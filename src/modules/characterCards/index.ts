@@ -34,6 +34,11 @@ const TOGGLE_MSG = `${PLUGIN_ID}/auto-info-toggled`;
 const INFO_SHOW_MSG = `${PLUGIN_ID}/info-show`;
 const CTX_BIND = "com.obr-suite/cc-bind-menu";
 
+// Tool action with shortcut — registered on the Select tool so pressing
+// Shift toggles the panel while in Select mode.
+const TOOL_ACTION_TOGGLE = "com.obr-suite/cc-toggle-shortcut";
+const SELECT_TOOL = "rodeo.owlbear.tool/select";
+
 const POPOVER_BOX = 64;
 const BOTTOM_OFFSET = 160;
 const RIGHT_OFFSET = 12;
@@ -44,6 +49,7 @@ const INFO_GAP = 8;
 const unsubs: Array<() => void> = [];
 let infoPopoverOpen = false;
 let currentInfoCard: string | null = null;
+let panelOpen = false;
 
 function isAutoInfoEnabled(): boolean {
   try {
@@ -74,6 +80,7 @@ async function openMainPopover() {
       hidePaper: true,
       disableClickAway: true,
     });
+    panelOpen = true;
   } catch (e) {
     console.error("[obr-suite/character-cards] openMainPopover failed", e);
   }
@@ -81,6 +88,12 @@ async function openMainPopover() {
 
 async function closeMainPopover() {
   try { await OBR.popover.close(POPOVER_ID); } catch {}
+  panelOpen = false;
+}
+
+async function toggleMainPanel() {
+  if (panelOpen) await closeMainPopover();
+  else await openMainPopover();
 }
 
 async function openInfoPopoverFor(cardId: string, roomId: string) {
@@ -179,14 +192,38 @@ async function handleSelection(selection: string[] | undefined) {
 }
 
 export async function setupCharacterCards(): Promise<void> {
-  // The main panel does NOT auto-open on scene ready anymore — it only
-  // opens when the cluster's "角色卡界面" button broadcasts panel-open.
-  // We just listen for that broadcast and open already-maximized.
+  // The main panel opens/closes on broadcast from the cluster button or
+  // from the Shift keyboard shortcut registered below.
   unsubs.push(
     OBR.broadcast.onMessage("com.character-cards/panel-open", async () => {
       await openMainPopover();
     })
   );
+  unsubs.push(
+    OBR.broadcast.onMessage("com.obr-suite/cc-panel-toggle", async () => {
+      await toggleMainPanel();
+    })
+  );
+
+  // ① Shift shortcut on the Select tool — toggles the cc panel. The action
+  // is hidden (filter pinned to a non-existent tool) so it doesn't render
+  // an icon, but the shortcut still fires when Shift is pressed in Select.
+  try {
+    await OBR.tool.createAction({
+      id: TOOL_ACTION_TOGGLE,
+      shortcut: "Shift",
+      icons: [
+        {
+          icon: ICON_URL,
+          label: "切换角色卡面板",
+          filter: { activeTools: [SELECT_TOOL] },
+        },
+      ],
+      onClick: async () => { await toggleMainPanel(); },
+    });
+  } catch (e) {
+    console.error("[obr-suite/character-cards] createAction failed", e);
+  }
 
   // Close the panel + info popover if scene unloads.
   unsubs.push(
@@ -274,5 +311,6 @@ export async function teardownCharacterCards(): Promise<void> {
   await closeMainPopover();
   await closeInfoPopover();
   try { await OBR.contextMenu.remove(CTX_BIND); } catch {}
+  try { await OBR.tool.removeAction(TOOL_ACTION_TOGGLE); } catch {}
   for (const u of unsubs.splice(0)) u();
 }

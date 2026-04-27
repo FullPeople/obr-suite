@@ -11,6 +11,9 @@ const PLUGIN_ID = "com.bestiary"; // backward-compat for existing scene metadata
 const TOOL_ID = "com.obr-suite/bestiary-tool";
 const POPOVER_ID = "com.obr-suite/bestiary-panel";
 const INFO_POPOVER_ID = "com.obr-suite/bestiary-info";
+const TOOL_ACTION_TOGGLE = "com.obr-suite/bestiary-toggle-shortcut";
+const SELECT_TOOL = "rodeo.owlbear.tool/select";
+const MOVE_TOOL = "rodeo.owlbear.tool/move";
 const POPOVER_URL = "https://obr.dnd.center/suite/bestiary-panel.html";
 const INFO_URL = "https://obr.dnd.center/suite/bestiary-monster-info.html";
 const ICON_URL = "https://obr.dnd.center/suite/bestiary-icon.svg";
@@ -39,6 +42,9 @@ let isOpen = false;
 let infoPopoverOpen = false;
 let currentInfoSlug: string | null = null;
 let bestiaryRole: "GM" | "PLAYER" = "PLAYER";
+// Tracks the previous tool so CapsLock can toggle back to it when the user
+// is currently on the bestiary tool.
+let previousTool: string | null = null;
 
 async function openPanel() {
   try {
@@ -165,16 +171,52 @@ export async function setupBestiary(): Promise<void> {
     cursors: [{ cursor: "default" }],
   });
 
-  // Open / close panel based on which tool is active.
+  // Track previous tool + open/close panel based on which tool is active.
   unsubs.push(
     OBR.tool.onToolChange(async (activeId) => {
       if (activeId === TOOL_ID) {
         if (!isOpen) await openPanel();
       } else {
+        // Remember the tool the user was on so CapsLock can return there.
+        previousTool = activeId;
         if (isOpen) await closePanel();
       }
     })
   );
+
+  // ② CapsLock shortcut on the Select tool — toggles to the bestiary tool.
+  // (Pressing CapsLock again on the bestiary's own tool flow returns to
+  // the previous tool via the bestiary tool's own tool-action below.)
+  try {
+    await OBR.tool.createAction({
+      id: TOOL_ACTION_TOGGLE,
+      shortcut: "CapsLock",
+      icons: [
+        {
+          icon: ICON_URL,
+          label: "切换怪物图鉴",
+          // Show this hidden-action shortcut on Select AND on bestiary tool
+          // so CapsLock works in both directions.
+          filter: { activeTools: [SELECT_TOOL, TOOL_ID] },
+        },
+      ],
+      onClick: async () => {
+        try {
+          const cur = await OBR.tool.getActiveTool();
+          if (cur === TOOL_ID) {
+            await OBR.tool.activateTool(previousTool ?? MOVE_TOOL);
+          } else {
+            previousTool = cur;
+            await OBR.tool.activateTool(TOOL_ID);
+          }
+        } catch (e) {
+          console.error("[obr-suite/bestiary] CapsLock toggle failed", e);
+        }
+      },
+    });
+  } catch (e) {
+    console.error("[obr-suite/bestiary] createAction failed", e);
+  }
 
   // Panel close button broadcasts → switch to default move tool.
   unsubs.push(
@@ -228,6 +270,7 @@ export async function setupBestiary(): Promise<void> {
 export async function teardownBestiary(): Promise<void> {
   await closePanel();
   await closeInfoPopover();
+  try { await OBR.tool.removeAction(TOOL_ACTION_TOGGLE); } catch {}
   try { await OBR.tool.removeMode(`${TOOL_ID}/mode`); } catch {}
   try { await OBR.tool.remove(TOOL_ID); } catch {}
   for (const u of unsubs.splice(0)) u();

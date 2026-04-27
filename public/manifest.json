@@ -5,6 +5,6 @@
   "author": "FullPeople",
   "homepage_url": "https://github.com/FullPeople/obr-suite",
   "description": "TRPG 全能套装：先攻追踪 / 怪物图鉴 / 角色卡 / 全局搜索 / 时停 / 同步视口（替代独立插件，单一安装）",
-  "icon": "/suite/icon.svg",
+  "icon": "/suite/exe_icon.png",
   "background_url": "/suite/background.html"
 }

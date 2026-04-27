@@ -112,20 +112,9 @@ async function toggle() {
 export async function setupTimeStop(): Promise<void> {
   isGM = (await OBR.player.getRole()) === "GM";
 
-  // Right-click empty space → toggle
-  await OBR.contextMenu.create({
-    id: MENU_ID,
-    icons: [
-      {
-        icon: ICON_URL,
-        label: "开启/关闭时停",
-        filter: { roles: ["GM"], min: 0, max: 0 },
-      },
-    ],
-    onClick: async () => { await toggle(); },
-  });
+  // Right-click context menu removed per user feedback — the only entry
+  // point is now the cluster's 时停 button (GM-only).
 
-  // Cluster button → toggle (GM-only behavior)
   unsubs.push(
     OBR.broadcast.onMessage(BC_TOGGLE, async () => {
       if (!isGM) return;
@@ -169,11 +158,9 @@ export async function setupTimeStop(): Promise<void> {
 }
 
 export async function teardownTimeStop(): Promise<void> {
-  // Don't auto-disable an active time stop on teardown — that'd be surprising
-  // for the DM. Just remove our handlers; if someone re-enables the module
-  // mid-session the state in scene metadata is still respected.
+  // Context menu was removed but we still try in case an old listener
+  // lingered.
   try { await OBR.contextMenu.remove(MENU_ID); } catch {}
   for (const u of unsubs.splice(0)) u();
-  // Hide overlay only if we're the one displaying it for our own client.
   await hideOverlay();
 }

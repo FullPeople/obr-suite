@@ -7,7 +7,12 @@ import {
   BROADCAST_CLOSE_PANEL,
   NEW_ITEM_DIALOG_ID,
 } from "./utils/constants";
-import { getStoredLang, t } from "./utils/i18n";
+import { Lang, t } from "./utils/i18n";
+import {
+  startSceneSync as startSuiteSync,
+  getState as getSuiteState,
+  onStateChange as onSuiteStateChange,
+} from "../../state";
 
 // Initiative Tracker module — migrated from the standalone plugin.
 // Setup opens the top-center horizontal initiative strip popover, registers
@@ -75,10 +80,14 @@ async function initKnownItems() {
   }
 }
 
-export async function setupInitiative(): Promise<void> {
-  const lang = getStoredLang();
+// Re-registration of context menus when the suite language flips. OBR has
+// no API to "update an existing context menu's label", so we remove and
+// re-create with the new lang each time. The handlers re-read lang on each
+// click via the closure.
+async function registerContextMenus(lang: Lang) {
+  try { await OBR.contextMenu.remove(CTX_TOGGLE); } catch {}
+  try { await OBR.contextMenu.remove(CTX_GATHER); } catch {}
 
-  // --- Right-click "add/remove from initiative" ---
   await OBR.contextMenu.create({
     id: CTX_TOGGLE,
     icons: [
@@ -104,6 +113,10 @@ export async function setupInitiative(): Promise<void> {
       },
     ],
     onClick: async (context) => {
+      // Re-read language from suite state so notifications reflect the
+      // most recent setting even if the user swapped languages between
+      // re-registrations.
+      const curLang = (getSuiteState().language as Lang) ?? "zh";
       const anyHasData = context.items.some(
         (item) => item.metadata[METADATA_KEY] !== undefined
       );
@@ -115,7 +128,7 @@ export async function setupInitiative(): Promise<void> {
             d.metadata[OPTED_OUT_KEY] = true;
           }
         });
-        OBR.notification.show(t(lang, "removed"));
+        OBR.notification.show(t(curLang, "removed"));
       } else {
         await OBR.scene.items.updateItems(ids, (drafts) => {
           for (const d of drafts) {
@@ -129,12 +142,11 @@ export async function setupInitiative(): Promise<void> {
             delete d.metadata[OPTED_OUT_KEY];
           }
         });
-        OBR.notification.show(t(lang, "added"));
+        OBR.notification.show(t(curLang, "added"));
       }
     },
   });
 
-  // --- Right-click empty space "gather here" ---
   await OBR.contextMenu.create({
     id: CTX_GATHER,
     icons: [
@@ -178,9 +190,29 @@ export async function setupInitiative(): Promise<void> {
           if (positions[idx]) d.position = positions[idx];
         });
       });
-      OBR.notification.show(t(lang, "gathered"));
+      const curLang = (getSuiteState().language as Lang) ?? "zh";
+      OBR.notification.show(t(curLang, "gathered"));
     },
   });
+}
+
+export async function setupInitiative(): Promise<void> {
+  // Read current language from suite state and register context menus.
+  startSuiteSync();
+  const initialLang = (getSuiteState().language as Lang) ?? "zh";
+  await registerContextMenus(initialLang);
+
+  // Re-register on language change so the right-click labels refresh.
+  let lastLang = initialLang;
+  unsubs.push(
+    onSuiteStateChange((s) => {
+      const next = (s.language as Lang) ?? "zh";
+      if (next !== lastLang) {
+        lastLang = next;
+        registerContextMenus(next).catch(() => {});
+      }
+    })
+  );
 
   // --- Open the panel now if scene is ready, and re-open on scene change ---
   try {

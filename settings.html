@@ -138,23 +138,42 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
   padding:9px 12px;margin-top:10px;font-size:11.5px;color:#bbb;border-radius:0 4px 4px 0;line-height:1.6;
 }
 
-/* Support tab buttons */
-.support-row{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 8px}
+/* Support tab buttons — muted style; uses tinted background rather than
+   their full brand colors so they read as part of the suite UI rather
+   than competing for attention. */
+.support-row{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 8px}
 .support-btn{
-  display:inline-flex;align-items:center;gap:8px;
-  padding:9px 16px;border-radius:8px;
-  font-family:inherit;font-size:13px;font-weight:600;
-  text-decoration:none;color:#fff;
-  border:1px solid transparent;
-  transition:transform .1s, box-shadow .15s;
+  display:inline-flex;align-items:center;gap:7px;
+  padding:7px 14px;border-radius:6px;
+  font-family:inherit;font-size:12px;font-weight:500;
+  text-decoration:none;
+  background:rgba(255,255,255,0.04);
+  border:1px solid var(--border);
+  color:var(--text);
+  transition:background .15s, border-color .15s;
 }
-.support-btn:hover{transform:translateY(-1px);text-decoration:none}
-.support-btn.kofi{background:var(--kofi)}
-.support-btn.kofi:hover{box-shadow:0 4px 14px rgba(255,94,91,0.4)}
-.support-btn.afdian{background:linear-gradient(135deg,#ff6b9d,#e94560)}
-.support-btn.afdian:hover{box-shadow:0 4px 14px rgba(233,69,96,0.4)}
+.support-btn:hover{
+  text-decoration:none;
+  background:rgba(255,255,255,0.08);
+  border-color:var(--border-strong);
+}
+.support-btn.kofi:hover{border-color:rgba(255,94,91,0.4)}
+.support-btn.kofi .ic{color:var(--kofi)}
+.support-btn.afdian:hover{border-color:rgba(255,107,157,0.4)}
+.support-btn.afdian .ic{color:#ff6b9d}
+.support-btn .ic{font-size:14px;line-height:1}
 .contact-box{background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-top:10px;font-size:12px}
 .contact-box code{font-family:ui-monospace,Consolas,monospace;color:var(--accent)}
+
+/* Important-notes tab: stepped instructions with screenshots */
+.step{margin:12px 0 16px;padding:12px 14px;background:rgba(255,255,255,0.03);border-radius:6px;border-left:3px solid var(--accent)}
+.step-title{font-size:12.5px;font-weight:700;color:#7ec8f0;margin-bottom:6px}
+.step p{margin-bottom:6px;font-size:12px;color:#cdd1de}
+.step img{display:block;max-width:100%;height:auto;border-radius:4px;margin:6px 0;box-shadow:0 2px 6px rgba(0,0,0,0.4);background:var(--bg-card)}
+.tip-line{font-size:11.5px;color:var(--text-dim);margin-top:6px}
+.benefit-list{padding-left:18px;margin:8px 0 12px}
+.benefit-list li{margin-bottom:4px;color:#cdd1de;font-size:12px}
+.benefit-tag{display:inline-block;font-size:10px;background:rgba(52,152,219,0.15);color:#5dade2;padding:2px 6px;border-radius:4px;margin-right:6px}
 
 .role-notice{font-size:10.5px;color:var(--text-dim);font-style:italic}
 </style>

@@ -31,48 +31,8 @@ async function focusCamera(x: number, y: number, scale: number) {
 }
 
 export async function setupFocus(): Promise<void> {
-  await OBR.contextMenu.create({
-    id: MENU_ID_ITEM,
-    icons: [
-      {
-        icon: ICON_URL,
-        label: "全员聚焦到此处",
-        filter: { roles: ["GM"] },
-      },
-    ],
-    onClick: async (context) => {
-      const scale = await OBR.viewport.getScale();
-      const pos =
-        context.items.length > 0
-          ? context.items[0].position
-          : context.selectionBounds.center;
-      OBR.broadcast.sendMessage(BROADCAST_FOCUS, {
-        x: pos.x,
-        y: pos.y,
-        scale,
-      });
-      focusCamera(pos.x, pos.y, scale);
-      OBR.notification.show("已聚焦所有玩家摄像头");
-    },
-  });
-
-  await OBR.contextMenu.create({
-    id: MENU_ID_EMPTY,
-    icons: [
-      {
-        icon: ICON_URL,
-        label: "全员聚焦到此处",
-        filter: { roles: ["GM"], min: 0, max: 0 },
-      },
-    ],
-    onClick: async (context) => {
-      const scale = await OBR.viewport.getScale();
-      const c = context.selectionBounds.center;
-      OBR.broadcast.sendMessage(BROADCAST_FOCUS, { x: c.x, y: c.y, scale });
-      focusCamera(c.x, c.y, scale);
-      OBR.notification.show("已聚焦所有玩家摄像头");
-    },
-  });
+  // Right-click context menus removed per user feedback — the only entry
+  // point is now the cluster's 同步视口 button (GM-only).
 
   unsubBroadcast = OBR.broadcast.onMessage(BROADCAST_FOCUS, async (event) => {
     const data = event.data as

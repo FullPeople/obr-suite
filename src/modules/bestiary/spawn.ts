@@ -111,6 +111,20 @@ export async function spawnMonster(monster: ParsedMonster) {
 
   await OBR.scene.items.addItems([item]);
 
+  // ② Focus the DM's viewport on the newly spawned token so they can see
+  // where it landed without manual panning.
+  try {
+    const x = worldX + offsetX;
+    const y = worldY + offsetY;
+    OBR.viewport.animateTo({
+      position: {
+        x: -x * vpScale + vpWidth / 2,
+        y: -y * vpScale + vpHeight / 2,
+      },
+      scale: vpScale,
+    });
+  } catch {}
+
   const modStr = monster.dexMod >= 0 ? `+${monster.dexMod}` : `${monster.dexMod}`;
   OBR.notification.show(
     `${monster.name} 已加入 (隐藏) HP:${monster.hp} AC:${monster.ac} 先攻:${initiativeRoll}(${modStr})`

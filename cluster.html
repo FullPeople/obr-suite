@@ -111,7 +111,7 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
    toggle, so it keeps a color to make "currently on" obvious) */
 .btn.timestop-active{background:rgba(245,166,35,0.18);border-color:rgba(245,166,35,0.5);color:#f5d76e}
 
-/* Main floating button — rectangular */
+/* Main floating button — rectangular, uses exe_icon.png */
 .main{
   display:inline-flex;align-items:center;justify-content:center;
   width:40px;height:40px;
@@ -123,19 +123,13 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   padding:0;
   flex-shrink:0;
   transition:filter .12s;
-  /* Try a PNG first (drop one at /suite/icon.png to override); falls back
-     to the SVG via a chained background. */
-  background-image:
-    url("/suite/icon.png"),
-    linear-gradient(135deg,#3a3f55,#252a3a);
-  background-size:32px 32px, cover;
-  background-position:center, center;
-  background-repeat:no-repeat;
+  overflow:hidden;
 }
 .main:hover{filter:brightness(1.15)}
-/* Hide the inline svg fallback when png is on (the png paints over).
-   If the png 404s the browser keeps the svg img visible. */
-.main img{width:32px;height:32px;display:block;image-rendering:auto}
+.main img{width:36px;height:36px;display:block;image-rendering:auto}
+
+/* Gear icon for the merged settings/about button */
+.btn .gear{width:16px;height:16px;display:inline-block;color:currentColor}
 
 .btn .ic{font-size:13px;line-height:1}
 </style>
@@ -145,7 +139,7 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   <div class="cluster" id="cluster">
     <div class="row" id="row"></div>
     <button class="main" id="main" type="button" title="枭熊插件">
-      <img src="/suite/icon.svg" alt="" onerror="this.style.display='none'">
+      <img src="/suite/exe_icon.png" alt="">
     </button>
   </div>
 </div>

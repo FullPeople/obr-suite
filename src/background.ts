@@ -31,13 +31,19 @@ async function openCluster() {
       OBR.viewport.getWidth(),
       OBR.viewport.getHeight(),
     ]);
+    // Open the popover at whatever width the persisted state says — that
+    // way the first click after a reload doesn't have to fight a narrower
+    // popover that came from a hard-coded "collapsed" initial open.
+    let initialWidth = CLUSTER_W_COLLAPSED;
+    try {
+      if (localStorage.getItem("obr-suite/cluster-expanded") === "1") {
+        initialWidth = CLUSTER_W_EXPANDED;
+      }
+    } catch {}
     await OBR.popover.open({
       id: CLUSTER_POPOVER_ID,
       url: CLUSTER_URL,
-      // Open at the expanded width so the iframe is wide enough to grow into
-      // when the user clicks expand. The cluster.ts code uses
-      // OBR.popover.setWidth to alternate between collapsed and expanded.
-      width: CLUSTER_W_COLLAPSED,
+      width: initialWidth,
       height: CLUSTER_H,
       anchorReference: "POSITION",
       anchorPosition: { left: vw - RIGHT_OFFSET, top: vh - BOTTOM_OFFSET },
