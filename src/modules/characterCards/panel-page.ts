@@ -54,7 +54,8 @@ const errEl = document.getElementById("error") as HTMLDivElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
 const resCol = document.getElementById("resCol") as HTMLElement;
 const emptyText = document.getElementById("emptyText") as HTMLDivElement;
-const miniBtn = document.getElementById("miniBtn") as HTMLButtonElement;
+// miniBtn removed in v1.1 — the cluster's "角色卡界面" button is the
+// only way to open this panel.
 const closeBtn = document.getElementById("closeBtn") as HTMLButtonElement;
 // "About" button removed — suite's About panel covers it.
 // "弹窗" toggle moved to the floating controls popover next to the main button.
@@ -108,8 +109,12 @@ async function setMaximized(next: boolean) {
       await OBR.popover.setWidth(POPOVER_ID, w);
       await OBR.popover.setHeight(POPOVER_ID, h);
     } else {
-      await OBR.popover.setWidth(POPOVER_ID, POPOVER_BOX);
-      await OBR.popover.setHeight(POPOVER_ID, POPOVER_BOX);
+      // The blue circular floating button was removed — there's no longer a
+      // 64×64 minimized state. Close the popover entirely instead. The user
+      // re-opens via the cluster's "角色卡界面" button.
+      saveState();
+      await OBR.popover.close(POPOVER_ID);
+      return;
     }
   } catch (e) {
     console.error("[character-cards] setMaximized failed", e);
@@ -380,14 +385,14 @@ OBR.onReady(async () => {
   } else if (saved.activeCardId) {
     current = { type: "card", id: saved.activeCardId };
   }
-  // Always start minimized — popover opens at 48x48 from background.ts,
-  // and the user can restore maximized state by clicking the floating button.
-  maximized = false;
-  document.body.classList.remove("maximized");
+  // The popover opens already maximized (full viewport) from the cluster's
+  // "角色卡界面" button. The blue circular mini-btn was removed.
+  maximized = true;
+  document.body.classList.add("maximized");
+  // miniBtn is hidden via CSS — no listener needed.
 
-  miniBtn.addEventListener("click", () => setMaximized(true));
-
-  // Cluster's "角色卡界面" button broadcasts this — maximize on demand.
+  // Re-trigger maximize on broadcast (idempotent — useful if the user opens
+  // the panel again while it's already alive somehow).
   OBR.broadcast.onMessage("com.character-cards/panel-open", () => {
     setMaximized(true);
   });

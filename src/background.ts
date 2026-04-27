@@ -20,7 +20,10 @@ const CLUSTER_W_COLLAPSED = 64;
 const CLUSTER_W_EXPANDED = 540; // 7 buttons + group label + main + padding
 const CLUSTER_H = 64;
 const RIGHT_OFFSET = 12;
-const BOTTOM_OFFSET = 12;
+// Lifted up from 12 → 80 so the cluster sits above OBR's bottom-right
+// toolbar (zoom controls + scene selector). The cluster.ts code may
+// further adjust if needed.
+const BOTTOM_OFFSET = 80;
 
 async function openCluster() {
   try {

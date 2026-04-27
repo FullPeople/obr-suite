@@ -8,32 +8,25 @@ import {
 } from "./state";
 import { t } from "./i18n";
 
-// Cluster popover internals. Background.ts opened this iframe at 64×64,
+// Cluster popover internals. Background.ts opened this iframe at 64×64
 // bottom-right anchored. We grow horizontally (LEFT) when the user clicks
-// the main button, by asking OBR to resize the popover via setWidth.
+// the main button.
 
 const POPOVER_ID = "com.obr-suite/cluster";
 const W_COLLAPSED = 64;
 const W_EXPANDED = 540;
-const H = 64;
 
 const SETTINGS_POPOVER_ID = "com.obr-suite/settings";
-const ABOUT_MODAL_ID = "com.obr-suite/about";
 const SETTINGS_URL = "https://obr.dnd.center/suite/settings.html";
-const ABOUT_URL = "https://obr.dnd.center/suite/about.html";
 
-// Broadcast messages — these signal to the relevant module's setup() handler
-// (or, for not-yet-migrated features, to the corresponding standalone plugin)
-// that the user clicked something in the cluster.
+// Broadcast messages
 const BC_TIMESTOP_TOGGLE = "com.obr-suite/timestop-toggle";
 const BC_FOCUS_TRIGGER = "com.obr-suite/focus-trigger";
-// Cross-plugin compatibility (works against both the unified suite and the
-// existing standalone plugins, until migration finishes):
 const BC_BESTIARY_AUTOPOPUP = "com.bestiary/auto-popup-toggled";
 const BC_CHARCARD_AUTOPOPUP = "com.character-cards/auto-info-toggled";
 const BC_OPEN_CHARCARD_PANEL = "com.character-cards/panel-open";
 
-// Per-client preferences (auto-popup toggles, expanded state).
+// Per-client preferences
 const LS_EXPANDED = "obr-suite/cluster-expanded";
 const LS_AUTO_BESTIARY = "com.bestiary/auto-popup";
 const LS_AUTO_CHARCARD = "character-cards/auto-info";
@@ -94,7 +87,8 @@ function renderRow() {
 
   const parts: string[] = [];
 
-  if (s.enabled.timeStop) {
+  // GM-only buttons: timestop, focus
+  if (isGM && s.enabled.timeStop) {
     parts.push(
       btnHTML({
         id: "btnTimeStop",
@@ -103,11 +97,13 @@ function renderRow() {
       })
     );
   }
-  if (s.enabled.focus) {
+  if (isGM && s.enabled.focus) {
     parts.push(btnHTML({ id: "btnFocus", label: t(lang, "btnFocus") }));
   }
 
-  // Grouped popup toggles (悬浮窗)
+  // ===== Popup toggles group (悬浮窗) =====
+  // Each toggle only shows if the corresponding plugin is enabled. Group
+  // wrapper is solid-bordered with a vertical 悬浮窗 label.
   const popupBtns: string[] = [];
   if (s.enabled.bestiary) {
     popupBtns.push(
@@ -130,26 +126,39 @@ function renderRow() {
     );
   }
   if (popupBtns.length) {
+    // Vertical 悬浮窗 label — one char per line.
+    const labelText = t(lang, "groupLabelPopups");
+    const labelChars = Array.from(labelText)
+      .map((c) => `<span>${c}</span>`)
+      .join("");
     parts.push(
-      `<div class="group"><span class="glabel">${t(
-        lang,
-        "groupLabelPopups"
-      )}</span>${popupBtns.join("")}</div>`
+      `<div class="group"><div class="glabel">${labelChars}</div>${popupBtns.join(
+        ""
+      )}</div>`
     );
   }
 
+  // 角色卡界面 button — only when characterCards is enabled. Now also
+  // assumes the role of the (removed) blue circular character-cards
+  // floating button: clicking opens the maximized panel directly.
   if (s.enabled.characterCards) {
     parts.push(
       btnHTML({ id: "btnCharCardPanel", label: t(lang, "btnCharCardPanel") })
     );
   }
 
-  parts.push(btnHTML({ id: "btnSettings", label: t(lang, "btnSettings") }));
-  parts.push(btnHTML({ id: "btnAbout", label: t(lang, "btnAbout") }));
+  // Combined Settings + About button (gear icon, opens the merged popover)
+  parts.push(
+    btnHTML({
+      id: "btnGear",
+      label: "⚙",
+      title: `${t(lang, "btnSettings")} / ${t(lang, "btnAbout")}`,
+    })
+  );
 
   rowEl.innerHTML = parts.join("");
 
-  // Wire handlers
+  // Wire handlers (only handlers for buttons that actually rendered)
   document.getElementById("btnTimeStop")?.addEventListener("click", onTimeStop);
   document.getElementById("btnFocus")?.addEventListener("click", onFocus);
   document
@@ -161,14 +170,11 @@ function renderRow() {
   document
     .getElementById("btnCharCardPanel")
     ?.addEventListener("click", onCharCardPanel);
-  document.getElementById("btnSettings")?.addEventListener("click", onSettings);
-  document.getElementById("btnAbout")?.addEventListener("click", onAbout);
+  document.getElementById("btnGear")?.addEventListener("click", onGear);
 }
 
 // --- Button handlers ---
 function onTimeStop() {
-  // Tell the time-stop module to toggle. (For backward-compat with the
-  // standalone time-stop plugin, the existing right-click flow still works.)
   try {
     OBR.broadcast.sendMessage(
       BC_TIMESTOP_TOGGLE,
@@ -179,7 +185,6 @@ function onTimeStop() {
 }
 
 function onFocus() {
-  // Trigger a focus-camera at the current selection center, or screen center.
   try {
     OBR.broadcast.sendMessage(
       BC_FOCUS_TRIGGER,
@@ -200,7 +205,8 @@ function onCharCardPopup() {
   renderRow();
 }
 function onCharCardPanel() {
-  // Tell character-cards plugin to open its panel.
+  // Now the only way to open the character-cards full panel — the blue
+  // circular mini button has been removed.
   try {
     OBR.broadcast.sendMessage(
       BC_OPEN_CHARCARD_PANEL,
@@ -210,7 +216,7 @@ function onCharCardPanel() {
   } catch {}
 }
 
-async function onSettings() {
+async function onGear() {
   try {
     const [vw, vh] = await Promise.all([
       OBR.viewport.getWidth(),
@@ -219,8 +225,8 @@ async function onSettings() {
     await OBR.popover.open({
       id: SETTINGS_POPOVER_ID,
       url: SETTINGS_URL,
-      width: 460,
-      height: 560,
+      width: 640,
+      height: 580,
       anchorReference: "POSITION",
       anchorPosition: { left: vw / 2, top: vh / 2 },
       anchorOrigin: { horizontal: "CENTER", vertical: "CENTER" },
@@ -232,21 +238,7 @@ async function onSettings() {
   }
 }
 
-async function onAbout() {
-  try {
-    await OBR.modal.open({
-      id: ABOUT_MODAL_ID,
-      url: ABOUT_URL,
-      width: 580,
-      height: 680,
-    });
-  } catch (e) {
-    console.error("[obr-suite] open about failed", e);
-  }
-}
-
-// --- TimeStop activity tracking — module broadcasts state so we can color the
-// cluster button when on. ---
+// --- TimeStop activity tracking ---
 OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {
   timeStopActive = !!(event.data as any)?.active;
   renderRow();
@@ -261,7 +253,6 @@ OBR.onReady(async () => {
   startSceneSync();
   onStateChange(() => renderRow());
 
-  // Apply initial expanded state.
   await applyExpanded(expanded);
   renderRow();
 });

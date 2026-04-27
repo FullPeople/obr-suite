@@ -51,6 +51,11 @@ function isAutoInfoEnabled(): boolean {
   } catch { return true; }
 }
 
+// The main panel opens already-maximized (full viewport). The blue circular
+// mini button was removed in v1.1 — the suite cluster's "角色卡界面"
+// button is the only way in. The panel-page itself listens for the
+// "panel-open" broadcast and calls setMaximized(true), which sets up the
+// popover-wide layout.
 async function openMainPopover() {
   try {
     const [w, h] = await Promise.all([
@@ -60,12 +65,12 @@ async function openMainPopover() {
     await OBR.popover.open({
       id: POPOVER_ID,
       url: PANEL_URL,
-      width: POPOVER_BOX,
-      height: POPOVER_BOX,
+      width: w,
+      height: h,
       anchorReference: "POSITION",
-      anchorPosition: { left: w - RIGHT_OFFSET, top: h - BOTTOM_OFFSET },
-      anchorOrigin: { horizontal: "RIGHT", vertical: "BOTTOM" },
-      transformOrigin: { horizontal: "RIGHT", vertical: "BOTTOM" },
+      anchorPosition: { left: 0, top: 0 },
+      anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
+      transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
       hidePaper: true,
       disableClickAway: true,
     });
@@ -174,12 +179,19 @@ async function handleSelection(selection: string[] | undefined) {
 }
 
 export async function setupCharacterCards(): Promise<void> {
-  // Open main panel popover when scene becomes ready.
-  if (await OBR.scene.isReady()) await openMainPopover();
+  // The main panel does NOT auto-open on scene ready anymore — it only
+  // opens when the cluster's "角色卡界面" button broadcasts panel-open.
+  // We just listen for that broadcast and open already-maximized.
+  unsubs.push(
+    OBR.broadcast.onMessage("com.character-cards/panel-open", async () => {
+      await openMainPopover();
+    })
+  );
+
+  // Close the panel + info popover if scene unloads.
   unsubs.push(
     OBR.scene.onReadyChange(async (ready) => {
-      if (ready) await openMainPopover();
-      else {
+      if (!ready) {
         await closeMainPopover();
         await closeInfoPopover();
       }

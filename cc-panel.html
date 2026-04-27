@@ -7,32 +7,13 @@
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#eee}
 html{background:transparent}
-body{background:transparent}
-body.maximized{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
 
-/* === Minimized floating button — pinned to body's bottom-right corner so its
-   viewport position stays stable while the popover resizes. === */
-.mini-wrap{
-  position:absolute;right:8px;bottom:8px;
-  width:48px;height:48px;
-  pointer-events:none;
-}
-.mini-btn{
-  pointer-events:auto;
-  width:48px;height:48px;
-  background:linear-gradient(135deg,#3498db,#2980b9);
-  color:#fff;border:1px solid rgba(255,255,255,0.2);
-  border-radius:50%;cursor:pointer;
-  font-size:22px;line-height:1;padding:0;
-  box-shadow:0 3px 10px rgba(0,0,0,0.4);
-  transition:box-shadow .15s, filter .15s;
-  font-family:inherit;
-}
-.mini-btn:hover{box-shadow:0 5px 16px rgba(52,152,219,0.6);filter:brightness(1.12)}
-.mini-btn:active{filter:brightness(0.92)}
-
-body.maximized .mini-wrap{display:none}
-body:not(.maximized) .panel{display:none}
+/* The mini-btn (the old circular blue floating button) was removed —
+   the suite cluster's "角色卡界面" button is now the only way to open
+   this panel, and it always opens already maximized. */
+.mini-wrap{display:none}
+.mini-btn{display:none}
 
 .panel{display:flex;height:100%;padding:20px;gap:14px}
 

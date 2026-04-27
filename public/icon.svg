@@ -1,16 +1,60 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <!-- Wooden grid platform -->
-  <path d="M8 38 L32 28 L56 38 L56 50 L32 60 L8 50 Z" fill="#8b5a2b" stroke="#000" stroke-width="1.5"/>
-  <path d="M8 38 L32 48 L56 38" fill="none" stroke="#000" stroke-width="1.2"/>
-  <path d="M32 48 L32 60" stroke="#000" stroke-width="1"/>
-  <!-- Grid lines on top -->
-  <path d="M14 41 L38 31 M20 44 L44 34 M26 47 L50 37" stroke="#5c3a1a" stroke-width="0.6" opacity="0.5"/>
-  <!-- TRPG miniature (gray humanoid) -->
-  <circle cx="20" cy="22" r="4" fill="#9aa0a8" stroke="#000" stroke-width="1.2"/>
-  <path d="M16 26 L16 38 L18 38 L18 32 L22 32 L22 38 L24 38 L24 26 Z" fill="#9aa0a8" stroke="#000" stroke-width="1.2"/>
-  <ellipse cx="20" cy="40" rx="6" ry="2" fill="#5a5a5a" stroke="#000" stroke-width="1"/>
-  <!-- Blue d20 dice -->
-  <path d="M44 14 L52 18 L52 26 L44 30 L36 26 L36 18 Z" fill="#7ec8f0" stroke="#000" stroke-width="1.5"/>
-  <path d="M44 14 L44 30 M36 18 L52 26 M36 26 L52 18" stroke="#000" stroke-width="0.8" opacity="0.6"/>
-  <text x="44" y="24" font-size="6" font-weight="700" fill="#000" text-anchor="middle" font-family="sans-serif">20</text>
+  <!-- Wooden grid platform with dark border (matches user's icon style) -->
+  <g>
+    <!-- Base shadow / dark outline -->
+    <path d="M5 36 L32 24 L59 36 L59 52 L32 64 L5 52 Z" fill="#000" opacity="0.85"/>
+    <!-- Wood top -->
+    <path d="M7 37 L32 26 L57 37 L32 48 Z" fill="#8b5a2a" stroke="#000" stroke-width="0.8"/>
+    <!-- Wood front edge -->
+    <path d="M7 37 L7 49 L32 60 L32 48 Z" fill="#5e3a17" stroke="#000" stroke-width="0.8"/>
+    <path d="M57 37 L57 49 L32 60 L32 48 Z" fill="#704321" stroke="#000" stroke-width="0.8"/>
+    <!-- Grid lines -->
+    <g stroke="#3a230d" stroke-width="0.4" opacity="0.7" fill="none">
+      <path d="M14 35 L40 47 M21 32 L48 43 M28 29 L55 40"/>
+      <path d="M14 41 L40 53 M21 38 L48 50"/>
+    </g>
+  </g>
+
+  <!-- Movement path nodes (4 colored hexagons connected by lines) -->
+  <g stroke="#000" stroke-width="0.7" stroke-linejoin="round">
+    <line x1="34" y1="22" x2="38" y2="14" stroke="#5fb04e" stroke-width="1.2"/>
+    <line x1="38" y1="14" x2="33" y2="11" stroke="#5fb04e" stroke-width="1.2"/>
+    <line x1="34" y1="22" x2="33" y2="29" stroke="#cc4422" stroke-width="1.2"/>
+    <line x1="38" y1="14" x2="40" y2="20" stroke="#a73aa8" stroke-width="1.2"/>
+    <!-- Hexagon nodes -->
+    <polygon points="33,9 35,10 35,12 33,13 31,12 31,10" fill="#5fb04e"/>
+    <polygon points="38,12 40,13 40,15 38,16 36,15 36,13" fill="#a73aa8"/>
+    <polygon points="34,20 36,21 36,23 34,24 32,23 32,21" fill="#cc4422"/>
+    <polygon points="40,18 42,19 42,21 40,22 38,21 38,19" fill="#e8c63a"/>
+    <polygon points="33,28 35,29 35,31 33,32 31,31 31,29" fill="#3a5fb0"/>
+  </g>
+
+  <!-- Blue d20 (top-right) -->
+  <g>
+    <polygon points="49,10 56,14 56,22 49,26 42,22 42,14" fill="#7ec8f0" stroke="#000" stroke-width="1"/>
+    <!-- Inner facets -->
+    <polygon points="49,10 49,26 42,22 42,14" fill="#5dade2" opacity="0.5"/>
+    <line x1="42" y1="14" x2="56" y2="22" stroke="#000" stroke-width="0.4" opacity="0.6"/>
+    <line x1="42" y1="22" x2="56" y2="14" stroke="#000" stroke-width="0.4" opacity="0.6"/>
+    <line x1="49" y1="10" x2="49" y2="26" stroke="#000" stroke-width="0.4" opacity="0.6"/>
+  </g>
+
+  <!-- Gray humanoid miniature on circular base -->
+  <g>
+    <!-- Round base -->
+    <ellipse cx="18" cy="36" rx="10" ry="3.5" fill="#4a4a4a" stroke="#000" stroke-width="0.8"/>
+    <!-- Body -->
+    <path d="M14 18 L14 33 L22 33 L22 18 Z" fill="#9a9a9a" stroke="#000" stroke-width="0.8"/>
+    <!-- Head -->
+    <circle cx="18" cy="14" r="4.2" fill="#a8a8a8" stroke="#000" stroke-width="0.8"/>
+    <!-- Arms -->
+    <path d="M11 19 L14 19 L14 27 L12 27 Z" fill="#9a9a9a" stroke="#000" stroke-width="0.7"/>
+    <path d="M22 19 L25 19 L25 28 L23 28 Z" fill="#9a9a9a" stroke="#000" stroke-width="0.7"/>
+    <!-- Sword (held in front) -->
+    <g>
+      <rect x="11" y="22" width="1.6" height="9" fill="#dcdcdc" stroke="#000" stroke-width="0.5"/>
+      <rect x="9.5" y="28" width="4.5" height="1.2" fill="#666" stroke="#000" stroke-width="0.5"/>
+      <rect x="11.4" y="29" width="0.8" height="2" fill="#3a2410"/>
+    </g>
+  </g>
 </svg>

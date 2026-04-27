@@ -17,7 +17,6 @@ export default defineConfig(({ command }) => ({
         background: resolve(__dirname, "background.html"),
         cluster: resolve(__dirname, "cluster.html"),
         settings: resolve(__dirname, "settings.html"),
-        about: resolve(__dirname, "about.html"),
         "timestop-overlay": resolve(__dirname, "timestop-overlay.html"),
         "search-bar": resolve(__dirname, "search-bar.html"),
         "initiative-panel": resolve(__dirname, "initiative-panel.html"),
