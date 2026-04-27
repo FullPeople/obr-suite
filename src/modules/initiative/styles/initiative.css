@@ -1,0 +1,577 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+:root {
+  --bg-primary: #1a1a2e;
+  --bg-secondary: #16213e;
+  --bg-card: #0f3460;
+  --accent: #e94560;
+  --accent-glow: rgba(233, 69, 96, 0.4);
+  --text-primary: #eee;
+  --text-secondary: #aaa;
+  --border: rgba(255, 255, 255, 0.12);
+  --gold: #f5a623;
+}
+
+html, body, #root { height: 100%; background: transparent; }
+
+/* ===================== HORIZONTAL STRIP (expanded mode) ===================== */
+.app-hbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px 4px;
+  color: var(--text-primary);
+  /* hidden vertical — prevents the scrollbar when content nudges past iframe
+     height. Roll buttons and active bulge are tuned to fit inside. */
+  overflow: hidden;
+}
+
+.app-hbar.transitioning,
+.app-pill.transitioning { visibility: hidden; }
+
+.hbar-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.hbar-row-items {
+  /* Fits: base card 80 OR active card 100 + 3px gap + 18px roll-button strip
+     + 22px extra so the horizontal scrollbar that appears when many entries
+     overflow doesn't clip the below-card buttons. Row stretches children so
+     the list reaches this height and the buttons aren't hidden by list
+     overflow. */
+  min-height: 144px;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.hbar-row-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;       /* center the whole cluster horizontally */
+  padding: 0 2px;
+  min-height: 30px;
+}
+
+/* Single centered cluster — every chrome control hugs the middle so the
+   row never has empty wings on the left/right edges. */
+.hbar-cluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+/* Items container — horizontal scroll when overflowing, vertical always fits. */
+.initiative-list {
+  min-width: 0;
+  display: flex;
+  gap: 0;                            /* cards touch — borders provide separation */
+  align-items: flex-start;
+  align-self: stretch;               /* fill 122px so absolute below-card buttons fit */
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 4px;
+  scrollbar-width: thin;
+  max-width: 100%;
+}
+
+.initiative-list::-webkit-scrollbar { height: 3px; }
+.initiative-list::-webkit-scrollbar-track { background: transparent; }
+.initiative-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+/* ===================== INITIATIVE ITEM — portrait card ===================== */
+.initiative-item {
+  position: relative;
+  flex-shrink: 0;
+  width: 56px;
+  height: 80px;                      /* base portrait card */
+  border-radius: 6px;
+  overflow: visible;                 /* so mod overlay + below-card buttons escape */
+  cursor: pointer;
+  background: rgba(22, 33, 62, 0.9);
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  transition: height 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
+              border-color 0.15s ease,
+              box-shadow 0.15s ease;
+}
+
+.initiative-item:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* Active: bulges DOWN — only height grows. Flex-start row alignment makes
+   the extra 20px poke below its neighbours. No translate (avoids pushing
+   below-card buttons off the iframe and triggering scrollbars). */
+.initiative-item.active {
+  height: 100px;
+  border-color: var(--accent);
+  box-shadow: 0 3px 10px rgba(233, 69, 96, 0.4);
+  z-index: 2;
+}
+
+.initiative-item.preparing.active {
+  border-color: var(--gold);
+  box-shadow: 0 3px 10px rgba(245, 166, 35, 0.4);
+}
+
+/* ----- Image area: top ~80% of the card, portrait-cropped, top aligned ----- */
+.item-img {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 80%;
+  overflow: hidden;
+  border-radius: 4px 4px 0 0;
+  background: var(--bg-card);
+}
+
+.item-img img {
+  display: block;
+  width: 100%;
+  height: 125%;                      /* show 80% of the source — crop bottom 20% */
+  object-fit: cover;
+  object-position: center top;       /* top-aligned */
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.item-img-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+}
+
+/* Image bottom fade so the count chip reads cleanly. */
+.item-img::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 30%;
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.55));
+  pointer-events: none;
+}
+
+/* ----- Count footer — always visible, bottom strip ----- */
+.item-count {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 20%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 52, 96, 0.92);
+  border-radius: 0 0 4px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.initiative-item.active .item-count {
+  background: rgba(233, 69, 96, 0.85);
+  color: #fff;
+}
+
+.initiative-item.preparing.active .item-count {
+  background: rgba(245, 166, 35, 0.85);
+  color: #1a1a2e;
+}
+
+.count-display {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gold);
+  line-height: 1;
+}
+
+.initiative-item.active .count-display {
+  color: #fff;
+}
+
+.item-count.locked { cursor: default; }
+.item-count.locked .count-display { opacity: 0.85; }
+
+.count-input {
+  width: 80%;
+  height: 90%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--gold);
+  border-radius: 3px;
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+}
+
+.count-input::-webkit-inner-spin-button,
+.count-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ----- Modifier overlay — top-left of image, click to edit ----- */
+.item-mod {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #8be;
+  cursor: pointer;
+  z-index: 3;
+  line-height: 1.1;
+}
+
+.item-mod:hover { border-color: #8be; }
+
+.mod-input {
+  width: 28px;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid #8be;
+  border-radius: 2px;
+  color: #8be;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+}
+
+.mod-input::-webkit-inner-spin-button,
+.mod-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ----- Roll buttons — BELOW the card, fit EXACTLY the card width so rows
+        of adjacent items don't overlap each other. 3 × 18px + 2 × 1px gap
+        = 56px = card width. ----- */
+.roll-buttons {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 1px;
+  margin-top: 3px;
+  justify-content: center;
+  z-index: 4;
+}
+
+.roll-btn {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  border-radius: 3px;
+  background: rgba(240, 240, 240, 0.95);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.roll-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* `color` drives the solid d20 fill in DiceIcons.tsx (fill=currentColor). */
+.roll-dis { color: #ff6b5b; }
+.roll-dis:hover:not(:disabled) { color: #ff8575; border-color: #9b1e0a; }
+
+.roll-normal { color: #d8dce8; }
+.roll-normal:hover:not(:disabled) { color: #fff; border-color: #4a5370; }
+
+.roll-adv { color: #55d38a; }
+.roll-adv:hover:not(:disabled) { color: #70e3a0; border-color: #165f35; }
+
+.d20-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.d20-svg { width: 13px; height: 13px; display: block; }
+.d20-overlay {
+  position: absolute;
+  top: -1px; right: -1px;
+  width: 7px; height: 7px;
+  pointer-events: none;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7));
+}
+
+/* ----- End-turn button for the current active player (non-GM owner) ----- */
+.end-turn-btn {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 3px;
+  height: 18px;
+  border: 1px solid rgba(39, 174, 96, 1);
+  border-radius: 3px;
+  background: linear-gradient(135deg, #2ecc71, #27ae60);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  z-index: 4;
+  padding: 0;
+  letter-spacing: 0.3px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.end-turn-btn:hover {
+  background: linear-gradient(135deg, #3fdb82, #30c070);
+  border-color: #1b8a4c;
+}
+
+/* ===================== LEFT / RIGHT PANEL CHROME ===================== */
+.collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(22, 33, 62, 0.85);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  font-family: inherit;
+  padding: 0;
+  flex-shrink: 0;
+}
+.collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.state-text {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.state-text.preparing { color: var(--gold); }
+.state-text.combat { color: var(--accent); }
+
+.round-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 24px;
+  padding: 0 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 12px;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+.round-badge.preparing {
+  background: var(--gold);
+  color: #1a1a2e;
+}
+.round-badge.idle {
+  background: rgba(22, 33, 62, 0.85);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.round-badge.idle .icon { font-size: 14px; }
+
+.about-btn {
+  background: rgba(22, 33, 62, 0.7);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 6px;
+  height: 24px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.about-btn:hover { color: #fff; border-color: var(--accent); }
+
+.lang-select {
+  background: rgba(22, 33, 62, 0.7);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  height: 24px;
+  font-size: 11px;
+  outline: none;
+  cursor: pointer;
+}
+.lang-select:hover { border-color: var(--text-secondary); }
+
+/* ===================== COMBAT CONTROLS (bottom row) ===================== */
+.combat-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+.prep-controls,
+.turn-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: white;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.btn-prepare {
+  background: linear-gradient(135deg, #f5a623, #e08e0b);
+}
+.btn-prepare:hover:not(:disabled) {
+  box-shadow: 0 2px 8px rgba(245, 166, 35, 0.4);
+}
+
+.btn-ambush {
+  background: linear-gradient(135deg, #e94560, #c0392b);
+}
+.btn-ambush:hover:not(:disabled) {
+  box-shadow: 0 2px 8px rgba(233, 69, 96, 0.4);
+}
+
+.btn-cancel {
+  background: rgba(90, 95, 110, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+.btn-cancel:hover { background: rgba(110, 115, 130, 0.95); }
+
+.btn-start {
+  background: linear-gradient(135deg, #e94560, #c0392b);
+}
+.btn-start:hover:not(:disabled) {
+  box-shadow: 0 2px 8px rgba(233, 69, 96, 0.4);
+}
+
+.btn-prev, .btn-next {
+  background: rgba(15, 52, 96, 0.85);
+  border: 1px solid var(--border);
+}
+.btn-prev:hover, .btn-next:hover { border-color: var(--accent); }
+
+.btn-end {
+  background: rgba(192, 57, 43, 0.9);
+  border: 1px solid rgba(231, 76, 60, 0.9);
+  color: #fff;
+}
+.btn-end:hover { background: rgba(231, 76, 60, 0.95); }
+
+.btn-icon { font-size: 13px; }
+
+/* ===================== EMPTY STATE ===================== */
+.empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 12px;
+  color: var(--text-secondary);
+  height: 88px;
+  min-height: 88px;
+}
+.empty-icon { font-size: 22px; opacity: 0.5; }
+.empty-text { font-size: 12px; font-weight: 600; }
+.empty-hint { font-size: 10px; opacity: 0.6; }
+
+.loading-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  height: 100%;
+}
+
+/* ===================== COLLAPSED PILL ===================== */
+.app-pill {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 32px;
+  background: rgba(22, 33, 62, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.pill-btn:hover { border-color: var(--accent); }
+
+.app-pill.state-preparing .pill-btn { border-color: var(--gold); }
+.app-pill.state-combat .pill-btn { border-color: var(--accent); }
+
+.pill-btn .icon { font-size: 14px; }
+.pill-btn .pill-round {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: var(--accent);
+}
+.app-pill.state-preparing .pill-btn .pill-round { background: var(--gold); color: #1a1a2e; }

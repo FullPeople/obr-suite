@@ -3,6 +3,7 @@ import { startSceneSync, getState, onStateChange } from "./state";
 import { setupTimeStop, teardownTimeStop } from "./modules/timeStop";
 import { setupFocus, teardownFocus } from "./modules/focus";
 import { setupSearch, teardownSearch } from "./modules/search";
+import { setupInitiative, teardownInitiative } from "./modules/initiative";
 
 // One central popover hosts the floating button + collapsible cluster.
 // The popover never closes itself; the iframe handles all expand/collapse
@@ -56,10 +57,10 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   timeStop: { setup: setupTimeStop, teardown: teardownTimeStop },
   focus: { setup: setupFocus, teardown: teardownFocus },
   search: { setup: setupSearch, teardown: teardownSearch },
-  // bestiary, characterCards, initiative are deferred to v0.3 — for now
-  // the existing standalone plugins still handle those features. The
-  // cluster's buttons for those still work because they broadcast to
-  // the existing plugins, and Settings still controls visibility/state.
+  initiative: { setup: setupInitiative, teardown: teardownInitiative },
+  // bestiary, characterCards are deferred to v0.4. The cluster's buttons
+  // for those still work because they broadcast to the existing plugins,
+  // and Settings controls visibility/state.
 };
 
 const moduleStatus = new Map<string, boolean>();

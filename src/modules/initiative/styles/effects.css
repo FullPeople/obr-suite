@@ -1,0 +1,247 @@
+/* ===== Combat Effect Overlay ===== */
+.combat-effect-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* Flash */
+.effect-flash {
+  position: absolute;
+  inset: 0;
+  background: white;
+  opacity: 0;
+}
+
+.phase-enter .effect-flash {
+  animation: flash 0.3s ease-out forwards;
+}
+
+@keyframes flash {
+  0% { opacity: 0; }
+  30% { opacity: 0.7; }
+  100% { opacity: 0; }
+}
+
+/* Vignette */
+.effect-vignette {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+
+.color-red .effect-vignette {
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(233, 69, 96, 0.4) 100%);
+}
+
+.color-gold .effect-vignette {
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(245, 166, 35, 0.4) 100%);
+}
+
+.phase-fly .effect-vignette {
+  animation: vignetteIn 0.4s ease-out forwards;
+}
+
+.phase-exit .effect-vignette {
+  animation: vignetteOut 0.4s ease-in forwards;
+}
+
+@keyframes vignetteIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vignetteOut { from { opacity: 1; } to { opacity: 0; } }
+
+/* ===== Flying Text Container ===== */
+.effect-flying-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 1;
+}
+
+.flying-text {
+  font-size: 72px;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* Color variants for text glow */
+.color-red .flying-text {
+  text-shadow:
+    0 0 20px rgba(233, 69, 96, 0.8),
+    0 0 60px rgba(233, 69, 96, 0.4),
+    0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.color-gold .flying-text {
+  text-shadow:
+    0 0 20px rgba(245, 166, 35, 0.8),
+    0 0 60px rgba(245, 166, 35, 0.4),
+    0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Fly from left: enter from left -> slow in center -> exit to right */
+.fly-from-left.animate {
+  animation: flyLeftToRight 1.3s forwards;
+}
+
+/* Fly from right: enter from right -> slow in center -> exit to left */
+.fly-from-right.animate {
+  animation: flyRightToLeft 1.3s forwards;
+}
+
+@keyframes flyLeftToRight {
+  0% {
+    transform: translateX(-120vw);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.0, 0.0, 0.2, 1); /* decelerate */
+  }
+  5% {
+    opacity: 1;
+  }
+  25% {
+    transform: translateX(0);
+    opacity: 1;
+    animation-timing-function: linear;
+  }
+  65% {
+    transform: translateX(0);
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.4, 0.0, 1, 1); /* accelerate */
+  }
+  95% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(120vw);
+    opacity: 0;
+  }
+}
+
+@keyframes flyRightToLeft {
+  0% {
+    transform: translateX(120vw);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.0, 0.0, 0.2, 1);
+  }
+  5% {
+    opacity: 1;
+  }
+  25% {
+    transform: translateX(0);
+    opacity: 1;
+    animation-timing-function: linear;
+  }
+  65% {
+    transform: translateX(0);
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.4, 0.0, 1, 1);
+  }
+  95% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(-120vw);
+    opacity: 0;
+  }
+}
+
+/* ===== New Item Dialog ===== */
+.new-item-dialog {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 20px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #1a1a2e;
+  color: #eee;
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.dialog-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.dialog-name {
+  font-size: 12px;
+  color: #aaa;
+  margin-bottom: 10px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog-input {
+  width: 120px;
+  height: 34px;
+  background: #0f3460;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: #f5a623;
+  font-size: 20px;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+  margin-bottom: 10px;
+}
+
+.dialog-input:focus {
+  border-color: #f5a623;
+}
+
+.dialog-input::-webkit-inner-spin-button,
+.dialog-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+
+.dialog-buttons {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  justify-content: center;
+}
+
+.btn-cancel {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 8px 24px;
+  border-radius: 6px;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.btn-confirm {
+  background: linear-gradient(135deg, #e94560, #c0392b);
+  border: none;
+  padding: 8px 24px;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.btn-confirm:hover {
+  box-shadow: 0 2px 8px rgba(233, 69, 96, 0.4);
+}

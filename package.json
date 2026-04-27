@@ -1,6 +1,6 @@
 {
   "name": "obr-suite",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -8,9 +8,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@owlbear-rodeo/sdk": "^3.1.0"
+    "@owlbear-rodeo/sdk": "^3.1.0",
+    "preact": "^10.29.1"
   },
   "devDependencies": {
+    "@preact/preset-vite": "^2.10.5",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.8"

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#1a1a2e;color:#eee}
+.d{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:10px 16px}
+.t{font-size:15px;font-weight:700;margin-bottom:2px}
+.n{font-size:12px;color:#aaa;margin-bottom:10px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+input{width:120px;height:34px;background:#0f3460;border:2px solid rgba(255,255,255,.2);border-radius:8px;color:#f5a623;font-size:20px;font-weight:700;text-align:center;outline:none;margin-bottom:8px}
+input:focus{border-color:#f5a623}
+input::-webkit-inner-spin-button,input::-webkit-outer-spin-button{-webkit-appearance:none}
+.roll-row{display:flex;gap:6px;margin-bottom:10px;align-items:center;justify-content:center}
+.roll-row button{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:40px;height:32px;border:none;border-radius:6px;cursor:pointer;
+  font-size:13px;font-weight:700;line-height:1;
+  transition:all .15s;color:#eee;
+  background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15)
+}
+.roll-row button:hover{background:rgba(255,255,255,.2)}
+.roll-dis{color:#e74c3c!important}
+.roll-dis:hover{border-color:#e74c3c!important;background:rgba(231,76,60,.2)!important}
+.roll-normal{color:#eee!important}
+.roll-normal:hover{border-color:#eee!important;background:rgba(238,238,238,.18)!important}
+.roll-adv{color:#2ecc71!important}
+.roll-adv:hover{border-color:#2ecc71!important;background:rgba(46,204,113,.2)!important}
+.d20-wrap{position:relative;display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%}
+.d20-svg{width:22px;height:22px}
+.d20-overlay{position:absolute;top:0;right:-1px;width:11px;height:11px;pointer-events:none;filter:drop-shadow(0 0 1px rgba(0,0,0,.6))}
+.b{display:flex;gap:10px}
+.b button{padding:7px 20px;border-radius:6px;font-size:13px;cursor:pointer;border:none}
+.s{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2)!important;color:#aaa}
+.s:hover{background:rgba(255,255,255,.15)}
+.c{background:linear-gradient(135deg,#e94560,#c0392b);color:#fff;font-weight:600}
+.c:hover{box-shadow:0 2px 8px rgba(233,69,96,.4)}
+</style>
+</head>
+<body>
+<div class="d">
+  <div class="t" id="title">设置先攻</div>
+  <div class="n" id="name"></div>
+  <input type="number" id="val" placeholder="先攻值">
+  <div class="roll-row">
+    <button class="roll-dis" id="rdis" title="2d20kl1">
+      <span class="d20-wrap">
+        <svg viewBox="0 0 24 24" class="d20-svg"><polygon points="12,2.5 21,7.5 21,16.5 12,21.5 3,16.5 3,7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><polygon points="12,7 16.5,9.5 16.5,14.5 12,17 7.5,14.5 7.5,9.5" fill="currentColor" opacity="0.12"/><text x="12" y="14.1" text-anchor="middle" font-size="6.4" font-weight="700" fill="currentColor">20</text></svg>
+        <svg viewBox="0 0 10 10" class="d20-overlay"><path d="M5 8.8 L9 3 L1 3 Z" fill="#e74c3c" stroke="#2a0a0a" stroke-width="0.6" stroke-linejoin="round"/></svg>
+      </span>
+    </button>
+    <button class="roll-normal" id="rnorm" title="1d20">
+      <span class="d20-wrap">
+        <svg viewBox="0 0 24 24" class="d20-svg"><polygon points="12,2.5 21,7.5 21,16.5 12,21.5 3,16.5 3,7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><polygon points="12,7 16.5,9.5 16.5,14.5 12,17 7.5,14.5 7.5,9.5" fill="currentColor" opacity="0.12"/><text x="12" y="14.1" text-anchor="middle" font-size="6.4" font-weight="700" fill="currentColor">20</text></svg>
+      </span>
+    </button>
+    <button class="roll-adv" id="radv" title="2d20kh1">
+      <span class="d20-wrap">
+        <svg viewBox="0 0 24 24" class="d20-svg"><polygon points="12,2.5 21,7.5 21,16.5 12,21.5 3,16.5 3,7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><polygon points="12,7 16.5,9.5 16.5,14.5 12,17 7.5,14.5 7.5,9.5" fill="currentColor" opacity="0.12"/><text x="12" y="14.1" text-anchor="middle" font-size="6.4" font-weight="700" fill="currentColor">20</text></svg>
+        <svg viewBox="0 0 10 10" class="d20-overlay"><path d="M5 1.2 L9 7 L1 7 Z" fill="#2ecc71" stroke="#0a2a12" stroke-width="0.6" stroke-linejoin="round"/></svg>
+      </span>
+    </button>
+  </div>
+  <div class="b">
+    <button class="s" id="skip">跳过</button>
+    <button class="c" id="add">添加</button>
+  </div>
+</div>
+<script type="module">
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
+
+const p = new URLSearchParams(location.search);
+const itemId = p.get("itemId");
+const itemName = p.get("itemName") || "";
+const lang = p.get("lang") || "zh";
+const isZh = lang === "zh";
+const MODAL_ID = "com.initiative-tracker/new-item-dialog";
+const META_KEY = "com.initiative-tracker/data";
+const MOD_KEY = "com.initiative-tracker/dexMod";
+
+document.getElementById("title").textContent = isZh ? "设置先攻" : "Set Initiative";
+document.getElementById("name").textContent = itemName || (isZh ? "新角色" : "New Character");
+document.getElementById("skip").textContent = isZh ? "跳过" : "Skip";
+document.getElementById("add").textContent = isZh ? "添加" : "Add";
+document.getElementById("val").placeholder = isZh ? "先攻值" : "Initiative";
+
+function localRoll(type) {
+  const r1 = Math.floor(Math.random() * 20) + 1;
+  const r2 = Math.floor(Math.random() * 20) + 1;
+  if (type === "dis") return Math.min(r1, r2);
+  if (type === "adv") return Math.max(r1, r2);
+  return r1;
+}
+
+OBR.onReady(async () => {
+  const input = document.getElementById("val");
+  input.focus();
+
+  // Read modifier from item metadata
+  let mod = 0;
+  try {
+    const items = await OBR.scene.items.getItems([itemId]);
+    if (items.length > 0) {
+      const m = items[0].metadata[MOD_KEY];
+      if (typeof m === "number") mod = m;
+    }
+  } catch {}
+
+  const submit = async () => {
+    const v = parseFloat(input.value);
+    if (isNaN(v)) return;
+    await OBR.scene.items.updateItems([itemId], items => {
+      for (const i of items) i.metadata[META_KEY] = {
+        count: v,
+        active: false,
+        rolled: false,
+        tiebreak: Math.random(),
+        // Use the item's creator/owner as initiative owner so delegated
+        // players can roll for their characters.
+        ownerId: i.createdUserId,
+      };
+    });
+    OBR.modal.close(MODAL_ID);
+  };
+
+  const doRoll = (type) => {
+    const roll = localRoll(type);
+    input.value = roll;
+    submit();
+  };
+
+  document.getElementById("rdis").onclick = () => doRoll("dis");
+  document.getElementById("rnorm").onclick = () => doRoll("normal");
+  document.getElementById("radv").onclick = () => doRoll("adv");
+
+  document.getElementById("add").onclick = submit;
+  document.getElementById("skip").onclick = () => OBR.modal.close(MODAL_ID);
+  input.onkeydown = e => { if(e.key==="Enter") submit(); if(e.key==="Escape") OBR.modal.close(MODAL_ID); };
+});
+</script>
+</body>
+</html>

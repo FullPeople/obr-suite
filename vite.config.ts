@@ -1,9 +1,11 @@
 import { defineConfig } from "vite";
+import preact from "@preact/preset-vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import { resolve } from "path";
 
 export default defineConfig(({ command }) => ({
-  plugins: command === "serve" ? [basicSsl()] : [],
+  plugins:
+    command === "serve" ? [preact(), basicSsl()] : [preact()],
   base: "/suite/",
   server: {
     cors: { origin: "*" },
@@ -18,6 +20,15 @@ export default defineConfig(({ command }) => ({
         about: resolve(__dirname, "about.html"),
         "timestop-overlay": resolve(__dirname, "timestop-overlay.html"),
         "search-bar": resolve(__dirname, "search-bar.html"),
+        "initiative-panel": resolve(__dirname, "initiative-panel.html"),
+        "initiative-combat-effect": resolve(
+          __dirname,
+          "initiative-combat-effect.html"
+        ),
+        "initiative-new-item": resolve(
+          __dirname,
+          "initiative-new-item.html"
+        ),
       },
     },
   },
