@@ -43,34 +43,23 @@ let expanded = false;          // synced with LS during init below
 let timeStopActive = false;
 let isGM = false;
 
-async function setPopoverWidth(w: number) {
-  try { await OBR.popover.setWidth(POPOVER_ID, w); } catch (e) {
-    console.warn("[obr-suite/cluster] setWidth failed", e);
-  }
-}
-
+// applyExpanded runs ONLY on user click after init. It updates the visual
+// state, persists to localStorage, AND calls setWidth ONCE. No retries,
+// no setTimeout pulses — those caused flicker on rapid toggles.
 async function applyExpanded(next: boolean) {
+  if (next === expanded) return;
   expanded = next;
   writeLS(LS_EXPANDED, next ? "1" : "0");
   wrapEl.classList.toggle("expanded", next);
   try { renderRow(); } catch (e) { console.error("[obr-suite/cluster] renderRow failed", e); }
-  const target = next ? W_EXPANDED : W_COLLAPSED;
-  // Issue ①: OBR sometimes ignores the very first setWidth call right
-  // after iframe load (popover layer not fully settled). We hammer it
-  // a few times to make sure the visual width matches our intent.
-  await setPopoverWidth(target);
-  setTimeout(() => { setPopoverWidth(target); }, 200);
-  setTimeout(() => { setPopoverWidth(target); }, 800);
+  try {
+    await OBR.popover.setWidth(POPOVER_ID, next ? W_EXPANDED : W_COLLAPSED);
+  } catch (e) {
+    console.warn("[obr-suite/cluster] setWidth failed", e);
+  }
 }
 
-// Click handler — no init guard, so even an early click expands the cluster.
-// Reads the latest persisted state at click time so we don't toggle off a
-// stale local in-memory copy.
 mainEl.addEventListener("click", () => {
-  // Re-sync `expanded` from localStorage in case background.ts opened the
-  // popover at a different width than our last in-iframe state thinks.
-  const persisted = readLS(LS_EXPANDED, "0") === "1";
-  if (persisted !== expanded) expanded = persisted;
   applyExpanded(!expanded).catch((e) => {
     console.error("[obr-suite/cluster] applyExpanded failed", e);
   });
@@ -299,26 +288,30 @@ OBR.onReady(async () => {
     }
   });
 
-  startSceneSync();
+  // Read expanded state from URL query param (set by background.ts) so the
+  // cluster iframe always knows the persisted state at load — no race with
+  // localStorage cross-iframe sync. The popover was already opened at the
+  // correct width by background.ts, so we just sync the CSS class.
+  const params = new URLSearchParams(location.search);
+  expanded = params.get("expanded") === "1";
+  wrapEl.classList.toggle("expanded", expanded);
 
-  // Re-render on every state change so disabled-module toggles disappear.
+  startSceneSync();
   onStateChange(() => renderRow());
+
+  // Belt-and-suspenders #1: scene metadata listener for cross-iframe sync.
   OBR.scene.onMetadataChange(() => {
     refreshFromScene().then(() => renderRow());
   });
 
-  // Force an explicit refresh + render so the very first paint reflects
-  // the current scene state, not the in-memory DEFAULT_STATE fallback.
-  await refreshFromScene();
-
-  // Read persisted expanded state and apply.
-  expanded = readLS(LS_EXPANDED, "0") === "1";
-  await applyExpanded(expanded);
-
-  // One more belt-and-suspenders refresh after a short delay for late-
-  // arriving scene metadata.
-  setTimeout(() => {
+  // Belt-and-suspenders #2: explicit broadcast that setState fires after
+  // every change. This is what makes the cluster reliably re-render when
+  // the DM toggles a module in Settings.
+  OBR.broadcast.onMessage("com.obr-suite/state-changed", () => {
     refreshFromScene().then(() => renderRow());
-    recheckRole();
-  }, 1200);
+  });
+
+  // Initial state load + render.
+  await refreshFromScene();
+  renderRow();
 });

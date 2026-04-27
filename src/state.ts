@@ -90,6 +90,17 @@ export async function setState(partial: Partial<SuiteState>): Promise<void> {
   await OBR.scene.setMetadata({ [SCENE_KEY]: next });
   cached = next;
   for (const fn of listeners) fn(cached);
+  // Explicit broadcast for cross-iframe sync. OBR.scene.onMetadataChange
+  // SHOULD fire in all iframes when scene metadata changes, but in
+  // practice some iframes miss the event (timing or layer issues). The
+  // broadcast is a redundant pathway every other iframe listens for.
+  try {
+    await OBR.broadcast.sendMessage(
+      BROADCAST_STATE_CHANGED,
+      {},
+      { destination: "LOCAL" }
+    );
+  } catch {}
 }
 
 // localStorage helpers (per-client prefs).

@@ -31,18 +31,16 @@ async function openCluster() {
       OBR.viewport.getWidth(),
       OBR.viewport.getHeight(),
     ]);
-    // Open the popover at whatever width the persisted state says — that
-    // way the first click after a reload doesn't have to fight a narrower
-    // popover that came from a hard-coded "collapsed" initial open.
-    let initialWidth = CLUSTER_W_COLLAPSED;
-    try {
-      if (localStorage.getItem("obr-suite/cluster-expanded") === "1") {
-        initialWidth = CLUSTER_W_EXPANDED;
-      }
-    } catch {}
+    // Read persisted state and pass it to the cluster iframe via URL param.
+    // We open the popover ONCE at the correct width; the cluster iframe
+    // never has to call setWidth on init. This fixes the initial-clipping
+    // bug + removes the resize flicker that retry-setWidth caused.
+    let isExpanded = false;
+    try { isExpanded = localStorage.getItem("obr-suite/cluster-expanded") === "1"; } catch {}
+    const initialWidth = isExpanded ? CLUSTER_W_EXPANDED : CLUSTER_W_COLLAPSED;
     await OBR.popover.open({
       id: CLUSTER_POPOVER_ID,
-      url: CLUSTER_URL,
+      url: `${CLUSTER_URL}?expanded=${isExpanded ? "1" : "0"}`,
       width: initialWidth,
       height: CLUSTER_H,
       anchorReference: "POSITION",
@@ -67,16 +65,21 @@ async function closeCluster() {
 // teardown. The shell is responsible for state-based dispatching.
 type ModuleHooks = { setup: () => Promise<void>; teardown: () => Promise<void> };
 
+// Module setup order matters — OBR's popover layer warms up after the
+// first few popovers are opened, and the LAST popover to be opened
+// sometimes fails its first-load render if it's the very first popover
+// to come up. So we load the popover-heavy modules first (initiative
+// panel, bestiary tool, character-cards) and search LAST.
 const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], ModuleHooks>> = {
   timeStop: { setup: setupTimeStop, teardown: teardownTimeStop },
   focus: { setup: setupFocus, teardown: teardownFocus },
-  search: { setup: setupSearch, teardown: teardownSearch },
   initiative: { setup: setupInitiative, teardown: teardownInitiative },
   bestiary: { setup: setupBestiary, teardown: teardownBestiary },
   characterCards: {
     setup: setupCharacterCards,
     teardown: teardownCharacterCards,
   },
+  search: { setup: setupSearch, teardown: teardownSearch },
 };
 
 const moduleStatus = new Map<string, boolean>();

@@ -439,6 +439,15 @@ OBR.onReady(async () => {
     if (e.key === "Escape") {
       e.preventDefault();
       minimize();
+      return;
+    }
+    // ④ Shift+A from inside the panel closes it. OBR's tool-action
+    // shortcut only fires when keyboard focus is on OBR's main window —
+    // once the user clicks into our panel, the shortcut goes nowhere.
+    // So we capture it ourselves.
+    if (e.shiftKey && (e.key === "A" || e.key === "a")) {
+      e.preventDefault();
+      minimize();
     }
   });
 
