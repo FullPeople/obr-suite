@@ -53,9 +53,14 @@ async function applyExpanded(next: boolean) {
   expanded = next;
   writeLS(LS_EXPANDED, next ? "1" : "0");
   wrapEl.classList.toggle("expanded", next);
-  // Render the row before the width animation so buttons are always present.
   try { renderRow(); } catch (e) { console.error("[obr-suite/cluster] renderRow failed", e); }
-  await setPopoverWidth(next ? W_EXPANDED : W_COLLAPSED);
+  const target = next ? W_EXPANDED : W_COLLAPSED;
+  // Issue ①: OBR sometimes ignores the very first setWidth call right
+  // after iframe load (popover layer not fully settled). We hammer it
+  // a few times to make sure the visual width matches our intent.
+  await setPopoverWidth(target);
+  setTimeout(() => { setPopoverWidth(target); }, 200);
+  setTimeout(() => { setPopoverWidth(target); }, 800);
 }
 
 // Click handler — no init guard, so even an early click expands the cluster.
@@ -270,21 +275,50 @@ OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {
 
 // --- Init ---
 OBR.onReady(async () => {
-  try {
-    isGM = (await OBR.player.getRole()) === "GM";
-  } catch {}
+  // Robust role detection: try getRole, then also subscribe to player
+  // changes so any future role updates (or successful role read) refresh
+  // the buttons. Some OBR sessions take a moment to settle the role.
+  const recheckRole = async () => {
+    try {
+      const role = await OBR.player.getRole();
+      const next = role === "GM";
+      if (next !== isGM) {
+        isGM = next;
+        renderRow();
+      }
+    } catch (e) {
+      console.warn("[obr-suite/cluster] getRole failed", e);
+    }
+  };
+  await recheckRole();
+  OBR.player.onChange((p) => {
+    const next = p.role === "GM";
+    if (next !== isGM) {
+      isGM = next;
+      renderRow();
+    }
+  });
 
   startSceneSync();
 
-  // ⑨ Re-render on every state change so disabled-module toggles disappear
-  // immediately when the DM flips them. Also belt-and-suspenders subscribe
-  // directly to scene metadata changes for resilience.
+  // Re-render on every state change so disabled-module toggles disappear.
   onStateChange(() => renderRow());
   OBR.scene.onMetadataChange(() => {
     refreshFromScene().then(() => renderRow());
   });
 
+  // Force an explicit refresh + render so the very first paint reflects
+  // the current scene state, not the in-memory DEFAULT_STATE fallback.
+  await refreshFromScene();
+
   // Read persisted expanded state and apply.
   expanded = readLS(LS_EXPANDED, "0") === "1";
   await applyExpanded(expanded);
+
+  // One more belt-and-suspenders refresh after a short delay for late-
+  // arriving scene metadata.
+  setTimeout(() => {
+    refreshFromScene().then(() => renderRow());
+    recheckRole();
+  }, 1200);
 });

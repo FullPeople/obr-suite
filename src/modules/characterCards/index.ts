@@ -205,13 +205,13 @@ export async function setupCharacterCards(): Promise<void> {
     })
   );
 
-  // ① Shift shortcut on the Select tool — toggles the cc panel. The action
-  // is hidden (filter pinned to a non-existent tool) so it doesn't render
-  // an icon, but the shortcut still fires when Shift is pressed in Select.
+  // ① Shift+A shortcut on the Select tool — toggles the cc panel.
+  // Plain "Shift" was a modifier and conflicted with normal Shift use;
+  // Shift+A is a real combo press that won't fire on Shift-clicks.
   try {
     await OBR.tool.createAction({
       id: TOOL_ACTION_TOGGLE,
-      shortcut: "Shift",
+      shortcut: "Shift+A",
       icons: [
         {
           icon: ICON_URL,

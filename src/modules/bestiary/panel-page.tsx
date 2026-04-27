@@ -107,8 +107,7 @@ function App() {
   }, []);
 
   // Dynamic height — the suite hosts this as a popover, so resize via the
-  // popover API instead of the legacy action API. The id matches the one
-  // used in the bestiary module's index.ts setup().
+  // popover API instead of the legacy action API.
   const POPOVER_ID = "com.obr-suite/bestiary-panel";
   useEffect(() => {
     const observer = new ResizeObserver((entries) => {
@@ -120,6 +119,28 @@ function App() {
     const root = document.getElementById("root");
     if (root) observer.observe(root);
     return () => observer.disconnect();
+  }, []);
+
+  // ④ CapsLock inside the bestiary panel. OBR's tool-action shortcut only
+  // fires when keyboard focus is on OBR's main window — once the user
+  // clicks into our panel, CapsLock here just goes nowhere. So we
+  // capture it ourselves and broadcast a toggle request the bestiary
+  // module's background handles.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "CapsLock") {
+        e.preventDefault();
+        try {
+          OBR.broadcast.sendMessage(
+            "com.obr-suite/bestiary-shortcut-toggle",
+            {},
+            { destination: "LOCAL" }
+          );
+        } catch {}
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   if (role !== "GM") {

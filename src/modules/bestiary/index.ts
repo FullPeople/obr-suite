@@ -184,9 +184,25 @@ export async function setupBestiary(): Promise<void> {
     })
   );
 
-  // ② CapsLock shortcut on the Select tool — toggles to the bestiary tool.
-  // (Pressing CapsLock again on the bestiary's own tool flow returns to
-  // the previous tool via the bestiary tool's own tool-action below.)
+  // ② CapsLock shortcut. Two paths to the same toggle:
+  //   a) OBR tool action shortcut (works when keyboard focus is on OBR's
+  //      main window — i.e. user hasn't clicked into the panel iframe yet)
+  //   b) keydown listener inside the panel iframe (works once the user
+  //      has clicked into the panel) → broadcasts to here.
+  const performShortcutToggle = async () => {
+    try {
+      const cur = await OBR.tool.getActiveTool();
+      if (cur === TOOL_ID) {
+        await OBR.tool.activateTool(previousTool ?? MOVE_TOOL);
+      } else {
+        previousTool = cur;
+        await OBR.tool.activateTool(TOOL_ID);
+      }
+    } catch (e) {
+      console.error("[obr-suite/bestiary] CapsLock toggle failed", e);
+    }
+  };
+
   try {
     await OBR.tool.createAction({
       id: TOOL_ACTION_TOGGLE,
@@ -195,28 +211,20 @@ export async function setupBestiary(): Promise<void> {
         {
           icon: ICON_URL,
           label: "切换怪物图鉴",
-          // Show this hidden-action shortcut on Select AND on bestiary tool
-          // so CapsLock works in both directions.
           filter: { activeTools: [SELECT_TOOL, TOOL_ID] },
         },
       ],
-      onClick: async () => {
-        try {
-          const cur = await OBR.tool.getActiveTool();
-          if (cur === TOOL_ID) {
-            await OBR.tool.activateTool(previousTool ?? MOVE_TOOL);
-          } else {
-            previousTool = cur;
-            await OBR.tool.activateTool(TOOL_ID);
-          }
-        } catch (e) {
-          console.error("[obr-suite/bestiary] CapsLock toggle failed", e);
-        }
-      },
+      onClick: performShortcutToggle,
     });
   } catch (e) {
     console.error("[obr-suite/bestiary] createAction failed", e);
   }
+
+  unsubs.push(
+    OBR.broadcast.onMessage("com.obr-suite/bestiary-shortcut-toggle", () => {
+      performShortcutToggle();
+    })
+  );
 
   // Panel close button broadcasts → switch to default move tool.
   unsubs.push(

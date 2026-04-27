@@ -31,18 +31,19 @@ async function openSearchPopover() {
 
 export async function setupSearch(): Promise<void> {
   try {
-    // ⑤ Bug: on first scene-ready, the popover sometimes fails to render.
-    // Workaround: open, then re-open after a short delay so OBR's popover
-    // layer settles after the rest of the suite's popovers come up.
+    // ② Bug: on first scene-ready, the popover sometimes fails to render
+    // its iframe. We do a couple of close+reopens at increasing delays
+    // until OBR's popover layer fully settles.
     await openSearchPopover();
-    setTimeout(() => {
-      // Close + reopen forces OBR to re-render the iframe content if the
-      // first attempt's iframe didn't finish loading.
-      OBR.popover
-        .close(POPOVER_ID)
-        .then(() => openSearchPopover())
-        .catch(() => {});
-    }, 600);
+    const reopenAttempts = [800, 2200, 4500];
+    for (const delay of reopenAttempts) {
+      setTimeout(() => {
+        OBR.popover
+          .close(POPOVER_ID)
+          .then(() => openSearchPopover())
+          .catch(() => {});
+      }, delay);
+    }
   } catch (e) {
     console.error("[obr-suite/search] setup failed", e);
   }
