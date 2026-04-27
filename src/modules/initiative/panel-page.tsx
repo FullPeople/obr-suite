@@ -5,7 +5,12 @@ import { InitiativeList } from "./components/InitiativeList";
 import { CombatControls } from "./components/CombatControls";
 import { useInitiative, RollType } from "./hooks/useInitiative";
 import { METADATA_KEY } from "./utils/constants";
-import { Lang, t, getStoredLang, setStoredLang } from "./utils/i18n";
+import { Lang, t } from "./utils/i18n";
+import {
+  startSceneSync,
+  getState as getSuiteState,
+  onStateChange as onSuiteStateChange,
+} from "../../state";
 import {
   setActiveRing,
   setHoverRing,
@@ -29,7 +34,16 @@ const EXPANDED_HEIGHT = 184;
 export const LangContext = createContext<Lang>("zh");
 
 function App() {
-  const [lang, setLang] = useState<Lang>(getStoredLang);
+  // Language is centrally controlled by the suite Settings panel; read it
+  // from scene metadata and stay subscribed to changes.
+  const [lang, setLang] = useState<Lang>(
+    () => (getSuiteState().language as Lang) ?? "zh"
+  );
+  useEffect(() => {
+    startSceneSync();
+    const unsub = onSuiteStateChange((s) => setLang(s.language as Lang));
+    return unsub;
+  }, []);
   const {
     items,
     combatState,
@@ -143,10 +157,8 @@ function App() {
   // Clean up on unmount
   useEffect(() => () => { clearAllRings(); }, []);
 
-  const changeLang = (newLang: Lang) => {
-    setLang(newLang);
-    setStoredLang(newLang);
-  };
+  // Language is set by suite Settings; the in-panel CN/EN selector was
+  // removed in favour of centralized control.
 
   const handleRoll = useCallback(async (itemId: string, type: RollType) => {
     if (isGM || combatState.inCombat) {
@@ -236,17 +248,8 @@ function App() {
               />
             )}
 
-            <select
-              className="lang-select"
-              value={lang}
-              onChange={(e) => changeLang((e.target as HTMLSelectElement).value as Lang)}
-              title="Language"
-            >
-              <option value="en">EN</option>
-              <option value="zh">中文</option>
-            </select>
-            {/* About button removed — the suite's centralized About panel
-                covers Initiative along with the other modules. */}
+            {/* CN/EN selector + About button removed — both are centrally
+                controlled by the suite Settings / About panels. */}
           </div>
         </div>
 

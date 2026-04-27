@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>怪物信息</title>
+<style>
+/* No transitions / animations — instant 0-frame show/hide. */
+*{margin:0;padding:0;box-sizing:border-box;transition:none!important;animation:none!important}
+
+/* Popover stays permanently open so content toggles with 0 frames. When no
+   monster is selected, the whole iframe is click-through so the DM can still
+   interact with the map under the info region. */
+html,body{
+  height:100%;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:#eee;background:transparent;
+  pointer-events:none;
+}
+
+.card{
+  position:absolute;inset:0;
+  background:rgba(22,33,62,0.94);
+  border-radius:10px;
+  box-shadow:0 8px 28px rgba(0,0,0,0.55);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  /* Card is interactive so long content can be scrolled. The popover is
+     only open while a monster is selected, so the iframe never occupies
+     screen space when no info is shown — click-through is automatic. */
+  pointer-events:auto;
+}
+
+.root{padding:10px 14px;height:100%;overflow-y:auto}
+.root::-webkit-scrollbar{width:3px}
+.root::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}
+
+.hdr{display:flex;align-items:baseline;gap:10px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:7px}
+.name{font-size:15px;font-weight:700;color:#e94560;flex-shrink:0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub{font-size:11px;color:#aaa;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Two-column top: chips (left) + six-abilities (right) */
+.top{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-bottom:7px}
+.chips{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;align-content:start;align-self:start}
+.chip{
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.07);
+  border-radius:4px;padding:3px 5px;text-align:center;
+}
+.chip .k{font-size:9px;color:#888;letter-spacing:.3px;display:block;line-height:1.2}
+.chip .v{font-size:12px;font-weight:700;color:#eee;line-height:1.3}
+.chip.hp .v{color:#e94560}
+.chip.ac .v{color:#3498db}
+.chip.cr .v{color:#f5a623}
+/* Speed: smaller font (~50% of a normal chip value) and one line per type. */
+.chip.speed .v{font-size:9px;line-height:1.25;font-weight:600}
+.chip.speed .v div{display:block}
+
+.abil{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;align-content:start}
+.abl{
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.07);
+  border-radius:4px;padding:3px 5px;
+  display:flex;align-items:center;gap:4px;
+}
+.abl .a{font-size:9px;color:#888;font-weight:700;letter-spacing:.5px;width:14px}
+.abl .t{font-size:11px;color:#bbb;min-width:16px}
+.abl .m{margin-left:auto;font-size:11.5px;color:#f5a623;font-weight:700}
+.abl.prof{background:rgba(245,166,35,0.14);border-color:rgba(245,166,35,0.55)}
+.abl.prof .a{color:#f5a623}
+.abl.prof .t{color:#fce6bd}
+
+.sect{font-size:10px;color:#5dade2;letter-spacing:.6px;margin:5px 0 3px;font-weight:600}
+
+.act{padding:4px 6px;margin-bottom:3px;background:rgba(255,255,255,0.035);border-radius:4px;font-size:10.5px;line-height:1.4}
+.act .n{color:#f5a623;font-weight:700;margin-right:4px}
+.act .t{color:#ccc}
+.act.bonus .n{color:#2ecc71}
+.act.reaction .n{color:#3498db}
+.act.legendary .n{color:#d8b4ff}
+.act.trait .n{color:#aaa}
+.act.spell{background:rgba(93,173,226,0.08);border:1px solid rgba(93,173,226,0.2)}
+.act.spell .n{color:#5dade2}
+.act.spell .sc-hdr{margin-bottom:2px}
+.spell-line{font-size:10px;color:#ccc;line-height:1.45;margin-top:2px}
+.spell-line .sl{color:#5dade2;font-weight:600;margin-right:5px}
+.preamble{font-size:10px;color:#aaa;font-style:italic;padding:3px 6px;margin-bottom:4px;line-height:1.45;border-left:2px solid rgba(216,180,255,0.4);background:rgba(216,180,255,0.05)}
+
+.empty{color:#888;font-size:11px;padding:3px 6px}
+.err{color:#e74c3c;padding:12px;text-align:center;font-size:11px}
+</style>
+</head>
+<body>
+<div class="card"><div class="root" id="root"></div></div>
+<script type="module" src="/src/modules/bestiary/monster-info-page.ts"></script>
+</body>
+</html>

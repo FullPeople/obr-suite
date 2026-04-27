@@ -29,6 +29,11 @@ export default defineConfig(({ command }) => ({
           __dirname,
           "initiative-new-item.html"
         ),
+        "bestiary-panel": resolve(__dirname, "bestiary-panel.html"),
+        "bestiary-monster-info": resolve(
+          __dirname,
+          "bestiary-monster-info.html"
+        ),
       },
     },
   },
