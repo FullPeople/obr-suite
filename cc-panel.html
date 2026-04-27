@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>角色卡面板</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#eee}
+html{background:transparent}
+body{background:transparent}
+body.maximized{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+
+/* === Minimized floating button — pinned to body's bottom-right corner so its
+   viewport position stays stable while the popover resizes. === */
+.mini-wrap{
+  position:absolute;right:8px;bottom:8px;
+  width:48px;height:48px;
+  pointer-events:none;
+}
+.mini-btn{
+  pointer-events:auto;
+  width:48px;height:48px;
+  background:linear-gradient(135deg,#3498db,#2980b9);
+  color:#fff;border:1px solid rgba(255,255,255,0.2);
+  border-radius:50%;cursor:pointer;
+  font-size:22px;line-height:1;padding:0;
+  box-shadow:0 3px 10px rgba(0,0,0,0.4);
+  transition:box-shadow .15s, filter .15s;
+  font-family:inherit;
+}
+.mini-btn:hover{box-shadow:0 5px 16px rgba(52,152,219,0.6);filter:brightness(1.12)}
+.mini-btn:active{filter:brightness(0.92)}
+
+body.maximized .mini-wrap{display:none}
+body:not(.maximized) .panel{display:none}
+
+.panel{display:flex;height:100%;padding:20px;gap:14px}
+
+/* === Left: card viewer (no drop) === */
+.viewer{
+  flex:1;min-width:0;
+  background:#fff;border-radius:10px;overflow:hidden;
+  box-shadow:0 8px 40px rgba(0,0,0,0.5);
+  position:relative;
+}
+.viewer iframe{border:none;width:100%;height:100%;display:block;position:absolute;inset:0}
+.viewer .empty-state{
+  position:absolute;inset:0;
+  background:rgba(255,255,255,0.04);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  color:rgba(255,255,255,0.4);font-size:15px;
+  border:1px dashed rgba(255,255,255,0.15);border-radius:10px;
+  text-align:center;padding:20px;gap:10px;
+}
+.viewer.has-content{background:#fff}
+.viewer.is-empty .empty-state{display:flex}
+.viewer:not(.is-empty) .empty-state{display:none}
+.viewer .empty-state .big{font-size:48px;opacity:.5}
+
+/* === Resource tab column (DM only) === */
+.res-col{
+  width:72px;flex-shrink:0;
+  background:rgba(22,33,62,0.85);
+  border-radius:10px;
+  display:flex;flex-direction:column;gap:4px;padding:10px 6px;
+  box-shadow:0 8px 30px rgba(0,0,0,0.4);
+  backdrop-filter:blur(4px);
+  overflow-y:auto;
+}
+.res-col::-webkit-scrollbar{width:3px}
+.res-col::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:2px}
+.res-tab{
+  border:1px solid rgba(255,255,255,0.08);
+  background:rgba(255,255,255,0.03);
+  color:#ccc;
+  border-radius:6px;
+  padding:10px 4px;
+  font-size:11px;
+  font-weight:600;
+  cursor:pointer;
+  font-family:inherit;
+  transition:all .15s;
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  line-height:1.2;
+}
+.res-tab:hover{background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.2)}
+.res-tab.active{background:rgba(52,152,219,0.22);color:#fff;border-color:rgba(52,152,219,0.6)}
+.res-tab .ico{font-size:18px;line-height:1}
+.res-tab .lbl{font-size:10px}
+
+/* === Right: sidebar (drop target) === */
+.side{
+  width:260px;flex-shrink:0;
+  background:rgba(22,33,62,0.85);
+  border-radius:10px;
+  display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:0 8px 30px rgba(0,0,0,0.4);
+  backdrop-filter:blur(4px);
+  position:relative;
+  transition:background .15s, outline .15s;
+  outline:3px dashed transparent;
+  outline-offset:-6px;
+}
+.side.drag-over{
+  background:rgba(52,152,219,0.35);
+  outline-color:#3498db;
+}
+.side.busy::after{
+  content:"⏳ 上传中…";
+  position:absolute;inset:0;background:rgba(0,0,0,0.6);
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:16px;font-weight:600;z-index:20;
+}
+
+.side-head{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:space-between;gap:6px}
+.side-head .title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;flex:1;min-width:0}
+.side-head .head-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.side-head .icon-btn{background:transparent;border:1px solid rgba(255,255,255,0.1);color:#aaa;cursor:pointer;font-size:11px;padding:3px 8px;font-family:inherit;border-radius:4px;line-height:1.3;text-decoration:none;display:inline-block}
+.side-head .icon-btn:hover{background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.25)}
+.side-head .icon-btn.off{color:#666;text-decoration:line-through;opacity:.7}
+.side-head .icon-btn.on{color:#5dade2;border-color:rgba(93,173,226,0.35)}
+.side-head .close{background:transparent;border:none;color:#aaa;cursor:pointer;font-size:18px;padding:2px 6px;font-family:inherit;border-radius:4px}
+.side-head .close:hover{background:rgba(255,255,255,0.08);color:#fff}
+
+.side-hint{padding:10px 14px;font-size:11px;color:#7aa;background:rgba(52,152,219,0.08);border-bottom:1px solid rgba(255,255,255,0.06);text-align:center}
+
+.card-list{flex:1;overflow-y:auto;padding:6px 8px 10px}
+.card-list::-webkit-scrollbar{width:3px}
+.card-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:2px}
+
+.card{padding:9px 10px;margin-bottom:3px;border-radius:6px;background:rgba(255,255,255,0.04);border:1px solid transparent;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;gap:2px;position:relative}
+.card:hover{background:rgba(255,255,255,0.08)}
+.card.active{background:rgba(52,152,219,0.18);border-color:rgba(52,152,219,0.5)}
+.card-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
+.card-sub{font-size:10px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-del{position:absolute;top:4px;right:4px;background:transparent;border:none;color:#666;cursor:pointer;width:18px;height:18px;font-size:13px;display:none;border-radius:3px;font-family:inherit;padding:0;line-height:1}
+.card:hover .card-del{display:block}
+.card-del:hover{background:rgba(231,76,60,0.25);color:#e74c3c}
+
+.empty-list{padding:30px 12px;text-align:center;color:#666;font-size:11px;line-height:1.6;white-space:pre-line}
+.err{padding:8px 12px;font-size:11px;color:#e74c3c;background:rgba(231,76,60,0.1);border-top:1px solid rgba(231,76,60,0.2)}
+.status{padding:6px 12px;font-size:10px;color:#5dade2;text-align:center}
+
+</style>
+</head>
+<body>
+<div class="mini-wrap"><button class="mini-btn" id="miniBtn" title="角色卡面板">📇</button></div>
+<div class="panel">
+  <div class="viewer is-empty" id="viewer">
+    <div class="empty-state" id="emptyState">
+      <div class="big">📇</div>
+      <div id="emptyText">从右侧选择一张角色卡</div>
+      <div style="font-size:11px;opacity:.7">拖拽 xlsx 到右侧栏上传</div>
+    </div>
+  </div>
+  <aside class="res-col" id="resCol" style="display:none"></aside>
+  <aside class="side" id="side">
+    <div class="side-head">
+      <div class="title">📇 角色卡</div>
+      <div class="head-actions">
+        <a
+          class="icon-btn"
+          href="https://obr.dnd.center/character-cards/template-belling-v1.0.12.xlsx"
+          download="DND5.5E人物卡-悲灵v1.0.12.xlsx"
+          target="_blank"
+          rel="noopener"
+          title="下载本插件支持的悲灵 v1.0.12 角色卡模板（xlsx）"
+        >下载模板</a>
+        <!-- About button removed — suite's centralized About panel covers it. -->
+        <button class="close" id="closeBtn" title="关闭 (Esc)">✕</button>
+      </div>
+    </div>
+    <div class="side-hint">拖拽 xlsx 到此处上传</div>
+    <div id="status" class="status" style="display:none"></div>
+    <div id="error" class="err" style="display:none"></div>
+    <div class="card-list" id="list"></div>
+  </aside>
+</div>
+<script type="module" src="/src/modules/characterCards/panel-page.ts"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>绑定角色卡</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#eee;background:#1a1a2e}
+.wrap{height:100%;display:flex;flex-direction:column}
+.head{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.1);display:flex;align-items:center;gap:10px}
+.head .t{font-size:14px;font-weight:700;flex:1}
+.head .cur{font-size:11px;color:#888;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unbind{background:rgba(231,76,60,.2);color:#e74c3c;border:1px solid rgba(231,76,60,.4);padding:3px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-family:inherit}
+.unbind:hover{background:rgba(231,76,60,.4);color:#fff}
+.list{flex:1;overflow-y:auto;padding:8px 10px}
+.list::-webkit-scrollbar{width:3px}
+.list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}
+.card{display:flex;align-items:center;padding:10px 12px;border-radius:6px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.05);margin-bottom:4px;cursor:pointer;transition:background .12s,border-color .12s;gap:8px}
+.card:hover{background:rgba(52,152,219,.14);border-color:rgba(52,152,219,.3)}
+.card.cur{background:rgba(52,152,219,.18);border-color:#3498db}
+.card .n{flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .m{font-size:10px;color:#888;white-space:nowrap;margin-left:8px}
+.empty{padding:40px 20px;text-align:center;color:#888;font-size:12px;line-height:1.7}
+.foot{padding:8px 16px;border-top:1px solid rgba(255,255,255,.1);text-align:center;font-size:10px;color:#666}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div class="t">绑定角色卡</div>
+    <div class="cur" id="cur"></div>
+    <button class="unbind" id="unbind" style="display:none">解绑</button>
+  </div>
+  <div class="list" id="list">加载中…</div>
+  <div class="foot">选择一张卡绑定到该角色，单选该角色时自动弹出信息</div>
+</div>
+<script type="module" src="/src/modules/characterCards/bind-page.ts"></script>
+</body>
+</html>

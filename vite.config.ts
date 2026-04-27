@@ -34,6 +34,9 @@ export default defineConfig(({ command }) => ({
           __dirname,
           "bestiary-monster-info.html"
         ),
+        "cc-panel": resolve(__dirname, "cc-panel.html"),
+        "cc-info": resolve(__dirname, "cc-info.html"),
+        "cc-bind": resolve(__dirname, "cc-bind.html"),
       },
     },
   },

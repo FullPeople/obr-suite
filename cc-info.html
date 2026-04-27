@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>角色卡信息</title>
+<style>
+/* No transitions / animations anywhere — user wants instant 0-frame show/hide. */
+*{margin:0;padding:0;box-sizing:border-box;transition:none!important;animation:none!important}
+
+/* Popover is only open while a bound character is selected, so the iframe
+   never occupies screen space when no card is shown — the block-clicks
+   problem is avoided entirely by simply not existing. */
+html,body{
+  height:100%;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:#eee;background:transparent;
+}
+
+.card{
+  position:absolute;inset:0;
+  background:rgba(22,33,62,0.94);
+  border-radius:10px;
+  box-shadow:0 8px 28px rgba(0,0,0,0.55);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+}
+.root{padding:10px 12px;height:100%;overflow-y:auto}
+.root::-webkit-scrollbar{width:3px}
+.root::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}
+
+.hdr{display:flex;align-items:baseline;gap:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:7px}
+.name{font-size:14px;font-weight:700;color:#f5a623;flex-shrink:0;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub{font-size:10.5px;color:#aaa;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.raw-link{
+  flex-shrink:0;font-size:10px;font-weight:600;letter-spacing:.3px;
+  color:#5dade2;text-decoration:none;
+  padding:2px 7px;border:1px solid rgba(93,173,226,.4);border-radius:10px;
+  background:rgba(52,152,219,.1);white-space:nowrap;
+}
+.raw-link:hover{background:rgba(52,152,219,.25);color:#fff}
+
+.row{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-bottom:6px}
+.chip{
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.07);
+  border-radius:4px;padding:3px 4px;text-align:center;
+}
+.chip .k{font-size:8.5px;color:#888;letter-spacing:.3px;display:block;line-height:1.2}
+.chip .v{font-size:12px;font-weight:700;color:#eee;line-height:1.25}
+.chip.hp .v{color:#e94560}
+.chip.ac .v{color:#3498db}
+.chip.init .v{color:#2ecc71}
+
+/* align-items: stretch (grid default) makes the 3 cards in each row share
+   the same height — STR/CON/CHA grow to match DEX/WIS so the layout no
+   longer looks ragged with short cards beside tall ones. */
+.abil{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin-bottom:6px;align-items:stretch}
+.abl{
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.07);
+  border-radius:4px;padding:3px 5px;
+  display:flex;flex-direction:column;
+}
+.abl-head{display:flex;align-items:center;gap:4px}
+.abl-head .a{font-size:9px;color:#888;font-weight:700;letter-spacing:.5px;width:14px}
+.abl-head .t{font-size:11px;color:#bbb;min-width:16px}
+.abl-head .m{margin-left:auto;font-size:11.5px;color:#f5a623;font-weight:700}
+.abl.prof{
+  background:rgba(245,166,35,0.14);
+  border-color:rgba(245,166,35,0.55);
+}
+.abl.prof .abl-head .a{color:#f5a623}
+.abl.prof .abl-head .t{color:#fce6bd}
+
+/* Skills embedded inside each ability card — 2 columns of small chips.
+   Width per chip is wide enough for "运动 +5" / "调查 +2" etc. */
+.abl-skills{
+  display:grid;grid-template-columns:1fr 1fr;
+  gap:1px 4px;
+  margin-top:3px;padding-top:3px;
+  border-top:1px solid rgba(255,255,255,0.06);
+  flex:1;align-content:start;
+}
+.abl .sk{
+  display:flex;align-items:baseline;gap:3px;
+  padding:0 2px;
+  font-size:9.5px;line-height:1.4;
+  border-radius:2px;
+}
+.abl .sk .sk-n{color:#888;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.abl .sk .sk-v{color:#888;font-weight:700;font-variant-numeric:tabular-nums;flex-shrink:0}
+.abl .sk.sk-prof{background:rgba(245,166,35,0.10)}
+.abl .sk.sk-prof .sk-n{color:#fce6bd}
+.abl .sk.sk-prof .sk-v{color:#f5a623}
+.abl .sk.sk-exp{background:rgba(46,204,113,0.12)}
+.abl .sk.sk-exp .sk-n{color:#abf3c7}
+.abl .sk.sk-exp .sk-v{color:#2ecc71}
+
+.sect{font-size:9.5px;color:#5dade2;letter-spacing:.6px;margin:5px 0 3px;font-weight:600}
+
+.wp{
+  display:grid;
+  grid-template-columns:1fr auto auto;
+  gap:6px;align-items:baseline;
+  padding:3px 6px;
+  background:rgba(255,255,255,0.035);
+  border-radius:4px;
+  margin-bottom:2px;
+  font-size:11px;
+}
+.wp.spell{background:rgba(155,89,182,0.14);border:1px solid rgba(155,89,182,0.35)}
+.wp.spell .n{color:#d8b4ff}
+.wp .n{color:#eee;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.wp .atk{color:#2ecc71;font-weight:700;font-variant-numeric:tabular-nums}
+.wp .dmg{color:#ccc;font-variant-numeric:tabular-nums}
+.wp .prop{grid-column:1/-1;font-size:9.5px;color:#888;margin-top:-1px;line-height:1.3}
+
+.empty{color:#888;font-size:11px;padding:3px 6px}
+.err{color:#e74c3c;padding:12px;text-align:center;font-size:11px}
+.loading{color:#888;padding:20px;text-align:center;font-size:11px}
+</style>
+</head>
+<body>
+<div class="card"><div class="root" id="root"></div></div>
+<script type="module" src="/src/modules/characterCards/info-page.ts"></script>
+</body>
+</html>

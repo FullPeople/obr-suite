@@ -5,6 +5,10 @@ import { setupFocus, teardownFocus } from "./modules/focus";
 import { setupSearch, teardownSearch } from "./modules/search";
 import { setupInitiative, teardownInitiative } from "./modules/initiative";
 import { setupBestiary, teardownBestiary } from "./modules/bestiary";
+import {
+  setupCharacterCards,
+  teardownCharacterCards,
+} from "./modules/characterCards";
 
 // One central popover hosts the floating button + collapsible cluster.
 // The popover never closes itself; the iframe handles all expand/collapse
@@ -60,8 +64,10 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   search: { setup: setupSearch, teardown: teardownSearch },
   initiative: { setup: setupInitiative, teardown: teardownInitiative },
   bestiary: { setup: setupBestiary, teardown: teardownBestiary },
-  // characterCards is deferred to v0.5 — the cluster's buttons for it
-  // still work via broadcast to the existing standalone plugin.
+  characterCards: {
+    setup: setupCharacterCards,
+    teardown: teardownCharacterCards,
+  },
 };
 
 const moduleStatus = new Map<string, boolean>();
