@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Wooden grid platform -->
+  <path d="M8 38 L32 28 L56 38 L56 50 L32 60 L8 50 Z" fill="#8b5a2b" stroke="#000" stroke-width="1.5"/>
+  <path d="M8 38 L32 48 L56 38" fill="none" stroke="#000" stroke-width="1.2"/>
+  <path d="M32 48 L32 60" stroke="#000" stroke-width="1"/>
+  <!-- Grid lines on top -->
+  <path d="M14 41 L38 31 M20 44 L44 34 M26 47 L50 37" stroke="#5c3a1a" stroke-width="0.6" opacity="0.5"/>
+  <!-- TRPG miniature (gray humanoid) -->
+  <circle cx="20" cy="22" r="4" fill="#9aa0a8" stroke="#000" stroke-width="1.2"/>
+  <path d="M16 26 L16 38 L18 38 L18 32 L22 32 L22 38 L24 38 L24 26 Z" fill="#9aa0a8" stroke="#000" stroke-width="1.2"/>
+  <ellipse cx="20" cy="40" rx="6" ry="2" fill="#5a5a5a" stroke="#000" stroke-width="1"/>
+  <!-- Blue d20 dice -->
+  <path d="M44 14 L52 18 L52 26 L44 30 L36 26 L36 18 Z" fill="#7ec8f0" stroke="#000" stroke-width="1.5"/>
+  <path d="M44 14 L44 30 M36 18 L52 26 M36 26 L52 18" stroke="#000" stroke-width="0.8" opacity="0.6"/>
+  <text x="44" y="24" font-size="6" font-weight="700" fill="#000" text-anchor="middle" font-family="sans-serif">20</text>
+</svg>

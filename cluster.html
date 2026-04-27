@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Owl Suite Cluster</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#eee}
+
+:root{
+  /* Anchor color tuned to match OBR's default body bg #292d3c so the
+     cluster reads as part of the OBR chrome. */
+  --bg: #292d3c;
+  --bg-strong: #1f2230;
+  --bg-soft: rgba(41,45,60,0.92);
+  --border: rgba(255,255,255,0.14);
+  --border-strong: rgba(255,255,255,0.22);
+  --text: #e6e8ee;
+  --text-dim: #9aa0b3;
+  --accent: #5dade2;
+  --accent-warm: #f5a623;
+  --accent-red: #e74c3c;
+  --accent-green: #2ecc71;
+}
+
+.wrap{
+  position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:flex-end;
+  padding:0;
+  pointer-events:none;
+}
+.cluster{
+  pointer-events:auto;
+  display:flex;align-items:center;gap:6px;
+  padding:6px;
+  background:var(--bg-soft);
+  border:1px solid var(--border);
+  border-radius:14px;
+  box-shadow:0 6px 22px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.04) inset;
+  backdrop-filter:blur(8px);
+  height:52px;
+  transition:padding-right .12s ease;
+}
+
+/* Buttons row appears LEFT of main button when expanded. */
+.row{
+  display:flex;align-items:center;gap:4px;
+  height:40px;
+  overflow:hidden;
+  /* Hidden by default; a width animation might be nice but OBR resizes
+     the iframe externally — relying on display: contents/visibility. */
+}
+.wrap:not(.expanded) .row{display:none}
+
+/* Group label+box for the "悬浮窗" cluster (the two popup-toggle buttons) */
+.group{
+  display:flex;align-items:stretch;
+  height:40px;
+  border:1px dashed rgba(255,255,255,0.20);
+  border-radius:8px;
+  padding:0 4px 0 0;
+  position:relative;
+}
+.group .glabel{
+  display:flex;align-items:center;
+  font-size:9px;color:var(--text-dim);
+  padding:0 6px 0 8px;letter-spacing:0.5px;
+  border-right:1px dashed rgba(255,255,255,0.20);
+  margin-right:4px;
+  font-weight:700;
+}
+
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  height:32px;min-width:32px;padding:0 8px;
+  background:rgba(255,255,255,0.04);
+  border:1px solid var(--border);
+  border-radius:7px;
+  color:var(--text);font-family:inherit;font-size:11px;font-weight:600;
+  cursor:pointer;letter-spacing:0.2px;
+  transition:background .12s, border-color .12s, color .12s;
+  white-space:nowrap;
+  gap:4px;
+}
+.btn:hover{background:rgba(255,255,255,0.10);border-color:var(--border-strong)}
+.btn:active{background:rgba(255,255,255,0.14)}
+
+/* Toggle button states */
+.btn.toggle.on{background:rgba(46,204,113,0.16);border-color:rgba(46,204,113,0.5);color:#7be0a0}
+.btn.toggle.off{background:rgba(231,76,60,0.10);border-color:rgba(231,76,60,0.35);color:#e74c3c;text-decoration:line-through;text-decoration-thickness:2px;text-decoration-color:#e74c3c}
+
+/* Time stop active = warning yellow */
+.btn.timestop-active{background:rgba(245,166,35,0.20);border-color:rgba(245,166,35,0.55);color:#f5d76e}
+
+/* Main floating button — rectangular per user request */
+.main{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:40px;height:40px;
+  background:linear-gradient(135deg,#3a3f55,#252a3a);
+  border:1px solid var(--border-strong);
+  border-radius:8px;
+  cursor:pointer;
+  box-shadow:0 2px 6px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);
+  padding:0;
+  flex-shrink:0;
+  transition:filter .12s;
+}
+.main:hover{filter:brightness(1.15)}
+.main img{width:32px;height:32px;display:block;image-rendering:auto}
+
+.btn .ic{font-size:13px;line-height:1}
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap">
+  <div class="cluster" id="cluster">
+    <div class="row" id="row"></div>
+    <button class="main" id="main" type="button" title="枭熊插件">
+      <img src="/suite/icon.svg" alt="">
+    </button>
+  </div>
+</div>
+<script type="module" src="/src/cluster.ts"></script>
+</body>
+</html>

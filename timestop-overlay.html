@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:transparent}
+.cinema{position:fixed;left:0;right:0;height:18vh;background:rgba(0,0,0,0.75);pointer-events:none;opacity:0;transition:opacity 1.2s ease}
+.cinema.show{opacity:1}
+.top{top:0}
+.bottom{bottom:0}
+</style>
+</head>
+<body>
+<div class="cinema top" id="top"></div>
+<div class="cinema bottom" id="bottom"></div>
+<script type="module" src="/src/timestop-overlay.ts"></script>
+</body>
+</html>
