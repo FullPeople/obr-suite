@@ -190,8 +190,7 @@ async function registerContextMenus(lang: Lang) {
           if (positions[idx]) d.position = positions[idx];
         });
       });
-      const curLang = (getSuiteState().language as Lang) ?? "zh";
-      OBR.notification.show(t(curLang, "gathered"));
+      // Notification removed per user feedback — silent gather.
     },
   });
 }

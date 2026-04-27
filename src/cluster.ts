@@ -42,28 +42,33 @@ const GEAR_SVG = `<svg class="gear" viewBox="0 0 24 24" fill="none" stroke="curr
 let expanded = false;          // synced with LS during init below
 let timeStopActive = false;
 let isGM = false;
-let initialApplied = false;     // guards first applyExpanded
 
 async function setPopoverWidth(w: number) {
-  try { await OBR.popover.setWidth(POPOVER_ID, w); } catch {}
+  try { await OBR.popover.setWidth(POPOVER_ID, w); } catch (e) {
+    console.warn("[obr-suite/cluster] setWidth failed", e);
+  }
 }
 
 async function applyExpanded(next: boolean) {
   expanded = next;
   writeLS(LS_EXPANDED, next ? "1" : "0");
   wrapEl.classList.toggle("expanded", next);
-  // Always render the row (it's hidden by CSS when collapsed). Doing this
-  // on EVERY apply ensures the buttons are pre-built before the popover
-  // visually expands, so the first expand always shows them.
-  renderRow();
+  // Render the row before the width animation so buttons are always present.
+  try { renderRow(); } catch (e) { console.error("[obr-suite/cluster] renderRow failed", e); }
   await setPopoverWidth(next ? W_EXPANDED : W_COLLAPSED);
 }
 
+// Click handler — no init guard, so even an early click expands the cluster.
+// Reads the latest persisted state at click time so we don't toggle off a
+// stale local in-memory copy.
 mainEl.addEventListener("click", () => {
-  // Guard against the rare race where the user clicks before init has
-  // finished applying initial state.
-  if (!initialApplied) return;
-  applyExpanded(!expanded).catch(() => {});
+  // Re-sync `expanded` from localStorage in case background.ts opened the
+  // popover at a different width than our last in-iframe state thinks.
+  const persisted = readLS(LS_EXPANDED, "0") === "1";
+  if (persisted !== expanded) expanded = persisted;
+  applyExpanded(!expanded).catch((e) => {
+    console.error("[obr-suite/cluster] applyExpanded failed", e);
+  });
 });
 
 function isAutoPopupOn(key: string): boolean {
@@ -282,5 +287,4 @@ OBR.onReady(async () => {
   // Read persisted expanded state and apply.
   expanded = readLS(LS_EXPANDED, "0") === "1";
   await applyExpanded(expanded);
-  initialApplied = true;
 });

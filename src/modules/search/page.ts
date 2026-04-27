@@ -1097,11 +1097,24 @@ window.addEventListener("blur", () => {
     setExpanded(false).catch(() => {});
   }
 });
-inputEl.addEventListener("focus", () => {
+
+// Re-expand only on REAL user action — pointerdown on the input. A pure
+// `focus` event (without preceding pointerdown) is often a programmatic
+// focus restoration that OBR triggers after right-click menus close /
+// item-move drags end / etc. Those should NOT wake up the dropdown.
+function userExpand() {
   if (collapsedKeepingQuery && inputEl.value) {
     collapsedKeepingQuery = false;
     wrapEl.classList.remove("collapsed");
     setExpanded(true).catch(() => {});
+  }
+}
+inputEl.addEventListener("pointerdown", userExpand);
+// Also expand when the user starts typing — covers keyboard-only flows.
+inputEl.addEventListener("keydown", (e) => {
+  // Ignore pure modifier-key presses; only real input causes expand.
+  if (e.key.length === 1 || e.key === "Backspace" || e.key === "Delete") {
+    userExpand();
   }
 });
 
