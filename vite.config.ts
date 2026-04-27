@@ -17,6 +17,7 @@ export default defineConfig(({ command }) => ({
         settings: resolve(__dirname, "settings.html"),
         about: resolve(__dirname, "about.html"),
         "timestop-overlay": resolve(__dirname, "timestop-overlay.html"),
+        "search-bar": resolve(__dirname, "search-bar.html"),
       },
     },
   },

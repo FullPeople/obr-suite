@@ -2,6 +2,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import { startSceneSync, getState, onStateChange } from "./state";
 import { setupTimeStop, teardownTimeStop } from "./modules/timeStop";
 import { setupFocus, teardownFocus } from "./modules/focus";
+import { setupSearch, teardownSearch } from "./modules/search";
 
 // One central popover hosts the floating button + collapsible cluster.
 // The popover never closes itself; the iframe handles all expand/collapse
@@ -54,9 +55,10 @@ type ModuleHooks = { setup: () => Promise<void>; teardown: () => Promise<void> }
 const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], ModuleHooks>> = {
   timeStop: { setup: setupTimeStop, teardown: teardownTimeStop },
   focus: { setup: setupFocus, teardown: teardownFocus },
-  // bestiary, characterCards, initiative, search are deferred to v0.2 —
-  // for now the existing standalone plugins still handle those features.
-  // The cluster's buttons for those still work because they broadcast to
+  search: { setup: setupSearch, teardown: teardownSearch },
+  // bestiary, characterCards, initiative are deferred to v0.3 — for now
+  // the existing standalone plugins still handle those features. The
+  // cluster's buttons for those still work because they broadcast to
   // the existing plugins, and Settings still controls visibility/state.
 };
 
