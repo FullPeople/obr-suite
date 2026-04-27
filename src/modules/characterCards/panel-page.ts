@@ -441,13 +441,18 @@ OBR.onReady(async () => {
       minimize();
       return;
     }
-    // ④ Shift+A from inside the panel closes it. OBR's tool-action
-    // shortcut only fires when keyboard focus is on OBR's main window —
-    // once the user clicks into our panel, the shortcut goes nowhere.
-    // So we capture it ourselves.
-    if (e.shiftKey && (e.key === "A" || e.key === "a")) {
+    // CapsLock from inside the panel closes it (mirror of the OBR
+    // tool-action shortcut, which doesn't fire while focus is in our
+    // iframe). The bestiary uses Shift+A from-inside.
+    if (e.key === "CapsLock") {
       e.preventDefault();
-      minimize();
+      try {
+        OBR.broadcast.sendMessage(
+          "com.obr-suite/cc-shortcut-toggle",
+          {},
+          { destination: "LOCAL" }
+        );
+      } catch {}
     }
   });
 

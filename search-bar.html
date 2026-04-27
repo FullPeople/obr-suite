@@ -52,10 +52,14 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
 .wrap.has-q .row .clear{display:inline-flex;align-items:center;justify-content:center}
 .row .clear:hover{background:rgba(255,255,255,0.1);color:#fff}
 
-/* === Tools row (filters) — only visible when expanded === */
+/* === Tools row (filters) — only visible when expanded ===
+   Use opacity + transform transitions instead of display:none for smooth
+   fade-in/out. The CSS uses display:flex always but transitions opacity
+   and a small slide-in. pointer-events:none when invisible so the row
+   still passes clicks through when collapsed. */
 .tools{
   pointer-events:auto;
-  display:none;
+  display:flex;
   height:28px;flex-shrink:0;
   margin:0 4px 2px 4px;
   padding:0 6px;
@@ -64,8 +68,19 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   border:1px solid rgba(255,255,255,0.10);
   border-bottom:none;
   border-radius:6px 6px 0 0;
+  opacity:0;
+  transform:translateY(-6px);
+  pointer-events:none;
+  visibility:hidden;
+  transition:opacity .18s ease, transform .18s ease, visibility 0s linear .18s;
 }
-.wrap.has-q:not(.collapsed) .tools{display:flex}
+.wrap.has-q:not(.collapsed) .tools{
+  opacity:1;
+  transform:translateY(0);
+  pointer-events:auto;
+  visibility:visible;
+  transition:opacity .18s ease, transform .18s ease, visibility 0s linear 0s;
+}
 
 /* Unified segmented frame around all functional toggles — one outer
    border, vertical hairlines between buttons. The state colors paint
@@ -111,13 +126,13 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
 
 .tools .count{margin-left:auto;font-size:10.5px;color:#7aa;font-family:ui-monospace,Consolas,monospace}
 
-/* === Body: dropdown (left) + preview (right) — only direct children of
-   .wrap, scoped so it doesn't collide with `.info` inside row items. === */
+/* === Body: dropdown (left) + preview (right) — same opacity-based
+   transition pattern as .tools above. === */
 .wrap > .body{
   pointer-events:auto;
   flex:1;min-height:0;
   margin:0 4px 4px 4px;
-  display:none;
+  display:flex;
   background:rgba(15,20,40,0.96);
   border:1px solid rgba(255,255,255,0.12);
   border-top:none;
@@ -125,8 +140,19 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   box-shadow:0 6px 22px rgba(0,0,0,0.5);
   backdrop-filter:blur(6px);
   overflow:hidden;
+  opacity:0;
+  transform:translateY(-6px);
+  pointer-events:none;
+  visibility:hidden;
+  transition:opacity .22s ease, transform .22s ease, visibility 0s linear .22s;
 }
-.wrap.has-q:not(.collapsed) > .body{display:flex}
+.wrap.has-q:not(.collapsed) > .body{
+  opacity:1;
+  transform:translateY(0);
+  pointer-events:auto;
+  visibility:visible;
+  transition:opacity .22s ease, transform .22s ease, visibility 0s linear 0s;
+}
 
 .drop{
   width:280px;flex-shrink:0;

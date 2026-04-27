@@ -31,9 +31,11 @@ const TOP_OFFSET = 12;
 export async function setupSearch(): Promise<void> {
   try {
     const vw = await OBR.viewport.getWidth();
+    // Use a clean URL (no cache-buster). Cache-buster wasn't helping and
+    // may have introduced extra fetch overhead.
     await OBR.popover.open({
       id: POPOVER_ID,
-      url: `${URL}?t=${Date.now()}`,
+      url: URL,
       width: BAR_W,
       height: BAR_H,
       anchorReference: "POSITION",
@@ -43,8 +45,11 @@ export async function setupSearch(): Promise<void> {
       hidePaper: true,
       disableClickAway: true,
     });
-  } catch (e) {
-    console.error("[obr-suite/search] setup failed", e);
+  } catch (e: any) {
+    // Expand the error so the user can read what threw in DevTools.
+    const msg = e?.message ?? String(e);
+    const stack = e?.stack ?? "(no stack)";
+    console.error(`[obr-suite/search] setup failed: ${msg}\n${stack}`);
   }
 }
 

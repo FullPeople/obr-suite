@@ -74,7 +74,6 @@ export async function setupFocus(): Promise<void> {
         const scale = await OBR.viewport.getScale();
         OBR.broadcast.sendMessage(BROADCAST_FOCUS, { x, y, scale });
         focusCamera(x, y, scale);
-        OBR.notification.show("已聚焦所有玩家摄像头");
       } catch (e) {
         console.error("[obr-suite/focus] trigger failed", e);
       }

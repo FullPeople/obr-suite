@@ -91,7 +91,7 @@ async function turnOn() {
   await showOverlay(true); // GM gets pass-through overlay
   await lockCharacterItems();
   notifyClusterState(true);
-  OBR.notification.show("时停模式已开启");
+  // notification removed per user feedback
 }
 
 async function turnOff() {
@@ -100,7 +100,7 @@ async function turnOff() {
   await hideOverlay();
   await unlockCharacterItems();
   notifyClusterState(false);
-  OBR.notification.show("时停已结束");
+  // notification removed per user feedback
 }
 
 async function toggle() {

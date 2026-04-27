@@ -205,13 +205,12 @@ export async function setupCharacterCards(): Promise<void> {
     })
   );
 
-  // ① Shift+A shortcut on the Select tool — toggles the cc panel.
-  // Plain "Shift" was a modifier and conflicted with normal Shift use;
-  // Shift+A is a real combo press that won't fire on Shift-clicks.
+  // CapsLock shortcut on the Select tool — toggles the cc panel.
+  // (User swapped: cc gets CapsLock, bestiary gets Shift+A.)
   try {
     await OBR.tool.createAction({
       id: TOOL_ACTION_TOGGLE,
-      shortcut: "Shift+A",
+      shortcut: "CapsLock",
       icons: [
         {
           icon: ICON_URL,
@@ -224,6 +223,14 @@ export async function setupCharacterCards(): Promise<void> {
   } catch (e) {
     console.error("[obr-suite/character-cards] createAction failed", e);
   }
+
+  // CapsLock from inside the panel iframe also toggles (panel listens
+  // for window keydown and broadcasts).
+  unsubs.push(
+    OBR.broadcast.onMessage("com.obr-suite/cc-shortcut-toggle", () => {
+      toggleMainPanel();
+    })
+  );
 
   // Close the panel + info popover if scene unloads.
   unsubs.push(

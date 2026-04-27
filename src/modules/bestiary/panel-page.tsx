@@ -121,14 +121,13 @@ function App() {
     return () => observer.disconnect();
   }, []);
 
-  // ④ CapsLock inside the bestiary panel. OBR's tool-action shortcut only
+  // Shift+A inside the bestiary panel. OBR's tool-action shortcut only
   // fires when keyboard focus is on OBR's main window — once the user
-  // clicks into our panel, CapsLock here just goes nowhere. So we
-  // capture it ourselves and broadcast a toggle request the bestiary
-  // module's background handles.
+  // clicks into our panel, Shift+A here just goes nowhere. So we
+  // capture it ourselves and broadcast.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "CapsLock") {
+      if (e.shiftKey && (e.key === "A" || e.key === "a")) {
         e.preventDefault();
         try {
           OBR.broadcast.sendMessage(

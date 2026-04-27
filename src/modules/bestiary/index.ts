@@ -206,7 +206,7 @@ export async function setupBestiary(): Promise<void> {
   try {
     await OBR.tool.createAction({
       id: TOOL_ACTION_TOGGLE,
-      shortcut: "CapsLock",
+      shortcut: "Shift+A",
       icons: [
         {
           icon: ICON_URL,

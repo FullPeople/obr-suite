@@ -1098,10 +1098,12 @@ window.addEventListener("blur", () => {
   }
 });
 
-// Re-expand only on REAL user action — pointerdown on the input. A pure
-// `focus` event (without preceding pointerdown) is often a programmatic
-// focus restoration that OBR triggers after right-click menus close /
-// item-move drags end / etc. Those should NOT wake up the dropdown.
+// Re-expand ONLY on real keyboard input. Mouse-based events (pointerdown
+// on the input area) were waking the dropdown when the user dragged a
+// token through the search bar's screen region or when bestiary spawned a
+// new monster (OBR sometimes returns focus to last-active element). A
+// keypress is a real conscious user action that can't be triggered by
+// programmatic focus or pointer drift.
 function userExpand() {
   if (collapsedKeepingQuery && inputEl.value) {
     collapsedKeepingQuery = false;
@@ -1109,10 +1111,7 @@ function userExpand() {
     setExpanded(true).catch(() => {});
   }
 }
-inputEl.addEventListener("pointerdown", userExpand);
-// Also expand when the user starts typing — covers keyboard-only flows.
 inputEl.addEventListener("keydown", (e) => {
-  // Ignore pure modifier-key presses; only real input causes expand.
   if (e.key.length === 1 || e.key === "Backspace" || e.key === "Delete") {
     userExpand();
   }

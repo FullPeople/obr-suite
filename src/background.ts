@@ -82,21 +82,44 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   search: { setup: setupSearch, teardown: teardownSearch },
 };
 
-const moduleStatus = new Map<string, boolean>();
+// Module lifecycle states: "off" (not running), "starting" (setup in
+// flight), "on" (setup completed), "stopping" (teardown in flight).
+// Tracking the in-flight states prevents concurrent syncModules calls
+// from issuing duplicate setup() invocations on the same module — which
+// is what was causing search.setup to be retried 4 times when scene
+// metadata changes fired in rapid succession during initial load.
+type ModuleState = "off" | "starting" | "on" | "stopping";
+const moduleStatus = new Map<string, ModuleState>();
 
 async function syncModules() {
   const state = getState();
   for (const [id, hooks] of Object.entries(modules)) {
     if (!hooks) continue;
     const wantOn = !!state.enabled[id as keyof typeof state.enabled];
-    const isOn = !!moduleStatus.get(id);
-    if (wantOn && !isOn) {
-      await hooks.setup();
-      moduleStatus.set(id, true);
-    } else if (!wantOn && isOn) {
-      await hooks.teardown();
-      moduleStatus.set(id, false);
+    const status = moduleStatus.get(id) ?? "off";
+    if (wantOn && status === "off") {
+      moduleStatus.set(id, "starting");
+      try {
+        await hooks.setup();
+        moduleStatus.set(id, "on");
+      } catch (e) {
+        // Mark as "on" anyway — the module's own setup catches its own
+        // errors normally; if something escapes here we don't want an
+        // infinite retry loop. The user can manually toggle in Settings.
+        console.error(`[obr-suite] ${id} setup escaped:`, e);
+        moduleStatus.set(id, "on");
+      }
+    } else if (!wantOn && status === "on") {
+      moduleStatus.set(id, "stopping");
+      try {
+        await hooks.teardown();
+      } catch (e) {
+        console.error(`[obr-suite] ${id} teardown escaped:`, e);
+      }
+      moduleStatus.set(id, "off");
     }
+    // status "starting" or "stopping" → another syncModules is already
+    // handling this module; let it finish.
   }
 }
 

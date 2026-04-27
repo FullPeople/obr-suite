@@ -125,8 +125,5 @@ export async function spawnMonster(monster: ParsedMonster) {
     });
   } catch {}
 
-  const modStr = monster.dexMod >= 0 ? `+${monster.dexMod}` : `${monster.dexMod}`;
-  OBR.notification.show(
-    `${monster.name} 已加入 (隐藏) HP:${monster.hp} AC:${monster.ac} 先攻:${initiativeRoll}(${modStr})`
-  );
+  // Spawn notification removed per user feedback — silent.
 }
