@@ -272,7 +272,7 @@ export async function setupInitiative(): Promise<void> {
             !item.metadata[OPTED_OUT_KEY]
           ) {
             knownItemIds.add(item.id);
-            const curLang = getStoredLang();
+            const curLang = (getSuiteState().language as Lang) ?? "zh";
             OBR.modal.open({
               id: NEW_ITEM_DIALOG_ID,
               url: `${NEW_ITEM_URL}?itemId=${item.id}&itemName=${encodeURIComponent(

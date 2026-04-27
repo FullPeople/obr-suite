@@ -256,14 +256,16 @@ async function onGear() {
   }
 }
 
-// TimeStop activity tracking
-OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {
-  timeStopActive = !!(event.data as any)?.active;
-  renderRow();
-});
-
 // --- Init ---
 OBR.onReady(async () => {
+  // TimeStop activity tracking — must be inside OBR.onReady, otherwise
+  // calling broadcast.onMessage too early throws "Unable to send message:
+  // not ready".
+  OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {
+    timeStopActive = !!(event.data as any)?.active;
+    renderRow();
+  });
+
   // Robust role detection: try getRole, then also subscribe to player
   // changes so any future role updates (or successful role read) refresh
   // the buttons. Some OBR sessions take a moment to settle the role.
