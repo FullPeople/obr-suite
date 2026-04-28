@@ -891,7 +891,13 @@ function setExpression(v: string) {
 function refreshBadges() {
   const parsed = parseExpr(expression);
   const counts: Record<string, number> = {};
-  for (const g of parsed.plain.groups) counts[g.type] = (counts[g.type] ?? 0) + g.count;
+  // Count from the canonical sources only — segments + outerPlain. The
+  // backward-compat shim aliases `parsed.plain` to `outerPlain` when
+  // there are zero segments, so reading both `plain` and `outerPlain`
+  // would double-count plain expressions like "1d20" → badge showed 2.
+  for (const seg of parsed.segments) {
+    for (const g of seg.plain.groups) counts[g.type] = (counts[g.type] ?? 0) + g.count;
+  }
   for (const g of parsed.outerPlain.groups) counts[g.type] = (counts[g.type] ?? 0) + g.count;
   diceRow.querySelectorAll<HTMLElement>(".dice-btn[data-type]").forEach((b) => {
     const t = b.dataset.type!;
