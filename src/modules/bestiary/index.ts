@@ -24,6 +24,20 @@ const AUTO_POPUP_KEY = `${PLUGIN_ID}/auto-popup`;
 const AUTO_POPUP_TOGGLE_MSG = `${PLUGIN_ID}/auto-popup-toggled`;
 const CLOSE_MSG = `${PLUGIN_ID}/close`;
 
+// Right-click context menu IDs (DM-only, see filter.roles below).
+const CTX_BIND = "com.obr-suite/bestiary-bind";
+const CTX_REBIND = "com.obr-suite/bestiary-rebind";
+const CTX_UNBIND = "com.obr-suite/bestiary-unbind";
+
+// Picker modal — reuses the bestiary panel HTML with `?pickerForItemId=...`.
+const PICKER_MODAL_ID = "com.obr-suite/bestiary-picker";
+
+// Bubbles + Initiative metadata keys used when binding (must match
+// spawn.ts so existing tokens look identical to freshly-spawned ones).
+const BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
+const BUBBLES_NAME = "com.owlbear-rodeo-bubbles-extension/name";
+const INITIATIVE_MODKEY = "com.initiative-tracker/dexMod";
+
 const isAutoPopupOn = (): boolean => {
   try { return localStorage.getItem(AUTO_POPUP_KEY) !== "0"; } catch { return true; }
 };
@@ -238,6 +252,104 @@ export async function setupBestiary(): Promise<void> {
   try { bestiaryRole = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch {}
   if (bestiaryRole !== "GM") return;
 
+  // --- Right-click context menu: bind / rebind / unbind ---
+  // Three entries with mutually-exclusive filters keyed on the
+  // `BESTIARY_SLUG_KEY` metadata so each token only ever shows the
+  // entry that makes sense for its current state.
+  const openPicker = async (itemId: string) => {
+    try {
+      await OBR.modal.open({
+        id: PICKER_MODAL_ID,
+        url: `${POPOVER_URL}?pickerForItemId=${encodeURIComponent(itemId)}`,
+        width: 400,
+        height: 600,
+      });
+    } catch (e) {
+      console.error("[obr-suite/bestiary] open picker failed", e);
+    }
+  };
+  try {
+    await OBR.contextMenu.create({
+      id: CTX_BIND,
+      icons: [
+        {
+          icon: ICON_URL,
+          label: "绑定怪物图鉴",
+          filter: {
+            roles: ["GM"],
+            every: [
+              { key: "type", value: "IMAGE" },
+              { key: ["metadata", BESTIARY_SLUG_KEY], value: undefined },
+            ],
+            max: 1,
+          },
+        },
+      ],
+      onClick: (ctx) => {
+        const id = ctx.items[0]?.id;
+        if (id) void openPicker(id);
+      },
+    });
+    await OBR.contextMenu.create({
+      id: CTX_REBIND,
+      icons: [
+        {
+          icon: ICON_URL,
+          label: "更换怪物图鉴",
+          filter: {
+            roles: ["GM"],
+            every: [
+              { key: "type", value: "IMAGE" },
+              { key: ["metadata", BESTIARY_SLUG_KEY], operator: "!=", value: undefined },
+            ],
+            max: 1,
+          },
+        },
+      ],
+      onClick: (ctx) => {
+        const id = ctx.items[0]?.id;
+        if (id) void openPicker(id);
+      },
+    });
+    await OBR.contextMenu.create({
+      id: CTX_UNBIND,
+      icons: [
+        {
+          icon: ICON_URL,
+          label: "移除怪物图鉴绑定",
+          filter: {
+            roles: ["GM"],
+            every: [
+              { key: "type", value: "IMAGE" },
+              { key: ["metadata", BESTIARY_SLUG_KEY], operator: "!=", value: undefined },
+            ],
+            max: 1,
+          },
+        },
+      ],
+      onClick: async (ctx) => {
+        const ids = ctx.items.map((i) => i.id);
+        if (ids.length === 0) return;
+        try {
+          await OBR.scene.items.updateItems(ids, (drafts) => {
+            for (const d of drafts) {
+              delete d.metadata[BESTIARY_SLUG_KEY];
+              // Bubbles HP/AC and the bound name are kept — the user
+              // may want to re-bind later or just continue without
+              // the stat-block link. Only the slug reference is
+              // removed, which is what disables the auto-popup +
+              // info popover behavior.
+            }
+          });
+        } catch (e) {
+          console.error("[obr-suite/bestiary] unbind failed", e);
+        }
+      },
+    });
+  } catch (e) {
+    console.error("[obr-suite/bestiary] context menu register failed", e);
+  }
+
   unsubs.push(
     OBR.scene.onReadyChange(async (ready) => {
       if (!ready) await closeInfoPopover();
@@ -278,8 +390,12 @@ export async function setupBestiary(): Promise<void> {
 export async function teardownBestiary(): Promise<void> {
   await closePanel();
   await closeInfoPopover();
+  try { await OBR.modal.close(PICKER_MODAL_ID); } catch {}
   try { await OBR.tool.removeAction(TOOL_ACTION_TOGGLE); } catch {}
   try { await OBR.tool.removeMode(`${TOOL_ID}/mode`); } catch {}
   try { await OBR.tool.remove(TOOL_ID); } catch {}
+  try { await OBR.contextMenu.remove(CTX_BIND); } catch {}
+  try { await OBR.contextMenu.remove(CTX_REBIND); } catch {}
+  try { await OBR.contextMenu.remove(CTX_UNBIND); } catch {}
   for (const u of unsubs.splice(0)) u();
 }

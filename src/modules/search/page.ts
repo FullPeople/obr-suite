@@ -9,32 +9,26 @@ import {
   Language,
 } from "../../state";
 import { formatTagsClickable, fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
+import { subscribeToSfx } from "../dice/sfx-broadcast";
 
-// Suite-version of the search bar. Differences from the standalone:
-//   - No in-iframe toggles row — version + allowPlayerMonsters live in
-//     the suite Settings panel (scene metadata).
-//   - dataVersion is a 3-way ("2014" / "2024" / "all") rather than two
-//     independent booleans.
-//   - language affects display preference (zh shows cn first, en shows
-//     en first) and could later switch to a different mirror.
+// Suite-version of the search bar — independent top-right popover with
+// its OWN visible input row (not driven by cluster). The popover resizes
+// itself via OBR.popover.setWidth/setHeight as the user types / clears,
+// so when idle the popover is only 280×40 and clicks below the input
+// pass through to the canvas naturally.
 
 const POPOVER_ID = "com.obr-suite/search-bar";
 
-// Data source — kiwee.top works for both languages (has both cn/n fields).
-// We pick the URL based on language so a future "official" mirror can be
-// dropped in for English mode without touching the rest.
+// Data source — kiwee.top works for both languages.
 const KIWEE_BASE = "https://5e.kiwee.top";
 function dataBase(_lang: Language): string {
-  // For now both use kiwee.top — it has cn AND n fields, complete data, and
-  // doesn't restrict iframe / CORS. If we later want to use 5etools'
-  // English official mirror in EN mode, swap here.
   return KIWEE_BASE;
 }
 function indexUrl(lang: Language): string { return `${dataBase(lang)}/search/index.json`; }
 function booksUrl(lang: Language): string { return `${dataBase(lang)}/data/books.json`; }
 
 const BAR_W_IDLE = 280;
-const BAR_W_OPEN = 640;
+const BAR_W_OPEN = 720;
 const BAR_H_IDLE = 40;
 const BAR_H_OPEN = 440;
 
@@ -81,17 +75,6 @@ interface CategoryInfo {
     | { fileBySource: (src: string) => string; key: string };
 }
 
-// kiwee.top index categories — verified against actual data files
-// 2026-04-28 by sampling 5+ entries per category and resolving them to
-// the 5etools data files. The ORIGINAL standalone 5e-search code (and
-// the previous version of THIS file) had the category numbers wrong:
-//   c=7 was "陷阱" but actually contains FEATS (Elven Accuracy, Dark
-//        Gifts from VRGtR, etc.) — feats.json
-//   c=8 was "专长" but actually contains OPTIONAL FEATURES (warlock
-//        invocations etc.) — optionalfeatures.json
-//   c=13 (冒险) had no data — exists as adventures.json
-//   c=16 was "表格" but actually contains TRAPS — trapshazards.json
-// The fixes below correct all of these and verify the rest.
 const CATEGORY: Record<number, CategoryInfo> = {
   1:  { label: "怪物", data: { fileBySource: (s) => `bestiary/bestiary-${s}.json`, key: "monster" } },
   2:  { label: "法术", data: { fileBySource: (s) => `spells/spells-${s}.json`, key: "spell" } },
@@ -134,10 +117,6 @@ const CATEGORY: Record<number, CategoryInfo> = {
   43: { label: "语言", data: { file: "languages.json", key: "language" } },
   44: { label: "整本书", data: { file: "books.json", key: "book" } },
   45: { label: "页面" },
-  // c=46 is the monster's "fluff" entry — base race/type description
-  // separate from the per-age stat blocks at c=1. Lives in
-  // fluff-bestiary-${src}.json under `monsterFluff` (NOT in the
-  // regular bestiary-${src}.json#monster file).
   46: { label: "怪物概述", data: { fileBySource: (s) => `bestiary/fluff-bestiary-${s}.json`, key: "monsterFluff" } },
   47: { label: "角色选项", data: { file: "items.json", key: "item" } },
   48: { label: "食谱", data: { file: "recipes.json", key: "recipe" } },
@@ -145,8 +124,6 @@ const CATEGORY: Record<number, CategoryInfo> = {
   50: { label: "技能" },
   51: { label: "感官" },
   52: { label: "牌组", data: { file: "decks.json", key: "deck" } },
-  // c=53 牌内容 — per user request, the card detail display is
-  // suppressed (was cluttering search results with low-value data).
   53: { label: "牌内容" },
   54: { label: "武器精通", data: { file: "items.json", key: "itemMastery" } },
   55: { label: "地点" },
@@ -159,7 +136,7 @@ function categoryInfo(c: number): CategoryInfo {
 
 // --- Source code lookup ---
 let sourceById = new Map<number, string>();
-let sourceNames = new Map<string, string>(); // CODE → 中文书名
+let sourceNames = new Map<string, string>();
 function srcCode(s: Entry["s"]): string {
   if (typeof s === "string") return s;
   if (typeof s === "number") return sourceById.get(s) ?? "";
@@ -252,7 +229,7 @@ async function loadBooks(): Promise<void> {
 
 // --- Filter & search ---
 interface FilterOpts {
-  dataVersion: DataVersion; // suite-wide
+  dataVersion: DataVersion;
   language: Language;
   isGM: boolean;
   allowPlayerMonsters: boolean;
@@ -262,10 +239,6 @@ interface Hit { entry: Entry; score: number; }
 const CORE_2014 = new Set(["PHB", "MM"]);
 const CORE_2024 = new Set(["XPHB", "XMM"]);
 
-// Returns true if an entry is allowed under the current dataVersion.
-//   "2014"     → only PHB + MM
-//   "2024"     → only XPHB + XMM
-//   "all"      → everything (cores + extensions)
 function passesVersion(code: string, dv: DataVersion): boolean {
   if (dv === "all") return true;
   if (dv === "2014") return CORE_2014.has(code);
@@ -290,9 +263,6 @@ function search(query: string, idx: IndexFile, opts: FilterOpts): Entry[] {
     const en = e.n?.toLowerCase() ?? "";
     const cn = e.cn?.toLowerCase() ?? "";
 
-    // Score: prefer the active language's startsWith, then the other
-    // language's startsWith, then their respective contains. English-mode
-    // users get English-name matches first; Chinese-mode users get cn first.
     let s = -1;
     const a = preferEn ? en : cn;
     const b = preferEn ? cn : en;
@@ -361,12 +331,6 @@ async function findEntryData(entry: Entry): Promise<DataEntry | null> {
     arr.find((e) => e.ENG_name?.toLowerCase() === entry.n.toLowerCase()) ??
     null;
   if (!found) return null;
-  // 5etools `_copy` inheritance — used heavily by monsterFluff (e.g.
-  // "White Dragon" inherits from "Chromatic Dragons" with mods). Without
-  // this resolution the entry has no body text. We do a shallow copy:
-  // walk the parent in the same file by ENG_name, inherit its entries
-  // if our entry lacks them. Mods (_mod) are NOT applied — the parent
-  // text is good enough for display.
   if (!found.entries && found._copy) {
     const cp = found._copy;
     const parentName = (cp.ENG_name || cp.name || "")?.toLowerCase();
@@ -395,12 +359,6 @@ function stripTags(s: string): string {
     return parts[0];
   });
 }
-// Render an entry-level string with 5etools tags. Body text gets the
-// rich version (clickable .rollable spans for {@dice}, {@damage},
-// {@hit}, {@d20}, {@chance} etc.); the surrounding prose is escaped.
-// Use this anywhere the 5etools data is INSIDE a <p>/<li>/<td> — i.e.
-// the player will read it as flowing text. For chip headers / name
-// labels stay with stripTags + escapeHtml.
 function richTags(s: string): string {
   return formatTagsClickable(s);
 }
@@ -411,8 +369,6 @@ function renderEntries(entries: any[]): string {
 }
 function renderEntry(e: any): string {
   if (e == null) return "";
-  // Body strings: use richTags so {@dice} / {@damage} / {@hit} etc.
-  // become clickable .rollable spans.
   if (typeof e === "string") return `<p>${richTags(e)}</p>`;
   if (typeof e !== "object") return "";
   const type = e.type ?? "entries";
@@ -457,7 +413,6 @@ function renderEntry(e: any): string {
 }
 function renderEntryInline(e: any): string {
   if (e == null) return "";
-  // Body strings inside lists / table cells — clickable too.
   if (typeof e === "string") return richTags(e);
   if (typeof e !== "object") return "";
   if (e.type === "item") {
@@ -537,7 +492,6 @@ function chipsFor(entry: Entry, data: DataEntry | null): string {
 function renderMonster(entry: Entry, data: DataEntry): string {
   const parts: string[] = [];
 
-  // Subtitle: 体型 类型，阵营
   const sz = sizeStr(data.size);
   const ty = typeStr(data.type);
   const al = alignmentStr(data.alignment);
@@ -545,19 +499,12 @@ function renderMonster(entry: Entry, data: DataEntry): string {
   const subLine = al ? `${sub}，${al}` : sub;
   if (subLine) parts.push(`<div class="prev-subtitle">${escapeHtml(subLine)}</div>`);
 
-  // Headline chips (CR/AC/HP/速度)
   parts.push(chipsFor(entry, data));
-
-  // Ability scores grid
   parts.push(renderAbilityGrid(data));
-
-  // Combat summary (saves, skills, resistances, immunities, senses, languages)
   parts.push(renderMonsterSummary(data));
 
-  // Optional flavor entries (some monsters include `entries` for description)
   if (data.entries) parts.push(renderEntries(data.entries));
 
-  // Sections
   if (data.trait?.length) {
     parts.push("<h4>特性</h4>");
     for (const t of data.trait) parts.push(renderTrait(t));
@@ -656,7 +603,6 @@ function formatTypeList(arr: any): string {
     .map((x) => {
       if (typeof x === "string") return stripTags(x);
       if (typeof x === "object") {
-        // e.g. {"resist": ["fire", "cold"], "note": "from nonmagical"}
         const inner = formatTypeList(
           x.resist ?? x.immune ?? x.vulnerable ?? x.conditionImmune ?? []
         );
@@ -671,7 +617,6 @@ function formatTypeList(arr: any): string {
 function renderTrait(t: any): string {
   const name = t.name ? `<b>${escapeHtml(stripTags(t.name))}.</b> ` : "";
   const entries = t.entries ? renderEntries(t.entries) : "";
-  // Wrap so the bold name and following <p>s read as one block.
   return `<div class="trait">${name}${entries}</div>`;
 }
 
@@ -722,7 +667,6 @@ function renderSpell(_entry: Entry, data: DataEntry): string {
     parts.push("<h4>当以更高阶法术位施放时</h4>");
     parts.push(renderEntries(data.entriesHigherLevel));
   }
-  // Class list
   const fromClass: string[] = [];
   if (data.classes?.fromClassList)
     for (const c of data.classes.fromClassList) fromClass.push(stripTags(c.name));
@@ -736,7 +680,6 @@ function renderSpell(_entry: Entry, data: DataEntry): string {
 
 function renderItem(_entry: Entry, data: DataEntry): string {
   const parts: string[] = [];
-  // Weapon stat line
   const weaponBits: string[] = [];
   if (data.dmg1) weaponBits.push(`${stripTags(String(data.dmg1))} ${dmgTypeStr(data.dmgType)}`);
   if (data.dmg2) weaponBits.push(`双手 ${stripTags(String(data.dmg2))}`);
@@ -745,7 +688,6 @@ function renderItem(_entry: Entry, data: DataEntry): string {
   if (data.range) weaponBits.push(`射程：${stripTags(String(data.range))}`);
   if (weaponBits.length)
     parts.push(`<p>${escapeHtml(weaponBits.join("　"))}</p>`);
-  // Armor stat
   if (data.ac != null) parts.push(`<p><b>AC</b> ${escapeHtml(String(data.ac))}</p>`);
   if (data.entries) parts.push(renderEntries(data.entries));
   return parts.join("");
@@ -761,7 +703,7 @@ function dmgTypeStr(t: any): string {
   return "";
 }
 
-// --- Generic helpers (shared by chips & renderers) ---
+// --- Generic helpers ---
 function crStr(cr: any): string {
   if (cr == null) return "";
   if (typeof cr === "string" || typeof cr === "number") return String(cr);
@@ -868,224 +810,7 @@ function prerequisiteStr(prereq: any): string {
     .join(" / ");
 }
 
-// --- DOM wiring ---
-const inputEl = document.getElementById("q") as HTMLInputElement;
-const clearEl = document.getElementById("clear") as HTMLButtonElement;
-const wrapEl = document.getElementById("wrap") as HTMLDivElement;
-const countEl = document.getElementById("count") as HTMLDivElement;
-const dropEl = document.getElementById("drop") as HTMLDivElement;
-const previewEl = document.getElementById("preview") as HTMLDivElement;
-
-// All filter state lives in suite scene metadata now — read via getState().
-let isGM = false;
-let currentHits: Entry[] = [];
-let kbdActiveIdx = -1;
-let pinnedEntry: Entry | null = null;
-let lastHoverEntry: Entry | null = null;
-let collapsedKeepingQuery = false;
-
-function applyLangPlaceholder() {
-  const lang = getLocalLang();
-  inputEl.placeholder =
-    lang === "zh"
-      ? "搜索 5etools…（怪物/法术/物品/职业/种族…）"
-      : "Search 5etools… (monsters/spells/items/classes/races…)";
-}
-
-// --- Animated resize ---
-// OBR.popover.setWidth/setHeight are instant (no built-in tween). We step
-// from current → target over ~220ms with easeOutCubic so width/height
-// changes feel smooth alongside the CSS opacity fade on .body / .tools.
-// A monotonic token cancels in-flight animations when a newer call
-// arrives, so rapid expand/collapse toggles never get stuck mid-step.
-let currentW = BAR_W_IDLE;
-let currentH = BAR_H_IDLE;
-let resizeToken = 0;
-const RESIZE_DURATION_MS = 220;
-const RESIZE_STEPS = 6;
-
-async function animateResize(targetW: number, targetH: number): Promise<void> {
-  const myToken = ++resizeToken;
-  const startW = currentW;
-  const startH = currentH;
-  if (startW === targetW && startH === targetH) return;
-  const dw = targetW - startW;
-  const dh = targetH - startH;
-  for (let i = 1; i <= RESIZE_STEPS; i++) {
-    if (myToken !== resizeToken) return;
-    const t = i / RESIZE_STEPS;
-    const ease = 1 - Math.pow(1 - t, 3); // easeOutCubic
-    const w = Math.round(startW + dw * ease);
-    const h = Math.round(startH + dh * ease);
-    currentW = w;
-    currentH = h;
-    try {
-      await Promise.all([
-        OBR.popover.setWidth(POPOVER_ID, w),
-        OBR.popover.setHeight(POPOVER_ID, h),
-      ]);
-    } catch {}
-    if (i < RESIZE_STEPS) {
-      await new Promise((r) => setTimeout(r, RESIZE_DURATION_MS / RESIZE_STEPS));
-    }
-  }
-}
-
-async function setExpanded(expanded: boolean) {
-  await animateResize(
-    expanded ? BAR_W_OPEN : BAR_W_IDLE,
-    expanded ? BAR_H_OPEN : BAR_H_IDLE
-  );
-}
-
-function renderHint(text: string, isErr = false) {
-  dropEl.innerHTML = `<div class="hint${isErr ? " err" : ""}">${escapeHtml(text)}</div>`;
-}
-function highlight(text: string, q: string): string {
-  if (!q) return escapeHtml(text);
-  const lower = text.toLowerCase();
-  const ql = q.toLowerCase();
-  const i = lower.indexOf(ql);
-  if (i < 0) return escapeHtml(text);
-  return (
-    escapeHtml(text.slice(0, i)) +
-    "<mark>" +
-    escapeHtml(text.slice(i, i + q.length)) +
-    "</mark>" +
-    escapeHtml(text.slice(i + q.length))
-  );
-}
-
-function renderResults(hits: Entry[], q: string) {
-  currentHits = hits;
-  kbdActiveIdx = -1;
-  pinnedEntry = null;
-  if (hits.length === 0) {
-    countEl.textContent = "0";
-    renderHint("无匹配条目");
-    renderPreviewIdle();
-    return;
-  }
-  countEl.textContent = String(hits.length);
-  const parts: string[] = [];
-  hits.forEach((e, idx) => {
-    const cat = categoryInfo(e.c);
-    const display = e.cn || e.n;
-    const sub = e.cn && e.n !== e.cn ? e.n : "";
-    const code = srcCode(e.s).toUpperCase();
-    // Edition badge color for the 4 core books only.
-    const edClass =
-      code === "PHB" || code === "MM"
-        ? "ed-2014"
-        : code === "XPHB" || code === "XMM"
-        ? "ed-2024"
-        : "";
-    parts.push(
-      `<div class="row-item" data-idx="${idx}" tabindex="-1">
-        <span class="cat cat-${e.c}">${escapeHtml(cat.label)}</span>
-        <span class="info">
-          <span class="name">${highlight(display, q)}</span>
-          ${sub ? `<span class="sub">${highlight(sub, q)}</span>` : ""}
-        </span>
-        <span class="src ${edClass}">${escapeHtml(code)}</span>
-      </div>`
-    );
-  });
-  dropEl.innerHTML = parts.join("");
-  dropEl.querySelectorAll<HTMLDivElement>(".row-item").forEach((row) => {
-    const idx = Number(row.dataset.idx);
-    row.addEventListener("mouseenter", () => onRowHover(idx));
-    row.addEventListener("click", () => onRowClick(idx));
-    // Keep focus on input when clicking — avoids losing it to body/row.
-    row.addEventListener("mousedown", (e) => e.preventDefault());
-  });
-  renderPreviewIdle();
-}
-
-function renderPreviewIdle() {
-  previewEl.innerHTML = `<div class="prev-empty">悬停或点击词条查看详情<br><span class="prev-empty-sub">Esc 关闭 · ↑↓ 选择</span></div>`;
-}
-
-async function onRowHover(idx: number) {
-  if (pinnedEntry) return;
-  const entry = currentHits[idx];
-  if (!entry) return;
-  lastHoverEntry = entry;
-  await renderPreviewFor(entry);
-}
-
-async function onRowClick(idx: number) {
-  const entry = currentHits[idx];
-  if (!entry) return;
-  if (pinnedEntry && pinnedEntry.id === entry.id) {
-    pinnedEntry = null;
-  } else {
-    pinnedEntry = entry;
-  }
-  dropEl.querySelectorAll<HTMLDivElement>(".row-item").forEach((row) => {
-    const i = Number(row.dataset.idx);
-    row.classList.toggle("pinned", currentHits[i] === pinnedEntry);
-  });
-  await renderPreviewFor(pinnedEntry ?? entry);
-}
-
-async function renderPreviewFor(entry: Entry) {
-  const cat = categoryInfo(entry.c);
-  const display = entry.cn || entry.n;
-  const code = srcCode(entry.s).toUpperCase();
-  const page = entry.p ? ` · p.${entry.p}` : "";
-
-  // Make sure books data is loaded for the source-name lookup.
-  await loadBooks();
-  const srcDisplay = sourceLabel(code);
-
-  previewEl.innerHTML = `
-    <div class="prev-head">
-      <div class="prev-title">${escapeHtml(display)}</div>
-      ${entry.n && entry.n !== display ? `<div class="prev-eng">${escapeHtml(entry.n)}</div>` : ""}
-      <div class="prev-meta">${escapeHtml(cat.label)} · ${escapeHtml(srcDisplay)}${escapeHtml(page)}</div>
-    </div>
-    <div class="prev-body" id="prev-body"><div class="prev-loading">加载中…</div></div>
-  `;
-  const bodyEl = previewEl.querySelector("#prev-body") as HTMLDivElement;
-
-  if (!cat.data) {
-    bodyEl.innerHTML = `<div class="prev-empty">该分类暂无内置详情<br><span class="prev-empty-sub">${escapeHtml(cat.label)} · 仅显示名称与来源</span></div>`;
-    return;
-  }
-
-  let data: DataEntry | null = null;
-  try { data = await findEntryData(entry); } catch {}
-  if (!pinnedEntry && lastHoverEntry && lastHoverEntry.id !== entry.id) return;
-
-  if (!data) {
-    bodyEl.innerHTML = `<div class="prev-empty">未找到详情数据<br><span class="prev-empty-sub">来源 ${escapeHtml(code)} 的数据可能尚未同步</span></div>`;
-    return;
-  }
-
-  // Dispatch by category
-  const c = entry.c;
-  if (c === 1 || c === 46) {
-    bodyEl.innerHTML = renderMonster(entry, data);
-  } else if (c === 2) {
-    bodyEl.innerHTML = chipsFor(entry, data) + renderSpell(entry, data);
-  } else if (c === 4 || c === 56 || c === 57) {
-    bodyEl.innerHTML = chipsFor(entry, data) + renderItem(entry, data);
-  } else if (c === 13) {
-    bodyEl.innerHTML = chipsFor(entry, data) + renderAdventure(entry, data);
-  } else if (c === 18 || c === 44) {
-    bodyEl.innerHTML = chipsFor(entry, data) + renderBook(entry, data);
-  } else {
-    // Generic: chips + entries
-    const body = data.entries ? renderEntries(data.entries) : "";
-    bodyEl.innerHTML = chipsFor(entry, data) + body;
-  }
-}
-
-// Adventures / books carry only a manifest (chapters / appendices /
-// covers / level range). The actual prose lives in `book/<ID>.json` /
-// `adventure/<ID>.json` files which we don't fetch here. Render a
-// readable chapter list + level/author meta so the entry isn't blank.
+// Adventures / books — manifest only.
 function renderAdventure(_entry: Entry, data: DataEntry): string {
   const parts: string[] = [];
   const lvl = data.level && (data.level.start != null || data.level.end != null)
@@ -1133,12 +858,182 @@ function renderBook(_entry: Entry, data: DataEntry): string {
   return parts.join("");
 }
 
+// --- DOM wiring ---
+const inputEl = document.getElementById("q") as HTMLInputElement;
+const clearEl = document.getElementById("clear") as HTMLButtonElement;
+const wrapEl = document.getElementById("wrap") as HTMLDivElement;
+const countEl = document.getElementById("count") as HTMLDivElement;
+const dropEl = document.getElementById("drop") as HTMLDivElement;
+const previewEl = document.getElementById("preview") as HTMLDivElement;
+
+let isGM = false;
+let currentHits: Entry[] = [];
+let kbdActiveIdx = -1;
+let pinnedEntry: Entry | null = null;
+let lastHoverEntry: Entry | null = null;
+let collapsedKeepingQuery = false;
+
+function applyLangPlaceholder() {
+  const lang = getLocalLang();
+  inputEl.placeholder =
+    lang === "zh"
+      ? "搜索 5etools…（怪物/法术/物品/职业/种族…）"
+      : "Search 5etools… (monsters/spells/items/classes/races…)";
+}
+
+// --- Resize ---
+let resizeBusy = false;
+async function setExpanded(expanded: boolean) {
+  if (resizeBusy) return;
+  resizeBusy = true;
+  try {
+    await OBR.popover.setWidth(POPOVER_ID, expanded ? BAR_W_OPEN : BAR_W_IDLE);
+    await OBR.popover.setHeight(POPOVER_ID, expanded ? BAR_H_OPEN : BAR_H_IDLE);
+  } catch {}
+  resizeBusy = false;
+}
+
+function renderHint(text: string, isErr = false) {
+  dropEl.innerHTML = `<div class="hint${isErr ? " err" : ""}">${escapeHtml(text)}</div>`;
+}
+function highlight(text: string, q: string): string {
+  if (!q) return escapeHtml(text);
+  const lower = text.toLowerCase();
+  const ql = q.toLowerCase();
+  const i = lower.indexOf(ql);
+  if (i < 0) return escapeHtml(text);
+  return (
+    escapeHtml(text.slice(0, i)) +
+    "<mark>" +
+    escapeHtml(text.slice(i, i + q.length)) +
+    "</mark>" +
+    escapeHtml(text.slice(i + q.length))
+  );
+}
+
+function renderResults(hits: Entry[], q: string) {
+  currentHits = hits;
+  kbdActiveIdx = -1;
+  pinnedEntry = null;
+  if (hits.length === 0) {
+    countEl.textContent = "0";
+    renderHint("无匹配条目");
+    renderPreviewIdle();
+    return;
+  }
+  countEl.textContent = String(hits.length);
+  const parts: string[] = [];
+  hits.forEach((e, idx) => {
+    const cat = categoryInfo(e.c);
+    const display = e.cn || e.n;
+    const sub = e.cn && e.n !== e.cn ? e.n : "";
+    const code = srcCode(e.s).toUpperCase();
+    const edClass =
+      code === "PHB" || code === "MM"
+        ? "ed-2014"
+        : code === "XPHB" || code === "XMM"
+        ? "ed-2024"
+        : "";
+    parts.push(
+      `<div class="row-item" data-idx="${idx}" tabindex="-1">
+        <span class="cat cat-${e.c}">${escapeHtml(cat.label)}</span>
+        <span class="info">
+          <span class="name">${highlight(display, q)}</span>
+          ${sub ? `<span class="sub">${highlight(sub, q)}</span>` : ""}
+        </span>
+        <span class="src ${edClass}">${escapeHtml(code)}</span>
+      </div>`
+    );
+  });
+  dropEl.innerHTML = parts.join("");
+  dropEl.querySelectorAll<HTMLDivElement>(".row-item").forEach((row) => {
+    const idx = Number(row.dataset.idx);
+    row.addEventListener("mouseenter", () => onRowHover(idx));
+    row.addEventListener("click", () => onRowClick(idx));
+    row.addEventListener("mousedown", (e) => e.preventDefault());
+  });
+  renderPreviewIdle();
+}
+
+function renderPreviewIdle() {
+  previewEl.innerHTML = `<div class="prev-empty">悬停或点击词条查看详情<br><span class="prev-empty-sub">Esc 关闭 · ↑↓ 选择</span></div>`;
+}
+
+async function onRowHover(idx: number) {
+  if (pinnedEntry) return;
+  const entry = currentHits[idx];
+  if (!entry) return;
+  lastHoverEntry = entry;
+  await renderPreviewFor(entry);
+}
+
+async function onRowClick(idx: number) {
+  const entry = currentHits[idx];
+  if (!entry) return;
+  if (pinnedEntry && pinnedEntry.id === entry.id) {
+    pinnedEntry = null;
+  } else {
+    pinnedEntry = entry;
+  }
+  dropEl.querySelectorAll<HTMLDivElement>(".row-item").forEach((row) => {
+    const i = Number(row.dataset.idx);
+    row.classList.toggle("pinned", currentHits[i] === pinnedEntry);
+  });
+  await renderPreviewFor(pinnedEntry ?? entry);
+}
+
+async function renderPreviewFor(entry: Entry) {
+  const cat = categoryInfo(entry.c);
+  const display = entry.cn || entry.n;
+  const code = srcCode(entry.s).toUpperCase();
+  const page = entry.p ? ` · p.${entry.p}` : "";
+
+  await loadBooks();
+  const srcDisplay = sourceLabel(code);
+
+  previewEl.innerHTML = `
+    <div class="prev-head">
+      <div class="prev-title">${escapeHtml(display)}</div>
+      ${entry.n && entry.n !== display ? `<div class="prev-eng">${escapeHtml(entry.n)}</div>` : ""}
+      <div class="prev-meta">${escapeHtml(cat.label)} · ${escapeHtml(srcDisplay)}${escapeHtml(page)}</div>
+    </div>
+    <div class="prev-body" id="prev-body"><div class="prev-loading">加载中…</div></div>
+  `;
+  const bodyEl = previewEl.querySelector("#prev-body") as HTMLDivElement;
+
+  if (!cat.data) {
+    bodyEl.innerHTML = `<div class="prev-empty">该分类暂无内置详情<br><span class="prev-empty-sub">${escapeHtml(cat.label)} · 仅显示名称与来源</span></div>`;
+    return;
+  }
+
+  let data: DataEntry | null = null;
+  try { data = await findEntryData(entry); } catch {}
+  if (!pinnedEntry && lastHoverEntry && lastHoverEntry.id !== entry.id) return;
+
+  if (!data) {
+    bodyEl.innerHTML = `<div class="prev-empty">未找到详情数据<br><span class="prev-empty-sub">来源 ${escapeHtml(code)} 的数据可能尚未同步</span></div>`;
+    return;
+  }
+
+  const c = entry.c;
+  if (c === 1 || c === 46) {
+    bodyEl.innerHTML = renderMonster(entry, data);
+  } else if (c === 2) {
+    bodyEl.innerHTML = chipsFor(entry, data) + renderSpell(entry, data);
+  } else if (c === 4 || c === 56 || c === 57) {
+    bodyEl.innerHTML = chipsFor(entry, data) + renderItem(entry, data);
+  } else if (c === 13) {
+    bodyEl.innerHTML = chipsFor(entry, data) + renderAdventure(entry, data);
+  } else if (c === 18 || c === 44) {
+    bodyEl.innerHTML = chipsFor(entry, data) + renderBook(entry, data);
+  } else {
+    const body = data.entries ? renderEntries(data.entries) : "";
+    bodyEl.innerHTML = chipsFor(entry, data) + body;
+  }
+}
+
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-// Re-runs the search using the current input value + state without
-// changing the visual collapsed/expanded state. Called from input events
-// (which already drive expand on their own) and from suite state changes
-// (which must NOT pop the panel back open).
 async function runSearch(q: string) {
   if (!indexCache) renderHint("加载索引中…（首次约 1 秒）");
   let idx: IndexFile;
@@ -1174,25 +1069,19 @@ async function onQueryChange(qRaw: string) {
     await setExpanded(false);
     return;
   }
-  // Typing always expands — conscious user action.
   collapsedKeepingQuery = false;
   wrapEl.classList.remove("collapsed");
   await setExpanded(true);
   await runSearch(q);
 }
 
-// Re-filter without forcing the panel open. Used when suite settings
-// change (language/dataVersion/allowPlayerMonsters) and the panel is in
-// any state — including collapsed-with-query.
 function refilter() {
   const q = inputEl.value.trim();
   if (!q) return;
   runSearch(q);
 }
 
-// Delegated click for any 5etools rollable tag inside the search
-// preview pane. Fires a quick-roll using the player's current
-// selection (if any) as the dice anchor.
+// Delegated click for any 5etools rollable tag inside the search preview.
 previewEl.addEventListener("click", async (e) => {
   const target = (e.target as HTMLElement | null)?.closest<HTMLElement>(".rollable");
   if (!target) return;
@@ -1218,10 +1107,8 @@ clearEl.addEventListener("click", async () => {
   inputEl.focus();
 });
 
-// Cluster's inline search input broadcasts every keystroke here. We
-// mirror it into our own (now hidden) input field and run the same
-// debounced query pipeline. The input row in this iframe is hidden
-// via CSS — typing in cluster IS typing here, conceptually.
+// External callers (character-card search-chips) can fill the input by
+// broadcasting BC_SEARCH_QUERY.
 const BC_SEARCH_QUERY = "com.obr-suite/search-query";
 OBR.onReady(() => {
   OBR.broadcast.onMessage(BC_SEARCH_QUERY, (event) => {
@@ -1229,6 +1116,7 @@ OBR.onReady(() => {
     inputEl.value = q;
     if (debounceTimer) clearTimeout(debounceTimer);
     onQueryChange(q).catch(() => {});
+    if (q) inputEl.focus();
   });
 });
 
@@ -1276,72 +1164,39 @@ document.addEventListener("keydown", (e) => {
 
 // --- Focus loss / regain → collapse / expand without losing query ---
 window.addEventListener("blur", () => {
-  // Iframe lost focus entirely (user clicked outside our popover, e.g. the
-  // OBR map). Collapse visuals but keep input value + cached results so
-  // re-clicking the input restores the panel instantly.
   if (wrapEl.classList.contains("has-q") && !collapsedKeepingQuery) {
     collapsedKeepingQuery = true;
     wrapEl.classList.add("collapsed");
     setExpanded(false).catch(() => {});
   }
 });
-
-// Re-expand on a deliberate user action: a real keystroke (printable key
-// or backspace/delete) OR a real `click` (mouse-down + mouse-up on the
-// input). `click` does NOT fire from programmatic focus, pointer drift
-// while dragging a token across the bar, or popover-induced focus
-// shuffling — so monsters being spawned and tokens being moved no
-// longer wake the panel up.
-function userExpand() {
-  ensureDataLoad();
+inputEl.addEventListener("focus", () => {
   if (collapsedKeepingQuery && inputEl.value) {
     collapsedKeepingQuery = false;
     wrapEl.classList.remove("collapsed");
     setExpanded(true).catch(() => {});
   }
-}
-inputEl.addEventListener("keydown", (e) => {
-  if (e.key.length === 1 || e.key === "Backspace" || e.key === "Delete") {
-    userExpand();
-  }
 });
-// Clicking the input row (input itself or the row container) is a real
-// user action — wake the panel and start lazy-loading data so by the
-// time they type the index is in flight.
-inputEl.addEventListener("click", () => userExpand());
-const rowEl = document.getElementById("row") as HTMLDivElement | null;
-rowEl?.addEventListener("click", () => userExpand());
-
-// Lazy data load: index + books are NOT preloaded. They start fetching
-// the first time the user clicks the input or types a key. By the time
-// they finish typing the first character, the index is usually ready.
-let dataLoadStarted = false;
-function ensureDataLoad() {
-  if (dataLoadStarted) return;
-  dataLoadStarted = true;
-  loadIndex().catch(() => {});
-  loadBooks().catch(() => {});
-}
 
 OBR.onReady(async () => {
+  subscribeToSfx();
   try {
     const role = await OBR.player.getRole();
     isGM = role === "GM";
   } catch {}
 
-  // Subscribe to suite scene state — dataVersion / allowPlayerMonsters
-  // changes from the Settings panel re-trigger filtering. refilter()
-  // no longer forces the panel open, so silent updates while the bar is
-  // collapsed-with-query stay silent.
   startSceneSync();
   applyLangPlaceholder();
   onStateChange(() => {
     if (inputEl.value) refilter();
   });
-  // Per-client language change (localStorage): update placeholder + rerun
-  // search since result ranking depends on language.
   onLangChange(() => {
     applyLangPlaceholder();
     if (inputEl.value) refilter();
   });
+
+  setTimeout(() => {
+    loadIndex().catch(() => {});
+    loadBooks().catch(() => {});
+  }, 250);
 });

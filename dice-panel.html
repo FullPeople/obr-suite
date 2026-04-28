@@ -179,8 +179,11 @@ html,body{
 }
 
 /* === Expression input === */
+.expr-row{
+  display:flex;align-items:stretch;gap:6px;
+}
 .expr-input{
-  width:100%;height:46px;
+  flex:1;min-width:0;height:46px;
   background:var(--bg-card);
   border:1px solid var(--border);
   border-radius:8px;
@@ -192,6 +195,28 @@ html,body{
 }
 .expr-input::placeholder{color:var(--text-dim);font-weight:500;font-size:13px;letter-spacing:0}
 .expr-input:focus{border-color:var(--accent)}
+.expr-mod{
+  display:flex;flex-direction:row;
+  height:46px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  overflow:hidden;
+  background:var(--bg-card);
+  flex-shrink:0;
+}
+.expr-mod button{
+  width:36px;height:100%;
+  background:transparent;border:none;
+  color:var(--text);
+  font-family:inherit;font-size:18px;font-weight:700;line-height:1;
+  cursor:pointer;padding:0;
+  transition:background .12s, color .12s;
+  display:inline-flex;align-items:center;justify-content:center;
+  user-select:none;-webkit-user-select:none;
+}
+.expr-mod button:hover{background:rgba(93,173,226,0.20);color:#7ec8f0}
+.expr-mod button:active{background:rgba(93,173,226,0.30)}
+.expr-mod button + button{border-left:1px solid var(--border)}
 
 .label-input{
   flex:1;height:34px;width:100%;
@@ -555,8 +580,14 @@ html,body{
 
       <div>
         <div class="sect-h">表达式</div>
-        <input class="expr-input" id="exprInput" type="text" spellcheck="false"
-               placeholder="例如 2d6 + 1d20 + 5  或  adv(1d20) 等">
+        <div class="expr-row">
+          <input class="expr-input" id="exprInput" type="text" spellcheck="false"
+                 placeholder="例如 2d6 + 1d20 + 5  或  adv(1d20) 等">
+          <div class="expr-mod">
+            <button id="btnModDec" type="button" title="加值 -1">−</button>
+            <button id="btnModInc" type="button" title="加值 +1">＋</button>
+          </div>
+        </div>
       </div>
 
       <input class="label-input" id="labelInput" type="text" placeholder="备注（可选，例如 偷袭）">

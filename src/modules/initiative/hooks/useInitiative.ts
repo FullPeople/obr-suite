@@ -743,7 +743,7 @@ export function useInitiative() {
     // client that triggers the advance (other clients receive a
     // separate sync-viewport sound when their camera follows the
     // active token).
-    import("../../dice/sfx").then((m) => m.sfxNextTurn()).catch(() => {});
+    import("../../dice/sfx-broadcast").then((m) => m.sfxNextTurn()).catch(() => {});
 
     const currentId =
       optimisticActiveIdRef.current ?? visible.find((i) => i.active)?.id ?? null;

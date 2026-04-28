@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>掷骰菜单</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:rgba(31,34,48,0.97);
+  --border:rgba(255,255,255,0.16);
+  --text:#e6e8ee;--text-dim:#9aa0b3;
+  --accent:#7aa2c4;--green:#7be0a0;--red:#ff8b7a;--yellow:#f5d76e;
+  --purple:#bb87dd;
+}
+html,body{
+  height:100%;width:100%;overflow:hidden;background:transparent;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:var(--text);font-size:12px;
+}
+.menu{
+  position:absolute;inset:0;
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:4px;
+  box-shadow:0 6px 22px rgba(0,0,0,0.55);
+  user-select:none;
+  -webkit-user-select:none;
+}
+.item{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 12px;border-radius:5px;cursor:pointer;
+  white-space:nowrap;
+  transition:background .12s;
+  font-family:inherit;color:inherit;font-size:12px;
+  background:transparent;border:none;
+  width:100%;text-align:left;
+}
+.item:hover{background:rgba(93,173,226,0.22)}
+.item .ico{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;font-size:13px;font-weight:700;color:var(--accent);
+  flex-shrink:0;
+}
+.item.adv .ico{color:var(--green)}
+.item.dis .ico{color:var(--red)}
+.item.tray .ico{color:var(--yellow)}
+.item.dark .ico{color:var(--purple)}
+.sep{height:1px;background:rgba(255,255,255,0.10);margin:3px 4px}
+</style>
+</head>
+<body>
+<div class="menu">
+  <button class="item" data-act="roll"><span class="ico">⚀</span><span>投掷</span></button>
+  <button class="item dark" data-act="dark"><span class="ico">●</span><span>暗骰</span></button>
+  <button class="item adv" data-act="adv"><span class="ico">▲</span><span>优势</span></button>
+  <button class="item dis" data-act="dis"><span class="ico">▼</span><span>劣势</span></button>
+  <div class="sep"></div>
+  <button class="item tray" data-act="tray"><span class="ico">＋</span><span>添加到骰盘</span></button>
+</div>
+<script type="module">
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
+
+const POPOVER_ID = "com.obr-suite/rollable-menu";
+const BC_QUICK_ROLL = "com.obr-suite/dice-quick-roll";
+const BC_PANEL_TOGGLE = "com.obr-suite/dice-panel-toggle";
+
+const params = new URLSearchParams(location.search);
+const expression = params.get("expr") ?? "";
+const label = params.get("label") ?? "";
+const itemId = params.get("itemId") || null;
+
+async function close() {
+  try { await OBR.popover.close(POPOVER_ID); } catch {}
+}
+
+OBR.onReady(() => {
+  document.querySelectorAll(".item").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const act = el.dataset.act ?? "";
+      try {
+        if (act === "tray") {
+          await OBR.broadcast.sendMessage(
+            BC_PANEL_TOGGLE,
+            { open: true, prefill: expression },
+            { destination: "LOCAL" },
+          );
+        } else if (act === "roll") {
+          await OBR.broadcast.sendMessage(
+            BC_QUICK_ROLL,
+            { expression, label, itemId, focus: !!itemId, hidden: false },
+            { destination: "LOCAL" },
+          );
+        } else if (act === "dark") {
+          await OBR.broadcast.sendMessage(
+            BC_QUICK_ROLL,
+            { expression, label, itemId, focus: !!itemId, hidden: true },
+            { destination: "LOCAL" },
+          );
+        } else if (act === "adv" || act === "dis") {
+          await OBR.broadcast.sendMessage(
+            BC_QUICK_ROLL,
+            { expression, label, itemId, focus: !!itemId, hidden: false, advMode: act },
+            { destination: "LOCAL" },
+          );
+        }
+      } catch (e) { console.error("[rollable-menu]", e); }
+      await close();
+    });
+  });
+
+  // Auto-close if user presses Esc.
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      void close();
+    }
+  });
+});
+</script>
+</body>
+</html>

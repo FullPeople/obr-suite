@@ -1,6 +1,8 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { ICONS } from "../../icons";
 import { fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
+import { bindRollableContextMenu } from "../dice/context-menu";
+import { subscribeToSfx } from "../dice/sfx-broadcast";
 
 const SHOW_MSG = "com.character-cards/info-show";
 
@@ -140,7 +142,7 @@ function render(d: any, cardId: string, roomId: string) {
         : "sk";
     const total = typeof s.total === "number" ? s.total : 0;
     const expr = `1d20${total >= 0 ? `+${total}` : total}`;
-    const lbl = `${name} · ${s.name ?? "?"}`;
+    const lbl = `${s.name ?? "?"}`;
     return `<div class="${cls} rollable" data-expr="${expr}" data-label="${escapeHtml(lbl)}" title="${escapeHtml(lbl)} ${expr}">
       <span class="sk-n">${escapeHtml(s.name ?? "?")}</span>
       <span class="sk-v">${fmtMod(s.total)}</span>
@@ -157,13 +159,13 @@ function render(d: any, cardId: string, roomId: string) {
       // modifier unless the save has its own bonus stored separately.
       const aMod = typeof a.modifier === "number" ? a.modifier : 0;
       const aExpr = `1d20${aMod >= 0 ? `+${aMod}` : aMod}`;
-      const aLbl = `${name} · ${FULL[k] ?? ABBR[k] ?? k}检定`;
+      const aLbl = `${FULL[k] ?? ABBR[k] ?? k}检定`;
       // Saving throw — different label, may have its own bonus.
       const saveBonus = typeof a.save?.bonus === "number"
         ? a.save.bonus
         : (a.save?.proficient ? aMod + (cs.proficiency_bonus ?? 0) : aMod);
       const saveExpr = `1d20${saveBonus >= 0 ? `+${saveBonus}` : saveBonus}`;
-      const saveLbl = `${name} · ${FULL[k] ?? ABBR[k] ?? k}豁免`;
+      const saveLbl = `${FULL[k] ?? ABBR[k] ?? k}豁免`;
       return `<div class="abl${prof ? " prof" : ""}">
         <div class="abl-head">
           <span class="a rollable" data-expr="${saveExpr}" data-label="${escapeHtml(saveLbl)}" title="${escapeHtml(saveLbl)} ${saveExpr}">${ABBR[k]}</span>
@@ -182,7 +184,7 @@ function render(d: any, cardId: string, roomId: string) {
     const bonus = extractBonus(sp.attack_bonus);
     const bn = parseInt(bonus.replace(/[^\d-]/g, ""), 10) || 0;
     const atkExpr = `1d20${bn >= 0 ? `+${bn}` : bn}`;
-    const atkLbl = `${name} · 法术攻击`;
+    const atkLbl = `法术攻击`;
     weaponRows.push(`<div class="wp spell">
       <span class="n">近战/远程法术攻击</span>
       <span class="atk rollable" data-expr="${atkExpr}" data-label="${escapeHtml(atkLbl)}" title="${escapeHtml(atkLbl)} ${atkExpr}">${escapeHtml(bonus)}</span>
@@ -200,13 +202,13 @@ function render(d: any, cardId: string, roomId: string) {
       const atkM = /([+-]?\s*\d+)/.exec(atkBonusStr);
       const atkBn = atkM ? parseInt(atkM[1].replace(/\s+/g, ""), 10) : 0;
       const atkExpr = `1d20${atkBn >= 0 ? `+${atkBn}` : atkBn}`;
-      const atkLbl = `${name} · ${wpName} 命中`;
+      const atkLbl = `${wpName} 命中`;
       // Damage: extract the raw dice expression from `w.damage`. Most
       // entries are like "1d8+3" or "2d6+4" — pass through directly.
       const dmgExprRaw = String(w.damage ?? "").replace(/\s+/g, "");
       const dmgExprMatch = /\d*d\d+([+-]\d+)?/.exec(dmgExprRaw);
       const dmgExpr = dmgExprMatch ? dmgExprMatch[0] : dmgExprRaw;
-      const dmgLbl = `${name} · ${wpName} 伤害${w.damage_type ? `(${w.damage_type})` : ""}`;
+      const dmgLbl = `${wpName} 伤害${w.damage_type ? `(${w.damage_type})` : ""}`;
       const dmgClickable = dmgExpr
         ? `<span class="rollable" data-expr="${escapeHtml(dmgExpr)}" data-label="${escapeHtml(dmgLbl)}" title="${escapeHtml(dmgLbl)} ${escapeHtml(dmgExpr)}">${escapeHtml(dmgRaw || "?")}</span>`
         : escapeHtml(dmgRaw || "?");
@@ -352,7 +354,39 @@ root.addEventListener("click", async (e) => {
   target.classList.add("rollable-flash");
 });
 
+// Right-click → context menu (投掷 / 优势 / 劣势 / 添加到骰盘).
+// Anchors on the bound character token so dice / camera focus are
+// consistent with the left-click behavior above.
+//
+// The cc-info popover is opened from `characterCards/index.ts` with
+// anchorPosition = { left: vw − RIGHT_OFFSET, top: anchorTop } and
+// anchorOrigin = RIGHT/BOTTOM. That puts the iframe's BOTTOM-RIGHT
+// in viewport at (vw − RIGHT_OFFSET, anchorTop), so its TOP-LEFT is
+// (vw − RIGHT_OFFSET − innerWidth, anchorTop − innerHeight). Constants
+// mirrored from characterCards/index.ts.
+const CC_RIGHT_OFFSET = 12;
+const CC_BOTTOM_OFFSET = 160;
+const CC_INFO_GAP = 8;
+const CC_BUTTON_HEIGHT = 48 + 8;
+bindRollableContextMenu(
+  root,
+  () => "open",
+  () => resolveBoundToken(),
+  async () => {
+    const [vw, vh] = await Promise.all([
+      OBR.viewport.getWidth().catch(() => 1280),
+      OBR.viewport.getHeight().catch(() => 720),
+    ]);
+    const anchorTop = vh - CC_BOTTOM_OFFSET - CC_BUTTON_HEIGHT - CC_INFO_GAP;
+    return {
+      left: Math.round(vw - CC_RIGHT_OFFSET - window.innerWidth),
+      top: Math.round(anchorTop - window.innerHeight),
+    };
+  },
+);
+
 OBR.onReady(() => {
+  subscribeToSfx();
   // Initial card from URL — popover is opened on-demand by background.ts
   // with the ids in the query string. While the popover stays open, background
   // broadcasts in-place swaps when a different bound character is selected.

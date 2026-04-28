@@ -29,11 +29,41 @@ export type ModuleId =
 export type DataVersion = "2014" | "2024" | "all";
 export type Language = "zh" | "en";
 
+// User-managed data libraries. The default library is 5etools-on-kiwee,
+// always available. Additional libraries follow the same JSON schema
+// (see settings.ts → 库设置 tab → 教程 for the contract). When more
+// than one library is enabled, search / bestiary will merge results
+// from all of them, prefixed with the library `name` so the source is
+// clear in the UI.
+export interface LibraryConfig {
+  /** Stable id, used as React-style key + for URL caches. */
+  id: string;
+  /** Display name shown in search-result row + chips. */
+  name: string;
+  /** Base URL — must serve `search/index.json` + `data/<file>.json`. */
+  baseUrl: string;
+  /** Whether the library is currently active (data fetched + merged). */
+  enabled: boolean;
+  /** Built-in libraries can't be deleted, only enabled/disabled. */
+  builtin?: boolean;
+}
+
 export interface SuiteState {
   enabled: Record<ModuleId, boolean>;
   dataVersion: DataVersion;
   allowPlayerMonsters: boolean;
+  libraries: LibraryConfig[];
 }
+
+export const DEFAULT_LIBRARIES: LibraryConfig[] = [
+  {
+    id: "5etools-kiwee",
+    name: "5etools (kiwee.top 镜像)",
+    baseUrl: "https://5e.kiwee.top",
+    enabled: true,
+    builtin: true,
+  },
+];
 
 export const DEFAULT_STATE: SuiteState = {
   enabled: {
@@ -42,17 +72,13 @@ export const DEFAULT_STATE: SuiteState = {
     bestiary: true,
     characterCards: true,
     initiative: true,
-    // search: still has rough edges (popover layout / keyboard nav).
-    // Default OFF until those are sorted out — the DM can opt in via
-    // the Settings tab when ready to test.
-    search: false,
+    search: true,
     dice: true,
-    // portals: still in active development (multi-scene linking,
-    // permission model). Default OFF — must be manually enabled.
-    portals: false,
+    portals: true,
   },
   dataVersion: "2024",
   allowPlayerMonsters: false,
+  libraries: DEFAULT_LIBRARIES,
 };
 
 let cached: SuiteState = DEFAULT_STATE;
@@ -64,11 +90,36 @@ export function getState(): SuiteState {
 
 function merge(partial: any): SuiteState {
   if (!partial || typeof partial !== "object") return DEFAULT_STATE;
+  // Libraries merge: user-saved entries take precedence, but built-in
+  // libraries are always present (so the default 5etools never
+  // disappears from older saves).
+  let libraries = DEFAULT_LIBRARIES.slice();
+  if (Array.isArray(partial.libraries)) {
+    const seen = new Set<string>();
+    libraries = [];
+    for (const lib of partial.libraries) {
+      if (lib && typeof lib.id === "string" && lib.id && !seen.has(lib.id)) {
+        seen.add(lib.id);
+        libraries.push({
+          id: String(lib.id),
+          name: String(lib.name ?? lib.id),
+          baseUrl: String(lib.baseUrl ?? ""),
+          enabled: lib.enabled !== false,
+          builtin: !!lib.builtin,
+        });
+      }
+    }
+    // Re-add any built-ins that weren't in the saved data.
+    for (const def of DEFAULT_LIBRARIES) {
+      if (!seen.has(def.id)) libraries.unshift(def);
+    }
+  }
   return {
     enabled: { ...DEFAULT_STATE.enabled, ...(partial.enabled ?? {}) },
     dataVersion: partial.dataVersion ?? DEFAULT_STATE.dataVersion,
     allowPlayerMonsters:
       partial.allowPlayerMonsters ?? DEFAULT_STATE.allowPlayerMonsters,
+    libraries,
   };
 }
 
@@ -77,6 +128,14 @@ function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
   if (a.allowPlayerMonsters !== b.allowPlayerMonsters) return false;
   for (const k of Object.keys(a.enabled) as ModuleId[]) {
     if (a.enabled[k] !== b.enabled[k]) return false;
+  }
+  if ((a.libraries?.length ?? 0) !== (b.libraries?.length ?? 0)) return false;
+  for (let i = 0; i < (a.libraries?.length ?? 0); i++) {
+    const la = a.libraries[i];
+    const lb = b.libraries[i];
+    if (la.id !== lb.id || la.name !== lb.name || la.baseUrl !== lb.baseUrl || la.enabled !== lb.enabled) {
+      return false;
+    }
   }
   return true;
 }

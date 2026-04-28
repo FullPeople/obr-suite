@@ -52,14 +52,12 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
 .wrap.has-q .row .clear{display:inline-flex;align-items:center;justify-content:center}
 .row .clear:hover{background:rgba(255,255,255,0.1);color:#fff}
 
-/* === Tools row (filters) — only visible when expanded ===
-   Use opacity + transform transitions instead of display:none for smooth
-   fade-in/out. The CSS uses display:flex always but transitions opacity
-   and a small slide-in. pointer-events:none when invisible so the row
-   still passes clicks through when collapsed. */
+/* === Tools row (filters) — only visible when expanded.
+   display:none when collapsed so the popover takes only the input row's
+   physical height (40px); clicks below pass through to the canvas. */
 .tools{
   pointer-events:auto;
-  display:flex;
+  display:none;
   height:28px;flex-shrink:0;
   margin:0 4px 2px 4px;
   padding:0 6px;
@@ -68,19 +66,8 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   border:1px solid rgba(255,255,255,0.10);
   border-bottom:none;
   border-radius:6px 6px 0 0;
-  opacity:0;
-  transform:translateY(-6px);
-  pointer-events:none;
-  visibility:hidden;
-  transition:opacity .18s ease, transform .18s ease, visibility 0s linear .18s;
 }
-.wrap.has-q:not(.collapsed) .tools{
-  opacity:1;
-  transform:translateY(0);
-  pointer-events:auto;
-  visibility:visible;
-  transition:opacity .18s ease, transform .18s ease, visibility 0s linear 0s;
-}
+.wrap.has-q:not(.collapsed) .tools{display:flex}
 
 /* Unified segmented frame around all functional toggles — one outer
    border, vertical hairlines between buttons. The state colors paint
@@ -126,13 +113,13 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
 
 .tools .count{margin-left:auto;font-size:10.5px;color:#7aa;font-family:ui-monospace,Consolas,monospace}
 
-/* === Body: dropdown (left) + preview (right) — same opacity-based
-   transition pattern as .tools above. === */
+/* === Body: dropdown (left) + preview (right). display:none when
+   collapsed so it doesn't take up popover space (clicks pass through). */
 .wrap > .body{
   pointer-events:auto;
   flex:1;min-height:0;
   margin:0 4px 4px 4px;
-  display:flex;
+  display:none;
   background:rgba(15,20,40,0.96);
   border:1px solid rgba(255,255,255,0.12);
   border-top:none;
@@ -140,19 +127,8 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   box-shadow:0 6px 22px rgba(0,0,0,0.5);
   backdrop-filter:blur(6px);
   overflow:hidden;
-  opacity:0;
-  transform:translateY(-6px);
-  pointer-events:none;
-  visibility:hidden;
-  transition:opacity .22s ease, transform .22s ease, visibility 0s linear .22s;
 }
-.wrap.has-q:not(.collapsed) > .body{
-  opacity:1;
-  transform:translateY(0);
-  pointer-events:auto;
-  visibility:visible;
-  transition:opacity .22s ease, transform .22s ease, visibility 0s linear 0s;
-}
+.wrap.has-q:not(.collapsed) > .body{display:flex}
 
 .drop{
   width:280px;flex-shrink:0;
@@ -308,15 +284,11 @@ mark{
 </head>
 <body>
 <div class="wrap" id="wrap">
-  <!-- Input row is hidden — the cluster's inline search input drives
-       this popover via the BC_SEARCH_QUERY broadcast. The DOM still
-       holds the input so the existing JS (inputEl references) keeps
-       working without refactor; CSS just hides it from view. -->
-  <div class="row" id="row" style="display:none">
+  <div class="row" id="row">
     <span class="ico" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
     </span>
-    <input id="q" type="text" placeholder="搜索 5etools…" autocomplete="off" spellcheck="false">
+    <input id="q" type="text" placeholder="搜索 5etools…（怪物/法术/物品/职业/种族…）" autocomplete="off" spellcheck="false">
     <button class="clear" id="clear" type="button" aria-label="清空">✕</button>
   </div>
 

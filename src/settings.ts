@@ -7,6 +7,7 @@ import {
   ModuleId,
   DataVersion,
   Language,
+  LibraryConfig,
   getLocalLang,
   setLocalLang,
   onLangChange,
@@ -278,7 +279,8 @@ const DICE_DESC: BilingualHtml = {
 
 <p><b>音效</b>：用 Web Audio API 实时合成（无需下载素材）。 抛物线 / 缩放冲击 / 数字飞行 / 旋转 / 爆炸 / 同值钟铃 / 大成功大失败闪光 / 同步视野 / 切换回合"登"声。可在 <b>基础设置</b> 里关闭，本地保存（每个玩家独立）。</p>
 
-<p style="font-size:11px;color:#9aa0b3;margin-top:10px">骰子图标来源：<a href="https://www.flaticon.com/" target="_blank" rel="noopener">flaticon</a> · 作者 <a href="https://www.flaticon.com/authors/freepik" target="_blank" rel="noopener">Freepik</a></p>`,
+<p style="font-size:11px;color:#9aa0b3;margin-top:10px">骰子图标来源：<a href="https://www.flaticon.com/" target="_blank" rel="noopener">flaticon</a> · 作者 <a href="https://www.flaticon.com/authors/freepik" target="_blank" rel="noopener">Freepik</a></p>
+<p style="font-size:11px;color:#9aa0b3;margin-top:4px">骰子音效：Sound Effect by <a href="https://pixabay.com/users/freesound_community-46691455/" target="_blank" rel="noopener">freesound_community</a> and ksjsbwuil from <a href="https://pixabay.com/" target="_blank" rel="noopener">Pixabay</a></p>`,
   en: `<p>Full dice system: expressions / multi-target / history / replay / SFX. Click the OBR action button at the top-left (d20 icon) to open the main panel.</p>
 
 <p><b>Expressions</b> (type into the panel or save as combos):</p>
@@ -327,11 +329,11 @@ const DICE_DESC: BilingualHtml = {
 
 <p><b>Sound effects</b>: synthesized live via Web Audio API (no asset downloads). Parabola / scale punch / number fly / spin / burst / same chime / crit-fail flashes / sync-viewport / next-turn 登. Toggle in <b>Basics</b> tab; saved locally (per-player).</p>
 
-<p style="font-size:11px;color:#9aa0b3;margin-top:10px">Dice icon: <a href="https://www.flaticon.com/" target="_blank" rel="noopener">flaticon</a> · by <a href="https://www.flaticon.com/authors/freepik" target="_blank" rel="noopener">Freepik</a></p>`,
+<p style="font-size:11px;color:#9aa0b3;margin-top:10px">Dice icon: <a href="https://www.flaticon.com/" target="_blank" rel="noopener">flaticon</a> · by <a href="https://www.flaticon.com/authors/freepik" target="_blank" rel="noopener">Freepik</a></p>
+<p style="font-size:11px;color:#9aa0b3;margin-top:4px">Dice SFX: Sound Effect by <a href="https://pixabay.com/users/freesound_community-46691455/" target="_blank" rel="noopener">freesound_community</a> and ksjsbwuil from <a href="https://pixabay.com/" target="_blank" rel="noopener">Pixabay</a></p>`,
 };
 const PORTALS_DESC: BilingualHtml = {
-  zh: `<p><b style="color:#f5a623">⚠ 仍在开发中 · 默认关闭</b> —— 已知问题：跨场景传送、权限模型、移动设备触摸支持都未完全实现。需手动开启来体验当前已实现的功能。</p>
-<p>左侧栏的「传送门」工具用于创建场景内的传送门区域。</p>
+  zh: `<p>左侧栏的「传送门」工具用于创建场景内的传送门区域。</p>
 <ul>
   <li>选中工具后，在地图上<b>按住拖拽画圆</b> —— 松手即创建一个传送门，圆心放置 SVG 标记，半径为触发范围</li>
   <li>松手后弹出命名面板：可设置「名字」（一楼/二楼/地下室…）和「标签」（001/002…）；下方预设可点击套用，可自由增删</li>
@@ -339,8 +341,7 @@ const PORTALS_DESC: BilingualHtml = {
   <li>DM 单击已存在的传送门 → 弹出命名面板可快速修改 / 删除</li>
   <li>把传送门设为<b>不可见</b>（OBR 自带的 visible=false） → 玩家看不见，无法从这里进入；但<b>仍可作为目的地</b>。可用于做单向传送</li>
 </ul>`,
-  en: `<p><b style="color:#f5a623">⚠ Under development · Default OFF</b> — known gaps: cross-scene portals, permission model, mobile touch support. Enable manually to try the currently-implemented bits.</p>
-<p>The "Portal" tool on the left rail creates teleport zones in the scene.</p>
+  en: `<p>The "Portal" tool on the left rail creates teleport zones in the scene.</p>
 <ul>
   <li>Activate the tool, then <b>click-drag to draw a circle</b> on the map — release to create a portal, with an SVG marker at the center and the drag distance as trigger radius</li>
   <li>An edit panel opens on release: set "Name" (1F / 2F / Basement…) and "Tag" (001 / 002…). Preset chips below are click-to-fill and freely editable</li>
@@ -350,8 +351,7 @@ const PORTALS_DESC: BilingualHtml = {
 </ul>`,
 };
 const SEARCH_DESC: BilingualHtml = {
-  zh: `<p><b style="color:#f5a623">⚠ 仍在修复中 · 默认关闭</b> —— 弹窗布局 / 键盘导航 / 集群面板交互还在打磨。需手动开启。</p>
-<p>集群面板内嵌搜索框 + 5etools 全数据联想搜索（弹出在集群下方）。</p>
+  zh: `<p>顶部右上的搜索框 + 5etools 全数据联想搜索。</p>
 <ul>
   <li>点输入框直接打字，下拉显示前 50 条匹配</li>
   <li>覆盖怪物 / 法术 / 物品 / 职业 / 子职业 / 种族 / 背景 / 专长 / 灵能 / 状态 / 神祇 / 整本书 / 表格 / ... 全部 5etools 分类</li>
@@ -359,8 +359,7 @@ const SEARCH_DESC: BilingualHtml = {
   <li>受当前数据版本过滤，玩家是否能查询怪物在下方设置</li>
   <li>角色卡 / 怪物面板的特性 / 法术名都可以点击 → 自动填入此搜索框</li>
 </ul>`,
-  en: `<p><b style="color:#f5a623">⚠ Under bug-fix · Default OFF</b> — popover layout, keyboard nav, and cluster integration still being polished. Enable manually.</p>
-<p>Inline search input inside the cluster popover + dropdown popover for 5etools data (renders below the cluster).</p>
+  en: `<p>Top-right search input + 5etools full-data autocomplete dropdown.</p>
 <ul>
   <li>Click the input and type — top 50 matches in the dropdown</li>
   <li>Covers all 5etools categories: monsters, spells, items, classes/subclasses, races, backgrounds, feats, psionics, conditions, deities, books, tables, ...</li>
@@ -369,6 +368,286 @@ const SEARCH_DESC: BilingualHtml = {
   <li>Character-card / monster-panel feature names + spells are click-to-search → auto-fill this input</li>
 </ul>`,
 };
+
+// =====================================================================
+// Libraries tab
+// =====================================================================
+//
+// Multi-library support — the user can register additional 5etools-like
+// data hosts beyond the default kiwee.top mirror. Custom libraries MUST
+// expose the same JSON shape (search/index.json + data/*.json with
+// matching keys). The tutorial below + AI prompt template walks the user
+// through writing a homebrew library and feeding it to an LLM.
+
+const AI_PROMPT_TEMPLATE = `你是一个 D&D 5E 数据格式工程师。请把我下面提供的怪物 / 法术 / 物品资料，转换为符合 5etools 数据规范的 JSON。
+
+输出要求：
+1. 按以下顶层结构产出 JSON 文件：
+   - 怪物：{ "monster": [ {...}, {...} ] }
+   - 法术：{ "spell":   [ {...}, {...} ] }
+   - 物品：{ "item":    [ {...}, {...} ] }
+2. 每个条目至少包含字段：
+   - "name": 中文名称
+   - "ENG_name": 英文名称（无英文则用拼音）
+   - "source": 来源缩写（自定义即可，例如 "HOMEBREW"）
+   - "page": 页码（无则填 0）
+3. 怪物条目额外需要：size, type, alignment, ac (数组), hp ({average, formula}), speed (对象 / 数字), str/dex/con/int/wis/cha 六个能力值, cr, trait/action/legendary 等数组（可选）。description 等行文统一放到 entries: ["...","..."]，可使用 5etools 行内标签如 {@dice 1d6}, {@damage 2d6+3}, {@hit 5}, {@dc 14}。
+4. 法术条目额外需要：level, school (A/C/D/E/I/N/T/V), time, range, components ({v, s, m}), duration, classes, entries。
+5. 物品条目额外需要：type, weight, value, rarity, entries；武器再加 dmg1, dmgType, property。
+6. 每条数据后追加 entry index 项，格式：
+   { "id": <自增整数>, "c": <类别号>, "n": "ENG_name", "cn": "name", "s": "<source>", "u": "<英文 url-slug>" }
+   类别号：怪物=1，法术=2，物品=4 / 56 / 57，背景=3，专长=7 等。
+
+请严格按上述格式输出 JSON 代码块（不要解释、不要其他文本）。下面是我的资料：
+
+`;
+
+function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): string {
+  const builtinLock = lib.builtin
+    ? `<span class="lib-tag">${lang === "zh" ? "内置" : "BUILT-IN"}</span>`
+    : "";
+  const disable = isGM ? "" : "disabled";
+  const editable = isGM && !lib.builtin;
+  return `
+    <div class="lib-row" data-lib-id="${escapeAttr(lib.id)}">
+      <div class="lib-row-head">
+        <input class="lib-name" data-field="name" type="text" value="${escapeAttr(lib.name)}" ${editable ? "" : "readonly"} ${disable}>
+        ${builtinLock}
+        <button class="tog ${lib.enabled ? "on" : ""}" data-field="enabled" type="button" ${disable}
+          aria-pressed="${lib.enabled}" title="${lang === "zh" ? "启用 / 禁用此库" : "Enable / disable"}"></button>
+        ${
+          !lib.builtin
+            ? `<button class="lib-del-btn" type="button" ${disable} title="${lang === "zh" ? "删除此库" : "Delete"}">✕</button>`
+            : ""
+        }
+      </div>
+      <div class="lib-row-url">
+        <span class="lib-row-label">URL:</span>
+        <input class="lib-url" data-field="baseUrl" type="text" value="${escapeAttr(lib.baseUrl)}" ${editable ? "" : "readonly"} ${disable}
+          placeholder="https://example.com">
+      </div>
+    </div>
+  `;
+}
+
+function escapeAttr(s: string): string {
+  return s.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+}
+
+function renderLibrariesBody(lang: Language): string {
+  const s = getState();
+  const libs = s.libraries ?? [];
+  const head = lang === "zh"
+    ? `
+      <div class="lib-warn">
+        ⚠ <b>数据格式按 5etools 规范适配。</b>当前内置库为 kiwee.top（5etools 中文镜像）。你可以添加自己的库（自托管 / 公开 URL）。库必须提供与 5etools 相同的 JSON 结构（<code>search/index.json</code> + <code>data/&lt;file&gt;.json</code>）。所有启用的库会在搜索/图鉴里合并显示。
+      </div>
+    `
+    : `
+      <div class="lib-warn">
+        ⚠ <b>Library data must follow the 5etools JSON schema.</b> The default built-in is kiwee.top (Chinese mirror). You can add custom libraries (self-hosted or public URLs) that expose the same shape (<code>search/index.json</code> + <code>data/&lt;file&gt;.json</code>). All enabled libraries are merged in search / bestiary results.
+      </div>
+    `;
+  const list = libs.map((l) => libraryRowHtml(l, lang, isGM)).join("");
+  const addBtn = isGM
+    ? `<button class="lib-add-btn" type="button">${lang === "zh" ? "+ 添加库" : "+ Add library"}</button>`
+    : `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>`;
+
+  const tutorial = lang === "zh" ? `
+    <details class="lib-tut">
+      <summary>${ICONS.book ?? ""} 如何编写自己的库（含 AI 提示词）</summary>
+      <div class="lib-tut-body">
+        <h4>1. 数据托管</h4>
+        <p>把数据 JSON 放到任意 HTTPS 静态站（GitHub Pages / 服务器 / 对象存储等），保证支持 CORS。基础目录结构：</p>
+        <pre><code>your-host.com/
+  search/
+    index.json        ← 总索引：每个条目的 ENG_name + source + 类别号
+  data/
+    bestiary/
+      bestiary-HOMEBREW.json   ← 怪物（按来源分文件）
+    spells/
+      spells-HOMEBREW.json     ← 法术
+    items.json
+    feats.json
+    ...</code></pre>
+
+        <h4>2. 索引文件 (search/index.json)</h4>
+        <pre><code>{
+  "x": [
+    { "id": 1, "c": 1, "n": "Frost Wisp", "cn": "霜灵精怪", "s": "HOMEBREW", "u": "frost-wisp" },
+    { "id": 2, "c": 2, "n": "Ember Seed", "cn": "余烬种子", "s": "HOMEBREW", "u": "ember-seed" }
+  ],
+  "m": { "s": { "HOMEBREW": 99 } }
+}</code></pre>
+        <p>类别号：怪物=1，法术=2，物品=4，背景=3，专长=7，能力=8，种族=10。</p>
+
+        <h4>3. 数据文件 (例：bestiary-HOMEBREW.json)</h4>
+        <pre><code>{
+  "monster": [
+    {
+      "name": "霜灵精怪",
+      "ENG_name": "Frost Wisp",
+      "source": "HOMEBREW",
+      "page": 1,
+      "size": "T",
+      "type": "elemental",
+      "alignment": ["N"],
+      "ac": [{"ac": 14, "from": ["natural armor"]}],
+      "hp": {"average": 22, "formula": "5d4 + 10"},
+      "speed": {"fly": 30, "hover": true},
+      "str": 6, "dex": 16, "con": 14,
+      "int": 8, "wis": 12, "cha": 10,
+      "cr": "1/2",
+      "trait": [
+        { "name": "Cold Aura", "entries": [
+          "Any creature within 5 ft. takes {@damage 1d4} cold damage at the start of its turn."
+        ]}
+      ],
+      "action": [
+        { "name": "Frost Touch", "entries": [
+          "{@atk ms} {@hit 5}, reach 5 ft., one target. {@h}{@damage 2d6+3} cold damage."
+        ]}
+      ]
+    }
+  ]
+}</code></pre>
+
+        <h4>4. AI 提示词（直接复制给任意大模型）</h4>
+        <p>把下面这段文字 + 你想录入的资料粘贴给 ChatGPT / Claude / 通义千问 / DeepSeek 等大模型，模型会输出符合本插件解析格式的 JSON。粘贴在第二行的 <code>"我的资料"</code> 后面就行。</p>
+        <textarea class="lib-prompt" readonly>${escapeAttr(AI_PROMPT_TEMPLATE)}</textarea>
+        <button class="lib-prompt-copy" type="button">复制提示词</button>
+
+        <h4>5. 验证 + 添加</h4>
+        <ol>
+          <li>把 JSON 文件放到 HTTPS 站点上，确保浏览器能直接打开 <code>https://your-host.com/search/index.json</code>。</li>
+          <li>在上面的 <b>+ 添加库</b> 里填入名称（任意） + 基础 URL（不带末尾斜杠）。</li>
+          <li>勾选启用，然后到搜索框 / 怪物图鉴搜一下，新条目会出现在结果里。</li>
+        </ol>
+        <p style="color:#9ab;font-size:11px;margin-top:8px">遇到加载失败时打开浏览器 DevTools 看 Network 面板，多半是 CORS / 404 / JSON 格式错误。</p>
+      </div>
+    </details>
+  ` : `
+    <details class="lib-tut">
+      <summary>How to write your own library (with AI prompt)</summary>
+      <div class="lib-tut-body">
+        <h4>1. Hosting</h4>
+        <p>Put your JSON data on any HTTPS static host (GitHub Pages, S3, your own server) with CORS enabled. Base layout:</p>
+        <pre><code>your-host.com/
+  search/
+    index.json
+  data/
+    bestiary/
+      bestiary-HOMEBREW.json
+    spells/
+      spells-HOMEBREW.json
+    items.json
+    ...</code></pre>
+
+        <h4>2. Index format</h4>
+        <pre><code>{
+  "x": [
+    { "id": 1, "c": 1, "n": "Frost Wisp", "cn": "霜灵精怪", "s": "HOMEBREW", "u": "frost-wisp" }
+  ],
+  "m": { "s": { "HOMEBREW": 99 } }
+}</code></pre>
+        <p>Categories: 1=monster, 2=spell, 4=item, 3=background, 7=feat, 8=optional feature, 10=race.</p>
+
+        <h4>3. AI prompt (copy and paste)</h4>
+        <textarea class="lib-prompt" readonly>${escapeAttr(AI_PROMPT_TEMPLATE)}</textarea>
+        <button class="lib-prompt-copy" type="button">Copy prompt</button>
+
+        <h4>4. Verify + add</h4>
+        <ol>
+          <li>Confirm <code>https://your-host.com/search/index.json</code> opens in a browser.</li>
+          <li>Use <b>+ Add library</b> above, enter a display name + base URL (no trailing slash).</li>
+          <li>Toggle ON, then search to see merged results.</li>
+        </ol>
+      </div>
+    </details>
+  `;
+
+  return `
+    ${head}
+    <div class="lib-list" id="libList">${list}</div>
+    <div class="lib-actions">${addBtn}</div>
+    ${tutorial}
+  `;
+}
+
+function wireLibrariesBody(root: HTMLElement): void {
+  const list = root.querySelector<HTMLDivElement>("#libList");
+  if (!list) return;
+
+  // Per-row edits
+  list.querySelectorAll<HTMLDivElement>(".lib-row").forEach((row) => {
+    const id = row.dataset.libId ?? "";
+    const nameInp = row.querySelector<HTMLInputElement>('input[data-field="name"]');
+    const urlInp = row.querySelector<HTMLInputElement>('input[data-field="baseUrl"]');
+    const enableBtn = row.querySelector<HTMLButtonElement>('button[data-field="enabled"]');
+    const delBtn = row.querySelector<HTMLButtonElement>(".lib-del-btn");
+
+    const commit = async (patch: Partial<LibraryConfig>) => {
+      if (!isGM) return;
+      const next = (getState().libraries ?? []).map((l) => (l.id === id ? { ...l, ...patch } : l));
+      await setState({ libraries: next });
+    };
+    nameInp?.addEventListener("change", () => commit({ name: nameInp.value.trim() || id }));
+    urlInp?.addEventListener("change", () =>
+      commit({ baseUrl: urlInp.value.trim().replace(/\/+$/, "") })
+    );
+    enableBtn?.addEventListener("click", async () => {
+      if (!isGM) return;
+      const cur = getState().libraries.find((l) => l.id === id);
+      await commit({ enabled: !cur?.enabled });
+    });
+    delBtn?.addEventListener("click", async () => {
+      if (!isGM) return;
+      if (!confirm("删除此库？这不会影响数据本身，只会从设置里移除。")) return;
+      const next = (getState().libraries ?? []).filter((l) => l.id !== id);
+      await setState({ libraries: next });
+    });
+  });
+
+  // Add new library
+  root.querySelector<HTMLButtonElement>(".lib-add-btn")?.addEventListener("click", async () => {
+    if (!isGM) return;
+    const name = window.prompt("新库名称（任意）：", "我的自定义库");
+    if (!name) return;
+    const baseUrl = window.prompt("基础 URL（不带末尾 /）：", "https://example.com");
+    if (!baseUrl) return;
+    const id = `custom-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
+    const cur = getState().libraries ?? [];
+    const next: LibraryConfig[] = [
+      ...cur,
+      {
+        id,
+        name: name.trim(),
+        baseUrl: baseUrl.trim().replace(/\/+$/, ""),
+        enabled: true,
+        builtin: false,
+      },
+    ];
+    await setState({ libraries: next });
+  });
+
+  // Copy prompt
+  root.querySelector<HTMLButtonElement>(".lib-prompt-copy")?.addEventListener("click", () => {
+    const ta = root.querySelector<HTMLTextAreaElement>(".lib-prompt");
+    if (!ta) return;
+    ta.select();
+    try {
+      navigator.clipboard.writeText(ta.value).catch(() => document.execCommand("copy"));
+    } catch {
+      document.execCommand("copy");
+    }
+    const btn = root.querySelector<HTMLButtonElement>(".lib-prompt-copy");
+    if (btn) {
+      const old = btn.textContent;
+      btn.textContent = "已复制 ✓";
+      setTimeout(() => { btn.textContent = old; }, 1200);
+    }
+  });
+}
 
 const TABS: TabDef[] = [
   {
@@ -452,6 +731,13 @@ const TABS: TabDef[] = [
         });
       }
     },
+  },
+  {
+    id: "libraries",
+    zh: `${ICONS.library} 库设置`,
+    en: `${ICONS.library} Libraries`,
+    dynamicBody: (lang) => renderLibrariesBody(lang),
+    afterRender: (root) => wireLibrariesBody(root),
   },
   { id: "timeStop", zh: `${ICONS.clockPause} 时停模式`, en: `${ICONS.clockPause} Time Stop`, moduleId: "timeStop", body: TIMESTOP_DESC },
   { id: "focus", zh: `${ICONS.crosshair} 同步视口`, en: `${ICONS.crosshair} Sync Viewport`, moduleId: "focus", body: FOCUS_DESC },

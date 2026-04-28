@@ -85,9 +85,7 @@ try { payload = JSON.parse(params.get("p") || "{}"); } catch {}
 const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-document.getElementById("sub").innerHTML =
-  `进入 <b>${escHtml(payload.entryName)}</b> · 标签 <b>${escHtml(payload.entryTag)}</b>` +
-  `（${payload.tokenIds.length} 个单位）<br>选择目的地：`;
+document.getElementById("sub").innerHTML = `选择目的地（${payload.tokenIds.length} 个单位）`;
 
 const listEl = document.getElementById("list");
 
@@ -104,6 +102,19 @@ if (!payload.candidates || payload.candidates.length === 0) {
   ).join("");
 }
 
+// Send the close signal eagerly + idempotently. The background
+// module's `destModalOpen` flag must always become `false` so the
+// next portal entry can re-open the modal — otherwise canceling
+// once locks the feature for the rest of the session.
+let closedFired = false;
+async function notifyClosed() {
+  if (closedFired) return;
+  closedFired = true;
+  try {
+    await OBR.broadcast.sendMessage(BROADCAST_DEST_CLOSED, {}, { destination: "LOCAL" });
+  } catch {}
+}
+
 OBR.onReady(async () => {
   document.querySelectorAll(".opt").forEach((el) => {
     el.addEventListener("click", async () => {
@@ -115,18 +126,22 @@ OBR.onReady(async () => {
           { destination: "LOCAL" }
         );
       } catch (e) { console.error("[portals] teleport broadcast", e); }
+      // Teleport listener already resets destModalOpen; we still send
+      // the close signal as a belt-and-suspenders.
+      await notifyClosed();
       try { await OBR.modal.close(MODAL_ID); } catch {}
     });
   });
   document.getElementById("btn-cancel").addEventListener("click", async () => {
+    await notifyClosed();
     try { await OBR.modal.close(MODAL_ID); } catch {}
   });
 
-  // Notify background module if user closes the modal via Esc / OBR's own X.
-  window.addEventListener("beforeunload", () => {
-    try {
-      OBR.broadcast.sendMessage(BROADCAST_DEST_CLOSED, {}, { destination: "LOCAL" });
-    } catch {}
+  // Catch-alls — Esc / OBR's own X / page navigation.
+  window.addEventListener("beforeunload", () => { void notifyClosed(); });
+  window.addEventListener("pagehide", () => { void notifyClosed(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") void notifyClosed();
   });
 });
 </script>

@@ -27,14 +27,13 @@ const CLUSTER_W_COLLAPSED = 64;
 const CLUSTER_W_EXPANDED_ZH = 760;
 const CLUSTER_W_EXPANDED_EN = 920;
 const CLUSTER_H = 64;
-// Desktop: top-right, offset enough to clear OBR's right-edge toolbar
-// (player avatars + scene panel). Bumped to 65 so the cluster's right
-// edge sits 5px further left than the bestiary panel reference (60),
-// per user request.
-const RIGHT_OFFSET = 65;
-const TOP_OFFSET = 14;
-// Mobile: keep bottom-right corner anchor — the top-right placement
-// covers viewport space that's scarce on phone-sized screens.
+// Desktop AND mobile: bottom-right corner. BOTTOM_OFFSET lifts the
+// cluster above OBR's bottom toolbar (turn / hotkey strip, ~60-70px
+// tall) so neither layer occludes the other. Moved off the top-right
+// because the global-search popover lives there and the two were
+// fighting for the same strip.
+const RIGHT_OFFSET = 12;
+const BOTTOM_OFFSET = 80;
 const MOBILE_BOTTOM_OFFSET = 80;
 const MOBILE_RIGHT_OFFSET = 12;
 
@@ -59,20 +58,13 @@ async function openCluster() {
     const lang = getLocalLang();
     const expandedWidth = lang === "zh" ? CLUSTER_W_EXPANDED_ZH : CLUSTER_W_EXPANDED_EN;
     const initialWidth = isExpanded ? expandedWidth : CLUSTER_W_COLLAPSED;
-    const anchor = IS_MOBILE
-      ? {
-          anchorPosition: {
-            left: vw - MOBILE_RIGHT_OFFSET,
-            top: vh - MOBILE_BOTTOM_OFFSET,
-          },
-          anchorOrigin: { horizontal: "RIGHT", vertical: "BOTTOM" } as const,
-          transformOrigin: { horizontal: "RIGHT", vertical: "BOTTOM" } as const,
-        }
-      : {
-          anchorPosition: { left: vw - RIGHT_OFFSET, top: TOP_OFFSET },
-          anchorOrigin: { horizontal: "RIGHT", vertical: "TOP" } as const,
-          transformOrigin: { horizontal: "RIGHT", vertical: "TOP" } as const,
-        };
+    const right = IS_MOBILE ? MOBILE_RIGHT_OFFSET : RIGHT_OFFSET;
+    const bottom = IS_MOBILE ? MOBILE_BOTTOM_OFFSET : BOTTOM_OFFSET;
+    const anchor = {
+      anchorPosition: { left: vw - right, top: vh - bottom },
+      anchorOrigin: { horizontal: "RIGHT", vertical: "BOTTOM" } as const,
+      transformOrigin: { horizontal: "RIGHT", vertical: "BOTTOM" } as const,
+    };
     await OBR.popover.open({
       id: CLUSTER_POPOVER_ID,
       url: `${CLUSTER_URL}?expanded=${isExpanded ? "1" : "0"}`,

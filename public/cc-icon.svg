@@ -1,4 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <text x="32" y="28" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="22" fill="white">角色</text>
-  <text x="32" y="52" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="22" fill="white">卡</text>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Matches ICONS.idCard in src/icons.ts so the OBR context menu /
+       fullscreen-toggle glyph is consistent with the settings tab. -->
+  <rect x="3" y="5" width="18" height="14" rx="2"/>
+  <circle cx="9" cy="11" r="2"/>
+  <path d="M5.5 17a4 4 0 0 1 7 0"/>
+  <line x1="15" y1="9" x2="19" y2="9"/>
+  <line x1="15" y1="13" x2="18" y2="13"/>
 </svg>

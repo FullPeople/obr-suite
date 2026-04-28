@@ -17,6 +17,7 @@ import {
   setHoverRing,
   clearAllRings,
 } from "./utils/visualEffects";
+import { subscribeToSfx } from "../dice/sfx-broadcast";
 import "./styles/initiative.css";
 
 // Suite-namespaced popover ID so the standalone plugin (same logical UI)
@@ -285,6 +286,7 @@ function PluginGate() {
 
   useEffect(() => {
     OBR.onReady(() => {
+      subscribeToSfx();
       setReady(true);
       OBR.scene.isReady().then(setSceneReady);
       OBR.scene.onReadyChange(setSceneReady);

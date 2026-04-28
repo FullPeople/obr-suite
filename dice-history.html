@@ -53,6 +53,19 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 .head-empty{
   font-size:10.5px;color:var(--text-dim);font-weight:600;
 }
+.head-x{
+  margin-left:auto;
+  background:transparent;border:none;
+  color:var(--text-dim);
+  cursor:pointer;
+  font-size:14px;line-height:1;
+  width:20px;height:20px;
+  display:inline-flex;align-items:center;justify-content:center;
+  border-radius:4px;
+  font-family:inherit;
+  transition:background .12s,color .12s;
+}
+.head-x:hover{background:rgba(255,255,255,0.10);color:var(--text)}
 
 .rows{
   flex:1;overflow-y:auto;
@@ -369,6 +382,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
   <div class="head">
     <span class="head-title">投骰记录</span>
     <span class="head-empty" id="headHint"></span>
+    <button class="head-x" id="btnDismiss" type="button" title="隐藏到下次投骰">×</button>
   </div>
   <div class="rows" id="rows">
     <div class="empty">还没人投骰</div>

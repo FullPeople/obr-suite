@@ -1,5 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { DiceType, DieResult, sidesOf } from "./types";
+import { subscribeToSfx } from "./sfx-broadcast";
 
 // Dice panel — three tabs (投掷 / 组合 / 历史). Loaded by OBR's action
 // drawer / popover. Owns the expression UI + history view, broadcasts
@@ -158,9 +159,26 @@ interface Wrapper {
   // same/burst: undefined.
   param?: number;
 }
-interface ParsedExpr {
+// One independently-wrapped sub-expression. `adv(1d6)+adv(1d4)` parses
+// to TWO segments — {plain:[d6], wrappers:[adv]} and {plain:[d4],
+// wrappers:[adv]} — so each adv runs on its own dice instead of both
+// d6 and d4 getting twin-rolled together.
+interface ParsedSegment {
   plain: PlainExpr;
   wrappers: Wrapper[]; // innermost-first
+}
+interface ParsedExpr {
+  segments: ParsedSegment[];
+  // Flat dice + modifiers OUTSIDE every wrapper — e.g. the `+1d4` in
+  // `adv(1d20)+1d4` lands here so it rolls ONCE and is added to the
+  // adv-winner. Empty when the expression is fully wrapped.
+  outerPlain: PlainExpr;
+  // Backward-compat shims so existing code that reads `parsed.plain` /
+  // `parsed.wrappers` keeps working: filled from the FIRST segment if
+  // there's exactly one, else empty/empty. Refactor will eventually
+  // drop these.
+  plain: PlainExpr;
+  wrappers: Wrapper[];
 }
 
 const TERM_RE = /([+\-]?)(?:(\d*)d(\d+)|(\d+))/gi;
@@ -219,16 +237,125 @@ function topLevelFirstComma(s: string): number {
   return -1;
 }
 
-// Try to peel ONE wrapper out of `s`. The wrapper need not be at the
-// start — anything around it (`<prefix>FUNC(...)<suffix>`) is treated
-// as additive plain terms that get absorbed into the new combined
-// inner. So `adv(1d20)+6` becomes `adv(1d20+6)` after one peel; a
-// follow-up peel finds no more wrappers and the plain parser picks up
-// `1d20+6` as the final NdM-and-modifier expression.
-//
-// This is the fix for "adv(1d20)+6 should equal adv(1d20+6)" and
-// generalises to any wrapper / surrounding additive terms.
-function peelOne(s: string): { wrapper: Wrapper; combined: string } | null {
+// Split `s` into top-level additive terms, preserving each term's sign.
+// E.g. `adv(1d6)+adv(1d4)-2` → [{sign:+1, body:"adv(1d6)"},
+// {sign:+1, body:"adv(1d4)"}, {sign:-1, body:"2"}]. Wrapper-internal
+// `+` / `-` (inside parens) are ignored — depth-aware.
+function splitTopLevel(s: string): Array<{ sign: 1 | -1; body: string }> {
+  const out: Array<{ sign: 1 | -1; body: string }> = [];
+  if (!s) return out;
+  let depth = 0;
+  let start = 0;
+  let sign: 1 | -1 = 1;
+  // A leading sign on the whole string ("-1d4") sets the first term's sign.
+  if (s[0] === "+" || s[0] === "-") {
+    sign = s[0] === "-" ? -1 : 1;
+    start = 1;
+  }
+  for (let i = start; i <= s.length; i++) {
+    const c = i < s.length ? s[i] : "";
+    if (c === "(") depth++;
+    else if (c === ")") depth = Math.max(0, depth - 1);
+    if (depth === 0 && (i === s.length || c === "+" || c === "-")) {
+      const body = s.slice(start, i).trim();
+      if (body) out.push({ sign, body });
+      sign = c === "-" ? -1 : 1;
+      start = i + 1;
+    }
+  }
+  return out;
+}
+
+// Try to read a wrapper call at the START of `s` (i.e. `s` is exactly
+// `FUNC(...)` with maybe an outer modifier appended). Returns the
+// wrapper, its inner string, and whatever trailed after the closing
+// paren. Returns null if `s` doesn't start with a wrapper call OR the
+// parens are unbalanced.
+function readWrapperHead(s: string): {
+  wrapper: Wrapper;
+  inner: string;
+  tail: string;
+} | null {
+  const m = /^(adv|dis|max|min|reset|same|burst|repeat)\(/i.exec(s);
+  if (!m) return null;
+  const fnName = m[1].toLowerCase() as WrapperKind;
+  const innerStart = m[0].length;
+  let depth = 1;
+  let innerEnd = -1;
+  for (let i = innerStart; i < s.length; i++) {
+    if (s[i] === "(") depth++;
+    else if (s[i] === ")") {
+      depth--;
+      if (depth === 0) { innerEnd = i; break; }
+    }
+  }
+  if (innerEnd < 0) return null;
+  const innerRaw = s.slice(innerStart, innerEnd);
+  const tail = s.slice(innerEnd + 1);
+  let wrapper: Wrapper;
+  let inner = innerRaw;
+  if (fnName === "adv" || fnName === "dis") {
+    let extraSets = 1;
+    const lastComma = topLevelLastComma(innerRaw);
+    if (lastComma >= 0) {
+      const t = innerRaw.slice(lastComma + 1);
+      if (/^\d+$/.test(t)) {
+        const n = parseInt(t, 10);
+        if (n > 0) {
+          inner = innerRaw.slice(0, lastComma);
+          extraSets = n;
+        }
+      }
+    }
+    wrapper = { kind: fnName, param: extraSets };
+  } else if (fnName === "max" || fnName === "min" || fnName === "reset") {
+    const lastComma = topLevelLastComma(innerRaw);
+    if (lastComma < 0) return null;
+    const t = innerRaw.slice(lastComma + 1);
+    if (!/^-?\d+$/.test(t)) return null;
+    wrapper = { kind: fnName, param: parseInt(t, 10) };
+    inner = innerRaw.slice(0, lastComma);
+  } else if (fnName === "repeat") {
+    const firstComma = topLevelFirstComma(innerRaw);
+    if (firstComma <= 0) return null;
+    const head = innerRaw.slice(0, firstComma);
+    if (!/^\d+$/.test(head)) return null;
+    const n = Math.max(1, Math.min(20, parseInt(head, 10) || 1));
+    wrapper = { kind: "repeat", param: n };
+    inner = innerRaw.slice(firstComma + 1);
+  } else {
+    wrapper = { kind: fnName }; // same / burst
+  }
+  return { wrapper, inner, tail };
+}
+
+// Apply `sign` to a PlainExpr — flips dice counts and modifier sign.
+// Used when a wrapped term has a leading minus, like `-adv(1d4)`.
+function negatePlain(p: PlainExpr): PlainExpr {
+  return {
+    groups: p.groups.map((g) => ({ type: g.type, count: g.count })).filter((g) => {
+      g.count = -g.count;
+      return g.count !== 0;
+    }),
+    modifier: -p.modifier,
+  };
+}
+
+// Merge `src` PlainExpr into `dst` (in place). Same-type dice sum.
+function mergePlain(dst: PlainExpr, src: PlainExpr): void {
+  for (const g of src.groups) {
+    const ex = dst.groups.find((x) => x.type === g.type);
+    if (ex) ex.count += g.count;
+    else dst.groups.push({ type: g.type, count: g.count });
+  }
+  dst.modifier += src.modifier;
+  dst.groups = dst.groups.filter((g) => g.count !== 0);
+}
+
+// LEGACY peelOne — replaced by `readWrapperHead` + `parseExprInner`.
+// Kept temporarily so I don't break unrelated callers in this commit;
+// nothing reaches it at runtime.
+function peelOne(s: string, outerOut?: PlainExpr): { wrapper: Wrapper; combined: string } | null {
   // Find the first wrapper-call signature anywhere in the string.
   const fnRe = /(adv|dis|max|min|reset|same|burst|repeat)\(/i;
   const m = s.match(fnRe);
@@ -293,6 +420,38 @@ function peelOne(s: string): { wrapper: Wrapper; combined: string } | null {
     wrapper = { kind: fnName };
   }
 
+  // For adv/dis: extract dice from prefix/suffix into outerOut so they
+  // get rolled ONCE outside the advantage. Flat modifiers stay in the
+  // combined string (commutative with adv comparison). If prefix/suffix
+  // contain another wrapper call we leave them alone — the next peel
+  // iteration handles them; until then we don't risk corrupting nested
+  // wrapper syntax by stripping their internal dice.
+  if ((wrapper.kind === "adv" || wrapper.kind === "dis") && outerOut) {
+    const wrapperRe = /(adv|dis|max|min|reset|same|burst|repeat)\(/i;
+    const prefixHasWrapper = wrapperRe.test(prefix);
+    const suffixHasWrapper = wrapperRe.test(suffix);
+    let prefixOut = prefix;
+    let suffixOut = suffix;
+    const absorbInto = (frag: string): string => {
+      const p = parsePlain(frag);
+      for (const g of p.groups) {
+        const ex = outerOut.groups.find((x) => x.type === g.type);
+        if (ex) ex.count += g.count;
+        else outerOut.groups.push({ ...g });
+      }
+      // Drop the dice; reduce to a flat-modifier string so peel can
+      // continue working on the wrapper chain.
+      if (p.modifier > 0) return `+${p.modifier}`;
+      if (p.modifier < 0) return `${p.modifier}`;
+      return "";
+    };
+    if (!prefixHasWrapper) prefixOut = absorbInto(prefix);
+    if (!suffixHasWrapper) suffixOut = absorbInto(suffix);
+    const needsSep = prefixOut && !/[+\-]$/.test(prefixOut) && inner && !/^[+\-]/.test(inner);
+    const combined = prefixOut + (needsSep ? "+" : "") + inner + suffixOut;
+    return { wrapper, combined };
+  }
+
   // Combine prefix + inner + suffix as the NEW expression to keep
   // peeling. Prefix should already end with an operator (or be empty).
   // Suffix should already start with an operator. If a sign-less prefix
@@ -303,47 +462,106 @@ function peelOne(s: string): { wrapper: Wrapper; combined: string } | null {
   return { wrapper, combined };
 }
 
+// Top-down recursive parser. Splits at top-level `+` / `-`, and for
+// each term either:
+//   - reads a wrapper call FUNC(...) → recursively parses the inner,
+//     pushes this wrapper onto every inner segment's chain, and lifts
+//     any inner outer-plain into a NEW segment with this wrapper.
+//   - parses as a flat plain term → folded into outerPlain.
+//
+// Result: `segments[]` are independent wrapped dice chains, plus a
+// flat `outerPlain` for un-wrapped terms. Each segment rolls its dice
+// ONCE through its own wrapper chain, so `adv(1d6)+adv(1d4)` correctly
+// performs two independent advantage rolls.
 function parseExpr(raw: string): ParsedExpr {
   const s = normalizeExpr(raw);
-  if (!s) return { plain: { groups: [], modifier: 0 }, wrappers: [] };
+  return finalizeParse(parseExprInner(s));
+}
 
-  // Peel wrappers iteratively. Each peel pulls a function-call out of
-  // the string and absorbs its surrounding terms into the new inner.
-  // After all peels, what's left is a flat plain expression.
-  const wrappers: Wrapper[] = [];
-  let cur = s;
-  for (let safety = 0; safety < 24; safety++) {
-    const peeled = peelOne(cur);
-    if (!peeled) break;
-    // Innermost-first storage: the FIRST wrapper we peel (outermost in
-    // user input) becomes the LAST applied at roll time. The repeat
-    // wrapper, however, must always be applied OUTERMOST regardless of
-    // how the user nested it — so push it to the very end of the chain
-    // and any other wrapper goes BEFORE it.
-    if (peeled.wrapper.kind === "repeat") {
-      wrappers.push(peeled.wrapper);
+function parseExprInner(s: string): {
+  segments: ParsedSegment[];
+  outerPlain: PlainExpr;
+} {
+  const segments: ParsedSegment[] = [];
+  const outerPlain: PlainExpr = { groups: [], modifier: 0 };
+  if (!s) return { segments, outerPlain };
+
+  for (const term of splitTopLevel(s)) {
+    const head = readWrapperHead(term.body);
+    if (head) {
+      // Wrapped term. Recursively parse the inner, then push THIS
+      // wrapper onto every inner segment AND lift the inner outer-plain
+      // into its own segment under this wrapper.
+      const innerParsed = parseExprInner(head.inner);
+      // Inner outer-plain → fresh segment with [this wrapper] applied.
+      const innerOuter = innerParsed.outerPlain;
+      if (innerOuter.groups.length || innerOuter.modifier !== 0) {
+        const seg: ParsedSegment = {
+          plain: term.sign === -1 ? negatePlain(innerOuter) : innerOuter,
+          wrappers: [head.wrapper],
+        };
+        segments.push(seg);
+      }
+      // Each existing inner segment: push this wrapper at the END
+      // (outer-of-inner = applied later by rollExpr).
+      for (const innerSeg of innerParsed.segments) {
+        const seg: ParsedSegment = {
+          plain: term.sign === -1 ? negatePlain(innerSeg.plain) : innerSeg.plain,
+          wrappers: [...innerSeg.wrappers, head.wrapper],
+        };
+        segments.push(seg);
+      }
+      // Trailing modifier after the wrapper, e.g. `adv(1d20)+5` has
+      // tail "+5" — fold into outerPlain.
+      if (head.tail) {
+        const tailParsed = parsePlain(head.tail);
+        if (term.sign === -1) {
+          // Sign on the wrapped term ALSO flips its tail.
+          tailParsed.modifier = -tailParsed.modifier;
+          for (const g of tailParsed.groups) g.count = -g.count;
+        }
+        mergePlain(outerPlain, tailParsed);
+      }
     } else {
-      // Insert just before the first repeat (if any), else at end.
-      const repeatIdx = wrappers.findIndex((w) => w.kind === "repeat");
-      if (repeatIdx >= 0) wrappers.splice(repeatIdx, 0, peeled.wrapper);
-      else wrappers.push(peeled.wrapper);
+      // Flat plain term (NdM or number). Apply sign and fold into
+      // outerPlain.
+      const signed = term.sign === -1 ? `-${term.body}` : term.body;
+      const plain = parsePlain(signed);
+      mergePlain(outerPlain, plain);
     }
-    cur = peeled.combined;
   }
 
-  // wrappers is now ordered roughly outermost-first because we
-  // pushed each peel's wrapper to the end. But rollExpr expects
-  // INNERMOST-first. Reverse for everything except repeat (repeat
-  // already at the very end stays there as outermost).
-  const repeatTail: Wrapper[] = [];
-  while (wrappers.length && wrappers[wrappers.length - 1].kind === "repeat") {
-    repeatTail.unshift(wrappers.pop()!);
-  }
-  wrappers.reverse();
-  for (const r of repeatTail) wrappers.push(r);
+  return { segments, outerPlain };
+}
 
-  const plain = parsePlain(cur);
-  return { plain, wrappers };
+// Strip empty-zero entries + populate the backward-compat shims.
+function finalizeParse(p: {
+  segments: ParsedSegment[];
+  outerPlain: PlainExpr;
+}): ParsedExpr {
+  // Drop segments whose plain has no dice and no modifier — happens
+  // when an empty wrapper inner gets pushed.
+  const segments = p.segments.filter(
+    (seg) => seg.plain.groups.length > 0 || seg.plain.modifier !== 0,
+  );
+  const outerPlain = p.outerPlain;
+  // Backward-compat shim: legacy callers read `parsed.plain` and
+  // `parsed.wrappers`. If there's exactly ONE segment, surface it; if
+  // there's none, surface outerPlain so simple `1d20+5`-style
+  // expressions still look "wrapper-less" to old code paths.
+  let plain: PlainExpr;
+  let wrappers: Wrapper[];
+  if (segments.length === 1) {
+    plain = segments[0].plain;
+    wrappers = segments[0].wrappers;
+  } else if (segments.length === 0) {
+    plain = outerPlain;
+    wrappers = [];
+  } else {
+    plain = { groups: [], modifier: 0 };
+    wrappers = [];
+  }
+  return { segments, outerPlain, plain, wrappers };
 }
 
 function rollDieType(type: string): number {
@@ -368,13 +586,13 @@ function formatPlain(p: PlainExpr): string {
   return s || "—";
 }
 
-function formatExpr(p: ParsedExpr): string {
-  let body = formatPlain(p.plain);
-  for (const w of p.wrappers) {
+function formatSegment(seg: ParsedSegment): string {
+  let body = formatPlain(seg.plain);
+  for (const w of seg.wrappers) {
     switch (w.kind) {
       case "adv":
       case "dis":
-        body = (w.param && w.param > 1)
+        body = w.param && w.param > 1
           ? `${w.kind}(${body},${w.param})`
           : `${w.kind}(${body})`;
         break;
@@ -392,7 +610,32 @@ function formatExpr(p: ParsedExpr): string {
         break;
     }
   }
-  return body || "—";
+  return body;
+}
+
+// Stitch all segments + outerPlain into a readable string. Order:
+// segments first (preserving the order they appeared in the input)
+// then any outer plain. Each piece is joined with ` + ` / ` - ` based
+// on the leading sign of its formatted body.
+function formatExpr(p: ParsedExpr): string {
+  const pieces: string[] = [];
+  for (const seg of p.segments) {
+    const s = formatSegment(seg);
+    if (s && s !== "—") pieces.push(s);
+  }
+  const outer = p.outerPlain ? formatPlain(p.outerPlain) : "";
+  if (outer && outer !== "—") pieces.push(outer);
+  if (pieces.length === 0) return "—";
+  // Join with ` + ` — formatPlain already inserts leading "-" for
+  // negative modifiers, so we just splice with " + " and the user sees
+  // "adv(1d20) + -1" → not pretty. Fix by detecting leading "-".
+  let out = pieces[0];
+  for (let i = 1; i < pieces.length; i++) {
+    const next = pieces[i];
+    if (next.startsWith("-")) out += ` ${next}`;
+    else out += ` + ${next}`;
+  }
+  return out;
 }
 
 // Apply max/min/reset to a single die value. Stamps originalValue if
@@ -584,17 +827,59 @@ function forceClear() {
 
 function adjustExprForType(type: DiceType, delta: number) {
   const parsed = parseExpr(expression);
-  // Adjust the INNER plain expression's count regardless of any
-  // wrappers (adv/dis/max/min/reset/same/burst/repeat all preserve
-  // their wrapping when reformatted).
-  const ex = parsed.plain.groups.find((g) => g.type === type);
+  // Add to outerPlain — outside any wrapper. Each click of a die
+  // button always lands as a free-standing additive term so the user
+  // can stack `adv(1d20) + 1d6` by clicking adv then d6 etc. For
+  // simple `1d20+5` (no wrapper) outerPlain IS where the dice live, so
+  // this also matches the old behavior. Decrement only fires when
+  // there's an existing entry to subtract from — matches the legacy
+  // "right-click on a die button removes one" UX.
+  const dst = parsed.outerPlain;
+  const ex = dst.groups.find((g) => g.type === type);
   if (ex) {
     ex.count += delta;
-    if (ex.count <= 0) parsed.plain.groups = parsed.plain.groups.filter((g) => g !== ex);
+    if (ex.count <= 0) dst.groups = dst.groups.filter((g) => g !== ex);
   } else if (delta > 0) {
-    parsed.plain.groups.push({ type, count: delta });
+    dst.groups.push({ type, count: delta });
   }
   setExpression(formatExpr(parsed));
+}
+
+// Bump the flat numeric modifier in the expression by `delta`. The
+// modifier always lives on the INNER plain (under any adv/dis/max/...
+// wrapper) — that's where peelOne already absorbs flat-number suffixes
+// like the +5 in `adv(1d20)+5`, and it formats cleanly back into the
+// inner. Empty expression starts at 0.
+function adjustExprModifier(delta: number) {
+  const parsed = parseExpr(expression);
+  // Add to outerPlain — that's the unambiguous "outside any wrapper"
+  // bucket. For a plain `1d20+5` (no wrapper, single segment) this
+  // adjusts the segment's own modifier via the backward-compat shim;
+  // for multi-segment / wrapped expressions the modifier shows up as
+  // a trailing `+ N` after the wrapped parts, which is the right
+  // behavior (it doesn't get advantage-doubled).
+  if (parsed.segments.length === 0) {
+    parsed.outerPlain.modifier += delta;
+  } else {
+    parsed.outerPlain.modifier += delta;
+  }
+  setExpression(formatExpr(parsed));
+}
+
+// Total modifier across all segments + outer. Used for empty-checks
+// and for the single-number `modifier` field in the broadcast payload.
+function totalModifier(p: ParsedExpr): number {
+  let m = p.outerPlain.modifier;
+  for (const seg of p.segments) m += seg.plain.modifier;
+  return m;
+}
+
+function exprIsEmpty(p: ParsedExpr): boolean {
+  if (p.outerPlain.groups.length || p.outerPlain.modifier !== 0) return false;
+  for (const seg of p.segments) {
+    if (seg.plain.groups.length || seg.plain.modifier !== 0) return false;
+  }
+  return true;
 }
 
 function setExpression(v: string) {
@@ -607,6 +892,7 @@ function refreshBadges() {
   const parsed = parseExpr(expression);
   const counts: Record<string, number> = {};
   for (const g of parsed.plain.groups) counts[g.type] = (counts[g.type] ?? 0) + g.count;
+  for (const g of parsed.outerPlain.groups) counts[g.type] = (counts[g.type] ?? 0) + g.count;
   diceRow.querySelectorAll<HTMLElement>(".dice-btn[data-type]").forEach((b) => {
     const t = b.dataset.type!;
     const c = counts[t] ?? 0;
@@ -951,26 +1237,52 @@ interface BuiltRoll {
   sameHighlight?: boolean;
 }
 function buildOneRollDice(parsed: ParsedExpr): BuiltRoll {
-  const sameHighlight = parsed.wrappers.some((w) => w.kind === "same");
-  // Strip "same" + "repeat" from the chain so rollExpr only sees the
-  // value-affecting wrappers.
-  const repeatW = parsed.wrappers.find((w) => w.kind === "repeat");
-  const innerWrappers = parsed.wrappers.filter((w) => w.kind !== "same" && w.kind !== "repeat");
+  // `same` highlight + `repeat` row layout are recognized at the
+  // segment level. We support repeat ONLY when it's the outermost
+  // wrapper of a segment that also covers all dice (i.e., a single
+  // segment with empty outerPlain). Mixing repeat with siblings is
+  // explicitly out of scope.
+  const sameHighlight = parsed.segments.some((s) =>
+    s.wrappers.some((w) => w.kind === "same"),
+  );
 
-  if (repeatW) {
+  const repeatSegIdx = parsed.segments.findIndex((s) =>
+    s.wrappers.some((w) => w.kind === "repeat"),
+  );
+  const outerDice = rollPlainSet(parsed.outerPlain);
+
+  if (repeatSegIdx >= 0 && parsed.segments.length === 1 && outerDice.length === 0) {
+    const seg = parsed.segments[0];
+    const repeatW = seg.wrappers.find((w) => w.kind === "repeat")!;
+    const inner = seg.wrappers.filter((w) => w.kind !== "same" && w.kind !== "repeat");
     const N = Math.max(1, repeatW.param ?? 1);
     const allDice: DieResult[] = [];
     const rowStarts: number[] = [];
     for (let i = 0; i < N; i++) {
       rowStarts.push(allDice.length);
-      const r = rollExpr(parsed.plain, innerWrappers);
+      const r = rollExpr(seg.plain, inner);
       for (const d of r.dice) allDice.push(d);
     }
     return { dice: allDice, winnerIdx: -1, rowStarts, sameHighlight };
   }
 
-  const r = rollExpr(parsed.plain, innerWrappers);
-  return { dice: r.dice, winnerIdx: r.winnerIdx, sameHighlight };
+  // Roll each segment INDEPENDENTLY through its own wrapper chain, then
+  // stitch dice arrays together. Each segment has its own winnerIdx
+  // (only meaningful for single-die segments under adv/dis), but the
+  // top-level winnerIdx is meaningful only when there's exactly one
+  // segment with one kept die.
+  const allDice: DieResult[] = [];
+  let winnerIdx = -1;
+  for (const seg of parsed.segments) {
+    const inner = seg.wrappers.filter((w) => w.kind !== "same" && w.kind !== "repeat");
+    const r = rollExpr(seg.plain, inner);
+    if (parsed.segments.length === 1 && outerDice.length === 0) {
+      winnerIdx = r.winnerIdx;
+    }
+    for (const d of r.dice) allDice.push(d);
+  }
+  for (const d of outerDice) allDice.push(d);
+  return { dice: allDice, winnerIdx, sameHighlight };
 }
 
 async function performRoll(opts: { hidden: boolean }): Promise<void> {
@@ -987,7 +1299,7 @@ async function performRoll(opts: { hidden: boolean }): Promise<void> {
   const expr = expression;
   const label = labelText.trim();
   const parsed = parseExpr(expr);
-  if (!parsed.plain.groups.length && parsed.plain.modifier === 0) {
+  if (exprIsEmpty(parsed)) {
     shakeButtonWithReason(btnSelf, expr.trim() ? "表达式无法解析" : "请先输入表达式");
     return;
   }
@@ -1030,7 +1342,7 @@ async function performRoll(opts: { hidden: boolean }): Promise<void> {
     await emitOneRoll({
       dice: built.dice,
       winnerIdx: built.winnerIdx,
-      modifier: parsed.plain.modifier,
+      modifier: totalModifier(parsed),
       label,
       itemId: tokenId || null,
       hidden: opts.hidden,
@@ -1067,7 +1379,7 @@ async function rollFromCombo(expr: string, label: string, hidden: boolean = fals
     return;
   }
   const parsed = parseExpr(expr);
-  if (!parsed.plain.groups.length && parsed.plain.modifier === 0) {
+  if (exprIsEmpty(parsed)) {
     shakeButtonWithReason(btnSelf, "表达式无法解析");
     return;
   }
@@ -1100,7 +1412,7 @@ async function rollFromCombo(expr: string, label: string, hidden: boolean = fals
     await emitOneRoll({
       dice: built.dice,
       winnerIdx: built.winnerIdx,
-      modifier: parsed.plain.modifier,
+      modifier: totalModifier(parsed),
       label,
       itemId: tokenId || null,
       hidden,
@@ -1123,7 +1435,7 @@ async function rollFromCombo(expr: string, label: string, hidden: boolean = fals
 
 function saveCurrentCombo() {
   const parsed = parseExpr(expression);
-  if (!parsed.plain.groups.length && parsed.plain.modifier === 0) return;
+  if (exprIsEmpty(parsed)) return;
   const promptName = labelText.trim() || formatExpr(parsed);
   const name = window.prompt("组合名称：", promptName);
   if (!name) return;
@@ -1156,12 +1468,62 @@ diceRow.querySelectorAll<HTMLButtonElement>(".dice-btn[data-type]").forEach((b) 
   });
 });
 
-// Adv / Dis: FILL the expression with adv(...)/dis(...). Does NOT roll.
-btnAdv.addEventListener("click", () => {
-  setExpression("adv(1d20)");
+// Adv / Dis: WRAP every dice term currently in the expression with
+// adv(...) / dis(...). Empty input → defaults to adv(1d20) / dis(1d20).
+// Wrapping is per-segment so `1d20+1d6` becomes `adv(1d20)+adv(1d6)`,
+// each die getting its own independent advantage. Already-wrapped
+// segments get their adv/dis kind toggled (adv→dis, dis→adv) instead
+// of double-wrapping. Other wrappers (max/min/reset/same/burst) are
+// preserved underneath the new adv/dis.
+function applyAdvWrap(kind: "adv" | "dis") {
+  const parsed = parseExpr(expression);
+  if (exprIsEmpty(parsed)) {
+    setExpression(`${kind}(1d20)`);
+    return;
+  }
+  const next: ParsedSegment[] = [];
+  // Each existing segment: replace any outermost adv/dis with the new
+  // kind (or push a fresh one if none).
+  for (const seg of parsed.segments) {
+    const ws = [...seg.wrappers];
+    const advIdx = ws.length - 1 - [...ws].reverse().findIndex(
+      (w) => w.kind === "adv" || w.kind === "dis",
+    );
+    if (advIdx >= 0 && advIdx < ws.length) {
+      ws[advIdx] = { kind, param: ws[advIdx].param ?? 1 };
+    } else {
+      ws.push({ kind, param: 1 });
+    }
+    next.push({ plain: seg.plain, wrappers: ws });
+  }
+  // outerPlain dice → wrap as a NEW segment under the chosen kind.
+  // outerPlain modifier stays outside (modifiers don't get advantage).
+  const outerHasDice = parsed.outerPlain.groups.length > 0;
+  let newOuter: PlainExpr = { groups: [], modifier: parsed.outerPlain.modifier };
+  if (outerHasDice) {
+    next.push({
+      plain: { groups: parsed.outerPlain.groups, modifier: 0 },
+      wrappers: [{ kind, param: 1 }],
+    });
+  }
+  setExpression(
+    formatExpr(finalizeParse({ segments: next, outerPlain: newOuter })),
+  );
+}
+
+btnAdv.addEventListener("click", () => applyAdvWrap("adv"));
+btnDis.addEventListener("click", () => applyAdvWrap("dis"));
+
+// ± buttons next to the expression input. Bumps the flat modifier
+// by 1 so the user can dial in attack/save/skill bonuses without
+// retyping the whole expression.
+document.getElementById("btnModInc")?.addEventListener("click", () => {
+  adjustExprModifier(+1);
+  exprInput.focus();
 });
-btnDis.addEventListener("click", () => {
-  setExpression("dis(1d20)");
+document.getElementById("btnModDec")?.addEventListener("click", () => {
+  adjustExprModifier(-1);
+  exprInput.focus();
 });
 
 exprInput.addEventListener("input", () => {
@@ -1257,6 +1619,11 @@ tabBtns.forEach((b) => {
 // --- Live history + lock-release subscriptions ---
 
 OBR.onReady(async () => {
+  // The dice panel is the iframe the user clicks "投掷" in — its
+  // AudioContext warms up immediately and is the most reliable path
+  // for SFX broadcast playback.
+  subscribeToSfx();
+
   // Resolve role + show / hide the 暗骰 (dark roll) button. Only DMs
   // see it. (OBR.player.onChange would also re-resolve if the role
   // ever flipped at runtime, but in practice it doesn't.)
@@ -1283,6 +1650,19 @@ OBR.onReady(async () => {
       renderHistorySeg();
       renderHistoryList();
     }
+  });
+
+  // Right-click "添加到骰盘" — pre-fill the expression input. We don't
+  // auto-roll; the user reviews and clicks 投掷.
+  OBR.broadcast.onMessage("com.obr-suite/dice-panel-fill", (event) => {
+    const data = event.data as { expression?: string } | undefined;
+    if (!data || typeof data.expression !== "string") return;
+    setExpression(data.expression);
+    switchTab("roll");
+    setTimeout(() => exprInput.focus(), 50);
+    // Consume the localStorage fallback if the live broadcast got
+    // there first — keeps re-opens of the panel from re-applying it.
+    try { localStorage.removeItem("obr-suite/dice-pending-prefill"); } catch {}
   });
 
   OBR.broadcast.onMessage(BC_DICE_FADE_START, (event) => {
@@ -1316,6 +1696,19 @@ renderCombos();
 renderHistorySeg();
 renderHistoryList();
 refreshBadges();
+
+// Pick up a pending prefill written by the bg module just before
+// `OBR.action.open()`. Covers the cold-start case where the broadcast
+// from "添加到骰盘" raced ahead of this iframe's listener registration.
+try {
+  const pending = localStorage.getItem("obr-suite/dice-pending-prefill");
+  if (pending) {
+    setExpression(pending);
+    switchTab("roll");
+    localStorage.removeItem("obr-suite/dice-pending-prefill");
+    setTimeout(() => exprInput.focus(), 50);
+  }
+} catch {}
 
 setInterval(() => {
   if (activeTab === "history") renderHistoryList();

@@ -32,7 +32,7 @@ async function focusCamera(x: number, y: number, scale: number) {
   // a focus broadcast, so everyone hears it together as their cameras
   // move.
   try {
-    const { sfxSyncView } = await import("./dice/sfx");
+    const { sfxSyncView } = await import("./dice/sfx-broadcast");
     sfxSyncView();
   } catch {}
 }

@@ -28,6 +28,10 @@ export interface QuickRollRequest {
   itemId?: string | null;
   hidden?: boolean;
   focus?: boolean;
+  collectiveId?: string;
+  // Right-click "优势 / 劣势" — every d20 in the parsed expression
+  // rolls twice; loser is flagged. Other dice unaffected.
+  advMode?: "adv" | "dis";
 }
 
 export function fireQuickRoll(req: QuickRollRequest): void {
@@ -85,12 +89,18 @@ interface RollSpec {
 // Parse the inside of a {@tag ...} payload. Returns either:
 //   - { kind: "roll", ... } if the tag produces a dice roll
 //   - { kind: "text", display } if it's a cosmetic tag (just text)
+//
+// Default cosmetic display follows the 5etools `name|source|display`
+// convention: parts[0] is the canonical display, parts[2] is an
+// explicit override when present. parts[1] is the SOURCE code (XPHB,
+// MM, etc.) and must never leak into the visible text — that was the
+// "陷入XPHB状态" / "随意XPHB、XPHB" bug.
 function parseTagPayload(tag: string, payload: string):
   | { kind: "roll"; spec: RollSpec }
   | { kind: "text"; display: string } {
   const parts = payload.split("|");
   const arg = parts[0] ?? "";
-  const display = parts[parts.length >= 3 && parts[2] ? 2 : 1] ?? arg;
+  const cosmeticDisplay = (parts[2] && parts[2].trim()) || parts[0] || "";
 
   switch (tag) {
     case "dice":
@@ -251,14 +261,27 @@ function parseTagPayload(tag: string, payload: string):
     case "actSaveFailBy":
     case "actTrigger":
     case "actResponse":
-      return { kind: "text", display };
-    case "recharge":
-      return { kind: "text", display: arg ? `（充能 ${arg}-6）` : "（充能）" };
+      return { kind: "text", display: cosmeticDisplay };
+    case "recharge": {
+      // Recharge ability: at the start of each turn, roll 1d6. If the
+      // roll is ≥ N, the ability recharges. Make it a clickable d6 so
+      // the DM can roll it inline from the stat block.
+      const n = parseInt(arg, 10);
+      const threshold = Number.isFinite(n) ? Math.max(2, Math.min(6, n)) : 6;
+      return {
+        kind: "roll",
+        spec: {
+          expression: "1d6",
+          label: `充能 ${threshold}+`,
+          display: `（充能 ${threshold}-6）`,
+        },
+      };
+    }
 
     default:
-      // Unknown tag — keep the display portion (5etools convention:
-      // first non-empty pipe segment is the visible text).
-      return { kind: "text", display };
+      // Unknown tag — fall back to the cosmetic display rule
+      // (parts[2] override, else parts[0] name).
+      return { kind: "text", display: cosmeticDisplay };
   }
 }
 
@@ -310,8 +333,10 @@ export function stripTagsToText(s: string): string {
   return s.replace(/\{@\w+(?:\s+([^{}]*))?\}/g, (_m, payload?: string) => {
     if (!payload) return "";
     const parts = payload.split("|");
-    if (parts.length >= 3 && parts[2]) return parts[2];
-    return parts[1] ?? parts[0] ?? "";
+    // 5etools cosmetic tag spec: parts[0] = display name, parts[1] =
+    // SOURCE code, parts[2] = optional rename. Fall back to parts[0],
+    // never parts[1] — that was the "陷入XPHB状态" bug.
+    return (parts[2] && parts[2].trim()) || parts[0] || "";
   });
 }
 

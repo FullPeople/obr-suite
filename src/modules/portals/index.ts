@@ -1,4 +1,4 @@
-import OBR, { buildImage, buildShape, Item } from "@owlbear-rodeo/sdk";
+import OBR, { buildImage, Item } from "@owlbear-rodeo/sdk";
 import {
   PLUGIN_ID,
   PORTAL_KEY,
@@ -20,8 +20,8 @@ const PREVIEW_ID = `${PLUGIN_ID}/draw-preview`;
 
 const EDIT_POPOVER_ID = `${PLUGIN_ID}/edit-popover`;
 const EDIT_URL = "https://obr.dnd.center/suite/portal-edit.html";
-const EDIT_W = 360;
-const EDIT_H = 320;
+const EDIT_W = 380;
+const EDIT_H = 540;
 const EDIT_TOP_OFFSET = 60;
 
 const DEST_MODAL_ID = `${PLUGIN_ID}/destination-modal`;
@@ -30,8 +30,12 @@ const DEST_URL = "https://obr.dnd.center/suite/portal-destination.html";
 const ICON_URL = "https://obr.dnd.center/suite/portal-icon.svg";
 const TOOL_ICON_URL = "https://obr.dnd.center/suite/portal-tool-icon.svg";
 
-const ICON_SIZE = 96; // image px (intrinsic SVG box × ~1.5)
-const MIN_RADIUS = 30; // ignore drags shorter than this (treated as click)
+// Intrinsic SVG box. Visible glow fills this edge-to-edge so the
+// rendered diameter == 2 × trigger radius.
+const ICON_INTRINSIC = 64;
+// Default base size for OBR's image grid.dpi math — matches the SVG.
+const ICON_SIZE = ICON_INTRINSIC;
+const MIN_RADIUS = 16; // ignore drags shorter than this (treated as click)
 
 // Broadcast channels (LOCAL only — single client lifecycle):
 const BROADCAST_TELEPORT = `${PLUGIN_ID}/teleport`;
@@ -43,16 +47,41 @@ const unsubs: Array<() => void> = [];
 let role: "GM" | "PLAYER" = "PLAYER";
 
 // --- Drag-to-draw state ---
+// `dragStart` is the user's first pointerdown — it becomes the CENTER
+// of the portal trigger zone. The drag distance from start to cursor
+// = the trigger radius. While dragging, a LIVE PREVIEW of the actual
+// SVG icon is rendered locally (OBR.scene.local) so the user sees the
+// final size grow in real-time. On drag-end the preview is removed
+// and the real portal is committed to scene metadata.
 let dragStart: { x: number; y: number } | null = null;
 let previewItemId: string | null = null;
 
-// --- Local-player containment tracking (entry detection) ---
-// Maps each token id we currently track to the portal id it's inside (or
-// null). Only items in OBR.player.getSelection() are tracked. When a token
-// transitions from null → portalId on a *visible* portal, we open the
-// destination modal once with the local player's full selection.
-const myPortalContainment = new Map<string, string | null>();
-let lastSelection: string[] = [];
+// --- Drag-end portal entry detection ---
+//
+// Strategy: when the local player's selected token's position changes,
+// start a debounce timer. If no further position change for the token
+// arrives within DRAG_END_MS, treat that as "drag end" and check if
+// the token now sits inside a (visible) portal. If yes, open the
+// destination modal.
+//
+// This replaces the earlier containment state machine which had two
+// nasty failure modes:
+//   1. Re-trigger immediately after a teleport (token lands inside the
+//      destination portal → state machine fires again).
+//   2. State got stuck "inside portal X" if selection changed mid-drag
+//      → no future entries could fire.
+// The drag-end approach has zero accumulated state per token; each
+// drag-end is evaluated fresh against the current world.
+const DRAG_END_MS = 350;
+let dragEndTimer: ReturnType<typeof setTimeout> | null = null;
+const lastTokenPos = new Map<string, { x: number; y: number }>();
+// Tokens just teleported by this client — their drag-end check is
+// suppressed for SUPPRESS_AFTER_TELEPORT_MS to swallow the
+// programmatic position change. Window is just long enough to cover
+// the post-update debounce (DRAG_END_MS + a buffer); legitimate user
+// drags landing AFTER the window fire normally.
+const SUPPRESS_AFTER_TELEPORT_MS = 700;
+const recentlyTeleported = new Map<string, number>();
 let destModalOpen = false;
 
 // --- DM auto-edit-popover when single portal selected ---
@@ -85,30 +114,43 @@ function readPortalMeta(it: Item): PortalMeta | null {
   };
 }
 
-// --- Drag preview (local-only circle) -------------------------------------
+// The portal item's `position` is the world coord where the image's
+// `offset` point lands. We always set offset to image-center, so
+// `position` IS the geometric center of the visible icon — same
+// pattern OBR's bestiary spawn uses.
+function portalCenter(it: Item): { x: number; y: number } {
+  return { x: it.position.x, y: it.position.y };
+}
+
+// --- Live preview (local-only, scales with the drag) ---------------------
 
 async function startPreview(center: { x: number; y: number }) {
   try {
-    // Shape position = top-left of bounding box; circle is drawn inside.
-    // Start with radius=1 so the preview is invisible until the user drags.
-    const shape = buildShape()
-      .shapeType("CIRCLE")
-      .width(2)
-      .height(2)
-      .position({ x: center.x - 1, y: center.y - 1 })
-      .strokeColor("#a78bfa")
-      .strokeWidth(2)
-      .strokeOpacity(0.9)
-      .fillColor("#6366f1")
-      .fillOpacity(0.18)
+    let sceneDpi = 150;
+    try { sceneDpi = await OBR.scene.grid.getDpi(); } catch {}
+    const half = ICON_SIZE / 2;
+    // Start at scale = MIN_RADIUS so the preview is visible from the
+    // very first move event instead of popping in at frame 2.
+    const s = (2 * MIN_RADIUS) / sceneDpi;
+    const img = buildImage(
+      {
+        width: ICON_SIZE,
+        height: ICON_SIZE,
+        url: ICON_URL,
+        mime: "image/svg+xml",
+      },
+      { dpi: ICON_SIZE, offset: { x: half, y: half } }
+    )
+      .position(center)
+      .scale({ x: s, y: s })
       .layer("DRAWING")
       .locked(true)
       .disableHit(true)
       .visible(true)
       .metadata({ [`${PLUGIN_ID}/preview`]: true })
       .build();
-    await OBR.scene.local.addItems([shape]);
-    previewItemId = shape.id;
+    await OBR.scene.local.addItems([img]);
+    previewItemId = img.id;
   } catch (e) {
     console.error("[obr-suite/portals] startPreview failed", e);
   }
@@ -116,13 +158,14 @@ async function startPreview(center: { x: number; y: number }) {
 
 async function updatePreview(center: { x: number; y: number }, radius: number) {
   if (!previewItemId) return;
-  const d = Math.max(2, radius * 2);
   try {
+    let sceneDpi = 150;
+    try { sceneDpi = await OBR.scene.grid.getDpi(); } catch {}
+    const s = (2 * radius) / sceneDpi;
     await OBR.scene.local.updateItems([previewItemId], (drafts) => {
-      for (const dr of drafts) {
-        dr.position = { x: center.x - radius, y: center.y - radius };
-        (dr as any).width = d;
-        (dr as any).height = d;
+      for (const d of drafts) {
+        d.position = { x: center.x, y: center.y };
+        d.scale = { x: s, y: s };
       }
     });
   } catch {}
@@ -130,15 +173,30 @@ async function updatePreview(center: { x: number; y: number }, radius: number) {
 
 async function clearPreview() {
   if (!previewItemId) return;
-  try { await OBR.scene.local.deleteItems([previewItemId]); } catch {}
+  const id = previewItemId;
   previewItemId = null;
+  try { await OBR.scene.local.deleteItems([id]); } catch {}
 }
 
 // --- Create portal --------------------------------------------------------
 
 async function createPortal(center: { x: number; y: number }, radius: number) {
   const meta: PortalMeta = { name: "", tag: "", radius };
+  // Same pattern as the bestiary's monster spawn (modules/bestiary/spawn.ts):
+  //   - dpi = ICON_SIZE → with scale=1 the icon renders at exactly 1 cell.
+  //   - offset = image-center → OBR places the offset point at `position`,
+  //     so `position` IS the world-coord center of the visible icon.
+  //   - .scale() multiplies the displayed size LINEARLY around the offset
+  //     point, so radius doubling → diameter doubling (no geometric blow-up).
+  // The trigger zone is invisible — only the SVG renders. Setting
+  // `locked(false)` + no `disableHit` keeps the item selectable and
+  // deletable via OBR's built-in handles.
+  let sceneDpi = 150;
+  try { sceneDpi = await OBR.scene.grid.getDpi(); } catch {}
   const half = ICON_SIZE / 2;
+  // Linear scale: visible diameter = 2 × radius scene-pixels.
+  // Base render (scale=1) = 1 grid cell = sceneDpi scene-pixels.
+  const s = (2 * radius) / sceneDpi;
   const img = buildImage(
     {
       width: ICON_SIZE,
@@ -149,6 +207,7 @@ async function createPortal(center: { x: number; y: number }, radius: number) {
     { dpi: ICON_SIZE, offset: { x: half, y: half } }
   )
     .position(center)
+    .scale({ x: s, y: s })
     .name("传送门")
     .layer("PROP")
     .visible(true)
@@ -156,7 +215,6 @@ async function createPortal(center: { x: number; y: number }, radius: number) {
     .metadata({ [PORTAL_KEY]: meta })
     .build();
   await OBR.scene.items.addItems([img]);
-  // Open the edit popover for the just-created portal so the DM can name it.
   suppressAutoEditOnce = img.id;
   await openEditPopover(img.id, true);
 }
@@ -179,7 +237,12 @@ async function openEditPopover(portalId: string, isNew: boolean) {
       anchorOrigin: { horizontal: "CENTER", vertical: "TOP" },
       transformOrigin: { horizontal: "CENTER", vertical: "TOP" },
       hidePaper: true,
-      disableClickAway: false,
+      // disableClickAway:true so OBR doesn't insert a viewport-wide
+      // invisible click-catcher overlay (which the user perceives as
+      // "a mouse-event mask"). Clicks outside the popover go straight
+      // to the canvas (move tokens / open menus / etc.); the popover
+      // is dismissed only via its own X / 取消 / 保存 / 删除 buttons.
+      disableClickAway: true,
     });
     editPopoverOpen = true;
     currentEditId = portalId;
@@ -221,59 +284,79 @@ async function handleDMSelectionForEdit(selection: string[] | undefined) {
   await openEditPopover(portalItem.id, false);
 }
 
-// --- Token entry detection ------------------------------------------------
+// --- Drag-end portal entry detection --------------------------------------
 
-async function refreshContainment(allItems?: Item[]) {
-  let items = allItems;
-  if (!items) {
-    try { items = await OBR.scene.items.getItems(); } catch { return; }
-  }
-
+// Called from scene.items.onChange. Tracks the LOCAL player's selected
+// tokens; whenever any of their positions changes, restart a debounce
+// timer. When the timer fires without further changes for DRAG_END_MS,
+// treat that as drag-end and run `onDragEnd`.
+async function onItemsMaybeDragging(items: Item[]) {
   let selection: string[] = [];
   try {
     const s = await OBR.player.getSelection();
     selection = s ?? [];
   } catch {}
-
-  // Drop tracking for tokens that are no longer selected.
-  if (selection.join("|") !== lastSelection.join("|")) {
-    for (const id of [...myPortalContainment.keys()]) {
-      if (!selection.includes(id)) myPortalContainment.delete(id);
-    }
-    lastSelection = selection;
-  }
   if (selection.length === 0) return;
+
+  let moved = false;
+  for (const it of items) {
+    if (!selection.includes(it.id)) continue;
+    if (it.layer !== "CHARACTER" && it.layer !== "MOUNT") continue;
+    if (isPortal(it)) continue;
+    const prev = lastTokenPos.get(it.id);
+    if (!prev || prev.x !== it.position.x || prev.y !== it.position.y) {
+      lastTokenPos.set(it.id, { x: it.position.x, y: it.position.y });
+      moved = true;
+    }
+  }
+
+  if (!moved) return;
+  if (dragEndTimer) clearTimeout(dragEndTimer);
+  dragEndTimer = setTimeout(() => {
+    dragEndTimer = null;
+    onDragEnd().catch(() => {});
+  }, DRAG_END_MS);
+}
+
+// Evaluates the world fresh: is any locally-selected token currently
+// sitting inside a visible portal? If yes, open the destination modal.
+// No memory of "where it was before" — pure point-in-circle test.
+async function onDragEnd() {
+  if (destModalOpen) return;
+  let selection: string[] = [];
+  try {
+    const s = await OBR.player.getSelection();
+    selection = s ?? [];
+  } catch {}
+  if (selection.length === 0) return;
+
+  let items: Item[];
+  try { items = await OBR.scene.items.getItems(); } catch { return; }
 
   const portals = items.filter(isPortal);
   if (portals.length === 0) return;
-
   const visiblePortals = portals.filter((p) => p.visible);
+  if (visiblePortals.length === 0) return;
 
-  let entered: { tokenId: string; portal: Item } | null = null;
+  const now = Date.now();
+  // Sweep stale entries from recentlyTeleported.
+  for (const [id, t] of recentlyTeleported) {
+    if (now - t > SUPPRESS_AFTER_TELEPORT_MS) recentlyTeleported.delete(id);
+  }
+
   for (const tok of items) {
     if (!selection.includes(tok.id)) continue;
     if (tok.layer !== "CHARACTER" && tok.layer !== "MOUNT") continue;
     if (isPortal(tok)) continue;
-    // Find the visible portal currently containing this token (if any).
-    let inside: Item | null = null;
+    if (recentlyTeleported.has(tok.id)) continue; // Just teleported here.
     for (const p of visiblePortals) {
       const pm = readPortalMeta(p);
       if (!pm) continue;
-      if (dist(tok.position, p.position) <= pm.radius) {
-        inside = p;
-        break;
+      if (dist(tok.position, portalCenter(p)) <= pm.radius) {
+        await openDestinationModal(p, items, selection);
+        return; // Only one modal, one entry.
       }
     }
-    const prev = myPortalContainment.get(tok.id) ?? null;
-    const cur = inside?.id ?? null;
-    if (cur !== prev) {
-      myPortalContainment.set(tok.id, cur);
-      if (cur && !entered) entered = { tokenId: tok.id, portal: inside! };
-    }
-  }
-
-  if (entered) {
-    await openDestinationModal(entered.portal, items, selection);
   }
 }
 
@@ -318,6 +401,12 @@ async function openDestinationModal(
   if (tokenIds.length === 0) return;
 
   destModalOpen = true;
+  // Hard safety net: after 60 s the flag is force-reset so a missed
+  // close-signal can't permanently lock the entry detector. The modal
+  // page itself sends close on click/cancel/Esc/unload, so this is
+  // pure paranoia — but the cost of getting stuck once was bad enough
+  // (user reported the bug), so the safety net stays.
+  setTimeout(() => { destModalOpen = false; }, 60_000);
   const payload = {
     entryName: entryMeta.name || "(未命名)",
     entryTag: entryMeta.tag,
@@ -325,12 +414,20 @@ async function openDestinationModal(
     tokenIds,
   };
   const url = `${DEST_URL}?p=${encodeURIComponent(JSON.stringify(payload))}`;
+  // Height fits content up to THREE candidates without inner scroll;
+  // 4+ candidates use the 3-item height and scroll inside the .list
+  // pane. Per-item row + gap ≈ 50px. Header (title + sub line) +
+  // bottom button bar + paddings ≈ 180px.
+  const ITEM_H = 50;
+  const BASE = 180;
+  const visibleItems = Math.min(Math.max(candidates.length, 1), 3);
+  const height = BASE + visibleItems * ITEM_H;
   try {
     await OBR.modal.open({
       id: DEST_MODAL_ID,
       url,
       width: 380,
-      height: Math.min(420, 140 + candidates.length * 48),
+      height,
     });
   } catch (e) {
     console.error("[obr-suite/portals] openDestinationModal failed", e);
@@ -345,6 +442,42 @@ async function closeDestinationModal() {
 
 // --- Teleport: gather tokens around destination portal --------------------
 
+// Snapshotted light metadata so the post-teleport restore knows the
+// original values. Map<tokenId, Record<metadataKey, originalValue>>.
+type LightSnapshot = Map<string, Record<string, any>>;
+
+// Detect "light source" metadata entries on an item — keys whose value
+// is an object with `attenuationRadius` or `sourceRadius`. Covers
+// OBR's official Dynamic Fog (`rodeo.owlbear.dynamic-fog/light`) and
+// any other extension following the same shape. Returns the literal
+// key names so we can restore them by-name later.
+function findLightKeys(metadata: Record<string, unknown>): string[] {
+  const keys: string[] = [];
+  for (const [k, v] of Object.entries(metadata)) {
+    if (!v || typeof v !== "object") continue;
+    const o = v as Record<string, unknown>;
+    if ("attenuationRadius" in o || "sourceRadius" in o) keys.push(k);
+  }
+  return keys;
+}
+
+async function snapshotLightMetadata(tokenIds: string[]): Promise<LightSnapshot> {
+  const snap: LightSnapshot = new Map();
+  try {
+    const items = await OBR.scene.items.getItems(tokenIds);
+    for (const it of items) {
+      const keys = findLightKeys(it.metadata as Record<string, unknown>);
+      if (keys.length === 0) continue;
+      const captured: Record<string, any> = {};
+      for (const k of keys) captured[k] = (it.metadata as any)[k];
+      snap.set(it.id, captured);
+    }
+  } catch (e) {
+    console.warn("[obr-suite/portals] snapshotLightMetadata failed", e);
+  }
+  return snap;
+}
+
 async function teleport(destPortalId: string, tokenIds: string[]) {
   if (tokenIds.length === 0) return;
   let dest: Item | null = null;
@@ -354,11 +487,25 @@ async function teleport(destPortalId: string, tokenIds: string[]) {
   } catch {}
   if (!dest) return;
 
-  const center = { x: dest.position.x, y: dest.position.y };
+  // Mark tokens as "just teleported" BEFORE any state changes. The
+  // upcoming `updateItems` will fire `scene.items.onChange`, which
+  // arms the drag-end debounce; without this guard set up-front, the
+  // debounce would fire after ~350ms — before our suppress flag is
+  // set — and `onDragEnd` would see the token sitting on the
+  // destination portal and pop the modal a second time. Setting it
+  // now (and clearing any in-flight debounce) makes the cancellation
+  // unconditional for the entire suppress window.
+  if (dragEndTimer) {
+    clearTimeout(dragEndTimer);
+    dragEndTimer = null;
+  }
+  const stamp = Date.now();
+  for (const id of tokenIds) recentlyTeleported.set(id, stamp);
 
   let dpi = 150;
   try { dpi = await OBR.scene.grid.getDpi(); } catch {}
   const spacing = dpi;
+  const center = portalCenter(dest);
 
   // Hex-ring spiral, same algorithm as initiative "gather here".
   const positions: { x: number; y: number }[] = [
@@ -377,6 +524,27 @@ async function teleport(destPortalId: string, tokenIds: string[]) {
     ring++;
   }
 
+  // Phase 1 — strip light metadata so dynamic-fog stops rejecting the
+  // move. No animation: the user reported the gradual-shrink path
+  // stuttered too much over OBR's metadata-update channel, so we
+  // just delete-and-snap. All snapshot values restored verbatim in
+  // Phase 3.
+  const lightSnap = await snapshotLightMetadata(tokenIds);
+  if (lightSnap.size > 0) {
+    try {
+      await OBR.scene.items.updateItems([...lightSnap.keys()], (drafts) => {
+        for (const d of drafts) {
+          const captured = lightSnap.get(d.id);
+          if (!captured) continue;
+          for (const k of Object.keys(captured)) delete (d.metadata as any)[k];
+        }
+      });
+    } catch (e) {
+      console.warn("[obr-suite/portals] strip light failed", e);
+    }
+  }
+
+  // Phase 2 — actual position update.
   try {
     await OBR.scene.items.updateItems(tokenIds, (drafts) => {
       drafts.forEach((d, idx) => {
@@ -387,13 +555,51 @@ async function teleport(destPortalId: string, tokenIds: string[]) {
     console.error("[obr-suite/portals] teleport updateItems failed", e);
   }
 
-  // Mark these tokens' containment as the destination so they don't
-  // immediately re-trigger the prompt for landing inside the dest portal.
-  const destMeta = readPortalMeta(dest);
-  if (destMeta) {
-    for (const id of tokenIds) {
-      myPortalContainment.set(id, dest.id);
+  // Pan the local camera to the destination portal (only on the
+  // originating client — BROADCAST_TELEPORT is LOCAL only). Same
+  // pattern as the focus module: keep current zoom, center on portal.
+  try {
+    const [vw, vh, vpScale] = await Promise.all([
+      OBR.viewport.getWidth(),
+      OBR.viewport.getHeight(),
+      OBR.viewport.getScale(),
+    ]);
+    OBR.viewport.animateTo({
+      position: {
+        x: -center.x * vpScale + vw / 2,
+        y: -center.y * vpScale + vh / 2,
+      },
+      scale: vpScale,
+    }).catch(() => {});
+  } catch {}
+
+  // Phase 3 — restore the original light metadata values verbatim.
+  if (lightSnap.size > 0) {
+    try {
+      await OBR.scene.items.updateItems([...lightSnap.keys()], (drafts) => {
+        for (const d of drafts) {
+          const captured = lightSnap.get(d.id);
+          if (!captured) continue;
+          for (const [key, original] of Object.entries(captured)) {
+            (d.metadata as any)[key] = original;
+          }
+        }
+      });
+    } catch (e) {
+      console.warn("[obr-suite/portals] restore light failed", e);
     }
+  }
+
+  // Refresh suppress timestamp at end so the full window covers any
+  // additional items.onChange noise from Phase 3 metadata writes.
+  const endStamp = Date.now();
+  for (const id of tokenIds) recentlyTeleported.set(id, endStamp);
+  // Belt-and-suspenders: also clear any debounce that armed during
+  // teleport. With the recentlyTeleported guard the timer's onDragEnd
+  // would no-op anyway, but cancelling it skips a wasted check.
+  if (dragEndTimer) {
+    clearTimeout(dragEndTimer);
+    dragEndTimer = null;
   }
 }
 
@@ -454,12 +660,12 @@ export async function setupPortals(): Promise<void> {
         if (!dragStart) return;
         const p = (event as any).pointerPosition as { x: number; y: number };
         const center = dragStart;
-        await clearPreview();
         dragStart = null;
+        await clearPreview();
         if (!p) return;
-        const r = dist(center, p);
-        if (r < MIN_RADIUS) return; // Treat as click — no portal created.
-        await createPortal(center, r);
+        const radius = dist(center, p);
+        if (radius < MIN_RADIUS) return; // Treat as click — no portal created.
+        await createPortal(center, radius);
       },
       onToolDragCancel: async () => {
         dragStart = null;
@@ -474,22 +680,26 @@ export async function setupPortals(): Promise<void> {
       try {
         if (role === "GM") await handleDMSelectionForEdit(player.selection);
       } catch {}
-      // Selection change also feeds containment tracking for everyone.
-      await refreshContainment();
+      // Drop the per-token last-position cache for any token no longer
+      // selected. Prevents stale entries leaking memory and stops a
+      // pending drag-end timer from firing on a deselected token.
+      const sel = new Set(player.selection ?? []);
+      for (const id of [...lastTokenPos.keys()]) {
+        if (!sel.has(id)) lastTokenPos.delete(id);
+      }
     })
   );
 
-  // Item changes feed both DM edit (item could be deleted) and player entry
-  // detection.
+  // Item changes drive both DM edit (portal could be deleted) and the
+  // player drag-end portal-entry check.
   unsubs.push(
     OBR.scene.items.onChange(async (items) => {
-      // If the currently-edited portal disappeared, close the popover.
       if (editPopoverOpen && currentEditId) {
         if (!items.find((i) => i.id === currentEditId)) {
           await closeEditPopover();
         }
       }
-      await refreshContainment(items);
+      await onItemsMaybeDragging(items);
     })
   );
 
@@ -555,8 +765,9 @@ export async function setupPortals(): Promise<void> {
     })
   );
 
-  // Initial pass — fire entry detection if user already has selection.
-  await refreshContainment();
+  // No initial pass — only player drag-end events trigger the modal.
+  // If the player happens to have selected a token already inside a
+  // portal at scene load, no modal opens until they drag the token.
 }
 
 export async function teardownPortals(): Promise<void> {
@@ -568,6 +779,10 @@ export async function teardownPortals(): Promise<void> {
     try { await OBR.tool.remove(TOOL_ID); } catch {}
   }
   for (const u of unsubs.splice(0)) u();
-  myPortalContainment.clear();
-  lastSelection = [];
+  if (dragEndTimer) {
+    clearTimeout(dragEndTimer);
+    dragEndTimer = null;
+  }
+  lastTokenPos.clear();
+  recentlyTeleported.clear();
 }

@@ -489,6 +489,19 @@ OBR.onReady(async () => {
     myPlayerId = await OBR.player.getId();
   } catch {}
 
+  // X button — dismiss the popover for this session, BUT keep the
+  // cluster's "投骰记录" toggle on so the next dice roll auto-reopens
+  // it. Background module owns this via BC_DICE_HISTORY_DISMISS.
+  document.getElementById("btnDismiss")?.addEventListener("click", () => {
+    try {
+      OBR.broadcast.sendMessage(
+        "com.obr-suite/dice-history-dismiss",
+        {},
+        { destination: "LOCAL" },
+      );
+    } catch {}
+  });
+
   // Live dice-roll broadcasts → queue as PENDING. Visible entry only
   // appears when the matching BC_DICE_HISTORY_REVEAL arrives (at the
   // end of the fly-to-history animation). Dark rolls are sent

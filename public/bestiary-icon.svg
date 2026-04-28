@@ -1,4 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <text x="32" y="28" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="22" fill="white">怪物</text>
-  <text x="32" y="52" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="22" fill="white">图鉴</text>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Matches ICONS.dragon in src/icons.ts so the OBR tool / context
+       menu glyph is consistent with the settings tab. -->
+  <path d="M5 3l3 4M19 3l-3 4"/>
+  <path d="M8 7c0-2 2-3 4-3s4 1 4 3v4c0 4-2 7-4 9-2-2-4-5-4-9V7z"/>
+  <circle cx="10" cy="11" r="0.8" fill="white"/>
+  <circle cx="14" cy="11" r="0.8" fill="white"/>
+  <path d="M10.5 16h3"/>
 </svg>

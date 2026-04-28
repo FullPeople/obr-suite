@@ -5,117 +5,162 @@
 <title>传送门</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#292d3c;--bg-strong:#1f2230;--bg-card:#323748;
+  --border:rgba(255,255,255,0.12);--border-strong:rgba(255,255,255,0.20);
+  --text:#e6e8ee;--text-dim:#9aa0b3;
+  --accent:#5dade2;--accent-warm:#f5a623;--accent-red:#e74c3c;--accent-green:#2ecc71;
+}
 html,body{
   height:100%;overflow:hidden;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
-  color:#eee;background:transparent;
+  color:var(--text);background:transparent;
   pointer-events:none;
+  font-size:13px;
 }
 .card{
   position:absolute;inset:0;
-  background:rgba(22,33,62,0.96);
+  background:var(--bg);
+  border:1px solid var(--border-strong);
   border-radius:10px;
-  box-shadow:0 8px 28px rgba(0,0,0,0.55);
-  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  box-shadow:0 12px 36px rgba(0,0,0,0.55);
   pointer-events:auto;
   display:flex;flex-direction:column;
-  padding:12px 14px;
+  padding:14px 16px;
   overflow:hidden;
 }
 .hdr{
   display:flex;align-items:center;gap:8px;
-  padding-bottom:8px;
-  border-bottom:1px solid rgba(255,255,255,.1);
-  margin-bottom:10px;
+  padding-bottom:10px;
+  border-bottom:1px solid var(--border);
+  margin-bottom:12px;
+  flex-shrink:0;
 }
-.hdr .ic{font-size:14px;color:#a78bfa}
-.hdr .ttl{font-size:14px;font-weight:700;flex:1}
+.hdr .ic{font-size:14px;color:var(--accent)}
+.hdr .ttl{font-size:14px;font-weight:700;flex:1;letter-spacing:0.2px}
 .hdr .x{
-  cursor:pointer;font-size:18px;color:#888;line-height:1;padding:0 4px;
+  cursor:pointer;font-size:18px;color:var(--text-dim);line-height:1;padding:0 4px;
   background:none;border:none;
+  transition:color .12s;
 }
-.hdr .x:hover{color:#eee}
+.hdr .x:hover{color:var(--text)}
 
-.row{margin-bottom:10px}
-.row .lbl{font-size:11px;color:#9aa0b3;margin-bottom:4px;letter-spacing:.4px}
+.body{
+  flex:1;min-height:0;
+  display:flex;flex-direction:column;gap:10px;
+  overflow:hidden;
+}
+
+.row{flex-shrink:0}
+.row .lbl{
+  font-size:10.5px;color:var(--text-dim);margin-bottom:4px;letter-spacing:.4px;
+  font-weight:700;text-transform:uppercase;
+}
 .row input{
-  width:100%;height:30px;
-  background:rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.15);
+  width:100%;height:32px;
+  background:var(--bg-strong);
+  border:1px solid var(--border);
   border-radius:6px;
-  padding:0 9px;color:#eee;font-size:13px;outline:none;
+  padding:0 10px;color:var(--text);font-size:13px;outline:none;
+  font-family:inherit;
+  transition:border-color .12s, box-shadow .12s;
 }
-.row input:focus{border-color:#a78bfa}
+.row input:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px rgba(93,173,226,0.30);
+}
 
-.chips-wrap{margin-bottom:8px}
+.chips-wrap{flex-shrink:0}
 .chips-wrap .lbl-row{
   display:flex;align-items:center;justify-content:space-between;
-  font-size:10.5px;color:#9aa0b3;margin-bottom:4px;letter-spacing:.4px;
+  font-size:10.5px;color:var(--text-dim);margin-bottom:5px;letter-spacing:.4px;
+  font-weight:700;text-transform:uppercase;
 }
 .chips-wrap .add{
-  font-size:10px;color:#a78bfa;cursor:pointer;
-  background:none;border:none;padding:2px 6px;
+  font-size:10.5px;color:var(--accent);cursor:pointer;
+  background:none;border:none;padding:2px 8px;
+  border-radius:4px;
+  font-family:inherit;font-weight:700;
+  transition:background .12s, color .12s;
 }
-.chips-wrap .add:hover{color:#c4b5fd}
-.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chips-wrap .add:hover{background:rgba(93,173,226,0.15);color:#7ec8f0}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
 .chip{
   display:inline-flex;align-items:center;gap:3px;
-  padding:2px 6px 2px 8px;
-  background:rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.13);
+  padding:3px 6px 3px 9px;
+  background:var(--bg-card);
+  border:1px solid var(--border);
   border-radius:11px;
-  font-size:11px;color:#ddd;
+  font-size:11px;color:#cdd1de;
   cursor:pointer;
   user-select:none;
-  transition:background .12s;
+  transition:background .12s, border-color .12s;
 }
-.chip:hover{background:rgba(167,139,250,.18);border-color:rgba(167,139,250,.35)}
+.chip:hover{
+  background:rgba(93,173,226,0.15);
+  border-color:rgba(93,173,226,0.35);
+  color:var(--text);
+}
 .chip .del{
-  font-size:11px;color:#888;line-height:1;
-  margin-left:1px;
-  background:none;border:none;cursor:pointer;padding:1px 2px;
+  font-size:11px;color:var(--text-dim);line-height:1;
+  margin-left:2px;
+  background:none;border:none;cursor:pointer;padding:1px 3px;
   border-radius:4px;
+  font-family:inherit;
+  transition:color .12s, background .12s;
 }
-.chip .del:hover{color:#e94560;background:rgba(233,69,96,.15)}
+.chip .del:hover{color:var(--accent-red);background:rgba(231,76,60,.18)}
 
 .btn-row{
   margin-top:auto;display:flex;gap:6px;justify-content:flex-end;
-  padding-top:10px;
-  border-top:1px solid rgba(255,255,255,.08);
+  padding-top:12px;
+  border-top:1px solid var(--border);
+  flex-shrink:0;
 }
 .btn{
-  padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;
-  border:1px solid transparent;
+  padding:7px 16px;border-radius:6px;font-size:12px;cursor:pointer;
+  border:1px solid transparent;font-family:inherit;font-weight:600;
+  transition:background .12s, border-color .12s, filter .12s;
 }
 .btn.del{
-  background:rgba(233,69,96,.15);color:#e94560;border-color:rgba(233,69,96,.35);
+  background:rgba(231,76,60,.14);color:var(--accent-red);
+  border-color:rgba(231,76,60,.32);
   margin-right:auto;
 }
-.btn.del:hover{background:rgba(233,69,96,.25)}
+.btn.del:hover{background:rgba(231,76,60,.24)}
 .btn.cancel{
-  background:rgba(255,255,255,.06);color:#bbb;border-color:rgba(255,255,255,.12);
+  background:var(--bg-strong);color:var(--text-dim);
+  border-color:var(--border);
 }
-.btn.cancel:hover{background:rgba(255,255,255,.1)}
+.btn.cancel:hover{background:var(--bg-card);color:var(--text)}
 .btn.save{
-  background:linear-gradient(135deg,#7c3aed,#6366f1);color:#fff;font-weight:600;
+  background:rgba(93,173,226,0.22);
+  color:#7ec8f0;
+  border-color:rgba(93,173,226,0.42);
 }
-.btn.save:hover{filter:brightness(1.1)}
+.btn.save:hover{
+  background:rgba(93,173,226,0.32);
+  border-color:rgba(93,173,226,0.55);
+}
 
-.add-form{display:none;margin-top:4px;gap:4px}
+.add-form{display:none;margin-top:5px;gap:5px}
 .add-form.on{display:flex}
 .add-form input{
-  flex:1;height:24px;
-  background:rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.15);
-  border-radius:5px;padding:0 7px;color:#eee;font-size:11px;outline:none;
+  flex:1;height:26px;
+  background:var(--bg-strong);
+  border:1px solid var(--border);
+  border-radius:5px;padding:0 8px;color:var(--text);font-size:11.5px;outline:none;
+  font-family:inherit;
+  transition:border-color .12s;
 }
-.add-form input:focus{border-color:#a78bfa}
+.add-form input:focus{border-color:var(--accent)}
 .add-form button{
-  height:24px;padding:0 8px;border-radius:5px;font-size:11px;cursor:pointer;
-  background:rgba(167,139,250,.2);border:1px solid rgba(167,139,250,.4);
-  color:#c4b5fd;
+  height:26px;padding:0 10px;border-radius:5px;font-size:11px;cursor:pointer;
+  background:rgba(93,173,226,0.18);border:1px solid rgba(93,173,226,0.40);
+  color:#7ec8f0;font-family:inherit;font-weight:600;
+  transition:background .12s;
 }
-.add-form button:hover{background:rgba(167,139,250,.32)}
+.add-form button:hover{background:rgba(93,173,226,0.30)}
 </style>
 </head>
 <body>
@@ -126,35 +171,37 @@ html,body{
     <button class="x" id="x">×</button>
   </div>
 
-  <div class="row">
-    <div class="lbl">名字</div>
-    <input id="inp-name" type="text" placeholder="例如 一楼" autocomplete="off">
-  </div>
-  <div class="chips-wrap">
-    <div class="lbl-row">
-      <span class="lbl">名字预设</span>
-      <button class="add" data-form="name">+ 添加</button>
+  <div class="body">
+    <div class="row">
+      <div class="lbl">名字</div>
+      <input id="inp-name" type="text" placeholder="例如 一楼" autocomplete="off">
     </div>
-    <div class="chips" id="chips-names"></div>
-    <div class="add-form" id="form-name">
-      <input id="inp-add-name" type="text" placeholder="新名字" maxlength="20">
-      <button id="btn-add-name">添加</button>
+    <div class="chips-wrap">
+      <div class="lbl-row">
+        <span>名字预设</span>
+        <button class="add" data-form="name">+ 添加</button>
+      </div>
+      <div class="chips" id="chips-names"></div>
+      <div class="add-form" id="form-name">
+        <input id="inp-add-name" type="text" placeholder="新名字" maxlength="20">
+        <button id="btn-add-name">添加</button>
+      </div>
     </div>
-  </div>
 
-  <div class="row">
-    <div class="lbl">标签（同标签互联）</div>
-    <input id="inp-tag" type="text" placeholder="例如 001" autocomplete="off" maxlength="32">
-  </div>
-  <div class="chips-wrap">
-    <div class="lbl-row">
-      <span class="lbl">标签预设</span>
-      <button class="add" data-form="tag">+ 添加</button>
+    <div class="row">
+      <div class="lbl">标签（同标签互联）</div>
+      <input id="inp-tag" type="text" placeholder="例如 001" autocomplete="off" maxlength="32">
     </div>
-    <div class="chips" id="chips-tags"></div>
-    <div class="add-form" id="form-tag">
-      <input id="inp-add-tag" type="text" placeholder="新标签" maxlength="20">
-      <button id="btn-add-tag">添加</button>
+    <div class="chips-wrap">
+      <div class="lbl-row">
+        <span>标签预设</span>
+        <button class="add" data-form="tag">+ 添加</button>
+      </div>
+      <div class="chips" id="chips-tags"></div>
+      <div class="add-form" id="form-tag">
+        <input id="inp-add-tag" type="text" placeholder="新标签" maxlength="20">
+        <button id="btn-add-tag">添加</button>
+      </div>
     </div>
   </div>
 

@@ -11,6 +11,7 @@ import {
 } from "./state";
 import { t } from "./i18n";
 import { ICONS } from "./icons";
+import { subscribeToSfx } from "./modules/dice/sfx-broadcast";
 
 // Crude device detection. OBR doesn't expose one; user-agent matching
 // covers the common phone/tablet cases well enough to decide whether to
@@ -50,14 +51,6 @@ const BC_TOGGLE_CC_PANEL = "com.obr-suite/cc-panel-toggle";
 // cc auto-popup toggles — per-client localStorage preference + a
 // LOCAL broadcast that the dice background module listens for.
 const BC_DICE_HISTORY_TOGGLE = "com.obr-suite/dice-history-toggle";
-// Inline-search query — cluster broadcasts every keystroke; the
-// search-bar popover (below cluster) listens and runs its existing
-// search/render pipeline.
-const BC_SEARCH_QUERY = "com.obr-suite/search-query";
-// Asks the search popover to close immediately (sent on Esc / clear
-// click in the cluster input). Distinct from a "q=''" broadcast so
-// the popover knows it's an explicit dismiss vs. a casual clear.
-const BC_SEARCH_CLOSE = "com.obr-suite/search-close";
 
 // Per-client preferences
 const LS_EXPANDED = "obr-suite/cluster-expanded";
@@ -76,9 +69,6 @@ const GEAR_SVG = `<svg class="gear" viewBox="0 0 24 24" fill="none" stroke="curr
 let expanded = false;          // synced with LS during init below
 let timeStopActive = false;
 let isGM = false;
-// Last-typed search query, preserved across re-renders so toggling
-// expand / language doesn't clear what the user was typing.
-let lastSearchQuery = "";
 // Last known cluster height (popover height) — used to dedupe setHeight
 // + broadcast calls so the search bar isn't churning every render.
 let lastClusterHeight = H_COLLAPSED;
@@ -262,20 +252,8 @@ function renderRow() {
     );
   }
 
-  // Inline search input — takes the remaining horizontal space.
-  // Typing here broadcasts to the search-bar popover below the
-  // cluster, which renders the dropdown / preview independently
-  // (so dropdown size doesn't affect cluster layout). Hidden on
-  // mobile — the search-bar popover would dwarf the screen.
-  if (s.enabled.search && !IS_MOBILE) {
-    const placeholder = lang === "zh"
-      ? "搜索 5etools…"
-      : "Search 5etools…";
-    parts.push(`<div class="search-wrap" id="searchWrap">
-      <input id="searchInput" type="text" placeholder="${placeholder}" autocomplete="off" spellcheck="false">
-      <button class="clear-btn" id="searchClear" type="button" aria-label="清空">✕</button>
-    </div>`);
-  }
+  // Search input now lives in its OWN top-right popover (not in the
+  // cluster). See modules/search/index.ts.
 
   // Merged settings/about gear — always present.
   parts.push(
@@ -305,54 +283,6 @@ function renderRow() {
     ?.addEventListener("click", onCharCardPanel);
   // Dice panel handler removed — dice now lives in the OBR action.
   document.getElementById("btnGear")?.addEventListener("click", onGear);
-
-  // Inline search wiring — broadcasts query changes to the search-bar
-  // popover below. The popover does the actual indexing + result
-  // rendering; this iframe just captures keystrokes.
-  const searchInput = document.getElementById("searchInput") as HTMLInputElement | null;
-  const searchClear = document.getElementById("searchClear") as HTMLButtonElement | null;
-  const searchWrap = document.getElementById("searchWrap") as HTMLDivElement | null;
-  if (searchInput) {
-    // Restore the last-typed query so re-renders (expand/collapse,
-    // language switch) don't wipe what the user was typing.
-    searchInput.value = lastSearchQuery;
-    if (lastSearchQuery) searchWrap?.classList.add("has-q");
-    searchInput.addEventListener("input", () => {
-      const q = searchInput.value;
-      lastSearchQuery = q;
-      searchWrap?.classList.toggle("has-q", q.length > 0);
-      try {
-        OBR.broadcast.sendMessage(BC_SEARCH_QUERY, { q }, { destination: "LOCAL" });
-      } catch {}
-    });
-    // Esc clears + explicitly closes the popover.
-    searchInput.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        searchInput.value = "";
-        lastSearchQuery = "";
-        searchWrap?.classList.remove("has-q");
-        searchInput.blur();
-        try {
-          OBR.broadcast.sendMessage(BC_SEARCH_QUERY, { q: "" }, { destination: "LOCAL" });
-          OBR.broadcast.sendMessage(BC_SEARCH_CLOSE, {}, { destination: "LOCAL" });
-        } catch {}
-      }
-    });
-  }
-  if (searchClear) {
-    searchClear.addEventListener("click", () => {
-      if (!searchInput) return;
-      searchInput.value = "";
-      lastSearchQuery = "";
-      searchWrap?.classList.remove("has-q");
-      searchInput.focus();
-      try {
-        OBR.broadcast.sendMessage(BC_SEARCH_QUERY, { q: "" }, { destination: "LOCAL" });
-        OBR.broadcast.sendMessage(BC_SEARCH_CLOSE, {}, { destination: "LOCAL" });
-      } catch {}
-    });
-  }
 
   // Re-measure after layout updates so the popover height tracks the
   // actual wrapped row count (and the search bar follows along).
@@ -443,29 +373,19 @@ async function onGear() {
 
 // --- Init ---
 OBR.onReady(async () => {
+  // Subscribe this iframe to dice-effect SFX broadcasts. Cluster is
+  // always-present and frequently clicked, so its AudioContext is
+  // usually warm enough to play sounds when dice-effect (which has
+  // disablePointerEvents and can never warm its own context) requests
+  // them.
+  subscribeToSfx();
+
   // TimeStop activity tracking — must be inside OBR.onReady, otherwise
   // calling broadcast.onMessage too early throws "Unable to send message:
   // not ready".
   OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {
     timeStopActive = !!(event.data as any)?.active;
     renderRow();
-  });
-
-  // ONCE-ONLY BC_SEARCH_QUERY listener. Previously this was registered
-  // inside renderRow() — every re-render piled on a new listener →
-  // input flickered, value got overwritten, the popover misbehaved.
-  // The listener now runs ONCE; it always looks up the CURRENT
-  // #searchInput element via getElementById since the DOM is rebuilt
-  // each renderRow.
-  OBR.broadcast.onMessage(BC_SEARCH_QUERY, (event) => {
-    const q = (event.data as { q?: string } | undefined)?.q ?? "";
-    const inp = document.getElementById("searchInput") as HTMLInputElement | null;
-    const wrap = document.getElementById("searchWrap") as HTMLDivElement | null;
-    if (!inp) return;
-    if (q === inp.value) return;
-    inp.value = q;
-    lastSearchQuery = q;
-    wrap?.classList.toggle("has-q", q.length > 0);
   });
 
   // Robust role detection: try getRole, then also subscribe to player

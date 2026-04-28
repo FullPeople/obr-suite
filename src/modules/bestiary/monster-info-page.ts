@@ -1,6 +1,8 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { ICONS } from "../../icons";
 import { formatTagsClickable, fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
+import { bindRollableContextMenu } from "../dice/context-menu";
+import { subscribeToSfx } from "../dice/sfx-broadcast";
 
 const SHOW_MSG = "com.bestiary/info-show";
 const BESTIARY_DATA_KEY = "com.bestiary/monsters";
@@ -246,7 +248,7 @@ function renderLegendary(m: any, displayName: string): string {
   const rows = items.map((a: any) => {
     const n = a.name || "?";
     const t = flattenEntries(a.entries);
-    return `<div class="act legendary"><span class="n">${escapeHtml(n)}</span><span class="t">${formatTagsClickable(t)}</span></div>`;
+    return `<div class="act legendary"><span class="n">${formatTagsClickable(n)}</span><span class="t">${formatTagsClickable(t)}</span></div>`;
   }).join("");
   return `<div class="sect">${ICONS.star} 传奇动作</div><div class="preamble">${formatTagsClickable(headerText)}</div>${rows}`;
 }
@@ -308,7 +310,7 @@ function render(m: any) {
       const aMod = mod(score);
       // Ability check: 1d20+modifier
       const aExpr = `1d20${aMod >= 0 ? `+${aMod}` : aMod}`;
-      const aLbl = `${monsterName} · ${FULL[k] ?? ABBR[k]}检定`;
+      const aLbl = `${FULL[k] ?? ABBR[k]}检定`;
       // Saving throw — for proficient saves, m.save[k] holds the bonus
       // string ("+5" / "5"). Otherwise it's the same as the modifier.
       const saveBonusRaw = saves[k];
@@ -320,7 +322,7 @@ function render(m: any) {
         saveBn = saveBonusRaw;
       }
       const saveExpr = `1d20${saveBn >= 0 ? `+${saveBn}` : saveBn}`;
-      const saveLbl = `${monsterName} · ${FULL[k] ?? ABBR[k]}豁免`;
+      const saveLbl = `${FULL[k] ?? ABBR[k]}豁免`;
       return `<div class="abl${isProf ? " prof" : ""}">
         <span class="a rollable" data-expr="${saveExpr}" data-label="${escapeHtml(saveLbl)}" title="${escapeHtml(saveLbl)} ${saveExpr}">${ABBR[k]}</span>
         <span class="t">${score}</span>
@@ -335,9 +337,10 @@ function render(m: any) {
       .map((a) => {
         const n = a.name || "?";
         const t = flattenEntries(a.entries);
-        // Body text gets the rich treatment so attack hits / damage
-        // dice in the entries become clickable rollable spans.
-        return `<div class="act ${cls}"><span class="n">${escapeHtml(n)}</span><span class="t">${formatTagsClickable(t)}</span></div>`;
+        // Both NAME and BODY get the rich treatment so {@recharge 4} in
+        // names ("Whelm {@recharge 4}") and {@hit}/{@damage} in entries
+        // all become clickable rollable spans.
+        return `<div class="act ${cls}"><span class="n">${formatTagsClickable(n)}</span><span class="t">${formatTagsClickable(t)}</span></div>`;
       })
       .join("");
     return `<div class="sect">${title}</div>${rows}`;
@@ -388,10 +391,10 @@ async function showMonster(slug: string) {
 }
 
 // Delegated click for any 5etools rollable tag inside the monster
-// stat-block. The bestiary popover is GM-only, so the click semantics
-// here favor "DM stays in control" — left-click defaults to a DARK
-// roll (only the DM sees the dice/result, players don't), right-click
-// fires an OPEN roll (everyone sees it).
+// stat-block. Left-click = OPEN roll (all players see it) — matches
+// the "DM is just rolling out loud" common case. Right-click pops the
+// context menu, which has its own 暗骰 entry for when the DM wants a
+// hidden roll.
 async function fireRollableFromBestiary(target: HTMLElement, hidden: boolean) {
   const expression = target.dataset.expr ?? "";
   const label = target.dataset.label ?? "";
@@ -408,18 +411,35 @@ root.addEventListener("click", async (e) => {
   if (!target) return;
   e.preventDefault();
   e.stopPropagation();
-  await fireRollableFromBestiary(target, true);  // left click → dark
+  await fireRollableFromBestiary(target, false); // left click → open roll
 });
 
-root.addEventListener("contextmenu", async (e) => {
-  const target = (e.target as HTMLElement | null)?.closest<HTMLElement>(".rollable");
-  if (!target) return;
-  e.preventDefault();
-  e.stopPropagation();
-  await fireRollableFromBestiary(target, false); // right click → open
-});
+// Right-click → context menu (投掷 / 优势 / 劣势 / 添加到骰盘).
+// Replaces the previous "right click = open roll" shortcut; the menu's
+// 投掷 entry preserves the open-roll path for users who want it.
+//
+// The bestiary monster-info popover is opened from `bestiary/index.ts`
+// with anchorPosition = { left: vw/2, top: INFO_TOP_OFFSET } and
+// anchorOrigin = CENTER/TOP. So the iframe's TOP-LEFT in viewport
+// pixels is (vw/2 − innerWidth/2, INFO_TOP_OFFSET). INFO_TOP_OFFSET
+// is 50 in bestiary/index.ts; pulled in via constant to stay aligned
+// if it ever changes.
+const INFO_TOP_OFFSET = 60; // matches bestiary/index.ts
+bindRollableContextMenu(
+  root,
+  () => "dark",
+  () => resolveClickRollTarget(),
+  async () => {
+    const vw = await OBR.viewport.getWidth().catch(() => 1280);
+    return {
+      left: Math.round(vw / 2 - window.innerWidth / 2),
+      top: INFO_TOP_OFFSET,
+    };
+  },
+);
 
 OBR.onReady(() => {
+  subscribeToSfx();
   // Capture the popover's opened height as the ceiling for future resizes.
   if (window.innerHeight > 0) INFO_MAX_HEIGHT = window.innerHeight;
 

@@ -4,10 +4,12 @@
 // fly with oscillators + filtered noise. Cheap to render (each sound
 // is ~50-700ms), zero asset weight, no fetch round-trip.
 //
-// Each function plays its sound and returns immediately. If the user
-// disabled sound (via the suite Settings → 基础设置 → 音效 toggle), all
-// functions are no-ops. The on/off pref is checked at play time so a
-// just-toggled change takes effect on the next sound.
+// IMPORTANT: this module is intentionally a leaf — no OBR SDK
+// imports. Earlier we tried to broadcast from inside this file, but
+// vite/rollup ended up putting a CommonJS-helper in `sfx.ts` and
+// importing it back from the shared `lib` chunk, creating an ESM
+// circular dep that triggered "e is not a function" at load time.
+// Broadcast/subscribe wiring lives in `./sfx-broadcast.ts` instead.
 
 const LS_KEY = "obr-suite/sfx-on";
 
@@ -34,6 +36,66 @@ function isOn(): boolean {
 function resume(): void {
   const c = getCtx();
   if (c && c.state === "suspended") c.resume().catch(() => {});
+}
+
+// --- Audio sample playback (mp3 / wav) ---
+//
+// Two real samples ship with the suite:
+//   - dice.mp3    (one tumble per die, dispatched per-die from the
+//                  effect page so 5 dice → 5 independent overlapping
+//                  plays)
+//   - cartoon.mp3 (the climax punch on the final-total scale-pop)
+// Other sfx stay synthesized.
+//
+// Credit: Sound Effect by freesound_community from Pixabay
+//         (uploader: ksjsbwuil)
+
+const DICE_URL = "https://obr.dnd.center/suite/dice.mp3";
+const CARTOON_URL = "https://obr.dnd.center/suite/cartoon.mp3";
+
+const sampleBuffers = new Map<string, AudioBuffer>();
+const sampleLoading = new Map<string, Promise<AudioBuffer | null>>();
+
+async function loadSample(url: string): Promise<AudioBuffer | null> {
+  const cached = sampleBuffers.get(url);
+  if (cached) return cached;
+  const pending = sampleLoading.get(url);
+  if (pending) return pending;
+  const p = (async () => {
+    const c = getCtx();
+    if (!c) return null;
+    try {
+      const res = await fetch(url);
+      const data = await res.arrayBuffer();
+      const buf = await c.decodeAudioData(data);
+      sampleBuffers.set(url, buf);
+      return buf;
+    } catch {
+      return null;
+    } finally {
+      sampleLoading.delete(url);
+    }
+  })();
+  sampleLoading.set(url, p);
+  return p;
+}
+
+function playSample(url: string, gain: number = 0.55): void {
+  if (!isOn()) return;
+  resume();
+  const c = getCtx();
+  if (!c) return;
+  // Prime the buffer load. Once cached, subsequent plays are sync.
+  loadSample(url).then((buf) => {
+    if (!buf) return;
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    const g = c.createGain();
+    g.gain.value = gain;
+    src.connect(g);
+    g.connect(c.destination);
+    try { src.start(); } catch {}
+  }).catch(() => {});
 }
 
 // --- Generic envelope helpers ---
@@ -142,92 +204,88 @@ function noiseBurst(opts: {
   src.stop(t0 + dur + 0.05);
 }
 
-// ──────────────── Public API: one function per sound ────────────────
+// ──────────────── Local play implementations ────────────────
+// These are EXPORTED so sfx-broadcast.ts can dispatch them by name
+// when a BC_SFX broadcast arrives.
 
-// 1. Dice rolling parabola — bouncing arc fly-in.
-//    Brief whoosh + descending pitch click bounces.
-export function sfxParabola(): void {
-  if (!isOn()) return; resume();
-  noiseBurst({ duration: 0.55, startFreq: 1800, endFreq: 200, Q: 1.4, gain: 0.18, attack: 0.05, release: 0.25 });
-  // 4 little impacts spaced like the bounce cascade in the visual.
-  tone({ freq: 380, type: "triangle", duration: 0.06, gain: 0.10, attack: 0.005, release: 0.05, delay: 0.32 });
-  tone({ freq: 320, type: "triangle", duration: 0.05, gain: 0.08, attack: 0.005, release: 0.04, delay: 0.42 });
-  tone({ freq: 280, type: "triangle", duration: 0.04, gain: 0.06, attack: 0.005, release: 0.03, delay: 0.49 });
-  tone({ freq: 240, type: "triangle", duration: 0.03, gain: 0.05, attack: 0.005, release: 0.025, delay: 0.54 });
+// Per-die roll tumble. effect-page calls this ONCE PER DIE, slightly
+// staggered, so 5 dice → 5 overlapping dice.mp3 plays (sounds like a
+// pile of dice tumbling). Source: dice.mp3 (Pixabay, ksjsbwuil).
+export function playParabola(): void {
+  playSample(DICE_URL, 0.45);
 }
-
-// 2. Single-die zoom punch (the climax scale on a winner).
-export function sfxScalePunch(): void {
-  if (!isOn()) return; resume();
-  tone({ freq: 660, endFreq: 440, type: "sine", duration: 0.18, gain: 0.20, attack: 0.005, release: 0.10 });
-  tone({ freq: 1320, endFreq: 880, type: "triangle", duration: 0.14, gain: 0.12, attack: 0.005, release: 0.08, delay: 0.01 });
+// Climax punch on the final-total scale-pop. Source: cartoon.mp3
+// (Pixabay, ksjsbwuil).
+export function playScalePunch(): void {
+  playSample(CARTOON_URL, 0.55);
 }
-
-// 3. Number flying up to running total (rush per-die).
-export function sfxNumFly(): void {
+export function playNumFly(): void {
   if (!isOn()) return; resume();
   tone({ freq: 540, endFreq: 1080, type: "sine", duration: 0.16, gain: 0.10, attack: 0.005, release: 0.10 });
 }
-
-// 4. Number landing in / merging with the running total — softer
-//    confirmation tick for each per-die rush.
-export function sfxNumLand(): void {
+export function playNumLand(): void {
   if (!isOn()) return; resume();
   tone({ freq: 880, type: "triangle", duration: 0.07, gain: 0.10, attack: 0.005, release: 0.05 });
 }
-
-// 5. Final result flash (crit / fail).
-export function sfxFlashCrit(): void {
+export function playFlashCrit(): void {
   if (!isOn()) return; resume();
   tone({ freq: 660, endFreq: 1320, type: "sawtooth", duration: 0.30, gain: 0.18, attack: 0.005, release: 0.18, filter: { type: "lowpass", freq: 4000, Q: 0.7 } });
   tone({ freq: 880, endFreq: 1760, type: "triangle", duration: 0.34, gain: 0.13, attack: 0.01, release: 0.20, delay: 0.04 });
 }
-export function sfxFlashFail(): void {
+export function playFlashFail(): void {
   if (!isOn()) return; resume();
   tone({ freq: 220, endFreq: 90, type: "sawtooth", duration: 0.40, gain: 0.20, attack: 0.005, release: 0.25, filter: { type: "lowpass", freq: 1200, Q: 1.0 } });
 }
-
-// 6. Spin-and-replace (max/min/reset transform).
-export function sfxSpin(): void {
+export function playSpin(): void {
   if (!isOn()) return; resume();
-  // Whirring "spin" — pitched filtered noise sweeping up.
   noiseBurst({ duration: 0.55, startFreq: 400, endFreq: 1800, Q: 4, gain: 0.12, attack: 0.03, release: 0.20 });
-  // Click at the end where the value snaps.
   tone({ freq: 1100, type: "triangle", duration: 0.10, gain: 0.16, attack: 0.005, release: 0.08, delay: 0.50 });
 }
-
-// 7. Burst (explosion dice triggered).
-export function sfxBurst(): void {
+export function playBurst(): void {
   if (!isOn()) return; resume();
   noiseBurst({ duration: 0.42, startFreq: 1400, endFreq: 80, Q: 0.8, gain: 0.30, attack: 0.005, release: 0.25 });
   tone({ freq: 220, endFreq: 60, type: "sawtooth", duration: 0.35, gain: 0.20, attack: 0.005, release: 0.20, filter: { type: "lowpass", freq: 800, Q: 1.2 } });
 }
-
-// 8. Same-value highlight (duplicate dice).
-export function sfxSame(): void {
+export function playSame(): void {
   if (!isOn()) return; resume();
-  // A small chord — perfect fifth — plays as one chime.
   tone({ freq: 880, type: "sine", duration: 0.42, gain: 0.10, attack: 0.005, release: 0.30 });
   tone({ freq: 1318.5, type: "sine", duration: 0.42, gain: 0.08, attack: 0.005, release: 0.30, delay: 0.04 });
 }
-
-// 9. Sync-viewport "登" — a gentle low-pitch confirmation thunk.
-export function sfxSyncView(): void {
+export function playSyncView(): void {
   if (!isOn()) return; resume();
   tone({ freq: 220, type: "sine", duration: 0.25, gain: 0.20, attack: 0.005, release: 0.20 });
   tone({ freq: 110, type: "sine", duration: 0.25, gain: 0.16, attack: 0.005, release: 0.20, delay: 0.005 });
 }
-
-// 10. Next-turn "登" — slightly higher / brighter than sync.
-export function sfxNextTurn(): void {
+export function playNextTurn(): void {
   if (!isOn()) return; resume();
   tone({ freq: 392, type: "sine", duration: 0.22, gain: 0.18, attack: 0.005, release: 0.18 });
   tone({ freq: 587.3, type: "triangle", duration: 0.20, gain: 0.10, attack: 0.005, release: 0.16, delay: 0.02 });
 }
 
-// Initial tap from any iframe — call once after the user has clicked
-// something, so the AudioContext can resume from its suspended state.
-// We don't auto-suspend later; the ctx stays alive for the session.
-export function sfxPrime(): void {
+// Public sfx names — also the broadcast payload `name` field used by
+// sfx-broadcast.ts.
+export type SfxName =
+  | "parabola" | "scalePunch" | "numFly" | "numLand"
+  | "flashCrit" | "flashFail" | "spin" | "burst" | "same"
+  | "syncView" | "nextTurn";
+
+export const PLAYERS: Record<SfxName, () => void> = {
+  parabola: playParabola,
+  scalePunch: playScalePunch,
+  numFly: playNumFly,
+  numLand: playNumLand,
+  flashCrit: playFlashCrit,
+  flashFail: playFlashFail,
+  spin: playSpin,
+  burst: playBurst,
+  same: playSame,
+  syncView: playSyncView,
+  nextTurn: playNextTurn,
+};
+
+// Resume the AudioContext — call from sfx-broadcast.ts on first user
+// gesture. Exposed here so the broadcast file doesn't need to peek at
+// the private ctx state.
+export function primeAudio(): void {
   resume();
 }

@@ -32,16 +32,11 @@ const MODAL_PREFIX = "com.obr-suite/dice-effect-";
 const EFFECT_URL = "https://obr.dnd.center/suite/dice-effect.html";
 
 // Dice panel popover (OBR manifest v1 doesn't accept a custom action
-// URL, so we use OBR.popover with positioning instead of OBR's native
-// action drawer). The cluster's dice button broadcasts a toggle that
-// opens / closes the popover.
-const PANEL_POPOVER_ID = "com.obr-suite/dice-panel";
-const PANEL_URL = "https://obr.dnd.center/suite/dice-panel.html";
+// The dice panel is the OBR action popover (manifest.json declares
+// `action.popover` → dice-panel.html). We open/close it via
+// `OBR.action.open()` / `close()`. The cluster's dice button + history
+// row + right-click "添加到骰盘" all broadcast BC_PANEL_TOGGLE.
 const BC_PANEL_TOGGLE = "com.obr-suite/dice-panel-toggle";
-const PANEL_W = 380;
-const PANEL_H = 580;
-const PANEL_RIGHT_OFFSET = 60;
-const PANEL_TOP_OFFSET = 80;
 
 // Dice history popover — always-on, anchored to the bottom-left of
 // the viewport. Per-player rows show last roll. Click a row to jump
@@ -60,6 +55,15 @@ const HISTORY_BOTTOM_OFFSET = 70;
 // payload to trigger a roll. The background module parses the
 // expression, rolls, broadcasts via the normal pipeline.
 const BC_QUICK_ROLL = "com.obr-suite/dice-quick-roll";
+// Sent by the dice-history popover's X button. Closes the popover
+// WITHOUT touching the cluster's "投骰记录" toggle state — so the
+// next dice roll re-opens it. The cluster toggle is the only thing
+// that can permanently disable the popover.
+const BC_DICE_HISTORY_DISMISS = "com.obr-suite/dice-history-dismiss";
+// "Add to dice tray" shortcut. Right-click context menu → 添加到骰盘
+// sends BC_PANEL_TOGGLE { open: true, prefill } and the background
+// module then broadcasts BC_DICE_PANEL_FILL to the panel iframe.
+export const BC_DICE_PANEL_FILL = "com.obr-suite/dice-panel-fill";
 // History-popover toggle. Cluster's "投骰记录" toggle button broadcasts
 // this; the dice background opens / closes the bottom-left popover
 // accordingly. Per-client preference stored in localStorage.
@@ -76,8 +80,10 @@ const REPLAY_URL = "https://obr.dnd.center/suite/dice-replay.html";
 export interface QuickRollRequest {
   // Plain dice expression: "1d20+5", "2d6+3", "1d4+1d6+2", etc. Only
   // simple sums of NdM terms + integer modifier are supported here —
-  // for adv/dis/max/burst/etc. the user should use the dice panel
-  // directly.
+  // for full adv/dis/max/burst/etc. expression syntax the user should
+  // use the dice panel. The `advMode` flag below is a SHORTCUT for the
+  // common "click to roll with advantage" right-click flow: every d20
+  // in the parsed expression rolls twice and the loser is marked.
   expression: string;
   // Optional human-readable label shown above the dice (e.g. "命中",
   // "敏捷豁免", weapon name).
@@ -91,6 +97,10 @@ export interface QuickRollRequest {
   focus?: boolean;
   // Optional collective-id (multi-target roll grouping).
   collectiveId?: string;
+  // Right-click "优势 / 劣势" shortcut. When set, every d20 in the
+  // expression rolls TWICE; the higher (adv) / lower (dis) is kept and
+  // the other is flagged loser. Other dice (d4/d6/...) roll once.
+  advMode?: "adv" | "dis";
 }
 
 // --- Broadcast payload schema (extended for multi-type dice) ---
@@ -144,36 +154,27 @@ interface LegacyDiceRollPayload {
 }
 
 const unsubs: Array<() => void> = [];
-let panelOpen = false;
 
-async function openPanel(): Promise<void> {
-  try {
-    const vw = await OBR.viewport.getWidth();
-    try { await OBR.popover.close(PANEL_POPOVER_ID); } catch {}
-    await OBR.popover.open({
-      id: PANEL_POPOVER_ID,
-      url: PANEL_URL,
-      width: PANEL_W,
-      height: PANEL_H,
-      anchorReference: "POSITION",
-      anchorPosition: { left: vw - PANEL_RIGHT_OFFSET, top: PANEL_TOP_OFFSET },
-      anchorOrigin: { horizontal: "RIGHT", vertical: "TOP" },
-      transformOrigin: { horizontal: "RIGHT", vertical: "TOP" },
-      hidePaper: true,
-      disableClickAway: true,
-    });
-    panelOpen = true;
-  } catch (e) {
-    console.error("[obr-suite/dice] open panel failed", e);
+// The dice panel lives ONLY in the OBR action popover (top-left
+// d20 button, declared via manifest.json `action.popover`). Earlier
+// we also exposed it as an OBR.popover so cluster + 添加到骰盘 could
+// open it, but having two co-existing panels was confusing — the user
+// asked us to nuke the popover route and route everything through
+// `OBR.action.open()` instead.
+async function openActionPanel(): Promise<void> {
+  try { await OBR.action.open(); } catch (e) {
+    console.error("[obr-suite/dice] open action panel failed", e);
   }
 }
-
-async function closePanel(): Promise<void> {
-  try { await OBR.popover.close(PANEL_POPOVER_ID); } catch {}
-  panelOpen = false;
+async function closeActionPanel(): Promise<void> {
+  try { await OBR.action.close(); } catch {}
 }
 
 let historyOpen = false;
+// User dismissed the popover via its X button without flipping the
+// cluster toggle. Stays true until either (a) a new dice roll arrives
+// (auto-reopen) or (b) the cluster toggle is operated (explicit signal).
+let historyManuallyDismissed = false;
 async function openHistory(): Promise<void> {
   if (historyOpen) return;
   try {
@@ -356,27 +357,75 @@ async function showDiceEffect(p: DiceRollPayload): Promise<void> {
 
 export async function setupDice(): Promise<void> {
   // 1. Listen for dice-roll broadcasts → render the visual effect.
+  //    Also auto-reopen the history popover if the user manually
+  //    dismissed it — a new roll is the natural cue to bring it back.
+  //
+  //    Dedupe: the sender broadcasts LOCAL+REMOTE for non-hidden rolls.
+  //    Most clients receive each rollId exactly once, but on the DM's
+  //    side we've intermittently seen the same payload arrive twice —
+  //    likely an OBR delivery quirk during initiative-driven rolls.
+  //    A small Set keyed by `rollId` with a 10s TTL guards against the
+  //    duplicate so the dice-effect modal opens at most once per roll.
+  const seenRolls = new Map<string, number>();
+  const ROLL_DEDUPE_MS = 10_000;
   unsubs.push(
     OBR.broadcast.onMessage(BROADCAST_DICE_ROLL, (event) => {
       const data = normalizePayload(event.data);
       if (!data) return;
+      const now = Date.now();
+      // Sweep stale entries.
+      if (seenRolls.size > 200) {
+        for (const [k, t] of seenRolls) {
+          if (now - t > ROLL_DEDUPE_MS) seenRolls.delete(k);
+        }
+      }
+      if (data.rollId && seenRolls.has(data.rollId)) return;
+      if (data.rollId) seenRolls.set(data.rollId, now);
       showDiceEffect(data).catch(() => {});
+      if (historyManuallyDismissed && isHistoryAutoOn()) {
+        historyManuallyDismissed = false;
+        openHistory().catch(() => {});
+      }
     })
   );
 
-  // 2. Toggle the dice panel popover.
-  // The cluster's dice button broadcasts BC_PANEL_TOGGLE without a
-  // payload (just toggles). The history-popover row clicks send
-  // { open: true } so the panel always OPENS (never accidentally
-  // closes if it was already up).
+  // 2. Toggle the dice panel via OBR.action (top-left d20 button).
+  // The cluster's dice button + history-popover row clicks +
+  // right-click "添加到骰盘" all broadcast BC_PANEL_TOGGLE. Payload
+  // shape: { open?: boolean, prefill?: string }. We always favor
+  // OPENing for prefill broadcasts so a typed-in expression doesn't
+  // toggle the panel closed.
   unsubs.push(
     OBR.broadcast.onMessage(BC_PANEL_TOGGLE, async (event) => {
-      const data = event.data as { open?: boolean } | undefined;
-      if (data && data.open === true) {
-        if (!panelOpen) await openPanel();
+      const data = event.data as { open?: boolean; prefill?: string } | undefined;
+      const wantOpen = !!(data && (data.open === true || typeof data.prefill === "string"));
+      let isOpen = false;
+      try { isOpen = await OBR.action.isOpen(); } catch {}
+      if (wantOpen) {
+        if (!isOpen) await openActionPanel();
       } else {
-        if (panelOpen) await closePanel();
-        else await openPanel();
+        if (isOpen) await closeActionPanel();
+        else await openActionPanel();
+      }
+      if (data?.prefill) {
+        // Two-phase prefill so it works on cold-start AND when the
+        // action iframe is already loaded:
+        //   1. Stash in localStorage so the iframe can pick it up on
+        //      mount (covers the case where the broadcast races
+        //      ahead of listener registration).
+        //   2. Also re-broadcast after a beat so a hot iframe gets
+        //      the fill via its live listener even if it loaded
+        //      before the user clicked.
+        try { localStorage.setItem("obr-suite/dice-pending-prefill", data.prefill); } catch {}
+        setTimeout(() => {
+          OBR.broadcast
+            .sendMessage(
+              BC_DICE_PANEL_FILL,
+              { expression: data.prefill },
+              { destination: "LOCAL" },
+            )
+            .catch(() => {});
+        }, 250);
       }
     })
   );
@@ -389,10 +438,22 @@ export async function setupDice(): Promise<void> {
   }
   unsubs.push(
     OBR.broadcast.onMessage(BC_DICE_HISTORY_TOGGLE, async () => {
-      // Just-toggled by cluster — read the (already-updated) pref and
-      // reconcile the popover open/closed state.
+      // Just-toggled by cluster — explicit user signal, so clear any
+      // "manually dismissed" state and obey the new pref.
+      historyManuallyDismissed = false;
       if (isHistoryAutoOn()) await openHistory();
       else await closeHistory();
+    }),
+  );
+
+  // X-button inside the history popover. Closes the popover but does
+  // NOT touch the LS_AUTO_DICE_HISTORY pref — the next dice roll
+  // (above) will auto-reopen it.
+  unsubs.push(
+    OBR.broadcast.onMessage(BC_DICE_HISTORY_DISMISS, async () => {
+      if (!historyOpen) return;
+      historyManuallyDismissed = true;
+      await closeHistory();
     }),
   );
 
@@ -501,7 +562,34 @@ function rollSimpleExpression(expr: string): { dice: DieResult[]; modifier: numb
 }
 
 async function handleQuickRoll(req: QuickRollRequest): Promise<void> {
-  const { dice, modifier } = rollSimpleExpression(req.expression);
+  const parsed = rollSimpleExpression(req.expression);
+  let { dice } = parsed;
+  const { modifier } = parsed;
+
+  // Advantage / disadvantage shortcut: every d20 in the dice array
+  // gets a paired roll; keep the higher (adv) / lower (dis), mark the
+  // loser. Other dice are unaffected.
+  if (req.advMode === "adv" || req.advMode === "dis") {
+    const expanded: DieResult[] = [];
+    for (const d of dice) {
+      if (d.type !== "d20") {
+        expanded.push(d);
+        continue;
+      }
+      const partner: DieResult = { type: "d20", value: rollDie("d20") };
+      const keepFirst =
+        req.advMode === "adv"
+          ? d.value >= partner.value
+          : d.value <= partner.value;
+      if (keepFirst) {
+        expanded.push(d, { ...partner, loser: true });
+      } else {
+        expanded.push({ ...d, loser: true }, partner);
+      }
+    }
+    dice = expanded;
+  }
+
   if (!dice.length && modifier === 0) return;
 
   // Camera focus on the requested token (only if explicitly asked
@@ -539,8 +627,10 @@ async function handleQuickRoll(req: QuickRollRequest): Promise<void> {
   });
 }
 
+
 export async function teardownDice(): Promise<void> {
-  await closePanel();
+  // Close the action panel if open. (OBR.action.close is idempotent.)
+  await closeActionPanel();
   // History popover is no longer opened during setup; closing it is
   // a no-op but cheap, kept for safety in case users still have a
   // stale popover from a previous session.

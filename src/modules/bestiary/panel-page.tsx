@@ -2,9 +2,62 @@ import { render } from "preact";
 import { useEffect, useState, useCallback, useRef } from "preact/compat";
 import OBR from "@owlbear-rodeo/sdk";
 import { ParsedMonster, MonsterEdition } from "./types";
-import { loadAllMonsters, searchMonsters } from "./data";
+import { loadAllMonsters, searchMonsters, getRawMonster, makeSlug } from "./data";
 import { spawnMonster } from "./spawn";
 import "./styles.css";
+
+// Bubbles + initiative metadata keys — same constants as spawn.ts. The
+// picker mode (?pickerForItemId=…) writes to these so the bound token
+// gets the chosen monster's HP / AC / DEX-mod alongside the slug
+// reference.
+const BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
+const BUBBLES_NAME = "com.owlbear-rodeo-bubbles-extension/name";
+const INITIATIVE_MODKEY = "com.initiative-tracker/dexMod";
+const BESTIARY_SLUG_KEY = "com.bestiary/slug";
+const BESTIARY_DATA_KEY = "com.bestiary/monsters";
+const PICKER_MODAL_ID = "com.obr-suite/bestiary-picker";
+
+// Read once at module load; the modal's URL is set by the caller.
+const URL_PARAMS = new URLSearchParams(location.search);
+const PICKER_TARGET_ITEM = URL_PARAMS.get("pickerForItemId") || null;
+
+async function ensureSharedMonsterData(slug: string, raw: any): Promise<void> {
+  if (!raw) return;
+  try {
+    const meta = await OBR.scene.getMetadata();
+    const table = (meta[BESTIARY_DATA_KEY] as Record<string, any>) || {};
+    if (table[slug]) return; // already populated
+    table[slug] = raw;
+    await OBR.scene.setMetadata({ [BESTIARY_DATA_KEY]: table });
+  } catch (e) {
+    console.error("[bestiary] ensureSharedMonsterData failed", e);
+  }
+}
+
+async function bindMonsterToToken(mon: ParsedMonster, itemId: string): Promise<void> {
+  const slug = makeSlug(mon.source, mon.engName);
+  await ensureSharedMonsterData(slug, getRawMonster(slug));
+  try {
+    await OBR.scene.items.updateItems([itemId], (drafts) => {
+      for (const d of drafts) {
+        d.metadata[BESTIARY_SLUG_KEY] = slug;
+        d.metadata[BUBBLES_META] = {
+          health: mon.hp,
+          "max health": mon.hp,
+          "temporary health": 0,
+          "armor class": mon.ac,
+          hide: true,
+        };
+        d.metadata[BUBBLES_NAME] = mon.name;
+        d.metadata[INITIATIVE_MODKEY] = mon.dexMod;
+        d.name = mon.name;
+      }
+    });
+  } catch (e) {
+    console.error("[bestiary] bindMonsterToToken failed", e);
+  }
+  try { await OBR.modal.close(PICKER_MODAL_ID); } catch {}
+}
 
 // Persisted UI state (keys are shared across panel opens / reloads).
 const LS_PREFIX = "bestiary/";
@@ -103,7 +156,11 @@ function App() {
   // from the suite Settings panel (dataVersion in scene metadata).
 
   const handleSpawn = useCallback(async (mon: ParsedMonster) => {
-    await spawnMonster(mon);
+    if (PICKER_TARGET_ITEM) {
+      await bindMonsterToToken(mon, PICKER_TARGET_ITEM);
+    } else {
+      await spawnMonster(mon);
+    }
   }, []);
 
   // Dynamic height — the suite hosts this as a popover, so resize via the
@@ -161,6 +218,13 @@ function App() {
 
   return (
     <div class="app">
+      {PICKER_TARGET_ITEM && (
+        <div
+          style="background:rgba(93,173,226,0.18);border-bottom:1px solid rgba(93,173,226,0.40);padding:8px 14px;font-size:12px;color:#7ec8f0;font-weight:600;text-align:center;"
+        >
+          点击下方怪物以绑定到所选 token（覆盖当前数据 / HP / AC）
+        </div>
+      )}
       <div class="header">
         <div class="header-top">
           <input

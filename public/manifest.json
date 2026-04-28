@@ -1,14 +1,14 @@
 {
-  "name": "枭熊插件 / Owl Suite",
-  "version": "0.1.0",
+  "name": "Full Suite",
+  "version": "1.0.0",
   "manifest_version": 1,
   "author": "FullPeople",
   "homepage_url": "https://github.com/FullPeople/obr-suite",
-  "description": "TRPG 全能套装：先攻追踪 / 怪物图鉴 / 角色卡 / 全局搜索 / 时停 / 同步视口 / 骰子（替代独立插件，单一安装）",
+  "description": "All-in-one TRPG suite / TRPG 全能套装：骰子、先攻、怪物图鉴、角色卡、搜索、时停、视口、传送门",
   "icon": "/suite/exe_icon.png",
   "background_url": "/suite/background.html",
   "action": {
-    "title": "骰子",
+    "title": "骰子 / Dice",
     "icon": "/suite/d20.png",
     "popover": "/suite/dice-panel.html",
     "width": 380,

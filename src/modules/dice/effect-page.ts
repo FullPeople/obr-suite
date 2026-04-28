@@ -1,6 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { DiceType, DIE_SIDES, DIE_SIZE_FACTOR, sidesOf } from "./types";
-import * as sfx from "./sfx";
+import * as sfx from "./sfx-broadcast";
 
 // Dice-effect modal page. Multi-die + multi-type capable.
 //
@@ -857,9 +857,14 @@ function frame(now: number): void {
 }
 
 OBR.onReady(async () => {
-  // Kick off the parabola whoosh + bounce-clicks the moment the
-  // modal mounts. The sound spans roughly the FLIGHT_MS bounce window.
-  sfx.sfxParabola();
+  // Each die plays its own tumble sample, staggered by ~60ms so a pile
+  // of dice sounds like a cascading roll rather than a single pop. With
+  // dice.mp3 ≈ 0.5-1s long, all instances overlap into the FLIGHT_MS
+  // bounce window. sfxParabola() also broadcasts so any iframe with a
+  // warm AudioContext picks it up — see sfx-broadcast.ts.
+  for (let i = 0; i < N_DICE; i++) {
+    setTimeout(() => sfx.sfxParabola(), i * 60);
+  }
 
   await readPosOnce();
 

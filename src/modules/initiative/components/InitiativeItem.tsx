@@ -89,7 +89,6 @@ export function InitiativeItemRow({
       onClick={() => onFocus(id)}
       onMouseEnter={() => onHover?.(id)}
       onMouseLeave={() => onHover?.(null)}
-      title={name}
     >
       <div className="item-img">
         {imageUrl ? (

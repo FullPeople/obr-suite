@@ -217,6 +217,156 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
   width:14px;height:14px;cursor:pointer;
   accent-color:#5dade2;
 }
+
+/* === 库设置 === */
+.lib-warn{
+  background:rgba(245,166,35,0.10);
+  border:1px solid rgba(245,166,35,0.35);
+  border-radius:6px;
+  padding:8px 12px;
+  font-size:11.5px;color:#f5d76e;
+  line-height:1.55;
+  margin-bottom:12px;
+}
+.lib-warn code{
+  background:rgba(0,0,0,0.35);
+  padding:1px 5px;border-radius:3px;
+  font-size:10.5px;
+}
+.lib-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.lib-row{
+  display:flex;flex-direction:column;gap:6px;
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.10);
+  border-radius:6px;
+  padding:8px 10px;
+}
+.lib-row-head{display:flex;align-items:center;gap:8px}
+.lib-row-head .lib-name{
+  flex:1;min-width:0;
+  background:rgba(0,0,0,0.30);
+  border:1px solid rgba(255,255,255,0.10);
+  color:#fff;font-size:12px;
+  padding:5px 8px;border-radius:4px;
+  font-family:inherit;
+}
+.lib-row-head .lib-name:read-only{opacity:0.7}
+.lib-row-url{display:flex;align-items:center;gap:6px}
+.lib-row-url .lib-row-label{
+  flex-shrink:0;
+  font-size:10.5px;color:#9ab;font-weight:700;
+  font-family:ui-monospace,Consolas,monospace;
+}
+.lib-url{
+  flex:1;min-width:0;
+  background:rgba(0,0,0,0.30);
+  border:1px solid rgba(255,255,255,0.10);
+  color:#cde;font-size:11px;
+  padding:4px 8px;border-radius:4px;
+  font-family:ui-monospace,Consolas,monospace;
+}
+.lib-url:read-only{opacity:0.7}
+.lib-tag{
+  font-size:9px;font-weight:700;
+  color:#7be0a0;background:rgba(46,204,113,0.18);
+  padding:2px 6px;border-radius:3px;letter-spacing:0.4px;
+}
+.lib-del-btn{
+  flex-shrink:0;width:24px;height:24px;
+  background:rgba(231,76,60,0.18);
+  border:1px solid rgba(231,76,60,0.35);
+  color:#ff8b7a;
+  border-radius:4px;font-size:12px;cursor:pointer;
+  font-family:inherit;
+  display:inline-flex;align-items:center;justify-content:center;
+  transition:background .12s;
+}
+.lib-del-btn:hover:not(:disabled){background:rgba(231,76,60,0.30)}
+.lib-del-btn:disabled{opacity:0.45;cursor:not-allowed}
+.lib-actions{margin-bottom:14px}
+.lib-add-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 14px;
+  background:rgba(52,152,219,0.18);
+  border:1px solid rgba(52,152,219,0.40);
+  color:#7ec8f0;font-weight:700;
+  border-radius:6px;font-size:11.5px;
+  cursor:pointer;font-family:inherit;
+  transition:background .12s;
+}
+.lib-add-btn:hover{background:rgba(52,152,219,0.30)}
+
+/* Tutorial collapsible */
+.lib-tut{
+  background:rgba(0,0,0,0.20);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:6px;
+  padding:6px 10px;
+  font-size:12px;
+}
+.lib-tut > summary{
+  cursor:pointer;
+  font-weight:700;color:#cde;
+  padding:4px 0;
+  list-style:none;
+  user-select:none;
+}
+.lib-tut > summary::before{
+  content:"▶";
+  display:inline-block;
+  margin-right:6px;
+  font-size:10px;color:#7aa2c4;
+  transition:transform .15s;
+}
+.lib-tut[open] > summary::before{transform:rotate(90deg)}
+.lib-tut-body{padding:6px 0 4px}
+.lib-tut-body h4{
+  font-size:12px;color:#f5a623;font-weight:700;
+  margin:10px 0 4px;padding-bottom:2px;
+  border-bottom:1px solid rgba(245,166,35,0.20);
+}
+.lib-tut-body p{margin:4px 0;line-height:1.6;color:#d2d6e3}
+.lib-tut-body pre{
+  background:rgba(0,0,0,0.40);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:4px;
+  padding:8px 10px;margin:6px 0;
+  overflow-x:auto;
+  font-size:10.5px;line-height:1.5;
+  color:#cde;
+  font-family:ui-monospace,Consolas,monospace;
+}
+.lib-tut-body code{
+  background:rgba(0,0,0,0.30);
+  padding:1px 5px;border-radius:3px;
+  font-size:10.5px;color:#7ec8f0;
+}
+.lib-tut-body ol, .lib-tut-body ul{margin:4px 0 4px 22px;color:#d2d6e3}
+.lib-tut-body li{margin-bottom:3px;line-height:1.55}
+.lib-prompt{
+  width:100%;
+  height:140px;
+  resize:vertical;
+  background:rgba(0,0,0,0.40);
+  border:1px solid rgba(255,255,255,0.10);
+  border-radius:4px;
+  padding:8px 10px;
+  font-size:10.5px;line-height:1.55;
+  color:#cde;
+  font-family:ui-monospace,Consolas,monospace;
+  margin:6px 0;
+}
+.lib-prompt-copy{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:5px 12px;
+  background:rgba(46,204,113,0.18);
+  border:1px solid rgba(46,204,113,0.40);
+  color:#7be0a0;font-weight:700;
+  border-radius:5px;font-size:11px;
+  cursor:pointer;font-family:inherit;
+  transition:background .12s;
+}
+.lib-prompt-copy:hover{background:rgba(46,204,113,0.30)}
 </style>
 </head>
 <body>
