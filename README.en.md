@@ -2,6 +2,10 @@
 
 [中文](./README.zh.md) · English
 
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="Full Suite" width="900" />
+</p>
+
 A third-party extension for [Owlbear Rodeo](https://owlbear.rodeo) that ships eight modules under one manifest.
 
 ## Install
@@ -24,6 +28,31 @@ https://obr.dnd.center/suite/manifest.json
 | <img src="docs/icons/clock-pause.svg" width="20" align="center" /> | Time Stop | DM-only freeze of player canvas input with cinematic letterbox bars. |
 | <img src="docs/icons/crosshair.svg" width="20" align="center" /> | Sync Viewport | Pans every player's camera to a chosen point or the selected token. |
 | <img src="docs/icons/portal.svg" width="20" align="center" /> | Portals | Drag-circle scene portals with same-tag linking; bypasses Dynamic Fog's light-source rejection during the position update. |
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/dice_roll.png" alt="Dice animation" width="100%" />
+      <br/><sub>Dice expressions and fly-in animation</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/initiative.png" alt="Initiative tracker" width="100%" />
+      <br/><sub>Top-anchored initiative strip with turn cycling</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/card.png" alt="Character card" width="100%" />
+      <br/><sub>Character card popover · click-to-roll</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/portal.png" alt="Portal" width="100%" />
+      <br/><sub>Portal tool · destination picker</sub>
+    </td>
+  </tr>
+</table>
 
 ## Dice expression syntax
 

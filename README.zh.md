@@ -2,6 +2,10 @@
 
 [English](./README.en.md) · 中文
 
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="Full Suite" width="900" />
+</p>
+
 [Owlbear Rodeo](https://owlbear.rodeo) 第三方扩展。在一个 manifest 下集成 8 个模块。
 
 ## 安装
@@ -24,6 +28,31 @@ https://obr.dnd.center/suite/manifest.json
 | <img src="docs/icons/clock-pause.svg" width="20" align="center" /> | 时停 | DM 一键禁用玩家画布操作，添加电影黑边。 |
 | <img src="docs/icons/crosshair.svg" width="20" align="center" /> | 同步视口 | 把所有玩家镜头移动到指定坐标或所选 token。 |
 | <img src="docs/icons/portal.svg" width="20" align="center" /> | 传送门 | 在场景中创建圆形传送区域，同标签互联，可绕过 Dynamic Fog 的光源拦截。 |
+
+## 截图
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/dice_roll.png" alt="骰子动画" width="100%" />
+      <br/><sub>骰子表达式 + 飞行动画</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/initiative.png" alt="先攻条" width="100%" />
+      <br/><sub>顶部先攻条 + 回合切换</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/card.png" alt="角色卡" width="100%" />
+      <br/><sub>角色卡浮窗 · 可点击投骰</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/portal.png" alt="传送门" width="100%" />
+      <br/><sub>传送门 + 目的地选择</sub>
+    </td>
+  </tr>
+</table>
 
 ## 骰子表达式语法
 

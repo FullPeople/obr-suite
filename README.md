@@ -1,5 +1,9 @@
 # Full Suite
 
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="Full Suite" width="900" />
+</p>
+
 An [Owlbear Rodeo](https://owlbear.rodeo) extension that bundles eight modules behind a single manifest: dice, initiative tracker, bestiary, character cards, global search, time stop, sync viewport, and portals.
 
 ```
