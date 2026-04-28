@@ -7,8 +7,12 @@ import {
   ModuleId,
   DataVersion,
   Language,
+  getLocalLang,
+  setLocalLang,
+  onLangChange,
 } from "./state";
 import { applyLangAttr } from "./i18n";
+import { ICONS } from "./icons";
 
 // Merged Settings + About panel.
 //
@@ -59,10 +63,10 @@ const SUPPORT: BilingualHtml = {
   zh: `
     <p>这套插件由 <b>弗人 FullPeople</b> 利用业余时间维护，所有代码开源于 GitHub。如果它对你的跑团有帮助，欢迎以下方式支持作者：</p>
     <div class="support-row">
-      <a class="support-btn kofi" href="${KOFI_URL}" target="_blank" rel="noopener"><span class="ic">☕</span> Support on Ko-fi</a>
-      <a class="support-btn afdian" href="${AFDIAN_URL}" target="_blank" rel="noopener"><span class="ic">♥</span> 前往爱发电</a>
+      <a class="support-btn kofi" href="${KOFI_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.coffee}</span> Support on Ko-fi</a>
+      <a class="support-btn afdian" href="${AFDIAN_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.heart}</span> 前往爱发电</a>
     </div>
-    <h3>📮 反馈</h3>
+    <h3>${ICONS.mail} 反馈</h3>
     <div class="contact-box">
       <p>遇到 bug、想加新功能、想交流插件开发，欢迎邮件联系：</p>
       <p>邮箱：<a href="mailto:${EMAIL}"><code>${EMAIL}</code></a></p>
@@ -75,10 +79,10 @@ const SUPPORT: BilingualHtml = {
   en: `
     <p>This plugin suite is built and maintained by <b>弗人 FullPeople</b> in spare time, with all code open-sourced on GitHub. If you find it useful for your campaigns, here are ways to support the author:</p>
     <div class="support-row">
-      <a class="support-btn kofi" href="${KOFI_URL}" target="_blank" rel="noopener"><span class="ic">☕</span> Support on Ko-fi</a>
-      <a class="support-btn afdian" href="${AFDIAN_URL}" target="_blank" rel="noopener"><span class="ic">♥</span> Afdian (Chinese Patreon)</a>
+      <a class="support-btn kofi" href="${KOFI_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.coffee}</span> Support on Ko-fi</a>
+      <a class="support-btn afdian" href="${AFDIAN_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.heart}</span> Afdian (Chinese Patreon)</a>
     </div>
-    <h3>📮 Feedback</h3>
+    <h3>${ICONS.mail} Feedback</h3>
     <div class="contact-box">
       <p>Found a bug, want a feature, or want to chat about plugin dev — please reach out:</p>
       <p>Email: <a href="mailto:${EMAIL}"><code>${EMAIL}</code></a></p>
@@ -92,7 +96,7 @@ const SUPPORT: BilingualHtml = {
 
 const IMPORTANT_NOTES: BilingualHtml = {
   zh: `
-    <h3>👤 如何为玩家设置 Owner</h3>
+    <h3>${ICONS.user} 如何为玩家设置 Owner</h3>
     <p>在 OBR 中把角色卡的 Owner 指派给玩家后，<b>玩家端就能在先攻插件里：</b></p>
     <ul class="benefit-list">
       <li><span class="benefit-tag">投骰</span>在准备阶段为<b>自己拥有的角色</b>投先攻骰</li>
@@ -122,7 +126,7 @@ const IMPORTANT_NOTES: BilingualHtml = {
     </div>
   `,
   en: `
-    <h3>👤 Setting up Owner permissions for players</h3>
+    <h3>${ICONS.user} Setting up Owner permissions for players</h3>
     <p>Once you assign a token's Owner to a player in OBR, <b>they gain extra abilities in the Initiative module:</b></p>
     <ul class="benefit-list">
       <li><span class="benefit-tag">Roll</span>Roll initiative for <b>their own characters</b> during prep phase</li>
@@ -199,7 +203,7 @@ const CHARCARD_DESC: BilingualHtml = {
   <li>选中绑定角色 token 时浮出小信息框（受悬浮窗开关控制）</li>
   <li>右键角色 token 可绑定 / 解绑卡片</li>
 </ul>`,
-  en: `<p><b>⚠️ This module is currently designed for the Chinese D&amp;D community's xlsx character sheet format (悲灵 v1.0.12). It will not parse generic English character sheets.</b></p>
+  en: `<p><b>${ICONS.warning} This module is currently designed for the Chinese D&amp;D community's xlsx character sheet format (悲灵 v1.0.12). It will not parse generic English character sheets.</b></p>
 <ul>
   <li>The cluster's "Character Card Panel" button opens the fullscreen view (the old circular blue floating button has been merged into this)</li>
   <li>Drag an xlsx onto the side panel to upload</li>
@@ -225,58 +229,204 @@ const INITIATIVE_DESC: BilingualHtml = {
   <li>Owner-players can roll their own initiative and click "End Turn" when active</li>
 </ul>`,
 };
+const DICE_DESC: BilingualHtml = {
+  zh: `<p>完整的骰子系统：表达式 / 多目标 / 历史 / 回放 / 音效。点击屏幕左上角的 OBR 动作按钮（d20 图标）打开主面板。</p>
+
+<p><b>表达式</b>（在面板里输入或保存为组合）：</p>
+<ul>
+  <li><code>2d6 + 1d20 + 5</code> — 标准混合表达式</li>
+  <li><code>adv(1d20)</code> / <code>dis(1d20)</code> — 优势 / 劣势（败方虚化淡出）</li>
+  <li><code>adv(1d20, 2)</code> — 精灵之准（投 3 组取最高）</li>
+  <li><code>max(1d20, 10)</code> / <code>min(1d20, 15)</code> — 保底 / 封顶</li>
+  <li><code>reset(1d20, 12)</code> — 投到 12 时重投一次</li>
+  <li><code>burst(2d6)</code> — 术法爆发：每个最大点追加一颗，最多链 5 次</li>
+  <li><code>same(2d20)</code> — 重复值高亮（玩家色对比色）</li>
+  <li><code>repeat(3, 1d20+5)</code> — 重复 3 次，每行独立显示总和</li>
+  <li>支持嵌套：<code>adv(max(1d20, 10) + 5)</code> 等。中文括号 / 逗号自动识别</li>
+  <li><kbd>Enter</kbd> 直接发送；输入 <code>(</code> 自动补 <code>)</code></li>
+</ul>
+
+<p><b>多目标 / 集体掷骰</b></p>
+<ul>
+  <li>多选 token 后投掷 → 自动给每个 token 各掷一次（独立的骰子值），摄像头框选所有目标的包围盒</li>
+  <li>历史里集体骰合并为一行，绿色"集体 N"标签</li>
+  <li>玩家只选 1 个或没选时：自动用其唯一拥有的角色 token；DM 必须显式选中</li>
+</ul>
+
+<p><b>暗骰</b>（DM 专属）</p>
+<ul>
+  <li>面板下方紫色"暗骰"按钮 / 怪物面板左键 / 组合卡的暗骰</li>
+  <li>仅 DM 自己的客户端可见；玩家不接收任何信号</li>
+  <li>无选中 token 时也可投，结果飘在屏幕中央，DM 自己的历史记录会显示"暗"标签</li>
+</ul>
+
+<p><b>历史浮窗</b>（左下角，集群"投骰记录"开关控制）</p>
+<ul>
+  <li>每个玩家一行，显示其最后一次投骰</li>
+  <li>点击行 → 平滑滑入该玩家的全部历史；返回按钮回主列表</li>
+  <li>详情里点条目 → 在所有相关 token 头顶显示气泡（骰子图标 + 总和 + 标签 + 投骰人颜色）；点空白处关闭气泡</li>
+  <li>暗骰条目只在 DM 自己客户端可见</li>
+</ul>
+
+<p><b>5etools 联动 / 角色卡联动</b></p>
+<ul>
+  <li>搜索 / 怪物图鉴里的所有 <code>{@dice}</code>、<code>{@damage}</code>、<code>{@hit}</code> 等标签都可点击直接投</li>
+  <li>角色卡六维的属性缩写 = 豁免，修正 = 检定；技能和武器整行都可点</li>
+  <li>怪物面板：左键暗骰 / 右键明骰</li>
+  <li>玩家小卡底部的"特性 / 专长 / 法术"小盒 → 点击自动填入搜索框</li>
+</ul>
+
+<p><b>音效</b>：用 Web Audio API 实时合成（无需下载素材）。 抛物线 / 缩放冲击 / 数字飞行 / 旋转 / 爆炸 / 同值钟铃 / 大成功大失败闪光 / 同步视野 / 切换回合"登"声。可在 <b>基础设置</b> 里关闭，本地保存（每个玩家独立）。</p>
+
+<p style="font-size:11px;color:#9aa0b3;margin-top:10px">骰子图标来源：<a href="https://www.flaticon.com/" target="_blank" rel="noopener">flaticon</a> · 作者 <a href="https://www.flaticon.com/authors/freepik" target="_blank" rel="noopener">Freepik</a></p>`,
+  en: `<p>Full dice system: expressions / multi-target / history / replay / SFX. Click the OBR action button at the top-left (d20 icon) to open the main panel.</p>
+
+<p><b>Expressions</b> (type into the panel or save as combos):</p>
+<ul>
+  <li><code>2d6 + 1d20 + 5</code> — standard mixed expression</li>
+  <li><code>adv(1d20)</code> / <code>dis(1d20)</code> — advantage / disadvantage (loser dice fade out)</li>
+  <li><code>adv(1d20, 2)</code> — Elven Accuracy (roll 3 sets, take highest)</li>
+  <li><code>max(1d20, 10)</code> / <code>min(1d20, 15)</code> — floor / ceiling</li>
+  <li><code>reset(1d20, 12)</code> — reroll once when result equals 12</li>
+  <li><code>burst(2d6)</code> — spell-burst (each max face adds another die, chain up to 5)</li>
+  <li><code>same(2d20)</code> — duplicate-value highlight (player conflict color)</li>
+  <li><code>repeat(3, 1d20+5)</code> — N independent rows, each with its own total</li>
+  <li>Nests freely: <code>adv(max(1d20, 10) + 5)</code> etc. CN parens / commas auto-recognized</li>
+  <li><kbd>Enter</kbd> rolls; <code>(</code> auto-closes to <code>()</code> with caret in the middle</li>
+</ul>
+
+<p><b>Multi-target / collective rolls</b></p>
+<ul>
+  <li>Select multiple tokens, then roll → each token gets its own independent dice values; camera fits a bounding box around all targets</li>
+  <li>History collapses the batch into one row tagged "集体 N" (Collective N)</li>
+  <li>Player auto-fallback: when nothing is selected and the player owns exactly one visible token, that token is used. DM must always explicitly select.</li>
+</ul>
+
+<p><b>Dark roll</b> (DM only)</p>
+<ul>
+  <li>Purple 暗骰 button at the panel bottom / left-click on monster panel / dark-roll button on combo cards</li>
+  <li>Only the DM's own client receives — players see nothing</li>
+  <li>Works without a selected token (dice float at viewport center). DM's history shows the 暗 tag</li>
+</ul>
+
+<p><b>History popover</b> (bottom-left, toggled via the cluster's "投骰记录" button)</p>
+<ul>
+  <li>One row per player, showing their most recent roll</li>
+  <li>Click row → slide-in detail of that player's full history; back button returns</li>
+  <li>Click an entry inside detail → speech-bubbles appear above every involved token (dice icons + total + label + roller's color); click empty area to dismiss</li>
+  <li>Dark-roll entries appear only in the DM's local view</li>
+</ul>
+
+<p><b>5etools / character card integration</b></p>
+<ul>
+  <li>All <code>{@dice}</code> / <code>{@damage}</code> / <code>{@hit}</code> tags in search results + bestiary entries are click-to-roll</li>
+  <li>Character card abilities: ability abbr = save, modifier = check; skill + weapon rows fully clickable</li>
+  <li>Monster panel: left-click = dark roll / right-click = open roll</li>
+  <li>Card bottom's "Features / Feats / Spells" chips → click fills the cluster search input</li>
+</ul>
+
+<p><b>Sound effects</b>: synthesized live via Web Audio API (no asset downloads). Parabola / scale punch / number fly / spin / burst / same chime / crit-fail flashes / sync-viewport / next-turn 登. Toggle in <b>Basics</b> tab; saved locally (per-player).</p>
+
+<p style="font-size:11px;color:#9aa0b3;margin-top:10px">Dice icon: <a href="https://www.flaticon.com/" target="_blank" rel="noopener">flaticon</a> · by <a href="https://www.flaticon.com/authors/freepik" target="_blank" rel="noopener">Freepik</a></p>`,
+};
+const PORTALS_DESC: BilingualHtml = {
+  zh: `<p><b style="color:#f5a623">⚠ 仍在开发中 · 默认关闭</b> —— 已知问题：跨场景传送、权限模型、移动设备触摸支持都未完全实现。需手动开启来体验当前已实现的功能。</p>
+<p>左侧栏的「传送门」工具用于创建场景内的传送门区域。</p>
+<ul>
+  <li>选中工具后，在地图上<b>按住拖拽画圆</b> —— 松手即创建一个传送门，圆心放置 SVG 标记，半径为触发范围</li>
+  <li>松手后弹出命名面板：可设置「名字」（一楼/二楼/地下室…）和「标签」（001/002…）；下方预设可点击套用，可自由增删</li>
+  <li><b>同标签的传送门互联</b> —— 玩家把 token 拖入任一传送门范围时，弹出选项让其选择同标签的目的地；多选时所有选中单位一起以六边形方式集结到目的地</li>
+  <li>DM 单击已存在的传送门 → 弹出命名面板可快速修改 / 删除</li>
+  <li>把传送门设为<b>不可见</b>（OBR 自带的 visible=false） → 玩家看不见，无法从这里进入；但<b>仍可作为目的地</b>。可用于做单向传送</li>
+</ul>`,
+  en: `<p><b style="color:#f5a623">⚠ Under development · Default OFF</b> — known gaps: cross-scene portals, permission model, mobile touch support. Enable manually to try the currently-implemented bits.</p>
+<p>The "Portal" tool on the left rail creates teleport zones in the scene.</p>
+<ul>
+  <li>Activate the tool, then <b>click-drag to draw a circle</b> on the map — release to create a portal, with an SVG marker at the center and the drag distance as trigger radius</li>
+  <li>An edit panel opens on release: set "Name" (1F / 2F / Basement…) and "Tag" (001 / 002…). Preset chips below are click-to-fill and freely editable</li>
+  <li><b>Portals with the same tag are linked</b> — when a token is dragged into a visible portal, a prompt offers same-tag destinations; with multiple tokens selected, all of them gather around the destination in a hex spiral</li>
+  <li>DM clicking an existing portal → edit panel pops up to rename / retag / delete</li>
+  <li>Set a portal to <b>invisible</b> (OBR's built-in visibility) → players can't see it nor enter from it, but it can <b>still be a destination</b>. Useful for one-way teleporters</li>
+</ul>`,
+};
 const SEARCH_DESC: BilingualHtml = {
-  zh: `<p>顶部右侧浮动搜索框，5etools 全数据联想搜索。</p>
+  zh: `<p><b style="color:#f5a623">⚠ 仍在修复中 · 默认关闭</b> —— 弹窗布局 / 键盘导航 / 集群面板交互还在打磨。需手动开启。</p>
+<p>集群面板内嵌搜索框 + 5etools 全数据联想搜索（弹出在集群下方）。</p>
 <ul>
   <li>点输入框直接打字，下拉显示前 50 条匹配</li>
-  <li>覆盖怪物 / 法术 / 物品 / 职业 / 子职业 / 种族 / 背景 / 专长 / 灵能 / 状态 / 神祇 / 整本书 / ... 全部 5etools 分类</li>
-  <li>悬停词条 → 右侧浮出完整内容</li>
+  <li>覆盖怪物 / 法术 / 物品 / 职业 / 子职业 / 种族 / 背景 / 专长 / 灵能 / 状态 / 神祇 / 整本书 / 表格 / ... 全部 5etools 分类</li>
+  <li>悬停词条 → 右侧浮出完整内容；点击词条钉住</li>
   <li>受当前数据版本过滤，玩家是否能查询怪物在下方设置</li>
+  <li>角色卡 / 怪物面板的特性 / 法术名都可以点击 → 自动填入此搜索框</li>
 </ul>`,
-  en: `<p>Floating search bar at the top right, type-ahead search across all 5etools data.</p>
+  en: `<p><b style="color:#f5a623">⚠ Under bug-fix · Default OFF</b> — popover layout, keyboard nav, and cluster integration still being polished. Enable manually.</p>
+<p>Inline search input inside the cluster popover + dropdown popover for 5etools data (renders below the cluster).</p>
 <ul>
   <li>Click the input and type — top 50 matches in the dropdown</li>
-  <li>Covers all 5etools categories</li>
-  <li>Hover an entry → right pane shows full content</li>
+  <li>Covers all 5etools categories: monsters, spells, items, classes/subclasses, races, backgrounds, feats, psionics, conditions, deities, books, tables, ...</li>
+  <li>Hover an entry → right pane shows full content; click to pin</li>
   <li>Filtered by current data-version; player monster-search controlled below</li>
+  <li>Character-card / monster-panel feature names + spells are click-to-search → auto-fill this input</li>
 </ul>`,
 };
 
 const TABS: TabDef[] = [
   {
     id: "support",
-    zh: "💖 支持作者 / 反馈",
-    en: "💖 Support / Feedback",
+    zh: `${ICONS.heartSpark} 支持作者 / 反馈`,
+    en: `${ICONS.heartSpark} Support / Feedback`,
     body: SUPPORT,
   },
   {
     id: "important",
-    zh: "📌 重要说明",
-    en: "📌 Important Notes",
+    zh: `${ICONS.pin} 重要说明`,
+    en: `${ICONS.pin} Important Notes`,
     body: IMPORTANT_NOTES,
   },
   {
     id: "version",
-    zh: "📚 版本数据",
-    en: "📚 Data Version",
+    zh: `${ICONS.library} 基础设置`,
+    en: `${ICONS.library} Basics`,
     dynamicBody: (lang) => {
       const s = getState();
       const seg = (val: DataVersion, label: string) =>
         `<button data-dv="${val}" class="${
           s.dataVersion === val ? "on" : ""
         }" type="button" ${isGM ? "" : "disabled"}>${label}</button>`;
+      // Local-only sound toggle (per-client, NOT synced to scene
+      // metadata — different players can have different preferences).
+      const soundOn = (() => {
+        try { return localStorage.getItem("obr-suite/sfx-on") !== "0"; }
+        catch { return true; }
+      })();
       return `
-        <div class="seg">
-          ${seg("2014", "2014")}
-          ${seg("2024", "2024")}
-          ${seg("all", "2014+2024")}
+        <div class="basics-block">
+          <div class="basics-h">${lang === "zh" ? "数据版本" : "Data version"}</div>
+          <div class="seg">
+            ${seg("2014", "2014")}
+            ${seg("2024", "2024")}
+            ${seg("all", "2014+2024")}
+          </div>
+          <p style="margin-top:6px">${
+            lang === "zh"
+              ? "决定怪物图鉴和搜索框显示的数据范围。2014 = 仅 PHB+MM；2024 = 仅 XPHB+XMM；2014+2024 = 全部。"
+              : "Controls the data range shown in Bestiary and Global Search. 2014 = PHB+MM only; 2024 = XPHB+XMM only; 2014+2024 = everything."
+          }</p>
+          ${!isGM ? `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
         </div>
-        <p style="margin-top:10px">${
-          lang === "zh"
-            ? "决定怪物图鉴和搜索框显示的数据范围。2014 = 仅 PHB+MM；2024 = 仅 XPHB+XMM；2014+2024 = 全部。"
-            : "Controls the data range shown in Bestiary and Global Search. 2014 = PHB+MM only; 2024 = XPHB+XMM only; 2014+2024 = everything."
-        }</p>
-        ${!isGM ? `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
+
+        <div class="basics-block" style="margin-top:14px">
+          <div class="basics-h">${lang === "zh" ? "音效" : "Sound effects"}</div>
+          <label class="basics-toggle">
+            <input type="checkbox" id="sfxToggle" ${soundOn ? "checked" : ""}>
+            <span>${lang === "zh" ? "启用骰子动画与界面音效" : "Enable dice + UI sound effects"}</span>
+          </label>
+          <p style="margin-top:6px;color:#9ab;font-size:11px">${
+            lang === "zh"
+              ? "本地保存（不同步到场景）。每个玩家可独立选择是否听到音效。"
+              : "Saved locally (NOT synced). Each player can opt in/out independently."
+          }</p>
+        </div>
       `;
     },
     afterRender: (root) => {
@@ -286,35 +436,76 @@ const TABS: TabDef[] = [
           await setState({ dataVersion: b.dataset.dv as DataVersion });
         });
       });
+      const toggle = root.querySelector<HTMLInputElement>("#sfxToggle");
+      if (toggle) {
+        toggle.addEventListener("change", () => {
+          try {
+            localStorage.setItem("obr-suite/sfx-on", toggle.checked ? "1" : "0");
+            // Notify any open iframes (effect, replay, etc.) that the
+            // pref changed. Local-only — this is per-client.
+            OBR.broadcast.sendMessage(
+              "com.obr-suite/sfx-toggled",
+              { on: toggle.checked },
+              { destination: "LOCAL" },
+            ).catch(() => {});
+          } catch {}
+        });
+      }
     },
   },
-  { id: "timeStop", zh: "⏸ 时停模式", en: "⏸ Time Stop", moduleId: "timeStop", body: TIMESTOP_DESC },
-  { id: "focus", zh: "🎯 同步视口", en: "🎯 Sync Viewport", moduleId: "focus", body: FOCUS_DESC },
+  { id: "timeStop", zh: `${ICONS.clockPause} 时停模式`, en: `${ICONS.clockPause} Time Stop`, moduleId: "timeStop", body: TIMESTOP_DESC },
+  { id: "focus", zh: `${ICONS.crosshair} 同步视口`, en: `${ICONS.crosshair} Sync Viewport`, moduleId: "focus", body: FOCUS_DESC },
   {
     id: "bestiary",
-    zh: "🐉 怪物图鉴",
-    en: "🐉 Bestiary",
+    zh: `${ICONS.dragon} 怪物图鉴`,
+    en: `${ICONS.dragon} Bestiary`,
     moduleId: "bestiary",
     body: BESTIARY_DESC,
   },
   {
     id: "characterCards",
-    zh: "📇 角色卡",
-    en: "📇 Character Cards",
+    zh: `${ICONS.idCard} 角色卡`,
+    en: `${ICONS.idCard} Character Cards`,
     moduleId: "characterCards",
-    body: CHARCARD_DESC,
+    dynamicBody: (lang) => {
+      const desc = lang === "zh" ? CHARCARD_DESC.zh : CHARCARD_DESC.en;
+      const btn = lang === "zh"
+        ? `<a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-v1.0.12.xlsx"
+              download="DND5.5E人物卡-悲灵v1.0.12.xlsx" target="_blank" rel="noopener">
+              ⬇ 下载角色卡 xlsx 模板（悲灵 v1.0.12）
+            </a>`
+        : `<a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-v1.0.12.xlsx"
+              download="DND5.5E-Character-Sheet-v1.0.12.xlsx" target="_blank" rel="noopener">
+              ⬇ Download character sheet xlsx template (悲灵 v1.0.12, Chinese only)
+            </a>`;
+      return `${desc}${btn}`;
+    },
   },
   {
     id: "initiative",
-    zh: "⚔ 先攻追踪",
-    en: "⚔ Initiative Tracker",
+    zh: `${ICONS.swords} 先攻追踪`,
+    en: `${ICONS.swords} Initiative Tracker`,
     moduleId: "initiative",
     body: INITIATIVE_DESC,
   },
   {
+    id: "dice",
+    zh: `${ICONS.d20} 骰子动效`,
+    en: `${ICONS.d20} Dice Roll Effect`,
+    moduleId: "dice",
+    body: DICE_DESC,
+  },
+  {
+    id: "portals",
+    zh: `${ICONS.portal} 传送门`,
+    en: `${ICONS.portal} Portals`,
+    moduleId: "portals",
+    body: PORTALS_DESC,
+  },
+  {
     id: "search",
-    zh: "🔍 全局搜索",
-    en: "🔍 Global Search",
+    zh: `${ICONS.search} 全局搜索`,
+    en: `${ICONS.search} Global Search`,
     moduleId: "search",
     body: SEARCH_DESC,
     dynamicBody: (lang) => {
@@ -373,6 +564,7 @@ function moduleLabelKey(id: ModuleId): string {
     case "characterCards": return lang === "zh" ? "角色卡" : "Character Cards";
     case "initiative": return lang === "zh" ? "先攻追踪" : "Initiative Tracker";
     case "search": return lang === "zh" ? "全局搜索" : "Global Search";
+    case "dice": return lang === "zh" ? "骰子动效" : "Dice Roll Effect";
   }
 }
 
@@ -438,18 +630,24 @@ function setLang(l: Language) {
   renderContent();
 }
 
-langZhEl.addEventListener("click", async () => {
+// Language is per-client (localStorage). Either GM or player picks their
+// own UI language; nothing is written to scene metadata.
+langZhEl.addEventListener("click", () => {
+  setLocalLang("zh");
   setLang("zh");
-  if (isGM) { try { await setState({ language: "zh" }); } catch {} }
 });
-langEnEl.addEventListener("click", async () => {
+langEnEl.addEventListener("click", () => {
+  setLocalLang("en");
   setLang("en");
-  if (isGM) { try { await setState({ language: "en" }); } catch {} }
 });
 
 OBR.onReady(async () => {
   try { isGM = (await OBR.player.getRole()) === "GM"; } catch {}
   startSceneSync();
+  // Re-render content (including the per-tab toggles + dynamic body) on
+  // any suite state change. Language changes are handled separately so the
+  // panel reflects another iframe (e.g. cluster) toggling lang.
   onStateChange(() => renderContent());
-  setLang(getState().language);
+  onLangChange((l) => setLang(l));
+  setLang(getLocalLang());
 });

@@ -117,6 +117,145 @@ html,body{
 .empty{color:#888;font-size:11px;padding:3px 6px}
 .err{color:#e74c3c;padding:12px;text-align:center;font-size:11px}
 .loading{color:#888;padding:20px;text-align:center;font-size:11px}
+
+/* Rollable elements — abilities (modifier badge), skills, weapons.
+   Subtle hint that they're clickable. Flash on click for instant
+   feedback (the actual roll then plays out via the dice modal). */
+.rollable{
+  cursor:pointer;
+  transition:background .12s, color .12s, transform .08s;
+  border-radius:3px;
+}
+.rollable:hover{
+  background:rgba(93,173,226,0.18);
+  color:#9bd0f0 !important;
+}
+.rollable:active{transform:scale(0.96)}
+.rollable.rollable-flash{
+  animation: rollFlash 0.4s ease-out;
+}
+@keyframes rollFlash{
+  0%   {background:rgba(93,173,226,0.55); transform:scale(1.18)}
+  100% {background:transparent; transform:scale(1)}
+}
+/* Skill rows — they're already display:flex so we just give the
+   hover a more pronounced background. */
+.abl .sk.rollable{cursor:pointer}
+.abl .sk.rollable:hover{background:rgba(93,173,226,0.18)}
+.wp .rollable{padding:0 2px}
+
+/* === Spells section (bottom of card) ===
+   Compact per-level blocks. Each spell row = name + optional [Hit]
+   button (1d20+atk) + optional [Damage] button (first NdM dice
+   expression in description). Buttons show their value text. */
+.sp-block{margin-bottom:6px}
+.sp-lvl{
+  font-size:9.5px;font-weight:700;color:#9ab;
+  letter-spacing:0.5px;
+  padding:2px 6px;
+  background:rgba(255,255,255,0.04);
+  border-left:2px solid rgba(155,89,182,0.55);
+  border-radius:0 4px 4px 0;
+  margin-bottom:3px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.sp-lvl .sp-slot{
+  font-family:ui-monospace,monospace;
+  font-size:9.5px;font-weight:700;color:#cda9e8;
+  background:rgba(155,89,182,0.18);
+  padding:0 5px;border-radius:3px;
+}
+.sp-items{
+  display:flex;flex-direction:column;gap:2px;
+}
+.sp-row{
+  display:grid;
+  grid-template-columns:1fr auto auto;
+  gap:6px;align-items:center;
+  padding:3px 6px;
+  background:rgba(255,255,255,0.025);
+  border-radius:4px;
+  font-size:11px;
+  min-height:22px;
+}
+.sp-row:hover{background:rgba(255,255,255,0.05)}
+.sp-row .sp-name{
+  color:#eee;font-weight:600;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  min-width:0;
+}
+.sp-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:36px;
+  font-family:ui-monospace,monospace;
+  font-size:10.5px;font-weight:800;
+  padding:2px 7px;
+  border-radius:4px;
+  cursor:pointer;
+  flex-shrink:0;
+  transition:background .12s, color .12s, transform .08s;
+  letter-spacing:0.2px;
+}
+.sp-btn.sp-hit{
+  color:#9be0a8;
+  background:rgba(46,204,113,0.16);
+  border:1px solid rgba(46,204,113,0.4);
+}
+.sp-btn.sp-hit:hover{background:rgba(46,204,113,0.28); color:#d2f5dd}
+.sp-btn.sp-dmg{
+  color:#ffb088;
+  background:rgba(255,140,80,0.14);
+  border:1px solid rgba(255,140,80,0.4);
+}
+.sp-btn.sp-dmg:hover{background:rgba(255,140,80,0.28); color:#ffd6c0}
+.sp-btn:active{transform:scale(0.94)}
+.sp-btn.rollable-flash{
+  animation: rollFlash 0.4s ease-out;
+}
+
+/* === Searchable chips (特性/专长/法术) ===
+   Tight name-only chips at the bottom of the card. Click → fills the
+   cluster's search input so the 5etools popover opens with results.
+   Layout-light: very compact, grid-wraps to as many lines as needed. */
+.srch-sect{margin-top:6px}
+.srch-sect-h{
+  font-size:9.5px;font-weight:700;color:#9ab;
+  letter-spacing:0.5px;
+  padding:2px 6px;
+  background:rgba(255,255,255,0.04);
+  border-left:2px solid rgba(93,173,226,0.55);
+  border-radius:0 4px 4px 0;
+  margin-bottom:3px;
+}
+.srch-grid{
+  display:flex;flex-wrap:wrap;gap:3px;
+  padding:0 2px;
+}
+.srch-chip{
+  display:inline-block;
+  padding:1px 6px;
+  background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.10);
+  border-radius:3px;
+  font-size:10px;line-height:1.4;font-weight:600;
+  color:#cdd2e0;
+  cursor:pointer;
+  transition:background .12s, color .12s, border-color .12s, transform .08s;
+  white-space:nowrap;
+  max-width:160px;
+  overflow:hidden;text-overflow:ellipsis;
+}
+.srch-chip:hover{
+  background:rgba(93,173,226,0.18);
+  border-color:rgba(93,173,226,0.5);
+  color:#bfe2f5;
+}
+.srch-chip:active{transform:scale(0.96)}
+.srch-chip.srch-flash{animation:srchFlash 0.4s ease-out}
+@keyframes srchFlash{
+  0%   {background:rgba(93,173,226,0.55); transform:scale(1.10)}
+  100% {background:rgba(255,255,255,0.06); transform:scale(1)}
+}
 </style>
 </head>
 <body>

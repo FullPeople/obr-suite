@@ -18,7 +18,8 @@ import {
   DICE_PLUS_ROLL_ERROR,
 } from "../utils/constants";
 import { itemToInitiativeItem, getCombatState } from "../utils/metadata";
-import { getStoredLang } from "../utils/i18n";
+import { getLocalLang } from "../../../state";
+import { broadcastDiceRoll } from "../../dice";
 
 export type RollType = "disadvantage" | "normal" | "advantage";
 export type EffectType = "prepare" | "ambush" | "combat";
@@ -31,14 +32,25 @@ function diceNotation(type: RollType): string {
   }
 }
 
-function localRoll(type: RollType): number {
+interface LocalRoll {
+  rolls: number[];   // every die actually rolled (advantage/disadvantage rolls 2)
+  winnerIdx: number; // which one is the kept value
+  finalValue: number;
+}
+
+function localRoll(type: RollType): LocalRoll {
   const r1 = Math.floor(Math.random() * 20) + 1;
-  const r2 = Math.floor(Math.random() * 20) + 1;
-  switch (type) {
-    case "disadvantage": return Math.min(r1, r2);
-    case "advantage": return Math.max(r1, r2);
-    default: return r1;
+  if (type === "normal") {
+    return { rolls: [r1], winnerIdx: 0, finalValue: r1 };
   }
+  const r2 = Math.floor(Math.random() * 20) + 1;
+  if (type === "advantage") {
+    const winnerIdx = r1 >= r2 ? 0 : 1;
+    return { rolls: [r1, r2], winnerIdx, finalValue: Math.max(r1, r2) };
+  }
+  // disadvantage
+  const winnerIdx = r1 <= r2 ? 0 : 1;
+  return { rolls: [r1, r2], winnerIdx, finalValue: Math.min(r1, r2) };
 }
 
 // Stable tiebreak: 1% precision random, stored as decimal
@@ -264,10 +276,13 @@ export function useInitiative() {
     const unsubItems = OBR.scene.items.onChange(() => refreshItems());
     const unsubMeta = OBR.scene.onMetadataChange(() => refreshCombat());
 
+    // Receiver picks its own language. The DM's broadcast no longer carries
+    // a `lang` field — each client (DM + every player) reads its local
+    // localStorage preference so the overlay text matches their UI choice.
     const unsubStart = OBR.broadcast.onMessage(
       BROADCAST_COMBAT_START,
-      (event) => {
-        const lang = (event.data as any)?.lang || "en";
+      () => {
+        const lang = getLocalLang();
         OBR.modal.open({
           id: COMBAT_EFFECT_MODAL_ID,
           url: `${import.meta.env.BASE_URL}initiative-combat-effect.html?lang=${lang}&type=combat`,
@@ -282,9 +297,8 @@ export function useInitiative() {
     const unsubPrepare = OBR.broadcast.onMessage(
       BROADCAST_COMBAT_PREPARE,
       (event) => {
-        const data = event.data as any;
-        const lang = data?.lang || "en";
-        const effectType = data?.effectType || "prepare";
+        const lang = getLocalLang();
+        const effectType = (event.data as any)?.effectType || "prepare";
         OBR.modal.open({
           id: COMBAT_EFFECT_MODAL_ID,
           url: `${import.meta.env.BASE_URL}initiative-combat-effect.html?lang=${lang}&type=${effectType}`,
@@ -326,12 +340,17 @@ export function useInitiative() {
       }
     );
 
+    // OBR.action is now bound to the dice panel (per manifest action
+    // block). Initiative's panel is its own popover and shouldn't
+    // hijack the dice button — these listeners are intentionally
+    // no-op. The constants stay in case a future flow wires them
+    // to the actual initiative-panel popover.
     const unsubOpenPanel = OBR.broadcast.onMessage(BROADCAST_OPEN_PANEL, () => {
-      try { OBR.action.open(); } catch {}
+      // intentionally empty
     });
 
     const unsubClosePanel = OBR.broadcast.onMessage(BROADCAST_CLOSE_PANEL, () => {
-      try { OBR.action.close(); } catch {}
+      // intentionally empty
     });
 
     const unsubDiceResult = OBR.broadcast.onMessage(
@@ -357,6 +376,29 @@ export function useInitiative() {
           }
         });
 
+        // Mirror the local-roll flow: show the dice animation above the
+        // token using the d20-portion of the Dice+ result. Clamp into
+        // 1..20 — Dice+ may return >20 on advantage etc., but for the
+        // visual we want the raw die face. Dice+ doesn't expose
+        // individual rolls in its broadcast payload, so we render a
+        // single die with the kept value as both the roll and winner.
+        const visual = Math.max(1, Math.min(20, Math.round(totalValue)));
+        try {
+          const [rollerId, rollerName] = await Promise.all([
+            OBR.player.getId(),
+            OBR.player.getName(),
+          ]);
+          await broadcastDiceRoll({
+            itemId,
+            dice: [{ type: "d20" as const, value: visual }],
+            winnerIdx: 0,
+            modifier: 0,
+            label: "先攻 / Initiative",
+            rollerId,
+            rollerName,
+          });
+        } catch {}
+
         setDiceRolling(false);
       }
     );
@@ -366,7 +408,8 @@ export function useInitiative() {
       async (event) => {
         const data = event.data as any;
         if (!data?.rollId) return;
-        OBR.notification.show(`Dice+ error: ${data.error || "unknown"}`);
+        // Toast removed — error is logged for debugging only.
+        console.warn("[obr-suite/initiative] Dice+ error:", data.error || "unknown");
         setDiceRolling(false);
       }
     );
@@ -437,7 +480,7 @@ export function useInitiative() {
     if (!item) return;
     const pid = playerIdRef.current;
     if (!isGMRef.current && (!pid || item.ownerId !== pid)) {
-      OBR.notification.show("只有角色的拥有者或 DM 可以修改");
+      // Toast removed — UI already disables the inputs for non-owner players.
       return;
     }
     await OBR.scene.items.updateItems([itemId], (drafts) => {
@@ -457,13 +500,91 @@ export function useInitiative() {
   }, []);
 
   const rollInitiativeLocal = useCallback(async (itemId: string, type: RollType) => {
-    const roll = localRoll(type);
-    await OBR.scene.items.updateItems([itemId], (drafts) => {
-      for (const d of drafts) {
-        const existing = d.metadata[METADATA_KEY] as any;
-        d.metadata[METADATA_KEY] = { ...existing, count: roll };
-      }
+    const { rolls, winnerIdx, finalValue } = localRoll(type);
+
+    // Read this token's stored DEX modifier so the dice animation can
+    // SHOW the bonus alongside the d20. The stored count remains the
+    // RAW d20 (the panel adds the modifier when displaying) — but the
+    // metadata write is deferred to the climax so the value visually
+    // "lands" in the initiative column at the moment the dice modal
+    // shows the final number (per spec).
+    let dexMod = 0;
+    try {
+      const items = await OBR.scene.items.getItems([itemId]);
+      const m = (items[0] as any)?.metadata?.["com.initiative-tracker/dexMod"];
+      if (typeof m === "number") dexMod = m;
+    } catch {}
+
+    // Spawn the dice animation above the token. The broadcast carries:
+    //   - dice: every d20 rolled. For advantage / disadvantage the
+    //     non-winner die is flagged loser:true so the visual treats it
+    //     as adv/dis (faded, doesn't add to the rush total) — without
+    //     this flag the modal was rendering it as a flat 2d20 with
+    //     both summed.
+    //   - modifier: dexMod, so the displayed running total = winner +
+    //     dexMod (animation shows d20+mod, scene metadata stores just
+    //     the raw d20 — panel applies +mod at display time).
+    //   - autoDismiss: the modal self-closes after the climax so the
+    //     dice don't linger on the canvas after the result is shown.
+    //
+    // Pre-subscribe to BC_DICE_FADE_START with a deterministic rollId
+    // so the metadata write fires at the exact moment of the climax
+    // (single-die zoom OR final scale-pop after the rush sequence) —
+    // not the previous time-based PUNCH_DELAY_MS approximation, which
+    // landed too early for the rush path (multi-die or +modifier).
+    const rollId = `init-${itemId}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const BC_DICE_FADE_START = "com.obr-suite/dice-fade-start";
+    let writeDone = false;
+    const writeFinalValue = () => {
+      if (writeDone) return;
+      writeDone = true;
+      OBR.scene.items.updateItems([itemId], (drafts) => {
+        for (const d of drafts) {
+          const existing = d.metadata[METADATA_KEY] as any;
+          d.metadata[METADATA_KEY] = { ...existing, count: finalValue };
+        }
+      }).catch((e) => {
+        console.error("[obr-suite/initiative] deferred count write failed", e);
+      });
+    };
+    const unsub = OBR.broadcast.onMessage(BC_DICE_FADE_START, (event) => {
+      const data = event.data as { rollId?: string } | undefined;
+      if (data?.rollId !== rollId) return;
+      writeFinalValue();
+      try { unsub(); } catch {}
     });
+    // Safety net: if the climax broadcast somehow doesn't arrive (bad
+    // network, modal crash, etc.) write the value after a generous
+    // timeout so the initiative column doesn't stay stale forever.
+    setTimeout(() => {
+      writeFinalValue();
+      try { unsub(); } catch {}
+    }, 6000);
+
+    try {
+      const [rollerId, rollerName] = await Promise.all([
+        OBR.player.getId(),
+        OBR.player.getName(),
+      ]);
+      await broadcastDiceRoll({
+        itemId,
+        dice: rolls.map((v, i) => {
+          const die: { type: "d20"; value: number; loser?: boolean } = {
+            type: "d20",
+            value: v,
+          };
+          if (rolls.length > 1 && i !== winnerIdx) die.loser = true;
+          return die;
+        }),
+        winnerIdx,
+        modifier: dexMod,
+        label: "先攻 / Initiative",
+        rollerId,
+        rollerName,
+        rollId,
+        autoDismiss: true,
+      });
+    } catch {}
   }, []);
 
   const diceRollingRef = useRef(false);
@@ -540,7 +661,6 @@ export function useInitiative() {
   const startPreparation = useCallback(async (effectType: EffectType = "prepare") => {
     const all = allItemsRef.current;
     if (all.filter((i) => i.visible).length === 0) return;
-    const lang = getStoredLang();
     setDiceRolling(false);
     optimisticActiveIdRef.current = null;
     lastWrittenActiveIdRef.current = null;
@@ -559,7 +679,7 @@ export function useInitiative() {
       });
     }
     await writeCombatState({ preparing: true, inCombat: false, round: 0 });
-    fireBroadcast(BROADCAST_COMBAT_PREPARE, { lang, effectType });
+    fireBroadcast(BROADCAST_COMBAT_PREPARE, { effectType });
     fireBroadcast(BROADCAST_OPEN_PANEL, {});
   }, [writeCombatState]);
 
@@ -569,7 +689,6 @@ export function useInitiative() {
     if (visible.length === 0) return;
 
     const firstId = visible[0].id;
-    const lang = getStoredLang();
     optimisticActiveIdRef.current = firstId;
     lastWrittenActiveIdRef.current = firstId;
 
@@ -585,7 +704,7 @@ export function useInitiative() {
       }
     });
     await writeCombatState({ preparing: false, inCombat: true, round: 1 });
-    fireBroadcast(BROADCAST_COMBAT_START, { lang });
+    fireBroadcast(BROADCAST_COMBAT_START, {});
     fireBroadcast(BROADCAST_OPEN_PANEL, {});
     broadcastFocus(firstId).catch(() => {});
   }, [broadcastFocus, writeCombatState]);
@@ -620,6 +739,11 @@ export function useInitiative() {
   const advanceTurn = useCallback((dir: 1 | -1) => {
     const visible = allItemsRef.current.filter((i) => i.visible);
     if (visible.length === 0) return;
+    // "登" — short turn-advance confirmation tone. Plays only on the
+    // client that triggers the advance (other clients receive a
+    // separate sync-viewport sound when their camera follows the
+    // active token).
+    import("../../dice/sfx").then((m) => m.sfxNextTurn()).catch(() => {});
 
     const currentId =
       optimisticActiveIdRef.current ?? visible.find((i) => i.active)?.id ?? null;

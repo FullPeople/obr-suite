@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { ICONS } from "../../icons";
 
 const MODAL_ID = "com.obr-suite/cc-bind-picker";
 const BIND_META = "com.character-cards/boundCardId";
@@ -55,7 +56,8 @@ async function bindTo(cardId: string | null) {
       if (cardId) d.metadata[BIND_META] = cardId;
       else delete d.metadata[BIND_META];
     });
-    OBR.notification.show(cardId ? "已绑定" : "已解绑");
+    // Toast removed per user feedback — actions are visible enough on
+     // the modal that closes itself.
   } catch (e) {
     console.error("[character-cards] bind failed", e);
   }
@@ -73,7 +75,7 @@ OBR.onReady(async () => {
   }
 
   if (cards.length === 0) {
-    listEl.innerHTML = `<div class="empty">这个场景还没有上传任何角色卡<br>先去右下角📇面板的右侧栏拖一张 .xlsx 上来</div>`;
+    listEl.innerHTML = `<div class="empty">这个场景还没有上传任何角色卡<br>先去右下角 ${ICONS.idCard} 面板的右侧栏拖一张 .xlsx 上来</div>`;
     return;
   }
 

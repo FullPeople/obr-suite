@@ -1,11 +1,24 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { ICONS } from "../../icons";
+import { fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
 
 const SHOW_MSG = "com.character-cards/info-show";
 
 const root = document.getElementById("root") as HTMLDivElement;
 
+// The token id this card is currently bound to. Updated whenever the
+// info popover is shown for a different character. Quick-rolls fire
+// on this token (for camera focus + dice anchoring above the head).
+let boundItemId: string | null = null;
+
 const ABBR: Record<string, string> = {
   str: "力", dex: "敏", con: "体", int: "智", wis: "感", cha: "魅",
+};
+// Full Chinese names for the dice-roll label (e.g. "敏捷检定" rather
+// than "敏检定"). Used for the panel-page formula label / history
+// display — the chip itself still shows the single-char ABBR.
+const FULL: Record<string, string> = {
+  str: "力量", dex: "敏捷", con: "体质", int: "智力", wis: "感知", cha: "魅力",
 };
 const ORDER = ["str", "dex", "con", "int", "wis", "cha"];
 
@@ -125,7 +138,10 @@ function render(d: any, cardId: string, roomId: string) {
       : s.proficiency === "proficient"
         ? "sk sk-prof"
         : "sk";
-    return `<div class="${cls}">
+    const total = typeof s.total === "number" ? s.total : 0;
+    const expr = `1d20${total >= 0 ? `+${total}` : total}`;
+    const lbl = `${name} · ${s.name ?? "?"}`;
+    return `<div class="${cls} rollable" data-expr="${expr}" data-label="${escapeHtml(lbl)}" title="${escapeHtml(lbl)} ${expr}">
       <span class="sk-n">${escapeHtml(s.name ?? "?")}</span>
       <span class="sk-v">${fmtMod(s.total)}</span>
     </div>`;
@@ -137,11 +153,22 @@ function render(d: any, cardId: string, roomId: string) {
       const prof = !!a.save?.proficient;
       const skList = skillsByAbil[k] ?? [];
       const skHtml = skList.map(renderSkillRow).join("");
+      // Ability check: 1d20+modifier. Saving-throw uses the same
+      // modifier unless the save has its own bonus stored separately.
+      const aMod = typeof a.modifier === "number" ? a.modifier : 0;
+      const aExpr = `1d20${aMod >= 0 ? `+${aMod}` : aMod}`;
+      const aLbl = `${name} · ${FULL[k] ?? ABBR[k] ?? k}检定`;
+      // Saving throw — different label, may have its own bonus.
+      const saveBonus = typeof a.save?.bonus === "number"
+        ? a.save.bonus
+        : (a.save?.proficient ? aMod + (cs.proficiency_bonus ?? 0) : aMod);
+      const saveExpr = `1d20${saveBonus >= 0 ? `+${saveBonus}` : saveBonus}`;
+      const saveLbl = `${name} · ${FULL[k] ?? ABBR[k] ?? k}豁免`;
       return `<div class="abl${prof ? " prof" : ""}">
         <div class="abl-head">
-          <span class="a">${ABBR[k]}</span>
+          <span class="a rollable" data-expr="${saveExpr}" data-label="${escapeHtml(saveLbl)}" title="${escapeHtml(saveLbl)} ${saveExpr}">${ABBR[k]}</span>
           <span class="t">${escapeHtml(a.total)}</span>
-          <span class="m">${fmtMod(a.modifier)}</span>
+          <span class="m rollable" data-expr="${aExpr}" data-label="${escapeHtml(aLbl)}" title="${escapeHtml(aLbl)} ${aExpr}">${fmtMod(a.modifier)}</span>
         </div>
         ${skHtml ? `<div class="abl-skills">${skHtml}</div>` : ""}
       </div>`;
@@ -153,9 +180,12 @@ function render(d: any, cardId: string, roomId: string) {
   // Spell attack row (first so it's easy to find). Only if character casts.
   if (sp.attack_bonus) {
     const bonus = extractBonus(sp.attack_bonus);
+    const bn = parseInt(bonus.replace(/[^\d-]/g, ""), 10) || 0;
+    const atkExpr = `1d20${bn >= 0 ? `+${bn}` : bn}`;
+    const atkLbl = `${name} · 法术攻击`;
     weaponRows.push(`<div class="wp spell">
       <span class="n">近战/远程法术攻击</span>
-      <span class="atk">${escapeHtml(bonus)}</span>
+      <span class="atk rollable" data-expr="${atkExpr}" data-label="${escapeHtml(atkLbl)}" title="${escapeHtml(atkLbl)} ${atkExpr}">${escapeHtml(bonus)}</span>
       <span class="dmg">DC ${escapeHtml(sp.save_dc ?? cs.dc ?? "?")}</span>
     </div>`);
   }
@@ -163,17 +193,40 @@ function render(d: any, cardId: string, roomId: string) {
   if (Array.isArray(cb.weapons)) {
     for (const w of cb.weapons) {
       const prop = w.properties ? `<span class="prop">${escapeHtml(w.properties)}</span>` : "";
-      const dmg = [w.damage, w.damage_type].filter(Boolean).join(" ");
+      const dmgRaw = [w.damage, w.damage_type].filter(Boolean).join(" ");
+      const wpName = w.name ?? "?";
+      // Attack roll: parse the leading sign+number from attack_bonus.
+      const atkBonusStr = String(w.attack_bonus ?? "").trim();
+      const atkM = /([+-]?\s*\d+)/.exec(atkBonusStr);
+      const atkBn = atkM ? parseInt(atkM[1].replace(/\s+/g, ""), 10) : 0;
+      const atkExpr = `1d20${atkBn >= 0 ? `+${atkBn}` : atkBn}`;
+      const atkLbl = `${name} · ${wpName} 命中`;
+      // Damage: extract the raw dice expression from `w.damage`. Most
+      // entries are like "1d8+3" or "2d6+4" — pass through directly.
+      const dmgExprRaw = String(w.damage ?? "").replace(/\s+/g, "");
+      const dmgExprMatch = /\d*d\d+([+-]\d+)?/.exec(dmgExprRaw);
+      const dmgExpr = dmgExprMatch ? dmgExprMatch[0] : dmgExprRaw;
+      const dmgLbl = `${name} · ${wpName} 伤害${w.damage_type ? `(${w.damage_type})` : ""}`;
+      const dmgClickable = dmgExpr
+        ? `<span class="rollable" data-expr="${escapeHtml(dmgExpr)}" data-label="${escapeHtml(dmgLbl)}" title="${escapeHtml(dmgLbl)} ${escapeHtml(dmgExpr)}">${escapeHtml(dmgRaw || "?")}</span>`
+        : escapeHtml(dmgRaw || "?");
       weaponRows.push(`<div class="wp">
-        <span class="n">${escapeHtml(w.name ?? "?")}</span>
-        <span class="atk">${escapeHtml(w.attack_bonus ?? "?")}</span>
-        <span class="dmg">${escapeHtml(dmg || "?")}</span>
+        <span class="n">${escapeHtml(wpName)}</span>
+        <span class="atk rollable" data-expr="${atkExpr}" data-label="${escapeHtml(atkLbl)}" title="${escapeHtml(atkLbl)} ${atkExpr}">${escapeHtml(w.attack_bonus ?? "?")}</span>
+        <span class="dmg">${dmgClickable}</span>
         ${prop}
       </div>`);
     }
   }
 
   const weps = weaponRows.length ? weaponRows.join("") : '<div class="empty">无</div>';
+
+  // ── Searchable chips: features / feats / spells ────────────────
+  // Each chip is a tiny compact name-only box. Clicking fills the
+  // cluster's search input with that name (BC_SEARCH_QUERY) so the
+  // 5etools search popover opens with matching results — letting
+  // the player look up a feature definition without leaving OBR.
+  const featuresHtml = renderSearchChips(d);
 
   root.innerHTML = `
     <div class="hdr">
@@ -183,10 +236,121 @@ function render(d: any, cardId: string, roomId: string) {
     </div>
     <div class="row">${chips}</div>
     <div class="abil">${abl}</div>
-    <div class="sect">⚔ 武器 / 攻击</div>
+    <div class="sect">${ICONS.swords} 武器 / 攻击</div>
     ${weps}
+    ${featuresHtml}
   `;
 }
+
+// Compact name-only chips. Click → fires BC_SEARCH_QUERY to populate
+// the cluster's search input. The cluster echoes its own input value
+// from this broadcast so the user sees the chip text appear in the
+// search box and the search popover opens with matching results.
+function renderSearchChips(d: any): string {
+  const sections: string[] = [];
+  const features = d.features ?? {};
+
+  const renderChips = (items: any[]) => items
+    .filter((x) => x && x.name)
+    .map((x) => {
+      const nm = String(x.name);
+      return `<span class="srch-chip" data-q="${escapeHtml(nm)}">${escapeHtml(nm)}</span>`;
+    })
+    .join("");
+
+  // 特性 = race_features + class_features (merged into one tight grid).
+  const featList: any[] = [];
+  if (Array.isArray(features.race_features)) featList.push(...features.race_features);
+  if (Array.isArray(features.class_features)) featList.push(...features.class_features);
+  if (featList.length) {
+    sections.push(`<div class="srch-sect">
+      <div class="srch-sect-h">特性</div>
+      <div class="srch-grid">${renderChips(featList)}</div>
+    </div>`);
+  }
+
+  // 专长 — class feats list.
+  if (Array.isArray(features.feats) && features.feats.length) {
+    sections.push(`<div class="srch-sect">
+      <div class="srch-sect-h">专长</div>
+      <div class="srch-grid">${renderChips(features.feats)}</div>
+    </div>`);
+  }
+
+  // 法术 — flatten always_known + prepared + cantrips_known into one
+  // grid (de-duplicated by name).
+  const sp = d.spellcasting ?? {};
+  const allSpells: any[] = [];
+  for (const key of ["cantrips_known", "always_known", "prepared"]) {
+    const arr = sp[key];
+    if (Array.isArray(arr)) for (const s of arr) if (s && s.name) allSpells.push(s);
+  }
+  if (allSpells.length) {
+    const seen = new Set<string>();
+    const uniq = allSpells.filter((s) => {
+      if (seen.has(s.name)) return false;
+      seen.add(s.name);
+      return true;
+    });
+    sections.push(`<div class="srch-sect">
+      <div class="srch-sect-h">法术</div>
+      <div class="srch-grid">${renderChips(uniq)}</div>
+    </div>`);
+  }
+
+  return sections.join("");
+}
+
+// Single delegated click handler for ALL rollable spans inside the
+// card. Reads the bound token id at click time so dice anchor on the
+// currently-selected character (falls back to live selection if the
+// info popover wasn't opened with one).
+async function resolveBoundToken(): Promise<string | null> {
+  if (boundItemId) return boundItemId;
+  return resolveClickRollTarget();
+}
+
+root.addEventListener("click", async (e) => {
+  // Search-chip click → fill the cluster's search input so the
+  // 5etools popover opens with matching results.
+  const chip = (e.target as HTMLElement | null)?.closest<HTMLElement>(".srch-chip");
+  if (chip) {
+    e.preventDefault();
+    e.stopPropagation();
+    const q = chip.dataset.q ?? "";
+    if (q) {
+      try {
+        OBR.broadcast.sendMessage(
+          "com.obr-suite/search-query",
+          { q },
+          { destination: "LOCAL" },
+        );
+      } catch {}
+    }
+    chip.classList.remove("srch-flash");
+    void chip.offsetWidth;
+    chip.classList.add("srch-flash");
+    return;
+  }
+
+  const target = (e.target as HTMLElement | null)?.closest<HTMLElement>(".rollable");
+  if (!target) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const expression = target.dataset.expr ?? "";
+  const label = target.dataset.label ?? "";
+  if (!expression) return;
+  const itemId = await resolveBoundToken();
+  fireQuickRoll({
+    expression,
+    label,
+    itemId,
+    focus: !!itemId,
+  });
+  target.classList.remove("rollable-flash");
+  void target.offsetWidth;
+  target.classList.add("rollable-flash");
+});
 
 OBR.onReady(() => {
   // Initial card from URL — popover is opened on-demand by background.ts
@@ -196,11 +360,17 @@ OBR.onReady(() => {
     const params = new URLSearchParams(location.search);
     const cardId = params.get("cardId");
     const roomId = params.get("roomId");
+    const itemId = params.get("itemId");
+    if (itemId) boundItemId = itemId;
     if (cardId && roomId) showCard(cardId, roomId);
   } catch {}
 
   OBR.broadcast.onMessage(SHOW_MSG, (ev: any) => {
     const p = ev?.data || {};
+    // Update the bound-token used by quick-roll clicks (selecting a
+    // different character should make rolls anchor on the new token).
+    if (typeof p.itemId === "string") boundItemId = p.itemId;
+    else if (p.itemId === null) boundItemId = null;
     if (p.cardId && p.roomId) showCard(String(p.cardId), String(p.roomId));
   });
 });

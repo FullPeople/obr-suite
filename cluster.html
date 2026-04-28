@@ -33,13 +33,21 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   border-radius:14px;
   box-shadow:0 6px 22px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.04) inset;
   backdrop-filter:blur(8px);
-  height:56px;
+  /* Height grows when the inner row wraps to 2+ lines */
+  min-height:56px;
 }
 
 .row{
   display:flex;align-items:center;gap:6px;
-  height:40px;
-  overflow:hidden;
+  /* Allow buttons to wrap to a second line in long-label languages
+     (English) where the row otherwise overflows the cluster's max
+     width. JS measures the resulting cluster height after each render
+     and resizes the OBR popover + broadcasts it so the search bar can
+     reposition below. */
+  flex-wrap:wrap;
+  row-gap:6px;
+  /* No fixed height — let it grow with wrapped rows */
+  align-content:center;
 }
 .wrap:not(.expanded) .row{display:none}
 
@@ -68,6 +76,17 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   align-self:stretch;
 }
 .group .glabel span{display:block}
+/* English / non-CJK label — render horizontally as a single inline span
+   instead of one-character-per-line, since "Auto Popup" looked awful
+   broken char-by-char vertically. */
+.group.h-label .glabel{
+  flex-direction:row;
+  padding:0 8px;
+  font-size:9.5px;
+  letter-spacing:0.2px;
+  white-space:nowrap;
+}
+.group.h-label .glabel span{display:inline}
 
 /* ===== Buttons ===== */
 .btn{
@@ -132,6 +151,52 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
 .btn .gear{width:16px;height:16px;display:inline-block;color:currentColor}
 
 .btn .ic{font-size:13px;line-height:1}
+
+/* Inline search input — takes remaining horizontal space inside the
+   cluster row. Height matches .btn (32px) so it sits flush with the
+   icon buttons. Its dropdown lives in the separate search-bar popover
+   below the cluster, so the cluster layout is unaffected by typing. */
+.search-wrap{
+  flex:1;min-width:120px;
+  display:flex;align-items:center;
+  height:32px;
+  background:rgba(255,255,255,0.04);
+  border:1px solid var(--border-strong);
+  border-radius:8px;
+  padding:0 4px 0 10px;
+  gap:4px;
+  box-sizing:border-box;
+}
+.search-wrap input{
+  flex:1;min-width:0;
+  background:transparent;border:0;outline:none;
+  color:var(--text);
+  font-family:inherit;font-size:12.5px;
+  height:100%;
+  padding:0;
+}
+.search-wrap input::placeholder{color:var(--text-dim);font-size:12px}
+.search-wrap .clear-btn{
+  flex:0 0 auto;
+  background:none;border:0;cursor:pointer;
+  color:var(--text-dim);
+  font-size:14px;line-height:1;
+  width:20px;height:20px;
+  border-radius:4px;
+  font-family:inherit;padding:0;
+  display:none;align-items:center;justify-content:center;
+}
+.search-wrap.has-q .clear-btn{display:inline-flex}
+.search-wrap .clear-btn:hover{color:var(--text);background:rgba(255,255,255,0.08)}
+
+/* Dice button — uses houm.png art, sized a bit larger than text glyphs
+   so the die silhouette is the dominant visual rather than a tiny icon. */
+.btn .dice-btn-art{
+  width:22px;height:22px;display:block;
+  image-rendering:auto;
+  pointer-events:none;
+  user-select:none;
+}
 </style>
 </head>
 <body>

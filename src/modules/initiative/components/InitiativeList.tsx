@@ -3,6 +3,7 @@ import { InitiativeItem } from "../types";
 import { InitiativeItemRow } from "./InitiativeItem";
 import { RollType } from "../hooks/useInitiative";
 import { Lang, t } from "../utils/i18n";
+import { ICONS } from "../../../icons";
 
 interface Props {
   items: InitiativeItem[];
@@ -31,7 +32,7 @@ export function InitiativeList({
   if (items.length === 0) {
     return (
       <div className="empty-state">
-        <div className="empty-icon">⚔</div>
+        <div className="empty-icon" dangerouslySetInnerHTML={{ __html: ICONS.swords }} />
         <div className="empty-text">{t(lang, "noCharacters")}</div>
         <div className="empty-hint">{t(lang, "rightClickHint")}</div>
       </div>

@@ -86,6 +86,28 @@ html,body{
 
 .empty{color:#888;font-size:11px;padding:3px 6px}
 .err{color:#e74c3c;padding:12px;text-align:center;font-size:11px}
+
+/* Rollable tags inside monster stat-block (attack hits, damage dice,
+   chance rolls). Click → fires a quick-roll on the selected token. */
+.rollable{
+  cursor:pointer;
+  color:#7fc3eb;
+  font-weight:600;
+  border-radius:3px;
+  padding:0 3px;
+  transition:background .12s, color .12s;
+}
+.rollable:hover{
+  background:rgba(93,173,226,0.20);
+  color:#bfe2f5;
+}
+.rollable.rollable-flash{
+  animation: bestRollFlash 0.4s ease-out;
+}
+@keyframes bestRollFlash{
+  0%   {background:rgba(93,173,226,0.55); transform:scale(1.18); display:inline-block}
+  100% {background:transparent; transform:scale(1)}
+}
 </style>
 </head>
 <body>

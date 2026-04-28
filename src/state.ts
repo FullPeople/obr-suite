@@ -1,14 +1,17 @@
 import OBR from "@owlbear-rodeo/sdk";
 
-// Shared state across the suite. Two layers:
+// Shared state across the suite. Three layers:
 //
 //   1. Scene metadata (DM-controlled, broadcast to all clients):
-//      enabled modules, data version, language, allow-player-monsters.
+//      enabled modules, data version, allow-player-monsters.
 //      Stored under SCENE_KEY as one object.
 //
-//   2. localStorage (per-client preferences):
-//      auto-popup toggles for bestiary/character cards, expanded state
-//      of the floating cluster, etc.
+//   2. localStorage shared across iframes of this client only:
+//      `obr-suite/lang` — UI language, per-client preference. Each
+//      player chooses their own; the DM's setting does NOT sync.
+//
+//   3. localStorage per-feature (auto-popup toggles, cluster expanded
+//      state, etc.). Each module owns its own keys.
 
 export const SCENE_KEY = "com.obr-suite/state";
 export const BROADCAST_STATE_CHANGED = "com.obr-suite/state-changed";
@@ -19,7 +22,9 @@ export type ModuleId =
   | "bestiary"
   | "characterCards"
   | "initiative"
-  | "search";
+  | "search"
+  | "dice"
+  | "portals";
 
 export type DataVersion = "2014" | "2024" | "all";
 export type Language = "zh" | "en";
@@ -27,7 +32,6 @@ export type Language = "zh" | "en";
 export interface SuiteState {
   enabled: Record<ModuleId, boolean>;
   dataVersion: DataVersion;
-  language: Language;
   allowPlayerMonsters: boolean;
 }
 
@@ -38,10 +42,16 @@ export const DEFAULT_STATE: SuiteState = {
     bestiary: true,
     characterCards: true,
     initiative: true,
-    search: true,
+    // search: still has rough edges (popover layout / keyboard nav).
+    // Default OFF until those are sorted out — the DM can opt in via
+    // the Settings tab when ready to test.
+    search: false,
+    dice: true,
+    // portals: still in active development (multi-scene linking,
+    // permission model). Default OFF — must be manually enabled.
+    portals: false,
   },
   dataVersion: "2024",
-  language: "zh",
   allowPlayerMonsters: false,
 };
 
@@ -57,20 +67,38 @@ function merge(partial: any): SuiteState {
   return {
     enabled: { ...DEFAULT_STATE.enabled, ...(partial.enabled ?? {}) },
     dataVersion: partial.dataVersion ?? DEFAULT_STATE.dataVersion,
-    language: partial.language ?? DEFAULT_STATE.language,
     allowPlayerMonsters:
       partial.allowPlayerMonsters ?? DEFAULT_STATE.allowPlayerMonsters,
   };
 }
 
+function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
+  if (a.dataVersion !== b.dataVersion) return false;
+  if (a.allowPlayerMonsters !== b.allowPlayerMonsters) return false;
+  for (const k of Object.keys(a.enabled) as ModuleId[]) {
+    if (a.enabled[k] !== b.enabled[k]) return false;
+  }
+  return true;
+}
+
 export async function refreshFromScene(): Promise<SuiteState> {
+  let next: SuiteState;
   try {
     const meta = await OBR.scene.getMetadata();
-    cached = merge(meta[SCENE_KEY]);
+    next = merge(meta[SCENE_KEY]);
   } catch {
-    cached = DEFAULT_STATE;
+    next = DEFAULT_STATE;
   }
-  for (const fn of listeners) fn(cached);
+  // OBR.scene.onMetadataChange fires for ANY scene metadata write (bestiary
+  // spawn list, character cards list, initiative combat state, etc.) — not
+  // just suite state writes. Diff before notifying so unrelated metadata
+  // changes don't cascade to listeners (e.g. waking the search panel
+  // every time a monster is spawned).
+  const changed = !suiteStateEqual(cached, next);
+  cached = next;
+  if (changed) {
+    for (const fn of listeners) fn(cached);
+  }
   return cached;
 }
 
@@ -119,4 +147,48 @@ export function writeLS(key: string, val: string) {
 export function startSceneSync() {
   refreshFromScene();
   OBR.scene.onMetadataChange(() => refreshFromScene());
+}
+
+// --- Per-client language (localStorage) ---
+//
+// Language is intentionally NOT in scene metadata. Each player picks the
+// UI language they want; the DM's choice does not propagate. Cross-iframe
+// sync within one client uses the `storage` event for receivers and a
+// direct in-process notify for the writer (the storage event does not
+// fire in the iframe that did the write).
+
+const LS_LANG = "obr-suite/lang";
+const langListeners = new Set<(l: Language) => void>();
+let langStorageInstalled = false;
+
+export function getLocalLang(): Language {
+  try {
+    const v = localStorage.getItem(LS_LANG);
+    if (v === "zh" || v === "en") return v;
+  } catch {}
+  return "zh";
+}
+
+export function setLocalLang(lang: Language): void {
+  if (lang !== "zh" && lang !== "en") return;
+  if (getLocalLang() === lang) return;
+  try { localStorage.setItem(LS_LANG, lang); } catch {}
+  for (const fn of langListeners) fn(lang);
+}
+
+function ensureLangStorageListener() {
+  if (langStorageInstalled) return;
+  langStorageInstalled = true;
+  window.addEventListener("storage", (e) => {
+    if (e.key !== LS_LANG) return;
+    const v = e.newValue;
+    if (v !== "zh" && v !== "en") return;
+    for (const fn of langListeners) fn(v);
+  });
+}
+
+export function onLangChange(fn: (l: Language) => void): () => void {
+  langListeners.add(fn);
+  ensureLangStorageListener();
+  return () => langListeners.delete(fn);
 }

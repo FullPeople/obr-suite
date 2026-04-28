@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>枭熊插件图标预览</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  background:#1a1d28;color:#e6e8ee;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  padding:32px;
+  min-height:100vh;
+}
+h1{font-size:18px;font-weight:600;letter-spacing:0.5px;margin-bottom:6px}
+.subtitle{color:#8a8e9c;font-size:12.5px;margin-bottom:24px}
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+  gap:14px;
+  max-width:1200px;
+}
+.card{
+  display:flex;align-items:center;gap:14px;
+  background:#252938;border:1px solid rgba(255,255,255,0.08);
+  border-radius:8px;padding:14px 16px;
+}
+.cell{
+  width:42px;height:42px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,0.25);border-radius:6px;
+  font-size:20px;
+}
+.cell.svg{color:#cdd2e0}
+.cell.svg svg{width:22px;height:22px;display:block}
+.arrow{color:#5a5f6f;font-size:14px;flex-shrink:0}
+.meta{flex:1;min-width:0}
+.label{font-size:13px;font-weight:600;color:#e6e8ee;line-height:1.3}
+.context{font-size:11px;color:#8a8e9c;margin-top:2px}
+.section{
+  grid-column:1/-1;
+  margin-top:14px;margin-bottom:-2px;
+  font-size:11.5px;font-weight:700;color:#5dade2;letter-spacing:0.5px;
+  text-transform:uppercase;
+  padding-left:4px;
+}
+.section:first-child{margin-top:0}
+
+/* Sample previews of how the icon looks in actual context */
+.context-row{
+  display:flex;align-items:center;gap:8px;
+  background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.06);
+  border-radius:6px;padding:8px 12px;
+  font-size:13px;
+  margin-top:14px;
+}
+.context-row svg{width:16px;height:16px;flex-shrink:0;color:#cdd2e0}
+.tabs-preview{
+  display:flex;flex-direction:column;gap:4px;
+  margin-top:14px;
+  background:rgba(0,0,0,0.3);
+  border-radius:8px;padding:8px;
+  max-width:240px;
+}
+.tabs-preview .tab{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 10px;
+  border-radius:5px;
+  font-size:12.5px;color:#cdd2e0;
+}
+.tabs-preview .tab.on{background:rgba(93,173,226,0.18);color:#8ecdf0}
+.tabs-preview .tab svg{width:14px;height:14px;flex-shrink:0}
+.split{
+  display:grid;grid-template-columns:1fr 1fr;gap:24px;
+  max-width:1200px;
+  margin-top:32px;
+}
+.split h2{font-size:13px;font-weight:600;color:#8a8e9c;margin-bottom:10px;letter-spacing:0.3px}
+</style>
+</head>
+<body>
+
+<h1>枭熊插件 · Emoji → SVG 矢量图替换预览</h1>
+<div class="subtitle">线条粗细 2px · 24×24 viewBox · 跟随父级颜色（currentColor）· 主题适配</div>
+
+<div class="grid" id="grid">
+  <!-- Section: Settings tabs (large emoji that drive the tab list) -->
+  <div class="section">设置面板 · 标签页</div>
+
+  <div class="card">
+    <div class="cell">💖</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-heart-spark"></div>
+    <div class="meta">
+      <div class="label">支持作者 / 反馈</div>
+      <div class="context">支持 tab</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">📌</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-pin"></div>
+    <div class="meta">
+      <div class="label">重要说明</div>
+      <div class="context">Owner 设置教程 tab</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">📚</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-library"></div>
+    <div class="meta">
+      <div class="label">版本数据</div>
+      <div class="context">2014 / 2024 切换 tab</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">⏸</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-clock-pause"></div>
+    <div class="meta">
+      <div class="label">时停模式</div>
+      <div class="context">tab + cluster button</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">🎯</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-crosshair"></div>
+    <div class="meta">
+      <div class="label">同步视口</div>
+      <div class="context">tab + cluster button</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">🐉</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-dragon"></div>
+    <div class="meta">
+      <div class="label">怪物图鉴</div>
+      <div class="context">tab</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">📇</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-id-card"></div>
+    <div class="meta">
+      <div class="label">角色卡</div>
+      <div class="context">tab + 提示语</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">⚔</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-swords"></div>
+    <div class="meta">
+      <div class="label">先攻 / 战斗 / 武器</div>
+      <div class="context">tab + 多处</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">🔍</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-search"></div>
+    <div class="meta">
+      <div class="label">全局搜索</div>
+      <div class="context">tab</div>
+    </div>
+  </div>
+
+  <!-- Section: Inline / contextual -->
+  <div class="section">面板内容 / 行内</div>
+
+  <div class="card">
+    <div class="cell">☕</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-coffee"></div>
+    <div class="meta">
+      <div class="label">Ko-fi 按钮</div>
+      <div class="context">支持页</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">♥</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-heart"></div>
+    <div class="meta">
+      <div class="label">爱发电 / 心形</div>
+      <div class="context">支持页</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">📮</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-mail"></div>
+    <div class="meta">
+      <div class="label">反馈</div>
+      <div class="context">小标题</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">👤</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-user"></div>
+    <div class="meta">
+      <div class="label">Owner / 玩家</div>
+      <div class="context">重要说明小标题</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">⚠️</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-warning"></div>
+    <div class="meta">
+      <div class="label">警告 / 注意</div>
+      <div class="context">英文模式角色卡 tab</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">✓</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-check"></div>
+    <div class="meta">
+      <div class="label">上传成功</div>
+      <div class="context">角色卡 panel</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">📖</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-book"></div>
+    <div class="meta">
+      <div class="label">书库链接</div>
+      <div class="context">角色卡 panel 资源链接</div>
+    </div>
+  </div>
+
+  <!-- Section: Bestiary stat block -->
+  <div class="section">怪物图鉴 stat block 小节标题</div>
+
+  <div class="card">
+    <div class="cell">✦</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-sparkle4"></div>
+    <div class="meta">
+      <div class="label">特性</div>
+      <div class="context">怪物详情</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">⚡</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-zap"></div>
+    <div class="meta">
+      <div class="label">附赠动作 / 突袭</div>
+      <div class="context">怪物 + 战斗</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">🛡</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-shield"></div>
+    <div class="meta">
+      <div class="label">反应</div>
+      <div class="context">怪物详情</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">★</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-star"></div>
+    <div class="meta">
+      <div class="label">传奇动作</div>
+      <div class="context">怪物详情</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">✨</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-sparkles"></div>
+    <div class="meta">
+      <div class="label">施法</div>
+      <div class="context">怪物详情</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cell">⏹</div>
+    <div class="arrow">→</div>
+    <div class="cell svg" id="i-stop"></div>
+    <div class="meta">
+      <div class="label">结束战斗</div>
+      <div class="context">先攻面板</div>
+    </div>
+  </div>
+</div>
+
+<!-- Real-context preview -->
+<div class="split">
+  <div>
+    <h2>实际效果 · 设置面板标签栏（中文）</h2>
+    <div class="tabs-preview">
+      <div class="tab on"><span id="ctx-1"></span> 支持作者 / 反馈</div>
+      <div class="tab"><span id="ctx-2"></span> 重要说明</div>
+      <div class="tab"><span id="ctx-3"></span> 版本数据</div>
+      <div class="tab"><span id="ctx-4"></span> 时停模式</div>
+      <div class="tab"><span id="ctx-5"></span> 同步视口</div>
+      <div class="tab"><span id="ctx-6"></span> 怪物图鉴</div>
+      <div class="tab"><span id="ctx-7"></span> 角色卡</div>
+      <div class="tab"><span id="ctx-8"></span> 先攻追踪</div>
+      <div class="tab"><span id="ctx-9"></span> 全局搜索</div>
+    </div>
+  </div>
+  <div>
+    <h2>实际效果 · 怪物详情小节</h2>
+    <div class="context-row" style="background:rgba(245,166,35,0.06);border-color:rgba(245,166,35,0.25);color:#f5d76e">
+      <span id="ctx-10"></span> 特性
+    </div>
+    <div class="context-row" style="background:rgba(231,76,60,0.06);border-color:rgba(231,76,60,0.25);color:#ff8b7a">
+      <span id="ctx-11"></span> 动作
+    </div>
+    <div class="context-row" style="background:rgba(46,204,113,0.06);border-color:rgba(46,204,113,0.25);color:#7be0a0">
+      <span id="ctx-12"></span> 附赠动作
+    </div>
+    <div class="context-row" style="background:rgba(52,152,219,0.06);border-color:rgba(52,152,219,0.25);color:#5dade2">
+      <span id="ctx-13"></span> 反应
+    </div>
+    <div class="context-row" style="background:rgba(155,89,182,0.06);border-color:rgba(155,89,182,0.25);color:#bb87dd">
+      <span id="ctx-14"></span> 施法
+    </div>
+    <div class="context-row" style="background:rgba(241,196,15,0.06);border-color:rgba(241,196,15,0.25);color:#f5d76e">
+      <span id="ctx-15"></span> 传奇动作
+    </div>
+  </div>
+</div>
+
+<script>
+const SVG = {
+  // Heart with little spark on top — represents 支持/love
+  heartSpark: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z" fill="currentColor" fill-opacity="0.18"/><path d="M19.5 3.5l.7 1.4 1.4.7-1.4.7-.7 1.4-.7-1.4-1.4-.7 1.4-.7z"/></svg>`,
+  pin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`,
+  library: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><line x1="9" y1="6" x2="14" y2="6"/></svg>`,
+  clockPause: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><line x1="9.5" y1="8" x2="9.5" y2="16"/><line x1="14.5" y1="8" x2="14.5" y2="16"/></svg>`,
+  crosshair: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="2"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>`,
+  dragon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l3 4M19 3l-3 4"/><path d="M8 7c0-2 2-3 4-3s4 1 4 3v4c0 4-2 7-4 9-2-2-4-5-4-9V7z"/><circle cx="10" cy="11" r="0.8" fill="currentColor"/><circle cx="14" cy="11" r="0.8" fill="currentColor"/><path d="M10.5 16h3"/></svg>`,
+  idCard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M5.5 17a4 4 0 0 1 7 0"/><line x1="15" y1="9" x2="19" y2="9"/><line x1="15" y1="13" x2="18" y2="13"/></svg>`,
+  swords: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" y1="19" x2="19" y2="13"/><line x1="16" y1="16" x2="20" y2="20"/><line x1="19" y1="21" x2="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" y1="14" x2="9" y2="18"/><line x1="7" y1="17" x2="4" y2="20"/><line x1="3" y1="19" x2="5" y2="21"/></svg>`,
+  search: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7.5"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>`,
+  coffee: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" y1="2" x2="6" y2="4"/><line x1="10" y1="2" x2="10" y2="4"/><line x1="14" y1="2" x2="14" y2="4"/></svg>`,
+  heart: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/></svg>`,
+  mail: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m21 7-9 5.5L3 7"/></svg>`,
+  user: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
+  warning: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><line x1="12" y1="9" x2="12" y2="13.5"/><circle cx="12" cy="17" r="0.8" fill="currentColor"/></svg>`,
+  check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+  book: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
+  sparkle4: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7z"/></svg>`,
+  zap: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+  shield: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/></svg>`,
+  star: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
+  sparkles: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.5 5.5l2 2M16.5 16.5l2 2M5.5 18.5l2-2M16.5 7.5l2-2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>`,
+  stop: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>`,
+};
+
+const fill = (id, key) => {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = SVG[key];
+};
+
+fill("i-heart-spark", "heartSpark");
+fill("i-pin", "pin");
+fill("i-library", "library");
+fill("i-clock-pause", "clockPause");
+fill("i-crosshair", "crosshair");
+fill("i-dragon", "dragon");
+fill("i-id-card", "idCard");
+fill("i-swords", "swords");
+fill("i-search", "search");
+fill("i-coffee", "coffee");
+fill("i-heart", "heart");
+fill("i-mail", "mail");
+fill("i-user", "user");
+fill("i-warning", "warning");
+fill("i-check", "check");
+fill("i-book", "book");
+fill("i-sparkle4", "sparkle4");
+fill("i-zap", "zap");
+fill("i-shield", "shield");
+fill("i-star", "star");
+fill("i-sparkles", "sparkles");
+fill("i-stop", "stop");
+
+// Context preview
+fill("ctx-1", "heartSpark");
+fill("ctx-2", "pin");
+fill("ctx-3", "library");
+fill("ctx-4", "clockPause");
+fill("ctx-5", "crosshair");
+fill("ctx-6", "dragon");
+fill("ctx-7", "idCard");
+fill("ctx-8", "swords");
+fill("ctx-9", "search");
+fill("ctx-10", "sparkle4");
+fill("ctx-11", "swords");
+fill("ctx-12", "zap");
+fill("ctx-13", "shield");
+fill("ctx-14", "sparkles");
+fill("ctx-15", "star");
+</script>
+
+</body>
+</html>

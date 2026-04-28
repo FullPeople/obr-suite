@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Dice Replay</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;pointer-events:none}
+html,body{
+  height:100%;width:100%;
+  overflow:hidden;
+  background:transparent;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  color:#fff;
+  pointer-events:none;
+}
+html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
+
+.stage{position:absolute;inset:0;overflow:hidden}
+
+/* One overlay block per token. Anchored at the screen position the
+   frame loop computes from the token's WORLD coords + viewport
+   transform. Compact horizontal layout: dice icons + values, then
+   modifier, then total. */
+.overlay{
+  position:absolute;
+  left:0;top:0;
+  /* Tokens animate into position; .show flips opacity from 0 → 1 with a brief fade. */
+  opacity:0;
+  transition:opacity 0.22s ease-out;
+  pointer-events:auto;
+  cursor:pointer;
+  /* Origin at the bottom-center so positioning sits ABOVE the token. */
+  transform-origin:50% 100%;
+  filter:drop-shadow(0 6px 14px rgba(0,0,0,0.7));
+}
+.overlay.show{opacity:1}
+
+/* Bubble background = the suite's standard popover slate (matches
+   dice-panel / cluster --bg-soft) so the on-canvas overlay reads as
+   "owl-bear suite UI" rather than a generic black tooltip. The
+   border is the roller's player color so different rollers stay
+   visually distinguishable. */
+.bubble{
+  display:flex;flex-direction:column;align-items:center;
+  background:rgba(31,34,48,0.94);
+  border:1.5px solid var(--player-color, #5dade2);
+  border-radius:10px;
+  padding:6px 10px 7px;
+  white-space:nowrap;
+  position:relative;
+  transform:translate(-50%, -100%) translateY(-12px);
+  backdrop-filter:blur(4px);
+}
+.bubble::after{
+  content:"";
+  position:absolute;
+  left:50%;top:100%;
+  width:0;height:0;
+  margin-left:-6px;
+  border-left:6px solid transparent;
+  border-right:6px solid transparent;
+  border-top:8px solid var(--player-color, #5dade2);
+  filter:drop-shadow(0 1px 1px rgba(0,0,0,0.5));
+}
+
+.bubble .label{
+  font-size:10px;font-weight:700;color:#cdd2e0;
+  letter-spacing:0.3px;
+  margin-bottom:2px;
+  max-width:200px;
+  overflow:hidden;text-overflow:ellipsis;
+}
+.bubble .row1{
+  display:flex;align-items:center;gap:4px;
+  font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
+}
+.bubble .die{
+  display:inline-flex;align-items:center;gap:1px;
+  padding:0 4px;
+  border-radius:6px;
+  background:rgba(255,255,255,0.08);
+  font-size:11px;font-weight:800;color:#fff;
+  height:18px;
+}
+.bubble .die img{width:13px;height:13px;-webkit-user-drag:none}
+.bubble .die.crit{background:rgba(255,200,0,0.25);color:#ffd34d}
+.bubble .die.fail{background:rgba(231,76,60,0.25);color:#ff8a7a}
+.bubble .die.loser{opacity:0.4;text-decoration:line-through}
+.bubble .mod{font-size:11px;color:#a0a8ba;font-weight:700}
+.bubble .eq{color:#888;font-weight:700;font-size:11px}
+.bubble .total{
+  font-size:14px;font-weight:900;color:var(--player-color, #5dade2);
+  margin-left:3px;
+  letter-spacing:-0.5px;
+}
+
+/* Hint at the top-center: "click overlay to close" / "click again on history row to close" */
+.hint{
+  position:absolute;
+  left:50%;top:14px;
+  transform:translateX(-50%);
+  background:rgba(20,22,32,0.85);
+  border:1px solid rgba(255,255,255,0.15);
+  border-radius:14px;
+  padding:5px 12px;
+  font-size:11px;font-weight:600;color:#bcc1d0;
+  pointer-events:none;
+  letter-spacing:0.4px;
+  opacity:0;
+  transition:opacity 0.3s ease-out;
+}
+.hint.show{opacity:0.85}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="hint" id="hint">点击气泡或再次点击词条关闭</div>
+</div>
+<script type="module" src="/src/modules/dice/replay-page.ts"></script>
+</body>
+</html>

@@ -3,9 +3,12 @@ import {
   startSceneSync,
   getState,
   onStateChange,
+  getLocalLang,
+  onLangChange,
   DataVersion,
   Language,
 } from "../../state";
+import { formatTagsClickable, fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
 
 // Suite-version of the search bar. Differences from the standalone:
 //   - No in-iframe toggles row — version + allowPlayerMonsters live in
@@ -78,6 +81,17 @@ interface CategoryInfo {
     | { fileBySource: (src: string) => string; key: string };
 }
 
+// kiwee.top index categories — verified against actual data files
+// 2026-04-28 by sampling 5+ entries per category and resolving them to
+// the 5etools data files. The ORIGINAL standalone 5e-search code (and
+// the previous version of THIS file) had the category numbers wrong:
+//   c=7 was "陷阱" but actually contains FEATS (Elven Accuracy, Dark
+//        Gifts from VRGtR, etc.) — feats.json
+//   c=8 was "专长" but actually contains OPTIONAL FEATURES (warlock
+//        invocations etc.) — optionalfeatures.json
+//   c=13 (冒险) had no data — exists as adventures.json
+//   c=16 was "表格" but actually contains TRAPS — trapshazards.json
+// The fixes below correct all of these and verify the rest.
 const CATEGORY: Record<number, CategoryInfo> = {
   1:  { label: "怪物", data: { fileBySource: (s) => `bestiary/bestiary-${s}.json`, key: "monster" } },
   2:  { label: "法术", data: { fileBySource: (s) => `spells/spells-${s}.json`, key: "spell" } },
@@ -85,52 +99,58 @@ const CATEGORY: Record<number, CategoryInfo> = {
   4:  { label: "物品", data: { file: "items.json", key: "item" } },
   5:  { label: "职业" },
   6:  { label: "状态", data: { file: "conditionsdiseases.json", key: "condition" } },
-  7:  { label: "陷阱", data: { file: "trapshazards.json", key: "trap" } },
-  8:  { label: "专长", data: { file: "feats.json", key: "feat" } },
+  7:  { label: "专长", data: { file: "feats.json", key: "feat" } },
+  8:  { label: "能力", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
   9:  { label: "灵能", data: { file: "psionics.json", key: "psionic" } },
   10: { label: "种族", data: { file: "races.json", key: "race" } },
   11: { label: "奖励", data: { file: "rewards.json", key: "reward" } },
   12: { label: "副规则", data: { file: "variantrules.json", key: "variantrule" } },
-  13: { label: "冒险" },
+  13: { label: "冒险", data: { file: "adventures.json", key: "adventure" } },
   14: { label: "神祇", data: { file: "deities.json", key: "deity" } },
   15: { label: "载具", data: { file: "vehicles.json", key: "vehicle" } },
-  16: { label: "表格" },
+  16: { label: "陷阱", data: { file: "trapshazards.json", key: "trap" } },
   17: { label: "灾害", data: { file: "trapshazards.json", key: "hazard" } },
-  18: { label: "书籍" },
+  18: { label: "整本书", data: { file: "books.json", key: "book" } },
   19: { label: "教派", data: { file: "cultsboons.json", key: "cult" } },
   20: { label: "恩惠", data: { file: "cultsboons.json", key: "boon" } },
   21: { label: "疾病", data: { file: "conditionsdiseases.json", key: "disease" } },
   22: { label: "超魔", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
   23: { label: "招式", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
-  24: { label: "变体", data: { file: "variantrules.json", key: "variantrule" } },
+  24: { label: "表格", data: { file: "tables.json", key: "table" } },
   25: { label: "牌组" },
   27: { label: "奥术箭", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
   29: { label: "战斗风格", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
   30: { label: "职业能力" },
-  31: { label: "物品分类" },
+  31: { label: "物品", data: { file: "items.json", key: "item" } },
   32: { label: "盟约", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
   33: { label: "武僧能力", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
   34: { label: "灌注", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
-  35: { label: "船升级" },
+  35: { label: "载具升级", data: { file: "vehicles.json", key: "vehicleUpgrade" } },
   36: { label: "船定制" },
   37: { label: "符文", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
   40: { label: "子职业" },
   41: { label: "子职能力" },
   42: { label: "动作", data: { file: "actions.json", key: "action" } },
   43: { label: "语言", data: { file: "languages.json", key: "language" } },
-  44: { label: "整本书" },
+  44: { label: "整本书", data: { file: "books.json", key: "book" } },
   45: { label: "页面" },
-  46: { label: "怪物", data: { fileBySource: (s) => `bestiary/bestiary-${s}.json`, key: "monster" } },
-  47: { label: "角色选项" },
+  // c=46 is the monster's "fluff" entry — base race/type description
+  // separate from the per-age stat blocks at c=1. Lives in
+  // fluff-bestiary-${src}.json under `monsterFluff` (NOT in the
+  // regular bestiary-${src}.json#monster file).
+  46: { label: "怪物概述", data: { fileBySource: (s) => `bestiary/fluff-bestiary-${s}.json`, key: "monsterFluff" } },
+  47: { label: "角色选项", data: { file: "items.json", key: "item" } },
   48: { label: "食谱", data: { file: "recipes.json", key: "recipe" } },
   49: { label: "规则", data: { file: "conditionsdiseases.json", key: "status" } },
   50: { label: "技能" },
   51: { label: "感官" },
-  52: { label: "牌组" },
+  52: { label: "牌组", data: { file: "decks.json", key: "deck" } },
+  // c=53 牌内容 — per user request, the card detail display is
+  // suppressed (was cluttering search results with low-value data).
   53: { label: "牌内容" },
   54: { label: "武器精通", data: { file: "items.json", key: "itemMastery" } },
   55: { label: "地点" },
-  56: { label: "圣物", data: { file: "items.json", key: "item" } },
+  56: { label: "物品集合", data: { file: "items.json", key: "itemGroup" } },
   57: { label: "物品", data: { file: "items.json", key: "item" } },
 };
 function categoryInfo(c: number): CategoryInfo {
@@ -170,7 +190,7 @@ async function loadIndex(): Promise<IndexFile> {
         }
       }
     } catch {}
-    const res = await fetch(indexUrl(getState().language), { cache: "default" });
+    const res = await fetch(indexUrl(getLocalLang()), { cache: "default" });
     if (!res.ok) throw new Error(`index fetch failed: ${res.status}`);
     const data = (await res.json()) as IndexFile;
     indexCache = data;
@@ -207,7 +227,7 @@ async function loadBooks(): Promise<void> {
       }
     } catch {}
     try {
-      const res = await fetch(booksUrl(getState().language), { cache: "default" });
+      const res = await fetch(booksUrl(getLocalLang()), { cache: "default" });
       if (!res.ok) return;
       const data = await res.json();
       const map: Record<string, string> = {};
@@ -302,7 +322,7 @@ async function loadCategoryData(entry: Entry): Promise<DataEntry[]> {
   if (cached) return cached;
   const pending = dataPending.get(ck);
   if (pending) return pending;
-  const base = dataBase(getState().language);
+  const base = dataBase(getLocalLang());
   let url: string;
   if ("fileBySource" in cat.data) {
     url = `${base}/data/${cat.data.fileBySource(src)}`;
@@ -332,15 +352,32 @@ async function findEntryData(entry: Entry): Promise<DataEntry | null> {
   const arr = await loadCategoryData(entry);
   if (arr.length === 0) return null;
   const targetSrc = srcCode(entry.s).toUpperCase();
-  return (
+  const found =
     arr.find(
       (e) =>
         e.ENG_name?.toLowerCase() === entry.n.toLowerCase() &&
         e.source?.toUpperCase() === targetSrc
     ) ??
     arr.find((e) => e.ENG_name?.toLowerCase() === entry.n.toLowerCase()) ??
-    null
-  );
+    null;
+  if (!found) return null;
+  // 5etools `_copy` inheritance — used heavily by monsterFluff (e.g.
+  // "White Dragon" inherits from "Chromatic Dragons" with mods). Without
+  // this resolution the entry has no body text. We do a shallow copy:
+  // walk the parent in the same file by ENG_name, inherit its entries
+  // if our entry lacks them. Mods (_mod) are NOT applied — the parent
+  // text is good enough for display.
+  if (!found.entries && found._copy) {
+    const cp = found._copy;
+    const parentName = (cp.ENG_name || cp.name || "")?.toLowerCase();
+    if (parentName) {
+      const parent = arr.find((e) => (e.ENG_name || e.name || "").toLowerCase() === parentName);
+      if (parent?.entries) {
+        return { ...found, entries: parent.entries, _copyResolvedFrom: parent.ENG_name || parent.name };
+      }
+    }
+  }
+  return found;
 }
 
 // --- HTML escape + 5etools tag stripping ---
@@ -358,6 +395,15 @@ function stripTags(s: string): string {
     return parts[0];
   });
 }
+// Render an entry-level string with 5etools tags. Body text gets the
+// rich version (clickable .rollable spans for {@dice}, {@damage},
+// {@hit}, {@d20}, {@chance} etc.); the surrounding prose is escaped.
+// Use this anywhere the 5etools data is INSIDE a <p>/<li>/<td> — i.e.
+// the player will read it as flowing text. For chip headers / name
+// labels stay with stripTags + escapeHtml.
+function richTags(s: string): string {
+  return formatTagsClickable(s);
+}
 
 // --- Generic recursive renderer (strings + 5etools structured types) ---
 function renderEntries(entries: any[]): string {
@@ -365,7 +411,9 @@ function renderEntries(entries: any[]): string {
 }
 function renderEntry(e: any): string {
   if (e == null) return "";
-  if (typeof e === "string") return `<p>${escapeHtml(stripTags(e))}</p>`;
+  // Body strings: use richTags so {@dice} / {@damage} / {@hit} etc.
+  // become clickable .rollable spans.
+  if (typeof e === "string") return `<p>${richTags(e)}</p>`;
   if (typeof e !== "object") return "";
   const type = e.type ?? "entries";
   if (type === "entries" || type === "section") {
@@ -409,7 +457,8 @@ function renderEntry(e: any): string {
 }
 function renderEntryInline(e: any): string {
   if (e == null) return "";
-  if (typeof e === "string") return escapeHtml(stripTags(e));
+  // Body strings inside lists / table cells — clickable too.
+  if (typeof e === "string") return richTags(e);
   if (typeof e !== "object") return "";
   if (e.type === "item") {
     const name = e.name ? `<b>${escapeHtml(stripTags(e.name))}.</b> ` : "";
@@ -836,22 +885,57 @@ let lastHoverEntry: Entry | null = null;
 let collapsedKeepingQuery = false;
 
 function applyLangPlaceholder() {
-  const s = getState();
+  const lang = getLocalLang();
   inputEl.placeholder =
-    s.language === "zh"
+    lang === "zh"
       ? "搜索 5etools…（怪物/法术/物品/职业/种族…）"
       : "Search 5etools… (monsters/spells/items/classes/races…)";
 }
 
-let resizeBusy = false;
+// --- Animated resize ---
+// OBR.popover.setWidth/setHeight are instant (no built-in tween). We step
+// from current → target over ~220ms with easeOutCubic so width/height
+// changes feel smooth alongside the CSS opacity fade on .body / .tools.
+// A monotonic token cancels in-flight animations when a newer call
+// arrives, so rapid expand/collapse toggles never get stuck mid-step.
+let currentW = BAR_W_IDLE;
+let currentH = BAR_H_IDLE;
+let resizeToken = 0;
+const RESIZE_DURATION_MS = 220;
+const RESIZE_STEPS = 6;
+
+async function animateResize(targetW: number, targetH: number): Promise<void> {
+  const myToken = ++resizeToken;
+  const startW = currentW;
+  const startH = currentH;
+  if (startW === targetW && startH === targetH) return;
+  const dw = targetW - startW;
+  const dh = targetH - startH;
+  for (let i = 1; i <= RESIZE_STEPS; i++) {
+    if (myToken !== resizeToken) return;
+    const t = i / RESIZE_STEPS;
+    const ease = 1 - Math.pow(1 - t, 3); // easeOutCubic
+    const w = Math.round(startW + dw * ease);
+    const h = Math.round(startH + dh * ease);
+    currentW = w;
+    currentH = h;
+    try {
+      await Promise.all([
+        OBR.popover.setWidth(POPOVER_ID, w),
+        OBR.popover.setHeight(POPOVER_ID, h),
+      ]);
+    } catch {}
+    if (i < RESIZE_STEPS) {
+      await new Promise((r) => setTimeout(r, RESIZE_DURATION_MS / RESIZE_STEPS));
+    }
+  }
+}
+
 async function setExpanded(expanded: boolean) {
-  if (resizeBusy) return;
-  resizeBusy = true;
-  try {
-    await OBR.popover.setWidth(POPOVER_ID, expanded ? BAR_W_OPEN : BAR_W_IDLE);
-    await OBR.popover.setHeight(POPOVER_ID, expanded ? BAR_H_OPEN : BAR_H_IDLE);
-  } catch {}
-  resizeBusy = false;
+  await animateResize(
+    expanded ? BAR_W_OPEN : BAR_W_IDLE,
+    expanded ? BAR_H_OPEN : BAR_H_IDLE
+  );
 }
 
 function renderHint(text: string, isErr = false) {
@@ -987,6 +1071,10 @@ async function renderPreviewFor(entry: Entry) {
     bodyEl.innerHTML = chipsFor(entry, data) + renderSpell(entry, data);
   } else if (c === 4 || c === 56 || c === 57) {
     bodyEl.innerHTML = chipsFor(entry, data) + renderItem(entry, data);
+  } else if (c === 13) {
+    bodyEl.innerHTML = chipsFor(entry, data) + renderAdventure(entry, data);
+  } else if (c === 18 || c === 44) {
+    bodyEl.innerHTML = chipsFor(entry, data) + renderBook(entry, data);
   } else {
     // Generic: chips + entries
     const body = data.entries ? renderEntries(data.entries) : "";
@@ -994,7 +1082,83 @@ async function renderPreviewFor(entry: Entry) {
   }
 }
 
+// Adventures / books carry only a manifest (chapters / appendices /
+// covers / level range). The actual prose lives in `book/<ID>.json` /
+// `adventure/<ID>.json` files which we don't fetch here. Render a
+// readable chapter list + level/author meta so the entry isn't blank.
+function renderAdventure(_entry: Entry, data: DataEntry): string {
+  const parts: string[] = [];
+  const lvl = data.level && (data.level.start != null || data.level.end != null)
+    ? `<p><b>等级范围：</b>${escapeHtml(`${data.level.start ?? "?"} - ${data.level.end ?? "?"}`)}</p>`
+    : "";
+  const author = data.author ? `<p><b>作者：</b>${escapeHtml(stripTags(String(data.author)))}</p>` : "";
+  const story = data.storyline ? `<p><b>故事线：</b>${escapeHtml(stripTags(String(data.storyline)))}</p>` : "";
+  const published = data.published ? `<p><b>出版：</b>${escapeHtml(String(data.published))}</p>` : "";
+  parts.push(lvl, author, story, published);
+  if (Array.isArray(data.contents) && data.contents.length) {
+    const chapters = data.contents
+      .map((ch: any) => {
+        const ord = ch.ordinal
+          ? `<span class="chap-ord">${escapeHtml(String(ch.ordinal.identifier ?? ""))}.</span> `
+          : "";
+        const title = escapeHtml(stripTags(ch.name ?? ch.ENG_name ?? "?"));
+        const headers = Array.isArray(ch.headers) && ch.headers.length
+          ? `<ul>${ch.headers.map((h: any) => {
+              const t = typeof h === "string" ? h : (h?.header ?? "");
+              return t ? `<li>${escapeHtml(stripTags(String(t)))}</li>` : "";
+            }).filter(Boolean).join("")}</ul>`
+          : "";
+        return `<li>${ord}${title}${headers}</li>`;
+      })
+      .join("");
+    parts.push(`<h4>章节</h4><ol class="chap-list">${chapters}</ol>`);
+  }
+  return parts.join("");
+}
+
+function renderBook(_entry: Entry, data: DataEntry): string {
+  const parts: string[] = [];
+  if (data.published) parts.push(`<p><b>出版：</b>${escapeHtml(String(data.published))}</p>`);
+  if (data.author) parts.push(`<p><b>作者：</b>${escapeHtml(stripTags(String(data.author)))}</p>`);
+  if (Array.isArray(data.contents) && data.contents.length) {
+    const chapters = data.contents.map((ch: any) => {
+      const ord = ch.ordinal
+        ? `<span class="chap-ord">${escapeHtml(String(ch.ordinal.identifier ?? ""))}.</span> `
+        : "";
+      const title = escapeHtml(stripTags(ch.name ?? ch.ENG_name ?? "?"));
+      return `<li>${ord}${title}</li>`;
+    }).join("");
+    parts.push(`<h4>目录</h4><ol class="chap-list">${chapters}</ol>`);
+  }
+  return parts.join("");
+}
+
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Re-runs the search using the current input value + state without
+// changing the visual collapsed/expanded state. Called from input events
+// (which already drive expand on their own) and from suite state changes
+// (which must NOT pop the panel back open).
+async function runSearch(q: string) {
+  if (!indexCache) renderHint("加载索引中…（首次约 1 秒）");
+  let idx: IndexFile;
+  try { idx = await loadIndex(); }
+  catch (e) {
+    renderHint("索引加载失败：" + ((e as Error).message ?? "网络错误"), true);
+    return;
+  }
+  const currentQ = inputEl.value.trim();
+  if (currentQ !== q) return;
+  const s = getState();
+  const hits = search(q, idx, {
+    dataVersion: s.dataVersion,
+    language: getLocalLang(),
+    isGM,
+    allowPlayerMonsters: s.allowPlayerMonsters,
+  });
+  renderResults(hits, q);
+}
+
 async function onQueryChange(qRaw: string) {
   const q = qRaw.trim();
   wrapEl.classList.toggle("has-q", q.length > 0);
@@ -1010,29 +1174,39 @@ async function onQueryChange(qRaw: string) {
     await setExpanded(false);
     return;
   }
+  // Typing always expands — conscious user action.
   collapsedKeepingQuery = false;
   wrapEl.classList.remove("collapsed");
   await setExpanded(true);
-  if (!indexCache) renderHint("加载索引中…（首次约 1 秒）");
-  let idx: IndexFile;
-  try { idx = await loadIndex(); }
-  catch (e) {
-    renderHint("索引加载失败：" + ((e as Error).message ?? "网络错误"), true);
-    return;
-  }
-  const currentQ = inputEl.value.trim();
-  if (currentQ !== q) return;
-  const s = getState();
-  const hits = search(q, idx, {
-    dataVersion: s.dataVersion,
-    language: s.language,
-    isGM,
-    allowPlayerMonsters: s.allowPlayerMonsters,
-  });
-  renderResults(hits, q);
+  await runSearch(q);
 }
 
-function refilter() { onQueryChange(inputEl.value); }
+// Re-filter without forcing the panel open. Used when suite settings
+// change (language/dataVersion/allowPlayerMonsters) and the panel is in
+// any state — including collapsed-with-query.
+function refilter() {
+  const q = inputEl.value.trim();
+  if (!q) return;
+  runSearch(q);
+}
+
+// Delegated click for any 5etools rollable tag inside the search
+// preview pane. Fires a quick-roll using the player's current
+// selection (if any) as the dice anchor.
+previewEl.addEventListener("click", async (e) => {
+  const target = (e.target as HTMLElement | null)?.closest<HTMLElement>(".rollable");
+  if (!target) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const expression = target.dataset.expr ?? "";
+  const label = target.dataset.label ?? "";
+  if (!expression) return;
+  const itemId = await resolveClickRollTarget();
+  fireQuickRoll({ expression, label, itemId, focus: !!itemId });
+  target.classList.remove("rollable-flash");
+  void target.offsetWidth;
+  target.classList.add("rollable-flash");
+});
 
 inputEl.addEventListener("input", () => {
   if (debounceTimer) clearTimeout(debounceTimer);
@@ -1042,6 +1216,20 @@ clearEl.addEventListener("click", async () => {
   inputEl.value = "";
   await onQueryChange("");
   inputEl.focus();
+});
+
+// Cluster's inline search input broadcasts every keystroke here. We
+// mirror it into our own (now hidden) input field and run the same
+// debounced query pipeline. The input row in this iframe is hidden
+// via CSS — typing in cluster IS typing here, conceptually.
+const BC_SEARCH_QUERY = "com.obr-suite/search-query";
+OBR.onReady(() => {
+  OBR.broadcast.onMessage(BC_SEARCH_QUERY, (event) => {
+    const q = (event.data as { q?: string } | undefined)?.q ?? "";
+    inputEl.value = q;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    onQueryChange(q).catch(() => {});
+  });
 });
 
 // --- Esc / arrow handling at document level ---
@@ -1098,13 +1286,14 @@ window.addEventListener("blur", () => {
   }
 });
 
-// Re-expand ONLY on real keyboard input. Mouse-based events (pointerdown
-// on the input area) were waking the dropdown when the user dragged a
-// token through the search bar's screen region or when bestiary spawned a
-// new monster (OBR sometimes returns focus to last-active element). A
-// keypress is a real conscious user action that can't be triggered by
-// programmatic focus or pointer drift.
+// Re-expand on a deliberate user action: a real keystroke (printable key
+// or backspace/delete) OR a real `click` (mouse-down + mouse-up on the
+// input). `click` does NOT fire from programmatic focus, pointer drift
+// while dragging a token across the bar, or popover-induced focus
+// shuffling — so monsters being spawned and tokens being moved no
+// longer wake the panel up.
 function userExpand() {
+  ensureDataLoad();
   if (collapsedKeepingQuery && inputEl.value) {
     collapsedKeepingQuery = false;
     wrapEl.classList.remove("collapsed");
@@ -1116,6 +1305,23 @@ inputEl.addEventListener("keydown", (e) => {
     userExpand();
   }
 });
+// Clicking the input row (input itself or the row container) is a real
+// user action — wake the panel and start lazy-loading data so by the
+// time they type the index is in flight.
+inputEl.addEventListener("click", () => userExpand());
+const rowEl = document.getElementById("row") as HTMLDivElement | null;
+rowEl?.addEventListener("click", () => userExpand());
+
+// Lazy data load: index + books are NOT preloaded. They start fetching
+// the first time the user clicks the input or types a key. By the time
+// they finish typing the first character, the index is usually ready.
+let dataLoadStarted = false;
+function ensureDataLoad() {
+  if (dataLoadStarted) return;
+  dataLoadStarted = true;
+  loadIndex().catch(() => {});
+  loadBooks().catch(() => {});
+}
 
 OBR.onReady(async () => {
   try {
@@ -1123,17 +1329,19 @@ OBR.onReady(async () => {
     isGM = role === "GM";
   } catch {}
 
-  // Subscribe to suite scene state. dataVersion / language / allowPlayerMonsters
-  // changes from the Settings panel re-trigger filtering automatically.
+  // Subscribe to suite scene state — dataVersion / allowPlayerMonsters
+  // changes from the Settings panel re-trigger filtering. refilter()
+  // no longer forces the panel open, so silent updates while the bar is
+  // collapsed-with-query stay silent.
   startSceneSync();
   applyLangPlaceholder();
   onStateChange(() => {
+    if (inputEl.value) refilter();
+  });
+  // Per-client language change (localStorage): update placeholder + rerun
+  // search since result ranking depends on language.
+  onLangChange(() => {
     applyLangPlaceholder();
     if (inputEl.value) refilter();
   });
-
-  setTimeout(() => {
-    loadIndex().catch(() => {});
-    loadBooks().catch(() => {});
-  }, 250);
 });

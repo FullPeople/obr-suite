@@ -6,14 +6,35 @@ import {
   refreshFromScene,
   readLS,
   writeLS,
+  getLocalLang,
+  onLangChange,
 } from "./state";
 import { t } from "./i18n";
+import { ICONS } from "./icons";
+
+// Crude device detection. OBR doesn't expose one; user-agent matching
+// covers the common phone/tablet cases well enough to decide whether to
+// hide the fullscreen character-card button (which is unusable on a
+// phone-sized viewport).
+function isMobileDevice(): boolean {
+  const ua = navigator.userAgent || "";
+  return /Mobi|Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(ua);
+}
+const IS_MOBILE = isMobileDevice();
 
 // Cluster popover internals.
 
 const POPOVER_ID = "com.obr-suite/cluster";
 const W_COLLAPSED = 64;
-const W_EXPANDED = 540;
+// Was 540 before the inline-search input moved into the cluster.
+// Bumped to fit the buttons + a usable search-input width without
+// the row wrapping to two lines on the default 中文 setup.
+// Cap the expanded width — instead of stretching wider for long-label
+// languages, we let the inner row wrap onto a second line. Same width
+// for every language; height grows when wrapping happens, and the
+// search bar listens for the new height to slide down accordingly.
+const W_EXPANDED = 760;
+const H_COLLAPSED = 64;
 
 const SETTINGS_POPOVER_ID = "com.obr-suite/settings";
 const SETTINGS_URL = "https://obr.dnd.center/suite/settings.html";
@@ -25,11 +46,24 @@ const BC_BESTIARY_AUTOPOPUP = "com.bestiary/auto-popup-toggled";
 const BC_CHARCARD_AUTOPOPUP = "com.character-cards/auto-info-toggled";
 const BC_OPEN_CHARCARD_PANEL = "com.character-cards/panel-open";
 const BC_TOGGLE_CC_PANEL = "com.obr-suite/cc-panel-toggle";
+// Dice-history popover (bottom-left). Same shape as the bestiary /
+// cc auto-popup toggles — per-client localStorage preference + a
+// LOCAL broadcast that the dice background module listens for.
+const BC_DICE_HISTORY_TOGGLE = "com.obr-suite/dice-history-toggle";
+// Inline-search query — cluster broadcasts every keystroke; the
+// search-bar popover (below cluster) listens and runs its existing
+// search/render pipeline.
+const BC_SEARCH_QUERY = "com.obr-suite/search-query";
+// Asks the search popover to close immediately (sent on Esc / clear
+// click in the cluster input). Distinct from a "q=''" broadcast so
+// the popover knows it's an explicit dismiss vs. a casual clear.
+const BC_SEARCH_CLOSE = "com.obr-suite/search-close";
 
 // Per-client preferences
 const LS_EXPANDED = "obr-suite/cluster-expanded";
 const LS_AUTO_BESTIARY = "com.bestiary/auto-popup";
 const LS_AUTO_CHARCARD = "character-cards/auto-info";
+const LS_AUTO_DICE_HISTORY = "com.obr-suite/dice-history-on";
 
 const wrapEl = document.getElementById("wrap") as HTMLDivElement;
 const rowEl = document.getElementById("row") as HTMLDivElement;
@@ -42,6 +76,39 @@ const GEAR_SVG = `<svg class="gear" viewBox="0 0 24 24" fill="none" stroke="curr
 let expanded = false;          // synced with LS during init below
 let timeStopActive = false;
 let isGM = false;
+// Last-typed search query, preserved across re-renders so toggling
+// expand / language doesn't clear what the user was typing.
+let lastSearchQuery = "";
+// Last known cluster height (popover height) — used to dedupe setHeight
+// + broadcast calls so the search bar isn't churning every render.
+let lastClusterHeight = H_COLLAPSED;
+
+const BC_CLUSTER_LAYOUT = "com.obr-suite/cluster-layout";
+
+function clusterEl(): HTMLDivElement | null {
+  return document.getElementById("cluster") as HTMLDivElement | null;
+}
+
+// Measure the cluster's actual rendered height and apply it to the
+// popover + broadcast it to other modules (the search bar listens so it
+// can slide its top offset down when the cluster wraps to 2 rows). Calls
+// after a renderRow / applyExpanded should run on rAF so layout has
+// settled. Idempotent — only fires when the value changes.
+function syncClusterHeight() {
+  requestAnimationFrame(() => {
+    let h = H_COLLAPSED;
+    if (expanded) {
+      const el = clusterEl();
+      if (el) h = Math.max(H_COLLAPSED, Math.round(el.getBoundingClientRect().height));
+    }
+    if (h === lastClusterHeight) return;
+    lastClusterHeight = h;
+    OBR.popover.setHeight(POPOVER_ID, h).catch(() => {});
+    OBR.broadcast
+      .sendMessage(BC_CLUSTER_LAYOUT, { height: h, expanded }, { destination: "LOCAL" })
+      .catch(() => {});
+  });
+}
 
 // applyExpanded runs ONLY on user click after init. It updates the visual
 // state, persists to localStorage, AND calls setWidth ONCE. No retries,
@@ -57,6 +124,9 @@ async function applyExpanded(next: boolean) {
   } catch (e) {
     console.warn("[obr-suite/cluster] setWidth failed", e);
   }
+  // Height may need to grow if buttons wrap onto a second line. Re-measure
+  // after the row has rendered + setWidth is in flight.
+  syncClusterHeight();
 }
 
 mainEl.addEventListener("click", () => {
@@ -93,7 +163,7 @@ function btnHTML(opts: {
 
 function renderRow() {
   const s = getState();
-  const lang = s.language;
+  const lang = getLocalLang();
 
   const parts: string[] = [];
 
@@ -120,7 +190,9 @@ function renderRow() {
 
   // === Popup toggles (悬浮窗) — only the toggles whose modules are enabled
   const popupBtns: string[] = [];
-  if (s.enabled.bestiary) {
+  // Bestiary popup is GM-only — players never see the bestiary so they
+  // shouldn't have a toggle for its monster info popover either.
+  if (isGM && s.enabled.bestiary) {
     popupBtns.push(
       btnHTML({
         id: "btnBestiaryPopup",
@@ -142,20 +214,45 @@ function renderRow() {
       })
     );
   }
+  // Dice history popover toggle — visible to ALL roles (DM and
+  // players both want a glanceable last-roll feed). The popover
+  // itself sits bottom-left when on. Default ON.
+  if (s.enabled.dice) {
+    popupBtns.push(
+      btnHTML({
+        id: "btnDiceHistoryPopup",
+        labelHtml: lang === "zh" ? "投骰记录" : "Dice Log",
+        toggle: true,
+        on: isAutoPopupOn(LS_AUTO_DICE_HISTORY),
+        title: lang === "zh" ? "投骰记录浮窗" : "Dice history popover",
+      })
+    );
+  }
   // Only render the wrapper group when there is at least one toggle.
   if (popupBtns.length) {
     const labelText = t(lang, "groupLabelPopups");
-    const labelChars = Array.from(labelText)
-      .map((c) => `<span>${c}</span>`)
-      .join("");
+    // For Chinese the 悬浮窗 label is 3 chars stacked vertically (one per
+    // line); for any other language we render it as a single horizontal
+    // label so it doesn't get character-broken into "A\nu\nt\no...".
+    const isVerticalLabel = lang === "zh";
+    const labelInner = isVerticalLabel
+      ? Array.from(labelText).map((c) => `<span>${c}</span>`).join("")
+      : `<span>${labelText}</span>`;
     parts.push(
-      `<div class="group"><div class="glabel">${labelChars}</div>${popupBtns.join(
+      `<div class="group${isVerticalLabel ? "" : " h-label"}"><div class="glabel">${labelInner}</div>${popupBtns.join(
         ""
       )}</div>`
     );
   }
 
-  if (s.enabled.characterCards) {
+  // The dice button used to live here. It now lives as the suite's
+  // native OBR action button (top-left corner), configured via the
+  // `action` block in manifest.json. Keeping the cluster slot empty
+  // here so the rest of the cluster row layout is unchanged.
+
+  // 角色卡界面 button — fullscreen panel, hidden on phone-sized devices
+  // since the panel layout assumes desktop width.
+  if (s.enabled.characterCards && !IS_MOBILE) {
     parts.push(
       btnHTML({
         id: "btnCharCardPanel",
@@ -163,6 +260,21 @@ function renderRow() {
         title: t(lang, "btnCharCardPanel"),
       })
     );
+  }
+
+  // Inline search input — takes the remaining horizontal space.
+  // Typing here broadcasts to the search-bar popover below the
+  // cluster, which renders the dropdown / preview independently
+  // (so dropdown size doesn't affect cluster layout). Hidden on
+  // mobile — the search-bar popover would dwarf the screen.
+  if (s.enabled.search && !IS_MOBILE) {
+    const placeholder = lang === "zh"
+      ? "搜索 5etools…"
+      : "Search 5etools…";
+    parts.push(`<div class="search-wrap" id="searchWrap">
+      <input id="searchInput" type="text" placeholder="${placeholder}" autocomplete="off" spellcheck="false">
+      <button class="clear-btn" id="searchClear" type="button" aria-label="清空">✕</button>
+    </div>`);
   }
 
   // Merged settings/about gear — always present.
@@ -186,9 +298,65 @@ function renderRow() {
     .getElementById("btnCharCardPopup")
     ?.addEventListener("click", onCharCardPopup);
   document
+    .getElementById("btnDiceHistoryPopup")
+    ?.addEventListener("click", onDiceHistoryPopup);
+  document
     .getElementById("btnCharCardPanel")
     ?.addEventListener("click", onCharCardPanel);
+  // Dice panel handler removed — dice now lives in the OBR action.
   document.getElementById("btnGear")?.addEventListener("click", onGear);
+
+  // Inline search wiring — broadcasts query changes to the search-bar
+  // popover below. The popover does the actual indexing + result
+  // rendering; this iframe just captures keystrokes.
+  const searchInput = document.getElementById("searchInput") as HTMLInputElement | null;
+  const searchClear = document.getElementById("searchClear") as HTMLButtonElement | null;
+  const searchWrap = document.getElementById("searchWrap") as HTMLDivElement | null;
+  if (searchInput) {
+    // Restore the last-typed query so re-renders (expand/collapse,
+    // language switch) don't wipe what the user was typing.
+    searchInput.value = lastSearchQuery;
+    if (lastSearchQuery) searchWrap?.classList.add("has-q");
+    searchInput.addEventListener("input", () => {
+      const q = searchInput.value;
+      lastSearchQuery = q;
+      searchWrap?.classList.toggle("has-q", q.length > 0);
+      try {
+        OBR.broadcast.sendMessage(BC_SEARCH_QUERY, { q }, { destination: "LOCAL" });
+      } catch {}
+    });
+    // Esc clears + explicitly closes the popover.
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        searchInput.value = "";
+        lastSearchQuery = "";
+        searchWrap?.classList.remove("has-q");
+        searchInput.blur();
+        try {
+          OBR.broadcast.sendMessage(BC_SEARCH_QUERY, { q: "" }, { destination: "LOCAL" });
+          OBR.broadcast.sendMessage(BC_SEARCH_CLOSE, {}, { destination: "LOCAL" });
+        } catch {}
+      }
+    });
+  }
+  if (searchClear) {
+    searchClear.addEventListener("click", () => {
+      if (!searchInput) return;
+      searchInput.value = "";
+      lastSearchQuery = "";
+      searchWrap?.classList.remove("has-q");
+      searchInput.focus();
+      try {
+        OBR.broadcast.sendMessage(BC_SEARCH_QUERY, { q: "" }, { destination: "LOCAL" });
+        OBR.broadcast.sendMessage(BC_SEARCH_CLOSE, {}, { destination: "LOCAL" });
+      } catch {}
+    });
+  }
+
+  // Re-measure after layout updates so the popover height tracks the
+  // actual wrapped row count (and the search bar follows along).
+  syncClusterHeight();
 }
 
 // --- Button handlers ---
@@ -222,12 +390,29 @@ function onCharCardPopup() {
   setAutoPopupOn(LS_AUTO_CHARCARD, next, BC_CHARCARD_AUTOPOPUP);
   renderRow();
 }
+function onDiceHistoryPopup() {
+  const next = !isAutoPopupOn(LS_AUTO_DICE_HISTORY);
+  setAutoPopupOn(LS_AUTO_DICE_HISTORY, next, BC_DICE_HISTORY_TOGGLE);
+  renderRow();
+}
 function onCharCardPanel() {
   // Toggle: open if closed, close if open. The cc module listens for the
   // toggle broadcast and decides which side to call.
   try {
     OBR.broadcast.sendMessage(
       BC_TOGGLE_CC_PANEL,
+      {},
+      { destination: "LOCAL" }
+    );
+  } catch {}
+}
+
+function onDicePanel() {
+  // Toggle the dice panel popover. The dice module owns the
+  // open/close logic (it knows the popover ID + URL).
+  try {
+    OBR.broadcast.sendMessage(
+      "com.obr-suite/dice-panel-toggle",
       {},
       { destination: "LOCAL" }
     );
@@ -266,6 +451,23 @@ OBR.onReady(async () => {
     renderRow();
   });
 
+  // ONCE-ONLY BC_SEARCH_QUERY listener. Previously this was registered
+  // inside renderRow() — every re-render piled on a new listener →
+  // input flickered, value got overwritten, the popover misbehaved.
+  // The listener now runs ONCE; it always looks up the CURRENT
+  // #searchInput element via getElementById since the DOM is rebuilt
+  // each renderRow.
+  OBR.broadcast.onMessage(BC_SEARCH_QUERY, (event) => {
+    const q = (event.data as { q?: string } | undefined)?.q ?? "";
+    const inp = document.getElementById("searchInput") as HTMLInputElement | null;
+    const wrap = document.getElementById("searchWrap") as HTMLDivElement | null;
+    if (!inp) return;
+    if (q === inp.value) return;
+    inp.value = q;
+    lastSearchQuery = q;
+    wrap?.classList.toggle("has-q", q.length > 0);
+  });
+
   // Robust role detection: try getRole, then also subscribe to player
   // changes so any future role updates (or successful role read) refresh
   // the buttons. Some OBR sessions take a moment to settle the role.
@@ -300,6 +502,16 @@ OBR.onReady(async () => {
 
   startSceneSync();
   onStateChange(() => renderRow());
+  // Per-client language: re-render when this iframe's localStorage lang
+  // is changed (settings panel writes it). Players + DM are independent.
+  // Width is fixed at W_EXPANDED for every language; if labels can't
+  // fit (English) the row wraps and the height grows — which the
+  // sync logic below then propagates to the popover height + the
+  // search bar's anchor.
+  onLangChange(() => {
+    renderRow();
+    syncClusterHeight();
+  });
 
   // Belt-and-suspenders #1: scene metadata listener for cross-iframe sync.
   OBR.scene.onMetadataChange(() => {

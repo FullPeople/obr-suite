@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>D20 Roll</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;pointer-events:none}
+html,body{
+  height:100%;width:100%;
+  overflow:hidden;
+  background:transparent;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  color:#fff;
+  /* Body + EVERY descendant (via the universal selector above) are
+     pointer-events:none. OBR's popover layer forwards events when the
+     iframe's content opts out of them, so clicks on the dice or empty
+     stage all pass through to the canvas underneath — the user can
+     keep panning, selecting, etc. while the dice is in flight. */
+  pointer-events:none;
+}
+html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
+
+.stage{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+
+/* The wrap is positioned at the token's TOP-CENTER screen coords
+   (--tx, --ty), updated every animation frame from the token's WORLD
+   position + the current viewport transform. Each die inside is offset
+   horizontally by JS so multiple dice (advantage / disadvantage) sit
+   side-by-side without overlap. */
+.dice-wrap{
+  position:absolute;
+  left:var(--tx, 50%);
+  top:var(--ty, 50%);
+  width:0;height:0;
+  pointer-events:none;
+}
+
+.dice{
+  position:absolute;
+  /* JS sets per-die left/top + transform inline. The element is
+     centered on its slot via negative half-width/height applied to
+     left/top in JS. */
+  width:var(--dice-size, 128px);
+  height:var(--dice-size, 128px);
+  filter:drop-shadow(0 8px 14px rgba(0,0,0,0.55));
+  opacity:0;
+  /* New blending stacking context — required for mix-blend-mode on the
+     foreground layer to multiply against ONLY the in-die background,
+     not the whole popover. */
+  isolation:isolate;
+}
+
+/* Two-layer color rendering — server-side PNGs are now pre-grayscaled
+   (white silhouette with internal gray shading bands for depth). We
+   bake the player color in client-side:
+     * art-base: solid player color masked by the PNG silhouette →
+       gives the die its full-color silhouette in the player's hue.
+     * art-fg:   the SAME grayscale PNG composited on top with
+       `mix-blend-mode: multiply` → the PNG's mid-gray shading bands
+       darken the base color in those regions, preserving the 3D facet
+       impression without painting over the player tint.
+   Per-die mask URL is set INLINE by effect-page.ts based on the die's
+   type (d4 / d6 / ... / d100); the rules here just provide layout. */
+.dice .art-base{
+  position:absolute;inset:0;
+  background:var(--player-color, #5dade2);
+  -webkit-mask:url("/suite/d20.png") center/contain no-repeat;
+  mask:url("/suite/d20.png") center/contain no-repeat;
+}
+.dice .art-fg{
+  position:absolute;inset:0;
+  background:url("/suite/d20.png") center/contain no-repeat;
+  mix-blend-mode:multiply;
+  pointer-events:none;
+}
+
+/* Slot-machine number — sits in the center of the dice. Blurred + tiny
+   vertical jitter while rolling, snaps sharp on the final settle.
+   Font-size scales with the die so multi-dice (smaller faces) still
+   read clearly. */
+.num{
+  position:absolute;
+  left:50%;top:54%;
+  transform:translate(-50%,-50%);
+  font-weight:900;
+  font-size:calc(var(--dice-size, 128px) * 0.32);
+  line-height:1;
+  color:#fff;
+  text-shadow:0 2px 4px rgba(0,0,0,0.85), 0 0 6px rgba(0,0,0,0.5);
+  pointer-events:none;
+  letter-spacing:-1px;
+  font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
+}
+.num.rolling{
+  filter:blur(2.5px);
+  animation:slot 0.06s linear infinite;
+}
+@keyframes slot{
+  0%{transform:translate(-50%,-58%)}
+  50%{transform:translate(-50%,-46%)}
+  100%{transform:translate(-50%,-58%)}
+}
+/* `.snap` is applied right after the slot stops — clears the rolling
+   blur instantly so the final value is sharp during the hold. */
+.num.snap{filter:blur(0)}
+/* `.land` is the dramatic zoom punch that fires AFTER the hold (only
+   on the winner die). Pure scale punch, no blur transition — blur was
+   already cleared by `.snap`, so re-introducing it here would flash.
+   Goes 1.0 → 1.5 → 1.0 with a slight overshoot ease-in-out. */
+.num.land{animation:numLand 0.36s cubic-bezier(0.34, 1.56, 0.64, 1) forwards}
+@keyframes numLand{
+  0%  {transform:translate(-50%,-50%) scale(1.0)}
+  45% {transform:translate(-50%,-50%) scale(1.5)}
+  100%{transform:translate(-50%,-50%) scale(1.0)}
+}
+
+/* Crit / fail flash — radial bursts at the winner die's landing spot.
+   Fullscreen popover means the burst can spill across the entire viewport. */
+.flash{
+  position:absolute;
+  left:var(--flash-x, 50%);
+  top:var(--flash-y, 50%);
+  width:780px;height:780px;
+  margin-left:-390px;margin-top:-390px;
+  border-radius:50%;
+  pointer-events:none;
+  opacity:0;
+}
+.flash.fire{animation:burst 0.7s ease-out forwards}
+.flash.crit{
+  background:radial-gradient(circle, rgba(255,215,0,0.85), rgba(255,165,0,0.4) 30%, transparent 65%);
+}
+.flash.fail{
+  background:radial-gradient(circle, rgba(231,76,60,0.85), rgba(180,40,40,0.4) 30%, transparent 65%);
+}
+@keyframes burst{
+  0%{opacity:0;transform:scale(0.35)}
+  18%{opacity:1;transform:scale(1.0)}
+  100%{opacity:0;transform:scale(1.7)}
+}
+
+/* Running total — appears ABOVE the dice row in the rush flow. Each
+   die's number flies up here and increments the displayed sum. */
+.running-total{
+  position:absolute;
+  left:0;
+  transform:translate(-50%, 0);
+  display:flex;align-items:center;justify-content:center;
+  pointer-events:none;
+  white-space:nowrap;
+  opacity:0;
+  transition:opacity 0.2s ease-out;
+  filter:drop-shadow(0 4px 10px rgba(0,0,0,0.7));
+}
+.running-total.on{opacity:1}
+.running-total .rt-num{
+  display:inline-block;
+  font-size:64px;font-weight:900;color:#fff;
+  font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
+  letter-spacing:-2px;
+  text-shadow:0 3px 8px rgba(0,0,0,0.95), 0 0 16px rgba(0,0,0,0.55);
+  transform-origin:center;
+}
+/* Hit-shake — fires every time a die's number lands in the total. */
+.running-total.shake .rt-num{animation:rtShake 0.18s ease-out}
+@keyframes rtShake{
+  0%   {transform:translate(0,0) scale(1)}
+  20%  {transform:translate(-3px, -2px) scale(1.06)}
+  40%  {transform:translate(3px, 2px) scale(1.06)}
+  60%  {transform:translate(-2px, 1px) scale(1.04)}
+  100% {transform:translate(0,0) scale(1)}
+}
+/* Final celebratory pop after the modifier has rushed in. */
+.running-total.final{animation:rtFinal 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) forwards}
+@keyframes rtFinal{
+  0%   {transform:translate(-50%, 0) scale(1.0)}
+  45%  {transform:translate(-50%, 0) scale(1.28)}
+  100% {transform:translate(-50%, 0) scale(1.0)}
+}
+
+/* Modifier + label box — sits below the dice. Stacks the modifier
+   number on top and the label underneath (label appears whenever the
+   roll has a label, including on single-die rolls with no modifier).
+   In the rush flow the modifier number is the TARGET of the
+   modifier-rush; the label stays put and just fades on exit. */
+.mod-box{
+  position:absolute;
+  left:0;
+  transform:translate(-50%, 0);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  pointer-events:none;
+  white-space:nowrap;
+  opacity:0;
+  transition:opacity 0.2s ease-out;
+  filter:drop-shadow(0 4px 8px rgba(0,0,0,0.6));
+}
+.mod-box.on{opacity:1}
+.mod-box .mod-label{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  font-size:18px;font-weight:600;color:#cdd2e0;letter-spacing:0.3px;
+  text-shadow:0 2px 4px rgba(0,0,0,0.85);
+}
+/* Modifier number — match the in-die `.num` family + weight + scaling
+   so the +5 below the dice reads as "more dice text" rather than a
+   different label. Slightly smaller than full-die so it's clearly the
+   bonus, not a fourth die. */
+.mod-box .mod-num{
+  font-size:calc(var(--dice-size, 128px) * 0.30);
+  font-weight:900;
+  color:#fff;
+  font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
+  letter-spacing:-1px;
+  text-shadow:0 2px 4px rgba(0,0,0,0.85), 0 0 6px rgba(0,0,0,0.5);
+}
+
+/* Flying-number clone — used during the rush. Cloned from a `.num`
+   span at its current screen position, then animated to the running
+   total via Web Animations API. */
+.num-fly{
+  position:fixed;
+  font-size:42px;font-weight:900;color:#fff;
+  font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
+  letter-spacing:-1px;
+  text-shadow:0 2px 4px rgba(0,0,0,0.85), 0 0 6px rgba(0,0,0,0.5);
+  pointer-events:none;
+  transform:translate(-50%, -50%);
+  will-change:transform;
+  z-index:10;
+}
+
+/* Crit/fail glow on the WINNER die — drop-shadow only, leaves the
+   player-color tint intact. */
+.dice.crit{filter:drop-shadow(0 0 18px rgba(255,200,0,0.85)) drop-shadow(0 8px 14px rgba(0,0,0,0.55))}
+.dice.crit .num{color:#fff7c2;text-shadow:0 0 14px rgba(255,200,0,0.9), 0 2px 4px rgba(0,0,0,0.7)}
+
+.dice.fail{filter:drop-shadow(0 0 18px rgba(231,76,60,0.85)) drop-shadow(0 8px 14px rgba(0,0,0,0.55))}
+.dice.fail .num{color:#ffe1e1;text-shadow:0 0 14px rgba(231,76,60,0.9), 0 2px 4px rgba(0,0,0,0.7)}
+
+/* Original-value tag — shown when max/min/reset replaced the rolled
+   value. Positioned BELOW the main number as a small "(orig)" so the
+   user can see "what the die actually rolled" alongside the post-rule
+   value. Faded in at the settle moment. */
+.num-orig{
+  position:absolute;
+  left:50%;
+  top:78%;
+  transform:translate(-50%, -50%);
+  font-size:calc(var(--dice-size, 128px) * 0.16);
+  font-weight:700;
+  color:rgba(255,255,255,0.7);
+  text-shadow:0 1px 2px rgba(0,0,0,0.85), 0 0 4px rgba(0,0,0,0.6);
+  font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
+  letter-spacing:-0.5px;
+  pointer-events:none;
+  opacity:0;
+  transition:opacity 0.2s ease-out;
+}
+.num-orig.on{opacity:1}
+
+/* same-highlight pulse — applied to dice whose value duplicates with
+   another die's value. Briefly scales up the die and tints the number
+   text to the player color so duplicates jump out before the rush. */
+.dice.same-pulse{animation: samePulse 0.7s ease-out}
+@keyframes samePulse{
+  0%   {transform:translate(0,0) scale(1)}
+  30%  {transform:translate(0,0) scale(1.22)}
+  70%  {transform:translate(0,0) scale(0.96)}
+  100% {transform:translate(0,0) scale(1)}
+}
+
+/* Transform pop — fires on the .num element AT THE MOMENT the value
+   actually changes for a max/min/reset transform. Same shape as the
+   .land animation but reusable inside the value-transform phase. */
+.num.transform-pop{animation: numTransformPop 0.36s cubic-bezier(0.34, 1.56, 0.64, 1) forwards}
+@keyframes numTransformPop{
+  0%   {transform:translate(-50%,-50%) scale(1.0)}
+  45%  {transform:translate(-50%,-50%) scale(1.55)}
+  100% {transform:translate(-50%,-50%) scale(1.0)}
+}
+/* Highlight color is the COMPLEMENT of the player color so the
+   duplicate-value tint reads against the player-colored die face
+   (same-on-same would blend in). The conflict-color CSS var is set
+   from JS by `complementHex(playerColor)`. */
+.num.same-tint{
+  color: var(--player-conflict-color, #ffd166);
+  text-shadow: 0 0 14px var(--player-conflict-color, rgba(255, 210, 80, 0.85)), 0 2px 4px rgba(0,0,0,0.85);
+}
+
+/* Per-row total (repeat() mode) — sits at the right edge of each row.
+   The inner .rt-num holds the numeric value so we can punch-shake it
+   without the whole positioned wrapper jumping. */
+.row-total{
+  position:absolute;
+  display:flex;align-items:center;justify-content:center;
+  pointer-events:none;
+  opacity:0;
+  transform:translate(0, -50%) scale(1);
+  transition:opacity 0.2s ease-out;
+  filter:drop-shadow(0 4px 10px rgba(0,0,0,0.7));
+}
+.row-total.on{opacity:1}
+.row-total .rt-num{
+  display:inline-block;
+  font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
+  font-weight:900;
+  font-size:calc(var(--dice-size, 128px) * 0.36);
+  color:#fff;
+  letter-spacing:-1px;
+  text-shadow:0 2px 6px rgba(0,0,0,0.95), 0 0 14px rgba(0,0,0,0.55);
+  transform-origin:center;
+}
+/* Hit-shake — fires every time a die's number lands in this row's total. */
+.row-total.shake .rt-num{animation:rtRowShake 0.18s ease-out}
+@keyframes rtRowShake{
+  0%   {transform:translate(0,0) scale(1)}
+  20%  {transform:translate(-3px, -2px) scale(1.06)}
+  40%  {transform:translate(3px, 2px) scale(1.06)}
+  60%  {transform:translate(-2px, 1px) scale(1.04)}
+  100% {transform:translate(0,0) scale(1)}
+}
+.row-total.pop{animation:rowTotalPop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) forwards}
+@keyframes rowTotalPop{
+  0%   {transform:translate(0, -50%) scale(1.0)}
+  45%  {transform:translate(0, -50%) scale(1.28)}
+  100% {transform:translate(0, -50%) scale(1.0)}
+}
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="flash" id="flash"></div>
+  <!-- Dice elements are inserted into #diceWrap by effect-page.ts based
+       on the rolls[] URL param. -->
+  <div class="dice-wrap" id="diceWrap"></div>
+</div>
+<script type="module" src="/src/modules/dice/effect-page.ts"></script>
+</body>
+</html>

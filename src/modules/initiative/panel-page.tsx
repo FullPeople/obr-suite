@@ -8,9 +8,10 @@ import { METADATA_KEY } from "./utils/constants";
 import { Lang, t } from "./utils/i18n";
 import {
   startSceneSync,
-  getState as getSuiteState,
-  onStateChange as onSuiteStateChange,
+  getLocalLang,
+  onLangChange,
 } from "../../state";
+import { ICONS } from "../../icons";
 import {
   setActiveRing,
   setHoverRing,
@@ -34,14 +35,14 @@ const EXPANDED_HEIGHT = 184;
 export const LangContext = createContext<Lang>("zh");
 
 function App() {
-  // Language is centrally controlled by the suite Settings panel; read it
-  // from scene metadata and stay subscribed to changes.
+  // Language is per-client (localStorage). Each player picks their own
+  // UI language; the DM's choice doesn't propagate.
   const [lang, setLang] = useState<Lang>(
-    () => (getSuiteState().language as Lang) ?? "zh"
+    () => (getLocalLang() as Lang) ?? "zh"
   );
   useEffect(() => {
     startSceneSync();
-    const unsub = onSuiteStateChange((s) => setLang(s.language as Lang));
+    const unsub = onLangChange((l) => setLang(l as Lang));
     return unsub;
   }, []);
   const {
@@ -187,7 +188,7 @@ function App() {
     return (
       <div className={`app-pill ${stateClass} ${transitioning ? "transitioning" : ""}`}>
         <button className="pill-btn" onClick={toggleExpanded} title="展开先攻面板">
-          <span className="icon">⚔</span>
+          <span className="icon" dangerouslySetInnerHTML={{ __html: ICONS.swords }} />
           {combatState.inCombat && (
             <span className="pill-round">R{combatState.round}</span>
           )}

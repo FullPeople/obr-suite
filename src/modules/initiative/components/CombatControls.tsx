@@ -2,6 +2,7 @@
 import { CombatState } from "../types";
 import { EffectType } from "../hooks/useInitiative";
 import { Lang, t } from "../utils/i18n";
+import { ICONS } from "../../../icons";
 
 interface Props {
   combatState: CombatState;
@@ -37,7 +38,7 @@ export function CombatControls({
             disabled={!hasItems}
             title={!hasItems ? t(lang, "addFirst") : ""}
           >
-            <span className="btn-icon">⚔</span> {t(lang, "startPreparation")}
+            <span className="btn-icon" dangerouslySetInnerHTML={{ __html: ICONS.swords }} /> {t(lang, "startPreparation")}
           </button>
           <button
             className="btn btn-ambush"
@@ -45,7 +46,7 @@ export function CombatControls({
             disabled={!hasItems}
             title={!hasItems ? t(lang, "addFirst") : ""}
           >
-            <span className="btn-icon">⚡</span> {t(lang, "ambush")}
+            <span className="btn-icon" dangerouslySetInnerHTML={{ __html: ICONS.zap }} /> {t(lang, "ambush")}
           </button>
         </div>
       </div>
@@ -62,7 +63,7 @@ export function CombatControls({
             onClick={onStartCombat}
             disabled={!hasItems}
           >
-            <span className="btn-icon">⚔</span> {t(lang, "startCombat")}
+            <span className="btn-icon" dangerouslySetInnerHTML={{ __html: ICONS.swords }} /> {t(lang, "startCombat")}
           </button>
           <button
             className="btn btn-cancel"
@@ -87,7 +88,7 @@ export function CombatControls({
         </button>
       </div>
       <button className="btn btn-end" onClick={onEndCombat}>
-        {t(lang, "endCombat")}
+        <span className="btn-icon" dangerouslySetInnerHTML={{ __html: ICONS.stop }} /> {t(lang, "endCombat")}
       </button>
     </div>
   );

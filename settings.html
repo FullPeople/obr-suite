@@ -176,6 +176,47 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
 .benefit-tag{display:inline-block;font-size:10px;background:rgba(52,152,219,0.15);color:#5dade2;padding:2px 6px;border-radius:4px;margin-right:6px}
 
 .role-notice{font-size:10.5px;color:var(--text-dim);font-style:italic}
+
+/* Settings download button — used by the character-card tab to expose
+   the xlsx template directly inside Settings (saves the user from
+   hunting for it inside the cc panel side-rail). */
+.dl-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  margin-top:10px;
+  padding:8px 14px;
+  background:linear-gradient(180deg, rgba(46,204,113,0.18), rgba(38,160,90,0.22));
+  border:1px solid rgba(46,204,113,0.45);
+  border-radius:6px;
+  color:#a3e9bf;font-size:12.5px;font-weight:700;
+  text-decoration:none;
+  letter-spacing:0.3px;
+  cursor:pointer;
+  transition:background .12s, color .12s, border-color .12s;
+}
+.dl-btn:hover{
+  background:linear-gradient(180deg, rgba(46,204,113,0.28), rgba(38,160,90,0.32));
+  color:#d2f5dd;
+}
+.dl-btn:active{transform:scale(0.98)}
+
+/* === 基础设置 — block layout for grouped sub-settings === */
+.basics-block{display:flex;flex-direction:column;gap:4px}
+.basics-h{
+  font-size:11px;font-weight:700;color:#cdd1de;
+  letter-spacing:0.4px;
+  text-transform:uppercase;
+  margin-bottom:2px;
+}
+.basics-toggle{
+  display:flex;align-items:center;gap:8px;
+  cursor:pointer;
+  font-size:12px;color:var(--text);
+  user-select:none;
+}
+.basics-toggle input{
+  width:14px;height:14px;cursor:pointer;
+  accent-color:#5dade2;
+}
 </style>
 </head>
 <body>

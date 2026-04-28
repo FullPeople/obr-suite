@@ -32,6 +32,7 @@ const TR: Dict = {
   modCharacterCards: { zh: "角色卡", en: "Character Cards" },
   modInitiative: { zh: "先攻追踪", en: "Initiative Tracker" },
   modSearch: { zh: "全局搜索", en: "Global Search" },
+  modPortals: { zh: "传送门", en: "Portals" },
   ver2014: { zh: "2014（PHB + MM）", en: "2014 (PHB + MM)" },
   ver2024: { zh: "2024（XPHB + XMM）", en: "2024 (XPHB + XMM)" },
   verAll: { zh: "全部（2014 + 2024）", en: "All (2014 + 2024)" },
@@ -43,21 +44,22 @@ const TR: Dict = {
   },
   charCardEnWarning: {
     zh: "",
-    en: "⚠️ This module currently only supports the Chinese D&D community's xlsx character sheet format (悲灵 ver.). It is not useful for English players unless you create your own template.",
+    en: "This module currently only supports the Chinese D&D community's xlsx character sheet format (悲灵 ver.). It is not useful for English players unless you create your own template.",
   },
 
   // About panel
   aboutTitle: { zh: "关于", en: "About" },
-  tabSupport: { zh: "💖 支持作者 / 反馈", en: "💖 Support / Feedback" },
+  tabSupport: { zh: "支持作者 / 反馈", en: "Support / Feedback" },
   tabTimeStop: { zh: "时停", en: "Time Stop" },
   tabFocus: { zh: "同步视口", en: "Sync Viewport" },
   tabBestiary: { zh: "怪物图鉴", en: "Bestiary" },
   tabCharacterCards: { zh: "角色卡", en: "Character Cards" },
   tabInitiative: { zh: "先攻追踪", en: "Initiative Tracker" },
   tabSearch: { zh: "全局搜索", en: "Global Search" },
+  tabPortals: { zh: "传送门", en: "Portals" },
   supportBlurb: {
-    zh: "如果这套插件对你的跑团有帮助，欢迎来支持一下作者 —— 用于服务器续费和新插件开发 ♥",
-    en: "If this suite helps your campaigns, please consider supporting the author — covers server costs and new plugin development ♥",
+    zh: "如果这套插件对你的跑团有帮助，欢迎来支持一下作者 —— 用于服务器续费和新插件开发。",
+    en: "If this suite helps your campaigns, please consider supporting the author — covers server costs and new plugin development.",
   },
   contactBlurb: {
     zh: "反馈或建议：",

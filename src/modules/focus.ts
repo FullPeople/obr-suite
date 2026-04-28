@@ -28,6 +28,13 @@ async function focusCamera(x: number, y: number, scale: number) {
     position: { x: -x * scale + w / 2, y: -y * scale + h / 2 },
     scale,
   });
+  // "登" — gentle confirmation thunk. Fires on every client receiving
+  // a focus broadcast, so everyone hears it together as their cameras
+  // move.
+  try {
+    const { sfxSyncView } = await import("./dice/sfx");
+    sfxSyncView();
+  } catch {}
 }
 
 export async function setupFocus(): Promise<void> {
@@ -42,38 +49,28 @@ export async function setupFocus(): Promise<void> {
     focusCamera(data.x, data.y, data.scale);
   });
 
-  // Cluster trigger: focus current viewport center (or selection center if any).
+  // Cluster trigger: ALWAYS broadcast the DM's current viewport center +
+  // scale, regardless of any token selection. The earlier "focus selected
+  // token if any" fallback was confusing — the DM expected players to see
+  // exactly what they themselves were looking at.
   unsubTriggerBroadcast = OBR.broadcast.onMessage(
     BC_FOCUS_TRIGGER,
     async () => {
       try {
         const role = await OBR.player.getRole();
-        if (role !== "GM") return; // only GM broadcasts focus events
-        const sel = await OBR.player.getSelection();
-        let x: number, y: number;
-        if (sel && sel.length > 0) {
-          const items = await OBR.scene.items.getItems(sel);
-          if (items.length > 0) {
-            const center = items[0].position;
-            x = center.x;
-            y = center.y;
-          } else return;
-        } else {
-          // Use current viewport center.
-          const [vp, scale, vw, vh] = await Promise.all([
-            OBR.viewport.getPosition(),
-            OBR.viewport.getScale(),
-            OBR.viewport.getWidth(),
-            OBR.viewport.getHeight(),
-          ]);
-          // viewport.position is the *world* coord at iframe (0,0); add half
-          // the viewport size in world coords to get its center.
-          x = -(vp.x - vw / 2) / scale;
-          y = -(vp.y - vh / 2) / scale;
-        }
-        const scale = await OBR.viewport.getScale();
+        if (role !== "GM") return;
+        const [vp, scale, vw, vh] = await Promise.all([
+          OBR.viewport.getPosition(),
+          OBR.viewport.getScale(),
+          OBR.viewport.getWidth(),
+          OBR.viewport.getHeight(),
+        ]);
+        // viewport.position is the *world* coord at iframe (0,0); add half
+        // the viewport size in world coords to get its center.
+        const x = -(vp.x - vw / 2) / scale;
+        const y = -(vp.y - vh / 2) / scale;
         OBR.broadcast.sendMessage(BROADCAST_FOCUS, { x, y, scale });
-        focusCamera(x, y, scale);
+        // DM doesn't need to animate to where they already are.
       } catch (e) {
         console.error("[obr-suite/focus] trigger failed", e);
       }

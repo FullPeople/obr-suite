@@ -19,7 +19,10 @@ import OBR from "@owlbear-rodeo/sdk";
 // in the suite cluster.
 
 const PLUGIN_ID = "com.character-cards"; // backward-compat for scene metadata + broadcasts
-const POPOVER_ID = "com.obr-suite/cc-panel";
+// The main panel uses OBR.modal (NOT popover) so it opens/closes
+// instantly without popover's built-in fade-in/fade-out transition.
+// disablePointerEvents stays false so the panel buttons work.
+const PANEL_MODAL_ID = "com.obr-suite/cc-panel";
 const INFO_POPOVER_ID = "com.obr-suite/cc-info";
 const BIND_MODAL_ID = "com.obr-suite/cc-bind-picker";
 const PANEL_URL = "https://obr.dnd.center/suite/cc-panel.html";
@@ -64,21 +67,13 @@ function isAutoInfoEnabled(): boolean {
 // popover-wide layout.
 async function openMainPopover() {
   try {
-    const [w, h] = await Promise.all([
-      OBR.viewport.getWidth(),
-      OBR.viewport.getHeight(),
-    ]);
-    await OBR.popover.open({
-      id: POPOVER_ID,
+    await OBR.modal.open({
+      id: PANEL_MODAL_ID,
       url: PANEL_URL,
-      width: w,
-      height: h,
-      anchorReference: "POSITION",
-      anchorPosition: { left: 0, top: 0 },
-      anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
-      transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
-      hidePaper: true,
-      disableClickAway: true,
+      fullScreen: true,
+      hideBackdrop: true, // no dark overlay
+      hidePaper: true,    // no Material paper container
+      // disablePointerEvents stays default (false) — panel buttons need clicks
     });
     panelOpen = true;
   } catch (e) {
@@ -87,7 +82,7 @@ async function openMainPopover() {
 }
 
 async function closeMainPopover() {
-  try { await OBR.popover.close(POPOVER_ID); } catch {}
+  try { await OBR.modal.close(PANEL_MODAL_ID); } catch {}
   panelOpen = false;
 }
 
@@ -96,7 +91,7 @@ async function toggleMainPanel() {
   else await openMainPopover();
 }
 
-async function openInfoPopoverFor(cardId: string, roomId: string) {
+async function openInfoPopoverFor(cardId: string, roomId: string, itemId: string | null) {
   if (infoPopoverOpen) return;
   try {
     const [vw, vh] = await Promise.all([
@@ -105,11 +100,12 @@ async function openInfoPopoverFor(cardId: string, roomId: string) {
     ]);
     const buttonTop = vh - (BOTTOM_OFFSET + 48 + 8);
     const anchorTop = buttonTop - INFO_GAP;
+    const itemParam = itemId ? `&itemId=${encodeURIComponent(itemId)}` : "";
     await OBR.popover.open({
       id: INFO_POPOVER_ID,
       url: `${INFO_URL}?cardId=${encodeURIComponent(cardId)}&roomId=${encodeURIComponent(
         roomId
-      )}`,
+      )}${itemParam}`,
       width: INFO_WIDTH,
       height: INFO_HEIGHT,
       anchorReference: "POSITION",
@@ -131,16 +127,28 @@ async function closeInfoPopover() {
   currentInfoCard = null;
 }
 
-async function showInfoFor(cardId: string) {
-  if (currentInfoCard === cardId && infoPopoverOpen) return;
+async function showInfoFor(cardId: string, itemId: string | null = null) {
+  if (currentInfoCard === cardId && infoPopoverOpen) {
+    // Even if the same card stays open, the bound token might've
+    // changed (different token with same card binding selected).
+    // Re-broadcast so info-page updates its rollable target.
+    try {
+      await OBR.broadcast.sendMessage(
+        INFO_SHOW_MSG,
+        { cardId, roomId: OBR.room.id || "default", itemId },
+        { destination: "LOCAL" }
+      );
+    } catch {}
+    return;
+  }
   const roomId = OBR.room.id || "default";
   if (!infoPopoverOpen) {
-    await openInfoPopoverFor(cardId, roomId);
+    await openInfoPopoverFor(cardId, roomId, itemId);
   } else {
     try {
       await OBR.broadcast.sendMessage(
         INFO_SHOW_MSG,
-        { cardId, roomId },
+        { cardId, roomId, itemId },
         { destination: "LOCAL" }
       );
     } catch {}
@@ -187,8 +195,13 @@ async function handleSelection(selection: string[] | undefined) {
     if (currentInfoCard) await hideInfo();
     return;
   }
-  if (currentInfoCard === boundId) return;
-  await showInfoFor(boundId);
+  if (currentInfoCard === boundId) {
+    // Same card, but the selected token may differ — refresh the
+    // info-page's bound-token for quick-rolls.
+    await showInfoFor(boundId, selection[0] ?? null);
+    return;
+  }
+  await showInfoFor(boundId, selection[0] ?? null);
 }
 
 export async function setupCharacterCards(): Promise<void> {

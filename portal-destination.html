@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>传送门</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  height:100%;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  background:#1a1a2e;color:#eee;overflow:hidden;
+}
+.wrap{
+  display:flex;flex-direction:column;height:100%;padding:14px 18px;
+}
+.title{
+  font-size:14px;font-weight:700;color:#a78bfa;
+  display:flex;align-items:center;gap:6px;
+  padding-bottom:8px;
+  border-bottom:1px solid rgba(255,255,255,.1);
+  margin-bottom:8px;
+}
+.sub{
+  font-size:11.5px;color:#bbb;line-height:1.5;
+  margin-bottom:8px;
+}
+.sub b{color:#e0e7ff}
+.list{
+  flex:1;overflow-y:auto;
+  display:flex;flex-direction:column;gap:5px;
+  padding-right:2px;
+}
+.list::-webkit-scrollbar{width:4px}
+.list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}
+.opt{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 10px;
+  background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:7px;
+  cursor:pointer;
+  transition:background .12s,border-color .12s;
+}
+.opt:hover{background:rgba(167,139,250,.18);border-color:rgba(167,139,250,.45)}
+.opt .ico{font-size:14px;color:#a78bfa;flex-shrink:0}
+.opt .nm{flex:1;font-size:13px;color:#eee;font-weight:600}
+.opt .ta{font-size:10.5px;color:#9aa0b3;letter-spacing:.5px}
+.opt .hd{font-size:10px;color:#888;font-style:italic;margin-left:4px}
+.btn-row{
+  display:flex;gap:6px;justify-content:flex-end;
+  padding-top:8px;
+  border-top:1px solid rgba(255,255,255,.1);
+  margin-top:8px;
+}
+.btn{
+  padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;
+  background:rgba(255,255,255,.06);color:#bbb;
+  border:1px solid rgba(255,255,255,.12);
+}
+.btn:hover{background:rgba(255,255,255,.1)}
+.empty{padding:24px;text-align:center;color:#888;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="title">◐ 传送门</div>
+  <div class="sub" id="sub"></div>
+  <div class="list" id="list"></div>
+  <div class="btn-row">
+    <button class="btn" id="btn-cancel">取消</button>
+  </div>
+</div>
+<script type="module">
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
+
+const PLUGIN_ID = "com.obr-suite/portals";
+const MODAL_ID = `${PLUGIN_ID}/destination-modal`;
+const BROADCAST_TELEPORT = `${PLUGIN_ID}/teleport`;
+const BROADCAST_DEST_CLOSED = `${PLUGIN_ID}/dest-modal-closed`;
+
+const params = new URLSearchParams(location.search);
+let payload = { entryName: "", entryTag: "", candidates: [], tokenIds: [] };
+try { payload = JSON.parse(params.get("p") || "{}"); } catch {}
+
+const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+document.getElementById("sub").innerHTML =
+  `进入 <b>${escHtml(payload.entryName)}</b> · 标签 <b>${escHtml(payload.entryTag)}</b>` +
+  `（${payload.tokenIds.length} 个单位）<br>选择目的地：`;
+
+const listEl = document.getElementById("list");
+
+if (!payload.candidates || payload.candidates.length === 0) {
+  listEl.innerHTML = `<div class="empty">没有同标签的其它传送门</div>`;
+} else {
+  listEl.innerHTML = payload.candidates.map((c) =>
+    `<div class="opt" data-id="${escHtml(c.id)}">
+       <span class="ico">◐</span>
+       <span class="nm">${escHtml(c.name)}</span>
+       <span class="ta">[${escHtml(c.tag)}]</span>
+       ${c.hidden ? '<span class="hd">隐藏</span>' : ''}
+     </div>`
+  ).join("");
+}
+
+OBR.onReady(async () => {
+  document.querySelectorAll(".opt").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const destPortalId = el.dataset.id;
+      try {
+        await OBR.broadcast.sendMessage(
+          BROADCAST_TELEPORT,
+          { destPortalId, tokenIds: payload.tokenIds },
+          { destination: "LOCAL" }
+        );
+      } catch (e) { console.error("[portals] teleport broadcast", e); }
+      try { await OBR.modal.close(MODAL_ID); } catch {}
+    });
+  });
+  document.getElementById("btn-cancel").addEventListener("click", async () => {
+    try { await OBR.modal.close(MODAL_ID); } catch {}
+  });
+
+  // Notify background module if user closes the modal via Esc / OBR's own X.
+  window.addEventListener("beforeunload", () => {
+    try {
+      OBR.broadcast.sendMessage(BROADCAST_DEST_CLOSED, {}, { destination: "LOCAL" });
+    } catch {}
+  });
+});
+</script>
+</body>
+</html>

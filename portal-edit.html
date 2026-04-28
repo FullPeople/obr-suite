@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>传送门</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  height:100%;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:#eee;background:transparent;
+  pointer-events:none;
+}
+.card{
+  position:absolute;inset:0;
+  background:rgba(22,33,62,0.96);
+  border-radius:10px;
+  box-shadow:0 8px 28px rgba(0,0,0,0.55);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  pointer-events:auto;
+  display:flex;flex-direction:column;
+  padding:12px 14px;
+  overflow:hidden;
+}
+.hdr{
+  display:flex;align-items:center;gap:8px;
+  padding-bottom:8px;
+  border-bottom:1px solid rgba(255,255,255,.1);
+  margin-bottom:10px;
+}
+.hdr .ic{font-size:14px;color:#a78bfa}
+.hdr .ttl{font-size:14px;font-weight:700;flex:1}
+.hdr .x{
+  cursor:pointer;font-size:18px;color:#888;line-height:1;padding:0 4px;
+  background:none;border:none;
+}
+.hdr .x:hover{color:#eee}
+
+.row{margin-bottom:10px}
+.row .lbl{font-size:11px;color:#9aa0b3;margin-bottom:4px;letter-spacing:.4px}
+.row input{
+  width:100%;height:30px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.15);
+  border-radius:6px;
+  padding:0 9px;color:#eee;font-size:13px;outline:none;
+}
+.row input:focus{border-color:#a78bfa}
+
+.chips-wrap{margin-bottom:8px}
+.chips-wrap .lbl-row{
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:10.5px;color:#9aa0b3;margin-bottom:4px;letter-spacing:.4px;
+}
+.chips-wrap .add{
+  font-size:10px;color:#a78bfa;cursor:pointer;
+  background:none;border:none;padding:2px 6px;
+}
+.chips-wrap .add:hover{color:#c4b5fd}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chip{
+  display:inline-flex;align-items:center;gap:3px;
+  padding:2px 6px 2px 8px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.13);
+  border-radius:11px;
+  font-size:11px;color:#ddd;
+  cursor:pointer;
+  user-select:none;
+  transition:background .12s;
+}
+.chip:hover{background:rgba(167,139,250,.18);border-color:rgba(167,139,250,.35)}
+.chip .del{
+  font-size:11px;color:#888;line-height:1;
+  margin-left:1px;
+  background:none;border:none;cursor:pointer;padding:1px 2px;
+  border-radius:4px;
+}
+.chip .del:hover{color:#e94560;background:rgba(233,69,96,.15)}
+
+.btn-row{
+  margin-top:auto;display:flex;gap:6px;justify-content:flex-end;
+  padding-top:10px;
+  border-top:1px solid rgba(255,255,255,.08);
+}
+.btn{
+  padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;
+  border:1px solid transparent;
+}
+.btn.del{
+  background:rgba(233,69,96,.15);color:#e94560;border-color:rgba(233,69,96,.35);
+  margin-right:auto;
+}
+.btn.del:hover{background:rgba(233,69,96,.25)}
+.btn.cancel{
+  background:rgba(255,255,255,.06);color:#bbb;border-color:rgba(255,255,255,.12);
+}
+.btn.cancel:hover{background:rgba(255,255,255,.1)}
+.btn.save{
+  background:linear-gradient(135deg,#7c3aed,#6366f1);color:#fff;font-weight:600;
+}
+.btn.save:hover{filter:brightness(1.1)}
+
+.add-form{display:none;margin-top:4px;gap:4px}
+.add-form.on{display:flex}
+.add-form input{
+  flex:1;height:24px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.15);
+  border-radius:5px;padding:0 7px;color:#eee;font-size:11px;outline:none;
+}
+.add-form input:focus{border-color:#a78bfa}
+.add-form button{
+  height:24px;padding:0 8px;border-radius:5px;font-size:11px;cursor:pointer;
+  background:rgba(167,139,250,.2);border:1px solid rgba(167,139,250,.4);
+  color:#c4b5fd;
+}
+.add-form button:hover{background:rgba(167,139,250,.32)}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="hdr">
+    <span class="ic">◐</span>
+    <span class="ttl" id="title">传送门</span>
+    <button class="x" id="x">×</button>
+  </div>
+
+  <div class="row">
+    <div class="lbl">名字</div>
+    <input id="inp-name" type="text" placeholder="例如 一楼" autocomplete="off">
+  </div>
+  <div class="chips-wrap">
+    <div class="lbl-row">
+      <span class="lbl">名字预设</span>
+      <button class="add" data-form="name">+ 添加</button>
+    </div>
+    <div class="chips" id="chips-names"></div>
+    <div class="add-form" id="form-name">
+      <input id="inp-add-name" type="text" placeholder="新名字" maxlength="20">
+      <button id="btn-add-name">添加</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="lbl">标签（同标签互联）</div>
+    <input id="inp-tag" type="text" placeholder="例如 001" autocomplete="off" maxlength="32">
+  </div>
+  <div class="chips-wrap">
+    <div class="lbl-row">
+      <span class="lbl">标签预设</span>
+      <button class="add" data-form="tag">+ 添加</button>
+    </div>
+    <div class="chips" id="chips-tags"></div>
+    <div class="add-form" id="form-tag">
+      <input id="inp-add-tag" type="text" placeholder="新标签" maxlength="20">
+      <button id="btn-add-tag">添加</button>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn del" id="btn-del">删除传送门</button>
+    <button class="btn cancel" id="btn-cancel">取消</button>
+    <button class="btn save" id="btn-save">保存</button>
+  </div>
+</div>
+<script type="module" src="/src/modules/portals/edit-page.ts"></script>
+</body>
+</html>

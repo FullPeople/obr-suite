@@ -282,15 +282,41 @@ mark{
 .preview .inset{background:rgba(255,255,255,0.03);border-left:3px solid #5dade2;padding:6px 10px;margin:8px 0;border-radius:0 4px 4px 0}
 .preview blockquote{border-left:3px solid rgba(245,166,35,0.5);padding:4px 10px;margin:8px 0;color:#bbb;font-style:italic}
 .preview .quote-by{font-size:10.5px;color:#888;margin-top:4px;font-style:normal}
+
+/* 5etools rollable inline tags ({@dice} / {@damage} / {@hit} etc.).
+   Click → fires a quick-roll on the currently-selected token. */
+.preview .rollable{
+  cursor:pointer;
+  color:#7fc3eb;
+  font-weight:600;
+  border-radius:3px;
+  padding:0 3px;
+  transition:background .12s, color .12s;
+}
+.preview .rollable:hover{
+  background:rgba(93,173,226,0.20);
+  color:#bfe2f5;
+}
+.preview .rollable.rollable-flash{
+  animation: searchRollFlash 0.4s ease-out;
+}
+@keyframes searchRollFlash{
+  0%   {background:rgba(93,173,226,0.55); transform:scale(1.18); display:inline-block}
+  100% {background:transparent; transform:scale(1)}
+}
 </style>
 </head>
 <body>
 <div class="wrap" id="wrap">
-  <div class="row" id="row">
+  <!-- Input row is hidden — the cluster's inline search input drives
+       this popover via the BC_SEARCH_QUERY broadcast. The DOM still
+       holds the input so the existing JS (inputEl references) keeps
+       working without refactor; CSS just hides it from view. -->
+  <div class="row" id="row" style="display:none">
     <span class="ico" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
     </span>
-    <input id="q" type="text" placeholder="搜索 5etools…（怪物/法术/物品/职业/种族…）" autocomplete="off" spellcheck="false">
+    <input id="q" type="text" placeholder="搜索 5etools…" autocomplete="off" spellcheck="false">
     <button class="clear" id="clear" type="button" aria-label="清空">✕</button>
   </div>
 

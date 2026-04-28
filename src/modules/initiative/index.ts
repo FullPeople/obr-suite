@@ -10,8 +10,8 @@ import {
 import { Lang, t } from "./utils/i18n";
 import {
   startSceneSync as startSuiteSync,
-  getState as getSuiteState,
-  onStateChange as onSuiteStateChange,
+  getLocalLang,
+  onLangChange,
 } from "../../state";
 
 // Initiative Tracker module — migrated from the standalone plugin.
@@ -30,7 +30,7 @@ const COLLAPSED_WIDTH = 120;
 const COLLAPSED_HEIGHT = 40;
 const EXPANDED_WIDTH = 720;
 const EXPANDED_HEIGHT = 184;
-const TOP_OFFSET = 40;
+const TOP_OFFSET = 45;
 
 const CTX_TOGGLE = `${METADATA_KEY}/context-menu`;
 const CTX_GATHER = `${METADATA_KEY}/gather-empty`;
@@ -113,10 +113,6 @@ async function registerContextMenus(lang: Lang) {
       },
     ],
     onClick: async (context) => {
-      // Re-read language from suite state so notifications reflect the
-      // most recent setting even if the user swapped languages between
-      // re-registrations.
-      const curLang = (getSuiteState().language as Lang) ?? "zh";
       const anyHasData = context.items.some(
         (item) => item.metadata[METADATA_KEY] !== undefined
       );
@@ -128,7 +124,6 @@ async function registerContextMenus(lang: Lang) {
             d.metadata[OPTED_OUT_KEY] = true;
           }
         });
-        OBR.notification.show(t(curLang, "removed"));
       } else {
         await OBR.scene.items.updateItems(ids, (drafts) => {
           for (const d of drafts) {
@@ -142,7 +137,6 @@ async function registerContextMenus(lang: Lang) {
             delete d.metadata[OPTED_OUT_KEY];
           }
         });
-        OBR.notification.show(t(curLang, "added"));
       }
     },
   });
@@ -196,16 +190,16 @@ async function registerContextMenus(lang: Lang) {
 }
 
 export async function setupInitiative(): Promise<void> {
-  // Read current language from suite state and register context menus.
+  // Read current per-client language and register context menus.
   startSuiteSync();
-  const initialLang = (getSuiteState().language as Lang) ?? "zh";
+  const initialLang = (getLocalLang() as Lang) ?? "zh";
   await registerContextMenus(initialLang);
 
   // Re-register on language change so the right-click labels refresh.
   let lastLang = initialLang;
   unsubs.push(
-    onSuiteStateChange((s) => {
-      const next = (s.language as Lang) ?? "zh";
+    onLangChange((l) => {
+      const next = (l as Lang) ?? "zh";
       if (next !== lastLang) {
         lastLang = next;
         registerContextMenus(next).catch(() => {});
@@ -272,7 +266,7 @@ export async function setupInitiative(): Promise<void> {
             !item.metadata[OPTED_OUT_KEY]
           ) {
             knownItemIds.add(item.id);
-            const curLang = (getSuiteState().language as Lang) ?? "zh";
+            const curLang = (getLocalLang() as Lang) ?? "zh";
             OBR.modal.open({
               id: NEW_ITEM_DIALOG_ID,
               url: `${NEW_ITEM_URL}?itemId=${item.id}&itemName=${encodeURIComponent(

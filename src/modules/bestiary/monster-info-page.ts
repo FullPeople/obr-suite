@@ -1,4 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { ICONS } from "../../icons";
+import { formatTagsClickable, fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
 
 const SHOW_MSG = "com.bestiary/info-show";
 const BESTIARY_DATA_KEY = "com.bestiary/monsters";
@@ -77,6 +79,10 @@ const root = document.getElementById("root") as HTMLDivElement;
 const ABBR: Record<string, string> = {
   str: "力", dex: "敏", con: "体", int: "智", wis: "感", cha: "魅",
 };
+// Full Chinese ability names for the rolled-dice LABEL text.
+const FULL: Record<string, string> = {
+  str: "力量", dex: "敏捷", con: "体质", int: "智力", wis: "感知", cha: "魅力",
+};
 const ORDER: Array<"str" | "dex" | "con" | "int" | "wis" | "cha"> =
   ["str", "dex", "con", "int", "wis", "cha"];
 
@@ -103,9 +109,14 @@ function stripTags(s: string): string {
   });
 }
 
+// Flatten 5etools entries to a string. KEEPS the original {@tag ...}
+// tokens intact so the caller can decide between rich (clickable) or
+// plain (stripped) rendering. Use stripTags() afterwards for plain
+// text fields, formatTagsClickable() for body prose where {@dice} /
+// {@damage} / {@hit} should become rollable.
 function flattenEntries(entries: any): string {
   if (entries == null) return "";
-  if (typeof entries === "string") return stripTags(entries);
+  if (typeof entries === "string") return entries;
   if (typeof entries === "number" || typeof entries === "boolean") return String(entries);
   if (Array.isArray(entries)) return entries.map(flattenEntries).filter(Boolean).join(" ");
   if (typeof entries === "object") {
@@ -171,7 +182,11 @@ function parseSizeStr(size: any): string {
 
 function renderSpellList(arr: any): string {
   if (!Array.isArray(arr)) return "";
-  return arr.map((s) => stripTags(String(s))).filter(Boolean).join("、");
+  // Spell names with 5etools tags — make rollable where applicable
+  // ({@spell ...} is cosmetic, but if a spell entry includes inline
+  // {@dice} it'll be clickable). The split by "、" stays string-safe
+  // because formatTagsClickable escapes the surrounding text.
+  return arr.map((s) => formatTagsClickable(String(s))).filter(Boolean).join("、");
 }
 
 function renderSpellLevels(spells: any): string {
@@ -184,7 +199,7 @@ function renderSpellLevels(spells: any): string {
     const slotInfo = typeof slot.slots === "number" ? ` (${slot.slots}次)` : "";
     const sp = renderSpellList(slot.spells);
     if (!sp) return "";
-    return `<div class="spell-line"><span class="sl">${label}${slotInfo}</span>${escapeHtml(sp)}</div>`;
+    return `<div class="spell-line"><span class="sl">${label}${slotInfo}</span>${sp}</div>`;
   }).filter(Boolean).join("");
 }
 
@@ -194,14 +209,14 @@ function renderSpellDaily(daily: any): string {
     const label = k.endsWith("e") ? `${k.slice(0, -1)}次/日（每个）` : `${k}次/日`;
     const sp = renderSpellList(v);
     if (!sp) return "";
-    return `<div class="spell-line"><span class="sl">${label}</span>${escapeHtml(sp)}</div>`;
+    return `<div class="spell-line"><span class="sl">${label}</span>${sp}</div>`;
   }).filter(Boolean).join("");
 }
 
 function renderSpellGroup(label: string, arr: any): string {
   const sp = renderSpellList(arr);
   if (!sp) return "";
-  return `<div class="spell-line"><span class="sl">${label}</span>${escapeHtml(sp)}</div>`;
+  return `<div class="spell-line"><span class="sl">${label}</span>${sp}</div>`;
 }
 
 function renderSpellcasting(sc: any): string {
@@ -215,11 +230,11 @@ function renderSpellcasting(sc: any): string {
     const rest = renderSpellGroup("短休回复", entry.rest);
     return `<div class="act spell">
       <div class="sc-hdr"><span class="n">${escapeHtml(name)}</span></div>
-      ${header ? `<div class="t">${escapeHtml(header)}</div>` : ""}
+      ${header ? `<div class="t">${formatTagsClickable(header)}</div>` : ""}
       ${will}${daily}${rest}${leveled}
     </div>`;
   });
-  return `<div class="sect">✨ 施法</div>${blocks.join("")}`;
+  return `<div class="sect">${ICONS.sparkles} 施法</div>${blocks.join("")}`;
 }
 
 function renderLegendary(m: any, displayName: string): string {
@@ -231,9 +246,9 @@ function renderLegendary(m: any, displayName: string): string {
   const rows = items.map((a: any) => {
     const n = a.name || "?";
     const t = flattenEntries(a.entries);
-    return `<div class="act legendary"><span class="n">${escapeHtml(n)}</span><span class="t">${escapeHtml(t)}</span></div>`;
+    return `<div class="act legendary"><span class="n">${escapeHtml(n)}</span><span class="t">${formatTagsClickable(t)}</span></div>`;
   }).join("");
-  return `<div class="sect">★ 传奇动作</div><div class="preamble">${escapeHtml(headerText)}</div>${rows}`;
+  return `<div class="sect">${ICONS.star} 传奇动作</div><div class="preamble">${formatTagsClickable(headerText)}</div>${rows}`;
 }
 
 let currentSlug: string | null = null;
@@ -285,14 +300,31 @@ function render(m: any) {
   `;
 
   const saves = m.save || {};
+  const monsterName = stripTags(m.name ?? m.ENG_name ?? "怪物");
   const abl = ORDER
     .map((k) => {
       const score = typeof m[k] === "number" ? m[k] : 10;
       const isProf = saves[k] !== undefined;
+      const aMod = mod(score);
+      // Ability check: 1d20+modifier
+      const aExpr = `1d20${aMod >= 0 ? `+${aMod}` : aMod}`;
+      const aLbl = `${monsterName} · ${FULL[k] ?? ABBR[k]}检定`;
+      // Saving throw — for proficient saves, m.save[k] holds the bonus
+      // string ("+5" / "5"). Otherwise it's the same as the modifier.
+      const saveBonusRaw = saves[k];
+      let saveBn = aMod;
+      if (typeof saveBonusRaw === "string") {
+        const m2 = /([+-]?\s*\d+)/.exec(saveBonusRaw);
+        if (m2) saveBn = parseInt(m2[1].replace(/\s+/g, ""), 10);
+      } else if (typeof saveBonusRaw === "number") {
+        saveBn = saveBonusRaw;
+      }
+      const saveExpr = `1d20${saveBn >= 0 ? `+${saveBn}` : saveBn}`;
+      const saveLbl = `${monsterName} · ${FULL[k] ?? ABBR[k]}豁免`;
       return `<div class="abl${isProf ? " prof" : ""}">
-        <span class="a">${ABBR[k]}</span>
+        <span class="a rollable" data-expr="${saveExpr}" data-label="${escapeHtml(saveLbl)}" title="${escapeHtml(saveLbl)} ${saveExpr}">${ABBR[k]}</span>
         <span class="t">${score}</span>
-        <span class="m">${fmtMod(mod(score))}</span>
+        <span class="m rollable" data-expr="${aExpr}" data-label="${escapeHtml(aLbl)}" title="${escapeHtml(aLbl)} ${aExpr}">${fmtMod(aMod)}</span>
       </div>`;
     })
     .join("");
@@ -303,17 +335,19 @@ function render(m: any) {
       .map((a) => {
         const n = a.name || "?";
         const t = flattenEntries(a.entries);
-        return `<div class="act ${cls}"><span class="n">${escapeHtml(n)}</span><span class="t">${escapeHtml(t)}</span></div>`;
+        // Body text gets the rich treatment so attack hits / damage
+        // dice in the entries become clickable rollable spans.
+        return `<div class="act ${cls}"><span class="n">${escapeHtml(n)}</span><span class="t">${formatTagsClickable(t)}</span></div>`;
       })
       .join("");
     return `<div class="sect">${title}</div>${rows}`;
   };
 
-  const traits = sectionHtml(m.trait, "trait", "✦ 特性");
+  const traits = sectionHtml(m.trait, "trait", `${ICONS.sparkle4} 特性`);
   const spellcasting = renderSpellcasting(m.spellcasting);
-  const actions = sectionHtml(m.action, "", "⚔ 动作");
-  const bonus = sectionHtml(m.bonus, "bonus", "⚡ 附赠动作");
-  const reactions = sectionHtml(m.reaction, "reaction", "🛡 反应");
+  const actions = sectionHtml(m.action, "", `${ICONS.swords} 动作`);
+  const bonus = sectionHtml(m.bonus, "bonus", `${ICONS.zap} 附赠动作`);
+  const reactions = sectionHtml(m.reaction, "reaction", `${ICONS.shield} 反应`);
   const legendary = renderLegendary(m, name);
 
   root.innerHTML = `
@@ -352,6 +386,38 @@ async function showMonster(slug: string) {
     await adjustHeight();
   }
 }
+
+// Delegated click for any 5etools rollable tag inside the monster
+// stat-block. The bestiary popover is GM-only, so the click semantics
+// here favor "DM stays in control" — left-click defaults to a DARK
+// roll (only the DM sees the dice/result, players don't), right-click
+// fires an OPEN roll (everyone sees it).
+async function fireRollableFromBestiary(target: HTMLElement, hidden: boolean) {
+  const expression = target.dataset.expr ?? "";
+  const label = target.dataset.label ?? "";
+  if (!expression) return;
+  const itemId = await resolveClickRollTarget();
+  fireQuickRoll({ expression, label, itemId, focus: !!itemId, hidden });
+  target.classList.remove("rollable-flash");
+  void target.offsetWidth;
+  target.classList.add("rollable-flash");
+}
+
+root.addEventListener("click", async (e) => {
+  const target = (e.target as HTMLElement | null)?.closest<HTMLElement>(".rollable");
+  if (!target) return;
+  e.preventDefault();
+  e.stopPropagation();
+  await fireRollableFromBestiary(target, true);  // left click → dark
+});
+
+root.addEventListener("contextmenu", async (e) => {
+  const target = (e.target as HTMLElement | null)?.closest<HTMLElement>(".rollable");
+  if (!target) return;
+  e.preventDefault();
+  e.stopPropagation();
+  await fireRollableFromBestiary(target, false); // right click → open
+});
 
 OBR.onReady(() => {
   // Capture the popover's opened height as the ceiling for future resizes.

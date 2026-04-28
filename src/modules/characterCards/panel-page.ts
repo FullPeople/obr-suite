@@ -1,10 +1,14 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { ICONS } from "../../icons";
 
 // Suite-namespaced popover ID so the standalone plugin's panel doesn't
 // fight with us during dual-install. Scene-metadata keys (the bound card
 // list, BIND_META) stay under the original com.character-cards/* namespace
 // for backward compatibility.
-const POPOVER_ID = "com.obr-suite/cc-panel";
+// Switched from popover to modal so open/close is instant (no
+// fade-in/out transition). Modal is fullScreen — no need for setWidth /
+// setHeight, the iframe always covers the viewport.
+const PANEL_MODAL_ID = "com.obr-suite/cc-panel";
 const API_BASE = "https://obr.dnd.center/api/character";
 const SERVER_ORIGIN = "https://obr.dnd.center";
 const SCENE_META_KEY = "com.character-cards/list";
@@ -32,7 +36,7 @@ interface ResourceDef {
 // ceiling and crashed the tab. Removed. 不全书 is a lighter site and safe
 // to keep resident for all players.
 const RESOURCES: ResourceDef[] = [
-  { slug: "bqs", label: "不全书", icon: "📖", url: "https://5echm.kagangtuya.top/" },
+  { slug: "bqs", label: "不全书", icon: ICONS.book, url: "https://5echm.kagangtuya.top/" },
 ];
 
 type View =
@@ -105,15 +109,13 @@ async function setMaximized(next: boolean) {
   document.body.classList.toggle("maximized", next);
   try {
     if (next) {
-      const [w, h] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]);
-      await OBR.popover.setWidth(POPOVER_ID, w);
-      await OBR.popover.setHeight(POPOVER_ID, h);
+      // Modal is fullScreen — no setWidth/setHeight needed.
     } else {
-      // The blue circular floating button was removed — there's no longer a
-      // 64×64 minimized state. Close the popover entirely instead. The user
-      // re-opens via the cluster's "角色卡界面" button.
+      // The blue circular floating button was removed — there's no longer
+      // a minimized state. Close the modal entirely; the user re-opens via
+      // the cluster's "角色卡界面" button.
       saveState();
-      await OBR.popover.close(POPOVER_ID);
+      await OBR.modal.close(PANEL_MODAL_ID);
       return;
     }
   } catch (e) {
@@ -127,8 +129,18 @@ function showError(msg: string) {
   errEl.style.display = msg ? "block" : "none";
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
 function showStatus(msg: string) {
-  statusEl.textContent = msg;
+  // Switched from textContent to innerHTML so SVG icons inside status
+  // messages render. Callers must HTML-escape any untrusted text first.
+  statusEl.innerHTML = msg;
   statusEl.style.display = msg ? "block" : "none";
   if (msg) setTimeout(() => { statusEl.style.display = "none"; }, 3000);
 }
@@ -189,7 +201,7 @@ async function uploadFile(file: File) {
     await writeCardsToScene(updated);
     cards = updated;
     current = { type: "card", id: entry.id };
-    showStatus(`✓ 已上传: ${entry.name}`);
+    showStatus(`${ICONS.check} 已上传: ${escapeHtml(entry.name)}`);
     render();
   } catch (e: any) {
     showError(`上传失败: ${e?.message || e}`);
