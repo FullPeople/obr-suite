@@ -1,5 +1,10 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { ICONS } from "../../icons";
+import { applyI18nDom, t } from "../../i18n";
+import { getLocalLang } from "../../state";
+
+const lang = getLocalLang();
+const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
 
 const MODAL_ID = "com.obr-suite/cc-bind-picker";
 const BIND_META = "com.character-cards/boundCardId";
@@ -65,17 +70,20 @@ async function bindTo(cardId: string | null) {
 }
 
 OBR.onReady(async () => {
+  applyI18nDom(lang);
   const [cards, boundId] = await Promise.all([getCards(), getCurrentBinding()]);
 
   if (boundId) {
     const boundCard = cards.find((c) => c.id === boundId);
-    curEl.textContent = boundCard ? `当前: ${boundCard.name}` : "当前: (卡已删除)";
+    curEl.textContent = boundCard
+      ? `${tt("ccBindCurrent")}: ${boundCard.name}`
+      : `${tt("ccBindCurrent")}: ${tt("ccBindCardDeleted")}`;
     unbindBtn.style.display = "inline-block";
     unbindBtn.addEventListener("click", () => bindTo(null));
   }
 
   if (cards.length === 0) {
-    listEl.innerHTML = `<div class="empty">这个场景还没有上传任何角色卡<br>先去右下角 ${ICONS.idCard} 面板的右侧栏拖一张 .xlsx 上来</div>`;
+    listEl.innerHTML = `<div class="empty">${tt("ccBindNoCards")}<br>${tt("ccBindUploadHint")} ${ICONS.idCard} ${tt("ccBindUploadHint2")}</div>`;
     return;
   }
 

@@ -167,48 +167,48 @@ html,body{
 <div class="card">
   <div class="hdr">
     <span class="ic">◐</span>
-    <span class="ttl" id="title">传送门</span>
+    <span class="ttl" id="title" data-i18n="portalTitle">传送门</span>
     <button class="x" id="x">×</button>
   </div>
 
   <div class="body">
     <div class="row">
-      <div class="lbl">名字</div>
-      <input id="inp-name" type="text" placeholder="例如 一楼" autocomplete="off">
+      <div class="lbl" data-i18n="portalLblName">名字</div>
+      <input id="inp-name" type="text" data-i18n-placeholder="portalNamePh" placeholder="例如 一楼" autocomplete="off">
     </div>
     <div class="chips-wrap">
       <div class="lbl-row">
-        <span>名字预设</span>
-        <button class="add" data-form="name">+ 添加</button>
+        <span data-i18n="portalLblNamePresets">名字预设</span>
+        <button class="add" data-form="name" data-i18n="portalAdd">+ 添加</button>
       </div>
       <div class="chips" id="chips-names"></div>
       <div class="add-form" id="form-name">
-        <input id="inp-add-name" type="text" placeholder="新名字" maxlength="20">
-        <button id="btn-add-name">添加</button>
+        <input id="inp-add-name" type="text" data-i18n-placeholder="portalNewName" placeholder="新名字" maxlength="20">
+        <button id="btn-add-name" data-i18n="portalAddBtn">添加</button>
       </div>
     </div>
 
     <div class="row">
-      <div class="lbl">标签（同标签互联）</div>
-      <input id="inp-tag" type="text" placeholder="例如 001" autocomplete="off" maxlength="32">
+      <div class="lbl" data-i18n="portalLblTag">标签（同标签互联）</div>
+      <input id="inp-tag" type="text" data-i18n-placeholder="portalTagPh" placeholder="例如 001" autocomplete="off" maxlength="32">
     </div>
     <div class="chips-wrap">
       <div class="lbl-row">
-        <span>标签预设</span>
-        <button class="add" data-form="tag">+ 添加</button>
+        <span data-i18n="portalLblTagPresets">标签预设</span>
+        <button class="add" data-form="tag" data-i18n="portalAdd">+ 添加</button>
       </div>
       <div class="chips" id="chips-tags"></div>
       <div class="add-form" id="form-tag">
-        <input id="inp-add-tag" type="text" placeholder="新标签" maxlength="20">
-        <button id="btn-add-tag">添加</button>
+        <input id="inp-add-tag" type="text" data-i18n-placeholder="portalNewTag" placeholder="新标签" maxlength="20">
+        <button id="btn-add-tag" data-i18n="portalAddBtn">添加</button>
       </div>
     </div>
   </div>
 
   <div class="btn-row">
-    <button class="btn del" id="btn-del">删除传送门</button>
-    <button class="btn cancel" id="btn-cancel">取消</button>
-    <button class="btn save" id="btn-save">保存</button>
+    <button class="btn del" id="btn-del" data-i18n="portalDel">删除传送门</button>
+    <button class="btn cancel" id="btn-cancel" data-i18n="portalCancel">取消</button>
+    <button class="btn save" id="btn-save" data-i18n="portalSave">保存</button>
   </div>
 </div>
 <script type="module" src="/src/modules/portals/edit-page.ts"></script>

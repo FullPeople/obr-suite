@@ -7,6 +7,11 @@ import {
   Presets,
   PortalMeta,
 } from "./types";
+import { applyI18nDom, t } from "../../i18n";
+import { getLocalLang, onLangChange } from "../../state";
+
+let lang = getLocalLang();
+const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
 
 // Per-client preset persistence — names + tags lists shown as chips for
 // quick fill-in. User can add/remove freely without touching the scene.
@@ -144,10 +149,10 @@ async function loadCurrent() {
     }
   } catch {}
   if (isNew) {
-    titleEl.textContent = "新建传送门";
+    titleEl.textContent = tt("portalNew");
     inpName.focus();
   } else {
-    titleEl.textContent = "编辑传送门";
+    titleEl.textContent = tt("portalEdit");
   }
 }
 
@@ -165,7 +170,7 @@ async function save() {
 }
 
 async function del() {
-  const ok = confirm("确定删除该传送门？");
+  const ok = confirm(tt("portalConfirmDel"));
   if (!ok) return;
   try {
     await OBR.broadcast.sendMessage(
@@ -201,7 +206,20 @@ async function closeSelf() {
   try { await OBR.popover.close(EDIT_POPOVER_ID); } catch {}
 }
 
+// Re-render labels + title when the user flips language in Settings.
+function reapplyI18n() {
+  applyI18nDom(lang);
+  if (titleEl) {
+    titleEl.textContent = isNew ? tt("portalNew") : tt("portalEdit");
+  }
+}
+onLangChange((next) => {
+  lang = next;
+  reapplyI18n();
+});
+
 OBR.onReady(async () => {
+  applyI18nDom(lang);
   renderChips();
   setupAddForms();
   await loadCurrent();

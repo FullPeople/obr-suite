@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>掷骰菜单</title>
+<title>Dice Menu</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -51,12 +51,12 @@ html,body{
 </head>
 <body>
 <div class="menu">
-  <button class="item" data-act="roll"><span class="ico">⚀</span><span>投掷</span></button>
-  <button class="item dark" data-act="dark"><span class="ico">●</span><span>暗骰</span></button>
-  <button class="item adv" data-act="adv"><span class="ico">▲</span><span>优势</span></button>
-  <button class="item dis" data-act="dis"><span class="ico">▼</span><span>劣势</span></button>
+  <button class="item" data-act="roll"><span class="ico">⚀</span><span data-l="roll">投掷</span></button>
+  <button class="item dark" data-act="dark"><span class="ico">●</span><span data-l="dark">暗骰</span></button>
+  <button class="item adv" data-act="adv"><span class="ico">▲</span><span data-l="adv">优势</span></button>
+  <button class="item dis" data-act="dis"><span class="ico">▼</span><span data-l="dis">劣势</span></button>
   <div class="sep"></div>
-  <button class="item tray" data-act="tray"><span class="ico">＋</span><span>添加到骰盘</span></button>
+  <button class="item tray" data-act="tray"><span class="ico">＋</span><span data-l="tray">添加到骰盘</span></button>
 </div>
 <script type="module">
 import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
@@ -64,6 +64,18 @@ import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
 const POPOVER_ID = "com.obr-suite/rollable-menu";
 const BC_QUICK_ROLL = "com.obr-suite/dice-quick-roll";
 const BC_PANEL_TOGGLE = "com.obr-suite/dice-panel-toggle";
+
+// Per-client UI language (mirrors src/state.ts LS_LANG).
+const LANG = (() => {
+  try { const v = localStorage.getItem("obr-suite/lang"); if (v === "en" || v === "zh") return v; } catch {}
+  return "zh";
+})();
+const L = {
+  zh: { roll: "投掷", dark: "暗骰", adv: "优势", dis: "劣势", tray: "添加到骰盘" },
+  en: { roll: "Roll", dark: "Dark Roll", adv: "Advantage", dis: "Disadvantage", tray: "Add to Tray" },
+}[LANG];
+document.querySelectorAll("[data-l]").forEach((el) => { el.textContent = L[el.dataset.l] ?? el.textContent; });
+document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
 
 const params = new URLSearchParams(location.search);
 const expression = params.get("expr") ?? "";

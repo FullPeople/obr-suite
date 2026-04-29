@@ -4,7 +4,12 @@ import OBR from "@owlbear-rodeo/sdk";
 import { ParsedMonster, MonsterEdition } from "./types";
 import { loadAllMonsters, searchMonsters, getRawMonster, makeSlug } from "./data";
 import { spawnMonster } from "./spawn";
+import { t } from "../../i18n";
+import { getLocalLang, onLangChange } from "../../state";
 import "./styles.css";
+
+let _lang = getLocalLang();
+const _tt = (k: Parameters<typeof t>[1]) => t(_lang, k);
 
 // Bubbles + initiative metadata keys — same constants as spawn.ts. The
 // picker mode (?pickerForItemId=…) writes to these so the bound token
@@ -104,7 +109,15 @@ function App() {
   const [role, setRole] = useState<"GM" | "PLAYER">("PLAYER");
   // Edition gate now flows from suite scene metadata (via dataVersion).
   const [dataVersion, setDataVersion] = useState<SuiteDataVersion>("all");
+  const [lang, setLang] = useState(_lang);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Per-client language: re-render when the user flips the suite-level
+  // language toggle so labels/placeholders update without a popover reopen.
+  useEffect(() => {
+    const unsub = onLangChange((next) => { _lang = next; setLang(next); });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     OBR.player.getRole().then(setRole);
@@ -202,7 +215,7 @@ function App() {
   if (role !== "GM") {
     return (
       <div class="app">
-        <div class="empty">仅 DM 可用</div>
+        <div class="empty">{t(lang, "bestiaryPanelOnlyDM")}</div>
       </div>
     );
   }
@@ -222,7 +235,7 @@ function App() {
         <div
           style="background:rgba(93,173,226,0.18);border-bottom:1px solid rgba(93,173,226,0.40);padding:8px 14px;font-size:12px;color:#7ec8f0;font-weight:600;text-align:center;"
         >
-          点击下方怪物以绑定到所选 token（覆盖当前数据 / HP / AC）
+          {t(lang, "bestiaryPanelHint")}
         </div>
       )}
       <div class="header">
@@ -231,25 +244,25 @@ function App() {
             ref={inputRef}
             type="text"
             class="search"
-            placeholder="搜索怪物名称/类型/CR..."
+            placeholder={t(lang, "bestiarySearchPh")}
             value={query}
             onInput={handleSearch}
           />
           <button
             class="close-btn"
             onClick={handleClearSearch}
-            title="清空搜索"
+            title={t(lang, "bestiaryClearSearch")}
             disabled={!query}
-            aria-label="清空搜索"
+            aria-label={t(lang, "bestiaryClearSearch")}
           >
             ✕
           </button>
         </div>
         <div class="header-row">
           <span class="count">
-            {loading ? "加载中..." : `${filtered.length} / ${monsters.length}`}
+            {loading ? t(lang, "bestiaryLoading") : `${filtered.length} / ${monsters.length}`}
           </span>
-          <button class="sort-btn" onClick={toggleSort} title="按CR排序">
+          <button class="sort-btn" onClick={toggleSort} title={t(lang, "bestiarySortByCR")}>
             CR {sortDesc ? "↓" : "↑"}
           </button>
         </div>
@@ -259,7 +272,7 @@ function App() {
           <MonsterCard key={`${mon.source}-${mon.engName}`} monster={mon} onSpawn={handleSpawn} />
         ))}
         {!loading && filtered.length === 0 && (
-          <div class="empty">未找到匹配的怪物</div>
+          <div class="empty">{t(lang, "bestiaryNoMatch")}</div>
         )}
       </div>
     </div>
@@ -326,7 +339,7 @@ function PluginGate() {
     OBR.onReady(() => setReady(true));
   }, []);
 
-  if (!ready) return <div class="app"><div class="empty">加载中...</div></div>;
+  if (!ready) return <div class="app"><div class="empty">{_tt("bestiaryLoading")}</div></div>;
   return <App />;
 }
 

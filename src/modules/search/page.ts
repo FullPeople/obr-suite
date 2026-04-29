@@ -10,6 +10,7 @@ import {
 } from "../../state";
 import { formatTagsClickable, fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
 import { subscribeToSfx } from "../dice/sfx-broadcast";
+import { applyI18nDom } from "../../i18n";
 
 // Suite-version of the search bar — independent top-right popover with
 // its OWN visible input row (not driven by cluster). The popover resizes
@@ -1187,11 +1188,13 @@ OBR.onReady(async () => {
 
   startSceneSync();
   applyLangPlaceholder();
+  applyI18nDom(getLocalLang());
   onStateChange(() => {
     if (inputEl.value) refilter();
   });
-  onLangChange(() => {
+  onLangChange((next) => {
     applyLangPlaceholder();
+    applyI18nDom(next);
     if (inputEl.value) refilter();
   });
 

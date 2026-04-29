@@ -116,6 +116,20 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 <div class="stage" id="stage">
   <div class="hint" id="hint">点击气泡或再次点击词条关闭</div>
 </div>
+<script>
+// Per-client UI language. The hint is the only translatable string in
+// this overlay so we patch it inline before the module script paints.
+(function(){
+  try {
+    var v = localStorage.getItem("obr-suite/lang");
+    if (v === "en") {
+      document.documentElement.lang = "en";
+      var h = document.getElementById("hint");
+      if (h) h.textContent = "Click bubble or click row again to close";
+    }
+  } catch {}
+})();
+</script>
 <script type="module" src="/src/modules/dice/replay-page.ts"></script>
 </body>
 </html>

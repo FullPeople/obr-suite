@@ -1,6 +1,11 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { DiceType, DieResult, sidesOf } from "./types";
 import { subscribeToSfx } from "./sfx-broadcast";
+import { applyI18nDom, t } from "../../i18n";
+import { getLocalLang, onLangChange } from "../../state";
+
+let lang = getLocalLang();
+const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
 
 // Dice panel — three tabs (投掷 / 组合 / 历史). Loaded by OBR's action
 // drawer / popover. Owns the expression UI + history view, broadcasts
@@ -912,12 +917,12 @@ function refreshBadges() {
 
 function renderCombos() {
   if (!combos.length) {
-    comboList.innerHTML = `<div class="empty-state">还没有保存的组合<br>在「投掷」标签里组好骰子后点「保存组合」</div>`;
+    comboList.innerHTML = `<div class="empty-state">${tt("diceComboEmpty")}</div>`;
     return;
   }
   // DM-only 暗骰 button — same gating as the main panel's dark-roll.
   const darkBtn = isDM
-    ? `<button class="btn dark-roll combo-dark" data-act="roll-dark" type="button">暗骰</button>`
+    ? `<button class="btn dark-roll combo-dark" data-act="roll-dark" type="button">${tt("diceComboBtnDark")}</button>`
     : "";
   comboList.innerHTML = combos.map((c) => {
     const formula = formatExpr(parseExpr(c.expr));
@@ -926,10 +931,10 @@ function renderCombos() {
         <div class="combo-name">${escapeHtml(c.name)}</div>
         <div class="combo-formula">${escapeHtml(formula)}</div>
         <div class="combo-actions">
-          <button class="btn primary" data-act="roll" type="button">投掷</button>
+          <button class="btn primary" data-act="roll" type="button">${tt("diceComboBtnRoll")}</button>
           ${darkBtn}
-          <button class="btn" data-act="load" type="button">编辑</button>
-          <button class="btn danger" data-act="del" type="button">删除</button>
+          <button class="btn" data-act="load" type="button">${tt("diceComboBtnEdit")}</button>
+          <button class="btn danger" data-act="del" type="button">${tt("diceComboBtnDel")}</button>
         </div>
       </div>
     `;
@@ -969,7 +974,7 @@ function renderHistorySeg() {
     }
   }
   const buttons: string[] = [
-    `<button class="seg-btn ${historyFilter === "" ? "on" : ""}" data-p="" type="button">全部</button>`,
+    `<button class="seg-btn ${historyFilter === "" ? "on" : ""}" data-p="" type="button">${tt("diceHistoryAll")}</button>`,
   ];
   for (const n of names) {
     const isOn = historyFilter === n;
@@ -992,7 +997,7 @@ function renderHistoryList() {
     ? history.filter((h) => h.rollerName === historyFilter)
     : history;
   if (!filtered.length) {
-    historyList.innerHTML = `<div class="empty-state">还没有掷骰记录</div>`;
+    historyList.innerHTML = `<div class="empty-state">${tt("diceHistoryEmpty")}</div>`;
     return;
   }
   historyList.innerHTML = filtered.map((h) => {
@@ -1035,11 +1040,11 @@ function renderHistoryList() {
 }
 
 function formatAgo(ms: number): string {
-  if (ms < 5_000) return "刚刚";
-  if (ms < 60_000) return `${Math.floor(ms / 1000)}s 前`;
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}min 前`;
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h 前`;
-  return `${Math.floor(ms / 86_400_000)}d 前`;
+  if (ms < 5_000) return tt("diceJustNow");
+  if (ms < 60_000) return `${Math.floor(ms / 1000)}${tt("diceAgoS")}`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}${tt("diceAgoMin")}`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}${tt("diceAgoH")}`;
+  return `${Math.floor(ms / 86_400_000)}${tt("diceAgoD")}`;
 }
 
 // --- Tab switching ---
@@ -1180,7 +1185,7 @@ async function emitOneRoll(opts: {
     : baseTotal + opts.modifier;
 
   let rollerId = "";
-  let rollerName = "投骰人";
+  let rollerName = tt("diceRollerFallback");
   let rollerColor = "#5dade2";
   try {
     [rollerId, rollerName, rollerColor] = await Promise.all([
@@ -1299,14 +1304,14 @@ async function performRoll(opts: { hidden: boolean }): Promise<void> {
     : btnRoll;
 
   if (isAnimating) {
-    shakeButtonWithReason(btnSelf, "动画进行中…");
+    shakeButtonWithReason(btnSelf, tt("diceShakeAnim"));
     return;
   }
   const expr = expression;
   const label = labelText.trim();
   const parsed = parseExpr(expr);
   if (exprIsEmpty(parsed)) {
-    shakeButtonWithReason(btnSelf, expr.trim() ? "表达式无法解析" : "请先输入表达式");
+    shakeButtonWithReason(btnSelf, expr.trim() ? tt("diceShakeParse") : tt("diceShakeEmpty"));
     return;
   }
 
@@ -1317,7 +1322,7 @@ async function performRoll(opts: { hidden: boolean }): Promise<void> {
   //     selection (anchored at viewport center for them only).
   let targetTokens = await getOwnedSelectedTokenIds();
   if (!opts.hidden && targetTokens.length === 0) {
-    shakeButtonWithReason(btnSelf, "请先选中角色");
+    shakeButtonWithReason(btnSelf, tt("diceShakeNoToken"));
     return;
   }
   if (opts.hidden && targetTokens.length === 0) {
@@ -1381,18 +1386,18 @@ async function performRoll(opts: { hidden: boolean }): Promise<void> {
 async function rollFromCombo(expr: string, label: string, hidden: boolean = false, sourceBtn?: HTMLButtonElement): Promise<void> {
   const btnSelf = sourceBtn ?? btnRoll;
   if (isAnimating) {
-    shakeButtonWithReason(btnSelf, "动画进行中…");
+    shakeButtonWithReason(btnSelf, tt("diceShakeAnim"));
     return;
   }
   const parsed = parseExpr(expr);
   if (exprIsEmpty(parsed)) {
-    shakeButtonWithReason(btnSelf, "表达式无法解析");
+    shakeButtonWithReason(btnSelf, tt("diceShakeParse"));
     return;
   }
 
   let targetTokens = await getOwnedSelectedTokenIds();
   if (!hidden && targetTokens.length === 0) {
-    shakeButtonWithReason(btnSelf, "请先选中角色");
+    shakeButtonWithReason(btnSelf, tt("diceShakeNoToken"));
     return;
   }
   // Dark roll: tokens optional — DM can dark-roll a combo with no
@@ -1443,7 +1448,7 @@ function saveCurrentCombo() {
   const parsed = parseExpr(expression);
   if (exprIsEmpty(parsed)) return;
   const promptName = labelText.trim() || formatExpr(parsed);
-  const name = window.prompt("组合名称：", promptName);
+  const name = window.prompt(tt("diceComboPrompt"), promptName);
   if (!name) return;
   const combo: SavedCombo = {
     id: `${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
@@ -1611,7 +1616,7 @@ document.querySelectorAll<HTMLButtonElement>("#examplesRow .example-btn").forEac
 });
 
 btnClearHist.addEventListener("click", () => {
-  if (!confirm("清空所有掷骰历史？")) return;
+  if (!confirm(tt("diceConfirmClearHistory"))) return;
   history = [];
   saveHistory();
   renderHistorySeg();
@@ -1696,8 +1701,47 @@ OBR.onReady(async () => {
   });
 });
 
+// --- i18n bootstrap ---
+//
+// Apply translations to all elements with data-i18n* attributes, render
+// the rules-hint list (which has many lines so we keep it data-driven),
+// and re-render dynamic content when the user flips the language toggle
+// in Settings.
+function renderRulesList() {
+  const el = document.getElementById("rulesList") as HTMLElement | null;
+  if (!el) return;
+  const items = [
+    `<code>2d6 + 1d20 + 5</code>${tt("diceRule1")}`,
+    `<code>adv(1d20)</code>${tt("diceRule2")}`,
+    `<code>dis(1d20)</code>${tt("diceRule3")}`,
+    `<code>max(1d20, 10)</code>${tt("diceRule4")}`,
+    `<code>min(1d20, 15)</code>${tt("diceRule5")}`,
+    `<code>reset(1d20, 12)</code>${tt("diceRule6")}`,
+    `<code>repeat(3, 1d20+5)</code>${tt("diceRule7")}`,
+    `<code>same(2d20)</code>${tt("diceRule8")}`,
+    `<code>burst(2d6)</code>${tt("diceRule9")}`,
+    `${tt("diceRule10")} <code>1d7</code>、<code>1d600</code>${tt("diceRule10b")} <code>（）</code>${tt("diceRule10c")} <code>，</code>${tt("diceRule10d")}`,
+  ];
+  el.innerHTML = items.map((s) => `<li>${s}</li>`).join("");
+}
+
+function reapplyAllI18n() {
+  applyI18nDom(lang);
+  renderRulesList();
+  renderCombos();
+  renderHistorySeg();
+  renderHistoryList();
+}
+
+onLangChange((next) => {
+  lang = next;
+  reapplyAllI18n();
+});
+
 // --- Initial paint ---
 
+applyI18nDom(lang);
+renderRulesList();
 renderCombos();
 renderHistorySeg();
 renderHistoryList();

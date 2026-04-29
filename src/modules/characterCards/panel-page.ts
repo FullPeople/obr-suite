@@ -1,5 +1,10 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { ICONS } from "../../icons";
+import { applyI18nDom, t } from "../../i18n";
+import { getLocalLang, onLangChange } from "../../state";
+
+let lang = getLocalLang();
+const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
 
 // LOCAL broadcast: when the local-file refresh succeeds, every cc
 // panel instance reloads the affected card iframe so other clients
@@ -206,10 +211,10 @@ async function uploadFile(file: File) {
     await writeCardsToScene(updated);
     cards = updated;
     current = { type: "card", id: entry.id };
-    showStatus(`${ICONS.check} 已上传: ${escapeHtml(entry.name)}`);
+    showStatus(`${ICONS.check} ${tt("ccPanelUploaded")}: ${escapeHtml(entry.name)}`);
     render();
   } catch (e: any) {
-    showError(`上传失败: ${e?.message || e}`);
+    showError(`${tt("ccPanelUploadFailed")}: ${e?.message || e}`);
   } finally {
     sideEl?.classList.remove("busy");
   }
@@ -254,7 +259,7 @@ async function refreshCardFromPicker(card: CardEntry): Promise<void> {
   const file = await pickXlsxFile();
   if (!file) return;
   if (!file.name.toLowerCase().endsWith(".xlsx")) {
-    showError("只支持 .xlsx 文件");
+    showError(tt("ccPanelOnlyXlsx"));
     return;
   }
   const row = document.querySelector<HTMLElement>(`.card[data-id="${card.id}"]`);
@@ -282,10 +287,10 @@ async function refreshCardFromPicker(card: CardEntry): Promise<void> {
         { destination: "REMOTE" },
       );
     } catch {}
-    showStatus(`${ICONS.check} 已刷新: ${escapeHtml(updated.name)}`);
+    showStatus(`${ICONS.check} ${tt("ccPanelRefreshed")}: ${escapeHtml(updated.name)}`);
     render();
   } catch (e: any) {
-    showError(`刷新失败: ${e?.message || e}`);
+    showError(`${tt("ccPanelRefreshFailed")}: ${e?.message || e}`);
   } finally {
     btn?.classList.remove("spinning");
   }
@@ -369,7 +374,7 @@ function render() {
   if (cards.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-list";
-    empty.textContent = "还没有角色卡\n拖拽 xlsx 到左侧上传";
+    empty.textContent = tt("ccPanelEmpty3");
     empty.style.whiteSpace = "pre-line";
     listEl.appendChild(empty);
   } else {
@@ -393,7 +398,7 @@ function render() {
       const refresh = document.createElement("button");
       refresh.className = "card-refresh";
       refresh.textContent = "↻";
-      refresh.title = "从最新的 xlsx 重新加载";
+      refresh.title = tt("ccPanelRefreshTitle");
       refresh.addEventListener("click", async (e) => {
         e.stopPropagation();
         await refreshCardFromPicker(c);
@@ -403,10 +408,11 @@ function render() {
       const del = document.createElement("button");
       del.className = "card-del";
       del.textContent = "×";
-      del.title = "删除";
+      del.title = tt("ccPanelDeleteTitle");
       del.addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (confirm(`删除 "${c.name}"？`)) await deleteCard(c.id);
+        const promptText = lang === "zh" ? `删除 "${c.name}"？` : `Delete "${c.name}"?`;
+        if (confirm(promptText)) await deleteCard(c.id);
       });
 
       card.appendChild(name);
@@ -444,7 +450,7 @@ function render() {
   viewer.classList.toggle("is-empty", !hasContent);
   viewer.classList.toggle("has-content", hasContent);
   if (!hasContent) {
-    emptyText.textContent = cards.length > 0 ? "从右侧选择一张角色卡" : "暂无角色卡";
+    emptyText.textContent = cards.length > 0 ? tt("ccPanelEmpty") : tt("ccPanelNoCards");
   }
 }
 
@@ -464,17 +470,29 @@ function buildResourceColumn() {
 
 function timeAgo(isoZ: string): string {
   try {
-    const t = new Date(isoZ).getTime();
-    const diff = (Date.now() - t) / 1000;
-    if (diff < 60) return "刚刚";
-    if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
-    return `${Math.floor(diff / 86400)}天前`;
+    const ts = new Date(isoZ).getTime();
+    const diff = (Date.now() - ts) / 1000;
+    if (diff < 60) return tt("ccPanelJustNow");
+    if (lang === "zh") {
+      if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
+      return `${Math.floor(diff / 86400)}天前`;
+    }
+    if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} h ago`;
+    return `${Math.floor(diff / 86400)} d ago`;
   } catch { return ""; }
 }
 
 // --- setup ---
+onLangChange((next) => {
+  lang = next;
+  applyI18nDom(lang);
+  render();
+});
+
 OBR.onReady(async () => {
+  applyI18nDom(lang);
   roomId = safeRoomId(OBR.room.id || "default");
   try { playerName = (await OBR.player.getName()) || "anonymous"; } catch {}
   // Resource column is visible to ALL players now (not just GM) — with only
@@ -525,7 +543,7 @@ OBR.onReady(async () => {
     const f = e.dataTransfer?.files?.[0] ?? null;
     if (!f) return;
     if (!f.name.toLowerCase().endsWith(".xlsx")) {
-      showError("只支持 .xlsx 文件");
+      showError(tt("ccPanelOnlyXlsx"));
       return;
     }
     await uploadFile(f);

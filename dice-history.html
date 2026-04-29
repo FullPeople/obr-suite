@@ -380,23 +380,23 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 <body>
 <div class="box">
   <div class="head">
-    <span class="head-title">投骰记录</span>
+    <span class="head-title" data-i18n="diceHistTitle">投骰记录</span>
     <span class="head-empty" id="headHint"></span>
-    <button class="head-x" id="btnDismiss" type="button" title="隐藏到下次投骰">×</button>
+    <button class="head-x" id="btnDismiss" type="button" data-i18n-title="diceHistDismissTitle" title="隐藏到下次投骰">×</button>
   </div>
   <div class="rows" id="rows">
-    <div class="empty">还没人投骰</div>
+    <div class="empty" data-i18n="diceHistEmpty">还没人投骰</div>
   </div>
   <!-- Slide-in detail view for one player's full history. Hidden by
        default; toggled with .on by JS. -->
   <div class="detail" id="detail">
     <div class="detail-head">
       <div class="detail-swatch" id="detailSwatch"></div>
-      <div class="detail-name" id="detailName">玩家</div>
+      <div class="detail-name" id="detailName" data-i18n="diceHistPlayer">玩家</div>
       <div class="detail-count" id="detailCount"></div>
     </div>
     <div class="detail-list" id="detailList"></div>
-    <button class="detail-back" id="detailBack" type="button">← 返回</button>
+    <button class="detail-back" id="detailBack" type="button" data-i18n="diceHistBack">← 返回</button>
   </div>
 </div>
 <script type="module" src="/src/modules/dice/history-page.ts"></script>

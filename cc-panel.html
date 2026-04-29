@@ -143,19 +143,19 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
 </style>
 </head>
 <body>
-<div class="mini-wrap"><button class="mini-btn" id="miniBtn" title="角色卡面板">📇</button></div>
+<div class="mini-wrap"><button class="mini-btn" id="miniBtn" data-i18n-title="ccPanelMiniTitle" title="角色卡面板">📇</button></div>
 <div class="panel">
   <div class="viewer is-empty" id="viewer">
     <div class="empty-state" id="emptyState">
       <div class="big">📇</div>
-      <div id="emptyText">从右侧选择一张角色卡</div>
-      <div style="font-size:11px;opacity:.7">拖拽 xlsx 到右侧栏上传</div>
+      <div id="emptyText" data-i18n="ccPanelEmpty">从右侧选择一张角色卡</div>
+      <div style="font-size:11px;opacity:.7" data-i18n="ccPanelEmpty2">拖拽 xlsx 到右侧栏上传</div>
     </div>
   </div>
   <aside class="res-col" id="resCol" style="display:none"></aside>
   <aside class="side" id="side">
     <div class="side-head">
-      <div class="title">📇 角色卡</div>
+      <div class="title">📇 <span data-i18n="ccPanelTitle">角色卡</span></div>
       <div class="head-actions">
         <a
           class="icon-btn"
@@ -163,18 +163,23 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
           download="DND5.5E人物卡-悲灵v1.0.12.xlsx"
           target="_blank"
           rel="noopener"
+          data-i18n="ccPanelDownloadTpl"
+          data-i18n-title="ccPanelDownloadTplTitle"
           title="下载本插件支持的悲灵 v1.0.12 角色卡模板（xlsx）"
         >下载模板</a>
         <!-- About button removed — suite's centralized About panel covers it. -->
-        <button class="close" id="closeBtn" title="关闭 (Esc)">✕</button>
+        <button class="close" id="closeBtn" data-i18n-title="ccPanelClose" title="关闭 (Esc)">✕</button>
       </div>
     </div>
     <div class="side-hint">
-      拖拽 xlsx 到此处上传，或
-      <button id="btnLinkLocal" class="link-local-btn" type="button" title="打开本地文件选择器上传 xlsx">
+      <span data-i18n="ccPanelDragHint">拖拽 xlsx 到此处上传，或</span>
+      <button id="btnLinkLocal" class="link-local-btn" type="button"
+              data-i18n="ccPanelChooseFile"
+              data-i18n-title="ccPanelChooseFileTitle"
+              title="打开本地文件选择器上传 xlsx">
         📁 选择文件
       </button>
-      <div class="side-hint-sub">每张卡片旁的 ↻ 可重新选择 xlsx 覆盖更新</div>
+      <div class="side-hint-sub" data-i18n="ccPanelRefreshHint">每张卡片旁的 ↻ 可重新选择 xlsx 覆盖更新</div>
     </div>
     <div id="status" class="status" style="display:none"></div>
     <div id="error" class="err" style="display:none"></div>

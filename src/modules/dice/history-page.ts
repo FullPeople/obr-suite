@@ -1,5 +1,10 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { DieResult, sidesOf } from "./types";
+import { applyI18nDom, t } from "../../i18n";
+import { getLocalLang, onLangChange } from "../../state";
+
+let lang = getLocalLang();
+const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
 
 // Bottom-left always-on history popover.
 //
@@ -127,7 +132,7 @@ function escapeHtml(s: string): string {
 }
 
 function formatAgo(ms: number): string {
-  if (ms < 5_000) return "刚刚";
+  if (ms < 5_000) return tt("diceJustNow");
   if (ms < 60_000) return `${Math.floor(ms / 1000)}s`;
   if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
   if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h`;
@@ -209,17 +214,17 @@ function latestPerPlayer(): GroupedRow[] {
 function render(): void {
   const rows = latestPerPlayer();
   if (!rows.length) {
-    rowsEl.innerHTML = `<div class="empty">还没人投骰</div>`;
+    rowsEl.innerHTML = `<div class="empty">${tt("diceHistEmpty")}</div>`;
     headHint.textContent = "";
     return;
   }
-  headHint.textContent = `${rows.length} 位`;
+  headHint.textContent = lang === "zh" ? `${rows.length} 位` : `${rows.length}`;
   rowsEl.innerHTML = rows.map((g) => {
     const h = g.head;
     const isCollective = g.members.length > 1;
     const dmTag = h.rollerId && myRoleIsDM(h) ? `<span class="dm-tag">DM</span>` : "";
-    const darkTag = h.hidden ? `<span class="dark-tag">暗</span>` : "";
-    const collTag = isCollective ? `<span class="coll-tag">集体 ${g.members.length}</span>` : "";
+    const darkTag = h.hidden ? `<span class="dark-tag">${tt("diceHistDarkTag")}</span>` : "";
+    const collTag = isCollective ? `<span class="coll-tag">${tt("diceHistColl")} ${g.members.length}</span>` : "";
     const rowCls = ["row"];
     if (h.hidden) rowCls.push("hidden-roll");
     return `
@@ -320,14 +325,16 @@ function renderDetail(): void {
     return k === detailRollerKey;
   });
   if (!entries.length) {
-    detailName.textContent = "（无记录）";
+    detailName.textContent = tt("diceHistNoEntries");
     detailCount.textContent = "";
-    detailList.innerHTML = `<div class="empty">该玩家还没有投过</div>`;
+    detailList.innerHTML = `<div class="empty">${tt("diceHistEmptyDetail")}</div>`;
     return;
   }
   const head = entries[0];
-  detailName.textContent = head.rollerName || "玩家";
-  detailCount.textContent = `${entries.length} 次`;
+  detailName.textContent = head.rollerName || tt("diceHistPlayer");
+  detailCount.textContent = lang === "zh"
+    ? `${entries.length} ${tt("diceHistTimes")}`
+    : `${entries.length} ${tt("diceHistTimes")}`;
   detailSwatch.style.setProperty("--player-color", head.rollerColor || "#5dade2");
   (detailSwatch.style as any).background = head.rollerColor || "#5dade2";
 
@@ -388,7 +395,7 @@ function renderHistoryBlock(cid: string, members: HistoryEntry[]): string {
   return `
     <div class="${containerCls.join(" ")}" style="--player-color:${head.rollerColor}">
       <div class="coll-head">
-        <span class="coll-tag">集体 ${members.length}</span>
+        <span class="coll-tag">${tt("diceHistColl")} ${members.length}</span>
         <span class="coll-label">${escapeHtml(head.label || "")}</span>
         <span class="coll-sum">∑ ${totalSum}</span>
       </div>
@@ -417,7 +424,7 @@ function renderEntryRow(h: HistoryEntry, cid: string, tight: boolean): string {
     <div class="${cls.join(" ")}" data-cid="${escapeHtml(cid)}" style="--player-color:${h.rollerColor}">
       <div class="body">
         <div class="line1">
-          <span class="player">${h.hidden && !tight ? `<span class="dark-tag">暗</span>` : ""}${escapeHtml(h.label || h.rollerName)}</span>
+          <span class="player">${h.hidden && !tight ? `<span class="dark-tag">${tt("diceHistDarkTag")}</span>` : ""}${escapeHtml(h.label || h.rollerName)}</span>
           <span class="ago">${ago}</span>
         </div>
         <div class="formula">${buildFormula(h)}</div>
@@ -557,7 +564,15 @@ OBR.onReady(async () => {
     }
   });
 
+  applyI18nDom(lang);
   render();
+});
+
+onLangChange((next) => {
+  lang = next;
+  applyI18nDom(lang);
+  render();
+  if (detailRollerKey) renderDetail();
 });
 
 // Refresh ago labels every 30s so "刚刚" turns into "1m" without a

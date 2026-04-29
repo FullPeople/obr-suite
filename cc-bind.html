@@ -27,12 +27,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <body>
 <div class="wrap">
   <div class="head">
-    <div class="t">绑定角色卡</div>
+    <div class="t" data-i18n="ccBindTitle">绑定角色卡</div>
     <div class="cur" id="cur"></div>
-    <button class="unbind" id="unbind" style="display:none">解绑</button>
+    <button class="unbind" id="unbind" data-i18n="ccBindUnbind" style="display:none">解绑</button>
   </div>
-  <div class="list" id="list">加载中…</div>
-  <div class="foot">选择一张卡绑定到该角色，单选该角色时自动弹出信息</div>
+  <div class="list" id="list" data-i18n="ccBindLoading">加载中…</div>
+  <div class="foot" data-i18n="ccBindFoot">选择一张卡绑定到该角色，单选该角色时自动弹出信息</div>
 </div>
 <script type="module" src="/src/modules/characterCards/bind-page.ts"></script>
 </body>

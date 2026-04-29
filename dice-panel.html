@@ -519,58 +519,58 @@ html,body{
 <body>
 <div class="panel">
   <div class="tabs">
-    <button class="tab on" data-tab="roll" type="button">投掷</button>
-    <button class="tab" data-tab="combos" type="button">组合</button>
-    <button class="tab" data-tab="history" type="button">历史</button>
+    <button class="tab on" data-tab="roll" type="button" data-i18n="diceTabRoll">投掷</button>
+    <button class="tab" data-tab="combos" type="button" data-i18n="diceTabCombos">组合</button>
+    <button class="tab" data-tab="history" type="button" data-i18n="diceTabHistory">历史</button>
   </div>
 
   <div class="body">
     <!-- ===== Roll tab ===== -->
     <div class="tabPane on" data-tab="roll">
       <div>
-        <div class="sect-h">骰子</div>
-        <div class="sect-hint">左键 + 1，右键 − 1。优势/劣势按钮填入表达式后点击「投掷」实际投骰</div>
+        <div class="sect-h" data-i18n="diceSectDice">骰子</div>
+        <div class="sect-hint" data-i18n="diceHintDicePm">左键 + 1，右键 − 1。优势/劣势按钮填入表达式后点击「投掷」实际投骰</div>
         <!-- Hand-laid grid: 6 of the standard dice fill rows 1-2; the
              d20-box (d20 + adv/dis stack) sits in row 1 col 3-4 to be
              the most prominent thing. -->
         <div class="dice-row" id="diceRow">
-          <button class="dice-btn" data-type="d4" type="button" title="左键 +1，右键 −1">
+          <button class="dice-btn" data-type="d4" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
             <img src="/suite/d4.png" alt="d4" draggable="false">
             <span class="lbl">d4</span>
             <span class="badge">0</span>
           </button>
-          <button class="dice-btn" data-type="d6" type="button" title="左键 +1，右键 −1">
+          <button class="dice-btn" data-type="d6" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
             <img src="/suite/d6.png" alt="d6" draggable="false">
             <span class="lbl">d6</span>
             <span class="badge">0</span>
           </button>
           <div class="d20-box">
-            <button class="dice-btn" data-type="d20" type="button" title="左键 +1，右键 −1">
+            <button class="dice-btn" data-type="d20" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
               <img src="/suite/d20.png" alt="d20" draggable="false">
               <span class="lbl">d20</span>
               <span class="badge">0</span>
             </button>
             <div class="advdis-stack">
-              <button class="ad-btn adv" id="btnAdv" type="button" title="优势 = 投两次 d20，取较高（不会自动投掷）">优势</button>
-              <button class="ad-btn dis" id="btnDis" type="button" title="劣势 = 投两次 d20，取较低（不会自动投掷）">劣势</button>
+              <button class="ad-btn adv" id="btnAdv" type="button" data-i18n="diceBtnAdv" data-i18n-title="diceTitleAdv" title="优势 = 投两次 d20，取较高（不会自动投掷）">优势</button>
+              <button class="ad-btn dis" id="btnDis" type="button" data-i18n="diceBtnDis" data-i18n-title="diceTitleDis" title="劣势 = 投两次 d20，取较低（不会自动投掷）">劣势</button>
             </div>
           </div>
-          <button class="dice-btn" data-type="d8" type="button" title="左键 +1，右键 −1">
+          <button class="dice-btn" data-type="d8" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
             <img src="/suite/d8.png" alt="d8" draggable="false">
             <span class="lbl">d8</span>
             <span class="badge">0</span>
           </button>
-          <button class="dice-btn" data-type="d10" type="button" title="左键 +1，右键 −1">
+          <button class="dice-btn" data-type="d10" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
             <img src="/suite/d10.png" alt="d10" draggable="false">
             <span class="lbl">d10</span>
             <span class="badge">0</span>
           </button>
-          <button class="dice-btn" data-type="d12" type="button" title="左键 +1，右键 −1">
+          <button class="dice-btn" data-type="d12" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
             <img src="/suite/d12.png" alt="d12" draggable="false">
             <span class="lbl">d12</span>
             <span class="badge">0</span>
           </button>
-          <button class="dice-btn" data-type="d100" type="button" title="左键 +1，右键 −1">
+          <button class="dice-btn" data-type="d100" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
             <img src="/suite/d100.png" alt="d100" draggable="false">
             <span class="lbl">d100</span>
             <span class="badge">0</span>
@@ -579,54 +579,46 @@ html,body{
       </div>
 
       <div>
-        <div class="sect-h">表达式</div>
+        <div class="sect-h" data-i18n="diceSectExpression">表达式</div>
         <div class="expr-row">
           <input class="expr-input" id="exprInput" type="text" spellcheck="false"
+                 data-i18n-placeholder="diceExprPlaceholder"
                  placeholder="例如 2d6 + 1d20 + 5  或  adv(1d20) 等">
           <div class="expr-mod">
-            <button id="btnModDec" type="button" title="加值 -1">−</button>
-            <button id="btnModInc" type="button" title="加值 +1">＋</button>
+            <button id="btnModDec" type="button" data-i18n-title="diceTitleModDec" title="加值 -1">−</button>
+            <button id="btnModInc" type="button" data-i18n-title="diceTitleModInc" title="加值 +1">＋</button>
           </div>
         </div>
       </div>
 
-      <input class="label-input" id="labelInput" type="text" placeholder="备注（可选，例如 偷袭）">
+      <input class="label-input" id="labelInput" type="text"
+             data-i18n-placeholder="diceLabelPlaceholder"
+             placeholder="备注（可选，例如 偷袭）">
 
       <div class="actions">
-        <button class="btn primary" id="btnRoll" type="button">投掷</button>
-        <button class="btn last" id="btnLastRoll" type="button" disabled>上一次</button>
-        <button class="btn save" id="btnSave" type="button">保存组合</button>
-        <button class="btn compact danger" id="btnClear" type="button">清空</button>
+        <button class="btn primary" id="btnRoll" type="button" data-i18n="diceBtnRoll">投掷</button>
+        <button class="btn last" id="btnLastRoll" type="button" data-i18n="diceBtnLast" disabled>上一次</button>
+        <button class="btn save" id="btnSave" type="button" data-i18n="diceBtnSaveCombo">保存组合</button>
+        <button class="btn compact danger" id="btnClear" type="button" data-i18n="diceBtnClear">清空</button>
       </div>
       <!-- DM-only dark roll button. Hidden by JS for non-DM clients. -->
-      <button class="btn dark-roll" id="btnDarkRoll" type="button" style="display:none">暗骰</button>
-      <button class="btn force-clr" id="btnForceClr" type="button">⚠ 强制结束(若动画卡住)</button>
+      <button class="btn dark-roll" id="btnDarkRoll" type="button" data-i18n="diceBtnDarkRoll" style="display:none">暗骰</button>
+      <button class="btn force-clr" id="btnForceClr" type="button" data-i18n="diceBtnForceClr">⚠ 强制结束(若动画卡住)</button>
 
       <div class="rules-hint">
-        <div class="rules-title">表达式说明</div>
-        <ul>
-          <li><code>2d6 + 1d20 + 5</code>：把若干种骰子和加值组合在一起一起投。</li>
-          <li><code>adv(1d20)</code>：优势 — 投两次取较高的那次。</li>
-          <li><code>dis(1d20)</code>：劣势 — 投两次取较低的那次。</li>
-          <li><code>max(1d20, 10)</code>：最低保底 — 骰出来低于 10 时按 10 算。</li>
-          <li><code>min(1d20, 15)</code>：最高封顶 — 骰出来高于 15 时按 15 算。</li>
-          <li><code>reset(1d20, 12)</code>：投到 12 时自动重投一次（只触发一次）。</li>
-          <li><code>repeat(3, 1d20+5)</code>：重复 3 次投，每次的总数单独显示。</li>
-          <li><code>same(2d20)</code>：当多颗骰子点数相同时，自动给重复的高亮一下。</li>
-          <li><code>burst(2d6)</code>：术法爆发 — 骰子掷到最大点会再追加一颗。</li>
-          <li>支持非标骰，比如 <code>1d7</code>、<code>1d600</code>。中文括号 <code>（）</code>、逗号 <code>，</code> 也能识别。</li>
-        </ul>
+        <div class="rules-title" data-i18n="diceRulesTitle">表达式说明</div>
+        <ul id="rulesList"></ul>
       </div>
 
       <div class="examples">
-        <div class="examples-title">示例（点击填入表达式）</div>
+        <div class="examples-title" data-i18n="diceExamplesTitle">示例（点击填入表达式）</div>
         <div class="examples-row" id="examplesRow">
           <button class="example-btn" type="button" data-expr="adv(1d20,2)">
-            <span class="ex-label">精灵之准</span>
+            <span class="ex-label" data-i18n="diceExampleElven">精灵之准</span>
             <span class="ex-expr">adv(1d20,2)</span>
           </button>
           <button class="example-btn" type="button" data-expr="burst(2d6)">
-            <span class="ex-label">术法爆发</span>
+            <span class="ex-label" data-i18n="diceExampleBurst">术法爆发</span>
             <span class="ex-expr">burst(2d6)</span>
           </button>
         </div>
@@ -642,7 +634,7 @@ html,body{
     <div class="tabPane" data-tab="history">
       <div class="history-toolbar">
         <div class="seg" id="historySeg"></div>
-        <button class="btn compact danger" id="btnClearHistory" type="button">清空</button>
+        <button class="btn compact danger" id="btnClearHistory" type="button" data-i18n="diceBtnClear">清空</button>
       </div>
       <div class="history-list" id="historyList"></div>
     </div>

@@ -288,8 +288,11 @@ mark{
     <span class="ico" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
     </span>
-    <input id="q" type="text" placeholder="搜索 5etools…（怪物/法术/物品/职业/种族…）" autocomplete="off" spellcheck="false">
-    <button class="clear" id="clear" type="button" aria-label="清空">✕</button>
+    <input id="q" type="text"
+           data-i18n-placeholder="searchPlaceholder"
+           placeholder="搜索 5etools…（怪物/法术/物品/职业/种族…）"
+           autocomplete="off" spellcheck="false">
+    <button class="clear" id="clear" type="button" data-i18n-aria="searchClearAria" aria-label="清空">✕</button>
   </div>
 
   <!-- Tools row only shows the result count now — version + player-monster

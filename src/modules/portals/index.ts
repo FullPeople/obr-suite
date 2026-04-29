@@ -4,6 +4,11 @@ import {
   PORTAL_KEY,
   PortalMeta,
 } from "./types";
+import { t } from "../../i18n";
+import { getLocalLang } from "../../state";
+
+const _lang = () => getLocalLang();
+const _t = (k: Parameters<typeof t>[1]) => t(_lang(), k);
 
 // Portal module — DM draws a circle with the tool, the area becomes a
 // teleport trigger zone marked by an SVG icon at its center. Tokens dragged
@@ -208,7 +213,7 @@ async function createPortal(center: { x: number; y: number }, radius: number) {
   )
     .position(center)
     .scale({ x: s, y: s })
-    .name("传送门")
+    .name(_t("portalToolName"))
     .layer("PROP")
     .visible(true)
     .locked(false)
@@ -380,7 +385,7 @@ async function openDestinationModal(
       if (m.tag !== entryMeta.tag) return null;
       return {
         id: p.id,
-        name: m.name || "(未命名)",
+        name: m.name || _t("portalUnnamed"),
         tag: m.tag,
         hidden: !p.visible,
       };
@@ -408,7 +413,7 @@ async function openDestinationModal(
   // (user reported the bug), so the safety net stays.
   setTimeout(() => { destModalOpen = false; }, 60_000);
   const payload = {
-    entryName: entryMeta.name || "(未命名)",
+    entryName: entryMeta.name || _t("portalUnnamed"),
     entryTag: entryMeta.tag,
     candidates,
     tokenIds,
@@ -656,7 +661,7 @@ export async function setupPortals(): Promise<void> {
       icons: [
         {
           icon: TOOL_ICON_URL,
-          label: "传送门",
+          label: _t("portalToolName"),
           filter: { roles: ["GM"] },
         },
       ],
@@ -671,7 +676,7 @@ export async function setupPortals(): Promise<void> {
       icons: [
         {
           icon: TOOL_ICON_URL,
-          label: "画圈创建传送门",
+          label: _t("portalToolHint"),
           filter: { activeTools: [TOOL_ID] },
         },
       ],
