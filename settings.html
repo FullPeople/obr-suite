@@ -187,12 +187,15 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
 }
 /* Stagger the rainbow phase per chip so neighbours show different
    colors at the same time. Negative delays start the animation
-   already partway through. */
-.backer:nth-child(2){animation-delay:-1.0s}
-.backer:nth-child(3){animation-delay:-2.0s}
-.backer:nth-child(4){animation-delay:-3.0s}
-.backer:nth-child(5){animation-delay:-4.0s}
-.backer:nth-child(6){animation-delay:-5.0s}
+   already partway through. Phase step ≈ 6s / N for a smooth wave. */
+.backer:nth-child(2){animation-delay:-0.66s}
+.backer:nth-child(3){animation-delay:-1.33s}
+.backer:nth-child(4){animation-delay:-2.00s}
+.backer:nth-child(5){animation-delay:-2.66s}
+.backer:nth-child(6){animation-delay:-3.33s}
+.backer:nth-child(7){animation-delay:-4.00s}
+.backer:nth-child(8){animation-delay:-4.66s}
+.backer:nth-child(9){animation-delay:-5.33s}
 @keyframes backer-rainbow {
   /* Skips the red zone — palette goes orange → yellow → green →
      cyan → blue → violet → orange. */
