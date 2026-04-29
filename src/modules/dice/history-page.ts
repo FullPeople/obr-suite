@@ -149,9 +149,16 @@ function imgFor(type: string): string {
 // Build a compact inline formula. Shows each kept die as a chip
 // (icon + value), losers struck through, modifier at the end, total
 // at the right edge.
-function buildFormula(entry: HistoryEntry): string {
+//
+// Returns the formula's INNER markup — caller wraps it in a
+// `.formula` container. The dice + modifier + label + "=" sit inside
+// `.dice-list` (which wraps when there are too many chips), and the
+// total is a sibling that sticks to the right edge. This split lets
+// long collective rolls wrap dice across multiple lines while
+// keeping the total visually anchored on the right.
+function chipsHtml(dice: DieResult[]): string {
   const parts: string[] = [];
-  for (const d of entry.dice) {
+  for (const d of dice) {
     const sides = sidesOf(d.type);
     const cls =
       d.loser ? "loser" :
@@ -164,15 +171,45 @@ function buildFormula(entry: HistoryEntry): string {
       `</span>`,
     );
   }
+  return parts.join("");
+}
+function buildFormula(entry: HistoryEntry): string {
+  const chips = chipsHtml(entry.dice);
   let modStr = "";
   if (entry.modifier !== 0) {
     modStr = `<span class="mod">${entry.modifier > 0 ? `+${entry.modifier}` : entry.modifier}</span>`;
   }
-  const total = `<span class="total">${entry.total}</span>`;
   const labelStr = entry.label
     ? `<span class="label-tag">${escapeHtml(entry.label)}</span>`
     : "";
-  return parts.join("") + modStr + labelStr + `<span class="eq">=</span>` + total;
+  const list = `<div class="dice-list">${chips}${modStr}${labelStr}<span class="eq">=</span></div>`;
+  const total = `<span class="total">${entry.total}</span>`;
+  return list + total;
+}
+
+// Aggregated formula for the collective-roll popover row. Concatenates
+// every member's dice into one wrap-friendly chip strip and shows the
+// sum-of-totals on the right. Modifiers are intentionally NOT shown
+// separately — each member's modifier is already baked into its
+// per-row total, so summing the totals gives the correct value
+// without the visual noise of "+5+5+5+5" stacking up.
+function buildFormulaForGroup(members: HistoryEntry[]): string {
+  const allDice: DieResult[] = [];
+  let totalSum = 0;
+  for (const m of members) {
+    for (const d of m.dice) allDice.push(d);
+    totalSum += m.total;
+  }
+  const chips = chipsHtml(allDice);
+  // Pull the head's label (if any) so labels like "命中" / "敏捷豁免"
+  // still show, but suppress per-member labels (would just repeat).
+  const head = members[0];
+  const labelStr = head?.label
+    ? `<span class="label-tag">${escapeHtml(head.label)}</span>`
+    : "";
+  const list = `<div class="dice-list">${chips}${labelStr}<span class="eq">∑</span></div>`;
+  const total = `<span class="total coll-sum-total">${totalSum}</span>`;
+  return list + total;
 }
 
 interface GroupedRow {
@@ -227,6 +264,10 @@ function render(): void {
     const collTag = isCollective ? `<span class="coll-tag">${tt("diceHistColl")} ${g.members.length}</span>` : "";
     const rowCls = ["row"];
     if (h.hidden) rowCls.push("hidden-roll");
+    // Collective row aggregates every member's dice into one wrap-
+    // friendly chip strip with the sum total on the right. Solo rolls
+    // use the per-entry formula as before.
+    const formulaHtml = isCollective ? buildFormulaForGroup(g.members) : buildFormula(h);
     return `
       <div class="${rowCls.join(" ")}" data-roller="${escapeHtml(h.rollerName)}" data-rollerid="${escapeHtml(h.rollerId)}">
         <div class="swatch" style="--player-color:${h.rollerColor}"></div>
@@ -235,7 +276,7 @@ function render(): void {
             <span class="player">${dmTag}${darkTag}${collTag}${escapeHtml(h.rollerName)}</span>
             <span class="ago">${formatAgo(Date.now() - h.ts)}</span>
           </div>
-          <div class="formula">${buildFormula(h)}</div>
+          <div class="formula">${formulaHtml}</div>
         </div>
       </div>
     `;

@@ -175,11 +175,26 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 }
 
 /* Compact formula line — dice icons + values inline. */
+/* Two-row layout: a flex-wrapping dice list on the left, total pinned
+   to the right edge no matter how many lines the dice take. The dice
+   list itself is a separate flex container so it can wrap freely
+   (each chip is shrink-prevented), while the outer .formula keeps the
+   total aligned to the right baseline. */
 .formula{
-  display:flex;flex-wrap:nowrap;align-items:center;gap:4px;
-  overflow:hidden;
-  white-space:nowrap;
+  display:flex;
+  align-items:flex-end;
+  gap:6px;
   font-size:11px;
+}
+.dice-list{
+  flex:1 1 auto;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:4px;
+  min-width:0;
+  /* Each die-chip is flex-shrink:0 so it never compresses; wrapping
+     is the only escape valve when the row gets crowded. */
 }
 .die-chip{
   display:inline-flex;align-items:center;gap:2px;
@@ -205,7 +220,15 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 .total{
   font-family:ui-monospace,monospace;font-size:13px;font-weight:900;
   color:var(--accent);flex-shrink:0;
-  margin-left:auto;
+  /* margin-left:auto removed — .total is now a sibling of .dice-list
+     inside .formula, so it naturally sits at the right edge with the
+     dice-list filling the remaining flex space. */
+}
+/* Collective row's sum total — green tint + ∑ prefix to read as
+   "this is the aggregate across all members" rather than a per-roll
+   total. */
+.total.coll-sum-total{
+  color:#7be0a0;
 }
 .label-tag{
   font-size:10px;color:var(--text-dim);font-style:italic;

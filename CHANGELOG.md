@@ -2,6 +2,13 @@
 
 All notable changes to this project follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] — 2026-04-29
+
+### Changed
+
+- **Dice history popover row now aggregates collective rolls.** Previously a 4-token collective showed only the head token's dice on the popover row (e.g. "🎲6 = 6"), forcing the user to click into the detail view to see the other 3 tokens' results. Now collective rows concatenate every member's dice into one strip and display the sum-of-totals on the right with a "∑" prefix and green tint, so a 4-token 1d6 collective reads as "🎲6 🎲4 🎲2 🎲5 ∑ = 17" at a glance. Per-member modifiers are intentionally not shown separately — they're already baked into each member's total, and stacking "+5 +5 +5 +5" would be visual noise. Solo rolls keep the existing per-entry formula.
+- **Dice chips wrap to multiple lines when crowded, total stays right-anchored.** Restructured the `.formula` row into a `.dice-list` (flex-wrapping) + `.total` (sticky right) two-column flex layout. Earlier the row used `flex-wrap:nowrap; overflow:hidden; white-space:nowrap`, which silently clipped long dice strips (e.g. a `repeat(5, 2d20)` rolled across multiple targets). Now the strip wraps to as many lines as it needs while the sum/total stays pinned to the right edge of the row.
+
 ## [1.0.3] — 2026-04-29
 
 ### Fixed
