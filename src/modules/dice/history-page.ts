@@ -344,31 +344,35 @@ function renderDetail(): void {
   // every roll's own dice + total without each one taking a full-
   // size slot. Solo rolls (no collectiveId) render as standalone
   // entries as before.
+  //
+  // Earlier versions tracked "consumed" entries by setting them to
+  // null in the local `entries` array, but the outer loop didn't skip
+  // those nulls — so iterating into a nullified position threw
+  // `Cannot read properties of null (reading 'collectiveId')` and
+  // froze the detail view. Use a Set<number> of consumed indices
+  // instead so the local entries array stays untouched.
+  const consumedIdx = new Set<number>();
   const blocks: string[] = [];
-  let i = 0;
-  while (i < entries.length) {
+  for (let i = 0; i < entries.length; i++) {
+    if (consumedIdx.has(i)) continue;
     const h = entries[i];
     const cid = h.collectiveId ?? h.rollId;
     // Gather all entries with the same cid (anywhere in the list,
     // not just consecutively — collective broadcasts can interleave
     // with other broadcasts on the wire).
     const members: HistoryEntry[] = [];
-    const consumed: number[] = [];
     for (let j = i; j < entries.length; j++) {
+      if (consumedIdx.has(j)) continue;
       const e = entries[j];
       if ((e.collectiveId ?? e.rollId) === cid) {
         members.push(e);
-        consumed.push(j);
+        consumedIdx.add(j);
       }
     }
-    // Mark consumed entries so we skip them later. Use a sparse
-    // marker array.
-    consumed.forEach((j) => { (entries as any)[j] = null; });
-    if (!members.length) { i++; continue; }
+    if (!members.length) continue;
     blocks.push(renderHistoryBlock(cid, members));
-    i++;
   }
-  detailList.innerHTML = blocks.filter(Boolean).join("");
+  detailList.innerHTML = blocks.join("");
 
   // Per-entry click handlers (works for both solo entries and
   // collective members — every clickable .entry element gets one).

@@ -2,6 +2,12 @@
 
 All notable changes to this project follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] — 2026-04-29
+
+### Fixed
+
+- **Dice history detail-view crash on collective rolls.** Clicking a player row whose latest roll was part of a collective threw `Cannot read properties of null (reading 'collectiveId')` and froze the slide-in detail view, leaving the user staring at the popover row's single head-token formula with no way to inspect every member of the group. Root cause was a long-standing logic bug in `renderDetail`: it tracked "already-grouped" entries by setting them to `null` in the local `entries` array, but the outer `while (i < entries.length)` loop didn't skip nullified positions, so the next iteration crashed on `entries[i].collectiveId`. Replaced with a `Set<number>` of consumed indices that both loops respect — entries array stays untouched, no null state to trip over.
+
 ## [1.0.2] — 2026-04-29
 
 UI English-localization sweep. The cluster + Settings + Initiative panels were already bilingual since 1.0.0; this pass closes the remaining gaps so the EN-mode user no longer sees Chinese chrome in the dice / portal / character-card / search / bestiary popovers.
