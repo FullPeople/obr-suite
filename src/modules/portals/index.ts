@@ -605,8 +605,48 @@ async function teleport(destPortalId: string, tokenIds: string[]) {
 
 // --- Setup / teardown -----------------------------------------------------
 
+// One-shot migration for portals created in plugin v0.x where the
+// SVG image was 96×96. The shipped portal-icon.svg is now 64×64
+// (matching ICON_INTRINSIC), and OBR logs a "content size 96 does
+// not match image size 64" warning every time those legacy items
+// render. Sweep them on setup and rewrite image.width / image.height
+// to ICON_SIZE so the warning stops. Idempotent — items already at
+// ICON_SIZE skip the update.
+async function migrateLegacyPortalIconSize(): Promise<void> {
+  try {
+    const items = await OBR.scene.items.getItems(isPortal);
+    const stale = items.filter((it: any) => {
+      const w = it?.image?.width;
+      const h = it?.image?.height;
+      return (typeof w === "number" && w !== ICON_SIZE)
+        || (typeof h === "number" && h !== ICON_SIZE);
+    });
+    if (stale.length === 0) return;
+    await OBR.scene.items.updateItems(
+      stale.map((it: any) => it.id),
+      (drafts: any[]) => {
+        for (const d of drafts) {
+          if (d.image) {
+            d.image.width = ICON_SIZE;
+            d.image.height = ICON_SIZE;
+          }
+        }
+      },
+    );
+  } catch (e) {
+    console.warn("[obr-suite/portals] icon-size migration skipped", e);
+  }
+}
+
 export async function setupPortals(): Promise<void> {
   try { role = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch {}
+
+  // Quietly normalise old portals (image.width/height = 96 from earlier
+  // versions) to the current ICON_SIZE so OBR stops warning on every
+  // render. Only the GM has scene-write permission, so we gate on role.
+  if (role === "GM") {
+    void migrateLegacyPortalIconSize();
+  }
 
   // GM-only tool icon. Players don't need the draw tool — they only get the
   // entry detector + destination prompt path.
