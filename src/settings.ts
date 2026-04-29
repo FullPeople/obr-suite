@@ -63,7 +63,7 @@ let isGM = false;
 // Backers credited in the support tab. Edit this array to add new
 // supporter names — keep order roughly chronological for fairness.
 const SUPPORTERS: string[] = [
-  "戥", "折云", "咸鱼", "呸呸", "Ejectam719",
+  "戥.", "折云", "咸鱼", "呸呸", "Ejectam719",
 ];
 
 function supportersHtml(lang: Language): string {
@@ -75,13 +75,13 @@ function supportersHtml(lang: Language): string {
        <div class="backers-box">
          <p>感谢以下用户在爱发电上的支持：</p>
          <div class="backers">${list}</div>
-         <p class="backers-extra">以及所有未具名的爱发电用户 — 你们让这个项目走得下去。</p>
+         <p class="backers-extra">以及其他默认名字爱发电用户（大家摁可以取个名字） — 你们让我有能力继续维持服务器费用和开发该插件，泪目</p>
        </div>`
     : `<h3>${ICONS.heart} Thanks</h3>
        <div class="backers-box">
          <p>Thanks to the following supporters on Afdian:</p>
          <div class="backers">${list}</div>
-         <p class="backers-extra">…and to every anonymous backer — you keep this project alive.</p>
+         <p class="backers-extra">…and to every default-named Afdian backer (you can pick a name too!) — you let me keep paying the server bills and shipping new features. *tearing up*</p>
        </div>`;
 }
 
