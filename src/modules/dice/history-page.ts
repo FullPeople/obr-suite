@@ -187,29 +187,32 @@ function buildFormula(entry: HistoryEntry): string {
   return list + total;
 }
 
-// Aggregated formula for the collective-roll popover row. Concatenates
-// every member's dice into one wrap-friendly chip strip and shows the
-// sum-of-totals on the right. Modifiers are intentionally NOT shown
-// separately — each member's modifier is already baked into its
-// per-row total, so summing the totals gives the correct value
-// without the visual noise of "+5+5+5+5" stacking up.
-function buildFormulaForGroup(members: HistoryEntry[]): string {
-  const allDice: DieResult[] = [];
-  let totalSum = 0;
-  for (const m of members) {
-    for (const d of m.dice) allDice.push(d);
-    totalSum += m.total;
-  }
-  const chips = chipsHtml(allDice);
-  // Pull the head's label (if any) so labels like "命中" / "敏捷豁免"
-  // still show, but suppress per-member labels (would just repeat).
-  const head = members[0];
-  const labelStr = head?.label
-    ? `<span class="label-tag">${escapeHtml(head.label)}</span>`
+// One member of a collective roll = one self-contained pill showing
+// that token's dice + modifier + total. Used in both the popover
+// row's strip (each player's latest collective) and the detail
+// view's strip (the player's full history). The card itself doesn't
+// own a click handler — clicks bubble to the parent .row /
+// .coll-entry which owns the gesture (open detail / fire replay).
+function buildMemberCard(m: HistoryEntry): string {
+  const chips = chipsHtml(m.dice);
+  const modStr = m.modifier !== 0
+    ? `<span class="mod">${m.modifier > 0 ? `+${m.modifier}` : m.modifier}</span>`
     : "";
-  const list = `<div class="dice-list">${chips}${labelStr}<span class="eq">∑</span></div>`;
-  const total = `<span class="total coll-sum-total">${totalSum}</span>`;
-  return list + total;
+  // Crit / fail tinting reflects this specific member's d20 outcome
+  // (so a 4-token collective with one nat-20 lights up exactly that
+  // card, not the whole strip).
+  const kept = m.dice.filter((d) => !d.loser);
+  const isCrit = kept.some((d) => d.type === "d20" && d.value === 20);
+  const isFail = kept.some((d) => d.type === "d20" && d.value === 1);
+  const cardCls = ["member-card"];
+  if (isCrit) cardCls.push("crit");
+  else if (isFail) cardCls.push("fail");
+  if (m.hidden) cardCls.push("hidden-roll");
+  return `<div class="${cardCls.join(" ")}" data-rollid="${escapeHtml(m.rollId)}" data-cid="${escapeHtml(m.collectiveId ?? m.rollId)}">${chips}${modStr}<span class="eq">=</span><span class="total">${m.total}</span></div>`;
+}
+
+function buildMemberStripHtml(members: HistoryEntry[]): string {
+  return `<div class="member-strip">${members.map(buildMemberCard).join("")}</div>`;
 }
 
 interface GroupedRow {
@@ -264,10 +267,15 @@ function render(): void {
     const collTag = isCollective ? `<span class="coll-tag">${tt("diceHistColl")} ${g.members.length}</span>` : "";
     const rowCls = ["row"];
     if (h.hidden) rowCls.push("hidden-roll");
-    // Collective row aggregates every member's dice into one wrap-
-    // friendly chip strip with the sum total on the right. Solo rolls
-    // use the per-entry formula as before.
-    const formulaHtml = isCollective ? buildFormulaForGroup(g.members) : buildFormula(h);
+    // Collective row: each member's roll is its own little box in a
+    // wrap-friendly strip — no aggregate total. Clicking the row (or
+    // any member-card inside, via bubbling) still opens the detail
+    // view, where the same strip is repeated for every collective in
+    // this player's history. Solo rolls keep the existing per-entry
+    // formula with chips + total.
+    const bodyTail = isCollective
+      ? buildMemberStripHtml(g.members)
+      : `<div class="formula">${buildFormula(h)}</div>`;
     return `
       <div class="${rowCls.join(" ")}" data-roller="${escapeHtml(h.rollerName)}" data-rollerid="${escapeHtml(h.rollerId)}">
         <div class="swatch" style="--player-color:${h.rollerColor}"></div>
@@ -276,7 +284,7 @@ function render(): void {
             <span class="player">${dmTag}${darkTag}${collTag}${escapeHtml(h.rollerName)}</span>
             <span class="ago">${formatAgo(Date.now() - h.ts)}</span>
           </div>
-          <div class="formula">${formulaHtml}</div>
+          ${bodyTail}
         </div>
       </div>
     `;
@@ -428,24 +436,40 @@ function renderDetail(): void {
 }
 
 // Render either a SOLO entry or a COLLECTIVE block of N members.
-// Collective members live in a tight container with shared border
-// + a header strip showing "集体 N · 总和 X".
+// Collective is rendered with the SAME `.entry` chrome as a solo
+// entry (so the existing `.entry` click-to-replay handler picks it
+// up automatically), with a `.member-strip` body showing each
+// member as its own pill instead of a single dice formula. No
+// aggregate total — per the user's design call, each token's roll
+// stands on its own.
 function renderHistoryBlock(cid: string, members: HistoryEntry[]): string {
   if (members.length === 1) return renderSingleEntry(members[0]);
   const head = members[0];
-  const totalSum = members.reduce((a, m) => a + (m.total ?? 0), 0);
-  const containerCls = ["coll-box"];
-  if (cid === activeReplayCid) containerCls.push("replay-on");
-  if (head.hidden) containerCls.push("hidden-roll");
+  const ago = formatAgo(Date.now() - head.ts);
+  const cls = ["entry", "coll-entry"];
+  if (cid === activeReplayCid) cls.push("replay-on");
+  if (head.hidden) cls.push("hidden-roll");
+  // Crit/fail tint on the parent box if any member nat-20'd / nat-1'd
+  // — crit wins over fail to match the solo entry rule.
+  const hasCrit = members.some((m) =>
+    m.dice.some((d) => !d.loser && d.type === "d20" && d.value === 20),
+  );
+  const hasFail = members.some((m) =>
+    m.dice.some((d) => !d.loser && d.type === "d20" && d.value === 1),
+  );
+  if (hasCrit) cls.push("crit");
+  else if (hasFail) cls.push("fail");
+  const darkTag = head.hidden ? `<span class="dark-tag">${tt("diceHistDarkTag")}</span>` : "";
+  const collTag = `<span class="coll-tag">${tt("diceHistColl")} ${members.length}</span>`;
+  const labelOrName = escapeHtml(head.label || head.rollerName);
   return `
-    <div class="${containerCls.join(" ")}" style="--player-color:${head.rollerColor}">
-      <div class="coll-head">
-        <span class="coll-tag">${tt("diceHistColl")} ${members.length}</span>
-        <span class="coll-label">${escapeHtml(head.label || "")}</span>
-        <span class="coll-sum">∑ ${totalSum}</span>
-      </div>
-      <div class="coll-members">
-        ${members.map((m) => renderEntryRow(m, cid, /* tight */ true)).join("")}
+    <div class="${cls.join(" ")}" data-cid="${escapeHtml(cid)}" style="--player-color:${head.rollerColor}">
+      <div class="body">
+        <div class="line1">
+          <span class="player">${darkTag}${collTag}${labelOrName}</span>
+          <span class="ago">${ago}</span>
+        </div>
+        ${buildMemberStripHtml(members)}
       </div>
     </div>
   `;

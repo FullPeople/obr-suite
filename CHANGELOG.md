@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] — 2026-04-29
+
+Redesign of the collective-roll display in the dice history popover, reverting 1.0.4's aggregate-total approach.
+
+### Changed
+
+- **Collective rolls now render as one independent pill per member.** 1.0.4 concatenated every member's dice into one strip with a sum-of-totals on the right. Per user feedback that's not the right mental model — each token's roll should stand on its own. Rebuilt as a `.member-strip` flex-wrap container holding one `.member-card` per token, each showing that token's own dice + modifier + total in a small bordered box. The strip wraps when there are too many cards to fit on one line. No aggregate total. Same layout used in BOTH the popover row (each player's latest collective) and the detail view's collective entry.
+- **Collective entries in the detail view now use the standard `.entry` chrome** (with a green left-border `.coll-entry` modifier) instead of the bespoke `.coll-box / .coll-head / .coll-members / .entry-tight` structure. The `.entry` click-to-replay handler picks them up automatically — no special wiring needed.
+
+### Fixed
+
+- **Detail-view collective entries used to render as 0-height non-clickable items.** The previous `.coll-box > .coll-members > .entry-tight × N` structure had a layout interaction with the recent `.formula > .dice-list + .total` split that collapsed the inner rows. Replacing it with the unified `.entry.coll-entry > .body > .member-strip` structure both fixes the layout and routes clicks through the existing `.entry` handler so each collective is reliably clickable to fire the replay overlay.
+
 ## [1.0.4] — 2026-04-29
 
 ### Changed

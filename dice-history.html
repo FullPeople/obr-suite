@@ -224,12 +224,6 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
      inside .formula, so it naturally sits at the right edge with the
      dice-list filling the remaining flex space. */
 }
-/* Collective row's sum total — green tint + ∑ prefix to read as
-   "this is the aggregate across all members" rather than a per-roll
-   total. */
-.total.coll-sum-total{
-  color:#7be0a0;
-}
 .label-tag{
   font-size:10px;color:var(--text-dim);font-style:italic;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -325,63 +319,88 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
   background:linear-gradient(180deg, rgba(93,173,226,0.10), var(--bg-card));
 }
 
-/* === Collective-roll container (detail view) ===
-   N collective members tightly stacked under one bordered box with a
-   header strip showing "集体 N · 总和 X". Click anywhere inside →
-   toggle the replay overlay for the whole group. */
-.coll-box{
-  background:var(--bg-card);
-  border:1px solid var(--border);
-  border-left:3px solid rgba(46,204,113,0.55);
-  border-radius:6px;
-  overflow:hidden;
-  cursor:pointer;
-  transition:border-color .12s, box-shadow .12s, background .12s;
+/* === Collective-roll member strip ===
+   Used in BOTH the popover row (each player's latest collective) and
+   the detail view (the player's full history). Every member of a
+   collective is rendered as its own small pill-shaped box; the whole
+   strip wraps when there are too many to fit on one line. No
+   aggregate total — the user wanted each token's roll to stand on
+   its own. */
+.member-strip{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:4px;
+  margin-top:2px;
+  /* In a wrap-friendly flex container the member-cards never compress
+     — they keep their natural width and overflow to a new row. */
 }
-.coll-box.hidden-roll{
-  background:linear-gradient(180deg, rgba(110,55,160,0.30), rgba(60,30,95,0.45));
-  border-left-color:rgba(180,110,225,0.85);
-}
-.coll-box.replay-on{
-  border-color:var(--player-color, #5dade2);
-  box-shadow:0 0 0 1px var(--player-color, #5dade2), 0 0 12px rgba(93,173,226,0.35);
-}
-.coll-head{
-  display:flex;align-items:center;gap:6px;
-  padding:4px 8px;
-  background:rgba(46,204,113,0.10);
-  border-bottom:1px solid var(--border);
-  font-size:10.5px;
-}
-.coll-head .coll-label{
-  color:var(--text-dim);font-weight:600;font-size:10.5px;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  flex:1;min-width:0;
-}
-.coll-head .coll-sum{
-  font-family:ui-monospace,monospace;font-weight:900;
-  color:#7be0a0;font-size:11.5px;letter-spacing:-0.3px;
+.member-card{
+  display:inline-flex;
+  align-items:center;
+  gap:3px;
+  padding:2px 7px 2px 4px;
+  border-radius:8px;
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.10);
+  white-space:nowrap;
   flex-shrink:0;
+  font-size:10.5px;
+  /* Card itself is non-clickable — clicks bubble to the .row /
+     .coll-entry parent which owns the gesture (open detail / fire
+     replay respectively). Hover effect is just a hint. */
+  transition:background .12s, border-color .12s;
 }
-.coll-members{
-  display:flex;flex-direction:column;
-  gap:1px;
-  padding:2px;
+.member-card:hover{
+  background:rgba(93,173,226,0.14);
+  border-color:rgba(93,173,226,0.32);
 }
-/* Tight entry rows inside a collective container — no borders, less
-   padding, smaller player line. The whole group share the container's
-   visual frame. */
-.entry-tight{
-  padding:3px 6px;
+.member-card.crit{
+  background:rgba(255,200,0,0.14);
+  border-color:rgba(255,200,0,0.42);
+}
+.member-card.fail{
+  background:rgba(231,76,60,0.14);
+  border-color:rgba(231,76,60,0.40);
+}
+.member-card.hidden-roll{
+  background:rgba(155,89,182,0.18);
+  border-color:rgba(180,110,225,0.45);
+}
+/* Inside a member-card the dice chips are no longer their own
+   visual pills — the card IS the pill. Strip backgrounds + padding
+   from nested chips so they read as plain text/icon next to each
+   other. */
+.member-card .die-chip{
   background:transparent;
-  border:0;border-left:2px solid var(--player-color, #5dade2);
-  border-radius:3px;
-  cursor:pointer;
+  border-radius:0;
+  padding:0;
+  height:auto;
+  font-size:10px;
 }
-.entry-tight:hover{background:rgba(255,255,255,0.04)}
-.entry-tight .line1{font-size:10.5px}
-.entry-tight .ago{font-size:9.5px}
-.entry-tight .formula{font-size:10.5px}
+.member-card .die-chip img{
+  width:13px;height:13px;
+}
+.member-card .mod{font-size:10px}
+.member-card .eq{font-size:10px;color:var(--text-dim)}
+.member-card .total{
+  font-family:ui-monospace,monospace;
+  font-size:11.5px;
+  font-weight:900;
+  color:var(--accent);
+  margin-left:2px;
+}
+.member-card.crit .total{color:#ffd34d}
+.member-card.fail .total{color:#ff8a7a}
+
+/* === Collective entry in detail view ===
+   Same .entry frame as a solo entry (so click → replay works through
+   the existing .entry handler), but with a green left border to
+   visually mark "this is a collective" and a member-strip body
+   instead of a single .formula. */
+.coll-entry{
+  border-left-color:rgba(46,204,113,0.55);
+}
 
 .detail-back{
   flex-shrink:0;
