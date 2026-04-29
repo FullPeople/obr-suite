@@ -52,6 +52,12 @@ export interface SuiteState {
   enabled: Record<ModuleId, boolean>;
   dataVersion: DataVersion;
   allowPlayerMonsters: boolean;
+  // When true, monsters spawned from the bestiary panel are written
+  // with `com.initiative-tracker/data` already populated, so they
+  // immediately appear in the initiative tracker. When false, the
+  // metadata is omitted and the DM has to right-click → Add to
+  // initiative manually. Default true (matches legacy behavior).
+  bestiaryAutoInitiative: boolean;
   libraries: LibraryConfig[];
 }
 
@@ -78,6 +84,7 @@ export const DEFAULT_STATE: SuiteState = {
   },
   dataVersion: "2024",
   allowPlayerMonsters: false,
+  bestiaryAutoInitiative: true,
   libraries: DEFAULT_LIBRARIES,
 };
 
@@ -119,6 +126,8 @@ function merge(partial: any): SuiteState {
     dataVersion: partial.dataVersion ?? DEFAULT_STATE.dataVersion,
     allowPlayerMonsters:
       partial.allowPlayerMonsters ?? DEFAULT_STATE.allowPlayerMonsters,
+    bestiaryAutoInitiative:
+      partial.bestiaryAutoInitiative ?? DEFAULT_STATE.bestiaryAutoInitiative,
     libraries,
   };
 }
@@ -126,6 +135,7 @@ function merge(partial: any): SuiteState {
 function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
   if (a.dataVersion !== b.dataVersion) return false;
   if (a.allowPlayerMonsters !== b.allowPlayerMonsters) return false;
+  if (a.bestiaryAutoInitiative !== b.bestiaryAutoInitiative) return false;
   for (const k of Object.keys(a.enabled) as ModuleId[]) {
     if (a.enabled[k] !== b.enabled[k]) return false;
   }

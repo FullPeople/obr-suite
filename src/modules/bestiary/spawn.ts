@@ -2,6 +2,21 @@ import OBR, { buildImage } from "@owlbear-rodeo/sdk";
 import { ParsedMonster } from "./types";
 import { getRawMonster, makeSlug } from "./data";
 
+// The bestiary panel iframe doesn't run startSceneSync(), so calling
+// getState() from src/state.ts here would return only DEFAULT_STATE.
+// Read the suite-state object straight off scene metadata instead.
+const SUITE_STATE_KEY = "com.obr-suite/state";
+async function readBestiaryAutoInit(): Promise<boolean> {
+  try {
+    const meta = await OBR.scene.getMetadata();
+    const s = meta[SUITE_STATE_KEY] as { bestiaryAutoInitiative?: boolean } | undefined;
+    if (typeof s?.bestiaryAutoInitiative === "boolean") return s.bestiaryAutoInitiative;
+  } catch {}
+  // Default to legacy behavior — auto-add to initiative — when the
+  // suite metadata hasn't been written yet.
+  return true;
+}
+
 const BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
 const BUBBLES_NAME = "com.owlbear-rodeo-bubbles-extension/name";
 const INITIATIVE_META = "com.initiative-tracker/data";
@@ -74,6 +89,33 @@ export async function spawnMonster(monster: ParsedMonster) {
   const halfW = imgSize.w / 2;
   const halfH = imgSize.h / 2;
 
+  // Honor the suite's "auto-add to initiative" toggle (Settings →
+  // 怪物图鉴 → 加入场景时自动加入先攻). When it's off, we leave the
+  // initiative metadata off, and the DM has to right-click → Add to
+  // initiative manually — useful when pre-staging tokens during prep.
+  const autoInit = await readBestiaryAutoInit();
+  const meta: Record<string, unknown> = {
+    [BUBBLES_META]: {
+      "health": monster.hp,
+      "max health": monster.hp,
+      "temporary health": 0,
+      "armor class": monster.ac,
+      "hide": true,
+    },
+    [BUBBLES_NAME]: monster.name,
+    [INITIATIVE_MODKEY]: monster.dexMod,
+    [BESTIARY_SLUG_KEY]: slug,
+  };
+  if (autoInit) {
+    meta[INITIATIVE_META] = {
+      count: initiativeRoll,
+      active: false,
+      rolled: false,
+      tiebreak: Math.random(),
+      ownerId,
+    };
+  }
+
   // DPI = image width → token occupies exactly 1 grid cell
   const item = buildImage(
     {
@@ -88,25 +130,7 @@ export async function spawnMonster(monster: ParsedMonster) {
     .name(monster.name)
     .visible(false)
     .layer("CHARACTER")
-    .metadata({
-      [BUBBLES_META]: {
-        "health": monster.hp,
-        "max health": monster.hp,
-        "temporary health": 0,
-        "armor class": monster.ac,
-        "hide": true,
-      },
-      [BUBBLES_NAME]: monster.name,
-      [INITIATIVE_META]: {
-        count: initiativeRoll,
-        active: false,
-        rolled: false,
-        tiebreak: Math.random(),
-        ownerId,
-      },
-      [INITIATIVE_MODKEY]: monster.dexMod,
-      [BESTIARY_SLUG_KEY]: slug,
-    })
+    .metadata(meta)
     .build();
 
   await OBR.scene.items.addItems([item]);

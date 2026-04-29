@@ -777,7 +777,39 @@ const TABS: TabDef[] = [
     zh: `${ICONS.dragon} 怪物图鉴`,
     en: `${ICONS.dragon} Bestiary`,
     moduleId: "bestiary",
-    body: BESTIARY_DESC,
+    dynamicBody: (lang) => {
+      const s = getState();
+      const autoOn = s.bestiaryAutoInitiative !== false;
+      return `
+        ${BESTIARY_DESC[lang]}
+        <h3>${lang === "zh" ? "选项" : "Options"}</h3>
+        <div class="row">
+          <div class="lbl">
+            ${lang === "zh" ? "加入场景时自动加入先攻" : "Auto-add to initiative on spawn"}
+            <div class="desc"><em>${
+              lang === "zh"
+                ? "一般用于备团时在场景中预制 token / 在战斗中临时加入敌人。"
+                : "Useful when pre-staging tokens during prep, or adding enemies mid-combat."
+            }</em></div>
+          </div>
+          <button class="tog ${
+            autoOn ? "on" : ""
+          }" data-key="bestiaryAutoInitiative" type="button" ${
+            isGM ? "" : "disabled"
+          } aria-pressed="${autoOn}"></button>
+        </div>
+        ${!isGM ? `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
+      `;
+    },
+    afterRender: (root) => {
+      root
+        .querySelector<HTMLButtonElement>('.tog[data-key="bestiaryAutoInitiative"]')
+        ?.addEventListener("click", async () => {
+          if (!isGM) return;
+          const cur = getState().bestiaryAutoInitiative !== false;
+          await setState({ bestiaryAutoInitiative: !cur });
+        });
+    },
   },
   {
     id: "characterCards",
