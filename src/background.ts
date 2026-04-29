@@ -84,6 +84,90 @@ async function closeCluster() {
   try { await OBR.popover.close(CLUSTER_POPOVER_ID); } catch {}
 }
 
+// ──────────── HTTP-cache prewarm for cc-panel iframes ────────────
+//
+// The cc-panel modal kills its iframes on close (OBR API gives us no
+// hide-keep-alive), so every reopen re-fetches 不全书 and each card.
+// As a non-invasive workaround, we host hidden 1×1 iframes inside
+// the always-alive `background.html` document for:
+//   - 不全书 (5echm.kagangtuya.top) — the heavy third-party page
+//   - the 3 most recent character cards on the scene (same origin,
+//     cheap)
+//
+// These hidden iframes load the full pages once, which warms the
+// browser's HTTP cache. When the visible cc-panel iframe later
+// requests the same URLs, the JS/CSS/HTML come back from disk cache
+// instead of a 5–10 s cold network fetch. Cross-origin caching only
+// works if the upstream server's Cache-Control allows it (5echm
+// does, in our testing). No JS state is shared — each iframe parses
+// the same cached bytes independently.
+
+const CC_LIST_KEY = "com.character-cards/list";
+const CC_PREWARM_BQS_URL = "https://5echm.kagangtuya.top/";
+const CC_PREWARM_CARD_LIMIT = 3;
+const CC_PREWARM_DELAY_MS = 8_000; // wait until OBR finishes its own load
+const SERVER_ORIGIN = "https://obr.dnd.center";
+
+const prewarmFrames = new Map<string, HTMLIFrameElement>();
+let prewarmStarted = false;
+
+function makeHiddenIframe(url: string, key: string): HTMLIFrameElement {
+  const f = document.createElement("iframe");
+  f.src = url;
+  f.title = `prewarm:${key}`;
+  f.dataset.prewarmKey = key;
+  // Off-screen, pointer-inert, zero footprint — pure cache primer.
+  f.style.cssText =
+    "position:fixed;left:-2px;top:-2px;width:1px;height:1px;" +
+    "border:0;visibility:hidden;pointer-events:none;opacity:0";
+  return f;
+}
+
+function ensurePrewarm(url: string, key: string): void {
+  if (prewarmFrames.has(key)) return;
+  try {
+    const f = makeHiddenIframe(url, key);
+    document.body.appendChild(f);
+    prewarmFrames.set(key, f);
+  } catch (e) {
+    console.warn("[obr-suite/prewarm] failed", key, e);
+  }
+}
+
+function syncCardPrewarms(): void {
+  // Read the current cc list off scene metadata and ensure a hidden
+  // iframe exists for each of the most recent N cards. Older cards
+  // are left alone — if they're already prewarmed they stay; if
+  // they were never prewarmed, the user pays the cold load on first
+  // open. Keeps memory bounded.
+  OBR.scene.getMetadata().then((meta) => {
+    const list = (meta[CC_LIST_KEY] as Array<{ id: string; url: string }> | undefined) ?? [];
+    const recent = list.slice(0, CC_PREWARM_CARD_LIMIT);
+    for (const c of recent) {
+      if (!c?.id || !c?.url) continue;
+      ensurePrewarm(SERVER_ORIGIN + c.url, `card:${c.id}`);
+    }
+  }).catch(() => {});
+}
+
+function startCcPrewarm(): void {
+  if (prewarmStarted) return;
+  const state = getState();
+  if (!state.enabled.characterCards) return;
+  prewarmStarted = true;
+  // Defer so we don't compete with OBR's own scene-load network.
+  setTimeout(() => {
+    ensurePrewarm(CC_PREWARM_BQS_URL, "bqs");
+    syncCardPrewarms();
+    // Also rewarm the card list whenever scene metadata changes
+    // (new card uploaded, old one deleted) so the most recent N
+    // cards are always primed.
+    try {
+      OBR.scene.onMetadataChange(() => syncCardPrewarms());
+    } catch {}
+  }, CC_PREWARM_DELAY_MS);
+}
+
 // Module lifecycle: each module's setup() is called when its enable flag
 // flips ON, teardown() when it flips OFF. Modules register OBR listeners
 // (context menu, broadcast, popover, etc.) at setup and clean up at
@@ -160,6 +244,7 @@ OBR.onReady(async () => {
       if (await OBR.scene.isReady()) {
         await openCluster();
         await syncModules();
+        startCcPrewarm();
       } else {
         await closeCluster();
       }
@@ -170,6 +255,7 @@ OBR.onReady(async () => {
     if (ready) {
       await openCluster();
       await syncModules();
+      startCcPrewarm();
     } else {
       await closeCluster();
     }
