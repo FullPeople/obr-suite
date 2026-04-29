@@ -5,13 +5,26 @@ import { resolve } from "path";
 
 // Dual deploy targets:
 //   stable → /suite/      (default)
-//   dev    → /suite-dev/  (set SUITE_BASE=/suite-dev/ before vite build)
+//   dev    → /suite-dev/  (set SUITE_BASE=suite-dev before vite build)
 //
-// The deploy-suite-dev.sh script wraps this with the right env var so
-// the dev build's bundled JS references /suite-dev/assets/* and its
-// manifest-dev.json points everything to /suite-dev/. Both can coexist
-// on the same server — install whichever URL you want in OBR.
-const SUITE_BASE = process.env.SUITE_BASE || "/suite/";
+// IMPORTANT: pass the dir name WITHOUT a leading slash. Git Bash on
+// Windows uses MSYS, which auto-converts UNIX-style absolute paths in
+// env vars — "/suite-dev/" gets rewritten to "/Git/suite-dev/" because
+// the MSYS root ships under C:\Program Files\Git\ — and the assets end
+// up emitted at /Git/suite-dev/assets/* which 404s on the server.
+// Passing the bare name "suite-dev" sidesteps the conversion entirely;
+// we add the slashes here. Old "/suite/" / "/suite-dev/" forms still
+// work — normaliseBase() strips any MSYS-prepended prefix.
+function normaliseBase(raw: string): string {
+  let s = raw.trim();
+  // If MSYS prepended its root path, peel it back to the suite dir.
+  const m = /\/(suite[^/]*)\/?$/.exec(s);
+  if (m) return `/${m[1]}/`;
+  if (!s.startsWith("/")) s = "/" + s;
+  if (!s.endsWith("/")) s = s + "/";
+  return s;
+}
+const SUITE_BASE = normaliseBase(process.env.SUITE_BASE || "/suite/");
 
 export default defineConfig(({ command }) => ({
   plugins:
