@@ -22,8 +22,8 @@ https://obr.dnd.center/suite/manifest.json
 |---|---|---|
 | <img src="docs/icons/dice.svg" width="20" align="center" /> | 骰子 | 表达式投骰、多目标、历史记录、回放、音效、与 5etools 标签联动。 |
 | <img src="docs/icons/swords.svg" width="20" align="center" /> | 先攻追踪 | 顶部横向先攻条。包含战斗开始、回合切换镜头、Owner 玩家可自助投骰与结束回合。 |
-| <img src="docs/icons/dragon.svg" width="20" align="center" /> | 怪物图鉴 | 5etools 怪物搜索 + 一键召唤；Token 右键支持绑定 / 更换 / 移除怪物图鉴。 |
-| <img src="docs/icons/idcard.svg" width="20" align="center" /> | 角色卡 | 解析 xlsx 角色卡（悲灵 v1.0.12 模板）为网页视图；选中绑定 token 时自动浮出信息卡。 |
+| <img src="docs/icons/dragon.svg" width="20" align="center" /> | 怪物图鉴 | 5etools 怪物搜索 + 一键召唤；Token 右键支持绑定 / 更换 / 移除怪物图鉴；可开关"加入场景时自动加入先攻"。 |
+| <img src="docs/icons/idcard.svg" width="20" align="center" /> | 角色卡 | 解析 xlsx 角色卡（悲灵 v1.0.12 模板）为网页视图；每张卡片旁有 ↻ 按钮可重新选择 xlsx 覆盖更新；选中绑定 token 时自动浮出信息卡。 |
 | <img src="docs/icons/search.svg" width="20" align="center" /> | 全局搜索 | 顶部右侧浮窗搜索框，覆盖 5etools 全分类，悬停预览、点击钉住。 |
 | <img src="docs/icons/clock-pause.svg" width="20" align="center" /> | 时停 | DM 一键禁用玩家画布操作，添加电影黑边。 |
 | <img src="docs/icons/crosshair.svg" width="20" align="center" /> | 同步视口 | 把所有玩家镜头移动到指定坐标或所选 token。 |

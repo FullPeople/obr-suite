@@ -22,8 +22,8 @@ https://obr.dnd.center/suite/manifest.json
 |---|---|---|
 | <img src="docs/icons/dice.svg" width="20" align="center" /> | Dice | Expression-based rolls, multi-target, history, replay, SFX, and 5etools tag integration. |
 | <img src="docs/icons/swords.svg" width="20" align="center" /> | Initiative | Top-anchored initiative strip. Includes start-combat, turn-change camera focus, and owner-aware roll / end-turn for player-owned tokens. |
-| <img src="docs/icons/dragon.svg" width="20" align="center" /> | Bestiary | 5etools monster search and one-click spawn; tokens have right-click menus to bind / replace / unbind a monster reference. |
-| <img src="docs/icons/idcard.svg" width="20" align="center" /> | Character Cards | Parses xlsx character sheets (悲灵 v1.0.12 template) into a web view; the info popover surfaces when a bound token is selected. |
+| <img src="docs/icons/dragon.svg" width="20" align="center" /> | Bestiary | 5etools monster search and one-click spawn; tokens have right-click menus to bind / replace / unbind a monster reference; per-scene "auto-join initiative on spawn" toggle. |
+| <img src="docs/icons/idcard.svg" width="20" align="center" /> | Character Cards | Parses xlsx character sheets (悲灵 v1.0.12 template) into a web view; each card row has a ↻ button to re-pick the xlsx and overwrite the card; the info popover surfaces when a bound token is selected. |
 | <img src="docs/icons/search.svg" width="20" align="center" /> | Global Search | Top-right floating search input over all 5etools categories with hover-to-preview and click-to-pin. |
 | <img src="docs/icons/clock-pause.svg" width="20" align="center" /> | Time Stop | DM-only freeze of player canvas input with cinematic letterbox bars. |
 | <img src="docs/icons/crosshair.svg" width="20" align="center" /> | Sync Viewport | Pans every player's camera to a chosen point or the selected token. |

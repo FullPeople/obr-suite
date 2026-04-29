@@ -215,32 +215,40 @@ const BESTIARY_DESC: BilingualHtml = {
   zh: `<p>来自 5etools 的全 D&amp;D 5E 怪物库，搜索 + 一键召唤到场景。仅 DM 可见。</p>
 <ul>
   <li>左侧 tool 栏图标启动，右侧出现搜索面板</li>
-  <li>支持中英文搜索、CR 排序，按当前数据版本过滤（在版本数据 tab 切换）</li>
-  <li>点击怪物 → 一键拖入场景，自动设置 HP/AC/先攻/DEX 修正</li>
+  <li>支持中英文搜索、CR 排序，按当前数据版本过滤（在基础设置切换）</li>
+  <li>点击怪物 → 一键拖入场景，自动设置 HP/AC/DEX 修正；先攻是否自动加入由下方开关控制</li>
   <li>选中已召唤怪物时顶部弹出完整 stat block（受悬浮窗开关控制）</li>
+  <li>右键 token：未绑定的会出现「绑定怪物图鉴」；已绑定的会出现「更换 / 移除怪物图鉴绑定」，bubbles HP/AC/名字会随之更新</li>
+  <li>怪物面板左键明骰；右键弹菜单（投掷 / 暗骰 / 优势 / 劣势 / 添加到骰盘）</li>
 </ul>`,
   en: `<p>D&amp;D 5E monster library powered by 5etools. Search and one-click spawn to scene. DM only.</p>
 <ul>
   <li>Tool icon on the left rail; click to open the side panel</li>
-  <li>CN/EN search, CR sort, filtered by the current data-version (set in the Data Version tab)</li>
-  <li>Click a monster → spawned at scene center, HP/AC/initiative/DEX bonus auto-set</li>
+  <li>CN/EN search, CR sort, filtered by the current data-version (set in the Basics tab)</li>
+  <li>Click a monster → spawned at scene center, HP/AC/DEX bonus auto-set; initiative auto-join is controlled by the toggle below</li>
   <li>Selecting a spawned monster shows the full stat block at the top (controlled by the auto-popup toggle)</li>
+  <li>Right-click a token: unbound tokens show "Bind Monster"; bound ones show "Replace / Unbind", with bubbles HP/AC/name updated automatically</li>
+  <li>Monster panel: left-click rolls open; right-click opens a context menu (Roll / Dark Roll / Advantage / Disadvantage / Add to Tray)</li>
 </ul>`,
 };
 const CHARCARD_DESC: BilingualHtml = {
   zh: `<p>导入 xlsx 格式的角色卡（DnD 中文社区悲灵 v1.0.12 模板），自动解析为可查阅的网页。</p>
 <ul>
-  <li>cluster 的「角色卡界面」按钮直接打开全屏面板（旧版的圆形蓝色浮动按钮已合并到这里）</li>
-  <li>把 xlsx 拖到右侧侧栏即可上传</li>
+  <li>cluster 的「角色卡界面」按钮直接打开全屏面板</li>
+  <li>把 xlsx 拖到右侧侧栏即可上传，或点「📁 选择文件」用浏览器选择器上传</li>
+  <li>每张卡片旁的 <b>↻</b> 按钮可重新选择 xlsx 覆盖更新（在 Excel 里改完保存→点刷新即可）</li>
   <li>选中绑定角色 token 时浮出小信息框（受悬浮窗开关控制）</li>
   <li>右键角色 token 可绑定 / 解绑卡片</li>
+  <li>角色卡可点击元素：六维字母 = 豁免（自动应用熟练加值），修正 = 检定；武器命中 + 伤害骰均可点；底部「特性 / 专长 / 法术」chip 点击即填入全局搜索</li>
 </ul>`,
   en: `<p><b>${ICONS.warning} This module is currently designed for the Chinese D&amp;D community's xlsx character sheet format (悲灵 v1.0.12). It will not parse generic English character sheets.</b></p>
 <ul>
-  <li>The cluster's "Character Card Panel" button opens the fullscreen view (the old circular blue floating button has been merged into this)</li>
-  <li>Drag an xlsx onto the side panel to upload</li>
+  <li>The cluster's "Character Card Panel" button opens the fullscreen view</li>
+  <li>Drag an xlsx onto the side panel to upload, or click "📁 Select File" to use the native file picker</li>
+  <li>Each card row has a <b>↻</b> button — re-pick the xlsx (e.g. after editing in Excel) and it overwrites in place</li>
   <li>Selecting a bound token shows a small info popup (subject to the auto-popup toggle)</li>
   <li>Right-click a token to bind/unbind a card</li>
+  <li>Clickable: ability letters = saving throws (with proficiency); modifiers = ability checks; weapon attack + damage; bottom "Traits / Feats / Spells" chips fill the global search input</li>
 </ul>`,
 };
 const INITIATIVE_DESC: BilingualHtml = {
