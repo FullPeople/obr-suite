@@ -1,0 +1,17 @@
+{
+  "name": "Full Suite (Dev)",
+  "version": "1.0.0-dev",
+  "manifest_version": 1,
+  "author": "FullPeople",
+  "homepage_url": "https://github.com/FullPeople/obr-suite",
+  "description": "TEST BUILD — All-in-one TRPG suite (development branch). Do NOT install alongside the stable Full Suite — they share internal namespaces and will fight over popovers.",
+  "icon": "/suite-dev/exe_icon.png",
+  "background_url": "/suite-dev/background.html",
+  "action": {
+    "title": "骰子 / Dice (Dev)",
+    "icon": "/suite-dev/d20.png",
+    "popover": "/suite-dev/dice-panel.html",
+    "width": 380,
+    "height": 620
+  }
+}

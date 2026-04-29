@@ -3,10 +3,20 @@ import preact from "@preact/preset-vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import { resolve } from "path";
 
+// Dual deploy targets:
+//   stable → /suite/      (default)
+//   dev    → /suite-dev/  (set SUITE_BASE=/suite-dev/ before vite build)
+//
+// The deploy-suite-dev.sh script wraps this with the right env var so
+// the dev build's bundled JS references /suite-dev/assets/* and its
+// manifest-dev.json points everything to /suite-dev/. Both can coexist
+// on the same server — install whichever URL you want in OBR.
+const SUITE_BASE = process.env.SUITE_BASE || "/suite/";
+
 export default defineConfig(({ command }) => ({
   plugins:
     command === "serve" ? [preact(), basicSsl()] : [preact()],
-  base: "/suite/",
+  base: SUITE_BASE,
   server: {
     cors: { origin: "*" },
     headers: { "Access-Control-Allow-Origin": "*" },
