@@ -110,23 +110,18 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
   padding:5px 10px;border-radius:4px;transition:background .12s, border-color .12s;
 }
 .link-local-btn:hover{background:rgba(46,204,113,0.22);border-color:rgba(46,204,113,0.65)}
+.side-hint-sub{font-size:10px;color:rgba(122,170,170,0.65);margin-top:2px}
 .card-refresh{
   position:absolute;top:4px;right:24px;
   background:transparent;border:none;color:#7be0a0;cursor:pointer;
-  width:18px;height:18px;font-size:13px;display:none;border-radius:3px;
+  width:18px;height:18px;font-size:14px;border-radius:3px;
   font-family:inherit;padding:0;line-height:1;
+  opacity:0.55;transition:opacity .12s, background .12s;
 }
-.card:hover .card-refresh{display:block}
-.card-refresh:hover{background:rgba(46,204,113,0.20)}
-.card-refresh.spinning{display:block;animation:cc-spin 0.8s linear infinite}
+.card:hover .card-refresh{opacity:1}
+.card-refresh:hover{background:rgba(46,204,113,0.22);opacity:1}
+.card-refresh.spinning{opacity:1;animation:cc-spin 0.8s linear infinite}
 @keyframes cc-spin { to { transform:rotate(360deg) } }
-.card-local-dot{
-  position:absolute;top:6px;right:46px;
-  width:6px;height:6px;border-radius:50%;
-  background:#2ecc71;
-  box-shadow:0 0 4px rgba(46,204,113,0.8);
-  pointer-events:none;
-}
 
 .card-list{flex:1;overflow-y:auto;padding:6px 8px 10px}
 .card-list::-webkit-scrollbar{width:3px}
@@ -175,10 +170,11 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
       </div>
     </div>
     <div class="side-hint">
-      拖拽 xlsx 到此处上传
-      <button id="btnLinkLocal" class="link-local-btn" type="button" style="display:none" title="选择本地 xlsx 文件并保持链接，之后可一键刷新">
-        📂 链接本地文件
+      拖拽 xlsx 到此处上传，或
+      <button id="btnLinkLocal" class="link-local-btn" type="button" title="打开本地文件选择器上传 xlsx">
+        📁 选择文件
       </button>
+      <div class="side-hint-sub">每张卡片旁的 ↻ 可重新选择 xlsx 覆盖更新</div>
     </div>
     <div id="status" class="status" style="display:none"></div>
     <div id="error" class="err" style="display:none"></div>

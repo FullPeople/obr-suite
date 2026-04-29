@@ -67,6 +67,7 @@ const SUPPORTERS: string[] = [
   "皓天", "莫西斯", "艾迪", "诺雁",
   "愛睡眠（好崩溃睡不着ver）", "这只冒险小队没有人类了",
   "奶牛饭", "DK", "黄烟", "盲人过北极", "1234",
+  "浩然正气",
 ];
 
 function supportersHtml(lang: Language): string {

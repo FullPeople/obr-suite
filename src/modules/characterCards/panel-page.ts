@@ -1,12 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { ICONS } from "../../icons";
-import {
-  getHandle,
-  setHandle,
-  deleteHandle,
-  ensureReadPermission,
-  isLocalLinkSupported,
-} from "./handle-store";
 
 // LOCAL broadcast: when the local-file refresh succeeds, every cc
 // panel instance reloads the affected card iframe so other clients
@@ -177,10 +170,6 @@ async function writeCardsToScene(list: CardEntry[]) {
 
 async function refreshFromScene() {
   cards = await readCardsFromScene();
-  // Re-build the in-memory "has handle" set from IDB so newly-loaded
-  // cards (e.g. after a panel re-open) display the 🔄 button if they
-  // were previously linked.
-  await syncLocalHandleSet();
   // Clean up iframes for cards no longer in scene
   for (const [id, frame] of cardIframes) {
     if (!cards.find((c) => c.id === id)) {
@@ -196,7 +185,7 @@ async function refreshFromScene() {
   render();
 }
 
-async function uploadFile(file: File, handle?: FileSystemFileHandle) {
+async function uploadFile(file: File) {
   showError("");
   const sideEl = document.getElementById("side");
   sideEl?.classList.add("busy");
@@ -217,12 +206,6 @@ async function uploadFile(file: File, handle?: FileSystemFileHandle) {
     await writeCardsToScene(updated);
     cards = updated;
     current = { type: "card", id: entry.id };
-    // Persist the FileSystemFileHandle (if any) so the user can hit
-    // 🔄 to re-read the same file later without picking it again.
-    if (handle) {
-      try { await setHandle(entry.id, handle); } catch {}
-      cardsWithLocalHandle.add(entry.id);
-    }
     showStatus(`${ICONS.check} 已上传: ${escapeHtml(entry.name)}`);
     render();
   } catch (e: any) {
@@ -232,79 +215,52 @@ async function uploadFile(file: File, handle?: FileSystemFileHandle) {
   }
 }
 
-// In-memory snapshot of which cards currently have a handle in IDB.
-// Populated lazily so render() can show a green dot + 🔄 button only
-// for those cards. Updated when handles are added / removed.
-const cardsWithLocalHandle = new Set<string>();
-async function syncLocalHandleSet(): Promise<void> {
-  cardsWithLocalHandle.clear();
-  for (const c of cards) {
-    const h = await getHandle(c.id);
-    if (h) cardsWithLocalHandle.add(c.id);
-  }
-}
-
-// Pop a native file picker, save the handle to IDB, and run the
-// normal upload pipeline. Falls through to a plain `<input type=file>`
-// dialog on browsers without showOpenFilePicker (Firefox / Safari /
-// mobile) so the user still gets a card without the refresh feature.
-async function linkLocalFile(): Promise<void> {
-  if (isLocalLinkSupported()) {
-    try {
-      const [handle] = await (window as any).showOpenFilePicker({
-        multiple: false,
-        types: [
-          {
-            description: "Excel xlsx",
-            accept: {
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-                [".xlsx"],
-            },
-          },
-        ],
-      });
-      const file = await handle.getFile();
-      await uploadFile(file, handle);
-    } catch (e: any) {
-      // AbortError = user cancelled the picker — silent.
-      if (e?.name === "AbortError") return;
-      showError(`打开文件失败: ${e?.message || e}`);
-    }
-  } else {
-    // Fallback: plain <input type=file> — no handle saved, no refresh
-    // button. The card still works as a one-shot upload.
+// Open a native file picker dialog. Returns the chosen File or null
+// if the user cancelled. We DON'T use `showOpenFilePicker()` here —
+// the File System Access API is blocked in cross-origin iframes
+// (which is exactly what OBR plugin frames are), so an attempt
+// throws SecurityError. Plain `<input type=file>` works everywhere.
+function pickXlsxFile(): Promise<File | null> {
+  return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".xlsx";
-    input.onchange = async () => {
-      const f = input.files?.[0];
-      if (f) await uploadFile(f);
-    };
+    input.onchange = () => resolve(input.files?.[0] ?? null);
+    // 'cancel' fires on modern Chromium when the user closes the
+    // picker without choosing. On older browsers we fall back to
+    // never resolving — the input is GC'd when the user picks again
+    // anyway. Either way, no leak.
+    input.addEventListener("cancel", () => resolve(null));
     input.click();
-  }
+  });
 }
 
-// Re-read a linked card's xlsx via its stored handle, POST to
-// /api/character/refresh, and replace the iframe so the change shows.
-async function refreshCardFromHandle(card: CardEntry): Promise<void> {
-  const handle = await getHandle(card.id);
-  if (!handle) {
-    showError("该角色卡未链接本地文件");
+// "Link a local xlsx" entry point. With FSA blocked, this just opens
+// a regular file picker; the resulting card behaves identically to a
+// drag-drop upload. The refresh button on each row uses the same
+// picker on subsequent clicks so the user can re-pick the freshly
+// edited xlsx without deleting + re-uploading the card.
+async function linkLocalFile(): Promise<void> {
+  const f = await pickXlsxFile();
+  if (!f) return;
+  await uploadFile(f);
+}
+
+// Refresh a card by re-picking the xlsx from disk. Cross-origin
+// iframes can't persist a FileSystemFileHandle, so the user has to
+// confirm the file each time — but the browser remembers the last
+// folder, so it's still a 2-click flow (pick + open).
+async function refreshCardFromPicker(card: CardEntry): Promise<void> {
+  const file = await pickXlsxFile();
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    showError("只支持 .xlsx 文件");
     return;
   }
-  if (!(await ensureReadPermission(handle))) {
-    showError("浏览器拒绝读取该文件，请重新链接");
-    return;
-  }
-  // Visual feedback on the row's spinner.
   const row = document.querySelector<HTMLElement>(`.card[data-id="${card.id}"]`);
   const btn = row?.querySelector<HTMLButtonElement>(".card-refresh");
   btn?.classList.add("spinning");
   try {
-    const file = await handle.getFile();
-    if (!file.name.toLowerCase().endsWith(".xlsx")) {
-      throw new Error("链接的文件不是 xlsx");
-    }
     const fd = new FormData();
     fd.append("file", file);
     const r = await fetch(
@@ -313,17 +269,12 @@ async function refreshCardFromHandle(card: CardEntry): Promise<void> {
     );
     if (!r.ok) throw new Error((await r.text()) || `HTTP ${r.status}`);
     const updated = (await r.json()) as CardEntry;
-    // Update local cards array + scene metadata so the side list
-    // reflects the new name + updated_at.
     cards = cards.map((c) => (c.id === updated.id ? { ...c, ...updated } : c));
     await writeCardsToScene(cards);
-    // Force the iframe to reload — append a cache-buster so the
-    // browser refetches index.html instead of serving from cache.
     const iframe = cardIframes.get(card.id);
     if (iframe) {
       iframe.src = SERVER_ORIGIN + updated.url + `?t=${Date.now()}`;
     }
-    // Tell every other client to also reload its iframe for this card.
     try {
       OBR.broadcast.sendMessage(
         BC_CARD_UPDATED,
@@ -347,8 +298,6 @@ async function deleteCard(id: string) {
   const f = cardIframes.get(id);
   if (f) { f.remove(); cardIframes.delete(id); }
   if (current.type === "card" && current.id === id) current = { type: "empty" };
-  cardsWithLocalHandle.delete(id);
-  try { await deleteHandle(id); } catch {}
   render();
   try { await fetch(`${API_BASE}/${roomId}/${id}`, { method: "DELETE" }); } catch {}
 }
@@ -438,28 +387,18 @@ function render() {
       sub.className = "card-sub";
       sub.textContent = `${c.uploader} · ${timeAgo(c.uploaded_at)}`;
 
-      const hasHandle = cardsWithLocalHandle.has(c.id);
-
-      // Green dot indicates the card is linked to a local xlsx.
-      if (hasHandle) {
-        const dot = document.createElement("span");
-        dot.className = "card-local-dot";
-        dot.title = "已链接本地 xlsx";
-        card.appendChild(dot);
-      }
-
-      // 🔄 refresh — only rendered for linked cards.
-      if (hasHandle) {
-        const refresh = document.createElement("button");
-        refresh.className = "card-refresh";
-        refresh.textContent = "↻";
-        refresh.title = "从本地 xlsx 重新加载";
-        refresh.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          await refreshCardFromHandle(c);
-        });
-        card.appendChild(refresh);
-      }
+      // ↻ refresh — every card row has one. Clicking opens a file
+      // picker so the user can re-pick the (possibly newly-saved)
+      // xlsx; the server overwrites the existing card's data.
+      const refresh = document.createElement("button");
+      refresh.className = "card-refresh";
+      refresh.textContent = "↻";
+      refresh.title = "从最新的 xlsx 重新加载";
+      refresh.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await refreshCardFromPicker(c);
+      });
+      card.appendChild(refresh);
 
       const del = document.createElement("button");
       del.className = "card-del";
@@ -583,44 +522,25 @@ OBR.onReady(async () => {
   sideEl.addEventListener("drop", async (e) => {
     e.preventDefault();
     sideEl.classList.remove("drag-over");
-
-    // Try the modern path first: getAsFileSystemHandle() yields a
-    // FileSystemFileHandle we can persist + re-read later. Falls back
-    // to plain dataTransfer.files on browsers that don't expose it.
-    let handle: FileSystemFileHandle | null = null;
-    let f: File | null = null;
-    const items = e.dataTransfer?.items;
-    if (items && items.length && (items[0] as any).getAsFileSystemHandle) {
-      try {
-        const h = await (items[0] as any).getAsFileSystemHandle();
-        if (h && h.kind === "file") {
-          handle = h as FileSystemFileHandle;
-          f = await handle.getFile();
-        }
-      } catch {}
-    }
-    if (!f) f = e.dataTransfer?.files?.[0] ?? null;
+    const f = e.dataTransfer?.files?.[0] ?? null;
     if (!f) return;
     if (!f.name.toLowerCase().endsWith(".xlsx")) {
       showError("只支持 .xlsx 文件");
       return;
     }
-    await uploadFile(f, handle ?? undefined);
+    await uploadFile(f);
   });
 
   document.addEventListener("dragover", (e) => { e.preventDefault(); });
   document.addEventListener("drop", (e) => { e.preventDefault(); });
 
-  // 📂 链接本地文件 button — only shown on Chromium-based browsers
-  // (the API gate). Unsupported browsers see the plain drag-drop hint.
+  // 📁 选择文件 button — alternate upload path for users who don't
+  // want to drag. Shown on every browser (uses plain `<input type=file>`,
+  // not the FSA picker which is blocked in cross-origin iframes).
   const linkBtn = document.getElementById("btnLinkLocal") as HTMLButtonElement | null;
   if (linkBtn) {
-    if (isLocalLinkSupported()) {
-      linkBtn.style.display = "";
-      linkBtn.addEventListener("click", () => { void linkLocalFile(); });
-    } else {
-      linkBtn.style.display = "none";
-    }
+    linkBtn.style.display = "";
+    linkBtn.addEventListener("click", () => { void linkLocalFile(); });
   }
 
   // Listen for refresh broadcasts from other clients. When the DM (or
