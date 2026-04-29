@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] — 2026-04-29
+
+### Added
+
+- **Bestiary group-saves popover.** When the GM selects 2+ tokens that are ALL bound to bestiary monsters, a 360×96 popover auto-shows just below the initiative tracker's collapsed position (top=95, centered) with six ability buttons (STR / DEX / CON / INT / WIS / CHA). Clicking any ability fires a collective save: each selected token rolls 1d20 + its OWN save bonus (proficient saves use the listed `m.save.<ability>`, otherwise the floor((score-10)/2) modifier). All N rolls share one collectiveId so they appear as one collective row in the dice history popover. Popover hides automatically when the selection changes to anything other than ≥2 monsters.
+  - New module `src/modules/bestiary/group-saves.ts` (paired lifecycle with the bestiary module's setup/teardown).
+  - New iframe `bestiary-group-saves.html` (inline ESM script, reads `localStorage["obr-suite/lang"]` for ZH / EN labels). Wired into Vite's `rollupOptions.input`.
+
+### Changed
+
+- **Dice panel collective camera focus skips zoom-to-fit when the bbox already fits in the viewport.** Earlier every multi-target roll called `OBR.viewport.animateToBounds(bbox)`, which yanked the GM's framing closer even when they were already zoomed wide enough to see everything. Now the focus path projects the bbox corners through the current viewport transform; if they all land inside `[0, vw] × [0, vh]` (with 2px slack), the camera stays put. Only fires `animateToBounds` when at least one target sits off-screen or partially clipped — i.e. when the user genuinely needs the camera to move.
+
 ## [1.0.5] — 2026-04-29
 
 Redesign of the collective-roll display in the dice history popover, reverting 1.0.4's aggregate-total approach.

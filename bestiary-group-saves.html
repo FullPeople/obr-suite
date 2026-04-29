@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Group Saves</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:rgba(31,34,48,0.95);
+  --bg-soft:rgba(38,42,58,0.95);
+  --border:rgba(255,255,255,0.12);
+  --border-strong:rgba(255,255,255,0.20);
+  --text:#e6e8ee;
+  --text-dim:#9aa0b3;
+  --accent:#5dade2;
+  --accent-on:#7ec8f0;
+  --green:#7be0a0;
+}
+html,body{
+  height:100%;width:100%;overflow:hidden;
+  background:transparent;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:var(--text);font-size:12px;
+}
+.box{
+  position:absolute;inset:0;
+  background:var(--bg);
+  border:1px solid var(--border-strong);
+  border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.55);
+  display:flex;flex-direction:column;
+  overflow:hidden;
+}
+
+.head{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 12px;
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.head .ttl{
+  font-size:11px;font-weight:700;
+  letter-spacing:0.6px;text-transform:uppercase;
+  color:var(--text);
+}
+.head .count{
+  font-size:10.5px;color:var(--text-dim);
+  font-weight:600;
+  margin-left:2px;
+}
+.head .hint{
+  margin-left:auto;
+  font-size:10.5px;color:var(--text-dim);font-style:italic;
+}
+
+.row{
+  flex:1;
+  display:grid;
+  grid-template-columns:repeat(6, 1fr);
+  gap:4px;
+  padding:6px;
+}
+.btn{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:1px;
+  background:var(--bg-soft);
+  border:1px solid var(--border);
+  border-radius:6px;
+  cursor:pointer;
+  font-family:inherit;color:var(--text);
+  padding:4px;
+  transition:background .12s, border-color .12s, transform .06s;
+  user-select:none;
+}
+.btn:hover{
+  background:rgba(93,173,226,0.18);
+  border-color:rgba(93,173,226,0.45);
+}
+.btn:active{transform:scale(0.96)}
+.btn .ab{
+  font-size:13px;font-weight:800;
+  color:var(--accent-on);
+  letter-spacing:0.4px;
+}
+.btn .lbl{
+  font-size:9px;color:var(--text-dim);
+  font-weight:600;
+  letter-spacing:0.3px;
+  text-transform:uppercase;
+}
+
+/* Brief flash when a save fires — visual confirmation that the click
+   landed (the actual dice play out on canvas, but the popover stays
+   open and we want a tiny ack here too). */
+.btn.flash{
+  background:rgba(46,204,113,0.30);
+  border-color:rgba(46,204,113,0.65);
+}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="head">
+    <span class="ttl" id="ttl">群体豁免</span>
+    <span class="count" id="count">…</span>
+    <span class="hint" id="hint">点击属性 · 各自加值</span>
+  </div>
+  <div class="row" id="row">
+    <button class="btn" data-ab="str"><span class="ab" data-l="abStr">力</span><span class="lbl">STR</span></button>
+    <button class="btn" data-ab="dex"><span class="ab" data-l="abDex">敏</span><span class="lbl">DEX</span></button>
+    <button class="btn" data-ab="con"><span class="ab" data-l="abCon">体</span><span class="lbl">CON</span></button>
+    <button class="btn" data-ab="int"><span class="ab" data-l="abInt">智</span><span class="lbl">INT</span></button>
+    <button class="btn" data-ab="wis"><span class="ab" data-l="abWis">感</span><span class="lbl">WIS</span></button>
+    <button class="btn" data-ab="cha"><span class="ab" data-l="abCha">魅</span><span class="lbl">CHA</span></button>
+  </div>
+</div>
+<script type="module">
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
+
+const BC_FIRE = "com.obr-suite/bestiary-group-save-fire";
+const BC_STATE = "com.obr-suite/bestiary-group-save-state";
+const BC_STATE_REQUEST = "com.obr-suite/bestiary-group-save-state-request";
+
+// Per-client UI language (mirrors src/state.ts LS_LANG).
+function readLang(){
+  try { const v = localStorage.getItem("obr-suite/lang"); if (v === "en" || v === "zh") return v; } catch {}
+  return "zh";
+}
+const T = {
+  zh: {
+    title: "群体豁免",
+    hint: "点击属性 · 各自加值",
+    countSel: (n) => `${n} 个目标`,
+    abStr: "力", abDex: "敏", abCon: "体", abInt: "智", abWis: "感", abCha: "魅",
+  },
+  en: {
+    title: "Group Save",
+    hint: "tap an ability · per-token bonus",
+    countSel: (n) => `${n} targets`,
+    abStr: "Str", abDex: "Dex", abCon: "Con", abInt: "Int", abWis: "Wis", abCha: "Cha",
+  },
+};
+
+function applyLang(lang) {
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  const t = T[lang];
+  document.getElementById("ttl").textContent = t.title;
+  document.getElementById("hint").textContent = t.hint;
+  document.querySelectorAll("[data-l]").forEach((el) => {
+    const k = el.dataset.l;
+    if (t[k] != null) el.textContent = t[k];
+  });
+}
+
+let currentLang = readLang();
+applyLang(currentLang);
+
+let lastCount = 0;
+
+OBR.onReady(() => {
+  // Receive selection state from the bg module. We use it ONLY to
+  // refresh the count display — actual save firing happens server-
+  // side using the bg module's cached selection (no need to round-
+  // trip the data through this iframe).
+  OBR.broadcast.onMessage(BC_STATE, (event) => {
+    const data = event.data;
+    if (!data) return;
+    if (typeof data.lang === "string" && (data.lang === "en" || data.lang === "zh") && data.lang !== currentLang) {
+      currentLang = data.lang;
+      applyLang(currentLang);
+    }
+    if (typeof data.count === "number") {
+      lastCount = data.count;
+      document.getElementById("count").textContent = T[currentLang].countSel(data.count);
+    }
+  });
+
+  // Belt-and-suspenders: ask the bg module for the current state in
+  // case the post-open broadcast raced ahead of our listener
+  // registration here.
+  OBR.broadcast.sendMessage(BC_STATE_REQUEST, {}, { destination: "LOCAL" }).catch(() => {});
+
+  document.querySelectorAll(".btn").forEach((b) => {
+    b.addEventListener("click", () => {
+      const ab = b.dataset.ab;
+      if (!ab) return;
+      // Visual flash
+      b.classList.add("flash");
+      setTimeout(() => b.classList.remove("flash"), 250);
+      OBR.broadcast.sendMessage(BC_FIRE, { ability: ab }, { destination: "LOCAL" }).catch(() => {});
+    });
+  });
+});
+</script>
+</body>
+</html>

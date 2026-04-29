@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { setupGroupSaves, teardownGroupSaves } from "./group-saves";
 
 // Bestiary module — migrated from the standalone plugin.
 //
@@ -385,9 +386,15 @@ export async function setupBestiary(): Promise<void> {
       } catch {}
     })
   );
+
+  // DM-only group-saves popover. Auto-shows when 2+ selected tokens
+  // are all bestiary-bound monsters. Lifecycle is paired with the
+  // bestiary module's own setup/teardown.
+  await setupGroupSaves();
 }
 
 export async function teardownBestiary(): Promise<void> {
+  await teardownGroupSaves();
   await closePanel();
   await closeInfoPopover();
   try { await OBR.modal.close(PICKER_MODAL_ID); } catch {}

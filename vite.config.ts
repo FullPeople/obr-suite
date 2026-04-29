@@ -46,6 +46,10 @@ export default defineConfig(({ command }) => ({
           __dirname,
           "bestiary-monster-info.html"
         ),
+        "bestiary-group-saves": resolve(
+          __dirname,
+          "bestiary-group-saves.html"
+        ),
         "cc-panel": resolve(__dirname, "cc-panel.html"),
         "cc-info": resolve(__dirname, "cc-info.html"),
         "cc-bind": resolve(__dirname, "cc-bind.html"),

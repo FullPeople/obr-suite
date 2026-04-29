@@ -1151,6 +1151,34 @@ async function focusCameraOnTokens(tokenIds: string[]): Promise<void> {
     const max = { x: maxX + padX, y: maxY + padY };
     const w = max.x - min.x;
     const h = max.y - min.y;
+
+    // Skip the zoom-to-fit if the user is already zoomed wider than
+    // the bbox AND every target sits inside the current viewport.
+    // Per spec: only zoom-to-bounds when the bbox doesn't fit in the
+    // current view (otherwise we'd be yanking the GM's framing closer
+    // for no reason). Use the world-to-screen transform to project
+    // the bbox corners into pixel space, then test against the
+    // viewport rect.
+    try {
+      const [vw, vh, scale, vpPos] = await Promise.all([
+        OBR.viewport.getWidth(),
+        OBR.viewport.getHeight(),
+        OBR.viewport.getScale(),
+        OBR.viewport.getPosition(),
+      ]);
+      // viewport position = screen-pixel offset of world origin, so
+      // screenX = worldX * scale + position.x.
+      const tlX = min.x * scale + vpPos.x;
+      const tlY = min.y * scale + vpPos.y;
+      const brX = max.x * scale + vpPos.x;
+      const brY = max.y * scale + vpPos.y;
+      // Tiny slack so a bbox edge that's pixel-perfectly at the
+      // viewport edge isn't penalised by floating-point jitter.
+      const slack = 2;
+      const fits = tlX >= -slack && tlY >= -slack && brX <= vw + slack && brY <= vh + slack;
+      if (fits) return;
+    } catch {}
+
     OBR.viewport.animateToBounds({
       min,
       max,
