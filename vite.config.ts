@@ -70,6 +70,10 @@ export default defineConfig(({ command }) => ({
         "dice-rollable-menu": resolve(__dirname, "dice-rollable-menu.html"),
         "portal-edit": resolve(__dirname, "portal-edit.html"),
         "portal-destination": resolve(__dirname, "portal-destination.html"),
+        // Dev-only entry; the bg module that loads it self-gates on
+        // SUITE_BASE so stable builds skip the tool registration even
+        // though the html file is still present in the bundle.
+        "test-panel": resolve(__dirname, "test-panel.html"),
       },
     },
   },

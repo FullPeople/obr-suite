@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Position Test Panel</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:rgba(31,34,48,0.97);
+  --bg-soft:rgba(38,42,58,0.95);
+  --border:rgba(255,255,255,0.14);
+  --text:#e6e8ee;
+  --text-dim:#9aa0b3;
+  --accent:#5dade2;
+  --green:#7be0a0;
+  --warn:#f5c876;
+}
+html,body{
+  height:100%;width:100%;overflow:hidden;
+  background:transparent;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:var(--text);font-size:12px;
+}
+.box{
+  position:absolute;inset:1px;
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:14px;
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  box-shadow:0 8px 24px rgba(0,0,0,0.55);
+}
+.head{
+  padding:8px 12px;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:8px;
+  flex-shrink:0;
+}
+.head .ttl{
+  font-size:11px;font-weight:700;letter-spacing:0.5px;
+  text-transform:uppercase;
+}
+.head .info{
+  margin-left:auto;
+  font-size:10px;color:var(--text-dim);
+  font-family:ui-monospace,monospace;
+}
+
+.body{
+  flex:1;
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  grid-template-rows:1fr 1fr 1fr;
+  gap:6px;
+  padding:10px;
+}
+.cell{
+  display:flex;align-items:center;justify-content:center;
+  font-family:inherit;color:var(--text);
+  background:var(--bg-soft);
+  border:1px solid var(--border);
+  border-radius:8px;
+  cursor:pointer;
+  user-select:none;
+  font-size:12px;font-weight:700;
+  transition:background .12s, border-color .12s, transform .06s;
+  letter-spacing:0.2px;
+}
+.cell:hover{
+  background:rgba(93,173,226,0.18);
+  border-color:rgba(93,173,226,0.45);
+}
+.cell:active{transform:scale(0.96)}
+.cell.flash{
+  background:rgba(46,204,113,0.30);
+  border-color:rgba(46,204,113,0.60);
+}
+.cell .arrow{
+  font-size:18px;line-height:1;color:var(--accent);
+}
+
+.foot{
+  padding:6px 12px;
+  border-top:1px solid var(--border);
+  font-size:10.5px;color:var(--text-dim);
+  font-family:ui-monospace,monospace;
+  flex-shrink:0;
+}
+.foot b{color:var(--green);font-weight:700}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="head">
+    <span class="ttl">Position Test Panel</span>
+    <span class="info" id="info">…</span>
+  </div>
+  <div class="body" id="grid">
+    <button class="cell" data-c="TL"><span class="arrow">↖</span></button>
+    <button class="cell" data-c="TC"><span class="arrow">↑</span></button>
+    <button class="cell" data-c="TR"><span class="arrow">↗</span></button>
+    <button class="cell" data-c="ML"><span class="arrow">←</span></button>
+    <button class="cell" data-c="CC"><span class="arrow">·</span></button>
+    <button class="cell" data-c="MR"><span class="arrow">→</span></button>
+    <button class="cell" data-c="BL"><span class="arrow">↙</span></button>
+    <button class="cell" data-c="BC"><span class="arrow">↓</span></button>
+    <button class="cell" data-c="BR"><span class="arrow">↘</span></button>
+  </div>
+  <div class="foot" id="foot">
+    点击任一方位 → 测试 popover 是否能 close+reopen 到对应角
+  </div>
+</div>
+<script type="module">
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
+
+const BC_MOVE = "com.obr-suite/dev-test-move";
+const BC_INFO = "com.obr-suite/dev-test-info";
+const BC_INFO_REQUEST = "com.obr-suite/dev-test-info-request";
+
+OBR.onReady(() => {
+  // The bg module computes anchor params and broadcasts back the
+  // current "where am I" string for the head info display, so we can
+  // see what anchor settings produced the layout we're looking at.
+  OBR.broadcast.onMessage(BC_INFO, (event) => {
+    const data = event.data;
+    if (!data) return;
+    if (typeof data.label === "string") {
+      document.getElementById("info").textContent = data.label;
+    }
+    if (typeof data.note === "string") {
+      document.getElementById("foot").innerHTML = data.note;
+    }
+  });
+  OBR.broadcast.sendMessage(BC_INFO_REQUEST, {}, { destination: "LOCAL" }).catch(() => {});
+
+  document.querySelectorAll(".cell").forEach((b) => {
+    b.addEventListener("click", () => {
+      const c = b.dataset.c;
+      if (!c) return;
+      b.classList.add("flash");
+      setTimeout(() => b.classList.remove("flash"), 200);
+      OBR.broadcast.sendMessage(BC_MOVE, { corner: c }, { destination: "LOCAL" }).catch(() => {});
+    });
+  });
+});
+</script>
+</body>
+</html>

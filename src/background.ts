@@ -11,6 +11,7 @@ import {
 } from "./modules/characterCards";
 import { setupDice, teardownDice } from "./modules/dice";
 import { setupPortals, teardownPortals } from "./modules/portals";
+import { setupDevTest, teardownDevTest } from "./modules/dev-test";
 
 // One central popover hosts the floating button + collapsible cluster.
 // The popover never closes itself; the iframe handles all expand/collapse
@@ -161,6 +162,11 @@ OBR.onReady(async () => {
   // Sync state, then open cluster + activate all enabled modules.
   startSceneSync();
   onStateChange(() => syncModules());
+
+  // Dev-only position-test tool. Self-gates on `import.meta.env.BASE_URL`
+  // — registers nothing in stable builds. Runs outside the moduleStatus
+  // machinery because it isn't a user-toggleable feature.
+  void setupDevTest();
 
   const showIfReady = async () => {
     try {
