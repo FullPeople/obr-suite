@@ -64,6 +64,12 @@ import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
 const POPOVER_ID = "com.obr-suite/rollable-menu";
 const BC_QUICK_ROLL = "com.obr-suite/dice-quick-roll";
 const BC_PANEL_TOGGLE = "com.obr-suite/dice-panel-toggle";
+// Group-save mode (used by bestiary-group-saves popover). When the
+// menu is opened with `?groupSave=1&ability=<key>`, clicks broadcast
+// to BC_GROUP_SAVE_FIRE instead of BC_QUICK_ROLL — the bestiary group-
+// saves bg module receives the broadcast and fires per-token rolls
+// with each monster's own save bonus.
+const BC_GROUP_SAVE_FIRE = "com.obr-suite/bestiary-group-save-fire";
 
 // Per-client UI language (mirrors src/state.ts LS_LANG).
 const LANG = (() => {
@@ -82,6 +88,18 @@ const expression = params.get("expr") ?? "";
 const label = params.get("label") ?? "";
 const itemId = params.get("itemId") || null;
 
+// "Group save" mode — drop the add-to-tray item (each token has its
+// own per-bonus expression so a single tray entry can't represent the
+// group). The remaining 4 items broadcast to BC_GROUP_SAVE_FIRE.
+const groupSave = params.get("groupSave") === "1";
+const groupAbility = params.get("ability") ?? "";
+if (groupSave) {
+  const tray = document.querySelector(".item.tray");
+  const sep = document.querySelector(".sep");
+  if (tray) tray.remove();
+  if (sep) sep.remove();
+}
+
 async function close() {
   try { await OBR.popover.close(POPOVER_ID); } catch {}
 }
@@ -91,7 +109,30 @@ OBR.onReady(() => {
     el.addEventListener("click", async () => {
       const act = el.dataset.act ?? "";
       try {
-        if (act === "tray") {
+        if (groupSave && groupAbility) {
+          // Group-save dispatch — BG module owns the per-token bonus
+          // resolution + collectiveId grouping. Tray is hidden in this
+          // mode, so we never see act === "tray" here.
+          if (act === "roll") {
+            await OBR.broadcast.sendMessage(
+              BC_GROUP_SAVE_FIRE,
+              { ability: groupAbility, hidden: false },
+              { destination: "LOCAL" },
+            );
+          } else if (act === "dark") {
+            await OBR.broadcast.sendMessage(
+              BC_GROUP_SAVE_FIRE,
+              { ability: groupAbility, hidden: true },
+              { destination: "LOCAL" },
+            );
+          } else if (act === "adv" || act === "dis") {
+            await OBR.broadcast.sendMessage(
+              BC_GROUP_SAVE_FIRE,
+              { ability: groupAbility, advMode: act },
+              { destination: "LOCAL" },
+            );
+          }
+        } else if (act === "tray") {
           await OBR.broadcast.sendMessage(
             BC_PANEL_TOGGLE,
             { open: true, prefill: expression },

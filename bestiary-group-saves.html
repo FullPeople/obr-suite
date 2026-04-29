@@ -22,11 +22,15 @@ html,body{
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
   color:var(--text);font-size:12px;
 }
+/* Bumped border-radius from 10px → 16px to match the suite's rounder
+   popover hosts (cluster uses 14px; OBR's wrapper sometimes clips at
+   ~12-14px). Inset .box by 1px so the OBR host's own clipping doesn't
+   eat our top/bottom edges when the host adds its own border. */
 .box{
-  position:absolute;inset:0;
+  position:absolute;inset:1px;
   background:var(--bg);
   border:1px solid var(--border-strong);
-  border-radius:10px;
+  border-radius:16px;
   box-shadow:0 8px 24px rgba(0,0,0,0.55);
   display:flex;flex-direction:column;
   overflow:hidden;
@@ -34,7 +38,7 @@ html,body{
 
 .head{
   display:flex;align-items:center;gap:8px;
-  padding:6px 12px;
+  padding:8px 14px 6px;
   border-bottom:1px solid var(--border);
   flex-shrink:0;
 }
@@ -53,24 +57,30 @@ html,body{
   font-size:10.5px;color:var(--text-dim);font-style:italic;
 }
 
+/* Row padding bumped to 10px so the corner buttons sit clear of the
+   16px box-arc — without this, the bottom-corner buttons get a
+   visible bite taken out where the box's rounded edge clips them. */
 .row{
   flex:1;
   display:grid;
   grid-template-columns:repeat(6, 1fr);
-  gap:4px;
-  padding:6px;
+  gap:5px;
+  padding:8px 10px 10px;
 }
 .btn{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:1px;
+  gap:2px;
   background:var(--bg-soft);
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:8px;
   cursor:pointer;
   font-family:inherit;color:var(--text);
-  padding:4px;
+  padding:5px 4px;
   transition:background .12s, border-color .12s, transform .06s;
   user-select:none;
+  /* Disable native browser context menu so our right-click → suite
+     popover handler is the only thing that fires. */
+  -webkit-touch-callout:none;
 }
 .btn:hover{
   background:rgba(93,173,226,0.18);
@@ -81,12 +91,12 @@ html,body{
   font-size:13px;font-weight:800;
   color:var(--accent-on);
   letter-spacing:0.4px;
+  line-height:1.15;
 }
 .btn .lbl{
   font-size:9px;color:var(--text-dim);
   font-weight:600;
   letter-spacing:0.3px;
-  text-transform:uppercase;
 }
 
 /* Brief flash when a save fires — visual confirmation that the click
@@ -103,15 +113,15 @@ html,body{
   <div class="head">
     <span class="ttl" id="ttl">群体豁免</span>
     <span class="count" id="count">…</span>
-    <span class="hint" id="hint">点击属性 · 各自加值</span>
+    <span class="hint" id="hint">左键投掷 · 右键更多</span>
   </div>
   <div class="row" id="row">
-    <button class="btn" data-ab="str"><span class="ab" data-l="abStr">力</span><span class="lbl">STR</span></button>
-    <button class="btn" data-ab="dex"><span class="ab" data-l="abDex">敏</span><span class="lbl">DEX</span></button>
-    <button class="btn" data-ab="con"><span class="ab" data-l="abCon">体</span><span class="lbl">CON</span></button>
-    <button class="btn" data-ab="int"><span class="ab" data-l="abInt">智</span><span class="lbl">INT</span></button>
-    <button class="btn" data-ab="wis"><span class="ab" data-l="abWis">感</span><span class="lbl">WIS</span></button>
-    <button class="btn" data-ab="cha"><span class="ab" data-l="abCha">魅</span><span class="lbl">CHA</span></button>
+    <button class="btn" data-ab="str"><span class="ab" data-l="abStr">力量</span><span class="lbl">STR</span></button>
+    <button class="btn" data-ab="dex"><span class="ab" data-l="abDex">敏捷</span><span class="lbl">DEX</span></button>
+    <button class="btn" data-ab="con"><span class="ab" data-l="abCon">体质</span><span class="lbl">CON</span></button>
+    <button class="btn" data-ab="int"><span class="ab" data-l="abInt">智力</span><span class="lbl">INT</span></button>
+    <button class="btn" data-ab="wis"><span class="ab" data-l="abWis">感知</span><span class="lbl">WIS</span></button>
+    <button class="btn" data-ab="cha"><span class="ab" data-l="abCha">魅力</span><span class="lbl">CHA</span></button>
   </div>
 </div>
 <script type="module">
@@ -121,6 +131,21 @@ const BC_FIRE = "com.obr-suite/bestiary-group-save-fire";
 const BC_STATE = "com.obr-suite/bestiary-group-save-state";
 const BC_STATE_REQUEST = "com.obr-suite/bestiary-group-save-state-request";
 
+// Layout constants must agree with src/modules/bestiary/group-saves.ts
+const POPOVER_W = 360;
+const POPOVER_H = 96;
+const POPOVER_TOP = 95;
+
+// Right-click context menu (reuses dice-rollable-menu.html in
+// "groupSave" mode — the menu detects the param and broadcasts to
+// BC_FIRE instead of the regular quick-roll channel).
+const MENU_URL = "https://obr.dnd.center/suite/dice-rollable-menu.html";
+const MENU_POPOVER_ID = "com.obr-suite/rollable-menu";
+const MENU_W = 170;
+// 4 items (no separator + no tray for group saves) ≈ 38px each + 8px paddings.
+const MENU_H = 168;
+const MENU_EDGE_MARGIN = 8;
+
 // Per-client UI language (mirrors src/state.ts LS_LANG).
 function readLang(){
   try { const v = localStorage.getItem("obr-suite/lang"); if (v === "en" || v === "zh") return v; } catch {}
@@ -129,13 +154,13 @@ function readLang(){
 const T = {
   zh: {
     title: "群体豁免",
-    hint: "点击属性 · 各自加值",
+    hint: "左键投掷 · 右键更多",
     countSel: (n) => `${n} 个目标`,
-    abStr: "力", abDex: "敏", abCon: "体", abInt: "智", abWis: "感", abCha: "魅",
+    abStr: "力量", abDex: "敏捷", abCon: "体质", abInt: "智力", abWis: "感知", abCha: "魅力",
   },
   en: {
     title: "Group Save",
-    hint: "tap an ability · per-token bonus",
+    hint: "left-click roll · right-click more",
     countSel: (n) => `${n} targets`,
     abStr: "Str", abDex: "Dex", abCon: "Con", abInt: "Int", abWis: "Wis", abCha: "Cha",
   },
@@ -156,6 +181,46 @@ let currentLang = readLang();
 applyLang(currentLang);
 
 let lastCount = 0;
+
+async function openContextMenu(ability, clientX, clientY) {
+  // Convert iframe-local clientX/Y to OBR viewport pixel coords. The
+  // popover is anchored at top-center: iframe top-left =
+  // (vw/2 - W/2, POPOVER_TOP).
+  const [vw, vh] = await Promise.all([
+    OBR.viewport.getWidth(),
+    OBR.viewport.getHeight(),
+  ]);
+  const iframeLeft = vw / 2 - POPOVER_W / 2;
+  const iframeTop = POPOVER_TOP;
+  let left = iframeLeft + clientX;
+  let top = iframeTop + clientY;
+  // Clamp inside viewport so the menu doesn't land off-screen near
+  // the right / bottom edge.
+  left = Math.max(MENU_EDGE_MARGIN, Math.min(left, vw - MENU_W - MENU_EDGE_MARGIN));
+  top = Math.max(MENU_EDGE_MARGIN, Math.min(top, vh - MENU_H - MENU_EDGE_MARGIN));
+
+  const params = new URLSearchParams();
+  params.set("groupSave", "1");
+  params.set("ability", ability);
+
+  try { await OBR.popover.close(MENU_POPOVER_ID); } catch {}
+  try {
+    await OBR.popover.open({
+      id: MENU_POPOVER_ID,
+      url: `${MENU_URL}?${params.toString()}`,
+      width: MENU_W,
+      height: MENU_H,
+      anchorReference: "POSITION",
+      anchorPosition: { left: Math.round(left), top: Math.round(top) },
+      anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
+      transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
+      hidePaper: true,
+      disableClickAway: false,
+    });
+  } catch (e) {
+    console.error("[group-saves] open context menu failed", e);
+  }
+}
 
 OBR.onReady(() => {
   // Receive selection state from the bg module. We use it ONLY to
@@ -181,13 +246,23 @@ OBR.onReady(() => {
   OBR.broadcast.sendMessage(BC_STATE_REQUEST, {}, { destination: "LOCAL" }).catch(() => {});
 
   document.querySelectorAll(".btn").forEach((b) => {
+    // Left-click → open save (default mode).
     b.addEventListener("click", () => {
       const ab = b.dataset.ab;
       if (!ab) return;
-      // Visual flash
       b.classList.add("flash");
       setTimeout(() => b.classList.remove("flash"), 250);
       OBR.broadcast.sendMessage(BC_FIRE, { ability: ab }, { destination: "LOCAL" }).catch(() => {});
+    });
+    // Right-click → open the suite's standard rollable context menu
+    // in "groupSave" mode (投掷 / 暗骰 / 优势 / 劣势; no add-to-tray
+    // since each token has a different per-bonus expression and the
+    // tray can't represent that).
+    b.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const ab = b.dataset.ab;
+      if (!ab) return;
+      void openContextMenu(ab, e.clientX, e.clientY);
     });
   });
 });

@@ -182,7 +182,10 @@ async function refresh(): Promise<void> {
   }
 }
 
-async function fireSave(ability: keyof SelectedMonster["saves"]): Promise<void> {
+async function fireSave(
+  ability: keyof SelectedMonster["saves"],
+  opts: { hidden?: boolean; advMode?: "adv" | "dis" } = {},
+): Promise<void> {
   if (lastSelection.length === 0) return;
   const lang = getLocalLang();
   const lbl = abilityLabel(ability, lang);
@@ -190,6 +193,9 @@ async function fireSave(ability: keyof SelectedMonster["saves"]): Promise<void> 
   // Per-token roll. Each one carries its own save bonus so the dice
   // animation + history reflect each monster's individual outcome.
   // collectiveId groups them in the history popover as one collective.
+  // hidden / advMode propagate to fireQuickRoll → handleQuickRoll →
+  // broadcastDiceRoll, so the dark-roll + adv/dis branches all work
+  // identically to a single quick-roll.
   for (const m of lastSelection) {
     const bn = m.saves[ability];
     const expr = `1d20${bn >= 0 ? `+${bn}` : `${bn}`}`;
@@ -199,8 +205,9 @@ async function fireSave(ability: keyof SelectedMonster["saves"]): Promise<void> 
         label: lbl,
         itemId: m.itemId,
         focus: false,        // group-camera handled by the dice panel's focusCameraOnTokens
-        hidden: false,
+        hidden: !!opts.hidden,
         collectiveId,
+        ...(opts.advMode ? { advMode: opts.advMode } : {}),
       });
     } catch (e) {
       console.error("[obr-suite/group-saves] fireSave failed for", m.itemId, e);
@@ -234,10 +241,12 @@ export async function setupGroupSaves(): Promise<void> {
   );
   unsubs.push(
     OBR.broadcast.onMessage(BC_FIRE, async (event) => {
-      const data = event.data as { ability?: string } | undefined;
+      const data = event.data as
+        | { ability?: string; hidden?: boolean; advMode?: "adv" | "dis" }
+        | undefined;
       const a = data?.ability;
       if (a === "str" || a === "dex" || a === "con" || a === "int" || a === "wis" || a === "cha") {
-        await fireSave(a);
+        await fireSave(a, { hidden: data?.hidden, advMode: data?.advMode });
       }
     }),
   );

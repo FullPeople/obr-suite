@@ -2,6 +2,23 @@
 
 All notable changes to this project follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] — 2026-04-29
+
+Polish pass on the bestiary group-saves popover (introduced in 1.0.6).
+
+### Added
+
+- **Right-click context menu on each ability button.** Right-clicking 力量 / 敏捷 / 体质 / 智力 / 感知 / 魅力 (or Str / Dex / Con / Int / Wis / Cha in EN) opens the suite's standard rollable context menu in a new "groupSave" mode: 投掷 / 暗骰 / 优势 / 劣势 (the 添加到骰盘 entry is intentionally hidden because each token has a different per-bonus expression and a single tray entry can't represent the group). The menu broadcasts to a new `BC_GROUP_SAVE_FIRE` channel that carries `{ ability, hidden?, advMode? }`; the bestiary group-saves bg module receives the broadcast and fires per-token rolls with each monster's own save bonus, propagating the dark-roll / advantage flags through the existing `fireQuickRoll → handleQuickRoll → broadcastDiceRoll` pipeline.
+
+### Changed
+
+- **Full ability names instead of one-character abbreviations.** Buttons used to show a single ZH character (力 / 敏 / 体 / 智 / 感 / 魅) — the popover is wide enough to show the full word, so the labels now read 力量 / 敏捷 / 体质 / 智力 / 感知 / 魅力. EN labels stay at the standard three-letter abbreviation (Str / Dex / Con / Int / Wis / Cha) which is the canonical D&D form. The hint line changed to "左键投掷 · 右键更多" / "left-click roll · right-click more" so the new gesture is discoverable.
+- **Bigger border-radius + safer corner padding to match the suite's rounded popover host.** Bumped `.box` border-radius from 10 → 16 px (cluster uses 14, the suite's host clips at ~12-14, so 16 leaves a margin on both sides), inset the box 1px so the host's own border doesn't eat our edge, and bumped `.row` padding from 6 → 8/10 px so the bottom-corner buttons sit clear of the 16px arc.
+
+### Fixed
+
+- **`dice-rollable-menu.html` now respects a `?groupSave=1&ability=<key>` mode.** When the URL carries those params, the menu drops the 添加到骰盘 / Add to Tray item and routes 投掷 / 暗骰 / 优势 / 劣势 clicks to `BC_GROUP_SAVE_FIRE` instead of `BC_QUICK_ROLL`. Single-roll callers (bestiary monster info, character card info, search preview) are unaffected.
+
 ## [1.0.6] — 2026-04-29
 
 ### Added
