@@ -4,7 +4,7 @@
   "manifest_version": 1,
   "author": "FullPeople",
   "homepage_url": "https://github.com/FullPeople/obr-suite",
-  "description": "All-in-one TRPG suite / TRPG 全能套装：骰子、先攻、怪物图鉴、角色卡、搜索、时停、视口、传送门",
+  "description": "TRPG 全能套装: 骰子, 先攻, 图鉴, 角色卡, 搜索, 时停, 传送门",
   "icon": "/suite/exe_icon.png",
   "background_url": "/suite/background.html",
   "action": {
