@@ -60,6 +60,31 @@ interface TabDef {
 let activeTab = "support";
 let isGM = false;
 
+// Backers credited in the support tab. Edit this array to add new
+// supporter names — keep order roughly chronological for fairness.
+const SUPPORTERS: string[] = [
+  "戥", "折云", "咸鱼", "呸呸", "Ejectam719",
+];
+
+function supportersHtml(lang: Language): string {
+  const list = SUPPORTERS.map(
+    (n) => `<span class="backer">${n}</span>`,
+  ).join("");
+  return lang === "zh"
+    ? `<h3>${ICONS.heart} 鸣谢</h3>
+       <div class="backers-box">
+         <p>感谢以下用户在爱发电上的支持：</p>
+         <div class="backers">${list}</div>
+         <p class="backers-extra">以及所有未具名的爱发电用户 — 你们让这个项目走得下去。</p>
+       </div>`
+    : `<h3>${ICONS.heart} Thanks</h3>
+       <div class="backers-box">
+         <p>Thanks to the following supporters on Afdian:</p>
+         <div class="backers">${list}</div>
+         <p class="backers-extra">…and to every anonymous backer — you keep this project alive.</p>
+       </div>`;
+}
+
 const SUPPORT: BilingualHtml = {
   zh: `
     <p>这套插件由 <b>弗人 FullPeople</b> 利用业余时间维护，所有代码开源于 GitHub。如果它对你的跑团有帮助，欢迎以下方式支持作者：</p>
@@ -67,6 +92,7 @@ const SUPPORT: BilingualHtml = {
       <a class="support-btn kofi" href="${KOFI_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.coffee}</span> Support on Ko-fi</a>
       <a class="support-btn afdian" href="${AFDIAN_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.heart}</span> 前往爱发电</a>
     </div>
+    ${supportersHtml("zh")}
     <h3>${ICONS.mail} 反馈</h3>
     <div class="contact-box">
       <p>遇到 bug、想加新功能、想交流插件开发，欢迎邮件联系：</p>
@@ -83,6 +109,7 @@ const SUPPORT: BilingualHtml = {
       <a class="support-btn kofi" href="${KOFI_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.coffee}</span> Support on Ko-fi</a>
       <a class="support-btn afdian" href="${AFDIAN_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.heart}</span> Afdian (Chinese Patreon)</a>
     </div>
+    ${supportersHtml("en")}
     <h3>${ICONS.mail} Feedback</h3>
     <div class="contact-box">
       <p>Found a bug, want a feature, or want to chat about plugin dev — please reach out:</p>
