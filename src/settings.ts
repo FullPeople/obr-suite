@@ -63,7 +63,7 @@ let isGM = false;
 // Backers credited in the support tab. Edit this array to add new
 // supporter names — keep order roughly chronological for fairness.
 const SUPPORTERS: string[] = [
-  "戥.", "折云", "咸鱼", "呸呸", "Ejectam719",
+  "fu读机", "折云", "咸鱼", "呸呸", "Ejectam719",
   "皓天", "莫西斯", "艾迪", "诺雁",
 ];
 
