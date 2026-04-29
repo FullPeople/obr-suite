@@ -68,7 +68,7 @@ const SUPPORTERS: string[] = [
   "愛睡眠（好崩溃睡不着ver）", "这只冒险小队没有人类了",
   "奶牛饭", "DK", "黄烟", "盲人过北极", "1234",
   "浩然正气","青灯栖凰","深白色(●—●)","白辰","瀞聆","滑而不稽则罔","Aisle","PB27",
-  "蚀星ErosionStar","消炎药","SiriusTGT","悠悠向青山","小舟"
+  "蚀星ErosionStar","消炎药","SiriusTGT","悠悠向青山","小舟","孤月映寒"
 ];
 
 function supportersHtml(lang: Language): string {
@@ -726,10 +726,10 @@ const TABS: TabDef[] = [
             ${seg("2024", "2024")}
             ${seg("all", "2014+2024")}
           </div>
-          <p style="margin-top:6px">${
+          <p style="margin-top:6px;line-height:1.7">${
             lang === "zh"
-              ? "决定怪物图鉴和搜索框显示的数据范围。2014 = 仅 PHB+MM；2024 = 仅 XPHB+XMM；2014+2024 = 全部。"
-              : "Controls the data range shown in Bestiary and Global Search. 2014 = PHB+MM only; 2024 = XPHB+XMM only; 2014+2024 = everything."
+              ? "决定怪物图鉴和搜索框显示的数据范围：<br>· 2014 = 仅 PHB + MM<br>· 2024 = 仅 XPHB + XMM<br>· 2014+2024 = 全部"
+              : "Controls the data range shown in Bestiary and Global Search:<br>· 2014 = PHB + MM only<br>· 2024 = XPHB + XMM only<br>· 2014+2024 = everything"
           }</p>
           ${!isGM ? `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
         </div>
@@ -827,16 +827,31 @@ const TABS: TabDef[] = [
     moduleId: "characterCards",
     dynamicBody: (lang) => {
       const desc = lang === "zh" ? CHARCARD_DESC.zh : CHARCARD_DESC.en;
-      const btn = lang === "zh"
-        ? `<a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-v1.0.12.xlsx"
-              download="DND5.5E人物卡-悲灵v1.0.12.xlsx" target="_blank" rel="noopener">
-              ⬇ 下载角色卡 xlsx 模板（悲灵 v1.0.12）
-            </a>`
-        : `<a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-v1.0.12.xlsx"
-              download="DND5.5E-Character-Sheet-v1.0.12.xlsx" target="_blank" rel="noopener">
-              ⬇ Download character sheet xlsx template (悲灵 v1.0.12, Chinese only)
-            </a>`;
-      return `${desc}${btn}`;
+      // Two templates side-by-side — both share the same xlsx layout
+      // (parsed by the same rules), only the D&D edition differs.
+      // 2014 = traditional 5e; 2024 = the revised "One D&D" rules.
+      const btns = lang === "zh"
+        ? `<div class="dl-row">
+             <a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-2014-v3.5.9.xlsx"
+                download="DND5E人物卡_悲灵v3.5.9 (2014).xlsx" target="_blank" rel="noopener">
+               ⬇ 5E2014 模板（传统 5e · 悲灵 v3.5.9）
+             </a>
+             <a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-v1.0.12.xlsx"
+                download="DND5.5E人物卡-悲灵v1.0.12 (2024).xlsx" target="_blank" rel="noopener">
+               ⬇ 5E2024 模板（5e 修订 · 悲灵 v1.0.12）
+             </a>
+           </div>`
+        : `<div class="dl-row">
+             <a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-2014-v3.5.9.xlsx"
+                download="DND5E-Character-Sheet-v3.5.9 (2014).xlsx" target="_blank" rel="noopener">
+               ⬇ 5E2014 sheet (legacy 5e · 悲灵 v3.5.9)
+             </a>
+             <a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-v1.0.12.xlsx"
+                download="DND5.5E-Character-Sheet-v1.0.12 (2024).xlsx" target="_blank" rel="noopener">
+               ⬇ 5E2024 sheet (revised 5e · 悲灵 v1.0.12)
+             </a>
+           </div>`;
+      return `${desc}${btns}`;
     },
   },
   {
@@ -844,7 +859,62 @@ const TABS: TabDef[] = [
     zh: `${ICONS.swords} 先攻追踪`,
     en: `${ICONS.swords} Initiative Tracker`,
     moduleId: "initiative",
-    body: INITIATIVE_DESC,
+    dynamicBody: (lang) => {
+      const s = getState();
+      const focusOn = s.initiativeFocusOnTurnChange !== false;
+      const autoSnap = !!s.initiativeAutoSnapOnPrep;
+      return `
+        ${INITIATIVE_DESC[lang]}
+        <h3>${lang === "zh" ? "选项" : "Options"}</h3>
+        <div class="row">
+          <div class="lbl">
+            ${lang === "zh" ? "轮换时聚焦当前角色" : "Focus current character on turn change"}
+            <div class="desc"><em>${
+              lang === "zh"
+                ? "下一回合时，所有客户端的镜头自动平移到当前行动角色身上。"
+                : "When the turn advances, every client's camera pans to the active character."
+            }</em></div>
+          </div>
+          <button class="tog ${
+            focusOn ? "on" : ""
+          }" data-key="initiativeFocusOnTurnChange" type="button" ${
+            isGM ? "" : "disabled"
+          } aria-pressed="${focusOn}"></button>
+        </div>
+        <div class="row">
+          <div class="lbl">
+            ${lang === "zh" ? "战斗准备阶段自动对齐网格中心" : "Auto-snap to grid centre on combat prep"}
+            <div class="desc"><em>${
+              lang === "zh"
+                ? "进入「战斗准备」时，把所有先攻条目里的 token 吸附到最近的网格格子中心。"
+                : "When combat preparation starts, every initiative token snaps to the centre of its nearest grid cell."
+            }</em></div>
+          </div>
+          <button class="tog ${
+            autoSnap ? "on" : ""
+          }" data-key="initiativeAutoSnapOnPrep" type="button" ${
+            isGM ? "" : "disabled"
+          } aria-pressed="${autoSnap}"></button>
+        </div>
+        ${!isGM ? `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
+      `;
+    },
+    afterRender: (root) => {
+      root
+        .querySelector<HTMLButtonElement>('.tog[data-key="initiativeFocusOnTurnChange"]')
+        ?.addEventListener("click", async () => {
+          if (!isGM) return;
+          const cur = getState().initiativeFocusOnTurnChange !== false;
+          await setState({ initiativeFocusOnTurnChange: !cur });
+        });
+      root
+        .querySelector<HTMLButtonElement>('.tog[data-key="initiativeAutoSnapOnPrep"]')
+        ?.addEventListener("click", async () => {
+          if (!isGM) return;
+          const cur = !!getState().initiativeAutoSnapOnPrep;
+          await setState({ initiativeAutoSnapOnPrep: !cur });
+        });
+    },
   },
   {
     id: "dice",

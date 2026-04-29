@@ -58,6 +58,14 @@ export interface SuiteState {
   // metadata is omitted and the DM has to right-click → Add to
   // initiative manually. Default true (matches legacy behavior).
   bestiaryAutoInitiative: boolean;
+  // Initiative tracker — focus the active token's owner camera onto
+  // the next character whenever the turn advances. Default true.
+  initiativeFocusOnTurnChange: boolean;
+  // Initiative tracker — when entering "preparing combat" state, snap
+  // every initiative token to the center of its grid cell so the
+  // turn order tokens line up cleanly. Default false (most groups
+  // pre-position by hand).
+  initiativeAutoSnapOnPrep: boolean;
   libraries: LibraryConfig[];
 }
 
@@ -85,6 +93,8 @@ export const DEFAULT_STATE: SuiteState = {
   dataVersion: "2024",
   allowPlayerMonsters: false,
   bestiaryAutoInitiative: true,
+  initiativeFocusOnTurnChange: true,
+  initiativeAutoSnapOnPrep: false,
   libraries: DEFAULT_LIBRARIES,
 };
 
@@ -128,6 +138,10 @@ function merge(partial: any): SuiteState {
       partial.allowPlayerMonsters ?? DEFAULT_STATE.allowPlayerMonsters,
     bestiaryAutoInitiative:
       partial.bestiaryAutoInitiative ?? DEFAULT_STATE.bestiaryAutoInitiative,
+    initiativeFocusOnTurnChange:
+      partial.initiativeFocusOnTurnChange ?? DEFAULT_STATE.initiativeFocusOnTurnChange,
+    initiativeAutoSnapOnPrep:
+      partial.initiativeAutoSnapOnPrep ?? DEFAULT_STATE.initiativeAutoSnapOnPrep,
     libraries,
   };
 }
@@ -136,6 +150,8 @@ function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
   if (a.dataVersion !== b.dataVersion) return false;
   if (a.allowPlayerMonsters !== b.allowPlayerMonsters) return false;
   if (a.bestiaryAutoInitiative !== b.bestiaryAutoInitiative) return false;
+  if (a.initiativeFocusOnTurnChange !== b.initiativeFocusOnTurnChange) return false;
+  if (a.initiativeAutoSnapOnPrep !== b.initiativeAutoSnapOnPrep) return false;
   for (const k of Object.keys(a.enabled) as ModuleId[]) {
     if (a.enabled[k] !== b.enabled[k]) return false;
   }

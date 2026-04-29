@@ -465,6 +465,19 @@ export function useInitiative() {
   }, []);
 
   const broadcastFocus = useCallback(async (itemId: string) => {
+    // Suite-level "focus on turn change" gate. Read at call time so
+    // the user can toggle it mid-combat and have it take effect for
+    // the next turn without restarting. Falls back to true when the
+    // suite isn't installed (legacy behaviour).
+    let focusEnabled = true;
+    try {
+      const meta = await OBR.scene.getMetadata();
+      const s: any = (meta as any)["com.obr-suite/state"];
+      if (s && typeof s.initiativeFocusOnTurnChange === "boolean") {
+        focusEnabled = s.initiativeFocusOnTurnChange;
+      }
+    } catch {}
+    if (!focusEnabled) return;
     OBR.broadcast.sendMessage(BROADCAST_FOCUS, { itemId });
     focusItem(itemId);
   }, [focusItem]);
@@ -677,6 +690,41 @@ export function useInitiative() {
           }
         }
       });
+    }
+    // Optional: snap every initiative token to the centre of its grid
+    // cell so the turn order looks tidy at the start of combat. Read
+    // the toggle from suite scene metadata; fall back to off when the
+    // suite isn't installed (legacy behaviour).
+    let autoSnap = false;
+    try {
+      const meta = await OBR.scene.getMetadata();
+      const s: any = (meta as any)["com.obr-suite/state"];
+      if (s && typeof s.initiativeAutoSnapOnPrep === "boolean") {
+        autoSnap = s.initiativeAutoSnapOnPrep;
+      }
+    } catch {}
+    if (autoSnap && allIds.length > 0) {
+      try {
+        const dpi = await OBR.scene.grid.getDpi().catch(() => 150);
+        const half = dpi / 2;
+        // Snap to the *centre* of the nearest grid cell (not the
+        // corner). For square grids cell centres are at (n*dpi +
+        // dpi/2, m*dpi + dpi/2). The (pos - half) / dpi → round →
+        // * dpi + half formula works whether the token's position
+        // currently represents a corner or already a centre — both
+        // cases fall onto the closest centre. Hex grids would need
+        // axial-coord math; out of scope for this toggle.
+        await OBR.scene.items.updateItems(allIds, (drafts) => {
+          for (const d of drafts) {
+            d.position = {
+              x: Math.round((d.position.x - half) / dpi) * dpi + half,
+              y: Math.round((d.position.y - half) / dpi) * dpi + half,
+            };
+          }
+        });
+      } catch (e) {
+        console.warn("[obr-suite/initiative] auto-snap on prep failed", e);
+      }
     }
     await writeCombatState({ preparing: true, inCombat: false, round: 0 });
     fireBroadcast(BROADCAST_COMBAT_PREPARE, { effectType });

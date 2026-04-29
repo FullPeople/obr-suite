@@ -157,17 +157,30 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
     <div class="side-head">
       <div class="title">📇 <span data-i18n="ccPanelTitle">角色卡</span></div>
       <div class="head-actions">
+        <!-- Two template versions live side-by-side. Same xlsx schema,
+             only the rules edition differs (2014 = traditional 5e,
+             2024 = the 5e revised). The cc-panel parser handles both
+             with one rule set. -->
+        <a
+          class="icon-btn"
+          href="https://obr.dnd.center/suite/template-belling-2014-v3.5.9.xlsx"
+          download="DND5E人物卡_悲灵v3.5.9 (2014).xlsx"
+          target="_blank"
+          rel="noopener"
+          data-i18n="ccPanelDownloadTpl2014"
+          data-i18n-title="ccPanelDownloadTpl2014Title"
+          title="下载 5E2014（传统 5e）角色卡模板"
+        >2014 模板</a>
         <a
           class="icon-btn"
           href="https://obr.dnd.center/suite/template-belling-v1.0.12.xlsx"
-          download="DND5.5E人物卡-悲灵v1.0.12.xlsx"
+          download="DND5.5E人物卡-悲灵v1.0.12 (2024).xlsx"
           target="_blank"
           rel="noopener"
-          data-i18n="ccPanelDownloadTpl"
-          data-i18n-title="ccPanelDownloadTplTitle"
-          title="下载本插件支持的悲灵 v1.0.12 角色卡模板（xlsx）"
-        >下载模板</a>
-        <!-- About button removed — suite's centralized About panel covers it. -->
+          data-i18n="ccPanelDownloadTpl2024"
+          data-i18n-title="ccPanelDownloadTpl2024Title"
+          title="下载 5E2024（5e 修订）角色卡模板"
+        >2024 模板</a>
         <button class="close" id="closeBtn" data-i18n-title="ccPanelClose" title="关闭 (Esc)">✕</button>
       </div>
     </div>
