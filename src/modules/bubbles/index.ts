@@ -319,7 +319,7 @@ half4 main(float2 coord) {
   float bandX = bandPos * size.x;
   float bandWidth = max(8.0, size.x * 0.08);
   float bd = (coord.x - bandX) / bandWidth;
-  float band = exp(-bd * bd) * 0.50;
+  float band = exp(-bd * bd) * 0.85;
 
   // Two interfering sine waves → subtle "liquid sloshing".
   float ripple = sin(coord.x * 0.35 - iTime * 3.0) * 0.07
@@ -328,8 +328,16 @@ half4 main(float2 coord) {
   // Top-edge brightening for a hint of 3D volume.
   float vgrad = (1.0 - coord.y / size.y) * 0.20;
 
-  float intensity = band + max(0.0, ripple) + vgrad;
-  return half4(half3(1.0) * intensity, intensity * edge);
+  // Final intensity. Probe runs showed the bar visibly rendering
+  // but with alpha so low it read as "nothing happening", so the
+  // raw sum is multiplied 2.5× and clamped to 1.0. The base
+  // ripple+vgrad bias provides a faint always-on warm glow so
+  // even the off-band sections show some color.
+  float intensity = clamp((band + max(0.0, ripple) + vgrad) * 2.5, 0.0, 1.0);
+  // Slight reddish warmth so the shimmer reads as "blood" rather
+  // than plain white noise.
+  half3 color = half3(1.0, 0.78, 0.78);
+  return half4(color * intensity, intensity * edge);
 }
 `;
 
@@ -619,186 +627,6 @@ function buildHpShimmer(ctx: BuildContext, L: BarLayout, ratio: number): any {
     .build();
 }
 
-// --- TEST VARIANTS (debug-only) ----------------------------------------
-// Stack of 6 thin probe bars under the main HP bar. Each uses a
-// different (effectType × blendMode × shader) combo so the user
-// can eyeball which actually animates and report back; we'll then
-// keep that combo and delete the rest. Bars sit BELOW the token,
-// 60% of the main bar height each.
-
-const SKSL_CONST_MAGENTA = `
-half4 main(float2 c) {
-  return half4(1.0, 0.0, 1.0, 0.6);
-}
-`;
-
-const SKSL_PULSE = `
-uniform float iTime;
-half4 main(float2 c) {
-  float p = sin(iTime * 2.0) * 0.4 + 0.5;
-  return half4(p, 1.0 - p, 0.0, 0.7);
-}
-`;
-
-interface TestVariantSpec {
-  name: string;
-  kind: "effect" | "curve";
-  effectType?: "STANDALONE" | "ATTACHMENT" | "VIEWPORT";
-  blendMode?: "SRC_OVER" | "PLUS" | "MULTIPLY" | "SCREEN";
-  sksl?: string;
-  uniforms?: (L: BarLayout, ratio: number, height: number) => Array<{ name: string; value: any }>;
-  curveColor?: string;
-}
-
-const TEST_VARIANTS: TestVariantSpec[] = [
-  {
-    name: "1 STD/SRC anim",
-    kind: "effect",
-    effectType: "STANDALONE",
-    blendMode: "SRC_OVER",
-    sksl: HP_SHIMMER_SKSL,
-    uniforms: (L, ratio, h) => [
-      { name: "iTime", value: 0 },
-      { name: "iSize", value: { x: L.barWidth, y: h } },
-      { name: "ratio", value: ratio },
-    ],
-  },
-  {
-    name: "2 STD/PLUS anim",
-    kind: "effect",
-    effectType: "STANDALONE",
-    blendMode: "PLUS",
-    sksl: HP_SHIMMER_SKSL,
-    uniforms: (L, ratio, h) => [
-      { name: "iTime", value: 0 },
-      { name: "iSize", value: { x: L.barWidth, y: h } },
-      { name: "ratio", value: ratio },
-    ],
-  },
-  {
-    name: "3 ATT/SRC anim",
-    kind: "effect",
-    effectType: "ATTACHMENT",
-    blendMode: "SRC_OVER",
-    sksl: HP_SHIMMER_SKSL,
-    uniforms: (L, ratio, h) => [
-      { name: "iTime", value: 0 },
-      { name: "iSize", value: { x: L.barWidth, y: h } },
-      { name: "ratio", value: ratio },
-    ],
-  },
-  {
-    name: "4 STD/SRC magenta",       // tests Effect renders AT ALL
-    kind: "effect",
-    effectType: "STANDALONE",
-    blendMode: "SRC_OVER",
-    sksl: SKSL_CONST_MAGENTA,
-    uniforms: () => [],
-  },
-  {
-    name: "5 STD/SRC iTime pulse",   // tests iTime uniform updates
-    kind: "effect",
-    effectType: "STANDALONE",
-    blendMode: "SRC_OVER",
-    sksl: SKSL_PULSE,
-    uniforms: () => [{ name: "iTime", value: 0 }],
-  },
-  {
-    name: "6 control curve",         // no shader at all — confirms position
-    kind: "curve",
-    curveColor: "#ff00ff",
-  },
-];
-
-function buildTestVariant(
-  ctx: BuildContext,
-  L: BarLayout,
-  ratio: number,
-  index: number,
-  variant: TestVariantSpec,
-): any {
-  const testHeight = Math.max(8, L.barHeight * 0.6);
-  const gap = 2;
-  const testY = L.barOrigin.y + L.barHeight + gap + index * (testHeight + gap);
-
-  if (variant.kind === "effect") {
-    return buildEffect()
-      .effectType(variant.effectType!)
-      .blendMode(variant.blendMode!)
-      .width(L.barWidth)
-      .height(testHeight)
-      .sksl(variant.sksl!)
-      .uniforms(variant.uniforms ? variant.uniforms(L, ratio, testHeight) : [])
-      .position({ x: L.barOrigin.x, y: testY })
-      .layer("ATTACHMENT")
-      .attachedTo(ctx.token.id)
-      .locked(true)
-      .disableHit(true)
-      .visible(true)
-      .disableAutoZIndex(true)
-      .zIndex(25000 + index * 10)
-      .disableAttachmentBehavior(DISABLE_INHERIT)
-      .metadata(bubbleMeta(ctx.token.id, "hp-shimmer"))
-      .build();
-  }
-  // Curve control variant — straight rounded-rect with bright color.
-  return buildCurve()
-    .fillColor(variant.curveColor!)
-    .fillOpacity(0.7)
-    .strokeOpacity(0)
-    .strokeWidth(0)
-    .tension(0)
-    .closed(true)
-    .points(roundedRectanglePoints(L.barWidth, testHeight, testHeight / 2))
-    .position({ x: L.barOrigin.x, y: testY })
-    .layer("ATTACHMENT")
-    .attachedTo(ctx.token.id)
-    .locked(true)
-    .disableHit(true)
-    .visible(true)
-    .disableAutoZIndex(true)
-    .zIndex(25000 + index * 10)
-    .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata(bubbleMeta(ctx.token.id, "hp-fill"))
-    .build();
-}
-
-function buildTestVariantLabel(
-  ctx: BuildContext,
-  L: BarLayout,
-  index: number,
-  name: string,
-): any {
-  const testHeight = Math.max(8, L.barHeight * 0.6);
-  const gap = 2;
-  const testY = L.barOrigin.y + L.barHeight + gap + index * (testHeight + gap);
-  return buildText()
-    .plainText(name)
-    .textType("PLAIN")
-    .textAlign("LEFT")
-    .textAlignVertical("MIDDLE")
-    .fontFamily(FONT_FAMILY)
-    .fontSize(testHeight * 0.7)
-    .fontWeight(700)
-    .fillColor("#ffffff")
-    .strokeColor("#000000")
-    .strokeOpacity(0.7)
-    .strokeWidth(1.0)
-    .lineHeight(0.95)
-    .width(220)
-    .height(testHeight)
-    .position({ x: L.barOrigin.x + L.barWidth + 4, y: testY })
-    .layer("TEXT")
-    .attachedTo(ctx.token.id)
-    .locked(true)
-    .disableHit(true)
-    .visible(true)
-    .disableAutoZIndex(true)
-    .zIndex(35000 + index)
-    .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata(bubbleMeta(ctx.token.id, "hp-text"))
-    .build();
-}
 
 function buildBarText(ctx: BuildContext, L: BarLayout, data: BubbleData): any {
   const text = `${data.hp}/${data.maxHp}${data.tempHp > 0 ? ` +${data.tempHp}` : ""}`;
@@ -1179,20 +1007,18 @@ async function syncBubbles(): Promise<void> {
         toAdd.push(bg, fill);
         newIds.push(bg.id, fill.id);
 
-        // === DEBUG TEST VARIANTS ===
-        // 6 probe rows below the main bar so we can identify which
-        // (effectType, blendMode, shader) combo OBR actually
-        // animates. To be removed once the user reports which row
-        // works.
+        // Single STD/SRC shimmer with a brighter shader than the
+        // probe version. Test rows 1+2 confirmed the path renders
+        // and animates — they were just too dim. The shader's
+        // intensity has been multiplied 3× and the band peak
+        // raised so the highlight reads cleanly without needing
+        // PLUS blend (which the probe row 2 showed buys nothing
+        // on top of SRC_OVER).
         if (w.statsVisible) {
-          for (let i = 0; i < TEST_VARIANTS.length; i++) {
-            const v = TEST_VARIANTS[i];
-            const item = buildTestVariant(ctx, w.layout, ratio, i, v);
-            const label = buildTestVariantLabel(ctx, w.layout, i, v.name);
-            toAdd.push(item, label);
-            newIds.push(item.id, label.id);
-            if (v.kind === "effect") shimmerIds.push(item.id);
-          }
+          const shimmer = buildHpShimmer(ctx, w.layout, ratio);
+          toAdd.push(shimmer);
+          newIds.push(shimmer.id);
+          shimmerIds.push(shimmer.id);
         }
 
         toAdd.push(text);
