@@ -6,131 +6,155 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{
-  height:100%;
+  height:100%;width:100%;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
-  background:#1a1a2e;color:#eee;overflow:hidden;
+  background:transparent;color:#eee;overflow:hidden;
 }
-.wrap{
-  display:flex;flex-direction:column;height:100%;padding:14px 18px;
+/* The popover iframe is opened with hidePaper:true and the bg is
+   transparent — we draw our own bubble with a faint stroke + tail
+   so it visually anchors to the portal beneath. */
+.bubble{
+  position:absolute; left:8px; right:8px; top:8px; bottom:14px;
+  background:rgba(20,18,38,0.86);
+  border:1px solid rgba(167,139,250,0.45);
+  border-radius:10px;
+  box-shadow:0 6px 20px rgba(0,0,0,.45), 0 0 24px rgba(167,139,250,.15);
+  backdrop-filter:blur(6px) saturate(1.05);
+  -webkit-backdrop-filter:blur(6px) saturate(1.05);
+  display:flex; flex-direction:column;
+  padding:9px 10px 8px;
+  overflow:hidden;
 }
-.title{
-  font-size:14px;font-weight:700;color:#a78bfa;
-  display:flex;align-items:center;gap:6px;
-  padding-bottom:8px;
-  border-bottom:1px solid rgba(255,255,255,.1);
-  margin-bottom:8px;
+/* Downward-pointing tail (default — popover sits ABOVE the portal). */
+.tail{
+  position:absolute; left:50%; bottom:0;
+  transform:translateX(-50%);
+  width:14px; height:14px;
+  background:rgba(20,18,38,0.86);
+  border-right:1px solid rgba(167,139,250,0.45);
+  border-bottom:1px solid rgba(167,139,250,0.45);
+  transform-origin:center;
+  rotate:45deg; translate: -50% 50%;
 }
+/* Upward tail when the popover had to flip below the portal. */
+body.below .bubble{ top:14px; bottom:8px; }
+body.below .tail{
+  top:0; bottom:auto;
+  border-right:none; border-bottom:none;
+  border-left:1px solid rgba(167,139,250,0.45);
+  border-top:1px solid rgba(167,139,250,0.45);
+  rotate:45deg; translate: -50% -50%;
+}
+.head{
+  display:flex; align-items:center; gap:6px;
+  font-size:11.5px; font-weight:700; color:#c4b5fd;
+  margin-bottom:6px;
+}
+.head .ico{font-size:13px}
+.head .nm{flex:1; color:#e0e7ff; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.head .ta{font-size:10px; color:#8884a8; letter-spacing:.4px; flex-shrink:0}
+.head .x{
+  margin-left:4px; padding:0 5px; height:16px; line-height:14px;
+  color:#9aa0b3; cursor:pointer; border-radius:3px;
+  font-size:13px; font-weight:600;
+}
+.head .x:hover{background:rgba(255,255,255,.08); color:#eee}
 .sub{
-  font-size:11.5px;color:#bbb;line-height:1.5;
-  margin-bottom:8px;
+  font-size:10.5px; color:#a3a0bd; line-height:1.4;
+  margin-bottom:5px;
+  padding-bottom:4px;
+  border-bottom:1px dashed rgba(255,255,255,.07);
 }
-.sub b{color:#e0e7ff}
 .list{
-  flex:1;overflow-y:auto;
-  display:flex;flex-direction:column;gap:5px;
+  flex:1; overflow-y:auto;
+  display:flex; flex-direction:column; gap:3px;
   padding-right:2px;
 }
-.list::-webkit-scrollbar{width:4px}
-.list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}
+.list::-webkit-scrollbar{width:3px}
+.list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:2px}
 .opt{
-  display:flex;align-items:center;gap:8px;
-  padding:8px 10px;
-  background:rgba(255,255,255,.05);
-  border:1px solid rgba(255,255,255,.1);
-  border-radius:7px;
+  display:flex; align-items:center; gap:7px;
+  padding:6px 8px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:6px;
   cursor:pointer;
-  transition:background .12s,border-color .12s;
+  transition:background .12s, border-color .12s, transform .08s;
 }
-.opt:hover{background:rgba(167,139,250,.18);border-color:rgba(167,139,250,.45)}
-.opt .ico{font-size:14px;color:#a78bfa;flex-shrink:0}
-.opt .nm{flex:1;font-size:13px;color:#eee;font-weight:600}
-.opt .ta{font-size:10.5px;color:#9aa0b3;letter-spacing:.5px}
-.opt .hd{font-size:10px;color:#888;font-style:italic;margin-left:4px}
-.btn-row{
-  display:flex;gap:6px;justify-content:flex-end;
-  padding-top:8px;
-  border-top:1px solid rgba(255,255,255,.1);
-  margin-top:8px;
-}
-.btn{
-  padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;
-  background:rgba(255,255,255,.06);color:#bbb;
-  border:1px solid rgba(255,255,255,.12);
-}
-.btn:hover{background:rgba(255,255,255,.1)}
-.empty{padding:24px;text-align:center;color:#888;font-size:12px}
+.opt:hover{background:rgba(167,139,250,.20);border-color:rgba(167,139,250,.55)}
+.opt:active{transform:scale(0.98)}
+.opt .ic{font-size:12px;color:#a78bfa;flex-shrink:0}
+.opt .nm{flex:1;font-size:12px;color:#eee;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.opt .ta{font-size:9.5px;color:#8884a8;letter-spacing:.4px;flex-shrink:0}
+.opt .hd{font-size:9px;color:#888;font-style:italic}
+.empty{padding:12px;text-align:center;color:#888;font-size:11px}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="title" id="title">◐ 传送门</div>
+<div class="bubble">
+  <div class="head">
+    <span class="ico">◐</span>
+    <span class="nm" id="entry-name"></span>
+    <span class="ta" id="entry-tag"></span>
+    <span class="x" id="btn-close" title="关闭">×</span>
+  </div>
   <div class="sub" id="sub"></div>
   <div class="list" id="list"></div>
-  <div class="btn-row">
-    <button class="btn" id="btn-cancel">取消</button>
-  </div>
 </div>
+<div class="tail"></div>
 <script type="module">
 import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
 
 const PLUGIN_ID = "com.obr-suite/portals";
-const MODAL_ID = `${PLUGIN_ID}/destination-modal`;
+const POPOVER_ID = `${PLUGIN_ID}/destination-popover`;
 const BROADCAST_TELEPORT = `${PLUGIN_ID}/teleport`;
 const BROADCAST_DEST_CLOSED = `${PLUGIN_ID}/dest-modal-closed`;
 
-// Per-client UI language (mirrors src/state.ts LS_LANG).
 const LANG = (() => {
   try { const v = localStorage.getItem("obr-suite/lang"); if (v === "en" || v === "zh") return v; } catch {}
   return "zh";
 })();
 const L = {
   zh: {
-    title: "传送门",
-    sub: (n) => `选择目的地（${n} 个单位）`,
-    cancel: "取消",
+    sub: (n) => `选择目的地 · ${n} 个单位`,
     empty: "没有同标签的其它传送门",
     hidden: "隐藏",
   },
   en: {
-    title: "Portal",
-    sub: (n) => `Select destination (${n} unit${n === 1 ? "" : "s"})`,
-    cancel: "Cancel",
-    empty: "No other portals with the same tag",
+    sub: (n) => `Pick destination · ${n} unit${n === 1 ? "" : "s"}`,
+    empty: "No other portals with this tag",
     hidden: "Hidden",
   },
 }[LANG];
 document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
-document.getElementById("title").textContent = "◐ " + L.title;
-document.getElementById("btn-cancel").textContent = L.cancel;
 
 const params = new URLSearchParams(location.search);
-let payload = { entryName: "", entryTag: "", candidates: [], tokenIds: [] };
+let payload = { entryName: "", entryTag: "", candidates: [], tokenIds: [], placeBelow: false };
 try { payload = JSON.parse(params.get("p") || "{}"); } catch {}
+
+if (payload.placeBelow) document.body.classList.add("below");
 
 const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+document.getElementById("entry-name").textContent = payload.entryName || "传送门";
+document.getElementById("entry-tag").textContent = payload.entryTag ? `[${payload.entryTag}]` : "";
 document.getElementById("sub").textContent = L.sub(payload.tokenIds.length);
 
 const listEl = document.getElementById("list");
-
 if (!payload.candidates || payload.candidates.length === 0) {
   listEl.innerHTML = `<div class="empty">${L.empty}</div>`;
 } else {
   listEl.innerHTML = payload.candidates.map((c) =>
     `<div class="opt" data-id="${escHtml(c.id)}">
-       <span class="ico">◐</span>
+       <span class="ic">◐</span>
        <span class="nm">${escHtml(c.name)}</span>
-       <span class="ta">[${escHtml(c.tag)}]</span>
+       <span class="ta">${escHtml(c.tag)}</span>
        ${c.hidden ? `<span class="hd">${L.hidden}</span>` : ''}
      </div>`
   ).join("");
 }
 
-// Send the close signal eagerly + idempotently. The background
-// module's `destModalOpen` flag must always become `false` so the
-// next portal entry can re-open the modal — otherwise canceling
-// once locks the feature for the rest of the session.
 let closedFired = false;
 async function notifyClosed() {
   if (closedFired) return;
@@ -138,6 +162,11 @@ async function notifyClosed() {
   try {
     await OBR.broadcast.sendMessage(BROADCAST_DEST_CLOSED, {}, { destination: "LOCAL" });
   } catch {}
+}
+
+async function dismiss() {
+  await notifyClosed();
+  try { await OBR.popover.close(POPOVER_ID); } catch {}
 }
 
 OBR.onReady(async () => {
@@ -151,23 +180,18 @@ OBR.onReady(async () => {
           { destination: "LOCAL" }
         );
       } catch (e) { console.error("[portals] teleport broadcast", e); }
-      // Teleport listener already resets destModalOpen; we still send
-      // the close signal as a belt-and-suspenders.
+      // Bg listener will close this popover and open the blink modal,
+      // but send a close-signal as a belt-and-suspenders.
       await notifyClosed();
-      try { await OBR.modal.close(MODAL_ID); } catch {}
     });
   });
-  document.getElementById("btn-cancel").addEventListener("click", async () => {
-    await notifyClosed();
-    try { await OBR.modal.close(MODAL_ID); } catch {}
-  });
+  document.getElementById("btn-close").addEventListener("click", dismiss);
 
-  // Catch-alls — Esc / OBR's own X / page navigation.
+  window.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { ev.preventDefault(); void dismiss(); }
+  });
   window.addEventListener("beforeunload", () => { void notifyClosed(); });
   window.addEventListener("pagehide", () => { void notifyClosed(); });
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") void notifyClosed();
-  });
 });
 </script>
 </body>

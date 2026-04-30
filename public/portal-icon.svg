@@ -2,14 +2,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
   <defs>
     <radialGradient id="portalGlow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.55"/>
-      <stop offset="55%" stop-color="#6366f1" stop-opacity="0.35"/>
+      <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.6"/>
+      <stop offset="60%" stop-color="#6366f1" stop-opacity="0.38"/>
+      <stop offset="92%" stop-color="#3730a3" stop-opacity="0.22"/>
       <stop offset="100%" stop-color="#1e1b4b" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <!-- Visible glow fills the full 64x64 viewBox so the rendered icon
-       diameter matches the trigger radius 1:1. -->
-  <circle cx="32" cy="32" r="31" fill="url(#portalGlow)"/>
+  <!-- Glow fills the FULL 64×64 viewBox so the rendered diameter
+       equals 2×radius scene-units 1:1 with the trigger zone. -->
+  <circle cx="32" cy="32" r="32" fill="url(#portalGlow)"/>
+  <!-- Crisp boundary ring at the visible/trigger edge so the user can
+       see exactly where the portal will fire. r=31.4 keeps a 0.6 px
+       anti-alias buffer inside the bounding box. -->
+  <circle cx="32" cy="32" r="31.4" stroke="#c4b5fd" stroke-width="0.8" stroke-opacity="0.85" fill="none"/>
   <g stroke="#e0e7ff" stroke-width="1.6" stroke-linecap="round" fill="none" opacity="0.9">
     <path d="M32 4 a28 28 0 0 1 0 56 a16 16 0 0 1 0 -32 a7 7 0 0 1 0 14"/>
     <path d="M32 4 a28 28 0 0 0 0 56" opacity="0.5"/>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Portal Blink</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  width:100%;height:100%;
+  background:transparent;color:#000;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+}
+/* Two black eyelids that meet at the center. We start them OFFSCREEN
+   (top above 0, bottom below 100%) and slide them in/out via CSS
+   variables driven from JS so the timing can be coordinated with the
+   bg-side teleport. The inner edges have a soft purple glow + a
+   gradient fade so the meeting line reads like flesh, not a hard cut. */
+.eyelid{
+  position:absolute; left:0; right:0;
+  pointer-events:none;
+  background:#000;
+  /* Drives a faint glow at the meeting line. */
+}
+.eyelid.top{
+  top:0;
+  height:50%;
+  transform:translateY(calc(-100% + var(--phase, 0%)));
+  /* Soft inner shadow gives the lid edge depth + lash hint. */
+  box-shadow:
+    inset 0 -3px 0 rgba(255,255,255,0.04),
+    0 4px 18px rgba(0,0,0,0.6),
+    0 0 26px rgba(167,139,250,0.18);
+  background:linear-gradient(to bottom, #000 0%, #000 80%, #06030f 100%);
+  transition:transform var(--blink-dur, 480ms) cubic-bezier(.55,.05,.45,1);
+}
+.eyelid.bottom{
+  bottom:0;
+  height:50%;
+  transform:translateY(calc(100% - var(--phase, 0%)));
+  box-shadow:
+    inset 0 3px 0 rgba(255,255,255,0.04),
+    0 -4px 18px rgba(0,0,0,0.6),
+    0 0 26px rgba(167,139,250,0.18);
+  background:linear-gradient(to top, #000 0%, #000 80%, #06030f 100%);
+  transition:transform var(--blink-dur, 480ms) cubic-bezier(.55,.05,.45,1);
+}
+/* A faint horizontal "seam" of purple haze that pulses while the eyes
+   are fully closed — visual confirmation that the teleport is happening. */
+.seam{
+  position:absolute; left:0; right:0; top:50%;
+  height:0;
+  transform:translateY(-50%);
+  pointer-events:none;
+  box-shadow:
+    0 0 0 0 rgba(167,139,250,0),
+    0 0 0 0 rgba(167,139,250,0);
+  opacity:0;
+  transition:opacity 220ms ease;
+}
+.seam.on{
+  opacity:1;
+  animation:seamPulse 720ms ease-in-out infinite;
+}
+@keyframes seamPulse{
+  0%,100%{ box-shadow: 0 0 0 0 rgba(167,139,250,0); }
+  50%   { box-shadow: 0 0 28px 2px rgba(167,139,250,0.35); }
+}
+</style>
+</head>
+<body>
+<div class="eyelid top"   id="lid-top"></div>
+<div class="eyelid bottom" id="lid-bottom"></div>
+<div class="seam" id="seam"></div>
+<script type="module">
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
+
+const PLUGIN_ID = "com.obr-suite/portals";
+const MODAL_ID = `${PLUGIN_ID}/blink-modal`;
+const BROADCAST_BLINK_PROCEED = `${PLUGIN_ID}/blink-proceed`;
+const BROADCAST_BLINK_DONE = `${PLUGIN_ID}/blink-done`;
+const BROADCAST_BLINK_CLOSED = `${PLUGIN_ID}/blink-modal-closed`;
+
+// Timing knobs — feel free to tune. The closed-window CAP guarantees
+// we never wait forever if BROADCAST_BLINK_DONE doesn't arrive
+// (e.g. user closed the panel mid-flight or the OBR call hung).
+const CLOSE_DUR = 480;     // ms eyelids slide together
+const HOLD_MIN  = 160;     // ms minimum eyes-fully-closed before reopening
+const CLOSED_CAP = 4000;   // ms hard cap on waiting for BLINK_DONE
+const OPEN_DUR  = 520;     // ms eyelids slide apart
+
+const lidTop = document.getElementById("lid-top");
+const lidBottom = document.getElementById("lid-bottom");
+const seam = document.getElementById("seam");
+
+function setBlinkDur(ms) {
+  document.documentElement.style.setProperty("--blink-dur", ms + "ms");
+}
+function setPhase(pct) {
+  // 0% = open (lids tucked away), 100% = closed (lids meeting at centre).
+  document.documentElement.style.setProperty("--phase", pct + "%");
+}
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let doneFired = false;
+let doneResolver = null;
+function awaitDone() {
+  return new Promise((resolve) => {
+    if (doneFired) return resolve();
+    doneResolver = resolve;
+  });
+}
+
+let closedFired = false;
+async function notifyClosed() {
+  if (closedFired) return;
+  closedFired = true;
+  try {
+    await OBR.broadcast.sendMessage(BROADCAST_BLINK_CLOSED, {}, { destination: "LOCAL" });
+  } catch {}
+}
+
+OBR.onReady(async () => {
+  OBR.broadcast.onMessage(BROADCAST_BLINK_DONE, () => {
+    doneFired = true;
+    if (doneResolver) { doneResolver(); doneResolver = null; }
+  });
+
+  // Phase 1 — start with eyes open, paint a frame, then animate close.
+  setBlinkDur(CLOSE_DUR);
+  setPhase(0);
+  // Nudge the renderer so the open state actually paints before we
+  // request the closed state (otherwise the transition collapses).
+  await new Promise((r) => requestAnimationFrame(r));
+  setPhase(100);
+
+  // Phase 2 — wait for the close to finish, then ask the bg to teleport.
+  await wait(CLOSE_DUR);
+  seam.classList.add("on");
+  try {
+    await OBR.broadcast.sendMessage(BROADCAST_BLINK_PROCEED, {}, { destination: "LOCAL" });
+  } catch (e) {
+    console.error("[portals/blink] proceed broadcast failed", e);
+  }
+
+  // Phase 3 — wait for the bg's done signal (or the cap).
+  const start = Date.now();
+  await Promise.race([awaitDone(), wait(CLOSED_CAP)]);
+  const held = Date.now() - start;
+  if (held < HOLD_MIN) await wait(HOLD_MIN - held);
+  seam.classList.remove("on");
+
+  // Phase 4 — open the eyes onto the destination.
+  setBlinkDur(OPEN_DUR);
+  setPhase(0);
+  await wait(OPEN_DUR + 30);
+
+  await notifyClosed();
+  try { await OBR.modal.close(MODAL_ID); } catch {}
+});
+
+window.addEventListener("beforeunload", () => { void notifyClosed(); });
+window.addEventListener("pagehide", () => { void notifyClosed(); });
+</script>
+</body>
+</html>

@@ -29,11 +29,14 @@ const EDIT_W = 380;
 const EDIT_H = 540;
 const EDIT_TOP_OFFSET = 60;
 
-const DEST_MODAL_ID = `${PLUGIN_ID}/destination-modal`;
-const DEST_URL = "https://obr.dnd.center/suite/portal-destination.html";
+const DEST_POPOVER_ID = `${PLUGIN_ID}/destination-popover`;
+const DEST_URL = `${import.meta.env.BASE_URL}portal-destination.html`;
 
-const ICON_URL = "https://obr.dnd.center/suite/portal-icon.svg";
-const TOOL_ICON_URL = "https://obr.dnd.center/suite/portal-tool-icon.svg";
+const BLINK_MODAL_ID = `${PLUGIN_ID}/blink-modal`;
+const BLINK_URL = `${import.meta.env.BASE_URL}portal-blink.html`;
+
+const ICON_URL = `${import.meta.env.BASE_URL}portal-icon.svg`;
+const TOOL_ICON_URL = `${import.meta.env.BASE_URL}portal-tool-icon.svg`;
 
 // Intrinsic SVG box. Visible glow fills this edge-to-edge so the
 // rendered diameter == 2 × trigger radius.
@@ -47,6 +50,10 @@ const BROADCAST_TELEPORT = `${PLUGIN_ID}/teleport`;
 const BROADCAST_EDIT_SAVE = `${PLUGIN_ID}/edit-save`;
 const BROADCAST_EDIT_DELETE = `${PLUGIN_ID}/edit-delete`;
 const BROADCAST_EDIT_CLOSE = `${PLUGIN_ID}/edit-close`;
+const BROADCAST_DEST_CLOSED = `${PLUGIN_ID}/dest-modal-closed`;
+// Blink-effect handshake — see openBlinkAndTeleport() and portal-blink.html.
+const BROADCAST_BLINK_PROCEED = `${PLUGIN_ID}/blink-proceed`;
+const BROADCAST_BLINK_DONE = `${PLUGIN_ID}/blink-done`;
 
 const unsubs: Array<() => void> = [];
 let role: "GM" | "PLAYER" = "PLAYER";
@@ -87,7 +94,15 @@ const lastTokenPos = new Map<string, { x: number; y: number }>();
 // drags landing AFTER the window fire normally.
 const SUPPRESS_AFTER_TELEPORT_MS = 700;
 const recentlyTeleported = new Map<string, number>();
-let destModalOpen = false;
+let destPopoverOpen = false;
+let destPopoverSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+// Blink modal stays attached to the dest-popover lifecycle: when the
+// modal is up we behave like the popover is up (no new portal entries
+// fire) so a teleport in flight can't be interrupted by another drag.
+let blinkModalOpen = false;
+// Payload latched at destination-pick time. The blink modal asks for
+// it via BROADCAST_BLINK_PROCEED at the apex of the close animation.
+let pendingTeleport: { destPortalId: string; tokenIds: string[] } | null = null;
 
 // --- DM auto-edit-popover when single portal selected ---
 let editPopoverOpen = false;
@@ -351,9 +366,13 @@ async function onItemsMaybeDragging(items: Item[]) {
 }
 
 async function onDragEnd() {
-  if (destModalOpen) return;
+  // Always drain movedByMeIds — even if we early-return below — so
+  // accumulating IDs from a drag-during-modal session can't leak into
+  // the next teleport's tokenIds. Ditto for clearing the per-token
+  // last-position cache for entries we won't act on.
   const movedNow = new Set(movedByMeIds);
   movedByMeIds.clear();
+  if (destPopoverOpen || blinkModalOpen) return;
   if (movedNow.size === 0) return;
 
   let items: Item[];
@@ -369,49 +388,37 @@ async function onDragEnd() {
     if (now - t > SUPPRESS_AFTER_TELEPORT_MS) recentlyTeleported.delete(id);
   }
 
-  // Group-teleport candidates: tokens I just moved + any other
-  // tokens in my selection (party drag — user explicitly opts in
-  // by selecting a party then dragging one of them).
-  let selection: string[] = [];
-  try { const s = await OBR.player.getSelection(); selection = s ?? []; } catch {}
-  const groupCandidates = new Set<string>(movedNow);
-  for (const id of selection) groupCandidates.add(id);
+  // Group-teleport candidates: ONLY the tokens this client actually
+  // moved during the current drag. OBR's multi-select drag fires
+  // change events for every token in the move (lastModifiedUserId =
+  // this client), so movedNow already contains the full party. We
+  // intentionally DO NOT union with the player's current selection —
+  // that union was the source of "single drag still teleports the
+  // multi-select party" because OBR keeps the previous multi-selection
+  // around after a teleport, and a fresh single-token drag would inherit
+  // it. movedNow is the canonical "what just moved" set.
+  const groupCandidates = movedNow;
 
-  // Trigger zone scales with the actual rendered size of BOTH the
-  // portal AND the token. We treat them as touching circles: the
-  // moved token enters a portal as soon as its visual edge overlaps
-  // the portal's visual edge — i.e. distance(centres) ≤
-  // (portalRadius + tokenRadius).
-  //
-  // portalRadius is the value stored at create time (matches the
-  // portal's drawn diameter). tokenRadius is computed from the
-  // token's actual image dpi + scale so a 2× large monster gets a
-  // proportionally bigger trigger than a small familiar.
-  let sceneDpi = 150;
-  try { sceneDpi = await OBR.scene.grid.getDpi(); } catch {}
-
-  function tokenVisualRadius(it: Item): number {
-    const anyIt = it as any;
-    const imgW: number = anyIt.image?.width ?? sceneDpi;
-    const imgDpi: number = anyIt.image?.dpi ?? sceneDpi;
-    const scale: number = it.scale?.x ?? 1;
-    // Scene-unit size: imageWidth / imageDpi * sceneDpi * scale.
-    const worldSize = (imgW / imgDpi) * sceneDpi * Math.abs(scale);
-    return worldSize / 2;
-  }
-
+  // Trigger geometry: token center must enter the portal's visible
+  // glow. Scale + offset math in createPortal() makes the rendered
+  // image diameter = 2×pm.radius scene-units, so pm.radius is the
+  // visible boundary radius. Earlier versions added the token's
+  // image-bounds radius to extend the trigger; that turned out
+  // to over-fire — token PNGs typically have transparent padding,
+  // so the real visible character lives well inside the bounding
+  // box, and the trigger radius would grow by 30-50% of the visible
+  // mismatch. Using just pm.radius makes the trigger == the visible
+  // ring, predictable for both DM and players.
   for (const tok of items) {
     if (!movedNow.has(tok.id)) continue;
     if (tok.layer !== "CHARACTER" && tok.layer !== "MOUNT") continue;
     if (isPortal(tok)) continue;
     if (recentlyTeleported.has(tok.id)) continue;
-    const tokRad = tokenVisualRadius(tok);
     for (const p of visiblePortals) {
       const pm = readPortalMeta(p);
       if (!pm) continue;
-      const triggerRadius = pm.radius + tokRad;
       const d = dist(tok.position, portalCenter(p));
-      if (d <= triggerRadius) {
+      if (d <= pm.radius) {
         console.log("[obr-suite/portals] portal entry detected", {
           dragger: "this client",
           movedToken: tok.id,
@@ -420,26 +427,33 @@ async function onDragEnd() {
           tokenPos: tok.position,
           portalCenter: portalCenter(p),
           portalRadius: pm.radius,
-          tokenRadius: tokRad,
-          triggerRadius,
           dist: d,
           groupCandidates: [...groupCandidates],
         });
-        await openDestinationModal(p, items, [...groupCandidates]);
+        await openDestinationPopover(p, items, [...groupCandidates]);
         return;
       }
     }
   }
 }
 
-// --- Destination modal ----------------------------------------------------
+// --- Destination popover --------------------------------------------------
+//
+// Renders a small transparent bubble ABOVE the entered portal. The
+// popover is anchored in screen-space (anchorReference: "POSITION"),
+// so the user can still pan / click / drag elsewhere on the canvas
+// while it's up. `disableClickAway: true` is REQUIRED so OBR doesn't
+// insert its viewport-wide click-catcher overlay (the user reported
+// the modal version blocked all canvas interaction). The popover is
+// dismissed via its own × button, picking a destination, or pressing
+// Esc inside it.
 
-async function openDestinationModal(
+async function openDestinationPopover(
   entryPortal: Item,
   allItems: Item[],
   selectedTokenIds: string[]
 ) {
-  if (destModalOpen) return;
+  if (destPopoverOpen || blinkModalOpen) return;
   const entryMeta = readPortalMeta(entryPortal);
   if (!entryMeta) return;
 
@@ -461,7 +475,7 @@ async function openDestinationModal(
 
   if (candidates.length === 0) return; // No destinations — silent
 
-  // Filter token ids to only the moveable ones (CHARACTER/MOUNT in selection)
+  // Filter token ids to only the moveable ones (CHARACTER/MOUNT)
   const tokenIds = allItems
     .filter(
       (i) =>
@@ -472,44 +486,128 @@ async function openDestinationModal(
     .map((i) => i.id);
   if (tokenIds.length === 0) return;
 
-  destModalOpen = true;
-  // Hard safety net: after 60 s the flag is force-reset so a missed
-  // close-signal can't permanently lock the entry detector. The modal
-  // page itself sends close on click/cancel/Esc/unload, so this is
-  // pure paranoia — but the cost of getting stuck once was bad enough
-  // (user reported the bug), so the safety net stays.
-  setTimeout(() => { destModalOpen = false; }, 60_000);
+  // Anchor: bottom-center of popover sits a few px above the portal's
+  // visual top edge. Compute screen-space portal radius so the gap is
+  // consistent regardless of zoom.
+  const center = portalCenter(entryPortal);
+  let screenX = 0;
+  let screenY = 0;
+  let portalScreenRadius = 32;
+  try {
+    const screen = await OBR.viewport.transformPoint(center);
+    screenX = screen.x;
+    screenY = screen.y;
+    const vScale = await OBR.viewport.getScale();
+    portalScreenRadius = entryMeta.radius * vScale;
+  } catch {}
+
+  // Clamp so the popover never lands outside the OBR viewport.
+  let vw = 1280, vh = 720;
+  try {
+    [vw, vh] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]);
+  } catch {}
+
+  const POPOVER_W = 240;
+  const ITEM_H = 38;
+  const BASE = 70; // header + paddings + tail
+  const visibleItems = Math.min(Math.max(candidates.length, 1), 4);
+  const POPOVER_H = BASE + visibleItems * ITEM_H;
+
+  const GAP = 14;
+  let anchorTop = screenY - portalScreenRadius - GAP;
+  let placeBelow = false;
+  // If there isn't room above, flip below the portal.
+  if (anchorTop - POPOVER_H < 12) {
+    anchorTop = screenY + portalScreenRadius + GAP;
+    placeBelow = true;
+  }
+  let anchorLeft = screenX;
+  // Clamp the anchor's horizontal projection so the popover stays
+  // inside the viewport with a small margin.
+  const half = POPOVER_W / 2;
+  anchorLeft = Math.max(half + 8, Math.min(vw - half - 8, anchorLeft));
+
+  destPopoverOpen = true;
+  // Hard safety net: 60 s force-reset of destPopoverOpen so a missed
+  // close-signal can't permanently lock the entry detector.
+  if (destPopoverSafetyTimer) clearTimeout(destPopoverSafetyTimer);
+  destPopoverSafetyTimer = setTimeout(() => {
+    destPopoverOpen = false;
+    destPopoverSafetyTimer = null;
+  }, 60_000);
+
   const payload = {
     entryName: entryMeta.name || _t("portalUnnamed"),
     entryTag: entryMeta.tag,
     candidates,
     tokenIds,
+    placeBelow,
   };
   const url = `${DEST_URL}?p=${encodeURIComponent(JSON.stringify(payload))}`;
-  // Height fits content up to THREE candidates without inner scroll;
-  // 4+ candidates use the 3-item height and scroll inside the .list
-  // pane. Per-item row + gap ≈ 50px. Header (title + sub line) +
-  // bottom button bar + paddings ≈ 180px.
-  const ITEM_H = 50;
-  const BASE = 180;
-  const visibleItems = Math.min(Math.max(candidates.length, 1), 3);
-  const height = BASE + visibleItems * ITEM_H;
   try {
-    await OBR.modal.open({
-      id: DEST_MODAL_ID,
+    await OBR.popover.open({
+      id: DEST_POPOVER_ID,
       url,
-      width: 380,
-      height,
+      width: POPOVER_W,
+      height: POPOVER_H,
+      anchorReference: "POSITION",
+      anchorPosition: { left: Math.round(anchorLeft), top: Math.round(anchorTop) },
+      anchorOrigin: { horizontal: "CENTER", vertical: placeBelow ? "TOP" : "BOTTOM" },
+      transformOrigin: { horizontal: "CENTER", vertical: placeBelow ? "TOP" : "BOTTOM" },
+      hidePaper: true,
+      // No viewport-wide click-catcher — keeps canvas interaction free.
+      disableClickAway: true,
     });
   } catch (e) {
-    console.error("[obr-suite/portals] openDestinationModal failed", e);
-    destModalOpen = false;
+    console.error("[obr-suite/portals] openDestinationPopover failed", e);
+    destPopoverOpen = false;
   }
 }
 
-async function closeDestinationModal() {
-  try { await OBR.modal.close(DEST_MODAL_ID); } catch {}
-  destModalOpen = false;
+async function closeDestinationPopover() {
+  try { await OBR.popover.close(DEST_POPOVER_ID); } catch {}
+  destPopoverOpen = false;
+  if (destPopoverSafetyTimer) {
+    clearTimeout(destPopoverSafetyTimer);
+    destPopoverSafetyTimer = null;
+  }
+}
+
+// --- Blink (eye-close → teleport → eye-open) ------------------------------
+//
+// Triggered when the destination popover sends BROADCAST_TELEPORT.
+// We open a fullscreen modal that paints two black "eyelid" bars
+// closing in the middle, perform the teleport while the eyes are
+// closed (camera moves instantly via setPosition during the closed
+// window so no visible canvas snap), then the modal opens the eyes
+// onto the destination and closes itself.
+async function openBlinkAndTeleport(destPortalId: string, tokenIds: string[]) {
+  if (blinkModalOpen) return;
+  pendingTeleport = { destPortalId, tokenIds };
+  blinkModalOpen = true;
+  try {
+    await OBR.modal.open({
+      id: BLINK_MODAL_ID,
+      url: BLINK_URL,
+      fullScreen: true,
+      hideBackdrop: true,
+      hidePaper: true,
+      // Block pointer events while the blink is in progress so the
+      // user can't drag during the teleport.
+      disablePointerEvents: false,
+    });
+  } catch (e) {
+    console.error("[obr-suite/portals] openBlinkAndTeleport failed", e);
+    blinkModalOpen = false;
+    pendingTeleport = null;
+    // Fall back to plain teleport so the user isn't stranded.
+    await teleport(destPortalId, tokenIds, false);
+  }
+}
+
+async function closeBlinkModal() {
+  try { await OBR.modal.close(BLINK_MODAL_ID); } catch {}
+  blinkModalOpen = false;
 }
 
 // --- Teleport: gather tokens around destination portal --------------------
@@ -629,7 +727,11 @@ async function snapshotExtensionMetadata(tokenIds: string[]): Promise<ExtMetaSna
   return snap;
 }
 
-async function teleport(destPortalId: string, tokenIds: string[]) {
+async function teleport(
+  destPortalId: string,
+  tokenIds: string[],
+  instantCamera: boolean = false,
+) {
   if (tokenIds.length === 0) return;
   let dest: Item | null = null;
   try {
@@ -783,22 +885,30 @@ async function teleport(destPortalId: string, tokenIds: string[]) {
     console.warn("[obr-suite/portals] restore attachments visibility failed", e);
   }
 
-  // Pan the local camera to the destination portal (only on the
-  // originating client — BROADCAST_TELEPORT is LOCAL only). Same
-  // pattern as the focus module: keep current zoom, center on portal.
+  // Move the local camera to the destination portal (only on the
+  // originating client — BROADCAST_TELEPORT is LOCAL only). When
+  // called during the blink flow the camera should jump INSTANTLY so
+  // when the eyes open the destination is already centered;
+  // otherwise we keep the smooth animateTo for the legacy fallback
+  // path. Either way, scale is preserved.
   try {
     const [vw, vh, vpScale] = await Promise.all([
       OBR.viewport.getWidth(),
       OBR.viewport.getHeight(),
       OBR.viewport.getScale(),
     ]);
-    OBR.viewport.animateTo({
-      position: {
-        x: -center.x * vpScale + vw / 2,
-        y: -center.y * vpScale + vh / 2,
-      },
-      scale: vpScale,
-    }).catch(() => {});
+    const targetPos = {
+      x: -center.x * vpScale + vw / 2,
+      y: -center.y * vpScale + vh / 2,
+    };
+    if (instantCamera) {
+      // setPosition is synchronous from the camera's POV — no tween,
+      // canvas redraws on the next frame. The blink overlay covers
+      // any flash.
+      await OBR.viewport.setPosition(targetPos).catch(() => {});
+    } else {
+      OBR.viewport.animateTo({ position: targetPos, scale: vpScale }).catch(() => {});
+    }
   } catch {}
 
   // Phase 3 — restore the original extension metadata values
@@ -982,15 +1092,52 @@ export async function setupPortals(): Promise<void> {
     })
   );
 
-  // Destination modal → teleport.
+  // Destination popover → blink modal → (proceed) → teleport.
+  // The popover sends BROADCAST_TELEPORT when the user picks a
+  // destination. We close the popover and open the blink modal; the
+  // modal animates eyelids closing, then sends BROADCAST_BLINK_PROCEED
+  // back to us — that's when the actual position update runs (camera
+  // jumps instantly so the post-blink eye-open lands on the
+  // destination). When the teleport finishes we send
+  // BROADCAST_BLINK_DONE so the modal can run the eye-open animation
+  // and close itself.
   unsubs.push(
     OBR.broadcast.onMessage(BROADCAST_TELEPORT, async (msg) => {
       const data = msg.data as
         | { destPortalId: string; tokenIds: string[] }
         | undefined;
       if (!data) return;
-      destModalOpen = false;
-      await teleport(data.destPortalId, data.tokenIds);
+      await closeDestinationPopover();
+      await openBlinkAndTeleport(data.destPortalId, data.tokenIds);
+    })
+  );
+
+  unsubs.push(
+    OBR.broadcast.onMessage(BROADCAST_BLINK_PROCEED, async () => {
+      const job = pendingTeleport;
+      pendingTeleport = null;
+      if (!job) {
+        // Modal asked to proceed but we've already cleared the job
+        // (e.g. modal opened twice somehow). Tell it to recover.
+        try {
+          await OBR.broadcast.sendMessage(BROADCAST_BLINK_DONE, {}, { destination: "LOCAL" });
+        } catch {}
+        return;
+      }
+      await teleport(job.destPortalId, job.tokenIds, true);
+      try {
+        await OBR.broadcast.sendMessage(BROADCAST_BLINK_DONE, {}, { destination: "LOCAL" });
+      } catch {}
+    })
+  );
+
+  // The blink modal sends this right before it closes itself, so the
+  // background can flip its open flag back off. (Modal onClose is not
+  // surfaced by OBR, so we rely on the page's beforeunload handler.)
+  unsubs.push(
+    OBR.broadcast.onMessage(`${PLUGIN_ID}/blink-modal-closed`, () => {
+      blinkModalOpen = false;
+      pendingTeleport = null;
     })
   );
 
@@ -1035,23 +1182,28 @@ export async function setupPortals(): Promise<void> {
     })
   );
 
-  // Modal-close detector: if the user closes the destination modal via OBR
-  // (Esc / X), reset the in-flight flag. There's no direct "modal closed"
-  // event, so use a broadcast from the modal's beforeunload as the signal.
+  // Popover-close detector: when the destination popover closes via
+  // user × / Esc / page unload, it broadcasts here so we can reset
+  // destPopoverOpen. (OBR doesn't expose a popover close-event API.)
   unsubs.push(
-    OBR.broadcast.onMessage(`${PLUGIN_ID}/dest-modal-closed`, () => {
-      destModalOpen = false;
+    OBR.broadcast.onMessage(BROADCAST_DEST_CLOSED, () => {
+      destPopoverOpen = false;
+      if (destPopoverSafetyTimer) {
+        clearTimeout(destPopoverSafetyTimer);
+        destPopoverSafetyTimer = null;
+      }
     })
   );
 
-  // No initial pass — only player drag-end events trigger the modal.
+  // No initial pass — only player drag-end events trigger the popover.
   // If the player happens to have selected a token already inside a
-  // portal at scene load, no modal opens until they drag the token.
+  // portal at scene load, no popover opens until they drag the token.
 }
 
 export async function teardownPortals(): Promise<void> {
   await closeEditPopover();
-  await closeDestinationModal();
+  await closeDestinationPopover();
+  await closeBlinkModal();
   await clearPreview();
   if (role === "GM") {
     try { await OBR.tool.removeMode(TOOL_MODE_ID); } catch {}
@@ -1062,6 +1214,12 @@ export async function teardownPortals(): Promise<void> {
     clearTimeout(dragEndTimer);
     dragEndTimer = null;
   }
+  if (destPopoverSafetyTimer) {
+    clearTimeout(destPopoverSafetyTimer);
+    destPopoverSafetyTimer = null;
+  }
+  movedByMeIds.clear();
+  pendingTeleport = null;
   lastTokenPos.clear();
   recentlyTeleported.clear();
 }
