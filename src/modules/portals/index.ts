@@ -967,6 +967,14 @@ async function teleport(
     clearTimeout(dragEndTimer);
     dragEndTimer = null;
   }
+
+  // Drop the teleported tokens from the player's selection. Without
+  // this, OBR's multi-select carryover means the next drag of any
+  // token in the set still moves the WHOLE party (OBR's documented
+  // multi-drag behavior). The user reads that as "single drag
+  // teleported the wrong tokens too" — fix by forcing a clean slate.
+  // Player has to click again to re-establish a fresh selection.
+  try { await OBR.player.deselect(tokenIds); } catch {}
 }
 
 // --- Setup / teardown -----------------------------------------------------
@@ -1106,16 +1114,38 @@ export async function setupPortals(): Promise<void> {
   // Also dismisses the destination popover when the user clicks
   // somewhere else (selection changes), so the bubble doesn't linger
   // after the user has clearly moved on.
+  //
+  // Pre-populates lastTokenPos for tokens that ENTER the selection.
+  // OBR's items.onChange appears to fire only once per drag (at the
+  // batched commit). Without a previous position recorded, the diff
+  // in onItemsMaybeDragging is `prev=undefined → no didMove → no
+  // dragEndTimer → no portal check`, and the user's first drag after
+  // a deselect+reselect is silently dropped — they have to drag a
+  // second time. Seeding the position at selection time gives the
+  // first drag a valid baseline.
   let prevSelectionKey = "";
   unsubs.push(
     OBR.player.onChange(async (player) => {
       try {
         if (role === "GM") await handleDMSelectionForEdit(player.selection);
       } catch {}
-      // Drop the per-token last-position cache for any token no longer
-      // selected. Prevents stale entries leaking memory and stops a
-      // pending drag-end timer from firing on a deselected token.
       const sel = new Set(player.selection ?? []);
+      // Pre-populate lastTokenPos for newly-selected tokens.
+      const toPopulate: string[] = [];
+      for (const id of sel) {
+        if (!lastTokenPos.has(id)) toPopulate.push(id);
+      }
+      if (toPopulate.length > 0) {
+        try {
+          const items = await OBR.scene.items.getItems(toPopulate);
+          for (const it of items) {
+            if (it.layer !== "CHARACTER" && it.layer !== "MOUNT") continue;
+            if (isPortal(it)) continue;
+            lastTokenPos.set(it.id, { x: it.position.x, y: it.position.y });
+          }
+        } catch {}
+      }
+      // Drop entries for tokens no longer selected (memory cleanup).
       for (const id of [...lastTokenPos.keys()]) {
         if (!sel.has(id)) lastTokenPos.delete(id);
       }

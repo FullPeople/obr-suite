@@ -4,23 +4,33 @@
 <meta charset="UTF-8">
 <title>传送门</title>
 <style>
+/* Suite palette — mirrors cluster.html / settings.html */
+:root{
+  --bg-soft: rgba(31,34,48,0.92);
+  --border: rgba(255,255,255,0.18);
+  --border-strong: rgba(93,173,226,0.40);
+  --text: #e6e8ee;
+  --text-dim: #9aa0b3;
+  --accent: #5dade2;
+  --accent-dim: #7ec8f0;
+}
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{
   height:100%;width:100%;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
-  background:transparent;color:#eee;overflow:hidden;
+  background:transparent;color:var(--text);overflow:hidden;
 }
 /* The popover iframe is opened with hidePaper:true and the bg is
    transparent — we draw our own bubble with a faint stroke + tail
    so it visually anchors to the portal beneath. */
 .bubble{
   position:absolute; left:8px; right:8px; top:8px; bottom:14px;
-  background:rgba(20,18,38,0.86);
-  border:1px solid rgba(167,139,250,0.45);
+  background:var(--bg-soft);
+  border:1px solid var(--border-strong);
   border-radius:10px;
-  box-shadow:0 6px 20px rgba(0,0,0,.45), 0 0 24px rgba(167,139,250,.15);
-  backdrop-filter:blur(6px) saturate(1.05);
-  -webkit-backdrop-filter:blur(6px) saturate(1.05);
+  box-shadow:0 6px 22px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.04) inset, 0 0 18px rgba(93,173,226,0.10);
+  backdrop-filter:blur(8px) saturate(1.05);
+  -webkit-backdrop-filter:blur(8px) saturate(1.05);
   display:flex; flex-direction:column;
   padding:9px 10px 8px;
   overflow:hidden;
@@ -30,9 +40,9 @@ html,body{
   position:absolute; left:50%; bottom:0;
   transform:translateX(-50%);
   width:14px; height:14px;
-  background:rgba(20,18,38,0.86);
-  border-right:1px solid rgba(167,139,250,0.45);
-  border-bottom:1px solid rgba(167,139,250,0.45);
+  background:var(--bg-soft);
+  border-right:1px solid var(--border-strong);
+  border-bottom:1px solid var(--border-strong);
   transform-origin:center;
   rotate:45deg; translate: -50% 50%;
 }
@@ -41,28 +51,28 @@ body.below .bubble{ top:14px; bottom:8px; }
 body.below .tail{
   top:0; bottom:auto;
   border-right:none; border-bottom:none;
-  border-left:1px solid rgba(167,139,250,0.45);
-  border-top:1px solid rgba(167,139,250,0.45);
+  border-left:1px solid var(--border-strong);
+  border-top:1px solid var(--border-strong);
   rotate:45deg; translate: -50% -50%;
 }
 .head{
   display:flex; align-items:center; gap:6px;
-  font-size:11.5px; font-weight:700; color:#c4b5fd;
+  font-size:11.5px; font-weight:700; color:var(--accent-dim);
   margin-bottom:6px;
 }
-.head .ico{font-size:13px}
-.head .nm{flex:1; color:#e0e7ff; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.head .ico{font-size:13px;color:var(--accent)}
+.head .nm{flex:1; color:var(--text); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .head .x{
   margin-left:4px; padding:0 5px; height:16px; line-height:14px;
-  color:#9aa0b3; cursor:pointer; border-radius:3px;
+  color:var(--text-dim); cursor:pointer; border-radius:3px;
   font-size:13px; font-weight:600;
 }
-.head .x:hover{background:rgba(255,255,255,.08); color:#eee}
+.head .x:hover{background:rgba(255,255,255,.08); color:var(--text)}
 .sub{
-  font-size:10.5px; color:#a3a0bd; line-height:1.4;
+  font-size:10.5px; color:var(--text-dim); line-height:1.4;
   margin-bottom:5px;
   padding-bottom:4px;
-  border-bottom:1px dashed rgba(255,255,255,.07);
+  border-bottom:1px dashed rgba(255,255,255,.08);
 }
 .list{
   flex:1; overflow-y:auto;
@@ -80,12 +90,12 @@ body.below .tail{
   cursor:pointer;
   transition:background .12s, border-color .12s, transform .08s;
 }
-.opt:hover{background:rgba(167,139,250,.20);border-color:rgba(167,139,250,.55)}
+.opt:hover{background:rgba(93,173,226,.18);border-color:rgba(93,173,226,.55)}
 .opt:active{transform:scale(0.98)}
-.opt .ic{font-size:12px;color:#a78bfa;flex-shrink:0}
-.opt .nm{flex:1;font-size:12px;color:#eee;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.opt .hd{font-size:9px;color:#888;font-style:italic}
-.empty{padding:12px;text-align:center;color:#888;font-size:11px}
+.opt .ic{font-size:12px;color:var(--accent);flex-shrink:0}
+.opt .nm{flex:1;font-size:12px;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.opt .hd{font-size:9px;color:var(--text-dim);font-style:italic}
+.empty{padding:12px;text-align:center;color:var(--text-dim);font-size:11px}
 </style>
 </head>
 <body>
