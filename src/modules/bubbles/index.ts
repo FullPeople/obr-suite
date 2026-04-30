@@ -117,6 +117,17 @@ function readEnabled(): boolean {
   return true;
 }
 
+function readUserScale(): number {
+  try {
+    const v = localStorage.getItem(LS_BUBBLES_SCALE);
+    if (v) {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0.3 && n < 3) return n;
+    }
+  } catch {}
+  return 1;
+}
+
 // --- Math helpers ------------------------------------------------------
 //
 // Reproduce the visible center of a token image accounting for
