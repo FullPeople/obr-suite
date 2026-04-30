@@ -475,38 +475,67 @@ async function closeDestinationModal() {
 
 // --- Teleport: gather tokens around destination portal --------------------
 
-// Snapshotted light metadata so the post-teleport restore knows the
-// original values. Map<tokenId, Record<metadataKey, originalValue>>.
-type LightSnapshot = Map<string, Record<string, any>>;
+// Snapshotted token-side extension metadata so the post-teleport
+// restore knows the original values.
+// Map<tokenId, Record<metadataKey, originalValue>>.
+type ExtMetaSnapshot = Map<string, Record<string, any>>;
 
-// Detect "light source" metadata entries on an item — keys whose value
-// is an object with `attenuationRadius` or `sourceRadius`. Covers
-// OBR's official Dynamic Fog (`rodeo.owlbear.dynamic-fog/light`) and
-// any other extension following the same shape. Returns the literal
-// key names so we can restore them by-name later.
-function findLightKeys(metadata: Record<string, unknown>): string[] {
+// Detect token-side metadata entries that fog / line-of-sight / wall
+// extensions watch — these often reject "illegal" position updates
+// (token crosses a wall / leaves an allowed region), so we strip
+// them before teleporting and restore right after. Covers:
+//
+//   • OBR Dynamic Fog (`rodeo.owlbear.dynamic-fog/light` etc.) —
+//     keys whose value carries attenuationRadius / sourceRadius.
+//   • Smoke & Spectre walls — the SS extension keeps per-token state
+//     under the `rodeo.owlbear.codeo.smoke-and-spectre/...` namespace
+//     (and also exposes metadata keys with "smoke", "spectre" or
+//     "specter" in them). When the token has a vision range stored
+//     here, SS will validate any position change against its wall
+//     geometry and snap the token back if the segment crosses a
+//     wall — exactly what blocks our teleport. Stripping the
+//     metadata briefly bypasses the validator.
+//   • Anything else with `visionRange` / `lightRadius` / `wallBlocks`
+//     properties on the value — defensive catch-all for similar
+//     fog/wall plugins.
+//
+// Restoration is verbatim — we don't mutate the captured value, just
+// delete the key for the duration of the position update and set it
+// back to the exact same object after.
+function findExtensionPositionKeys(metadata: Record<string, unknown>): string[] {
   const keys: string[] = [];
   for (const [k, v] of Object.entries(metadata)) {
     if (!v || typeof v !== "object") continue;
     const o = v as Record<string, unknown>;
-    if ("attenuationRadius" in o || "sourceRadius" in o) keys.push(k);
+    // Dynamic Fog shape
+    if ("attenuationRadius" in o || "sourceRadius" in o) { keys.push(k); continue; }
+    // Generic vision / wall shape
+    if ("visionRange" in o || "lightRadius" in o || "wallBlocks" in o) { keys.push(k); continue; }
+    // Smoke & Spectre namespace match (case-insensitive substring on
+    // the metadata KEY, since SS sets keys like
+    // "rodeo.owlbear.codeo.smoke-and-spectre/visionRange" /
+    // ".../sceneData" etc.)
+    const kl = k.toLowerCase();
+    if (kl.includes("smoke") || kl.includes("spectre") || kl.includes("specter")) {
+      keys.push(k);
+    }
   }
   return keys;
 }
 
-async function snapshotLightMetadata(tokenIds: string[]): Promise<LightSnapshot> {
-  const snap: LightSnapshot = new Map();
+async function snapshotExtensionMetadata(tokenIds: string[]): Promise<ExtMetaSnapshot> {
+  const snap: ExtMetaSnapshot = new Map();
   try {
     const items = await OBR.scene.items.getItems(tokenIds);
     for (const it of items) {
-      const keys = findLightKeys(it.metadata as Record<string, unknown>);
+      const keys = findExtensionPositionKeys(it.metadata as Record<string, unknown>);
       if (keys.length === 0) continue;
       const captured: Record<string, any> = {};
       for (const k of keys) captured[k] = (it.metadata as any)[k];
       snap.set(it.id, captured);
     }
   } catch (e) {
-    console.warn("[obr-suite/portals] snapshotLightMetadata failed", e);
+    console.warn("[obr-suite/portals] snapshotExtensionMetadata failed", e);
   }
   return snap;
 }
@@ -557,23 +586,25 @@ async function teleport(destPortalId: string, tokenIds: string[]) {
     ring++;
   }
 
-  // Phase 1 — strip light metadata so dynamic-fog stops rejecting the
-  // move. No animation: the user reported the gradual-shrink path
-  // stuttered too much over OBR's metadata-update channel, so we
-  // just delete-and-snap. All snapshot values restored verbatim in
-  // Phase 3.
-  const lightSnap = await snapshotLightMetadata(tokenIds);
-  if (lightSnap.size > 0) {
+  // Phase 1 — strip extension metadata that fog/wall plugins use to
+  // validate token movement. Covers Dynamic Fog (light sources) and
+  // Smoke & Spectre walls; both reject "illegal" position updates,
+  // which would otherwise snap the teleport back. No animation: the
+  // user reported the gradual-shrink path stuttered too much over
+  // OBR's metadata-update channel, so we just delete-and-snap. All
+  // snapshot values restored verbatim in Phase 3.
+  const extSnap = await snapshotExtensionMetadata(tokenIds);
+  if (extSnap.size > 0) {
     try {
-      await OBR.scene.items.updateItems([...lightSnap.keys()], (drafts) => {
+      await OBR.scene.items.updateItems([...extSnap.keys()], (drafts) => {
         for (const d of drafts) {
-          const captured = lightSnap.get(d.id);
+          const captured = extSnap.get(d.id);
           if (!captured) continue;
           for (const k of Object.keys(captured)) delete (d.metadata as any)[k];
         }
       });
     } catch (e) {
-      console.warn("[obr-suite/portals] strip light failed", e);
+      console.warn("[obr-suite/portals] strip extension metadata failed", e);
     }
   }
 
@@ -606,12 +637,13 @@ async function teleport(destPortalId: string, tokenIds: string[]) {
     }).catch(() => {});
   } catch {}
 
-  // Phase 3 — restore the original light metadata values verbatim.
-  if (lightSnap.size > 0) {
+  // Phase 3 — restore the original extension metadata values
+  // verbatim (Dynamic Fog light + Smoke & Spectre vision/wall keys).
+  if (extSnap.size > 0) {
     try {
-      await OBR.scene.items.updateItems([...lightSnap.keys()], (drafts) => {
+      await OBR.scene.items.updateItems([...extSnap.keys()], (drafts) => {
         for (const d of drafts) {
-          const captured = lightSnap.get(d.id);
+          const captured = extSnap.get(d.id);
           if (!captured) continue;
           for (const [key, original] of Object.entries(captured)) {
             (d.metadata as any)[key] = original;
@@ -619,7 +651,7 @@ async function teleport(destPortalId: string, tokenIds: string[]) {
         }
       });
     } catch (e) {
-      console.warn("[obr-suite/portals] restore light failed", e);
+      console.warn("[obr-suite/portals] restore extension metadata failed", e);
     }
   }
 

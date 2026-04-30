@@ -50,33 +50,29 @@ async function hideOverlay() {
   try { await OBR.modal.close(MODAL_ID); } catch {}
 }
 
-async function lockCharacterItems() {
-  const items = await OBR.scene.items.getItems(
-    (item) =>
-      (item.layer === "CHARACTER" || item.layer === "MOUNT") && !item.locked
-  );
-  if (items.length === 0) return;
-  const ids = items.map((i) => i.id);
-  await OBR.scene.items.updateItems(ids, (drafts) => {
-    for (const d of drafts) {
-      d.locked = true;
-      d.metadata[LOCK_TAG] = true;
-    }
-  });
-}
-
-async function unlockCharacterItems() {
-  const items = await OBR.scene.items.getItems(
-    (item) => item.metadata[LOCK_TAG] === true
-  );
-  if (items.length === 0) return;
-  const ids = items.map((i) => i.id);
-  await OBR.scene.items.updateItems(ids, (drafts) => {
-    for (const d of drafts) {
-      d.locked = false;
-      delete d.metadata[LOCK_TAG];
-    }
-  });
+// Per user feedback (2026-04-30): time stop should ONLY block player
+// input via the full-screen overlay + force-deselect. We no longer
+// lock individual tokens — that was belt-and-suspenders that also
+// unhelpfully prevented the GM from moving anything during the
+// effect. Kept unlockOldLockedItems() as a one-time migration so any
+// tokens still carrying the legacy LOCK_TAG from older versions get
+// unlocked the next time time stop fires (or scene loads).
+async function unlockOldLockedItems() {
+  try {
+    const items = await OBR.scene.items.getItems(
+      (item) => item.metadata[LOCK_TAG] === true
+    );
+    if (items.length === 0) return;
+    const ids = items.map((i) => i.id);
+    await OBR.scene.items.updateItems(ids, (drafts) => {
+      for (const d of drafts) {
+        d.locked = false;
+        delete d.metadata[LOCK_TAG];
+      }
+    });
+  } catch (e) {
+    console.warn("[obr-suite/timeStop] legacy unlock skipped", e);
+  }
 }
 
 function notifyClusterState(active: boolean) {
@@ -89,18 +85,19 @@ async function turnOn() {
   await OBR.scene.setMetadata({ [META_KEY]: { active: true } });
   await OBR.broadcast.sendMessage(BROADCAST_ON, {});
   await showOverlay(true); // GM gets pass-through overlay
-  await lockCharacterItems();
+  // Belt-and-suspenders: scrub any legacy locked tokens left over
+  // from the old "lock all characters" behaviour so they don't stay
+  // un-movable by the GM during this time stop.
+  await unlockOldLockedItems();
   notifyClusterState(true);
-  // notification removed per user feedback
 }
 
 async function turnOff() {
   await OBR.scene.setMetadata({ [META_KEY]: { active: false } });
   await OBR.broadcast.sendMessage(BROADCAST_OFF, {});
   await hideOverlay();
-  await unlockCharacterItems();
+  await unlockOldLockedItems();
   notifyClusterState(false);
-  // notification removed per user feedback
 }
 
 async function toggle() {
