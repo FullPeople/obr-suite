@@ -232,6 +232,11 @@ const TR: Dict = {
   portalDestUnits: { zh: "个单位", en: "unit(s)" },
   portalDestNoMatch: { zh: "没有同标签的其它传送门", en: "No other portals with the same tag" },
   portalDestHidden: { zh: "隐藏", en: "Hidden" },
+  portalBlinkLabel: { zh: "传送眨眼特效", en: "Teleport Blink Effect" },
+  portalBlinkDesc: {
+    zh: "本机偏好。开启后传送瞬间播放闭眼/睁眼动画，闭眼时刻执行实际传送，因此略慢；关闭则直接平滑过场。",
+    en: "Per-client preference. When on, picking a destination plays a close-eye / open-eye animation with the actual teleport happening at the closed moment — slightly slower. Off = immediate smooth pan.",
+  },
 
   // === Character card bind ===
   ccBindTitle: { zh: "绑定角色卡", en: "Bind Character Card" },

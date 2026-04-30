@@ -69,7 +69,7 @@ const SUPPORTERS: string[] = [
   "奶牛饭", "DK", "黄烟", "盲人过北极", "1234",
   "浩然正气","青灯栖凰","深白色(●—●)","白辰","瀞聆","滑而不稽则罔","Aisle","PB27",
   "蚀星ErosionStar","消炎药","SiriusTGT","悠悠向青山","小舟","孤月映寒","Joe","武御",
-  "Misaka Mikoto","森海飞霞🐿"
+  "Misaka Mikoto","森海飞霞🐿","每日 1/? Fen","北省"
 ];
 
 function supportersHtml(lang: Language): string {
@@ -1075,7 +1075,51 @@ const TABS: TabDef[] = [
     zh: `${ICONS.portal} 传送门`,
     en: `${ICONS.portal} Portals`,
     moduleId: "portals",
-    body: PORTALS_DESC,
+    dynamicBody: (lang) => {
+      // Per-client localStorage; mirrors com.obr-suite/portals/blink-enabled.
+      const blinkOn = (() => {
+        try {
+          const v = localStorage.getItem("com.obr-suite/portals/blink-enabled");
+          if (v === "0") return false;
+          if (v === "1") return true;
+        } catch {}
+        return true;
+      })();
+      const lbl = lang === "zh" ? "传送眨眼特效" : "Teleport Blink Effect";
+      const desc = lang === "zh"
+        ? "本机偏好。开启后传送瞬间播放闭眼/睁眼动画，闭眼时刻执行实际传送，因此略慢；关闭则直接平滑过场。"
+        : "Per-client preference. When on, picking a destination plays a close-eye / open-eye animation with the actual teleport happening at the closed moment — slightly slower. Off = immediate smooth pan.";
+      return `
+        ${PORTALS_DESC[lang]}
+        <h3>${lang === "zh" ? "选项" : "Options"}</h3>
+        <div class="row">
+          <div class="lbl">
+            ${lbl}
+            <div class="desc"><em>${desc}</em></div>
+          </div>
+          <button class="tog ${
+            blinkOn ? "on" : ""
+          }" data-key="portalBlinkEnabled" type="button" aria-pressed="${blinkOn}"></button>
+        </div>
+      `;
+    },
+    afterRender: (root) => {
+      root
+        .querySelector<HTMLButtonElement>('.tog[data-key="portalBlinkEnabled"]')
+        ?.addEventListener("click", (e) => {
+          const btn = e.currentTarget as HTMLButtonElement;
+          const wasOn = btn.classList.contains("on");
+          const next = !wasOn;
+          try {
+            localStorage.setItem(
+              "com.obr-suite/portals/blink-enabled",
+              next ? "1" : "0",
+            );
+          } catch {}
+          btn.classList.toggle("on", next);
+          btn.setAttribute("aria-pressed", String(next));
+        });
+    },
   },
   {
     id: "search",

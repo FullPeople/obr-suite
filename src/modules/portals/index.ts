@@ -29,14 +29,22 @@ const EDIT_W = 380;
 const EDIT_H = 540;
 const EDIT_TOP_OFFSET = 60;
 
+// Asset URLs MUST be absolute — OBR resolves Item.image.url against
+// its own app origin, so a leading-slash path like "/suite-dev/x.svg"
+// turns into "https://www.owlbear.app/suite-dev/x.svg" and 404s. Pull
+// the origin from the bg iframe's own location (always served from
+// our deployed host) and combine with vite's BASE_URL so dev/stable
+// pick the right subpath automatically.
+const ASSET_BASE = `${location.origin}${import.meta.env.BASE_URL}`;
+
 const DEST_POPOVER_ID = `${PLUGIN_ID}/destination-popover`;
-const DEST_URL = `${import.meta.env.BASE_URL}portal-destination.html`;
+const DEST_URL = `${ASSET_BASE}portal-destination.html`;
 
 const BLINK_MODAL_ID = `${PLUGIN_ID}/blink-modal`;
-const BLINK_URL = `${import.meta.env.BASE_URL}portal-blink.html`;
+const BLINK_URL = `${ASSET_BASE}portal-blink.html`;
 
-const ICON_URL = `${import.meta.env.BASE_URL}portal-icon.svg`;
-const TOOL_ICON_URL = `${import.meta.env.BASE_URL}portal-tool-icon.svg`;
+const ICON_URL = `${ASSET_BASE}portal-icon.svg`;
+const TOOL_ICON_URL = `${ASSET_BASE}portal-tool-icon.svg`;
 
 // Intrinsic SVG box. Visible glow fills this edge-to-edge so the
 // rendered diameter == 2 × trigger radius.
@@ -44,6 +52,19 @@ const ICON_INTRINSIC = 64;
 // Default base size for OBR's image grid.dpi math — matches the SVG.
 const ICON_SIZE = ICON_INTRINSIC;
 const MIN_RADIUS = 16; // ignore drags shorter than this (treated as click)
+
+// Per-client blink-effect preference. Default ON. When OFF the
+// destination pick skips the blink modal and teleports immediately
+// — same effect logic but the user trades the cinematic for speed.
+const LS_BLINK_KEY = `${PLUGIN_ID}/blink-enabled`;
+function readBlinkEnabled(): boolean {
+  try {
+    const v = localStorage.getItem(LS_BLINK_KEY);
+    if (v === "0") return false;
+    if (v === "1") return true;
+  } catch {}
+  return true;
+}
 
 // Broadcast channels (LOCAL only — single client lifecycle):
 const BROADCAST_TELEPORT = `${PLUGIN_ID}/teleport`;
@@ -358,6 +379,12 @@ async function onItemsMaybeDragging(items: Item[]) {
   }
 
   if (!didMove) return;
+  // Any genuine drag dismisses the destination popover so the user
+  // isn't stuck with a stale bubble blocking re-trigger. Closing is
+  // idempotent — a popover already closed is a no-op.
+  if (destPopoverOpen) {
+    void closeDestinationPopover();
+  }
   if (dragEndTimer) clearTimeout(dragEndTimer);
   dragEndTimer = setTimeout(() => {
     dragEndTimer = null;
@@ -951,14 +978,25 @@ async function teleport(
 // render. Sweep them on setup and rewrite image.width / image.height
 // to ICON_SIZE so the warning stops. Idempotent — items already at
 // ICON_SIZE skip the update.
-async function migrateLegacyPortalIconSize(): Promise<void> {
+async function migrateLegacyPortals(): Promise<void> {
   try {
     const items = await OBR.scene.items.getItems(isPortal);
     const stale = items.filter((it: any) => {
       const w = it?.image?.width;
       const h = it?.image?.height;
-      return (typeof w === "number" && w !== ICON_SIZE)
-        || (typeof h === "number" && h !== ICON_SIZE);
+      const u = it?.image?.url;
+      const sizeWrong =
+        (typeof w === "number" && w !== ICON_SIZE) ||
+        (typeof h === "number" && h !== ICON_SIZE);
+      // URL is broken if it isn't absolute (relative paths 404 inside
+      // OBR) OR it references a different /suite*/ path than the one
+      // this build is serving (e.g. portals created on the buggy dev
+      // build pointed at /suite-dev/ even from stable). Force-rewrite
+      // both cases to the current ASSET_BASE.
+      const urlWrong =
+        typeof u === "string" &&
+        (!/^https?:\/\//i.test(u) || u !== ICON_URL);
+      return sizeWrong || urlWrong;
     });
     if (stale.length === 0) return;
     await OBR.scene.items.updateItems(
@@ -968,12 +1006,13 @@ async function migrateLegacyPortalIconSize(): Promise<void> {
           if (d.image) {
             d.image.width = ICON_SIZE;
             d.image.height = ICON_SIZE;
+            d.image.url = ICON_URL;
           }
         }
       },
     );
   } catch (e) {
-    console.warn("[obr-suite/portals] icon-size migration skipped", e);
+    console.warn("[obr-suite/portals] portal migration skipped", e);
   }
 }
 
@@ -994,7 +1033,7 @@ export async function setupPortals(): Promise<void> {
   // versions) to the current ICON_SIZE so OBR stops warning on every
   // render. Only the GM has scene-write permission, so we gate on role.
   if (role === "GM") {
-    void migrateLegacyPortalIconSize();
+    void migrateLegacyPortals();
   }
 
   // GM-only tool icon. Players don't need the draw tool — they only get the
@@ -1064,6 +1103,10 @@ export async function setupPortals(): Promise<void> {
   }
 
   // Selection watcher (DM): single-portal selection → edit popover.
+  // Also dismisses the destination popover when the user clicks
+  // somewhere else (selection changes), so the bubble doesn't linger
+  // after the user has clearly moved on.
+  let prevSelectionKey = "";
   unsubs.push(
     OBR.player.onChange(async (player) => {
       try {
@@ -1076,6 +1119,11 @@ export async function setupPortals(): Promise<void> {
       for (const id of [...lastTokenPos.keys()]) {
         if (!sel.has(id)) lastTokenPos.delete(id);
       }
+      const selKey = (player.selection ?? []).slice().sort().join(",");
+      if (destPopoverOpen && selKey !== prevSelectionKey) {
+        void closeDestinationPopover();
+      }
+      prevSelectionKey = selKey;
     })
   );
 
@@ -1108,7 +1156,14 @@ export async function setupPortals(): Promise<void> {
         | undefined;
       if (!data) return;
       await closeDestinationPopover();
-      await openBlinkAndTeleport(data.destPortalId, data.tokenIds);
+      if (readBlinkEnabled()) {
+        await openBlinkAndTeleport(data.destPortalId, data.tokenIds);
+      } else {
+        // Blink disabled — direct teleport with the smooth animateTo
+        // camera move (instantCamera=false) so the user still sees a
+        // brief pan to the destination instead of an abrupt snap.
+        await teleport(data.destPortalId, data.tokenIds, false);
+      }
     })
   );
 
@@ -1119,12 +1174,27 @@ export async function setupPortals(): Promise<void> {
       if (!job) {
         // Modal asked to proceed but we've already cleared the job
         // (e.g. modal opened twice somehow). Tell it to recover.
+        blinkModalOpen = false;
         try {
           await OBR.broadcast.sendMessage(BROADCAST_BLINK_DONE, {}, { destination: "LOCAL" });
         } catch {}
         return;
       }
       await teleport(job.destPortalId, job.tokenIds, true);
+      // The teleport's own updateItems calls fire scene.items.onChange
+      // → onItemsMaybeDragging → seeds movedByMeIds with the teleported
+      // IDs (because lastModifiedUserId is this client). If we don't
+      // strip them now, the next genuine user drag hits onDragEnd
+      // with movedNow = {teleported tokens, plus newly-dragged token}
+      // — and any teleported token still sitting on its destination
+      // portal will re-trigger the popover with the wrong tokenIds.
+      for (const id of job.tokenIds) movedByMeIds.delete(id);
+      // Release the gate as soon as the teleport finishes — the
+      // remaining eye-open animation is purely visual (~500ms) and
+      // shouldn't silently swallow the user's next drag. Without
+      // this, dragging during the open animation is dropped and the
+      // user has to drag a second time to make anything happen.
+      blinkModalOpen = false;
       try {
         await OBR.broadcast.sendMessage(BROADCAST_BLINK_DONE, {}, { destination: "LOCAL" });
       } catch {}

@@ -52,7 +52,6 @@ body.below .tail{
 }
 .head .ico{font-size:13px}
 .head .nm{flex:1; color:#e0e7ff; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-.head .ta{font-size:10px; color:#8884a8; letter-spacing:.4px; flex-shrink:0}
 .head .x{
   margin-left:4px; padding:0 5px; height:16px; line-height:14px;
   color:#9aa0b3; cursor:pointer; border-radius:3px;
@@ -85,7 +84,6 @@ body.below .tail{
 .opt:active{transform:scale(0.98)}
 .opt .ic{font-size:12px;color:#a78bfa;flex-shrink:0}
 .opt .nm{flex:1;font-size:12px;color:#eee;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.opt .ta{font-size:9.5px;color:#8884a8;letter-spacing:.4px;flex-shrink:0}
 .opt .hd{font-size:9px;color:#888;font-style:italic}
 .empty{padding:12px;text-align:center;color:#888;font-size:11px}
 </style>
@@ -95,7 +93,6 @@ body.below .tail{
   <div class="head">
     <span class="ico">◐</span>
     <span class="nm" id="entry-name"></span>
-    <span class="ta" id="entry-tag"></span>
     <span class="x" id="btn-close" title="关闭">×</span>
   </div>
   <div class="sub" id="sub"></div>
@@ -138,7 +135,6 @@ const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 document.getElementById("entry-name").textContent = payload.entryName || "传送门";
-document.getElementById("entry-tag").textContent = payload.entryTag ? `[${payload.entryTag}]` : "";
 document.getElementById("sub").textContent = L.sub(payload.tokenIds.length);
 
 const listEl = document.getElementById("list");
@@ -149,7 +145,6 @@ if (!payload.candidates || payload.candidates.length === 0) {
     `<div class="opt" data-id="${escHtml(c.id)}">
        <span class="ic">◐</span>
        <span class="nm">${escHtml(c.name)}</span>
-       <span class="ta">${escHtml(c.tag)}</span>
        ${c.hidden ? `<span class="hd">${L.hidden}</span>` : ''}
      </div>`
   ).join("");
