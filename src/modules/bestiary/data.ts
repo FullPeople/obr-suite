@@ -13,8 +13,32 @@ function detectEdition(source: string): MonsterEdition {
   return "other";
 }
 
-// Data source (JSON) — kiwee.top Chinese mirror
-const DATA_BASE = "https://5e.kiwee.top";
+// Data source (JSON) — primary kiwee.top Chinese mirror, but the
+// suite's LibraryConfig (state.libraries) can add user-supplied
+// alternates (e.g. self-hosted Cloudflare worker). loadAllMonsters
+// fetches from EVERY enabled library and merges results, so
+// monsters from a custom library show up in the bestiary panel
+// alongside the default ones.
+const DEFAULT_BASE = "https://5e.kiwee.top";
+
+function getEnabledLibraryBases(): string[] {
+  // Read library list lazily at call time. We deliberately import
+  // through a runtime-resolved path (not top-level `import`) because
+  // bestiary/data.ts is also pulled in by background bundles where
+  // suite state may not be initialised yet — falling back to the
+  // hardcoded DEFAULT_BASE is the right behaviour there.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getState } = require("../../state") as typeof import("../../state");
+    const libs = getState().libraries || [];
+    const bases = libs
+      .filter((l) => l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim().length > 0)
+      .map((l) => l.baseUrl.replace(/\/+$/, ""));
+    return bases.length > 0 ? bases : [DEFAULT_BASE];
+  } catch {
+    return [DEFAULT_BASE];
+  }
+}
 // Images: proxied through our own server so OBR can load them as WebGL textures
 // (5e.tools doesn't send CORS headers, so direct loading fails in scene rendering).
 const IMG_BASE = "https://obr.dnd.center/5etools-img";
@@ -177,25 +201,41 @@ export async function loadAllMonsters(): Promise<ParsedMonster[]> {
   if (loadingPromise) return loadingPromise;
 
   loadingPromise = (async () => {
-    // Load index to get all source files
-    const indexRes = await fetch(`${DATA_BASE}/data/bestiary/index.json`);
-    const index = await indexRes.json() as Record<string, string>;
-
-    // Load all source files in parallel
-    const entries = Object.entries(index);
-    const results = await Promise.all(
-      entries.map(async ([, filename]) => {
+    // Fetch from EVERY enabled library and merge. Libraries may
+    // disagree on which sources they ship (custom Cloudflare libs
+    // typically only have a handful of homebrew monsters); merging
+    // by makeSlug() naturally dedupes so the canonical 5etools
+    // monster wins for shared sources, and homebrew slugs from a
+    // custom library appear alongside.
+    const bases = getEnabledLibraryBases();
+    const perLibraryMonsters = await Promise.all(
+      bases.map(async (base) => {
         try {
-          const res = await fetch(`${DATA_BASE}/data/bestiary/${filename}`);
-          const data = await res.json();
-          return (data.monster || []) as Monster[];
-        } catch {
+          const indexRes = await fetch(`${base}/data/bestiary/index.json`);
+          if (!indexRes.ok) return [] as Monster[];
+          const index = await indexRes.json() as Record<string, string>;
+          const files = Object.entries(index);
+          const results = await Promise.all(
+            files.map(async ([, filename]) => {
+              try {
+                const res = await fetch(`${base}/data/bestiary/${filename}`);
+                if (!res.ok) return [] as Monster[];
+                const data = await res.json();
+                return (data.monster || []) as Monster[];
+              } catch (e) {
+                console.warn(`[obr-suite/bestiary] failed to load ${base}/data/bestiary/${filename}`, e);
+                return [] as Monster[];
+              }
+            })
+          );
+          return results.flat();
+        } catch (e) {
+          console.warn(`[obr-suite/bestiary] failed to load index from ${base}`, e);
           return [] as Monster[];
         }
       })
     );
-
-    const rawAll = results.flat();
+    const rawAll = perLibraryMonsters.flat();
     // Build slug → raw lookup so spawn/info can read full monster data
     // (abilities, actions, etc.) without re-fetching.
     for (const m of rawAll) {

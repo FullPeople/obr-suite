@@ -20,10 +20,31 @@ import { applyI18nDom } from "../../i18n";
 
 const POPOVER_ID = "com.obr-suite/search-bar";
 
-// Data source — kiwee.top works for both languages.
-const KIWEE_BASE = "https://5e.kiwee.top";
+// Data source — kiwee.top works for both languages, but additional
+// libraries can be wired in via the suite's library list (set in
+// Settings → 库设置). When >1 library is enabled, loadIndex fetches
+// from every one and merges entries — that way a self-hosted
+// Cloudflare lib's homebrew monsters show up in search alongside
+// the kiwee defaults.
+const DEFAULT_BASE = "https://5e.kiwee.top";
+
+function getEnabledLibraryBases(): string[] {
+  try {
+    const libs = getState().libraries || [];
+    const bases = libs
+      .filter((l) => l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim().length > 0)
+      .map((l) => l.baseUrl.replace(/\/+$/, ""));
+    return bases.length > 0 ? bases : [DEFAULT_BASE];
+  } catch {
+    return [DEFAULT_BASE];
+  }
+}
+
 function dataBase(_lang: Language): string {
-  return KIWEE_BASE;
+  // First enabled lib is the "primary" — used for per-entry data
+  // fetches that look up by source code (we walk every base when
+  // resolving). Fallback is the kiwee mirror.
+  return getEnabledLibraryBases()[0];
 }
 function indexUrl(lang: Language): string { return `${dataBase(lang)}/search/index.json`; }
 function booksUrl(lang: Language): string { return `${dataBase(lang)}/data/books.json`; }
@@ -157,8 +178,12 @@ async function loadIndex(): Promise<IndexFile> {
   if (indexCache) return indexCache;
   if (indexLoading) return indexLoading;
   indexLoading = (async () => {
+    // Cache key is keyed on the active library set so switching
+    // libraries doesn't serve a stale merged index.
+    const bases = getEnabledLibraryBases();
+    const cacheKey = `${CACHE_KEY}:${bases.join("|")}`;
     try {
-      const raw = localStorage.getItem(CACHE_KEY);
+      const raw = localStorage.getItem(cacheKey);
       if (raw) {
         const parsed = JSON.parse(raw) as { ts: number; data: IndexFile };
         if (Date.now() - parsed.ts < CACHE_TTL_MS && parsed.data?.x?.length) {
@@ -168,15 +193,51 @@ async function loadIndex(): Promise<IndexFile> {
         }
       }
     } catch {}
-    const res = await fetch(indexUrl(getLocalLang()), { cache: "default" });
-    if (!res.ok) throw new Error(`index fetch failed: ${res.status}`);
-    const data = (await res.json()) as IndexFile;
-    indexCache = data;
+    // Fetch all libraries in parallel; merge `x` (entries) by
+    // (cn / n / source) and the source map `m.s` by code.
+    const perLibrary = await Promise.all(
+      bases.map(async (base) => {
+        try {
+          const res = await fetch(`${base}/search/index.json`, { cache: "default" });
+          if (!res.ok) return null;
+          return (await res.json()) as IndexFile;
+        } catch (e) {
+          console.warn(`[obr-suite/search] index fetch failed for ${base}`, e);
+          return null;
+        }
+      })
+    );
+    const valid = perLibrary.filter((x): x is IndexFile => !!x && Array.isArray(x.x));
+    if (valid.length === 0) {
+      throw new Error("no library returned a valid search index");
+    }
+    // Naive merge — primary lib's source map wins, all entries pooled.
+    // dedupeKey uses `${cn}|${n}|${s ?? ""}` so the same monster from
+    // two libraries collapses to one row (custom lib wins because
+    // it's typically listed first).
+    const merged: IndexFile = { x: [], m: { s: {} } };
+    for (const lib of valid) {
+      if (lib.m?.s) {
+        for (const [code, id] of Object.entries(lib.m.s)) {
+          if (!(code in merged.m.s)) merged.m.s[code] = id;
+        }
+      }
+    }
+    const seen = new Set<string>();
+    for (const lib of valid) {
+      for (const e of lib.x) {
+        const key = `${e.cn || ""}|${e.n || ""}|${e.s ?? ""}|${e.c ?? ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.x.push(e);
+      }
+    }
+    indexCache = merged;
     buildSourceMap(indexCache);
     try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+      localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: merged }));
     } catch {}
-    return data;
+    return merged;
   })();
   try { return await indexLoading; } finally { indexLoading = null; }
 }

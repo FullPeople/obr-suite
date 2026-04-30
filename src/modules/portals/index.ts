@@ -291,21 +291,46 @@ async function handleDMSelectionForEdit(selection: string[] | undefined) {
 
 // --- Drag-end portal entry detection --------------------------------------
 
-// Called from scene.items.onChange. Tracks the LOCAL player's selected
-// tokens; whenever any of their positions changes, restart a debounce
-// timer. When the timer fires without further changes for DRAG_END_MS,
-// treat that as drag-end and run `onDragEnd`.
-async function onItemsMaybeDragging(items: Item[]) {
-  let selection: string[] = [];
+// Called from scene.items.onChange. Tracks tokens this client cares
+// about — selection (whatever's actively highlighted) PLUS tokens
+// the local player owns (createdUserId match). The ownership fallback
+// is what makes portals work for PLAYERS who drag without keeping a
+// selection — earlier the selection-only check meant only the GM
+// (who tends to keep things selected) reliably triggered teleport.
+//
+// Whenever any of these tokens' positions change, restart a debounce
+// timer; if no further change for DRAG_END_MS, treat as drag-end.
+async function getCareAboutTokenIds(): Promise<Set<string>> {
+  const careAbout = new Set<string>();
   try {
     const s = await OBR.player.getSelection();
-    selection = s ?? [];
+    if (s) for (const id of s) careAbout.add(id);
   } catch {}
-  if (selection.length === 0) return;
+  let myId = "";
+  try { myId = await OBR.player.getId(); } catch {}
+  if (myId) {
+    // Owner-fallback: for PLAYERS, this picks up "I created this
+    // token" (their own characters / summons). For GM, it includes
+    // everything they spawned which is fine — we only act on tokens
+    // that actually moved AND sit on a portal, so broad inclusion
+    // is safe.
+    try {
+      const all = await OBR.scene.items.getItems(
+        (it: Item) => it.createdUserId === myId,
+      );
+      for (const it of all) careAbout.add(it.id);
+    } catch {}
+  }
+  return careAbout;
+}
+
+async function onItemsMaybeDragging(items: Item[]) {
+  const careAbout = await getCareAboutTokenIds();
+  if (careAbout.size === 0) return;
 
   let moved = false;
   for (const it of items) {
-    if (!selection.includes(it.id)) continue;
+    if (!careAbout.has(it.id)) continue;
     if (it.layer !== "CHARACTER" && it.layer !== "MOUNT") continue;
     if (isPortal(it)) continue;
     const prev = lastTokenPos.get(it.id);
@@ -323,17 +348,14 @@ async function onItemsMaybeDragging(items: Item[]) {
   }, DRAG_END_MS);
 }
 
-// Evaluates the world fresh: is any locally-selected token currently
-// sitting inside a visible portal? If yes, open the destination modal.
-// No memory of "where it was before" — pure point-in-circle test.
+// Evaluates the world fresh: is any "I care about" token currently
+// sitting inside a visible portal? If yes, open the destination
+// modal — only on this client, only with this client's owned tokens
+// as candidates for teleport.
 async function onDragEnd() {
   if (destModalOpen) return;
-  let selection: string[] = [];
-  try {
-    const s = await OBR.player.getSelection();
-    selection = s ?? [];
-  } catch {}
-  if (selection.length === 0) return;
+  const careAbout = await getCareAboutTokenIds();
+  if (careAbout.size === 0) return;
 
   let items: Item[];
   try { items = await OBR.scene.items.getItems(); } catch { return; }
@@ -350,7 +372,7 @@ async function onDragEnd() {
   }
 
   for (const tok of items) {
-    if (!selection.includes(tok.id)) continue;
+    if (!careAbout.has(tok.id)) continue;
     if (tok.layer !== "CHARACTER" && tok.layer !== "MOUNT") continue;
     if (isPortal(tok)) continue;
     if (recentlyTeleported.has(tok.id)) continue; // Just teleported here.
@@ -358,7 +380,13 @@ async function onDragEnd() {
       const pm = readPortalMeta(p);
       if (!pm) continue;
       if (dist(tok.position, portalCenter(p)) <= pm.radius) {
-        await openDestinationModal(p, items, selection);
+        // Only this client opens the modal (OBR.modal is local). Pass
+        // the careAbout set so the resulting teleport only considers
+        // tokens this client has the right to move — the destination
+        // page returns these via BROADCAST_TELEPORT and the listener
+        // running on this same client uses OBR.scene.items.updateItems
+        // which OBR's permission layer enforces.
+        await openDestinationModal(p, items, [...careAbout]);
         return; // Only one modal, one entry.
       }
     }

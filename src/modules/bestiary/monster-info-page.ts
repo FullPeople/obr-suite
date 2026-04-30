@@ -6,37 +6,82 @@ import { subscribeToSfx } from "../dice/sfx-broadcast";
 
 const SHOW_MSG = "com.bestiary/info-show";
 const BESTIARY_DATA_KEY = "com.bestiary/monsters";
-const DATA_BASE = "https://5e.kiwee.top";
+const DEFAULT_BASE = "https://5e.kiwee.top";
 
-let indexCache: Record<string, string> | null = null;
-async function loadBestiaryIndex(): Promise<Record<string, string>> {
-  if (indexCache) return indexCache;
-  const res = await fetch(`${DATA_BASE}/data/bestiary/index.json`);
-  indexCache = (await res.json()) as Record<string, string>;
-  return indexCache;
+// Read enabled-library bases from suite state at call time. Same
+// pattern as bestiary/data.ts — falls back to the kiwee mirror
+// when state isn't populated yet.
+function getBases(): string[] {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getState } = require("../../state") as typeof import("../../state");
+    const libs = getState().libraries || [];
+    const bases = libs
+      .filter((l) => l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim().length > 0)
+      .map((l) => l.baseUrl.replace(/\/+$/, ""));
+    return bases.length > 0 ? bases : [DEFAULT_BASE];
+  } catch {
+    return [DEFAULT_BASE];
+  }
 }
 
-const fileCache = new Map<string, any[]>();
-async function fetchMonsterFile(filename: string): Promise<any[]> {
-  const cached = fileCache.get(filename);
+// Index cache is per-base now; a custom Cloudflare lib has its own
+// `bestiary/index.json` that may list different sources than kiwee.
+const indexCacheByBase = new Map<string, Record<string, string>>();
+async function loadBestiaryIndexFor(base: string): Promise<Record<string, string>> {
+  const cached = indexCacheByBase.get(base);
   if (cached) return cached;
   try {
-    const res = await fetch(`${DATA_BASE}/data/bestiary/${filename}`);
+    const res = await fetch(`${base}/data/bestiary/index.json`);
+    if (!res.ok) {
+      indexCacheByBase.set(base, {});
+      return {};
+    }
+    const idx = (await res.json()) as Record<string, string>;
+    indexCacheByBase.set(base, idx);
+    return idx;
+  } catch {
+    indexCacheByBase.set(base, {});
+    return {};
+  }
+}
+
+// File cache key: `${base}|${filename}` so the same source from
+// different libraries doesn't collide.
+const fileCache = new Map<string, any[]>();
+async function fetchMonsterFile(base: string, filename: string): Promise<any[]> {
+  const key = `${base}|${filename}`;
+  const cached = fileCache.get(key);
+  if (cached) return cached;
+  try {
+    const res = await fetch(`${base}/data/bestiary/${filename}`);
+    if (!res.ok) {
+      fileCache.set(key, []);
+      return [];
+    }
     const data = await res.json();
     const list = (data.monster || []) as any[];
-    fileCache.set(filename, list);
+    fileCache.set(key, list);
     return list;
   } catch {
+    fileCache.set(key, []);
     return [];
   }
 }
 
+// Walk every enabled library until we find the monster. Custom libs
+// usually win because they're narrower; if not found there, falls
+// through to kiwee.
 async function findMonster(source: string, engName: string): Promise<any | null> {
-  const index = await loadBestiaryIndex();
-  const filename = index[source];
-  if (!filename) return null;
-  const list = await fetchMonsterFile(filename);
-  return list.find((x) => (x.ENG_name || x.name) === engName) || null;
+  for (const base of getBases()) {
+    const index = await loadBestiaryIndexFor(base);
+    const filename = index[source];
+    if (!filename) continue;
+    const list = await fetchMonsterFile(base, filename);
+    const hit = list.find((x) => (x.ENG_name || x.name) === engName);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 // Resolve 5etools _copy by fetching the parent source file and merging. Same
