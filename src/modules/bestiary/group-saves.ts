@@ -1,5 +1,6 @@
 import OBR, { Item } from "@owlbear-rodeo/sdk";
 import { fireQuickRoll } from "../dice/tags";
+import { broadcastDiceRoll } from "../dice";
 import { getLocalLang, onLangChange } from "../../state";
 
 // "Group save" popover — auto-shows when the GM box-selects 2+ tokens
@@ -29,6 +30,16 @@ const COMBAT_STATE_KEY = "com.initiative-tracker/combat";
 // spawn auto-populates it from the monster's DEX score so the
 // initiative roll uses the right bonus.
 const INITIATIVE_DEX_KEY = "com.initiative-tracker/dexMod";
+// Initiative tracker stores per-token state (count, active, rolled)
+// at this metadata key. Group-initiative writes the rolled d20
+// (no modifier) into `count` once the dice modal hits its climax,
+// so the initiative panel's column updates in sync with the
+// animation — exact same protocol as useInitiative.rollInitiativeLocal.
+const INITIATIVE_DATA_KEY = "com.initiative-tracker/data";
+// The dice-effect page broadcasts this near the climax of every
+// roll so any listener that knows the rollId can side-effect at
+// the same instant the final number appears on canvas.
+const BC_DICE_FADE_START = "com.obr-suite/dice-fade-start";
 
 // Broadcast channels (LOCAL only — single client lifecycle):
 const BC_FIRE = "com.obr-suite/bestiary-group-save-fire";
@@ -207,6 +218,25 @@ async function refresh(): Promise<void> {
   }
 }
 
+// Roll one or two d20s for a single initiative entry. Mirrors the
+// localRoll() helper in useInitiative.ts — same shape so the count
+// write at climax matches the panel's display.
+function rollD20Local(variant: "adv" | "normal" | "dis"): {
+  rolls: number[];
+  winnerIdx: number;
+  finalValue: number;
+} {
+  const r1 = Math.floor(Math.random() * 20) + 1;
+  if (variant === "normal") return { rolls: [r1], winnerIdx: 0, finalValue: r1 };
+  const r2 = Math.floor(Math.random() * 20) + 1;
+  if (variant === "adv") {
+    const winnerIdx = r1 >= r2 ? 0 : 1;
+    return { rolls: [r1, r2], winnerIdx, finalValue: Math.max(r1, r2) };
+  }
+  const winnerIdx = r1 <= r2 ? 0 : 1;
+  return { rolls: [r1, r2], winnerIdx, finalValue: Math.min(r1, r2) };
+}
+
 async function fireInitiative(
   variant: "adv" | "normal" | "dis",
 ): Promise<void> {
@@ -216,31 +246,88 @@ async function fireInitiative(
     ? (variant === "adv" ? "先攻 (优势)" : variant === "dis" ? "先攻 (劣势)" : "先攻")
     : (variant === "adv" ? "Initiative (Adv)" : variant === "dis" ? "Initiative (Dis)" : "Initiative");
   const collectiveId = `col-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+
   // Read each token's dex modifier from initiative-tracker metadata
   // (bestiary spawn populates this when a monster is added). Falls
   // back to 0 if the token isn't initiative-tracked yet — the dice
   // animation still plays so the GM gets a usable number.
-  let items: any[] = [];
+  let items: Item[] = [];
   try { items = await OBR.scene.items.getItems(lastSelection.map((m) => m.itemId)); } catch {}
-  const itemMap = new Map<string, any>();
+  const itemMap = new Map<string, Item>();
   for (const it of items) itemMap.set(it.id, it);
+
+  let rollerId = "";
+  let rollerName = "";
+  try {
+    [rollerId, rollerName] = await Promise.all([
+      OBR.player.getId(),
+      OBR.player.getName(),
+    ]);
+  } catch {}
+
+  // Per-token: roll d20 locally, generate deterministic init- rollId,
+  // subscribe to BC_DICE_FADE_START with that rollId, then broadcast
+  // the dice. The fade-start listener writes the rolled value into the
+  // initiative-tracker `count` metadata at the instant of the climax —
+  // exact same protocol as useInitiative.rollInitiativeLocal so the
+  // initiative panel's column lights up at the right moment. Without
+  // this we were just throwing dice without ever updating count.
   for (const m of lastSelection) {
     const it = itemMap.get(m.itemId);
-    const dexMod = (it?.metadata?.[INITIATIVE_DEX_KEY] as number) ?? 0;
-    const expr = `1d20${dexMod >= 0 ? `+${dexMod}` : `${dexMod}`}`;
+    if (!it) continue;
+    const dexMod = (it.metadata?.[INITIATIVE_DEX_KEY] as number) ?? 0;
+    const { rolls, winnerIdx, finalValue } = rollD20Local(variant);
+    const rollId = `init-${m.itemId}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+
+    let writeDone = false;
+    const writeFinalValue = () => {
+      if (writeDone) return;
+      writeDone = true;
+      OBR.scene.items.updateItems([m.itemId], (drafts) => {
+        for (const d of drafts) {
+          const existing = d.metadata[INITIATIVE_DATA_KEY] as any;
+          // Stored count is the RAW d20 (no modifier) — the panel
+          // adds the dexMod at display time. Mirror that exactly so
+          // the existing sort / display path works unchanged.
+          d.metadata[INITIATIVE_DATA_KEY] = { ...(existing ?? { count: 0, active: false }), count: finalValue, rolled: true };
+        }
+      }).catch((e) => {
+        console.error("[obr-suite/group-saves] init count write failed", e);
+      });
+    };
+    const unsub = OBR.broadcast.onMessage(BC_DICE_FADE_START, (event) => {
+      const data = event.data as { rollId?: string } | undefined;
+      if (data?.rollId !== rollId) return;
+      writeFinalValue();
+      try { unsub(); } catch {}
+    });
+    // Safety net — if the climax broadcast never arrives (modal
+    // crash / network), still write the value after a generous
+    // timeout so the column doesn't stay stale forever.
+    setTimeout(() => { writeFinalValue(); try { unsub(); } catch {} }, 6000);
+
     try {
-      await fireQuickRoll({
-        expression: expr,
-        label: variantLabel,
+      await broadcastDiceRoll({
         itemId: m.itemId,
-        focus: false,
-        hidden: false,
+        dice: rolls.map((v, i) => {
+          const die: { type: "d20"; value: number; loser?: boolean } = {
+            type: "d20",
+            value: v,
+          };
+          if (rolls.length > 1 && i !== winnerIdx) die.loser = true;
+          return die;
+        }),
+        winnerIdx,
+        modifier: dexMod,
+        label: variantLabel,
+        rollerId,
+        rollerName,
+        rollId,
+        autoDismiss: true,
         collectiveId,
-        ...(variant === "adv" ? { advMode: "adv" } : {}),
-        ...(variant === "dis" ? { advMode: "dis" } : {}),
       });
     } catch (e) {
-      console.error("[obr-suite/group-saves] fireInitiative failed for", m.itemId, e);
+      console.error("[obr-suite/group-saves] fireInitiative broadcast failed for", m.itemId, e);
     }
   }
 }

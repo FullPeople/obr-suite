@@ -66,6 +66,18 @@ export interface SuiteState {
   // turn order tokens line up cleanly. Default false (most groups
   // pre-position by hand).
   initiativeAutoSnapOnPrep: boolean;
+  // Cross-scene sync. When ON, the suite's scene-state is mirrored
+  // to ROOM metadata so every scene in the room shares the same
+  // settings. The flag itself rides along with the state (it's part
+  // of the mirror), so once enabled in one scene it propagates to
+  // all. Default false (per-scene settings, classic behaviour).
+  crossSceneSyncSettings: boolean;
+  // Cross-scene sync for character cards (the list under
+  // `com.character-cards/list`). Same pattern as above but keyed off
+  // a separate room key so users can mix-and-match: "share my
+  // settings across scenes but keep different card decks per scene"
+  // is a valid combo.
+  crossSceneSyncCards: boolean;
   libraries: LibraryConfig[];
 }
 
@@ -95,6 +107,8 @@ export const DEFAULT_STATE: SuiteState = {
   bestiaryAutoInitiative: true,
   initiativeFocusOnTurnChange: true,
   initiativeAutoSnapOnPrep: false,
+  crossSceneSyncSettings: false,
+  crossSceneSyncCards: false,
   libraries: DEFAULT_LIBRARIES,
 };
 
@@ -142,6 +156,10 @@ function merge(partial: any): SuiteState {
       partial.initiativeFocusOnTurnChange ?? DEFAULT_STATE.initiativeFocusOnTurnChange,
     initiativeAutoSnapOnPrep:
       partial.initiativeAutoSnapOnPrep ?? DEFAULT_STATE.initiativeAutoSnapOnPrep,
+    crossSceneSyncSettings:
+      partial.crossSceneSyncSettings ?? DEFAULT_STATE.crossSceneSyncSettings,
+    crossSceneSyncCards:
+      partial.crossSceneSyncCards ?? DEFAULT_STATE.crossSceneSyncCards,
     libraries,
   };
 }
@@ -152,6 +170,8 @@ function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
   if (a.bestiaryAutoInitiative !== b.bestiaryAutoInitiative) return false;
   if (a.initiativeFocusOnTurnChange !== b.initiativeFocusOnTurnChange) return false;
   if (a.initiativeAutoSnapOnPrep !== b.initiativeAutoSnapOnPrep) return false;
+  if (a.crossSceneSyncSettings !== b.crossSceneSyncSettings) return false;
+  if (a.crossSceneSyncCards !== b.crossSceneSyncCards) return false;
   for (const k of Object.keys(a.enabled) as ModuleId[]) {
     if (a.enabled[k] !== b.enabled[k]) return false;
   }
@@ -166,11 +186,38 @@ function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
   return true;
 }
 
+// Cross-scene sync — when crossSceneSyncSettings is on, the suite's
+// state is mirrored to ROOM metadata under this key. Every scene-load
+// checks here first; if the room mirror exists AND its sync flag is
+// still on, the scene is hydrated from the room copy instead of the
+// scene's own metadata. The flag rides along with the state, so once
+// enabled in any scene it propagates to all.
+const ROOM_STATE_KEY = "com.obr-suite/state-room";
+
 export async function refreshFromScene(): Promise<SuiteState> {
   let next: SuiteState;
   try {
-    const meta = await OBR.scene.getMetadata();
-    next = merge(meta[SCENE_KEY]);
+    // Cross-scene sync: prefer room mirror when active.
+    let usedRoom = false;
+    try {
+      const roomMeta = await OBR.room.getMetadata();
+      const fromRoom = roomMeta[ROOM_STATE_KEY] as any;
+      if (fromRoom && fromRoom.crossSceneSyncSettings) {
+        next = merge(fromRoom);
+        usedRoom = true;
+        // Mirror back to scene metadata so consumers that read
+        // SCENE_KEY directly (bestiary auto-init flag, etc.) see the
+        // synced value too.
+        try { await OBR.scene.setMetadata({ [SCENE_KEY]: next }); } catch {}
+      } else {
+        const meta = await OBR.scene.getMetadata();
+        next = merge(meta[SCENE_KEY]);
+      }
+    } catch {
+      const meta = await OBR.scene.getMetadata();
+      next = merge(meta[SCENE_KEY]);
+    }
+    void usedRoom; // satisfy lint when not in use elsewhere
   } catch {
     next = DEFAULT_STATE;
   }
@@ -195,6 +242,7 @@ export function onStateChange(fn: (s: SuiteState) => void): () => void {
 // DM-only writes; player writes are silently dropped at OBR's permission layer
 // but we don't gate here — the UI hides write controls for non-GM users.
 export async function setState(partial: Partial<SuiteState>): Promise<void> {
+  const prev = cached;
   const next: SuiteState = {
     ...cached,
     ...partial,
@@ -202,6 +250,21 @@ export async function setState(partial: Partial<SuiteState>): Promise<void> {
   };
   await OBR.scene.setMetadata({ [SCENE_KEY]: next });
   cached = next;
+
+  // Cross-scene sync mirror: write to room when ON, clear when
+  // transitioning ON → OFF so other scenes don't keep hydrating from
+  // a stale mirror.
+  try {
+    if (next.crossSceneSyncSettings) {
+      await OBR.room.setMetadata({ [ROOM_STATE_KEY]: next });
+    } else if (prev.crossSceneSyncSettings) {
+      // Was on, now off — clear so scene-loads stop seeing it.
+      await OBR.room.setMetadata({ [ROOM_STATE_KEY]: undefined });
+    }
+  } catch (e) {
+    console.warn("[obr-suite/state] room mirror write failed", e);
+  }
+
   for (const fn of listeners) fn(cached);
   // Explicit broadcast for cross-iframe sync. OBR.scene.onMetadataChange
   // SHOULD fire in all iframes when scene metadata changes, but in

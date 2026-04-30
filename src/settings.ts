@@ -717,6 +717,8 @@ const TABS: TabDef[] = [
         `<button data-dv="${val}" class="${
           s.dataVersion === val ? "on" : ""
         }" type="button" ${isGM ? "" : "disabled"}>${label}</button>`;
+      const syncSet = !!s.crossSceneSyncSettings;
+      const syncCards = !!s.crossSceneSyncCards;
       return `
         <div class="basics-block">
           <div class="basics-h">${lang === "zh" ? "数据版本" : "Data version"}</div>
@@ -730,6 +732,37 @@ const TABS: TabDef[] = [
               ? "决定怪物图鉴和搜索框显示的数据范围：<br>· 2014 = 仅 PHB + MM<br>· 2024 = 仅 XPHB + XMM<br>· 2014+2024 = 全部"
               : "Controls the data range shown in Bestiary and Global Search:<br>· 2014 = PHB + MM only<br>· 2024 = XPHB + XMM only<br>· 2014+2024 = everything"
           }</p>
+          ${!isGM ? `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
+        </div>
+
+        <div class="basics-block" style="margin-top:14px">
+          <div class="basics-h">${lang === "zh" ? "跨场景同步" : "Cross-scene sync"}</div>
+          <div class="row">
+            <div class="lbl">
+              ${lang === "zh" ? "同步插件设置" : "Sync suite settings"}
+              <div class="desc"><em>${
+                lang === "zh"
+                  ? "开启后，房间里所有场景共享同一份插件设置（数据版本、模块开关、库列表等）。开启时会询问是否以当前场景为基准。"
+                  : "When ON, every scene in the room shares one set of suite settings (data version, module toggles, libraries...). Enabling prompts whether to use the current scene as the source."
+              }</em></div>
+            </div>
+            <button class="tog ${syncSet ? "on" : ""}" data-key="crossSceneSyncSettings" type="button" ${
+              isGM ? "" : "disabled"
+            } aria-pressed="${syncSet}"></button>
+          </div>
+          <div class="row">
+            <div class="lbl">
+              ${lang === "zh" ? "同步角色卡列表" : "Sync character-card list"}
+              <div class="desc"><em>${
+                lang === "zh"
+                  ? "开启后，房间里所有场景共享同一份角色卡列表。开启时会询问是否以当前场景为基准。卡片实际数据本来就以房间 ID 存在服务器上，所以同步只是同步「哪些卡可见」。"
+                  : "When ON, every scene in the room shares one character-card list. Enabling prompts whether to use the current scene as the source. Card content itself is already keyed by room ID server-side; this only syncs WHICH cards each scene shows."
+              }</em></div>
+            </div>
+            <button class="tog ${syncCards ? "on" : ""}" data-key="crossSceneSyncCards" type="button" ${
+              isGM ? "" : "disabled"
+            } aria-pressed="${syncCards}"></button>
+          </div>
           ${!isGM ? `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
         </div>
       `;
@@ -746,6 +779,52 @@ const TABS: TabDef[] = [
           await setState({ dataVersion: b.dataset.dv as DataVersion });
         });
       });
+      root
+        .querySelector<HTMLButtonElement>('.tog[data-key="crossSceneSyncSettings"]')
+        ?.addEventListener("click", async () => {
+          if (!isGM) return;
+          const cur = !!getState().crossSceneSyncSettings;
+          if (!cur) {
+            // Off → ON: confirm before propagating current scene's
+            // settings to every other scene in the room.
+            const ok = window.confirm(
+              getLocalLang() === "zh"
+                ? "需要以当前场景的设置为基准，同步到本房间所有场景吗？\n\n（其他场景之前的独立设置会被覆盖。）"
+                : "Sync the current scene's settings as the source-of-truth across every scene in this room?\n\n(Other scenes' previously-independent settings will be overwritten.)"
+            );
+            if (!ok) return;
+          }
+          await setState({ crossSceneSyncSettings: !cur });
+        });
+      root
+        .querySelector<HTMLButtonElement>('.tog[data-key="crossSceneSyncCards"]')
+        ?.addEventListener("click", async () => {
+          if (!isGM) return;
+          const cur = !!getState().crossSceneSyncCards;
+          if (!cur) {
+            const ok = window.confirm(
+              getLocalLang() === "zh"
+                ? "需要以当前场景的角色卡列表为基准，同步到本房间所有场景吗？\n\n（其他场景之前独立的卡列表会被覆盖。）"
+                : "Sync the current scene's character-card list as the source-of-truth across every scene in this room?\n\n(Other scenes' previously-independent lists will be overwritten.)"
+            );
+            if (!ok) return;
+            // Seed the room mirror with the current scene's cards
+            // BEFORE flipping the flag, so the moment other scenes
+            // hydrate they'll see the correct list.
+            try {
+              const m = await import("./modules/cross-scene-cards");
+              await m.seedRoomCardsFromCurrentScene();
+            } catch (e) { console.warn("[obr-suite/settings] seed cards failed", e); }
+          } else {
+            // ON → off: clear the room mirror so other scenes stop
+            // hydrating from a stale list.
+            try {
+              const m = await import("./modules/cross-scene-cards");
+              await m.clearRoomCardsMirror();
+            } catch (e) { console.warn("[obr-suite/settings] clear cards mirror failed", e); }
+          }
+          await setState({ crossSceneSyncCards: !cur });
+        });
     },
   },
   {

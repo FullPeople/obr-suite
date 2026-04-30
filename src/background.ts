@@ -12,6 +12,7 @@ import {
 import { setupDice, teardownDice } from "./modules/dice";
 import { setupPortals, teardownPortals } from "./modules/portals";
 import { setupDevTest, teardownDevTest } from "./modules/dev-test";
+import { setupCrossSceneCards } from "./modules/cross-scene-cards";
 
 // One central popover hosts the floating button + collapsible cluster.
 // The popover never closes itself; the iframe handles all expand/collapse
@@ -231,6 +232,11 @@ OBR.onReady(async () => {
   // broadcast their flag at scene-ready so others know which player
   // doesn't have the heavy popovers.
   setupMobilePresenceListener();
+
+  // Cross-scene character-card sync. Always-on watcher; the actual
+  // mirroring is gated on state.crossSceneSyncCards inside the
+  // module so it's a no-op when the user hasn't enabled the toggle.
+  void setupCrossSceneCards();
 
   const showIfReady = async () => {
     try {
