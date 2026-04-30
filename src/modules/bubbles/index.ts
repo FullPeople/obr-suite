@@ -77,15 +77,24 @@ const TEXT_COLOR = "#ffffff";
 
 // --- Layout ---------------------------------------------------------------
 //
-// Pixel sizes here are SCENE UNITS. Labels use SCALE inheritance from the
-// attached parent, so a 1-cell token displays bubbles at these exact
-// dimensions and a 2-cell token doubles them automatically.
+// Pixel sizes here are SCENE UNITS. Labels use SCALE inheritance from
+// the attached parent so a 1-cell token displays bubbles at these
+// exact dimensions and a 2-cell token doubles them automatically.
+//
+// Placement matches the canonical OBR token-stat-bubble convention:
+// a row at the BOTTOM of the token, sitting on the bottom edge with
+// roughly half above + half below — pills look "stuck" to the
+// bottom of the model rather than floating above.
+//
+// Label.position uses TOP-LEFT semantics (like Shape — there is no
+// `offset` field on the Label item to redirect that anchor), so we
+// compute (left, top) for each pill rather than centers.
 
-const PILL_H = 22;        // height of each pill
-const AC_W = 32;          // AC pill width
-const HP_W = 64;          // HP pill width
-const TEMP_W = 28;        // Temp HP pill width
-const GAP = 5;            // gap between pills
+const PILL_H = 26;        // pill height
+const AC_W = 36;          // AC pill width  (1–2 chars)
+const HP_W = 70;          // HP pill width  ("current/max" ≈ 5 chars)
+const TEMP_W = 32;        // Temp HP pill width
+const GAP = 4;            // gap between pills
 
 interface BubbleEntry {
   ids: string[];          // ordered: [acId?, hpId, tempId?]
@@ -99,13 +108,13 @@ function tokenSignature(tok: Item): string {
   return `${a.image?.width ?? "_"}|${a.image?.height ?? "_"}|${a.image?.dpi ?? "_"}|${tok.scale?.x ?? 1}|${tok.scale?.y ?? 1}|${tok.position.x}|${tok.position.y}|${tok.visible ? 1 : 0}`;
 }
 
-function tokenTopY(tok: Item, sceneDpi: number): number {
+function tokenBottomY(tok: Item, sceneDpi: number): number {
   const a = tok as any;
   const imgH = a.image?.height ?? sceneDpi;
   const imgDpi = a.image?.dpi ?? sceneDpi;
   const sy = Math.abs(tok.scale?.y ?? 1);
   const tokenHalfH = (imgH / imgDpi) * sceneDpi * sy / 2;
-  return tok.position.y - tokenHalfH;
+  return tok.position.y + tokenHalfH;
 }
 
 function readEnabled(): boolean {
@@ -147,41 +156,40 @@ function scheduleSync(): void {
 interface PillSpec {
   text: string;
   fill: string;
-  centerX: number;
-  centerY: number;
+  left: number;        // top-left X in scene coords (Label position semantics)
+  top: number;         // top-left Y in scene coords
   width: number;
   height: number;
+  cornerRadius: number;
 }
 
 function buildPill(tokenId: string, spec: PillSpec): any {
-  // Label position semantics: the label is centered on `position`.
-  // (Confirmed empirically — earlier OBR releases anchored at
-  // top-left, but current builds use center anchor for built
-  // labels.) We compute centerX / centerY explicitly.
   return buildLabel()
     .plainText(spec.text)
     .width(spec.width)
     .height(spec.height)
     .padding(2)
-    .fontFamily("Roboto, system-ui, -apple-system, sans-serif")
-    .fontSize(13)
+    .fontSize(14)
     .fontWeight(700)
     .textAlign("CENTER")
     .textAlignVertical("MIDDLE")
     .fillColor(TEXT_COLOR)
     .fillOpacity(1)
     .strokeColor("#000000")
-    .strokeOpacity(0.55)
-    .strokeWidth(1.2)
+    .strokeOpacity(0.6)
+    .strokeWidth(1.4)
     .backgroundColor(spec.fill)
-    .backgroundOpacity(0.92)
-    .cornerRadius(6)
-    .position({ x: spec.centerX, y: spec.centerY })
+    .backgroundOpacity(0.94)
+    .cornerRadius(spec.cornerRadius)
+    .position({ x: spec.left, y: spec.top })
     .layer("ATTACHMENT")
     .attachedTo(tokenId)
     .locked(true)
     .disableHit(true)
     .visible(true)
+    // Don't inherit ROTATION (bubble stays upright) or LOCKED
+    // (we set our own locked() above so it doesn't matter what
+    // the parent token's locked state is).
     .disableAttachmentBehavior(["ROTATION", "LOCKED"])
     .metadata({ [BUBBLE_OWNER_KEY]: tokenId })
     .build();
@@ -194,12 +202,12 @@ function makeBubblePills(
   userScale: number,
 ): { items: any[]; ids: string[] } {
   // Compose the row: [AC?] [HP] [Temp?]. Compute total width from
-  // present blocks, center horizontally above the token.
+  // present blocks, center it horizontally below the token.
   const showAc = data.ac != null;
   const showHp = data.maxHp > 0;
   const showTemp = data.tempHp > 0 && data.maxHp > 0;
 
-  const u = userScale; // applied to widths AND vertical placement
+  const u = userScale; // user-knob multiplier on top of token-scale inheritance
   const ac_w = AC_W * u;
   const hp_w = HP_W * u;
   const temp_w = TEMP_W * u;
@@ -207,34 +215,39 @@ function makeBubblePills(
   const gap = GAP * u;
 
   let totalW = 0;
-  if (showAc) totalW += ac_w + gap;
-  if (showHp) totalW += hp_w;
-  if (showTemp) totalW += gap + temp_w;
+  if (showAc) totalW += ac_w;
+  if (showHp) totalW += (showAc ? gap : 0) + hp_w;
+  if (showTemp) totalW += (showHp || showAc ? gap : 0) + temp_w;
   if (totalW <= 0) return { items: [], ids: [] };
 
-  // Vertical placement: pill row sits ABOVE the token's top edge but
-  // the bottom 25% of the row dips into the token (matches the
-  // reference plugin's tucked-into-the-head look).
-  const top = tokenTopY(tok, sceneDpi);
-  const centerY = top - pill_h * 0.5 + pill_h * 0.30;
+  // Vertical placement: bubble row sits across the token's BOTTOM
+  // edge, with the row vertically centered on that edge (≈50% above,
+  // 50% below). Matches the canonical OBR token-stat-bubble layout.
+  const bottom = tokenBottomY(tok, sceneDpi);
+  const rowTop = bottom - pill_h / 2;
 
   const rowLeft = tok.position.x - totalW / 2;
   let cursor = rowLeft;
   const items: any[] = [];
   const ids: string[] = [];
 
+  // cornerRadius = pill_h / 2 → the pill's short ends are full
+  // semicircles, so it reads as a rounded "stat capsule".
+  const cr = pill_h / 2;
+
   if (showAc) {
     const it = buildPill(tok.id, {
       text: `${data.ac}`,
       fill: AC_COLOR,
-      centerX: cursor + ac_w / 2,
-      centerY,
+      left: cursor,
+      top: rowTop,
       width: ac_w,
       height: pill_h,
+      cornerRadius: cr,
     });
     items.push(it);
     ids.push(it.id);
-    cursor += ac_w + gap;
+    cursor += ac_w + (showHp || showTemp ? gap : 0);
   }
 
   if (showHp) {
@@ -242,25 +255,26 @@ function makeBubblePills(
     const it = buildPill(tok.id, {
       text: `${data.hp}/${data.maxHp}`,
       fill: hpColor(ratio),
-      centerX: cursor + hp_w / 2,
-      centerY,
+      left: cursor,
+      top: rowTop,
       width: hp_w,
       height: pill_h,
+      cornerRadius: cr,
     });
     items.push(it);
     ids.push(it.id);
-    cursor += hp_w;
+    cursor += hp_w + (showTemp ? gap : 0);
   }
 
   if (showTemp) {
-    cursor += gap;
     const it = buildPill(tok.id, {
       text: `+${data.tempHp}`,
       fill: TEMP_COLOR,
-      centerX: cursor + temp_w / 2,
-      centerY,
+      left: cursor,
+      top: rowTop,
       width: temp_w,
       height: pill_h,
+      cornerRadius: cr,
     });
     items.push(it);
     ids.push(it.id);
