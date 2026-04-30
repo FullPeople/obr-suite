@@ -293,65 +293,53 @@ async function handleDMSelectionForEdit(selection: string[] | undefined) {
 
 // === Drag-end portal entry detection ===
 //
-// We need to answer two questions correctly:
-//   (a) which token did THIS client just drag?
-//   (b) which group of tokens should teleport with it?
+// Attribution is via `Item.lastModifiedUserId` — OBR sets this to
+// the player who initiated the change (drag, metadata write, etc.).
+// The reference plugin (gitlab.com/resident-uhlig/owlbear-rodeo-portals)
+// uses the same approach and it's the only RELIABLE way to answer
+// "did I just move this?" — neither selection nor createdUserId
+// works:
+//   • selection updates timing-race with item changes; sometimes
+//     the new selection isn't reflected when items.onChange fires
+//   • createdUserId tells you the OWNER, not the MOVER. DM has
+//     write permission for player-owned tokens, so DM can drag
+//     them — yet createdUserId stays as the player, mis-attributing
+//     the move to whoever happens to own the token.
+// `lastModifiedUserId` is the canonical OBR signal: whoever just
+// wrote position is whoever should fire portal logic.
 //
-// Earlier attempts got both wrong:
-//   • Round 1: selection-only — players who drag without keeping a
-//     selection never fired, so portals only worked for the DM.
-//   • Round 4: any token in selection ∪ owned — too broad. ANY owned
-//     token sitting on a portal at drag-end fired (even if the user
-//     dragged a totally different token). Group teleport then sent
-//     EVERY owned token to the destination.
-//
-// Current model:
-//   "I dragged this" = it's owned by me (createdUserId === myId)
-//                       AND its position changed since last snapshot
-//   "Group" = the moved tokens UNION (current selection ∩ owned)
-//   This way:
-//     • Only the actual mover's client fires (OBR write perms imply
-//       only the createdUserId-matching client could have changed
-//       the position; other clients see the change but can't
-//       rightly attribute it to themselves)
-//     • The modal teleports JUST what the user was dragging plus
-//       any other owned tokens they explicitly selected (party
-//       teleport works; bystander teleport doesn't)
+// Group teleport: when the user explicitly selects a party of N and
+// drags ONE into the portal, all N should teleport. Group =
+// (tokens I just moved) ∪ (current selection that's a CHARACTER /
+// MOUNT). OBR's permission layer drops any token in the group that
+// the dragger doesn't have write access to during the actual
+// teleport's updateItems call.
 
 const movedByMeIds = new Set<string>();
 
-async function getOwnedTokenIds(): Promise<Set<string>> {
-  const owned = new Set<string>();
+async function onItemsMaybeDragging(items: Item[]) {
   let myId = "";
   try { myId = await OBR.player.getId(); } catch {}
-  if (!myId) return owned;
-  try {
-    const all = await OBR.scene.items.getItems(
-      (it: Item) => it.createdUserId === myId,
-    );
-    for (const it of all) owned.add(it.id);
-  } catch {}
-  return owned;
-}
-
-async function onItemsMaybeDragging(items: Item[]) {
-  const owned = await getOwnedTokenIds();
-  if (owned.size === 0) return;
+  if (!myId) return;
 
   let didMove = false;
   for (const it of items) {
-    if (!owned.has(it.id)) continue;
     if (it.layer !== "CHARACTER" && it.layer !== "MOUNT") continue;
     if (isPortal(it)) continue;
-    const prev = lastTokenPos.get(it.id);
-    if (!prev || prev.x !== it.position.x || prev.y !== it.position.y) {
+    // Only attribute moves where THIS client is the last writer.
+    // Other clients see the change but didn't initiate it.
+    if ((it as any).lastModifiedUserId !== myId) {
+      // Still update lastTokenPos so a subsequent move-by-me can
+      // correctly diff against the latest known position.
       lastTokenPos.set(it.id, { x: it.position.x, y: it.position.y });
-      // Only count as "moved by me" if we'd previously seen this
-      // token at a different position. The first sighting of a new
-      // token is just a metadata initialization, not a drag.
-      if (prev) movedByMeIds.add(it.id);
+      continue;
+    }
+    const prev = lastTokenPos.get(it.id);
+    if (prev && (prev.x !== it.position.x || prev.y !== it.position.y)) {
+      movedByMeIds.add(it.id);
       didMove = true;
     }
+    lastTokenPos.set(it.id, { x: it.position.x, y: it.position.y });
   }
 
   if (!didMove) return;
@@ -364,7 +352,6 @@ async function onItemsMaybeDragging(items: Item[]) {
 
 async function onDragEnd() {
   if (destModalOpen) return;
-  // Snapshot + clear so a back-to-back drag doesn't reuse stale ids.
   const movedNow = new Set(movedByMeIds);
   movedByMeIds.clear();
   if (movedNow.size === 0) return;
@@ -382,20 +369,14 @@ async function onDragEnd() {
     if (now - t > SUPPRESS_AFTER_TELEPORT_MS) recentlyTeleported.delete(id);
   }
 
-  // Build group-teleport candidates: tokens I just moved + any other
-  // owned tokens I have selected (party drag). NOT every token I own
-  // — that's what caused the "many unrelated characters teleported"
-  // bug from round 4.
+  // Group-teleport candidates: tokens I just moved + any other
+  // tokens in my selection (party drag — user explicitly opts in
+  // by selecting a party then dragging one of them).
   let selection: string[] = [];
   try { const s = await OBR.player.getSelection(); selection = s ?? []; } catch {}
-  const owned = await getOwnedTokenIds();
   const groupCandidates = new Set<string>(movedNow);
-  for (const id of selection) {
-    if (owned.has(id)) groupCandidates.add(id);
-  }
+  for (const id of selection) groupCandidates.add(id);
 
-  // Only MOVED tokens trigger entry. A bystander token sitting on
-  // top of a portal that didn't move shouldn't open a modal.
   for (const tok of items) {
     if (!movedNow.has(tok.id)) continue;
     if (tok.layer !== "CHARACTER" && tok.layer !== "MOUNT") continue;
@@ -405,6 +386,12 @@ async function onDragEnd() {
       const pm = readPortalMeta(p);
       if (!pm) continue;
       if (dist(tok.position, portalCenter(p)) <= pm.radius) {
+        console.log("[obr-suite/portals] portal entry detected", {
+          dragger: "this client",
+          movedToken: tok.id,
+          portal: p.id,
+          groupCandidates: [...groupCandidates],
+        });
         await openDestinationModal(p, items, [...groupCandidates]);
         return;
       }
@@ -544,18 +531,23 @@ function findExtensionPositionKeys(metadata: Record<string, unknown>): string[] 
 
 async function snapshotExtensionMetadata(tokenIds: string[]): Promise<ExtMetaSnapshot> {
   const snap: ExtMetaSnapshot = new Map();
+  console.log(
+    "%c[obr-suite/portals] === TELEPORT SNAPSHOT START ===",
+    "background:#5dade2;color:#fff;padding:2px 6px;font-weight:bold;border-radius:3px",
+    { tokenIds },
+  );
   try {
     const items = await OBR.scene.items.getItems(tokenIds);
     for (const it of items) {
       const allKeys = Object.keys(it.metadata as Record<string, unknown>);
       const matchedKeys = findExtensionPositionKeys(it.metadata as Record<string, unknown>);
       // DIAGNOSTIC: log every metadata key on the token and which we
-      // matched. If teleport still bumps into Smoke & Spectre walls,
-      // the user can copy this console output to share the actual
-      // metadata key namespace SS uses, and we can extend the matcher.
-      // Format: one line per token so it's easy to copy-paste.
+      // matched. If teleport still bumps into Smoke & Spectre walls
+      // the user can copy this console output to share the exact
+      // metadata key namespace SS uses, and we extend the matcher.
       console.log(
-        "[obr-suite/portals] token metadata snapshot",
+        "%c[obr-suite/portals] token metadata",
+        "color:#7be0a0;font-weight:bold",
         {
           tokenId: it.id,
           tokenName: it.name,
@@ -565,6 +557,7 @@ async function snapshotExtensionMetadata(tokenIds: string[]): Promise<ExtMetaSna
             acc[k] = (it.metadata as any)[k];
             return acc;
           }, {}),
+          fullMetadata: it.metadata,  // full dump so user can grep visually
         },
       );
       if (matchedKeys.length === 0) continue;
@@ -575,6 +568,11 @@ async function snapshotExtensionMetadata(tokenIds: string[]): Promise<ExtMetaSna
   } catch (e) {
     console.warn("[obr-suite/portals] snapshotExtensionMetadata failed", e);
   }
+  console.log(
+    "%c[obr-suite/portals] === TELEPORT SNAPSHOT END ===",
+    "background:#5dade2;color:#fff;padding:2px 6px;font-weight:bold;border-radius:3px",
+    { snappedKeys: [...snap.entries()].map(([id, v]) => ({ id, keys: Object.keys(v) })) },
+  );
   return snap;
 }
 
@@ -743,6 +741,16 @@ async function migrateLegacyPortalIconSize(): Promise<void> {
 
 export async function setupPortals(): Promise<void> {
   try { role = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch {}
+
+  // Banner log so the user can confirm the module actually started
+  // on this client. If they see this in DevTools console, it means
+  // the bg iframe loaded. Subsequent portal logs (drag detection,
+  // metadata snapshots) are then guaranteed to fire when relevant.
+  console.log(
+    "%c[obr-suite/portals] setup OK",
+    "background:#9a6cf2;color:#fff;padding:2px 6px;font-weight:bold;border-radius:3px",
+    { role, base: import.meta.env.BASE_URL },
+  );
 
   // Quietly normalise old portals (image.width/height = 96 from earlier
   // versions) to the current ICON_SIZE so OBR stops warning on every
