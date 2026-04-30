@@ -33,7 +33,18 @@ async function isTimeStopActive(): Promise<boolean> {
   } catch { return false; }
 }
 
+// Track local overlay state so we don't re-issue OBR.modal.open on a
+// modal that's already shown — that re-fires the iframe's CSS
+// transition and the user sees the cinematic letterbox bars
+// "flicker" / re-animate. Reproed on the GM client when scene
+// metadata changes during an active time stop (state-sync triggers
+// a re-checkState which would call showOverlay a second time).
+let overlayShown = false;
+let overlayPassThrough = false;
+
 async function showOverlay(passThrough: boolean) {
+  // Already visible with the same gating? Nothing to do.
+  if (overlayShown && overlayPassThrough === passThrough) return;
   try {
     await OBR.modal.open({
       id: MODAL_ID,
@@ -43,11 +54,14 @@ async function showOverlay(passThrough: boolean) {
       hideBackdrop: true,
       disablePointerEvents: passThrough,
     });
+    overlayShown = true;
+    overlayPassThrough = passThrough;
   } catch {}
 }
 
 async function hideOverlay() {
   try { await OBR.modal.close(MODAL_ID); } catch {}
+  overlayShown = false;
 }
 
 // Per user feedback (2026-04-30): time stop should ONLY block player

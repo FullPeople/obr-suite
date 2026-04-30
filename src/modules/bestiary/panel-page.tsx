@@ -23,8 +23,22 @@ const BESTIARY_DATA_KEY = "com.bestiary/monsters";
 const PICKER_MODAL_ID = "com.obr-suite/bestiary-picker";
 
 // Read once at module load; the modal's URL is set by the caller.
+// Two URL conventions:
+//   • pickerForItemId=<id>           — single-token bind (legacy)
+//   • pickerForItemIds=<id1,id2,...> — bulk bind / overwrite (new
+//                                       group-bind context menu)
+// The handler treats the singular form as a 1-element list so the
+// downstream code is uniform.
 const URL_PARAMS = new URLSearchParams(location.search);
-const PICKER_TARGET_ITEM = URL_PARAMS.get("pickerForItemId") || null;
+const PICKER_TARGET_ITEM_IDS: string[] = (() => {
+  const single = URL_PARAMS.get("pickerForItemId");
+  if (single) return [single];
+  const multi = URL_PARAMS.get("pickerForItemIds");
+  if (multi) return multi.split(",").map((s) => s.trim()).filter(Boolean);
+  return [];
+})();
+const PICKER_TARGET_ITEM = PICKER_TARGET_ITEM_IDS[0] || null;
+const PICKER_IS_GROUP = PICKER_TARGET_ITEM_IDS.length > 1;
 
 async function ensureSharedMonsterData(slug: string, raw: any): Promise<void> {
   if (!raw) return;
@@ -39,11 +53,17 @@ async function ensureSharedMonsterData(slug: string, raw: any): Promise<void> {
   }
 }
 
-async function bindMonsterToToken(mon: ParsedMonster, itemId: string): Promise<void> {
+// Apply one monster to one OR many tokens. Single updateItems call
+// keeps the write atomic — for bulk bind, ALL selected tokens get
+// the new slug, bubbles, name, and dex mod in a single broadcast,
+// avoiding a flicker where some tokens have updated and others
+// haven't.
+async function bindMonsterToTokens(mon: ParsedMonster, itemIds: string[]): Promise<void> {
+  if (itemIds.length === 0) return;
   const slug = makeSlug(mon.source, mon.engName);
   await ensureSharedMonsterData(slug, getRawMonster(slug));
   try {
-    await OBR.scene.items.updateItems([itemId], (drafts) => {
+    await OBR.scene.items.updateItems(itemIds, (drafts) => {
       for (const d of drafts) {
         d.metadata[BESTIARY_SLUG_KEY] = slug;
         d.metadata[BUBBLES_META] = {
@@ -59,9 +79,15 @@ async function bindMonsterToToken(mon: ParsedMonster, itemId: string): Promise<v
       }
     });
   } catch (e) {
-    console.error("[bestiary] bindMonsterToToken failed", e);
+    console.error("[bestiary] bindMonsterToTokens failed", e);
   }
   try { await OBR.modal.close(PICKER_MODAL_ID); } catch {}
+}
+
+// Backwards-compat single-token wrapper retained for any external
+// callers; new code should use bindMonsterToTokens.
+async function bindMonsterToToken(mon: ParsedMonster, itemId: string): Promise<void> {
+  return bindMonsterToTokens(mon, [itemId]);
 }
 
 // Persisted UI state (keys are shared across panel opens / reloads).
@@ -169,8 +195,11 @@ function App() {
   // from the suite Settings panel (dataVersion in scene metadata).
 
   const handleSpawn = useCallback(async (mon: ParsedMonster) => {
-    if (PICKER_TARGET_ITEM) {
-      await bindMonsterToToken(mon, PICKER_TARGET_ITEM);
+    if (PICKER_TARGET_ITEM_IDS.length > 0) {
+      // Both single-bind and group-bind paths come through here. The
+      // group-bind URL ships >1 id and we apply the chosen monster to
+      // every one in a single atomic updateItems call.
+      await bindMonsterToTokens(mon, PICKER_TARGET_ITEM_IDS);
     } else {
       await spawnMonster(mon);
     }
@@ -236,6 +265,13 @@ function App() {
           style="background:rgba(93,173,226,0.18);border-bottom:1px solid rgba(93,173,226,0.40);padding:8px 14px;font-size:12px;color:#7ec8f0;font-weight:600;text-align:center;"
         >
           {t(lang, "bestiaryPanelHint")}
+          {PICKER_IS_GROUP && (
+            <span style="display:block;margin-top:2px;font-size:11px;font-weight:500;opacity:0.85">
+              {lang === "zh"
+                ? `（群体绑定 · ${PICKER_TARGET_ITEM_IDS.length} 个 token）`
+                : `(group bind · ${PICKER_TARGET_ITEM_IDS.length} tokens)`}
+            </span>
+          )}
         </div>
       )}
       <div class="header">

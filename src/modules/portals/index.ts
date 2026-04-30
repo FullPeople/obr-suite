@@ -291,56 +291,70 @@ async function handleDMSelectionForEdit(selection: string[] | undefined) {
 
 // --- Drag-end portal entry detection --------------------------------------
 
-// Called from scene.items.onChange. Tracks tokens this client cares
-// about — selection (whatever's actively highlighted) PLUS tokens
-// the local player owns (createdUserId match). The ownership fallback
-// is what makes portals work for PLAYERS who drag without keeping a
-// selection — earlier the selection-only check meant only the GM
-// (who tends to keep things selected) reliably triggered teleport.
+// === Drag-end portal entry detection ===
 //
-// Whenever any of these tokens' positions change, restart a debounce
-// timer; if no further change for DRAG_END_MS, treat as drag-end.
-async function getCareAboutTokenIds(): Promise<Set<string>> {
-  const careAbout = new Set<string>();
-  try {
-    const s = await OBR.player.getSelection();
-    if (s) for (const id of s) careAbout.add(id);
-  } catch {}
+// We need to answer two questions correctly:
+//   (a) which token did THIS client just drag?
+//   (b) which group of tokens should teleport with it?
+//
+// Earlier attempts got both wrong:
+//   • Round 1: selection-only — players who drag without keeping a
+//     selection never fired, so portals only worked for the DM.
+//   • Round 4: any token in selection ∪ owned — too broad. ANY owned
+//     token sitting on a portal at drag-end fired (even if the user
+//     dragged a totally different token). Group teleport then sent
+//     EVERY owned token to the destination.
+//
+// Current model:
+//   "I dragged this" = it's owned by me (createdUserId === myId)
+//                       AND its position changed since last snapshot
+//   "Group" = the moved tokens UNION (current selection ∩ owned)
+//   This way:
+//     • Only the actual mover's client fires (OBR write perms imply
+//       only the createdUserId-matching client could have changed
+//       the position; other clients see the change but can't
+//       rightly attribute it to themselves)
+//     • The modal teleports JUST what the user was dragging plus
+//       any other owned tokens they explicitly selected (party
+//       teleport works; bystander teleport doesn't)
+
+const movedByMeIds = new Set<string>();
+
+async function getOwnedTokenIds(): Promise<Set<string>> {
+  const owned = new Set<string>();
   let myId = "";
   try { myId = await OBR.player.getId(); } catch {}
-  if (myId) {
-    // Owner-fallback: for PLAYERS, this picks up "I created this
-    // token" (their own characters / summons). For GM, it includes
-    // everything they spawned which is fine — we only act on tokens
-    // that actually moved AND sit on a portal, so broad inclusion
-    // is safe.
-    try {
-      const all = await OBR.scene.items.getItems(
-        (it: Item) => it.createdUserId === myId,
-      );
-      for (const it of all) careAbout.add(it.id);
-    } catch {}
-  }
-  return careAbout;
+  if (!myId) return owned;
+  try {
+    const all = await OBR.scene.items.getItems(
+      (it: Item) => it.createdUserId === myId,
+    );
+    for (const it of all) owned.add(it.id);
+  } catch {}
+  return owned;
 }
 
 async function onItemsMaybeDragging(items: Item[]) {
-  const careAbout = await getCareAboutTokenIds();
-  if (careAbout.size === 0) return;
+  const owned = await getOwnedTokenIds();
+  if (owned.size === 0) return;
 
-  let moved = false;
+  let didMove = false;
   for (const it of items) {
-    if (!careAbout.has(it.id)) continue;
+    if (!owned.has(it.id)) continue;
     if (it.layer !== "CHARACTER" && it.layer !== "MOUNT") continue;
     if (isPortal(it)) continue;
     const prev = lastTokenPos.get(it.id);
     if (!prev || prev.x !== it.position.x || prev.y !== it.position.y) {
       lastTokenPos.set(it.id, { x: it.position.x, y: it.position.y });
-      moved = true;
+      // Only count as "moved by me" if we'd previously seen this
+      // token at a different position. The first sighting of a new
+      // token is just a metadata initialization, not a drag.
+      if (prev) movedByMeIds.add(it.id);
+      didMove = true;
     }
   }
 
-  if (!moved) return;
+  if (!didMove) return;
   if (dragEndTimer) clearTimeout(dragEndTimer);
   dragEndTimer = setTimeout(() => {
     dragEndTimer = null;
@@ -348,14 +362,12 @@ async function onItemsMaybeDragging(items: Item[]) {
   }, DRAG_END_MS);
 }
 
-// Evaluates the world fresh: is any "I care about" token currently
-// sitting inside a visible portal? If yes, open the destination
-// modal — only on this client, only with this client's owned tokens
-// as candidates for teleport.
 async function onDragEnd() {
   if (destModalOpen) return;
-  const careAbout = await getCareAboutTokenIds();
-  if (careAbout.size === 0) return;
+  // Snapshot + clear so a back-to-back drag doesn't reuse stale ids.
+  const movedNow = new Set(movedByMeIds);
+  movedByMeIds.clear();
+  if (movedNow.size === 0) return;
 
   let items: Item[];
   try { items = await OBR.scene.items.getItems(); } catch { return; }
@@ -366,28 +378,35 @@ async function onDragEnd() {
   if (visiblePortals.length === 0) return;
 
   const now = Date.now();
-  // Sweep stale entries from recentlyTeleported.
   for (const [id, t] of recentlyTeleported) {
     if (now - t > SUPPRESS_AFTER_TELEPORT_MS) recentlyTeleported.delete(id);
   }
 
+  // Build group-teleport candidates: tokens I just moved + any other
+  // owned tokens I have selected (party drag). NOT every token I own
+  // — that's what caused the "many unrelated characters teleported"
+  // bug from round 4.
+  let selection: string[] = [];
+  try { const s = await OBR.player.getSelection(); selection = s ?? []; } catch {}
+  const owned = await getOwnedTokenIds();
+  const groupCandidates = new Set<string>(movedNow);
+  for (const id of selection) {
+    if (owned.has(id)) groupCandidates.add(id);
+  }
+
+  // Only MOVED tokens trigger entry. A bystander token sitting on
+  // top of a portal that didn't move shouldn't open a modal.
   for (const tok of items) {
-    if (!careAbout.has(tok.id)) continue;
+    if (!movedNow.has(tok.id)) continue;
     if (tok.layer !== "CHARACTER" && tok.layer !== "MOUNT") continue;
     if (isPortal(tok)) continue;
-    if (recentlyTeleported.has(tok.id)) continue; // Just teleported here.
+    if (recentlyTeleported.has(tok.id)) continue;
     for (const p of visiblePortals) {
       const pm = readPortalMeta(p);
       if (!pm) continue;
       if (dist(tok.position, portalCenter(p)) <= pm.radius) {
-        // Only this client opens the modal (OBR.modal is local). Pass
-        // the careAbout set so the resulting teleport only considers
-        // tokens this client has the right to move — the destination
-        // page returns these via BROADCAST_TELEPORT and the listener
-        // running on this same client uses OBR.scene.items.updateItems
-        // which OBR's permission layer enforces.
-        await openDestinationModal(p, items, [...careAbout]);
-        return; // Only one modal, one entry.
+        await openDestinationModal(p, items, [...groupCandidates]);
+        return;
       }
     }
   }
@@ -528,10 +547,29 @@ async function snapshotExtensionMetadata(tokenIds: string[]): Promise<ExtMetaSna
   try {
     const items = await OBR.scene.items.getItems(tokenIds);
     for (const it of items) {
-      const keys = findExtensionPositionKeys(it.metadata as Record<string, unknown>);
-      if (keys.length === 0) continue;
+      const allKeys = Object.keys(it.metadata as Record<string, unknown>);
+      const matchedKeys = findExtensionPositionKeys(it.metadata as Record<string, unknown>);
+      // DIAGNOSTIC: log every metadata key on the token and which we
+      // matched. If teleport still bumps into Smoke & Spectre walls,
+      // the user can copy this console output to share the actual
+      // metadata key namespace SS uses, and we can extend the matcher.
+      // Format: one line per token so it's easy to copy-paste.
+      console.log(
+        "[obr-suite/portals] token metadata snapshot",
+        {
+          tokenId: it.id,
+          tokenName: it.name,
+          allMetadataKeys: allKeys,
+          matchedForStrip: matchedKeys,
+          matchedValues: matchedKeys.reduce<Record<string, unknown>>((acc, k) => {
+            acc[k] = (it.metadata as any)[k];
+            return acc;
+          }, {}),
+        },
+      );
+      if (matchedKeys.length === 0) continue;
       const captured: Record<string, any> = {};
-      for (const k of keys) captured[k] = (it.metadata as any)[k];
+      for (const k of matchedKeys) captured[k] = (it.metadata as any)[k];
       snap.set(it.id, captured);
     }
   } catch (e) {

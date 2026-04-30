@@ -29,6 +29,14 @@ const CLOSE_MSG = `${PLUGIN_ID}/close`;
 const CTX_BIND = "com.obr-suite/bestiary-bind";
 const CTX_REBIND = "com.obr-suite/bestiary-rebind";
 const CTX_UNBIND = "com.obr-suite/bestiary-unbind";
+// Multi-select group variants (only show when ≥2 tokens are selected).
+// Group bind = "pick a monster, apply to ALL selected, overwriting any
+// previous binding". Group unbind = "remove the binding from each
+// selected token that has one (untouched tokens are skipped)". Both
+// sit alongside the single-select trio above so the existing UX for
+// one-token operations stays exactly the same.
+const CTX_GROUP_BIND = "com.obr-suite/bestiary-group-bind";
+const CTX_GROUP_UNBIND = "com.obr-suite/bestiary-group-unbind";
 
 // Picker modal — reuses the bestiary panel HTML with `?pickerForItemId=...`.
 const PICKER_MODAL_ID = "com.obr-suite/bestiary-picker";
@@ -256,12 +264,19 @@ export async function setupBestiary(): Promise<void> {
   // --- Right-click context menu: bind / rebind / unbind ---
   // Three entries with mutually-exclusive filters keyed on the
   // `BESTIARY_SLUG_KEY` metadata so each token only ever shows the
-  // entry that makes sense for its current state.
-  const openPicker = async (itemId: string) => {
+  // entry that makes sense for its current state. Plus two more
+  // (CTX_GROUP_BIND / CTX_GROUP_UNBIND) gated on min:2 for bulk
+  // operations.
+  const openPicker = async (itemIds: string[]) => {
+    if (itemIds.length === 0) return;
     try {
       await OBR.modal.open({
         id: PICKER_MODAL_ID,
-        url: `${POPOVER_URL}?pickerForItemId=${encodeURIComponent(itemId)}`,
+        // Comma-joined ids in a single param. The picker page reads
+        // it via `pickerForItemIds` (plural), falling back to the
+        // legacy `pickerForItemId` (singular) for the existing
+        // single-select context menu entries.
+        url: `${POPOVER_URL}?pickerForItemIds=${encodeURIComponent(itemIds.join(","))}`,
         width: 400,
         height: 600,
       });
@@ -288,7 +303,7 @@ export async function setupBestiary(): Promise<void> {
       ],
       onClick: (ctx) => {
         const id = ctx.items[0]?.id;
-        if (id) void openPicker(id);
+        if (id) void openPicker([id]);
       },
     });
     await OBR.contextMenu.create({
@@ -309,7 +324,7 @@ export async function setupBestiary(): Promise<void> {
       ],
       onClick: (ctx) => {
         const id = ctx.items[0]?.id;
-        if (id) void openPicker(id);
+        if (id) void openPicker([id]);
       },
     });
     await OBR.contextMenu.create({
@@ -344,6 +359,66 @@ export async function setupBestiary(): Promise<void> {
           });
         } catch (e) {
           console.error("[obr-suite/bestiary] unbind failed", e);
+        }
+      },
+    });
+
+    // === Group operations (≥ 2 selected tokens) ===
+    await OBR.contextMenu.create({
+      id: CTX_GROUP_BIND,
+      icons: [
+        {
+          icon: ICON_URL,
+          label: "群体绑定怪物图鉴",
+          filter: {
+            roles: ["GM"],
+            // ALL selected tokens must be IMAGE; metadata state can
+            // be anything (bind overwrites whatever was there).
+            every: [{ key: "type", value: "IMAGE" }],
+            min: 2,
+          },
+        },
+      ],
+      onClick: (ctx) => {
+        const ids = ctx.items.map((i) => i.id);
+        if (ids.length >= 2) void openPicker(ids);
+      },
+    });
+    await OBR.contextMenu.create({
+      id: CTX_GROUP_UNBIND,
+      icons: [
+        {
+          icon: ICON_URL,
+          label: "群体移除怪物图鉴",
+          filter: {
+            roles: ["GM"],
+            // Show only when at least one selected token actually
+            // has a binding to remove. The handler then iterates
+            // and removes the metadata from the bound subset only;
+            // unbound tokens are skipped so we don't waste a write.
+            every: [{ key: "type", value: "IMAGE" }],
+            some: [
+              { key: ["metadata", BESTIARY_SLUG_KEY], operator: "!=", value: undefined },
+            ],
+            min: 2,
+          },
+        },
+      ],
+      onClick: async (ctx) => {
+        // Filter to only those with the slug — no point writing to
+        // tokens that don't have it.
+        const ids = ctx.items
+          .filter((it) => (it.metadata as any)?.[BESTIARY_SLUG_KEY] != null)
+          .map((i) => i.id);
+        if (ids.length === 0) return;
+        try {
+          await OBR.scene.items.updateItems(ids, (drafts) => {
+            for (const d of drafts) {
+              delete d.metadata[BESTIARY_SLUG_KEY];
+            }
+          });
+        } catch (e) {
+          console.error("[obr-suite/bestiary] group unbind failed", e);
         }
       },
     });
@@ -404,5 +479,7 @@ export async function teardownBestiary(): Promise<void> {
   try { await OBR.contextMenu.remove(CTX_BIND); } catch {}
   try { await OBR.contextMenu.remove(CTX_REBIND); } catch {}
   try { await OBR.contextMenu.remove(CTX_UNBIND); } catch {}
+  try { await OBR.contextMenu.remove(CTX_GROUP_BIND); } catch {}
+  try { await OBR.contextMenu.remove(CTX_GROUP_UNBIND); } catch {}
   for (const u of unsubs.splice(0)) u();
 }
