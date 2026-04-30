@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../asset-base";
 
 // "Time Stop" / 时停模式 module — migrated from time-stop plugin.
 //
@@ -20,8 +21,8 @@ const BC_TOGGLE = "com.obr-suite/timestop-toggle";
 const BC_STATE = "com.obr-suite/timestop-state";
 
 const MENU_ID = `${PLUGIN_ID}/toggle`;
-const ICON_URL = "https://obr.dnd.center/suite/timestop-icon.svg";
-const OVERLAY_URL = "https://obr.dnd.center/suite/timestop-overlay.html";
+const ICON_URL = assetUrl("timestop-icon.svg");
+const OVERLAY_URL = assetUrl("timestop-overlay.html");
 
 const unsubs: Array<() => void> = [];
 let isGM = false;

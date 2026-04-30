@@ -12,6 +12,7 @@ import {
 import { t } from "./i18n";
 import { ICONS } from "./icons";
 import { subscribeToSfx } from "./modules/dice/sfx-broadcast";
+import { assetUrl } from "./asset-base";
 
 // Crude device detection. OBR doesn't expose one; user-agent matching
 // covers the common phone/tablet cases well enough to decide whether to
@@ -38,7 +39,7 @@ const W_EXPANDED = 760;
 const H_COLLAPSED = 64;
 
 const SETTINGS_POPOVER_ID = "com.obr-suite/settings";
-const SETTINGS_URL = "https://obr.dnd.center/suite/settings.html";
+const SETTINGS_URL = assetUrl("settings.html");
 
 // Broadcast IDs
 const BC_TIMESTOP_TOGGLE = "com.obr-suite/timestop-toggle";

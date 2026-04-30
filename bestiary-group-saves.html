@@ -165,7 +165,14 @@ const POPOVER_TOP = 95;
 // Right-click context menu (reuses dice-rollable-menu.html in
 // "groupSave" mode — the menu detects the param and broadcasts to
 // BC_FIRE instead of the regular quick-roll channel).
-const MENU_URL = "https://obr.dnd.center/suite/dice-rollable-menu.html";
+//
+// Build-target-aware: derive the asset base from this iframe's own
+// pathname so dev (/suite-dev/) and stable (/suite/) installs each
+// pull the menu HTML from their own deploy. Inline scripts in vite
+// HTML entry points are NOT bundled, so import.meta.env.BASE_URL is
+// unavailable here — pathname slicing is the portable fallback.
+const ASSET_BASE = `${location.origin}${location.pathname.replace(/[^/]+$/, "")}`;
+const MENU_URL = `${ASSET_BASE}dice-rollable-menu.html`;
 const MENU_POPOVER_ID = "com.obr-suite/rollable-menu";
 const MENU_W = 170;
 // 4 items (no separator + no tray for group saves) ≈ 38px each + 8px paddings.

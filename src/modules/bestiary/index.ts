@@ -1,5 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { setupGroupSaves, teardownGroupSaves } from "./group-saves";
+import { assetUrl } from "../../asset-base";
 
 // Bestiary module — migrated from the standalone plugin.
 //
@@ -15,9 +16,9 @@ const INFO_POPOVER_ID = "com.obr-suite/bestiary-info";
 const TOOL_ACTION_TOGGLE = "com.obr-suite/bestiary-toggle-shortcut";
 const SELECT_TOOL = "rodeo.owlbear.tool/select";
 const MOVE_TOOL = "rodeo.owlbear.tool/move";
-const POPOVER_URL = "https://obr.dnd.center/suite/bestiary-panel.html";
-const INFO_URL = "https://obr.dnd.center/suite/bestiary-monster-info.html";
-const ICON_URL = "https://obr.dnd.center/suite/bestiary-icon.svg";
+const POPOVER_URL = assetUrl("bestiary-panel.html");
+const INFO_URL = assetUrl("bestiary-monster-info.html");
+const ICON_URL = assetUrl("bestiary-icon.svg");
 
 const BESTIARY_SLUG_KEY = `${PLUGIN_ID}/slug`;
 const INFO_SHOW_MSG = `${PLUGIN_ID}/info-show`;

@@ -13,12 +13,13 @@ import { setupDice, teardownDice } from "./modules/dice";
 import { setupPortals, teardownPortals } from "./modules/portals";
 import { setupDevTest, teardownDevTest } from "./modules/dev-test";
 import { setupCrossSceneCards } from "./modules/cross-scene-cards";
+import { assetUrl } from "./asset-base";
 
 // One central popover hosts the floating button + collapsible cluster.
 // The popover never closes itself; the iframe handles all expand/collapse
 // internally so the user can click around the map without losing state.
 const CLUSTER_POPOVER_ID = "com.obr-suite/cluster";
-const CLUSTER_URL = "https://obr.dnd.center/suite/cluster.html";
+const CLUSTER_URL = assetUrl("cluster.html");
 
 const CLUSTER_W_COLLAPSED = 64;
 // Expanded width depends on UI language — English labels need more room.

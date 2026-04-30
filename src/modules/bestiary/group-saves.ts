@@ -2,6 +2,7 @@ import OBR, { Item } from "@owlbear-rodeo/sdk";
 import { fireQuickRoll } from "../dice/tags";
 import { broadcastDiceRoll } from "../dice";
 import { getLocalLang, onLangChange } from "../../state";
+import { assetUrl } from "../../asset-base";
 
 // "Group save" popover — auto-shows when the GM box-selects 2+ tokens
 // that ALL have bestiary monster data bound. Six ability buttons fire
@@ -15,7 +16,7 @@ import { getLocalLang, onLangChange } from "../../state";
 
 const PLUGIN_ID = "com.bestiary";
 const POPOVER_ID = "com.obr-suite/bestiary-group-saves";
-const POPOVER_URL = "https://obr.dnd.center/suite/bestiary-group-saves.html";
+const POPOVER_URL = assetUrl("bestiary-group-saves.html");
 
 const BESTIARY_SLUG_KEY = `${PLUGIN_ID}/slug`;
 const BESTIARY_DATA_KEY = `${PLUGIN_ID}/monsters`;

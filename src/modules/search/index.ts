@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../../asset-base";
 
 // Search module — independent always-visible popover at the top-right
 // of the OBR viewport, mirroring the legacy 5e-search standalone.
@@ -15,7 +16,7 @@ import OBR from "@owlbear-rodeo/sdk";
 // iframe listens for the broadcast and runs the query.
 
 const POPOVER_ID = "com.obr-suite/search-bar";
-const URL = "https://obr.dnd.center/suite/search-bar.html";
+const URL = assetUrl("search-bar.html");
 
 const BAR_W_IDLE = 280;
 const BAR_H_IDLE = 40;

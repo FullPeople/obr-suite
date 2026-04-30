@@ -14,6 +14,7 @@ import {
 } from "./state";
 import { applyLangAttr } from "./i18n";
 import { ICONS } from "./icons";
+import { assetUrl } from "./asset-base";
 
 // Merged Settings + About panel.
 //
@@ -69,7 +70,7 @@ const SUPPORTERS: string[] = [
   "奶牛饭", "DK", "黄烟", "盲人过北极", "1234",
   "浩然正气","青灯栖凰","深白色(●—●)","白辰","瀞聆","滑而不稽则罔","Aisle","PB27",
   "蚀星ErosionStar","消炎药","SiriusTGT","悠悠向青山","小舟","孤月映寒","Joe","武御",
-  "Misaka Mikoto","森海飞霞🐿","每日 1/? Fen","北省"
+  "Misaka Mikoto","森海飞霞🐿","每日 1/? Fen²","北省","得君所见"
 ];
 
 function supportersHtml(lang: Language): string {
@@ -885,23 +886,25 @@ const TABS: TabDef[] = [
       // Two templates side-by-side — both share the same xlsx layout
       // (parsed by the same rules), only the D&D edition differs.
       // 2014 = traditional 5e; 2024 = the revised "One D&D" rules.
+      const tpl2014 = assetUrl("template-belling-2014-v3.5.9.xlsx");
+      const tpl2024 = assetUrl("template-belling-v1.0.12.xlsx");
       const btns = lang === "zh"
         ? `<div class="dl-row">
-             <a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-2014-v3.5.9.xlsx"
+             <a class="dl-btn" href="${tpl2014}"
                 download="DND5E人物卡_悲灵v3.5.9 (2014).xlsx" target="_blank" rel="noopener">
                ⬇ 5E2014 模板（传统 5e · 悲灵 v3.5.9）
              </a>
-             <a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-v1.0.12.xlsx"
+             <a class="dl-btn" href="${tpl2024}"
                 download="DND5.5E人物卡-悲灵v1.0.12 (2024).xlsx" target="_blank" rel="noopener">
                ⬇ 5E2024 模板（5e 修订 · 悲灵 v1.0.12）
              </a>
            </div>`
         : `<div class="dl-row">
-             <a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-2014-v3.5.9.xlsx"
+             <a class="dl-btn" href="${tpl2014}"
                 download="DND5E-Character-Sheet-v3.5.9 (2014).xlsx" target="_blank" rel="noopener">
                ⬇ 5E2014 sheet (legacy 5e · 悲灵 v3.5.9)
              </a>
-             <a class="dl-btn" href="https://obr.dnd.center/suite/template-belling-v1.0.12.xlsx"
+             <a class="dl-btn" href="${tpl2024}"
                 download="DND5.5E-Character-Sheet-v1.0.12 (2024).xlsx" target="_blank" rel="noopener">
                ⬇ 5E2024 sheet (revised 5e · 悲灵 v1.0.12)
              </a>

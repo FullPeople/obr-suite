@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../../asset-base";
 
 // Character Cards module — migrated from the standalone plugin.
 //
@@ -25,10 +26,10 @@ const PLUGIN_ID = "com.character-cards"; // backward-compat for scene metadata +
 const PANEL_MODAL_ID = "com.obr-suite/cc-panel";
 const INFO_POPOVER_ID = "com.obr-suite/cc-info";
 const BIND_MODAL_ID = "com.obr-suite/cc-bind-picker";
-const PANEL_URL = "https://obr.dnd.center/suite/cc-panel.html";
-const INFO_URL = "https://obr.dnd.center/suite/cc-info.html";
-const BIND_URL = "https://obr.dnd.center/suite/cc-bind.html";
-const ICON_URL = "https://obr.dnd.center/suite/cc-icon.svg";
+const PANEL_URL = assetUrl("cc-panel.html");
+const INFO_URL = assetUrl("cc-info.html");
+const BIND_URL = assetUrl("cc-bind.html");
+const ICON_URL = assetUrl("cc-icon.svg");
 
 const BIND_META = `${PLUGIN_ID}/boundCardId`;
 const SCENE_META_KEY = `${PLUGIN_ID}/list`;

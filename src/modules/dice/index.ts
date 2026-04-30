@@ -1,5 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { DiceType, DIE_SIDES, DieResult, rollDie, sidesOf } from "./types";
+import { assetUrl } from "../../asset-base";
 
 // Dice module — independent feature with two halves:
 //
@@ -29,7 +30,7 @@ export const BC_DICE_CLEAR_ALL = "com.obr-suite/dice-clear-all";
 
 // Effect modal (the in-flight dice visual)
 const MODAL_PREFIX = "com.obr-suite/dice-effect-";
-const EFFECT_URL = "https://obr.dnd.center/suite/dice-effect.html";
+const EFFECT_URL = assetUrl("dice-effect.html");
 
 // Dice panel popover (OBR manifest v1 doesn't accept a custom action
 // The dice panel is the OBR action popover (manifest.json declares
@@ -42,7 +43,7 @@ const BC_PANEL_TOGGLE = "com.obr-suite/dice-panel-toggle";
 // the viewport. Per-player rows show last roll. Click a row to jump
 // the dice panel to History tab + filter.
 const HISTORY_POPOVER_ID = "com.obr-suite/dice-history";
-const HISTORY_URL = "https://obr.dnd.center/suite/dice-history.html";
+const HISTORY_URL = assetUrl("dice-history.html");
 const HISTORY_W = 320;
 const HISTORY_H = 280;
 const HISTORY_LEFT_OFFSET = 16;
@@ -76,7 +77,7 @@ const LS_AUTO_DICE_HISTORY = "com.obr-suite/dice-history-on";
 // above each token participating in the collective roll.
 const BC_DICE_REPLAY = "com.obr-suite/dice-replay";
 const REPLAY_MODAL_PREFIX = "com.obr-suite/dice-replay-";
-const REPLAY_URL = "https://obr.dnd.center/suite/dice-replay.html";
+const REPLAY_URL = assetUrl("dice-replay.html");
 export interface QuickRollRequest {
   // Plain dice expression: "1d20+5", "2d6+3", "1d4+1d6+2", etc. Only
   // simple sums of NdM terms + integer modifier are supported here —

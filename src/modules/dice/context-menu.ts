@@ -1,5 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { resolveClickRollTarget } from "./tags";
+import { assetUrl } from "../../asset-base";
 
 // Right-click context menu for `.rollable` spans. Implemented as an
 // OBR popover (`dice-rollable-menu.html`) — NOT an in-iframe DOM
@@ -15,7 +16,7 @@ import { resolveClickRollTarget } from "./tags";
 export type RollableMenuKind = "open" | "dark";
 
 const POPOVER_ID = "com.obr-suite/rollable-menu";
-const URL = "https://obr.dnd.center/suite/dice-rollable-menu.html";
+const URL = assetUrl("dice-rollable-menu.html");
 const POPOVER_W = 170;
 const POPOVER_H = 232; // 5 items + separator + paddings
 const EDGE_MARGIN = 8;

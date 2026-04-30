@@ -77,8 +77,12 @@ function resume(): void {
 // Credit: Sound Effect by freesound_community from Pixabay
 //         (uploader: ksjsbwuil)
 
-const DICE_URL = "https://obr.dnd.center/suite/dice.mp3";
-const CARTOON_URL = "https://obr.dnd.center/suite/cartoon.mp3";
+// Build-target-aware. Same logic as src/asset-base.ts but inlined here
+// to keep sfx.ts a true leaf module (no cross-module imports — see
+// the file header for why circular-dep risk made us split sfx).
+const SFX_BASE = `${location.origin}${import.meta.env.BASE_URL}`;
+const DICE_URL = `${SFX_BASE}dice.mp3`;
+const CARTOON_URL = `${SFX_BASE}cartoon.mp3`;
 
 const sampleBuffers = new Map<string, AudioBuffer>();
 const sampleLoading = new Map<string, Promise<AudioBuffer | null>>();

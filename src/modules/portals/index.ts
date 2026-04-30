@@ -6,6 +6,7 @@ import {
 } from "./types";
 import { t } from "../../i18n";
 import { getLocalLang } from "../../state";
+import { assetUrl } from "../../asset-base";
 
 const _lang = () => getLocalLang();
 const _t = (k: Parameters<typeof t>[1]) => t(_lang(), k);
@@ -24,27 +25,26 @@ const TOOL_MODE_ID = `${PLUGIN_ID}/mode`;
 const PREVIEW_ID = `${PLUGIN_ID}/draw-preview`;
 
 const EDIT_POPOVER_ID = `${PLUGIN_ID}/edit-popover`;
-const EDIT_URL = "https://obr.dnd.center/suite/portal-edit.html";
+const EDIT_URL = assetUrl("portal-edit.html");
 const EDIT_W = 380;
 const EDIT_H = 540;
 const EDIT_TOP_OFFSET = 60;
 
 // Asset URLs MUST be absolute — OBR resolves Item.image.url against
 // its own app origin, so a leading-slash path like "/suite-dev/x.svg"
-// turns into "https://www.owlbear.app/suite-dev/x.svg" and 404s. Pull
-// the origin from the bg iframe's own location (always served from
-// our deployed host) and combine with vite's BASE_URL so dev/stable
-// pick the right subpath automatically.
-const ASSET_BASE = `${location.origin}${import.meta.env.BASE_URL}`;
+// turns into "https://www.owlbear.app/suite-dev/x.svg" and 404s.
+// `assetUrl` (src/asset-base.ts) builds an absolute URL from
+// location.origin + the build's BASE_URL so dev / stable installs
+// each load their own assets without bleeding into the other.
 
 const DEST_POPOVER_ID = `${PLUGIN_ID}/destination-popover`;
-const DEST_URL = `${ASSET_BASE}portal-destination.html`;
+const DEST_URL = assetUrl("portal-destination.html");
 
 const BLINK_MODAL_ID = `${PLUGIN_ID}/blink-modal`;
-const BLINK_URL = `${ASSET_BASE}portal-blink.html`;
+const BLINK_URL = assetUrl("portal-blink.html");
 
-const ICON_URL = `${ASSET_BASE}portal-icon.svg`;
-const TOOL_ICON_URL = `${ASSET_BASE}portal-tool-icon.svg`;
+const ICON_URL = assetUrl("portal-icon.svg");
+const TOOL_ICON_URL = assetUrl("portal-tool-icon.svg");
 
 // Intrinsic SVG box. Visible glow fills this edge-to-edge so the
 // rendered diameter == 2 × trigger radius.

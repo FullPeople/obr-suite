@@ -13,6 +13,7 @@ import {
   getLocalLang,
   onLangChange,
 } from "../../state";
+import { assetUrl } from "../../asset-base";
 
 // Initiative Tracker module — migrated from the standalone plugin.
 // Setup opens the top-center horizontal initiative strip popover, registers
@@ -22,9 +23,9 @@ import {
 // during active combat. Teardown unwinds all of the above.
 
 const POPOVER_ID = "com.obr-suite/initiative-panel";
-const PANEL_URL = "https://obr.dnd.center/suite/initiative-panel.html";
-const NEW_ITEM_URL = "https://obr.dnd.center/suite/initiative-new-item.html";
-const ICON_URL = "https://obr.dnd.center/suite/initiative-icon.svg";
+const PANEL_URL = assetUrl("initiative-panel.html");
+const NEW_ITEM_URL = assetUrl("initiative-new-item.html");
+const ICON_URL = assetUrl("initiative-icon.svg");
 
 const COLLAPSED_WIDTH = 120;
 const COLLAPSED_HEIGHT = 40;

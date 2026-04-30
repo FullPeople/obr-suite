@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../asset-base";
 
 // "Sync Viewport" / 同步视口 module — migrated from focus-camera plugin.
 //
@@ -14,7 +15,7 @@ const BC_FOCUS_TRIGGER = "com.obr-suite/focus-trigger";
 
 const MENU_ID_ITEM = `${PLUGIN_ID}/focus-item`;
 const MENU_ID_EMPTY = `${PLUGIN_ID}/focus-empty`;
-const ICON_URL = "https://obr.dnd.center/suite/focus-icon.svg";
+const ICON_URL = assetUrl("focus-icon.svg");
 
 let unsubBroadcast: (() => void) | null = null;
 let unsubTriggerBroadcast: (() => void) | null = null;
