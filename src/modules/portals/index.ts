@@ -415,16 +415,30 @@ async function onDragEnd() {
     if (now - t > SUPPRESS_AFTER_TELEPORT_MS) recentlyTeleported.delete(id);
   }
 
-  // Group-teleport candidates: ONLY the tokens this client actually
-  // moved during the current drag. OBR's multi-select drag fires
-  // change events for every token in the move (lastModifiedUserId =
-  // this client), so movedNow already contains the full party. We
-  // intentionally DO NOT union with the player's current selection —
-  // that union was the source of "single drag still teleports the
-  // multi-select party" because OBR keeps the previous multi-selection
-  // around after a teleport, and a fresh single-token drag would inherit
-  // it. movedNow is the canonical "what just moved" set.
-  const groupCandidates = movedNow;
+  // Group-teleport candidates: tokens this client moved AND that
+  // are in the player's current selection. The intersection is what
+  // the user actually "grabbed":
+  //   • movedNow alone over-fires — OBR auto-moves attached items
+  //     (Stat Bubbles, S&S vision sources, follower tokens, anything
+  //     with `attachedTo` + default POSITION inheritance) when the
+  //     parent drags. Those attached items get added to movedByMeIds
+  //     even though the user never selected them.
+  //   • selection alone misses moved items that aren't in selection
+  //     (e.g. an unselected token shoved by collision).
+  //   • The intersection captures "the user explicitly grabbed these
+  //     and they actually moved" — this is the tokenIds payload the
+  //     popover shows the user.
+  // Empty-selection fallback: if the player has no selection at all
+  // at drag-end (rare — drag usually implies selection), accept all
+  // moved tokens so the feature still fires.
+  let selection: string[] = [];
+  try { const s = await OBR.player.getSelection(); selection = s ?? []; } catch {}
+  const selSet = new Set(selection);
+  const groupCandidates = new Set<string>();
+  for (const id of movedNow) {
+    if (selSet.size === 0 || selSet.has(id)) groupCandidates.add(id);
+  }
+  if (groupCandidates.size === 0) return;
 
   // Trigger geometry: token center must enter the portal's visible
   // glow. Scale + offset math in createPortal() makes the rendered
@@ -437,7 +451,7 @@ async function onDragEnd() {
   // mismatch. Using just pm.radius makes the trigger == the visible
   // ring, predictable for both DM and players.
   for (const tok of items) {
-    if (!movedNow.has(tok.id)) continue;
+    if (!groupCandidates.has(tok.id)) continue;
     if (tok.layer !== "CHARACTER" && tok.layer !== "MOUNT") continue;
     if (isPortal(tok)) continue;
     if (recentlyTeleported.has(tok.id)) continue;
@@ -455,6 +469,8 @@ async function onDragEnd() {
           portalCenter: portalCenter(p),
           portalRadius: pm.radius,
           dist: d,
+          movedNow: [...movedNow],
+          selection,
           groupCandidates: [...groupCandidates],
         });
         await openDestinationPopover(p, items, [...groupCandidates]);
@@ -787,21 +803,61 @@ async function teleport(
   const spacing = dpi;
   const center = portalCenter(dest);
 
-  // Hex-ring spiral, same algorithm as initiative "gather here".
-  const positions: { x: number; y: number }[] = [
+  // Find tokens already sitting at the destination portal so we don't
+  // land on top of them. The user reads "A teleports onto B" as
+  // "B teleported with A", and the visual overlap is genuinely
+  // confusing. Anyone within the destination's trigger radius +
+  // 1 grid cell is considered "already there" and their slots are
+  // skipped during placement.
+  const destMeta = readPortalMeta(dest);
+  const destRadius = destMeta?.radius ?? spacing;
+  let occupants: { x: number; y: number }[] = [];
+  try {
+    const all = await OBR.scene.items.getItems();
+    const teleSet = new Set(tokenIds);
+    occupants = all
+      .filter((it) =>
+        !teleSet.has(it.id) &&
+        (it.layer === "CHARACTER" || it.layer === "MOUNT") &&
+        !isPortal(it) &&
+        dist(it.position, center) <= destRadius + spacing,
+      )
+      .map((it) => ({ x: it.position.x, y: it.position.y }));
+  } catch {}
+
+  // Hex-ring spiral. Generate enough candidate slots to cover both
+  // the teleporting tokens AND any existing occupants we'll need to
+  // skip past, then pick the first N that don't conflict.
+  const needed = tokenIds.length;
+  const target = needed + occupants.length;
+  const candidates: { x: number; y: number }[] = [
     { x: center.x, y: center.y },
   ];
   let ring = 1;
-  while (positions.length < tokenIds.length) {
+  while (candidates.length < target + 1) {
     const count = ring * 6;
-    for (let i = 0; i < count && positions.length < tokenIds.length; i++) {
+    for (let i = 0; i < count && candidates.length < target + 1; i++) {
       const angle = (i / count) * 2 * Math.PI - Math.PI / 2;
-      positions.push({
+      candidates.push({
         x: center.x + Math.cos(angle) * spacing * ring,
         y: center.y + Math.sin(angle) * spacing * ring,
       });
     }
     ring++;
+  }
+  const conflict = (p: { x: number; y: number }) =>
+    occupants.some((o) => dist(o, p) < spacing * 0.5);
+  const positions: { x: number; y: number }[] = [];
+  for (const c of candidates) {
+    if (conflict(c)) continue;
+    positions.push(c);
+    if (positions.length >= needed) break;
+  }
+  // Fallback — every candidate conflicted (small portal stuffed full
+  // of tokens). Stack on the center rather than refusing the
+  // teleport entirely.
+  while (positions.length < needed) {
+    positions.push({ x: center.x, y: center.y });
   }
 
   // Phase 1 — strip extension metadata that fog/wall plugins use to
