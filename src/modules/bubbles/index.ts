@@ -225,6 +225,17 @@ function scheduleSync(): void {
 }
 
 // --- Layout computation ------------------------------------------------
+//
+// Every dimension here scales with the token's actual rendered size on
+// the map. The reference is `Math.min(rendered_w, rendered_h) /
+// sceneDpi` — a default 1-cell token has scale 1.0, a 0.5-cell
+// familiar has scale 0.5, a 3-cell ogre has scale 3.0, etc. The
+// user's per-client preference (LS_BUBBLES_SCALE, default 1) is
+// multiplied on top so they can globally enlarge / shrink.
+//
+// Without this scaling, a 20-px-tall bar swamps a 30-px-wide
+// familiar but is invisible on a giant. With it, the bar always
+// occupies roughly the same fraction of the token's footprint.
 
 interface BarLayout {
   /** anchor at the token's bottom-center in scene coords */
@@ -233,50 +244,106 @@ interface BarLayout {
   barOrigin: Vector2;
   /** bar width in scene units */
   barWidth: number;
+  /** scaled bar height */
+  barHeight: number;
+  /** scaled bar corner radius (= barHeight / 2 for the capsule shape) */
+  barCornerRadius: number;
+  /** scaled bar text font size */
+  barFontSize: number;
+  /** scaled HP-bar text vertical offset (the upstream's TEXT_VERTICAL_OFFSET) */
+  barTextOffset: number;
+  /** scaled stat-bubble diameter */
+  diameter: number;
+  /** scaled stat-bubble font size for ≤2 digits */
+  bubbleFontSize: number;
+  /** scaled stat-bubble font size for 3-digit values */
+  bubbleFontSizeTight: number;
+  /** scaled stat-bubble text vertical offset */
+  bubbleTextOffset: number;
   /** AC stat bubble CENTER (Shape CIRCLE position semantics) — null if no AC */
   acCenter: Vector2 | null;
   /** Temp HP stat bubble CENTER — null if tempHp == 0 */
   tempCenter: Vector2 | null;
 }
 
-function computeLayout(image: Image, sceneDpi: number, data: BubbleData): BarLayout {
+function computeLayout(
+  image: Image,
+  sceneDpi: number,
+  data: BubbleData,
+  userScale: number,
+): BarLayout {
   const center = getImageCenter(image, sceneDpi);
   const size = getRenderedSize(image, sceneDpi);
+
+  // Token-size-proportional scale. A standard 1-cell token (image
+  // width = sceneDpi worth of scene units when scale.x = 1) yields
+  // tokenScale = 1.0; halving / doubling the token halves / doubles
+  // it. Min of width & height keeps very wide or very tall token
+  // images from blowing up the bar past their narrower dimension.
+  const tokenScale = Math.max(0.05, Math.min(size.width, size.height) / sceneDpi);
+  const s = tokenScale * userScale;
+
+  const barHeight = BAR_HEIGHT * s;
+  const barPadding = BAR_PADDING * s;
+  const barCornerRadius = barHeight / 2;
+  const barFontSize = BAR_FONT_SIZE * s;
+  const barTextOffset = TEXT_VERTICAL_OFFSET * s;
+  const diameter = DIAMETER * s;
+  const bubbleFontSize = BUBBLE_FONT_SIZE * s;
+  const bubbleFontSizeTight = BUBBLE_FONT_SIZE_TIGHT * s;
+  const bubbleTextOffset = TEXT_VERTICAL_OFFSET * s;
+
   const origin: Vector2 = { x: center.x, y: center.y + size.height / 2 };
 
-  const barWidth = Math.max(40, size.width - BAR_PADDING * 2);
+  // Bar inset by `barPadding` on each side; sits 2*s scene units
+  // above the bottom edge so there's a small gap to the token edge.
+  const barWidth = Math.max(barHeight, size.width - barPadding * 2);
   const barOrigin: Vector2 = {
     x: origin.x - barWidth / 2,
-    y: origin.y - BAR_HEIGHT - 2,
+    y: origin.y - barHeight - 2 * s,
   };
 
   // Stat bubbles sit right-aligned ABOVE the bar's top edge, with the
-  // rightmost bubble nestled at the token's right edge.
+  // rightmost bubble nestled at the token's right edge. All gaps and
+  // diameters scale with the token, so a tiny familiar's bubbles
+  // proportionally hug the bar instead of looming over the top.
   const showHp = data.maxHp > 0;
-  const bubbleBottomY = barOrigin.y - 4; // 4 px gap above the bar
-  const bubbleCenterY = bubbleBottomY - DIAMETER / 2;
+  const bubbleGap = 4 * s;
+  const bubbleSpacing = 8 * s;
+  const edgeInset = 2 * s;
+  const bubbleBottomY = barOrigin.y - bubbleGap;
+  const bubbleCenterY = bubbleBottomY - diameter / 2;
 
   let acCenter: Vector2 | null = null;
   let tempCenter: Vector2 | null = null;
 
-  let nextRightEdge = origin.x + size.width / 2 - 2;
+  let nextRightEdge = origin.x + size.width / 2 - edgeInset;
   if (data.ac != null) {
-    acCenter = { x: nextRightEdge - DIAMETER / 2, y: bubbleCenterY };
-    nextRightEdge -= DIAMETER + 8;
+    acCenter = { x: nextRightEdge - diameter / 2, y: bubbleCenterY };
+    nextRightEdge -= diameter + bubbleSpacing;
   }
   if (data.tempHp > 0 && showHp) {
-    tempCenter = { x: nextRightEdge - DIAMETER / 2, y: bubbleCenterY };
+    tempCenter = { x: nextRightEdge - diameter / 2, y: bubbleCenterY };
   }
 
   void showHp;
-  return { origin, barOrigin, barWidth, acCenter, tempCenter };
+  return {
+    origin, barOrigin, barWidth,
+    barHeight, barCornerRadius, barFontSize, barTextOffset,
+    diameter, bubbleFontSize, bubbleFontSizeTight, bubbleTextOffset,
+    acCenter, tempCenter,
+  };
 }
 
 function geometryKey(L: BarLayout, has: { hp: boolean; ac: boolean; temp: boolean }): string {
+  // Includes the scaled dimensions so a token-scale change
+  // triggers a full rebuild — Curve polygon points are baked in at
+  // create time, so width / height changes can't be patched
+  // position-only.
   const parts = [
-    `hp:${has.hp ? `${L.barOrigin.x.toFixed(2)},${L.barOrigin.y.toFixed(2)},${L.barWidth.toFixed(2)}` : "_"}`,
-    `ac:${has.ac && L.acCenter ? `${L.acCenter.x.toFixed(2)},${L.acCenter.y.toFixed(2)}` : "_"}`,
-    `tp:${has.temp && L.tempCenter ? `${L.tempCenter.x.toFixed(2)},${L.tempCenter.y.toFixed(2)}` : "_"}`,
+    `hp:${has.hp ? `${L.barOrigin.x.toFixed(2)},${L.barOrigin.y.toFixed(2)},${L.barWidth.toFixed(2)},${L.barHeight.toFixed(2)}` : "_"}`,
+    `ac:${has.ac && L.acCenter ? `${L.acCenter.x.toFixed(2)},${L.acCenter.y.toFixed(2)},${L.diameter.toFixed(2)}` : "_"}`,
+    `tp:${has.temp && L.tempCenter ? `${L.tempCenter.x.toFixed(2)},${L.tempCenter.y.toFixed(2)},${L.diameter.toFixed(2)}` : "_"}`,
   ];
   return parts.join("|");
 }
@@ -297,7 +364,7 @@ function buildBarBg(ctx: BuildContext, L: BarLayout, statsVisible: boolean): any
     .strokeWidth(0)
     .tension(0)
     .closed(true)
-    .points(roundedRectanglePoints(L.barWidth, BAR_HEIGHT, BAR_CORNER_RADIUS))
+    .points(roundedRectanglePoints(L.barWidth, L.barHeight, L.barCornerRadius))
     .position(L.barOrigin)
     .layer("ATTACHMENT")
     .attachedTo(ctx.token.id)
@@ -319,7 +386,7 @@ function buildBarFill(ctx: BuildContext, L: BarLayout, ratio: number): any {
     .strokeWidth(0)
     .tension(0)
     .closed(true)
-    .points(roundedRectanglePoints(L.barWidth, BAR_HEIGHT, BAR_CORNER_RADIUS, ratio))
+    .points(roundedRectanglePoints(L.barWidth, L.barHeight, L.barCornerRadius, ratio))
     .position(L.barOrigin)
     .layer("ATTACHMENT")
     .attachedTo(ctx.token.id)
@@ -335,23 +402,27 @@ function buildBarFill(ctx: BuildContext, L: BarLayout, ratio: number): any {
 
 function buildBarText(ctx: BuildContext, L: BarLayout, data: BubbleData): any {
   const text = `${data.hp}/${data.maxHp}${data.tempHp > 0 ? ` +${data.tempHp}` : ""}`;
+  // Stroke width tracks bar height too so the text outline doesn't
+  // dominate the glyphs on a tiny familiar (was a fixed 1.5 px →
+  // looked like a black blob at small scale).
+  const strokeWidth = Math.max(0.4, L.barHeight * 0.075);
   return buildText()
     .plainText(text)
     .textType("PLAIN")
     .textAlign("CENTER")
     .textAlignVertical("MIDDLE")
     .fontFamily(FONT_FAMILY)
-    .fontSize(BAR_FONT_SIZE)
+    .fontSize(L.barFontSize)
     .fontWeight(700)
     .fillColor("#ffffff")
     .fillOpacity(1)
     .strokeColor("#000000")
     .strokeOpacity(0.7)
-    .strokeWidth(1.5)
+    .strokeWidth(strokeWidth)
     .lineHeight(0.95)
     .width(L.barWidth)
-    .height(BAR_HEIGHT)
-    .position({ x: L.barOrigin.x, y: L.barOrigin.y + TEXT_VERTICAL_OFFSET })
+    .height(L.barHeight)
+    .position({ x: L.barOrigin.x, y: L.barOrigin.y + L.barTextOffset })
     .layer("TEXT")
     .attachedTo(ctx.token.id)
     .locked(true)
@@ -364,13 +435,13 @@ function buildBarText(ctx: BuildContext, L: BarLayout, data: BubbleData): any {
     .build();
 }
 
-function buildStatBubbleBg(ctx: BuildContext, center: Vector2, color: string): any {
+function buildStatBubbleBg(ctx: BuildContext, L: BarLayout, center: Vector2, color: string): any {
   // Shape CIRCLE position is the bubble's CENTER (verified empirically
   // against the upstream's positioning math).
   return buildShape()
     .shapeType("CIRCLE")
-    .width(DIAMETER)
-    .height(DIAMETER)
+    .width(L.diameter)
+    .height(L.diameter)
     .fillColor(color)
     .fillOpacity(BG_OPACITY)
     .strokeColor(color)
@@ -389,9 +460,10 @@ function buildStatBubbleBg(ctx: BuildContext, center: Vector2, color: string): a
     .build();
 }
 
-function buildStatBubbleText(ctx: BuildContext, center: Vector2, value: number): any {
+function buildStatBubbleText(ctx: BuildContext, L: BarLayout, center: Vector2, value: number): any {
   const text = value.toString();
-  const fontSize = text.length >= 3 ? BUBBLE_FONT_SIZE_TIGHT : BUBBLE_FONT_SIZE;
+  const fontSize = text.length >= 3 ? L.bubbleFontSizeTight : L.bubbleFontSize;
+  const strokeWidth = Math.max(0.4, L.diameter * 0.05);
   return buildText()
     .plainText(text.length > 3 ? "…" : text)
     .textType("PLAIN")
@@ -404,13 +476,13 @@ function buildStatBubbleText(ctx: BuildContext, center: Vector2, value: number):
     .fillOpacity(1)
     .strokeColor("#000000")
     .strokeOpacity(0.7)
-    .strokeWidth(1.5)
+    .strokeWidth(strokeWidth)
     .lineHeight(0.95)
-    .width(DIAMETER)
-    .height(DIAMETER)
+    .width(L.diameter)
+    .height(L.diameter)
     .position({
-      x: center.x - DIAMETER / 2,
-      y: center.y - DIAMETER / 2 + TEXT_VERTICAL_OFFSET,
+      x: center.x - L.diameter / 2,
+      y: center.y - L.diameter / 2 + L.bubbleTextOffset,
     })
     .layer("TEXT")
     .attachedTo(ctx.token.id)
@@ -445,6 +517,8 @@ async function syncBubbles(): Promise<void> {
     let sceneDpi = 150;
     try { sceneDpi = await OBR.scene.grid.getDpi(); } catch {}
 
+    const userScale = readUserScale();
+
     interface Wanted {
       tok: Image;
       data: BubbleData;
@@ -462,7 +536,7 @@ async function syncBubbles(): Promise<void> {
       if (!d) continue;
       const statsVisible = !d.hide;
       if (d.hide && role !== "GM") continue;
-      const layout = computeLayout(it, sceneDpi, d);
+      const layout = computeLayout(it, sceneDpi, d, userScale);
       const has = { hp: d.maxHp > 0, ac: d.ac != null, temp: d.tempHp > 0 && d.maxHp > 0 };
       wanted.set(it.id, {
         tok: it,
@@ -516,15 +590,15 @@ async function syncBubbles(): Promise<void> {
       }
       // AC bubble
       if (w.layout.acCenter && w.data.ac != null) {
-        const acBg = buildStatBubbleBg(ctx, w.layout.acCenter, AC_COLOR);
-        const acText = buildStatBubbleText(ctx, w.layout.acCenter, w.data.ac);
+        const acBg = buildStatBubbleBg(ctx, w.layout, w.layout.acCenter, AC_COLOR);
+        const acText = buildStatBubbleText(ctx, w.layout, w.layout.acCenter, w.data.ac);
         toAdd.push(acBg, acText);
         newIds.push(acBg.id, acText.id);
       }
       // Temp HP bubble
       if (w.layout.tempCenter && w.data.tempHp > 0) {
-        const tempBg = buildStatBubbleBg(ctx, w.layout.tempCenter, TEMP_HP_COLOR);
-        const tempText = buildStatBubbleText(ctx, w.layout.tempCenter, w.data.tempHp);
+        const tempBg = buildStatBubbleBg(ctx, w.layout, w.layout.tempCenter, TEMP_HP_COLOR);
+        const tempText = buildStatBubbleText(ctx, w.layout, w.layout.tempCenter, w.data.tempHp);
         toAdd.push(tempBg, tempText);
         newIds.push(tempBg.id, tempText.id);
       }
