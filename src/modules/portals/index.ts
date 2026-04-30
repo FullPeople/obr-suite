@@ -377,6 +377,16 @@ async function onDragEnd() {
   const groupCandidates = new Set<string>(movedNow);
   for (const id of selection) groupCandidates.add(id);
 
+  // Widen the trigger zone by half a grid cell. The token's position
+  // tracks its centre; if a tile-sized token's centre is within
+  // (portalRadius + halfTokenWidth) of the portal centre, the token
+  // visually overlaps the portal. The earlier strict centre-to-
+  // centre check meant the user had to drop the mouse very close to
+  // the exact middle of the portal for it to fire.
+  let dpi = 150;
+  try { dpi = await OBR.scene.grid.getDpi(); } catch {}
+  const tokenFudge = dpi / 2;
+
   for (const tok of items) {
     if (!movedNow.has(tok.id)) continue;
     if (tok.layer !== "CHARACTER" && tok.layer !== "MOUNT") continue;
@@ -385,11 +395,17 @@ async function onDragEnd() {
     for (const p of visiblePortals) {
       const pm = readPortalMeta(p);
       if (!pm) continue;
-      if (dist(tok.position, portalCenter(p)) <= pm.radius) {
+      const triggerRadius = pm.radius + tokenFudge;
+      if (dist(tok.position, portalCenter(p)) <= triggerRadius) {
         console.log("[obr-suite/portals] portal entry detected", {
           dragger: "this client",
           movedToken: tok.id,
           portal: p.id,
+          tokenPos: tok.position,
+          portalCenter: portalCenter(p),
+          portalRadius: pm.radius,
+          tokenFudge,
+          dist: dist(tok.position, portalCenter(p)),
           groupCandidates: [...groupCandidates],
         });
         await openDestinationModal(p, items, [...groupCandidates]);
@@ -511,20 +527,40 @@ type ExtMetaSnapshot = Map<string, Record<string, any>>;
 function findExtensionPositionKeys(metadata: Record<string, unknown>): string[] {
   const keys: string[] = [];
   for (const [k, v] of Object.entries(metadata)) {
+    // KEY-based namespace check FIRST — must run before the value-
+    // type guard below, because Smoke & Spectre stores its per-token
+    // state as FLAT primitives (hasVision: boolean, visionRange:
+    // number, etc.), not nested objects. Round 7's "if not object,
+    // continue" was skipping every SS key.
+    //
+    // Confirmed SS keys (from user's DevTools dump):
+    //   com.battle-system.smoke/hasVision
+    //   com.battle-system.smoke/visionRange
+    //   com.battle-system.smoke/visionSourceRange
+    //   com.battle-system.smoke/visionFallOff
+    //   com.battle-system.smoke/visionInAngle
+    //   com.battle-system.smoke/visionOutAngle
+    //   com.battle-system.smoke/visionDark
+    // The "smoke" substring catches all of them. We also keep the
+    // looser "spectre" / "specter" checks in case a future SS build
+    // changes namespace.
+    const kl = k.toLowerCase();
+    if (
+      kl.includes("smoke") ||
+      kl.includes("spectre") ||
+      kl.includes("specter") ||
+      kl.includes("battle-system")  // SS's actual prefix
+    ) {
+      keys.push(k);
+      continue;
+    }
+    // Object-shape checks for plugins that nest their state.
     if (!v || typeof v !== "object") continue;
     const o = v as Record<string, unknown>;
-    // Dynamic Fog shape
+    // Dynamic Fog
     if ("attenuationRadius" in o || "sourceRadius" in o) { keys.push(k); continue; }
     // Generic vision / wall shape
     if ("visionRange" in o || "lightRadius" in o || "wallBlocks" in o) { keys.push(k); continue; }
-    // Smoke & Spectre namespace match (case-insensitive substring on
-    // the metadata KEY, since SS sets keys like
-    // "rodeo.owlbear.codeo.smoke-and-spectre/visionRange" /
-    // ".../sceneData" etc.)
-    const kl = k.toLowerCase();
-    if (kl.includes("smoke") || kl.includes("spectre") || kl.includes("specter")) {
-      keys.push(k);
-    }
   }
   return keys;
 }
