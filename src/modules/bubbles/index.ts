@@ -24,6 +24,7 @@
 
 import OBR, {
   buildCurve,
+  buildEffect,
   buildShape,
   buildText,
   Image,
@@ -208,6 +209,117 @@ function roundedRectanglePoints(
   ];
 }
 
+// Polygon points for a heraldic heater-shield outline anchored at
+// (0, 0) extending into +x / +y. The shield has gently rounded top
+// corners, vertical sides for the upper ~45%, then quadratic-bezier
+// curves converging to a point at the bottom-center. Pure geometry,
+// no styling — fed into `buildCurve().points()` like any other
+// closed polygon.
+function shieldPoints(W: number, H: number, segments = 14): Vector2[] {
+  const pts: Vector2[] = [];
+  const cornerR = Math.min(W, H) * 0.18;
+  const sideStraightBottom = H * 0.42;
+
+  // Top-left corner arc
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const a = -Math.PI + (Math.PI / 2) * t;
+    pts.push({
+      x: cornerR + Math.cos(a) * cornerR,
+      y: cornerR + Math.sin(a) * cornerR,
+    });
+  }
+  // Top-right corner arc
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const a = -Math.PI / 2 + (Math.PI / 2) * t;
+    pts.push({
+      x: W - cornerR + Math.cos(a) * cornerR,
+      y: cornerR + Math.sin(a) * cornerR,
+    });
+  }
+  // Right side straight to (W, sideStraightBottom)
+  pts.push({ x: W, y: sideStraightBottom });
+  // Quadratic bezier from (W, sideStraightBottom) → (W/2, H), bowing inward
+  const segs2 = segments * 2;
+  for (let i = 1; i <= segs2; i++) {
+    const t = i / segs2;
+    const u = 1 - t;
+    const p0 = { x: W, y: sideStraightBottom };
+    const p1 = { x: W * 0.85, y: H * 0.92 };
+    const p2 = { x: W / 2, y: H };
+    pts.push({
+      x: u * u * p0.x + 2 * u * t * p1.x + t * t * p2.x,
+      y: u * u * p0.y + 2 * u * t * p1.y + t * t * p2.y,
+    });
+  }
+  // Mirror curve from bottom-point back up to (0, sideStraightBottom)
+  for (let i = 1; i <= segs2; i++) {
+    const t = i / segs2;
+    const u = 1 - t;
+    const p0 = { x: W / 2, y: H };
+    const p1 = { x: W * 0.15, y: H * 0.92 };
+    const p2 = { x: 0, y: sideStraightBottom };
+    pts.push({
+      x: u * u * p0.x + 2 * u * t * p1.x + t * t * p2.x,
+      y: u * u * p0.y + 2 * u * t * p1.y + t * t * p2.y,
+    });
+  }
+  // Curve auto-closes from (0, sideStraightBottom) back to first arc point
+  return pts;
+}
+
+// SKSL shader for the HP-bar shimmer overlay. Renders an additive
+// highlight pass over the static fill curve underneath:
+//   - rounded-end clipping so highlights respect the bar shape
+//   - a gradient brightening the top edge (suggests volume)
+//   - a moving bright band that sweeps left → right (the "flow")
+//   - low-amplitude sine ripples for liquid motion
+// All driven by the `iTime` uniform that we update from a single
+// throttled timer (see `ensureAnimationTimer`).
+const HP_SHIMMER_SKSL = `
+uniform float iTime;
+uniform float2 iSize;
+uniform float ratio;
+
+half4 main(float2 coord) {
+  float2 size = iSize;
+
+  // Bail past the filled portion entirely.
+  float fillEnd = ratio * size.x;
+  if (coord.x > fillEnd) return half4(0);
+
+  // Rounded-end clipping. Both bar ends and the right edge of the
+  // partial fill are semicircles of radius size.y / 2.
+  float r = size.y * 0.5;
+  float2 cc;
+  cc.x = clamp(coord.x, r, max(r, fillEnd - r));
+  cc.y = clamp(coord.y, r, size.y - r);
+  float dist = distance(coord, cc);
+  if (dist > r) return half4(0);
+  float edge = 1.0 - smoothstep(r - 1.0, r, dist);
+
+  // Sweeping highlight band — bandPos cycles through [-0.2, 1.2]
+  // so the band scrolls off the right end and re-enters from the
+  // left without a hard reset.
+  float bandPos = mod(iTime * 0.5, 1.4) - 0.2;
+  float bandX = bandPos * size.x;
+  float bandWidth = max(8.0, size.x * 0.08);
+  float bd = (coord.x - bandX) / bandWidth;
+  float band = exp(-bd * bd) * 0.50;
+
+  // Two interfering sine waves → subtle "liquid sloshing".
+  float ripple = sin(coord.x * 0.35 - iTime * 3.0) * 0.07
+              + sin(coord.x * 0.18 + iTime * 1.7) * 0.05;
+
+  // Top-edge brightening for a hint of 3D volume.
+  float vgrad = (1.0 - coord.y / size.y) * 0.20;
+
+  float intensity = band + max(0.0, ripple) + vgrad;
+  return half4(half3(1.0) * intensity, intensity * edge);
+}
+`;
+
 // --- Per-token rendering state -----------------------------------------
 //
 // Each token may have up to 6 attached local items:
@@ -215,9 +327,10 @@ function roundedRectanglePoints(
 //   acBgId / acTextId        — AC stat bubble (2 items)
 //   tempBgId / tempTextId    — Temp HP stat bubble (2 items)
 interface BubbleEntry {
-  ids: string[];     // every local item id we own for this token
-  hash: string;      // matches dataHash(data)
-  geomKey: string;   // matches the layout signature (position + width)
+  ids: string[];                  // every local item id we own for this token
+  shimmerId: string | null;       // optional Effect that animates over the fill
+  hash: string;                   // matches dataHash(data)
+  geomKey: string;                // matches the layout signature (position + width)
 }
 const entries = new Map<string, BubbleEntry>();
 
@@ -226,6 +339,48 @@ let unsubs: Array<() => void> = [];
 let inSync = false;
 let queuedSync = false;
 let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+
+// --- Animation timer for shimmer effects ----------------------------------
+// OBR Effect items don't auto-update their uniforms, so we drive `iTime`
+// from a single throttled interval. One batched updateItems per tick
+// updates every active shimmer — cheaper than per-token calls.
+let animationTimer: ReturnType<typeof setInterval> | null = null;
+let animationStart = Date.now();
+
+function ensureAnimationTimer(): void {
+  if (animationTimer) return;
+  let active = 0;
+  for (const e of entries.values()) if (e.shimmerId) { active++; break; }
+  if (active === 0) return;
+  animationStart = Date.now();
+  animationTimer = setInterval(() => {
+    const ids: string[] = [];
+    for (const e of entries.values()) if (e.shimmerId) ids.push(e.shimmerId);
+    if (ids.length === 0) {
+      stopAnimationTimer();
+      return;
+    }
+    const t = (Date.now() - animationStart) / 1000;
+    OBR.scene.local.updateItems(ids, (drafts) => {
+      for (const d of drafts) {
+        const eff = d as any;
+        if (!Array.isArray(eff.uniforms)) continue;
+        let found = false;
+        for (const u of eff.uniforms) {
+          if (u.name === "iTime") { u.value = t; found = true; break; }
+        }
+        if (!found) eff.uniforms.push({ name: "iTime", value: t });
+      }
+    }, true).catch(() => {});
+  }, 60);
+}
+
+function stopAnimationTimer(): void {
+  if (animationTimer) {
+    clearInterval(animationTimer);
+    animationTimer = null;
+  }
+}
 
 function scheduleSync(): void {
   if (pendingTimer) return;
@@ -411,6 +566,37 @@ function buildBarFill(ctx: BuildContext, L: BarLayout, ratio: number): any {
     .build();
 }
 
+// Shimmer overlay — additive Effect rendered on top of the static
+// fill curve. Shader-driven (see HP_SHIMMER_SKSL); the `iTime`
+// uniform is kept ticking by `ensureAnimationTimer`. If the
+// shader / uniform updates fail for any reason, the static fill
+// underneath still renders the bar correctly — this layer is
+// purely decorative.
+function buildHpShimmer(ctx: BuildContext, L: BarLayout, ratio: number): any {
+  return buildEffect()
+    .effectType("ATTACHMENT")
+    .blendMode("PLUS")
+    .width(L.barWidth)
+    .height(L.barHeight)
+    .sksl(HP_SHIMMER_SKSL)
+    .uniforms([
+      { name: "iTime", value: 0 },
+      { name: "iSize", value: { x: L.barWidth, y: L.barHeight } },
+      { name: "ratio", value: ratio },
+    ])
+    .position(L.barOrigin)
+    .layer("ATTACHMENT")
+    .attachedTo(ctx.token.id)
+    .locked(true)
+    .disableHit(true)
+    .visible(ctx.visible)
+    .disableAutoZIndex(true)
+    .zIndex(25000)
+    .disableAttachmentBehavior(DISABLE_INHERIT)
+    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
+    .build();
+}
+
 function buildBarText(ctx: BuildContext, L: BarLayout, data: BubbleData): any {
   const text = `${data.hp}/${data.maxHp}${data.tempHp > 0 ? ` +${data.tempHp}` : ""}`;
   // Stroke width tracks bar height too so the text outline doesn't
@@ -459,6 +645,36 @@ function buildStatBubbleBg(ctx: BuildContext, L: BarLayout, center: Vector2, col
     .strokeOpacity(0)
     .strokeWidth(0)
     .position(center)
+    .layer("ATTACHMENT")
+    .attachedTo(ctx.token.id)
+    .locked(true)
+    .disableHit(true)
+    .visible(ctx.visible)
+    .disableAutoZIndex(true)
+    .zIndex(15000)
+    .disableAttachmentBehavior(DISABLE_INHERIT)
+    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
+    .build();
+}
+
+// AC shield — replaces the CIRCLE Shape with a Curve outlined as a
+// heraldic heater shield. Same diameter footprint as the circle so
+// the layout math doesn't shift; the shape inside the bbox is just
+// the shield outline. A thin white stroke gives the rim a touch of
+// shine.
+function buildAcShield(ctx: BuildContext, L: BarLayout, center: Vector2, color: string): any {
+  const W = L.diameter;
+  const H = L.diameter;
+  return buildCurve()
+    .fillColor(color)
+    .fillOpacity(BG_OPACITY)
+    .strokeColor("#ffffff")
+    .strokeOpacity(0.45)
+    .strokeWidth(Math.max(0.6, L.diameter * 0.04))
+    .tension(0)
+    .closed(true)
+    .points(shieldPoints(W, H))
+    .position({ x: center.x - W / 2, y: center.y - H / 2 })
     .layer("ATTACHMENT")
     .attachedTo(ctx.token.id)
     .locked(true)
@@ -591,22 +807,31 @@ async function syncBubbles(): Promise<void> {
       const newIds: string[] = [];
 
       // HP bar
+      let shimmerId: string | null = null;
       if (w.data.maxHp > 0) {
         const ratio = Math.max(0, Math.min(1, w.data.hp / w.data.maxHp));
         const bg = buildBarBg(ctx, w.layout, w.statsVisible);
         const fill = buildBarFill(ctx, w.layout, ratio);
+        const shimmer = w.statsVisible ? buildHpShimmer(ctx, w.layout, ratio) : null;
         const text = buildBarText(ctx, w.layout, w.data);
-        toAdd.push(bg, fill, text);
-        newIds.push(bg.id, fill.id, text.id);
+        toAdd.push(bg, fill);
+        if (shimmer) {
+          toAdd.push(shimmer);
+          shimmerId = shimmer.id;
+        }
+        toAdd.push(text);
+        newIds.push(bg.id, fill.id);
+        if (shimmer) newIds.push(shimmer.id);
+        newIds.push(text.id);
       }
-      // AC bubble
+      // AC shield (replaces the circular stat bubble)
       if (w.layout.acCenter && w.data.ac != null) {
-        const acBg = buildStatBubbleBg(ctx, w.layout, w.layout.acCenter, AC_COLOR);
+        const acShield = buildAcShield(ctx, w.layout, w.layout.acCenter, AC_COLOR);
         const acText = buildStatBubbleText(ctx, w.layout, w.layout.acCenter, w.data.ac);
-        toAdd.push(acBg, acText);
-        newIds.push(acBg.id, acText.id);
+        toAdd.push(acShield, acText);
+        newIds.push(acShield.id, acText.id);
       }
-      // Temp HP bubble
+      // Temp HP bubble (still a circle — distinct from the shield)
       if (w.layout.tempCenter && w.data.tempHp > 0) {
         const tempBg = buildStatBubbleBg(ctx, w.layout, w.layout.tempCenter, TEMP_HP_COLOR);
         const tempText = buildStatBubbleText(ctx, w.layout, w.layout.tempCenter, w.data.tempHp);
@@ -614,7 +839,7 @@ async function syncBubbles(): Promise<void> {
         newIds.push(tempBg.id, tempText.id);
       }
 
-      entries.set(tokId, { ids: newIds, hash: w.hash, geomKey: w.geomKey });
+      entries.set(tokId, { ids: newIds, shimmerId, hash: w.hash, geomKey: w.geomKey });
     }
 
     if (rebuildIds.length) {
@@ -649,6 +874,13 @@ async function syncBubbles(): Promise<void> {
         },
       );
     }
+    // After every successful sync, kick the animation timer if any
+    // shimmer effects are now alive — and let the timer self-stop
+    // the next tick if `entries` is empty.
+    let anyShimmer = false;
+    for (const e of entries.values()) if (e.shimmerId) { anyShimmer = true; break; }
+    if (anyShimmer) ensureAnimationTimer();
+    else stopAnimationTimer();
   } finally {
     inSync = false;
     if (queuedSync) {
@@ -662,6 +894,7 @@ async function clearAll(): Promise<void> {
   const ids: string[] = [];
   for (const e of entries.values()) ids.push(...e.ids);
   entries.clear();
+  stopAnimationTimer();
   if (ids.length) {
     await OBR.scene.local.deleteItems(ids).catch(() => {});
   }
