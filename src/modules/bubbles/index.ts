@@ -1,24 +1,31 @@
-// Bubbles — HP bar overlay for tokens.
+// Bubbles — HP bar + AC + temp-HP stat indicators on tokens.
 //
 // Adapted from "Stat Bubbles for D&D" by Seamus Finlayson:
 //   https://github.com/SeamusFinlayson/Bubbles-for-Owlbear-Rodeo
-// That project and this suite are both released under GNU GPL-3.0.
-// Both reach into OBR's `Curve` + `Label` primitives for rendering;
-// what is shared with the upstream here is the architectural shape
-// (compound items per token, image-grid-aware positioning, the
-// metadata-key namespace) and the functional constants required
-// for visual parity (bar height, padding, corner radius). The
-// implementation below is written fresh and styled to match the
-// rest of the obr-suite codebase.
+// That project and this suite are both GNU GPL-3.0. What's shared is
+// the architectural shape (compound items per token, image-grid-aware
+// positioning via OBR's Math2, the metadata-key namespace) and the
+// functional layout constants required for visual parity (bar height,
+// bubble diameter, padding, opacities). The implementation below is
+// written fresh, tracking the suite's existing module conventions.
 //
-// Per the user's current direction this build is HP-only — no AC
-// circle, no separate temp-HP pill, no name tag — and exposes a
-// single Settings tab with one enabled-toggle. Temp HP is shown
-// inline in the bar text as "current/max +N" when present.
+// Layout:
+//
+//   ┌───────────── token bounds ─────────────┐
+//   │                                        │
+//   │           [ token image ]              │
+//   │                                        │
+//   │ ╭──────── HP bar full width ────────╮  │
+//   │ │  current/max +temp-HP suffix       │  │   ← ⌐ bar straddles bottom edge
+//   ╰─╰────────────────────────────────────╯──╯
+//                                  ┌──┐  ┌──┐
+//                                  │+5│  │16│   ← Temp HP / AC stat bubbles
+//                                  └──┘  └──┘     (above the bar, right-aligned)
 
 import OBR, {
   buildCurve,
-  buildLabel,
+  buildShape,
+  buildText,
   Image,
   Item,
   isImage,
@@ -43,17 +50,30 @@ const BAR_PADDING = 2;
 const BAR_CORNER_RADIUS = BAR_HEIGHT / 2;
 const BG_OPACITY = 0.6;
 const FILL_OPACITY = 0.5;
-const FONT_SIZE = 22;
+const BAR_FONT_SIZE = 22;
 
-// Items have these inheritance behaviors disabled so dragging /
-// scaling / locking the parent token doesn't get the bar items
-// into a bad state. POSITION inheritance is left intact so the
-// bar follows on drag without us re-positioning manually.
+const DIAMETER = 30;
+const BUBBLE_FONT_SIZE = DIAMETER - 8;          // 22, fits 1–2 digits
+const BUBBLE_FONT_SIZE_TIGHT = DIAMETER - 15;   // 15, used for 3 digits
+const TEXT_VERTICAL_OFFSET = -0.3;              // OBR text rendering nudge
+
+// Stat bubble palette.
+const HP_FILL = "#e74c3c";
+const HP_BG = "#A4A4A4";
+const HP_BG_HIDDEN = "#000000";    // GM-only when stats are hidden from players
+const TEMP_HP_COLOR = "#3b82f6";    // blue
+const AC_COLOR = "#c0c4cc";         // silver
+
+const FONT_FAMILY = "Roboto, sans-serif";
+
+// Items have these inheritance behaviors disabled so that scaling /
+// rotating / locking the parent token doesn't mangle the bubble
+// items. POSITION inheritance stays so the bar follows on drag.
 const DISABLE_INHERIT: Array<"SCALE" | "ROTATION" | "LOCKED" | "COPY"> = [
-  "SCALE",     // we factor the token's scale into bar width manually
-  "ROTATION",  // bar must stay upright when token rotates
-  "LOCKED",    // we set our own .locked() above so don't inherit
-  "COPY",      // a copy of the token shouldn't drag a copy of the bar
+  "SCALE",
+  "ROTATION",
+  "LOCKED",
+  "COPY",
 ];
 
 // --- Data shape ---------------------------------------------------------
@@ -61,6 +81,7 @@ interface BubbleData {
   hp: number;
   maxHp: number;
   tempHp: number;
+  ac: number | null;
   hide: boolean;
 }
 
@@ -70,17 +91,21 @@ function readBubbleData(item: Item): BubbleData | null {
   const hpRaw = Number(m["health"]);
   const maxRaw = Number(m["max health"]);
   const tempRaw = Number(m["temporary health"]);
-  if (!Number.isFinite(maxRaw) || maxRaw <= 0) return null;
+  const acRaw = m["armor class"];
+  const hasHp = Number.isFinite(maxRaw) && maxRaw > 0;
+  const hasAc = acRaw != null && Number.isFinite(Number(acRaw));
+  if (!hasHp && !hasAc) return null;
   return {
-    hp: Number.isFinite(hpRaw) ? Math.max(0, Math.min(hpRaw, maxRaw)) : maxRaw,
-    maxHp: maxRaw,
+    hp: Number.isFinite(hpRaw) ? Math.max(0, Math.min(hpRaw, hasHp ? maxRaw : hpRaw)) : (hasHp ? maxRaw : 0),
+    maxHp: hasHp ? maxRaw : 0,
     tempHp: Number.isFinite(tempRaw) && tempRaw > 0 ? Math.floor(tempRaw) : 0,
+    ac: hasAc ? Number(acRaw) : null,
     hide: !!m["hide"],
   };
 }
 
 function dataHash(d: BubbleData): string {
-  return `${d.hp}|${d.maxHp}|${d.tempHp}|${d.hide ? 1 : 0}`;
+  return `${d.hp}|${d.maxHp}|${d.tempHp}|${d.ac == null ? "_" : d.ac}|${d.hide ? 1 : 0}`;
 }
 
 function readEnabled(): boolean {
@@ -94,29 +119,18 @@ function readEnabled(): boolean {
 
 // --- Math helpers ------------------------------------------------------
 //
-// `getImageCenter` is the single most important fix versus my earlier
-// rounds: an OBR Image's `position` lands at the IMAGE'S OFFSET POINT
-// (which is whatever image-pixel was set as the image's anchor —
-// usually but NOT always the image center). To get the visible center
-// of the rendered token we have to start from the image's literal
-// center in image-pixel coords, subtract the offset, scale-switch
-// from image dpi to scene dpi, apply the item's scale, rotate, then
-// add the item's position. Earlier rounds skipped most of this and
-// just used `position.y - image.height/2`, which lands in the wrong
-// place whenever the offset isn't at center.
+// Reproduce the visible center of a token image accounting for
+// `image.grid.offset` (the image's anchor point), the image's own
+// dpi vs the scene's dpi, the item's per-axis scale, and rotation.
+// `tok.position` is where the OFFSET POINT lands in world coords —
+// not necessarily the center.
 
 function getImageCenter(image: Image, sceneDpi: number): Vector2 {
-  // Image-coordinate point at the image's geometric center.
   let p: Vector2 = { x: image.image.width / 2, y: image.image.height / 2 };
-  // Translate so the image's offset point becomes the new origin.
   p = Math2.subtract(p, image.grid.offset);
-  // Scale-switch from image-pixel space to scene-pixel space.
   p = Math2.multiply(p, sceneDpi / image.grid.dpi);
-  // Apply the item's per-axis scale.
   p = { x: p.x * image.scale.x, y: p.y * image.scale.y };
-  // Apply the item's rotation around (0, 0).
   p = Math2.rotate(p, { x: 0, y: 0 }, image.rotation);
-  // Translate by the item's world position to land in scene coords.
   return Math2.add(p, image.position);
 }
 
@@ -128,11 +142,10 @@ function getRenderedSize(image: Image, sceneDpi: number) {
   };
 }
 
-// Polygon points for a rounded rectangle anchored at (0, 0) with the
-// width / height extending into +x / +y quadrant. `fill` in [0, 1]
-// produces a partial rectangle that ends with a rounded right edge —
-// used for the HP bar's filled portion. Each corner is approximated
-// with `pointsInCorner` segments so the curve looks smooth at scale.
+// Polygon points for a rounded rectangle anchored at (0, 0) extending
+// into the +x / +y quadrant. `fill` ∈ [0, 1] produces a partial
+// rectangle ending in a rounded right edge — used for the HP bar's
+// filled portion.
 function roundedRectanglePoints(
   width: number,
   height: number,
@@ -143,12 +156,7 @@ function roundedRectanglePoints(
   if (radius * 2 > height) radius = height / 2;
   if (radius * 2 > width) radius = width / 2;
 
-  const arc = (
-    cx: number,
-    cy: number,
-    fromAngle: number,
-    toAngle: number,
-  ): Vector2[] => {
+  const arc = (cx: number, cy: number, fromAngle: number, toAngle: number): Vector2[] => {
     const out: Vector2[] = [];
     for (let i = 0; i <= pointsInCorner; i++) {
       const t = i / pointsInCorner;
@@ -160,24 +168,18 @@ function roundedRectanglePoints(
 
   if (fill >= 1) {
     return [
-      // Top edge — left endpoint after the top-left arc to the start
-      // of the top-right arc.
-      ...arc(radius, radius, -Math.PI, -Math.PI / 2),                  // TL
-      ...arc(width - radius, radius, -Math.PI / 2, 0),                 // TR
-      ...arc(width - radius, height - radius, 0, Math.PI / 2),         // BR
-      ...arc(radius, height - radius, Math.PI / 2, Math.PI),           // BL
+      ...arc(radius, radius, -Math.PI, -Math.PI / 2),                  // top-left
+      ...arc(width - radius, radius, -Math.PI / 2, 0),                 // top-right
+      ...arc(width - radius, height - radius, 0, Math.PI / 2),         // bottom-right
+      ...arc(radius, height - radius, Math.PI / 2, Math.PI),           // bottom-left
     ];
   }
 
-  // Partial fill: stop the top + bottom edges at the fill width.
-  // The right side keeps its rounded cap so the fill looks like a
-  // filled-in HP bar rather than a square fragment. Below the
-  // minimum width of `radius` we just collapse to nothing.
   const filledWidth = Math.max(0, Math.min(width, fill * width));
   if (filledWidth <= 0) return [];
   if (filledWidth <= radius) {
-    // Tiny sliver — render a half-pill so the user still sees a
-    // small red blip when HP is critical.
+    // Tiny sliver at critical HP — render a half-pill so the user
+    // still sees a small red blip.
     return [
       ...arc(radius, radius, -Math.PI, -Math.PI / 2),
       { x: radius, y: 0 },
@@ -196,18 +198,17 @@ function roundedRectanglePoints(
 }
 
 // --- Per-token rendering state -----------------------------------------
+//
+// Each token may have up to 6 attached local items:
+//   bgId / fillId / textId   — HP bar (3 items)
+//   acBgId / acTextId        — AC stat bubble (2 items)
+//   tempBgId / tempTextId    — Temp HP stat bubble (2 items)
 interface BubbleEntry {
-  bgId: string;
-  fillId: string;
-  textId: string;
-  hash: string;     // matches dataHash(data) for content
-  posKey: string;   // matches the geometry key for placement
+  ids: string[];     // every local item id we own for this token
+  hash: string;      // matches dataHash(data)
+  geomKey: string;   // matches the layout signature (position + width)
 }
 const entries = new Map<string, BubbleEntry>();
-
-function geomKey(c: Vector2, w: number, h: number): string {
-  return `${c.x.toFixed(2)}|${c.y.toFixed(2)}|${w.toFixed(2)}|${h.toFixed(2)}`;
-}
 
 let role: "GM" | "PLAYER" = "PLAYER";
 let unsubs: Array<() => void> = [];
@@ -223,108 +224,203 @@ function scheduleSync(): void {
   }, 60);
 }
 
-// --- Item builders -----------------------------------------------------
+// --- Layout computation ------------------------------------------------
 
-interface BarPlacement {
-  origin: Vector2;       // mid-point of the bar's bottom edge
-  bgPosition: Vector2;   // top-left of the bg rectangle in world coords
-  width: number;         // bar width in scene units
+interface BarLayout {
+  /** anchor at the token's bottom-center in scene coords */
+  origin: Vector2;
+  /** bar's TOP-LEFT in scene coords */
+  barOrigin: Vector2;
+  /** bar width in scene units */
+  barWidth: number;
+  /** AC stat bubble CENTER (Shape CIRCLE position semantics) — null if no AC */
+  acCenter: Vector2 | null;
+  /** Temp HP stat bubble CENTER — null if tempHp == 0 */
+  tempCenter: Vector2 | null;
 }
 
-function placeBar(image: Image, sceneDpi: number): BarPlacement {
+function computeLayout(image: Image, sceneDpi: number, data: BubbleData): BarLayout {
   const center = getImageCenter(image, sceneDpi);
   const size = getRenderedSize(image, sceneDpi);
-  // Origin sits at the token's BOTTOM edge, horizontally centered.
   const origin: Vector2 = { x: center.x, y: center.y + size.height / 2 };
-  // Bar top-left: shift left half the bar width, then up so the bar
-  // sits ABOVE the origin (= just inside the token's bottom edge).
-  const width = Math.max(40, size.width - BAR_PADDING * 2);
-  return {
-    origin,
-    bgPosition: {
-      x: origin.x - width / 2,
-      y: origin.y - BAR_HEIGHT - 2,
-    },
-    width,
+
+  const barWidth = Math.max(40, size.width - BAR_PADDING * 2);
+  const barOrigin: Vector2 = {
+    x: origin.x - barWidth / 2,
+    y: origin.y - BAR_HEIGHT - 2,
   };
+
+  // Stat bubbles sit right-aligned ABOVE the bar's top edge, with the
+  // rightmost bubble nestled at the token's right edge.
+  const showHp = data.maxHp > 0;
+  const bubbleBottomY = barOrigin.y - 4; // 4 px gap above the bar
+  const bubbleCenterY = bubbleBottomY - DIAMETER / 2;
+
+  let acCenter: Vector2 | null = null;
+  let tempCenter: Vector2 | null = null;
+
+  let nextRightEdge = origin.x + size.width / 2 - 2;
+  if (data.ac != null) {
+    acCenter = { x: nextRightEdge - DIAMETER / 2, y: bubbleCenterY };
+    nextRightEdge -= DIAMETER + 8;
+  }
+  if (data.tempHp > 0 && showHp) {
+    tempCenter = { x: nextRightEdge - DIAMETER / 2, y: bubbleCenterY };
+  }
+
+  void showHp;
+  return { origin, barOrigin, barWidth, acCenter, tempCenter };
 }
 
-function buildBgCurve(token: Item, p: BarPlacement, statsVisible: boolean): any {
-  const color = statsVisible ? "#A4A4A4" : "#000000";
+function geometryKey(L: BarLayout, has: { hp: boolean; ac: boolean; temp: boolean }): string {
+  const parts = [
+    `hp:${has.hp ? `${L.barOrigin.x.toFixed(2)},${L.barOrigin.y.toFixed(2)},${L.barWidth.toFixed(2)}` : "_"}`,
+    `ac:${has.ac && L.acCenter ? `${L.acCenter.x.toFixed(2)},${L.acCenter.y.toFixed(2)}` : "_"}`,
+    `tp:${has.temp && L.tempCenter ? `${L.tempCenter.x.toFixed(2)},${L.tempCenter.y.toFixed(2)}` : "_"}`,
+  ];
+  return parts.join("|");
+}
+
+// --- Item builders -----------------------------------------------------
+
+interface BuildContext {
+  token: Item;
+  visible: boolean;
+}
+
+function buildBarBg(ctx: BuildContext, L: BarLayout, statsVisible: boolean): any {
+  const color = statsVisible ? HP_BG : HP_BG_HIDDEN;
   return buildCurve()
     .fillColor(color)
     .fillOpacity(BG_OPACITY)
-    .strokeColor("#000000")
     .strokeOpacity(0)
     .strokeWidth(0)
     .tension(0)
     .closed(true)
-    .points(roundedRectanglePoints(p.width, BAR_HEIGHT, BAR_CORNER_RADIUS))
-    .position(p.bgPosition)
+    .points(roundedRectanglePoints(L.barWidth, BAR_HEIGHT, BAR_CORNER_RADIUS))
+    .position(L.barOrigin)
     .layer("ATTACHMENT")
-    .attachedTo(token.id)
+    .attachedTo(ctx.token.id)
     .locked(true)
     .disableHit(true)
-    .visible(token.visible)
+    .visible(ctx.visible)
     .disableAutoZIndex(true)
     .zIndex(10000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata({ [BUBBLE_OWNER_KEY]: token.id })
+    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
     .build();
 }
 
-function buildFillCurve(token: Item, p: BarPlacement, ratio: number): any {
+function buildBarFill(ctx: BuildContext, L: BarLayout, ratio: number): any {
   return buildCurve()
-    .fillColor("#e74c3c")
+    .fillColor(HP_FILL)
     .fillOpacity(FILL_OPACITY)
     .strokeOpacity(0)
     .strokeWidth(0)
     .tension(0)
     .closed(true)
-    .points(roundedRectanglePoints(p.width, BAR_HEIGHT, BAR_CORNER_RADIUS, ratio))
-    .position(p.bgPosition)
+    .points(roundedRectanglePoints(L.barWidth, BAR_HEIGHT, BAR_CORNER_RADIUS, ratio))
+    .position(L.barOrigin)
     .layer("ATTACHMENT")
-    .attachedTo(token.id)
+    .attachedTo(ctx.token.id)
     .locked(true)
     .disableHit(true)
-    .visible(token.visible)
+    .visible(ctx.visible)
     .disableAutoZIndex(true)
     .zIndex(20000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata({ [BUBBLE_OWNER_KEY]: token.id })
+    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
     .build();
 }
 
-function buildText(token: Item, p: BarPlacement, data: BubbleData): any {
+function buildBarText(ctx: BuildContext, L: BarLayout, data: BubbleData): any {
   const text = `${data.hp}/${data.maxHp}${data.tempHp > 0 ? ` +${data.tempHp}` : ""}`;
-  return buildLabel()
+  return buildText()
     .plainText(text)
-    .width(p.width)
-    .height(BAR_HEIGHT + 2)
-    .padding(0)
-    .fontSize(FONT_SIZE)
-    .fontWeight(700)
+    .textType("PLAIN")
     .textAlign("CENTER")
     .textAlignVertical("MIDDLE")
+    .fontFamily(FONT_FAMILY)
+    .fontSize(BAR_FONT_SIZE)
+    .fontWeight(700)
     .fillColor("#ffffff")
+    .fillOpacity(1)
     .strokeColor("#000000")
     .strokeOpacity(0.7)
     .strokeWidth(1.5)
-    .backgroundColor("#000000")
-    .backgroundOpacity(0)               // transparent — color comes from the curves underneath
-    .cornerRadius(0)
-    .pointerWidth(0)
-    .pointerHeight(0)
-    .position(p.bgPosition)
-    .layer("ATTACHMENT")
-    .attachedTo(token.id)
+    .lineHeight(0.95)
+    .width(L.barWidth)
+    .height(BAR_HEIGHT)
+    .position({ x: L.barOrigin.x, y: L.barOrigin.y + TEXT_VERTICAL_OFFSET })
+    .layer("TEXT")
+    .attachedTo(ctx.token.id)
     .locked(true)
     .disableHit(true)
-    .visible(token.visible)
+    .visible(ctx.visible)
     .disableAutoZIndex(true)
     .zIndex(30000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata({ [BUBBLE_OWNER_KEY]: token.id })
+    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
+    .build();
+}
+
+function buildStatBubbleBg(ctx: BuildContext, center: Vector2, color: string): any {
+  // Shape CIRCLE position is the bubble's CENTER (verified empirically
+  // against the upstream's positioning math).
+  return buildShape()
+    .shapeType("CIRCLE")
+    .width(DIAMETER)
+    .height(DIAMETER)
+    .fillColor(color)
+    .fillOpacity(BG_OPACITY)
+    .strokeColor(color)
+    .strokeOpacity(0)
+    .strokeWidth(0)
+    .position(center)
+    .layer("ATTACHMENT")
+    .attachedTo(ctx.token.id)
+    .locked(true)
+    .disableHit(true)
+    .visible(ctx.visible)
+    .disableAutoZIndex(true)
+    .zIndex(15000)
+    .disableAttachmentBehavior(DISABLE_INHERIT)
+    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
+    .build();
+}
+
+function buildStatBubbleText(ctx: BuildContext, center: Vector2, value: number): any {
+  const text = value.toString();
+  const fontSize = text.length >= 3 ? BUBBLE_FONT_SIZE_TIGHT : BUBBLE_FONT_SIZE;
+  return buildText()
+    .plainText(text.length > 3 ? "…" : text)
+    .textType("PLAIN")
+    .textAlign("CENTER")
+    .textAlignVertical("MIDDLE")
+    .fontFamily(FONT_FAMILY)
+    .fontSize(fontSize)
+    .fontWeight(700)
+    .fillColor("#ffffff")
+    .fillOpacity(1)
+    .strokeColor("#000000")
+    .strokeOpacity(0.7)
+    .strokeWidth(1.5)
+    .lineHeight(0.95)
+    .width(DIAMETER)
+    .height(DIAMETER)
+    .position({
+      x: center.x - DIAMETER / 2,
+      y: center.y - DIAMETER / 2 + TEXT_VERTICAL_OFFSET,
+    })
+    .layer("TEXT")
+    .attachedTo(ctx.token.id)
+    .locked(true)
+    .disableHit(true)
+    .visible(ctx.visible)
+    .disableAutoZIndex(true)
+    .zIndex(25000)
+    .disableAttachmentBehavior(DISABLE_INHERIT)
+    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
     .build();
 }
 
@@ -352,29 +448,28 @@ async function syncBubbles(): Promise<void> {
     interface Wanted {
       tok: Image;
       data: BubbleData;
-      placement: BarPlacement;
+      layout: BarLayout;
       hash: string;
-      posKey: string;
+      geomKey: string;
       statsVisible: boolean;
     }
     const wanted = new Map<string, Wanted>();
     for (const it of allItems) {
-      // Upstream covers Character / Mount / Prop layers; we follow.
+      // Match upstream — Character / Mount / Prop layers all show bubbles.
       if (it.layer !== "CHARACTER" && it.layer !== "MOUNT" && it.layer !== "PROP") continue;
       if (!isImage(it)) continue;
       const d = readBubbleData(it);
       if (!d) continue;
-      // The `hide` flag historically means "don't show stats to
-      // players" — GM still sees them with a darkened backdrop.
       const statsVisible = !d.hide;
       if (d.hide && role !== "GM") continue;
-      const placement = placeBar(it, sceneDpi);
+      const layout = computeLayout(it, sceneDpi, d);
+      const has = { hp: d.maxHp > 0, ac: d.ac != null, temp: d.tempHp > 0 && d.maxHp > 0 };
       wanted.set(it.id, {
         tok: it,
         data: d,
-        placement,
+        layout,
         hash: dataHash(d),
-        posKey: geomKey(placement.bgPosition, placement.width, BAR_HEIGHT),
+        geomKey: geometryKey(layout, has),
         statsVisible,
       });
     }
@@ -383,7 +478,7 @@ async function syncBubbles(): Promise<void> {
     const orphans: string[] = [];
     for (const [tokId, e] of entries) {
       if (!wanted.has(tokId)) {
-        orphans.push(e.bgId, e.fillId, e.textId);
+        orphans.push(...e.ids);
         entries.delete(tokId);
       }
     }
@@ -393,39 +488,48 @@ async function syncBubbles(): Promise<void> {
       );
     }
 
-    const toAdd: any[] = [];
-    const positionUpdates: Array<{ id: string; pos: Vector2 }> = [];
+    // For each wanted: rebuild on data hash change OR geometry change.
+    // Earlier rounds tried position-only patches on geometry change,
+    // but the Curve's polygon points are baked in at create time —
+    // patching position alone makes the bar appear "anchored at its
+    // bottom-left" because position shifts but width/shape doesn't.
+    // Full rebuild on width change keeps the visual correct.
     const rebuildIds: string[] = [];
+    const toAdd: any[] = [];
 
     for (const [tokId, w] of wanted) {
       const existing = entries.get(tokId);
-      if (existing && existing.hash === w.hash && existing.posKey === w.posKey) continue;
+      if (existing && existing.hash === w.hash && existing.geomKey === w.geomKey) continue;
+      if (existing) rebuildIds.push(...existing.ids);
 
-      // Data hash changed → rebuild (fill width, text content,
-      // and bg color all depend on the data).
-      if (!existing || existing.hash !== w.hash) {
-        if (existing) rebuildIds.push(existing.bgId, existing.fillId, existing.textId);
+      const ctx: BuildContext = { token: w.tok, visible: w.tok.visible };
+      const newIds: string[] = [];
+
+      // HP bar
+      if (w.data.maxHp > 0) {
         const ratio = Math.max(0, Math.min(1, w.data.hp / w.data.maxHp));
-        const bg = buildBgCurve(w.tok, w.placement, w.statsVisible);
-        const fill = buildFillCurve(w.tok, w.placement, ratio);
-        const text = buildText(w.tok, w.placement, w.data);
+        const bg = buildBarBg(ctx, w.layout, w.statsVisible);
+        const fill = buildBarFill(ctx, w.layout, ratio);
+        const text = buildBarText(ctx, w.layout, w.data);
         toAdd.push(bg, fill, text);
-        entries.set(tokId, {
-          bgId: bg.id,
-          fillId: fill.id,
-          textId: text.id,
-          hash: w.hash,
-          posKey: w.posKey,
-        });
-        continue;
+        newIds.push(bg.id, fill.id, text.id);
+      }
+      // AC bubble
+      if (w.layout.acCenter && w.data.ac != null) {
+        const acBg = buildStatBubbleBg(ctx, w.layout.acCenter, AC_COLOR);
+        const acText = buildStatBubbleText(ctx, w.layout.acCenter, w.data.ac);
+        toAdd.push(acBg, acText);
+        newIds.push(acBg.id, acText.id);
+      }
+      // Temp HP bubble
+      if (w.layout.tempCenter && w.data.tempHp > 0) {
+        const tempBg = buildStatBubbleBg(ctx, w.layout.tempCenter, TEMP_HP_COLOR);
+        const tempText = buildStatBubbleText(ctx, w.layout.tempCenter, w.data.tempHp);
+        toAdd.push(tempBg, tempText);
+        newIds.push(tempBg.id, tempText.id);
       }
 
-      // Only geometry changed (drag / scale / rotation). Patch
-      // positions in-place — much cheaper than rebuild.
-      positionUpdates.push({ id: existing.bgId, pos: w.placement.bgPosition });
-      positionUpdates.push({ id: existing.fillId, pos: w.placement.bgPosition });
-      positionUpdates.push({ id: existing.textId, pos: w.placement.bgPosition });
-      existing.posKey = w.posKey;
+      entries.set(tokId, { ids: newIds, hash: w.hash, geomKey: w.geomKey });
     }
 
     if (rebuildIds.length) {
@@ -438,21 +542,6 @@ async function syncBubbles(): Promise<void> {
         console.warn("[obr-suite/bubbles] addItems failed", err),
       );
     }
-    if (positionUpdates.length) {
-      const ids = positionUpdates.map((p) => p.id);
-      await OBR.scene.local.updateItems(
-        ids,
-        (drafts) => {
-          for (const d of drafts) {
-            const u = positionUpdates.find((p) => p.id === d.id);
-            if (u) (d as any).position = u.pos;
-          }
-        },
-        true,
-      ).catch((err) =>
-        console.warn("[obr-suite/bubbles] position update failed", err),
-      );
-    }
 
     if (toAdd.length || rebuildIds.length || orphans.length) {
       const sample = [...wanted.values()][0];
@@ -461,14 +550,16 @@ async function syncBubbles(): Promise<void> {
         "background:#5dade2;color:#fff;padding:1px 5px;border-radius:3px",
         {
           tokens: wanted.size,
-          added: toAdd.length / 3,
-          rebuilt: rebuildIds.length / 3,
-          orphans: orphans.length / 3,
+          itemsAdded: toAdd.length,
+          itemsRebuilt: rebuildIds.length,
+          orphans: orphans.length,
           sample: sample ? {
             tokenId: sample.tok.id,
             tokenPosition: sample.tok.position,
-            bgPosition: sample.placement.bgPosition,
-            width: sample.placement.width,
+            barOrigin: sample.layout.barOrigin,
+            barWidth: sample.layout.barWidth,
+            acCenter: sample.layout.acCenter,
+            tempCenter: sample.layout.tempCenter,
           } : null,
         },
       );
@@ -484,7 +575,7 @@ async function syncBubbles(): Promise<void> {
 
 async function clearAll(): Promise<void> {
   const ids: string[] = [];
-  for (const e of entries.values()) ids.push(e.bgId, e.fillId, e.textId);
+  for (const e of entries.values()) ids.push(...e.ids);
   entries.clear();
   if (ids.length) {
     await OBR.scene.local.deleteItems(ids).catch(() => {});
