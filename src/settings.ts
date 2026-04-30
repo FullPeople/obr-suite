@@ -69,7 +69,7 @@ const SUPPORTERS: string[] = [
   "奶牛饭", "DK", "黄烟", "盲人过北极", "1234",
   "浩然正气","青灯栖凰","深白色(●—●)","白辰","瀞聆","滑而不稽则罔","Aisle","PB27",
   "蚀星ErosionStar","消炎药","SiriusTGT","悠悠向青山","小舟","孤月映寒","Joe","武御",
-  "Misaka Mikoto"
+  "Misaka Mikoto","森海飞霞🐿"
 ];
 
 function supportersHtml(lang: Language): string {

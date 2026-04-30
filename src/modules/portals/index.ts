@@ -377,35 +377,52 @@ async function onDragEnd() {
   const groupCandidates = new Set<string>(movedNow);
   for (const id of selection) groupCandidates.add(id);
 
-  // Widen the trigger zone by half a grid cell. The token's position
-  // tracks its centre; if a tile-sized token's centre is within
-  // (portalRadius + halfTokenWidth) of the portal centre, the token
-  // visually overlaps the portal. The earlier strict centre-to-
-  // centre check meant the user had to drop the mouse very close to
-  // the exact middle of the portal for it to fire.
-  let dpi = 150;
-  try { dpi = await OBR.scene.grid.getDpi(); } catch {}
-  const tokenFudge = dpi / 2;
+  // Trigger zone scales with the actual rendered size of BOTH the
+  // portal AND the token. We treat them as touching circles: the
+  // moved token enters a portal as soon as its visual edge overlaps
+  // the portal's visual edge — i.e. distance(centres) ≤
+  // (portalRadius + tokenRadius).
+  //
+  // portalRadius is the value stored at create time (matches the
+  // portal's drawn diameter). tokenRadius is computed from the
+  // token's actual image dpi + scale so a 2× large monster gets a
+  // proportionally bigger trigger than a small familiar.
+  let sceneDpi = 150;
+  try { sceneDpi = await OBR.scene.grid.getDpi(); } catch {}
+
+  function tokenVisualRadius(it: Item): number {
+    const anyIt = it as any;
+    const imgW: number = anyIt.image?.width ?? sceneDpi;
+    const imgDpi: number = anyIt.image?.dpi ?? sceneDpi;
+    const scale: number = it.scale?.x ?? 1;
+    // Scene-unit size: imageWidth / imageDpi * sceneDpi * scale.
+    const worldSize = (imgW / imgDpi) * sceneDpi * Math.abs(scale);
+    return worldSize / 2;
+  }
 
   for (const tok of items) {
     if (!movedNow.has(tok.id)) continue;
     if (tok.layer !== "CHARACTER" && tok.layer !== "MOUNT") continue;
     if (isPortal(tok)) continue;
     if (recentlyTeleported.has(tok.id)) continue;
+    const tokRad = tokenVisualRadius(tok);
     for (const p of visiblePortals) {
       const pm = readPortalMeta(p);
       if (!pm) continue;
-      const triggerRadius = pm.radius + tokenFudge;
-      if (dist(tok.position, portalCenter(p)) <= triggerRadius) {
+      const triggerRadius = pm.radius + tokRad;
+      const d = dist(tok.position, portalCenter(p));
+      if (d <= triggerRadius) {
         console.log("[obr-suite/portals] portal entry detected", {
           dragger: "this client",
           movedToken: tok.id,
+          movedTokenName: tok.name,
           portal: p.id,
           tokenPos: tok.position,
           portalCenter: portalCenter(p),
           portalRadius: pm.radius,
-          tokenFudge,
-          dist: dist(tok.position, portalCenter(p)),
+          tokenRadius: tokRad,
+          triggerRadius,
+          dist: d,
           groupCandidates: [...groupCandidates],
         });
         await openDestinationModal(p, items, [...groupCandidates]);
@@ -660,11 +677,8 @@ async function teleport(destPortalId: string, tokenIds: string[]) {
 
   // Phase 1 — strip extension metadata that fog/wall plugins use to
   // validate token movement. Covers Dynamic Fog (light sources) and
-  // Smoke & Spectre walls; both reject "illegal" position updates,
-  // which would otherwise snap the teleport back. No animation: the
-  // user reported the gradual-shrink path stuttered too much over
-  // OBR's metadata-update channel, so we just delete-and-snap. All
-  // snapshot values restored verbatim in Phase 3.
+  // Smoke & Spectre vision keys (com.battle-system.smoke/...). All
+  // captured values restored verbatim in Phase 3.
   const extSnap = await snapshotExtensionMetadata(tokenIds);
   if (extSnap.size > 0) {
     try {
@@ -680,6 +694,60 @@ async function teleport(destPortalId: string, tokenIds: string[]) {
     }
   }
 
+  // Phase 1.5 — handle Smoke & Spectre's ATTACHMENT-based wall
+  // collision. Stripping the token's own SS metadata isn't enough
+  // for tokens with vision sources because SS attaches separate
+  // scene items (light cones / vision sources) to the token; those
+  // attachments collide with walls during the position update and
+  // SS snaps the whole group back.
+  //
+  // The reference plugin (gitlab.com/resident-uhlig/owlbear-rodeo-portals)
+  // works around this by toggling the attachments' `visible` flag
+  // off during the move. Invisible items don't trigger SS's wall
+  // check. After the move we restore visible exactly as it was.
+  type AttSnap = Map<string, boolean>;
+  const attVisible: AttSnap = new Map();
+  let attachmentIds: string[] = [];
+  let localAttachmentIds: string[] = [];
+  try {
+    const attachments = await OBR.scene.items.getItemAttachments(tokenIds);
+    for (const a of attachments) {
+      attVisible.set(a.id, a.visible);
+      attachmentIds.push(a.id);
+    }
+  } catch (e) {
+    console.warn("[obr-suite/portals] getItemAttachments failed", e);
+  }
+  try {
+    const localAttachments = await OBR.scene.local.getItemAttachments(tokenIds);
+    for (const a of localAttachments) {
+      attVisible.set(a.id, a.visible);
+      localAttachmentIds.push(a.id);
+    }
+  } catch (e) {
+    console.warn("[obr-suite/portals] local.getItemAttachments failed", e);
+  }
+  if (attachmentIds.length > 0 || localAttachmentIds.length > 0) {
+    console.log(
+      "[obr-suite/portals] hiding attachments for teleport",
+      { sceneAttachments: attachmentIds, localAttachments: localAttachmentIds },
+    );
+  }
+  try {
+    if (attachmentIds.length > 0) {
+      await OBR.scene.items.updateItems(attachmentIds, (drafts) => {
+        for (const d of drafts) d.visible = false;
+      });
+    }
+    if (localAttachmentIds.length > 0) {
+      await OBR.scene.local.updateItems(localAttachmentIds, (drafts) => {
+        for (const d of drafts) d.visible = false;
+      });
+    }
+  } catch (e) {
+    console.warn("[obr-suite/portals] hide attachments failed", e);
+  }
+
   // Phase 2 — actual position update.
   try {
     await OBR.scene.items.updateItems(tokenIds, (drafts) => {
@@ -689,6 +757,30 @@ async function teleport(destPortalId: string, tokenIds: string[]) {
     });
   } catch (e) {
     console.error("[obr-suite/portals] teleport updateItems failed", e);
+  }
+
+  // Phase 2.5 — restore attachments' visible state. Symmetric with
+  // Phase 1.5; uses the captured value so we don't accidentally
+  // un-hide an item that the user intentionally had hidden.
+  try {
+    if (attachmentIds.length > 0) {
+      await OBR.scene.items.updateItems(attachmentIds, (drafts) => {
+        for (const d of drafts) {
+          const v = attVisible.get(d.id);
+          if (typeof v === "boolean") d.visible = v;
+        }
+      });
+    }
+    if (localAttachmentIds.length > 0) {
+      await OBR.scene.local.updateItems(localAttachmentIds, (drafts) => {
+        for (const d of drafts) {
+          const v = attVisible.get(d.id);
+          if (typeof v === "boolean") d.visible = v;
+        }
+      });
+    }
+  } catch (e) {
+    console.warn("[obr-suite/portals] restore attachments visibility failed", e);
   }
 
   // Pan the local camera to the destination portal (only on the
