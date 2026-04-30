@@ -150,10 +150,15 @@ function buildSvg(d: BubbleData): string {
 }
 
 function svgDataUri(svg: string): string {
-  // encodeURIComponent leaves us with a safely-escaped data URI that
-  // every Chromium/Safari/Firefox SVG renderer accepts. base64 would
-  // also work but is bulkier and harder to diff in DevTools.
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  // Base64 encoding — OBR's image renderer rejected the
+  // encodeURIComponent variant (it showed "!" as broken-image
+  // fallback). base64 is bulkier but every <img> implementation
+  // accepts it without quirks. TextEncoder lets the path stay safe
+  // if the SVG ever picks up a non-ASCII char.
+  const bytes = new TextEncoder().encode(svg);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return `data:image/svg+xml;base64,${btoa(bin)}`;
 }
 
 // --- Per-token state -------------------------------------------------------
@@ -172,16 +177,19 @@ function tokenSignature(tok: Item): string {
   return `${a.image?.width ?? "_"}|${a.image?.height ?? "_"}|${a.image?.dpi ?? "_"}|${tok.scale?.x ?? 1}|${tok.scale?.y ?? 1}|${tok.position.x}|${tok.position.y}|${tok.visible ? 1 : 0}`;
 }
 
-function bubbleAnchorY(tok: Item, sceneDpi: number, userScale: number): number {
+function bubbleAnchorY(tok: Item, sceneDpi: number, _userScale: number): number {
+  // Anchor sits exactly on the token's visible top edge. The actual
+  // overlap (~30% of bubble height into the token) comes from the
+  // image's own offset point — see makeBubbleItem(): we pick
+  // offset.y = SVG_H * 0.7 so the anchor is 70% down inside the
+  // bubble graphic, which leaves the bottom 30% of the bubble
+  // hanging below the anchor (i.e. tucked inside the token).
   const a = tok as any;
   const imgH = a.image?.height ?? sceneDpi;
   const imgDpi = a.image?.dpi ?? sceneDpi;
   const sy = Math.abs(tok.scale?.y ?? 1);
   const tokenHalfH = (imgH / imgDpi) * sceneDpi * sy / 2;
-  // Bubble sits a small gap above the token's top edge, scaled with
-  // the user's per-client size preference so they can shrink/enlarge.
-  const gap = sceneDpi * 0.04 * userScale;
-  return tok.position.y - tokenHalfH - gap;
+  return tok.position.y - tokenHalfH;
 }
 
 function readEnabled(): boolean {
@@ -339,7 +347,13 @@ function makeBubbleItem(
     },
     {
       dpi: SVG_W,
-      offset: { x: SVG_W / 2, y: SVG_H }, // bottom-center anchor
+      // Anchor 70% down the bubble — 70% of the graphic sits ABOVE
+      // the anchor point, 30% sits BELOW it. Combined with
+      // `position.y = tokenTop` (see bubbleAnchorY) this tucks the
+      // bottom slice of the bubble inside the token's upper edge,
+      // which matches the reference Bubbles plugin's tight-to-the
+      // -head placement instead of floating high above the token.
+      offset: { x: SVG_W / 2, y: SVG_H * 0.7 },
     },
   )
     .position({ x: tok.position.x, y: anchorY })
