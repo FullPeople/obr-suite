@@ -11,6 +11,7 @@ import {
 } from "./modules/characterCards";
 import { setupDice, teardownDice } from "./modules/dice";
 import { setupPortals, teardownPortals } from "./modules/portals";
+import { setupBubbles, teardownBubbles } from "./modules/bubbles";
 import { setupDevTest, teardownDevTest } from "./modules/dev-test";
 import { setupCrossSceneCards } from "./modules/cross-scene-cards";
 import { assetUrl } from "./asset-base";
@@ -175,6 +176,7 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   },
   dice: { setup: setupDice, teardown: teardownDice },
   portals: { setup: setupPortals, teardown: teardownPortals },
+  bubbles: { setup: setupBubbles, teardown: teardownBubbles },
   search: { setup: setupSearch, teardown: teardownSearch },
 };
 

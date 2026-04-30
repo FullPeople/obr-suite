@@ -24,7 +24,8 @@ export type ModuleId =
   | "initiative"
   | "search"
   | "dice"
-  | "portals";
+  | "portals"
+  | "bubbles";
 
 export type DataVersion = "2014" | "2024" | "all";
 export type Language = "zh" | "en";
@@ -101,6 +102,7 @@ export const DEFAULT_STATE: SuiteState = {
     search: true,
     dice: true,
     portals: true,
+    bubbles: true,
   },
   dataVersion: "2024",
   allowPlayerMonsters: false,

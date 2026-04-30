@@ -1125,6 +1125,104 @@ const TABS: TabDef[] = [
     },
   },
   {
+    id: "bubbles",
+    zh: `${ICONS.heart} 头顶气泡`,
+    en: `${ICONS.heart} Token Bubbles`,
+    moduleId: "bubbles",
+    dynamicBody: (lang) => {
+      // Per-client preferences (localStorage). Match the keys exported
+      // from src/modules/bubbles/index.ts.
+      const enabled = (() => {
+        try {
+          const v = localStorage.getItem("com.obr-suite/bubbles/enabled");
+          if (v === "0") return false;
+          if (v === "1") return true;
+        } catch {}
+        return true;
+      })();
+      const userScale = (() => {
+        try {
+          const v = localStorage.getItem("com.obr-suite/bubbles/scale");
+          if (v) {
+            const n = Number(v);
+            if (Number.isFinite(n) && n > 0.3 && n < 3) return n;
+          }
+        } catch {}
+        return 1;
+      })();
+      const desc = lang === "zh"
+        ? `<p>在每个 token 头顶渲染一个紧凑信息条：<b>HP 条</b>（按比例变红 / 橙 / 绿）+ <b>AC 盾牌</b> + <b>临时生命值</b>。气泡自动跟随 token 拖拽 / 缩放 / 传送，旋转时保持竖直。</p>
+<ul>
+  <li>怪物图鉴绑定的 token 会自动写入 HP/AC，对玩家隐藏（仅 DM 可见，与图鉴默认隐藏一致）</li>
+  <li>角色卡绑定的 token 会同步当前 / 最大 / 临时 HP 与 AC，所有人可见</li>
+  <li>HP / AC / 临时 HP 编辑入口在<b>怪物悬浮窗</b>和<b>角色卡悬浮窗</b>里，没有单独的右键菜单</li>
+  <li>仅本地渲染（OBR.scene.local），不同步给其他玩家，开关切换无延迟</li>
+</ul>`
+        : `<p>Renders a compact info row above every token with stats: <b>HP bar</b> (color-coded), <b>AC shield</b>, <b>temp HP</b> badge. Auto-follows drag / scale / teleport and stays upright when the token rotates.</p>
+<ul>
+  <li>Bestiary-bound tokens get HP/AC auto-written and hidden from players (GM-only, matches the bestiary default)</li>
+  <li>Character-card-bound tokens sync current / max / temp HP and AC, visible to everyone</li>
+  <li>Edit entry points live in the <b>monster info popup</b> and <b>character card popup</b>; no separate right-click menu</li>
+  <li>Local render only (OBR.scene.local) — toggling is instant and doesn't sync to other players</li>
+</ul>`;
+      const enabledLbl = lang === "zh" ? "显示头顶气泡" : "Show token bubbles";
+      const enabledDesc = lang === "zh"
+        ? "本机偏好。关闭后立即清除所有气泡，不影响别人。"
+        : "Per-client preference. Toggling off clears every local bubble immediately and doesn't affect other players.";
+      const sizeLbl = lang === "zh" ? "气泡大小" : "Bubble size";
+      const sizeDesc = lang === "zh"
+        ? "本机偏好。0.6× ~ 2.0×。气泡本身已经随 token 自动缩放，这里是统一上加的乘数。"
+        : "Per-client preference. 0.6× ~ 2.0×. Bubbles already scale with the token; this is an additional multiplier on top.";
+      return `
+        ${desc}
+        <h3>${lang === "zh" ? "选项" : "Options"}</h3>
+        <div class="row">
+          <div class="lbl">
+            ${enabledLbl}
+            <div class="desc"><em>${enabledDesc}</em></div>
+          </div>
+          <button class="tog ${enabled ? "on" : ""}" data-key="bubblesEnabled" type="button" aria-pressed="${enabled}"></button>
+        </div>
+        <div class="row">
+          <div class="lbl">
+            ${sizeLbl}
+            <div class="desc"><em>${sizeDesc}</em></div>
+          </div>
+          <input type="range" min="0.6" max="2" step="0.05" value="${userScale}"
+                 data-key="bubblesScale"
+                 style="flex:0 0 140px;align-self:center"/>
+          <span data-bind="bubblesScale" style="flex:0 0 38px;text-align:right;color:#9aa0b3;font-variant-numeric:tabular-nums">${userScale.toFixed(2)}×</span>
+        </div>
+      `;
+    },
+    afterRender: (root) => {
+      root
+        .querySelector<HTMLButtonElement>('.tog[data-key="bubblesEnabled"]')
+        ?.addEventListener("click", (e) => {
+          const btn = e.currentTarget as HTMLButtonElement;
+          const wasOn = btn.classList.contains("on");
+          const next = !wasOn;
+          try {
+            localStorage.setItem("com.obr-suite/bubbles/enabled", next ? "1" : "0");
+          } catch {}
+          btn.classList.toggle("on", next);
+          btn.setAttribute("aria-pressed", String(next));
+        });
+      const range = root.querySelector<HTMLInputElement>('input[data-key="bubblesScale"]');
+      const display = root.querySelector<HTMLSpanElement>('span[data-bind="bubblesScale"]');
+      if (range) {
+        range.addEventListener("input", () => {
+          const v = Number(range.value);
+          if (display) display.textContent = `${v.toFixed(2)}×`;
+        });
+        range.addEventListener("change", () => {
+          const v = Number(range.value);
+          try { localStorage.setItem("com.obr-suite/bubbles/scale", String(v)); } catch {}
+        });
+      }
+    },
+  },
+  {
     id: "search",
     zh: `${ICONS.search} 全局搜索`,
     en: `${ICONS.search} Global Search`,
