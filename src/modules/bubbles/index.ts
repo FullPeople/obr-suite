@@ -36,6 +36,19 @@ import OBR, {
 
 const PLUGIN_ID = "com.obr-suite/bubbles";
 const BUBBLE_OWNER_KEY = `${PLUGIN_ID}/owner`;
+// Role tag stamped onto each item's metadata so the in-place
+// `patchGeometry` dispatcher knows what kind of update to apply
+// (each role updates different fields — Curve.points vs
+// Shape.width/height vs Effect.uniforms vs Text dimensions).
+const BUBBLE_ROLE_KEY = `${PLUGIN_ID}/role`;
+type BubbleRole =
+  | "hp-bg" | "hp-fill" | "hp-shimmer" | "hp-text"
+  | "ac-shield" | "ac-text"
+  | "temp-bg"  | "temp-text";
+
+function bubbleMeta(tokenId: string, role: BubbleRole): Record<string, unknown> {
+  return { [BUBBLE_OWNER_KEY]: tokenId, [BUBBLE_ROLE_KEY]: role };
+}
 
 export const LS_BUBBLES_ENABLED = `${PLUGIN_ID}/enabled`;
 export const LS_BUBBLES_SCALE = `${PLUGIN_ID}/scale`;
@@ -540,7 +553,7 @@ function buildBarBg(ctx: BuildContext, L: BarLayout, statsVisible: boolean): any
     .disableAutoZIndex(true)
     .zIndex(10000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
+    .metadata(bubbleMeta(ctx.token.id, "hp-bg"))
     .build();
 }
 
@@ -562,20 +575,20 @@ function buildBarFill(ctx: BuildContext, L: BarLayout, ratio: number): any {
     .disableAutoZIndex(true)
     .zIndex(20000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
+    .metadata(bubbleMeta(ctx.token.id, "hp-fill"))
     .build();
 }
 
-// Shimmer overlay — additive Effect rendered on top of the static
-// fill curve. Shader-driven (see HP_SHIMMER_SKSL); the `iTime`
-// uniform is kept ticking by `ensureAnimationTimer`. If the
-// shader / uniform updates fail for any reason, the static fill
-// underneath still renders the bar correctly — this layer is
-// purely decorative.
+// Shimmer overlay — Effect rendered on top of the static fill curve.
+// Earlier rounds used effectType ATTACHMENT + blendMode PLUS, but
+// neither was reliably visible. STANDALONE + SRC_OVER is the same
+// pattern OBR's lighting uses and renders the shader as a normal
+// alpha-blended overlay. The shader (HP_SHIMMER_SKSL) outputs
+// half4(rgb, alpha) so SRC_OVER picks up its colors directly.
 function buildHpShimmer(ctx: BuildContext, L: BarLayout, ratio: number): any {
   return buildEffect()
-    .effectType("ATTACHMENT")
-    .blendMode("PLUS")
+    .effectType("STANDALONE")
+    .blendMode("SRC_OVER")
     .width(L.barWidth)
     .height(L.barHeight)
     .sksl(HP_SHIMMER_SKSL)
@@ -593,7 +606,7 @@ function buildHpShimmer(ctx: BuildContext, L: BarLayout, ratio: number): any {
     .disableAutoZIndex(true)
     .zIndex(25000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
+    .metadata(bubbleMeta(ctx.token.id, "hp-shimmer"))
     .build();
 }
 
@@ -628,7 +641,7 @@ function buildBarText(ctx: BuildContext, L: BarLayout, data: BubbleData): any {
     .disableAutoZIndex(true)
     .zIndex(30000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
+    .metadata(bubbleMeta(ctx.token.id, "hp-text"))
     .build();
 }
 
@@ -653,7 +666,7 @@ function buildStatBubbleBg(ctx: BuildContext, L: BarLayout, center: Vector2, col
     .disableAutoZIndex(true)
     .zIndex(15000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
+    .metadata(bubbleMeta(ctx.token.id, "temp-bg"))
     .build();
 }
 
@@ -683,14 +696,25 @@ function buildAcShield(ctx: BuildContext, L: BarLayout, center: Vector2, color: 
     .disableAutoZIndex(true)
     .zIndex(15000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
+    .metadata(bubbleMeta(ctx.token.id, "ac-shield"))
     .build();
 }
 
-function buildStatBubbleText(ctx: BuildContext, L: BarLayout, center: Vector2, value: number): any {
+// Stat-bubble text overlay — used for both AC and Temp HP.
+// `role` distinguishes the two so patchGeometry can dispatch them
+// differently (AC text gets an upward Y nudge to compensate for
+// the shield outline's visual centroid being above the geometric
+// center of the bbox; Temp HP sits in a centered circle and
+// doesn't need that nudge). Stroke is dropped on very small icons
+// where a 0.4-px outline reads as a black blob.
+function buildStatBubbleText(ctx: BuildContext, L: BarLayout, center: Vector2, value: number, role: "ac-text" | "temp-text"): any {
   const text = value.toString();
   const fontSize = text.length >= 3 ? L.bubbleFontSizeTight : L.bubbleFontSize;
-  const strokeWidth = Math.max(0.4, L.diameter * 0.05);
+  const strokeWidth = L.diameter < 20 ? 0 : Math.max(0.4, L.diameter * 0.05);
+  // Shield's visual centroid sits above its geometric center
+  // (because the bottom point is thin); nudge AC text up by 8%
+  // of the bbox so the number looks centered on the shield body.
+  const yShift = role === "ac-text" ? -L.diameter * 0.08 : 0;
   return buildText()
     .plainText(text.length > 3 ? "…" : text)
     .textType("PLAIN")
@@ -709,7 +733,7 @@ function buildStatBubbleText(ctx: BuildContext, L: BarLayout, center: Vector2, v
     .height(L.diameter)
     .position({
       x: center.x - L.diameter / 2,
-      y: center.y - L.diameter / 2 + L.bubbleTextOffset,
+      y: center.y - L.diameter / 2 + L.bubbleTextOffset + yShift,
     })
     .layer("TEXT")
     .attachedTo(ctx.token.id)
@@ -719,11 +743,152 @@ function buildStatBubbleText(ctx: BuildContext, L: BarLayout, center: Vector2, v
     .disableAutoZIndex(true)
     .zIndex(25000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
-    .metadata({ [BUBBLE_OWNER_KEY]: ctx.token.id })
+    .metadata(bubbleMeta(ctx.token.id, role))
     .build();
 }
 
 // --- Sync --------------------------------------------------------------
+
+interface Wanted {
+  tok: Image;
+  data: BubbleData;
+  layout: BarLayout;
+  hash: string;
+  geomKey: string;
+  statsVisible: boolean;
+}
+
+// Geometry-only in-place update — used when the token's data
+// (HP / AC / hide / temp HP) is unchanged but its position or
+// scale shifted. Avoids the delete + re-add cycle that made
+// resize feel "release-only" before: the user grabs the corner
+// handle, OBR fires items.onChange repeatedly during the drag,
+// and we patch each shimmer / shield / text item's position +
+// dimensions + font size in a single batched updateItems call.
+// `iTime` for shimmers is left alone — the animation timer
+// keeps ticking it independently.
+//
+// Dispatches by the `BUBBLE_ROLE_KEY` metadata each builder
+// stamps onto its item — that role tells us which fields to
+// update for that item type.
+async function patchGeometry(patches: Array<{ entry: BubbleEntry; w: Wanted }>): Promise<void> {
+  if (patches.length === 0) return;
+
+  const wantedByItemId = new Map<string, Wanted>();
+  const allIds: string[] = [];
+  for (const { entry, w } of patches) {
+    for (const id of entry.ids) {
+      wantedByItemId.set(id, w);
+      allIds.push(id);
+    }
+  }
+  if (allIds.length === 0) return;
+
+  await OBR.scene.local.updateItems(allIds, (drafts) => {
+    for (const d of drafts) {
+      const w = wantedByItemId.get(d.id);
+      if (!w) continue;
+      const role = (d.metadata as any)?.[BUBBLE_ROLE_KEY] as BubbleRole | undefined;
+      if (!role) continue;
+      const L = w.layout;
+      const D = L.diameter;
+      const da = d as any;
+      switch (role) {
+        case "hp-bg": {
+          da.position = L.barOrigin;
+          da.points = roundedRectanglePoints(L.barWidth, L.barHeight, L.barCornerRadius);
+          break;
+        }
+        case "hp-fill": {
+          const ratio = Math.max(0, Math.min(1, w.data.hp / Math.max(1, w.data.maxHp)));
+          da.position = L.barOrigin;
+          da.points = roundedRectanglePoints(L.barWidth, L.barHeight, L.barCornerRadius, ratio);
+          break;
+        }
+        case "hp-shimmer": {
+          const ratio = Math.max(0, Math.min(1, w.data.hp / Math.max(1, w.data.maxHp)));
+          da.position = L.barOrigin;
+          da.width = L.barWidth;
+          da.height = L.barHeight;
+          if (Array.isArray(da.uniforms)) {
+            for (const u of da.uniforms) {
+              if (u.name === "iSize") u.value = { x: L.barWidth, y: L.barHeight };
+              else if (u.name === "ratio") u.value = ratio;
+            }
+          }
+          break;
+        }
+        case "hp-text": {
+          da.position = { x: L.barOrigin.x, y: L.barOrigin.y + L.barTextOffset };
+          if (da.text) {
+            da.text.width = L.barWidth;
+            da.text.height = L.barHeight;
+            if (da.text.style) {
+              da.text.style.fontSize = L.barFontSize;
+              da.text.style.strokeWidth = Math.max(0.4, L.barHeight * 0.075);
+            }
+          }
+          break;
+        }
+        case "ac-shield": {
+          if (L.acCenter) {
+            da.position = { x: L.acCenter.x - D / 2, y: L.acCenter.y - D / 2 };
+            da.points = shieldPoints(D, D);
+            da.style = { ...(da.style ?? {}), strokeWidth: Math.max(0.6, D * 0.04) };
+          }
+          break;
+        }
+        case "ac-text": {
+          if (L.acCenter) {
+            const txt: string = da.text?.plainText ?? "";
+            const fs = txt.length >= 3 ? L.bubbleFontSizeTight : L.bubbleFontSize;
+            const yShift = -D * 0.08;
+            da.position = {
+              x: L.acCenter.x - D / 2,
+              y: L.acCenter.y - D / 2 + L.bubbleTextOffset + yShift,
+            };
+            if (da.text) {
+              da.text.width = D;
+              da.text.height = D;
+              if (da.text.style) {
+                da.text.style.fontSize = fs;
+                da.text.style.strokeWidth = D < 20 ? 0 : Math.max(0.4, D * 0.05);
+              }
+            }
+          }
+          break;
+        }
+        case "temp-bg": {
+          if (L.tempCenter) {
+            da.position = L.tempCenter;
+            da.width = D;
+            da.height = D;
+          }
+          break;
+        }
+        case "temp-text": {
+          if (L.tempCenter) {
+            const txt: string = da.text?.plainText ?? "";
+            const fs = txt.length >= 3 ? L.bubbleFontSizeTight : L.bubbleFontSize;
+            da.position = {
+              x: L.tempCenter.x - D / 2,
+              y: L.tempCenter.y - D / 2 + L.bubbleTextOffset,
+            };
+            if (da.text) {
+              da.text.width = D;
+              da.text.height = D;
+              if (da.text.style) {
+                da.text.style.fontSize = fs;
+                da.text.style.strokeWidth = D < 20 ? 0 : Math.max(0.4, D * 0.05);
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
+  }, true).catch((e) => console.warn("[obr-suite/bubbles] patchGeometry failed", e));
+}
 
 async function syncBubbles(): Promise<void> {
   if (inSync) {
@@ -746,14 +911,6 @@ async function syncBubbles(): Promise<void> {
 
     const userScale = readUserScale();
 
-    interface Wanted {
-      tok: Image;
-      data: BubbleData;
-      layout: BarLayout;
-      hash: string;
-      geomKey: string;
-      statsVisible: boolean;
-    }
     const wanted = new Map<string, Wanted>();
     for (const it of allItems) {
       // Match upstream — Character / Mount / Prop layers all show bubbles.
@@ -797,10 +954,23 @@ async function syncBubbles(): Promise<void> {
     // Full rebuild on width change keeps the visual correct.
     const rebuildIds: string[] = [];
     const toAdd: any[] = [];
+    // Tokens whose data is unchanged but whose geometry shifted
+    // (drag, resize, scale change). Patched in-place via
+    // patchGeometry — keeps the live update during a token resize
+    // gesture instead of the user only seeing the new size on
+    // mouse-release.
+    const geomPatches: Array<{ entry: BubbleEntry; w: Wanted }> = [];
 
     for (const [tokId, w] of wanted) {
       const existing = entries.get(tokId);
       if (existing && existing.hash === w.hash && existing.geomKey === w.geomKey) continue;
+      if (existing && existing.hash === w.hash) {
+        // Data unchanged → cheap in-place geometry patch.
+        geomPatches.push({ entry: existing, w });
+        existing.geomKey = w.geomKey;
+        continue;
+      }
+      // Hash changed (or new token) → full rebuild.
       if (existing) rebuildIds.push(...existing.ids);
 
       const ctx: BuildContext = { token: w.tok, visible: w.tok.visible };
@@ -827,14 +997,14 @@ async function syncBubbles(): Promise<void> {
       // AC shield (replaces the circular stat bubble)
       if (w.layout.acCenter && w.data.ac != null) {
         const acShield = buildAcShield(ctx, w.layout, w.layout.acCenter, AC_COLOR);
-        const acText = buildStatBubbleText(ctx, w.layout, w.layout.acCenter, w.data.ac);
+        const acText = buildStatBubbleText(ctx, w.layout, w.layout.acCenter, w.data.ac, "ac-text");
         toAdd.push(acShield, acText);
         newIds.push(acShield.id, acText.id);
       }
       // Temp HP bubble (still a circle — distinct from the shield)
       if (w.layout.tempCenter && w.data.tempHp > 0) {
         const tempBg = buildStatBubbleBg(ctx, w.layout, w.layout.tempCenter, TEMP_HP_COLOR);
-        const tempText = buildStatBubbleText(ctx, w.layout, w.layout.tempCenter, w.data.tempHp);
+        const tempText = buildStatBubbleText(ctx, w.layout, w.layout.tempCenter, w.data.tempHp, "temp-text");
         toAdd.push(tempBg, tempText);
         newIds.push(tempBg.id, tempText.id);
       }
@@ -852,8 +1022,11 @@ async function syncBubbles(): Promise<void> {
         console.warn("[obr-suite/bubbles] addItems failed", err),
       );
     }
+    if (geomPatches.length) {
+      await patchGeometry(geomPatches);
+    }
 
-    if (toAdd.length || rebuildIds.length || orphans.length) {
+    if (toAdd.length || rebuildIds.length || orphans.length || geomPatches.length) {
       const sample = [...wanted.values()][0];
       console.log(
         "%c[obr-suite/bubbles] sync",
@@ -862,6 +1035,7 @@ async function syncBubbles(): Promise<void> {
           tokens: wanted.size,
           itemsAdded: toAdd.length,
           itemsRebuilt: rebuildIds.length,
+          geomPatches: geomPatches.length,
           orphans: orphans.length,
           sample: sample ? {
             tokenId: sample.tok.id,
