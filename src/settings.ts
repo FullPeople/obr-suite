@@ -70,7 +70,7 @@ const SUPPORTERS: string[] = [
   "奶牛饭", "DK", "黄烟", "盲人过北极", "1234",
   "浩然正气","青灯栖凰","深白色(●—●)","白辰","瀞聆","滑而不稽则罔","Aisle","PB27",
   "蚀星ErosionStar","消炎药","SiriusTGT","悠悠向青山","小舟","孤月映寒","Joe","武御",
-  "Misaka Mikoto","森海飞霞🐿","每日 1/? Fen²","北省","得君所见"
+  "Misaka Mikoto","森海飞霞🐿","每日 1/? Fen²","北省","得君所见","蜗","鱼喵"
 ];
 
 function supportersHtml(lang: Language): string {
@@ -107,7 +107,7 @@ const SUPPORT: BilingualHtml = {
       <p>GitHub：<a href="${GITHUB_URL}" target="_blank">${GITHUB_URL}</a></p>
     </div>
     <div class="note">
-      插件目前自托管在作者的服务器上，每月都有服务器费用在跑。作者也会时不时更新优化、修 bug、加新功能，请大家见谅 (｀・ω・´)ゞ。代码以 <a href="https://polyformproject.org/licenses/noncommercial/1.0.0/" target="_blank">PolyForm Noncommercial 1.0.0</a> 协议发布 —— 可自由查看 / 修改 / 二次创作 / 非商用分发；商业使用禁止。
+      插件目前自托管在作者的服务器上，每月都有服务器费用在跑。作者也会时不时更新优化、修 bug、加新功能，请大家见谅 (｀・ω・´)ゞ。代码以 <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank">GNU GPL-3.0</a> 协议发布 —— 可自由查看 / 修改 / 再分发（含商业），衍生作品需保持 GPL-3.0 并附带源码。
     </div>
   `,
   en: `
@@ -124,7 +124,7 @@ const SUPPORT: BilingualHtml = {
       <p>GitHub: <a href="${GITHUB_URL}" target="_blank">${GITHUB_URL}</a></p>
     </div>
     <div class="note">
-      The plugin is self-hosted by the author at their own monthly cost, with continuous updates and bug fixes. Source under <a href="https://polyformproject.org/licenses/noncommercial/1.0.0/" target="_blank">PolyForm Noncommercial 1.0.0</a> — view / modify / fork / distribute freely for noncommercial use; commercial use prohibited.
+      The plugin is self-hosted by the author at their own monthly cost, with continuous updates and bug fixes. Source under <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank">GNU GPL-3.0</a> — view, modify, redistribute (including commercially); derivative works must keep GPL-3.0 and ship source.
     </div>
   `,
 };

@@ -23,6 +23,8 @@ https://obr.dnd.center/suite/manifest.json
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](./LICENSE) — derivative works permitted with attribution; commercial use prohibited.
+[GNU General Public License v3.0](./LICENSE) — strong copyleft. Copy / modify / redistribute / use commercially, provided derivative works keep the GPL-3.0 license and source.
 
 Copyright © 2026 FullPeople — [github.com/FullPeople](https://github.com/FullPeople)
+
+The `bubbles` module is informed by [Stat Bubbles for D&D](https://github.com/SeamusFinlayson/Bubbles-for-Owlbear-Rodeo) by Seamus Finlayson, also under GPL-3.0.

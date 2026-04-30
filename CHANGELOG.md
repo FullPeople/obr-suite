@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased — dev branch]
+
+### Changed
+
+- **License changed from PolyForm Noncommercial 1.0.0 → GNU GPL-3.0.** Strong copyleft. Done deliberately so the new `bubbles` module can derive from [Stat Bubbles for D&D](https://github.com/SeamusFinlayson/Bubbles-for-Owlbear-Rodeo) (also GPL-3.0) without an incompatibility. README, store listing, settings UI, and changelog all updated to reflect the new terms.
+
+### Added
+
+- **`bubbles` module** — HP / temp-HP / AC indicators on tokens, derived from the upstream Stat Bubbles plugin. Per-client toggle in Settings → 头顶气泡.
+
 ## [1.0.7] — 2026-04-29
 
 Polish pass on the bestiary group-saves popover (introduced in 1.0.6).

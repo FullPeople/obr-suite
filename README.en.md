@@ -136,13 +136,14 @@ Per-client preferences live in localStorage (cluster expanded, auto-popup toggle
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](./LICENSE)
+[GNU General Public License v3.0](./LICENSE) — strong copyleft.
 
 | | |
 |---|---|
-| <img src="docs/icons/check.svg" width="14" align="center" /> | View, modify, fork, and non-commercial distribution permitted |
-| <img src="docs/icons/check.svg" width="14" align="center" /> | Required notice: `Copyright (c) 2026 FullPeople` must remain |
-| <img src="docs/icons/x-mark.svg" width="14" align="center" /> | Commercial use prohibited |
+| <img src="docs/icons/check.svg" width="14" align="center" /> | Free to view, modify, redistribute, including commercially |
+| <img src="docs/icons/check.svg" width="14" align="center" /> | Source must accompany any distribution |
+| <img src="docs/icons/check.svg" width="14" align="center" /> | Derivative works must keep GPL-3.0 license |
+| <img src="docs/icons/check.svg" width="14" align="center" /> | Original copyright notice (`Copyright (c) 2026 FullPeople`) preserved |
 
 ## Credits
 
@@ -150,6 +151,7 @@ Per-client preferences live in localStorage (cluster expanded, auto-popup toggle
 - Dice SFX: Sound Effect by [freesound_community](https://pixabay.com/users/freesound_community-46691455/) and ksjsbwuil from [Pixabay](https://pixabay.com/)
 - 5etools data: [5e.kiwee.top](https://5e.kiwee.top) (Chinese mirror)
 - D&D 5e content © Wizards of the Coast; this extension is a reference and play aid only.
+- The `bubbles` module is derived from [Stat Bubbles for D&D](https://github.com/SeamusFinlayson/Bubbles-for-Owlbear-Rodeo) by Seamus Finlayson, also under GPL-3.0.
 
 ## Support
 

@@ -63,7 +63,7 @@ Nested             adv(max(1d20, 10) + 5)
 
 ## License
 
-Released under the [PolyForm Noncommercial License 1.0.0](https://github.com/FullPeople/obr-suite/blob/main/LICENSE) — view, modify, fork, and non-commercial distribution permitted with attribution; commercial use prohibited.
+Released under [GNU GPL-3.0](https://github.com/FullPeople/obr-suite/blob/main/LICENSE). Strong copyleft — view, modify, redistribute (including commercially); derivative works must keep GPL-3.0 and ship source. The `bubbles` module derives from [Stat Bubbles for D&D](https://github.com/SeamusFinlayson/Bubbles-for-Owlbear-Rodeo) by Seamus Finlayson, also GPL-3.0.
 
 ## Support
 

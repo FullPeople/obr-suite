@@ -136,13 +136,14 @@ obr-suite/
 
 ## 许可证
 
-[PolyForm Noncommercial License 1.0.0](./LICENSE)
+[GNU 通用公共许可证 v3.0 (GPL-3.0)](./LICENSE) —— 强 copyleft。
 
 | | |
 |---|---|
-| <img src="docs/icons/check.svg" width="14" align="center" /> | 允许查看、修改、二次创作、非商业分发 |
-| <img src="docs/icons/check.svg" width="14" align="center" /> | 必须保留版权声明：`Copyright (c) 2026 FullPeople` |
-| <img src="docs/icons/x-mark.svg" width="14" align="center" /> | 禁止任何商业用途 |
+| <img src="docs/icons/check.svg" width="14" align="center" /> | 自由查看、修改、再分发，包括商业分发 |
+| <img src="docs/icons/check.svg" width="14" align="center" /> | 任何分发都必须附带源码 |
+| <img src="docs/icons/check.svg" width="14" align="center" /> | 衍生作品必须保持 GPL-3.0 许可证 |
+| <img src="docs/icons/check.svg" width="14" align="center" /> | 原始版权声明（`Copyright (c) 2026 FullPeople`）必须保留 |
 
 ## 鸣谢
 
@@ -150,6 +151,7 @@ obr-suite/
 - 骰子音效：Sound Effect by [freesound_community](https://pixabay.com/users/freesound_community-46691455/) and ksjsbwuil from [Pixabay](https://pixabay.com/)
 - 5etools 数据来源：[5e.kiwee.top](https://5e.kiwee.top)（中文镜像）
 - D&D 5e 内容版权属于 Wizards of the Coast；本扩展仅作查阅与跑团辅助使用。
+- `bubbles` 模块衍生自 Seamus Finlayson 的 [Stat Bubbles for D&D](https://github.com/SeamusFinlayson/Bubbles-for-Owlbear-Rodeo)（同样基于 GPL-3.0）。
 
 ## 支持
 
