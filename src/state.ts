@@ -198,26 +198,37 @@ export async function refreshFromScene(): Promise<SuiteState> {
   let next: SuiteState;
   try {
     // Cross-scene sync: prefer room mirror when active.
-    let usedRoom = false;
     try {
-      const roomMeta = await OBR.room.getMetadata();
+      const [roomMeta, sceneMeta] = await Promise.all([
+        OBR.room.getMetadata(),
+        OBR.scene.getMetadata(),
+      ]);
       const fromRoom = roomMeta[ROOM_STATE_KEY] as any;
       if (fromRoom && fromRoom.crossSceneSyncSettings) {
         next = merge(fromRoom);
-        usedRoom = true;
-        // Mirror back to scene metadata so consumers that read
+        // Mirror to scene metadata so consumers that read
         // SCENE_KEY directly (bestiary auto-init flag, etc.) see the
-        // synced value too.
-        try { await OBR.scene.setMetadata({ [SCENE_KEY]: next }); } catch {}
+        // synced value too — but ONLY if the scene doesn't already
+        // match. Without this guard, every refresh writes scene →
+        // OBR.scene.onMetadataChange fires → refreshFromScene runs
+        // again → writes scene → ... infinite loop. The user
+        // reported severe flicker / freeze when toggling sync on,
+        // and that's the root cause.
+        const currentScene = merge(sceneMeta[SCENE_KEY]);
+        if (!suiteStateEqual(currentScene, next)) {
+          try { await OBR.scene.setMetadata({ [SCENE_KEY]: next }); } catch {}
+        }
       } else {
-        const meta = await OBR.scene.getMetadata();
-        next = merge(meta[SCENE_KEY]);
+        next = merge(sceneMeta[SCENE_KEY]);
       }
     } catch {
-      const meta = await OBR.scene.getMetadata();
-      next = merge(meta[SCENE_KEY]);
+      try {
+        const meta = await OBR.scene.getMetadata();
+        next = merge(meta[SCENE_KEY]);
+      } catch {
+        next = DEFAULT_STATE;
+      }
     }
-    void usedRoom; // satisfy lint when not in use elsewhere
   } catch {
     next = DEFAULT_STATE;
   }
