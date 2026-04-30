@@ -18,9 +18,21 @@ const POPOVER_URL = "https://obr.dnd.center/suite/bestiary-group-saves.html";
 
 const BESTIARY_SLUG_KEY = `${PLUGIN_ID}/slug`;
 const BESTIARY_DATA_KEY = `${PLUGIN_ID}/monsters`;
+// Initiative tracker writes its combat-state object to this scene
+// metadata key. Shape: { preparing: bool, inCombat: bool, round: int }.
+// We watch it so that during the "preparing combat" window the
+// popover swaps from 6-ability save buttons to 3 initiative-roll
+// variants (adv / normal / dis) — that's the GM's natural workflow
+// (multi-select monsters → roll their initiative).
+const COMBAT_STATE_KEY = "com.initiative-tracker/combat";
+// Each initiative item carries a dexterity modifier here; bestiary
+// spawn auto-populates it from the monster's DEX score so the
+// initiative roll uses the right bonus.
+const INITIATIVE_DEX_KEY = "com.initiative-tracker/dexMod";
 
 // Broadcast channels (LOCAL only — single client lifecycle):
 const BC_FIRE = "com.obr-suite/bestiary-group-save-fire";
+const BC_FIRE_INIT = "com.obr-suite/bestiary-group-init-fire";
 const BC_STATE = "com.obr-suite/bestiary-group-save-state";
 
 const POPOVER_WIDTH = 360;
@@ -121,14 +133,27 @@ async function resolveSelection(): Promise<SelectedMonster[]> {
   return out;
 }
 
+async function readCombatPreparing(): Promise<boolean> {
+  try {
+    const meta = await OBR.scene.getMetadata();
+    const cs = meta[COMBAT_STATE_KEY] as { preparing?: boolean } | undefined;
+    return !!cs?.preparing;
+  } catch { return false; }
+}
+
 async function broadcastState(): Promise<void> {
   try {
+    const preparing = await readCombatPreparing();
     await OBR.broadcast.sendMessage(
       BC_STATE,
       {
         count: lastSelection.length,
         names: lastSelection.map((m) => m.name),
         lang: getLocalLang(),
+        // mode: "initiative" while combat is being prepared (the GM
+        // is rolling for monsters about to enter the order); "save"
+        // otherwise (group save against a spell DC etc.).
+        mode: preparing ? "initiative" : "save",
       },
       { destination: "LOCAL" },
     );
@@ -179,6 +204,44 @@ async function refresh(): Promise<void> {
     else void broadcastState();
   } else {
     if (popoverOpen) await closePopover();
+  }
+}
+
+async function fireInitiative(
+  variant: "adv" | "normal" | "dis",
+): Promise<void> {
+  if (lastSelection.length === 0) return;
+  const lang = getLocalLang();
+  const variantLabel = lang === "zh"
+    ? (variant === "adv" ? "先攻 (优势)" : variant === "dis" ? "先攻 (劣势)" : "先攻")
+    : (variant === "adv" ? "Initiative (Adv)" : variant === "dis" ? "Initiative (Dis)" : "Initiative");
+  const collectiveId = `col-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  // Read each token's dex modifier from initiative-tracker metadata
+  // (bestiary spawn populates this when a monster is added). Falls
+  // back to 0 if the token isn't initiative-tracked yet — the dice
+  // animation still plays so the GM gets a usable number.
+  let items: any[] = [];
+  try { items = await OBR.scene.items.getItems(lastSelection.map((m) => m.itemId)); } catch {}
+  const itemMap = new Map<string, any>();
+  for (const it of items) itemMap.set(it.id, it);
+  for (const m of lastSelection) {
+    const it = itemMap.get(m.itemId);
+    const dexMod = (it?.metadata?.[INITIATIVE_DEX_KEY] as number) ?? 0;
+    const expr = `1d20${dexMod >= 0 ? `+${dexMod}` : `${dexMod}`}`;
+    try {
+      await fireQuickRoll({
+        expression: expr,
+        label: variantLabel,
+        itemId: m.itemId,
+        focus: false,
+        hidden: false,
+        collectiveId,
+        ...(variant === "adv" ? { advMode: "adv" } : {}),
+        ...(variant === "dis" ? { advMode: "dis" } : {}),
+      });
+    } catch (e) {
+      console.error("[obr-suite/group-saves] fireInitiative failed for", m.itemId, e);
+    }
   }
 }
 
@@ -247,6 +310,15 @@ export async function setupGroupSaves(): Promise<void> {
       const a = data?.ability;
       if (a === "str" || a === "dex" || a === "con" || a === "int" || a === "wis" || a === "cha") {
         await fireSave(a, { hidden: data?.hidden, advMode: data?.advMode });
+      }
+    }),
+  );
+  unsubs.push(
+    OBR.broadcast.onMessage(BC_FIRE_INIT, async (event) => {
+      const data = event.data as { variant?: string } | undefined;
+      const v = data?.variant;
+      if (v === "adv" || v === "normal" || v === "dis") {
+        await fireInitiative(v);
       }
     }),
   );

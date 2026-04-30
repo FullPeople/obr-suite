@@ -44,6 +44,65 @@ function isMobileDevice(): boolean {
 }
 const IS_MOBILE = isMobileDevice();
 
+// === Mobile-presence advertisement ===
+//
+// On a phone / tablet client some heavy popovers (full-screen
+// character-card view, global search) are hidden because they don't
+// render usefully or eat too much memory. To make this visible to the
+// rest of the table — so the GM doesn't think a player is "missing"
+// the cc panel by accident — every client broadcasts its mobile flag
+// at scene-ready, and any client that receives "another player is on
+// mobile" pops a yellow notification once per player ID per session.
+//
+// Disabled-feature list shown in the notification:
+//   • 角色卡界面 / Character Card panel  (cluster button hidden)
+//   • 全局搜索 / Global Search           (popover not registered)
+const BC_MOBILE_PRESENCE = "com.obr-suite/mobile-presence";
+const seenMobilePlayers = new Set<string>();
+
+function disabledFeaturesText(lang: "zh" | "en"): string {
+  return lang === "zh" ? "角色卡全屏面板、全局搜索" : "Character Card panel + Global Search";
+}
+
+async function announceMobilePresence(): Promise<void> {
+  if (!IS_MOBILE) return;
+  try {
+    const [pid, pname] = await Promise.all([
+      OBR.player.getId(),
+      OBR.player.getName(),
+    ]);
+    await OBR.broadcast.sendMessage(
+      BC_MOBILE_PRESENCE,
+      { playerId: pid, playerName: pname || "?" },
+      { destination: "ALL" },
+    );
+  } catch (e) {
+    console.warn("[obr-suite] announceMobilePresence failed", e);
+  }
+}
+
+function setupMobilePresenceListener(): void {
+  OBR.broadcast.onMessage(BC_MOBILE_PRESENCE, async (event) => {
+    const data = event.data as { playerId?: string; playerName?: string } | undefined;
+    if (!data?.playerId) return;
+    // Dedup: each player only triggers one notification per session
+    // on each receiving client (else they'd re-fire on every
+    // reconnection / scene change broadcast).
+    if (seenMobilePlayers.has(data.playerId)) return;
+    seenMobilePlayers.add(data.playerId);
+    const lang = getLocalLang();
+    const name = data.playerName || "?";
+    const txt = lang === "zh"
+      ? `${name} 正在使用手机端，为性能考虑无法使用：${disabledFeaturesText("zh")}。`
+      : `${name} is on mobile — disabled for performance: ${disabledFeaturesText("en")}.`;
+    try {
+      await OBR.notification.show(txt, "WARNING");
+    } catch (e) {
+      console.warn("[obr-suite] mobile-presence notification failed", e);
+    }
+  });
+}
+
 async function openCluster() {
   try {
     const [vw, vh] = await Promise.all([
@@ -168,11 +227,17 @@ OBR.onReady(async () => {
   // machinery because it isn't a user-toggleable feature.
   void setupDevTest();
 
+  // Mobile-presence: every client listens; phones additionally
+  // broadcast their flag at scene-ready so others know which player
+  // doesn't have the heavy popovers.
+  setupMobilePresenceListener();
+
   const showIfReady = async () => {
     try {
       if (await OBR.scene.isReady()) {
         await openCluster();
         await syncModules();
+        void announceMobilePresence();
       } else {
         await closeCluster();
       }
@@ -183,6 +248,7 @@ OBR.onReady(async () => {
     if (ready) {
       await openCluster();
       await syncModules();
+      void announceMobilePresence();
     } else {
       await closeCluster();
     }

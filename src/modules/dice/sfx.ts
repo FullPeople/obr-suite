@@ -11,7 +11,31 @@
 // circular dep that triggered "e is not a function" at load time.
 // Broadcast/subscribe wiring lives in `./sfx-broadcast.ts` instead.
 
-const LS_KEY = "obr-suite/sfx-on";
+// Per-module SFX gates. Each module can be muted independently.
+// Old single-key "obr-suite/sfx-on" still acts as a master fallback
+// when the per-module key isn't set, so existing users with sfx
+// disabled keep their preference unless they touch the new toggles.
+const LS_KEY_DICE = "obr-suite/sfx-dice";          // dice rolling pipeline
+const LS_KEY_INITIATIVE = "obr-suite/sfx-initiative"; // turn chime, etc.
+const LS_KEY_LEGACY = "obr-suite/sfx-on";
+
+// Default the per-module gates to whatever the legacy master is set
+// to (default ON if neither is set). The "channel" arg lets call
+// sites tag their playback so each module's toggle controls its own
+// sounds without leaking into the other.
+type Channel = "dice" | "initiative";
+function isOnFor(channel: Channel): boolean {
+  try {
+    const moduleKey = channel === "dice" ? LS_KEY_DICE : LS_KEY_INITIATIVE;
+    const v = localStorage.getItem(moduleKey);
+    if (v === "0") return false;
+    if (v === "1") return true;
+    // No per-module pref yet → fall back to legacy master.
+    return localStorage.getItem(LS_KEY_LEGACY) !== "0";
+  } catch {
+    return true;
+  }
+}
 
 let ctx: AudioContext | null = null;
 function getCtx(): AudioContext | null {
@@ -25,9 +49,12 @@ function getCtx(): AudioContext | null {
   return ctx;
 }
 
+// Backwards-compatible wrapper. Every call site in this file plays a
+// dice-module sound, so we route them all through the dice channel.
+// Initiative-side sounds live in sfx-broadcast.ts and use isOnFor
+// directly with channel="initiative".
 function isOn(): boolean {
-  try { return localStorage.getItem(LS_KEY) !== "0"; }
-  catch { return true; }
+  return isOnFor("dice");
 }
 
 // Resume the ctx if suspended (browsers throttle until first user
@@ -251,13 +278,17 @@ export function playSame(): void {
   tone({ freq: 880, type: "sine", duration: 0.42, gain: 0.10, attack: 0.005, release: 0.30 });
   tone({ freq: 1318.5, type: "sine", duration: 0.42, gain: 0.08, attack: 0.005, release: 0.30, delay: 0.04 });
 }
+// Sync-viewport chime: not strictly an initiative sound, but it's a
+// "table coordination" cue so we group it under the initiative SFX
+// gate (closer to "session pacing" than "dice rolling").
 export function playSyncView(): void {
-  if (!isOn()) return; resume();
+  if (!isOnFor("initiative")) return; resume();
   tone({ freq: 220, type: "sine", duration: 0.25, gain: 0.20, attack: 0.005, release: 0.20 });
   tone({ freq: 110, type: "sine", duration: 0.25, gain: 0.16, attack: 0.005, release: 0.20, delay: 0.005 });
 }
+// Initiative turn-advance chime — explicitly initiative channel.
 export function playNextTurn(): void {
-  if (!isOn()) return; resume();
+  if (!isOnFor("initiative")) return; resume();
   tone({ freq: 392, type: "sine", duration: 0.22, gain: 0.18, attack: 0.005, release: 0.18 });
   tone({ freq: 587.3, type: "triangle", duration: 0.20, gain: 0.10, attack: 0.005, release: 0.16, delay: 0.02 });
 }

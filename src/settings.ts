@@ -68,7 +68,8 @@ const SUPPORTERS: string[] = [
   "愛睡眠（好崩溃睡不着ver）", "这只冒险小队没有人类了",
   "奶牛饭", "DK", "黄烟", "盲人过北极", "1234",
   "浩然正气","青灯栖凰","深白色(●—●)","白辰","瀞聆","滑而不稽则罔","Aisle","PB27",
-  "蚀星ErosionStar","消炎药","SiriusTGT","悠悠向青山","小舟","孤月映寒"
+  "蚀星ErosionStar","消炎药","SiriusTGT","悠悠向青山","小舟","孤月映寒","Joe","武御",
+  "Misaka Mikoto"
 ];
 
 function supportersHtml(lang: Language): string {
@@ -241,7 +242,8 @@ const CHARCARD_DESC: BilingualHtml = {
   <li>选中绑定角色 token 时浮出小信息框（受悬浮窗开关控制）</li>
   <li>右键角色 token 可绑定 / 解绑卡片</li>
   <li>角色卡可点击元素：六维字母 = 豁免（自动应用熟练加值），修正 = 检定；武器命中 + 伤害骰均可点；底部「特性 / 专长 / 法术」chip 点击即填入全局搜索</li>
-</ul>`,
+</ul>
+<p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>📱 手机端</b>：全屏面板按钮被隐藏（在小屏幕上不可用，且会显著占用内存）。手机玩家可通过被绑定 token 浮出的小信息框查看角色卡。</p>`,
   en: `<p><b>${ICONS.warning} This module is currently designed for the Chinese D&amp;D community's xlsx character sheet format (悲灵 v1.0.12). It will not parse generic English character sheets.</b></p>
 <ul>
   <li>The cluster's "Character Card Panel" button opens the fullscreen view</li>
@@ -250,7 +252,8 @@ const CHARCARD_DESC: BilingualHtml = {
   <li>Selecting a bound token shows a small info popup (subject to the auto-popup toggle)</li>
   <li>Right-click a token to bind/unbind a card</li>
   <li>Clickable: ability letters = saving throws (with proficiency); modifiers = ability checks; weapon attack + damage; bottom "Traits / Feats / Spells" chips fill the global search input</li>
-</ul>`,
+</ul>
+<p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>📱 Mobile</b>: the fullscreen panel button is hidden (not usable on small screens + significant memory cost). Mobile players can still see card info via the auto-popup info card on selected tokens.</p>`,
 };
 const INITIATIVE_DESC: BilingualHtml = {
   zh: `<p>顶部居中的横向先攻条，覆盖完整 D&amp;D 战斗流程。</p>
@@ -398,7 +401,8 @@ const SEARCH_DESC: BilingualHtml = {
   <li>悬停词条 → 右侧浮出完整内容；点击词条钉住</li>
   <li>受当前数据版本过滤，玩家是否能查询怪物在下方设置</li>
   <li>角色卡 / 怪物面板的特性 / 法术名都可以点击 → 自动填入此搜索框</li>
-</ul>`,
+</ul>
+<p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>📱 手机端</b>：搜索框完全不注册（5etools 全量索引在手机内存里太重）。需要查询的玩家请在桌面 / 平板上操作。</p>`,
   en: `<p>Top-right search input + 5etools full-data autocomplete dropdown.</p>
 <ul>
   <li>Click the input and type — top 50 matches in the dropdown</li>
@@ -406,7 +410,8 @@ const SEARCH_DESC: BilingualHtml = {
   <li>Hover an entry → right pane shows full content; click to pin</li>
   <li>Filtered by current data-version; player monster-search controlled below</li>
   <li>Character-card / monster-panel feature names + spells are click-to-search → auto-fill this input</li>
-</ul>`,
+</ul>
+<p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>📱 Mobile</b>: the search input isn't registered at all (the 5etools dataset is too memory-heavy on phones). Use a desktop / tablet client for lookups.</p>`,
 };
 
 // =====================================================================
@@ -712,12 +717,6 @@ const TABS: TabDef[] = [
         `<button data-dv="${val}" class="${
           s.dataVersion === val ? "on" : ""
         }" type="button" ${isGM ? "" : "disabled"}>${label}</button>`;
-      // Local-only sound toggle (per-client, NOT synced to scene
-      // metadata — different players can have different preferences).
-      const soundOn = (() => {
-        try { return localStorage.getItem("obr-suite/sfx-on") !== "0"; }
-        catch { return true; }
-      })();
       return `
         <div class="basics-block">
           <div class="basics-h">${lang === "zh" ? "数据版本" : "Data version"}</div>
@@ -733,20 +732,12 @@ const TABS: TabDef[] = [
           }</p>
           ${!isGM ? `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
         </div>
-
-        <div class="basics-block" style="margin-top:14px">
-          <div class="basics-h">${lang === "zh" ? "音效" : "Sound effects"}</div>
-          <label class="basics-toggle">
-            <input type="checkbox" id="sfxToggle" ${soundOn ? "checked" : ""}>
-            <span>${lang === "zh" ? "启用骰子动画与界面音效" : "Enable dice + UI sound effects"}</span>
-          </label>
-          <p style="margin-top:6px;color:#9ab;font-size:11px">${
-            lang === "zh"
-              ? "本地保存（不同步到场景）。每个玩家可独立选择是否听到音效。"
-              : "Saved locally (NOT synced). Each player can opt in/out independently."
-          }</p>
-        </div>
       `;
+      // Sound-effect toggle moved out of 基础设置 — each module
+      // (骰子动效 / 先攻追踪) now owns its own SFX switch under the
+      // localStorage keys obr-suite/sfx-dice and
+      // obr-suite/sfx-initiative respectively. See sfx.ts for the
+      // per-channel gating + legacy fallback.
     },
     afterRender: (root) => {
       root.querySelectorAll<HTMLButtonElement>(".seg button[data-dv]").forEach((b) => {
@@ -755,21 +746,6 @@ const TABS: TabDef[] = [
           await setState({ dataVersion: b.dataset.dv as DataVersion });
         });
       });
-      const toggle = root.querySelector<HTMLInputElement>("#sfxToggle");
-      if (toggle) {
-        toggle.addEventListener("change", () => {
-          try {
-            localStorage.setItem("obr-suite/sfx-on", toggle.checked ? "1" : "0");
-            // Notify any open iframes (effect, replay, etc.) that the
-            // pref changed. Local-only — this is per-client.
-            OBR.broadcast.sendMessage(
-              "com.obr-suite/sfx-toggled",
-              { on: toggle.checked },
-              { destination: "LOCAL" },
-            ).catch(() => {});
-          } catch {}
-        });
-      }
     },
   },
   {
@@ -863,6 +839,14 @@ const TABS: TabDef[] = [
       const s = getState();
       const focusOn = s.initiativeFocusOnTurnChange !== false;
       const autoSnap = !!s.initiativeAutoSnapOnPrep;
+      const sfxOn = (() => {
+        try {
+          const v = localStorage.getItem("obr-suite/sfx-initiative");
+          if (v === "0") return false;
+          if (v === "1") return true;
+          return localStorage.getItem("obr-suite/sfx-on") !== "0";
+        } catch { return true; }
+      })();
       return `
         ${INITIATIVE_DESC[lang]}
         <h3>${lang === "zh" ? "选项" : "Options"}</h3>
@@ -896,7 +880,18 @@ const TABS: TabDef[] = [
             isGM ? "" : "disabled"
           } aria-pressed="${autoSnap}"></button>
         </div>
-        ${!isGM ? `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
+        <div class="row">
+          <div class="lbl">
+            ${lang === "zh" ? "启用先攻 / 同步视口音效" : "Enable initiative + sync-viewport SFX"}
+            <div class="desc"><em>${
+              lang === "zh"
+                ? "回合切换提示音、同步视口提示音。本地保存，只影响你自己的客户端。"
+                : "Turn-change chime + sync-viewport chime. Saved locally — only affects your own client."
+            }</em></div>
+          </div>
+          <button class="tog ${sfxOn ? "on" : ""}" data-key="sfxInitiative" type="button" aria-pressed="${sfxOn}"></button>
+        </div>
+        ${!isGM ? `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置（音效开关除外）" : "Read-only · Set by DM (except SFX toggle)"}</p>` : ""}
       `;
     },
     afterRender: (root) => {
@@ -914,6 +909,27 @@ const TABS: TabDef[] = [
           const cur = !!getState().initiativeAutoSnapOnPrep;
           await setState({ initiativeAutoSnapOnPrep: !cur });
         });
+      root
+        .querySelector<HTMLButtonElement>('.tog[data-key="sfxInitiative"]')
+        ?.addEventListener("click", (e) => {
+          const btn = e.currentTarget as HTMLButtonElement;
+          const wasOn = btn.classList.contains("on");
+          const next = !wasOn;
+          try {
+            localStorage.setItem("obr-suite/sfx-initiative", next ? "1" : "0");
+            const diceOn = (() => {
+              const v = localStorage.getItem("obr-suite/sfx-dice");
+              if (v === "0") return false;
+              if (v === "1") return true;
+              return localStorage.getItem("obr-suite/sfx-on") !== "0";
+            })();
+            if (next === diceOn) {
+              localStorage.setItem("obr-suite/sfx-on", next ? "1" : "0");
+            }
+          } catch {}
+          btn.classList.toggle("on", next);
+          btn.setAttribute("aria-pressed", String(next));
+        });
     },
   },
   {
@@ -921,7 +937,59 @@ const TABS: TabDef[] = [
     zh: `${ICONS.d20} 骰子动效`,
     en: `${ICONS.d20} Dice Roll Effect`,
     moduleId: "dice",
-    body: DICE_DESC,
+    dynamicBody: (lang) => {
+      // Per-client dice SFX gate. Reads / writes
+      // localStorage["obr-suite/sfx-dice"]; defaults to the legacy
+      // "obr-suite/sfx-on" value if the per-module pref isn't set.
+      const sfxOn = (() => {
+        try {
+          const v = localStorage.getItem("obr-suite/sfx-dice");
+          if (v === "0") return false;
+          if (v === "1") return true;
+          return localStorage.getItem("obr-suite/sfx-on") !== "0";
+        } catch { return true; }
+      })();
+      return `
+        ${DICE_DESC[lang]}
+        <h3>${lang === "zh" ? "选项" : "Options"}</h3>
+        <div class="row">
+          <div class="lbl">
+            ${lang === "zh" ? "启用骰子音效" : "Enable dice SFX"}
+            <div class="desc"><em>${
+              lang === "zh"
+                ? "骰子翻滚、爆炸、命中音效。本地保存，只影响你自己的客户端。"
+                : "Tumble, burst, crit/fail tones. Saved locally — only affects your own client."
+            }</em></div>
+          </div>
+          <button class="tog ${sfxOn ? "on" : ""}" data-key="sfxDice" type="button" aria-pressed="${sfxOn}"></button>
+        </div>
+      `;
+    },
+    afterRender: (root) => {
+      root.querySelector<HTMLButtonElement>('.tog[data-key="sfxDice"]')
+        ?.addEventListener("click", (e) => {
+          const btn = e.currentTarget as HTMLButtonElement;
+          const wasOn = btn.classList.contains("on");
+          const next = !wasOn;
+          try {
+            localStorage.setItem("obr-suite/sfx-dice", next ? "1" : "0");
+            // Mirror the user's intent into the legacy master key
+            // when both per-module toggles agree, so future fallback
+            // reads stay consistent.
+            const initOn = (() => {
+              const v = localStorage.getItem("obr-suite/sfx-initiative");
+              if (v === "0") return false;
+              if (v === "1") return true;
+              return localStorage.getItem("obr-suite/sfx-on") !== "0";
+            })();
+            if (next === initOn) {
+              localStorage.setItem("obr-suite/sfx-on", next ? "1" : "0");
+            }
+          } catch {}
+          btn.classList.toggle("on", next);
+          btn.setAttribute("aria-pressed", String(next));
+        });
+    },
   },
   {
     id: "portals",

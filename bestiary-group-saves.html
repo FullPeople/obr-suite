@@ -106,6 +106,19 @@ html,body{
   background:rgba(46,204,113,0.30);
   border-color:rgba(46,204,113,0.65);
 }
+/* Initiative-variant buttons get adv-green / dis-red accents so they
+   read as "advantage" / "disadvantage" without needing extra
+   wording. Normal stays neutral. */
+.btn.init-btn.adv .ab{color:#7be0a0}
+.btn.init-btn.adv:hover{
+  background:rgba(46,204,113,0.16);
+  border-color:rgba(46,204,113,0.45);
+}
+.btn.init-btn.dis .ab{color:#ff8b7a}
+.btn.init-btn.dis:hover{
+  background:rgba(231,76,60,0.16);
+  border-color:rgba(231,76,60,0.45);
+}
 </style>
 </head>
 <body>
@@ -115,7 +128,8 @@ html,body{
     <span class="count" id="count">…</span>
     <span class="hint" id="hint">左键投掷 · 右键更多</span>
   </div>
-  <div class="row" id="row">
+  <!-- "save" mode: 6 ability save buttons (visible by default) -->
+  <div class="row" id="rowSave">
     <button class="btn" data-ab="str"><span class="ab" data-l="abStr">力量</span><span class="lbl">STR</span></button>
     <button class="btn" data-ab="dex"><span class="ab" data-l="abDex">敏捷</span><span class="lbl">DEX</span></button>
     <button class="btn" data-ab="con"><span class="ab" data-l="abCon">体质</span><span class="lbl">CON</span></button>
@@ -123,11 +137,23 @@ html,body{
     <button class="btn" data-ab="wis"><span class="ab" data-l="abWis">感知</span><span class="lbl">WIS</span></button>
     <button class="btn" data-ab="cha"><span class="ab" data-l="abCha">魅力</span><span class="lbl">CHA</span></button>
   </div>
+
+  <!-- "initiative" mode: 3 variant buttons (hidden by default; the bg
+       module flips display based on combat state). 优势/普通/劣势 — when
+       combat is being prepared, the GM's natural multi-select gesture
+       is to roll initiative for the chosen monsters, so we present
+       the relevant action front-and-centre. -->
+  <div class="row row-init" id="rowInit" style="display:none;grid-template-columns:repeat(3, 1fr)">
+    <button class="btn init-btn adv" data-iv="adv"><span class="ab" data-l="ivAdv">优势</span><span class="lbl">ADV</span></button>
+    <button class="btn init-btn normal" data-iv="normal"><span class="ab" data-l="ivNormal">普通</span><span class="lbl">NORMAL</span></button>
+    <button class="btn init-btn dis" data-iv="dis"><span class="ab" data-l="ivDis">劣势</span><span class="lbl">DIS</span></button>
+  </div>
 </div>
 <script type="module">
 import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
 
 const BC_FIRE = "com.obr-suite/bestiary-group-save-fire";
+const BC_FIRE_INIT = "com.obr-suite/bestiary-group-init-fire";
 const BC_STATE = "com.obr-suite/bestiary-group-save-state";
 const BC_STATE_REQUEST = "com.obr-suite/bestiary-group-save-state-request";
 
@@ -154,27 +180,46 @@ function readLang(){
 const T = {
   zh: {
     title: "群体豁免",
+    titleInit: "群体先攻",
     hint: "左键投掷 · 右键更多",
+    hintInit: "战斗准备阶段 · 1d20 + 各自敏捷调整值",
     countSel: (n) => `${n} 个目标`,
     abStr: "力量", abDex: "敏捷", abCon: "体质", abInt: "智力", abWis: "感知", abCha: "魅力",
+    ivAdv: "优势", ivNormal: "普通", ivDis: "劣势",
   },
   en: {
     title: "Group Save",
+    titleInit: "Group Initiative",
     hint: "left-click roll · right-click more",
+    hintInit: "Combat prep · 1d20 + each token's DEX modifier",
     countSel: (n) => `${n} targets`,
     abStr: "Str", abDex: "Dex", abCon: "Con", abInt: "Int", abWis: "Wis", abCha: "Cha",
+    ivAdv: "Advantage", ivNormal: "Normal", ivDis: "Disadvantage",
   },
 };
+let currentMode = "save"; // "save" | "initiative"
 
 function applyLang(lang) {
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   const t = T[lang];
-  document.getElementById("ttl").textContent = t.title;
-  document.getElementById("hint").textContent = t.hint;
+  // Title + hint depend on the active mode (save vs initiative).
+  document.getElementById("ttl").textContent =
+    currentMode === "initiative" ? t.titleInit : t.title;
+  document.getElementById("hint").textContent =
+    currentMode === "initiative" ? t.hintInit : t.hint;
   document.querySelectorAll("[data-l]").forEach((el) => {
     const k = el.dataset.l;
     if (t[k] != null) el.textContent = t[k];
   });
+}
+
+function applyMode(mode) {
+  currentMode = mode === "initiative" ? "initiative" : "save";
+  const saveRow = document.getElementById("rowSave");
+  const initRow = document.getElementById("rowInit");
+  if (saveRow) saveRow.style.display = currentMode === "initiative" ? "none" : "grid";
+  if (initRow) initRow.style.display = currentMode === "initiative" ? "grid" : "none";
+  applyLang(currentLang);
 }
 
 let currentLang = readLang();
@@ -234,6 +279,9 @@ OBR.onReady(() => {
       currentLang = data.lang;
       applyLang(currentLang);
     }
+    if (typeof data.mode === "string" && data.mode !== currentMode) {
+      applyMode(data.mode);
+    }
     if (typeof data.count === "number") {
       lastCount = data.count;
       document.getElementById("count").textContent = T[currentLang].countSel(data.count);
@@ -246,13 +294,21 @@ OBR.onReady(() => {
   OBR.broadcast.sendMessage(BC_STATE_REQUEST, {}, { destination: "LOCAL" }).catch(() => {});
 
   document.querySelectorAll(".btn").forEach((b) => {
-    // Left-click → open save (default mode).
+    // Left-click — semantics depend on which row the button lives in.
+    // Save row buttons carry data-ab (str/dex/...); init row buttons
+    // carry data-iv (adv/normal/dis). Each routes to its own
+    // broadcast channel; the right-click context menu only applies
+    // to the save row (init has its own three variants inline).
     b.addEventListener("click", () => {
-      const ab = b.dataset.ab;
-      if (!ab) return;
       b.classList.add("flash");
       setTimeout(() => b.classList.remove("flash"), 250);
-      OBR.broadcast.sendMessage(BC_FIRE, { ability: ab }, { destination: "LOCAL" }).catch(() => {});
+      const ab = b.dataset.ab;
+      const iv = b.dataset.iv;
+      if (ab) {
+        OBR.broadcast.sendMessage(BC_FIRE, { ability: ab }, { destination: "LOCAL" }).catch(() => {});
+      } else if (iv) {
+        OBR.broadcast.sendMessage(BC_FIRE_INIT, { variant: iv }, { destination: "LOCAL" }).catch(() => {});
+      }
     });
     // Right-click → open the suite's standard rollable context menu
     // in "groupSave" mode (投掷 / 暗骰 / 优势 / 劣势; no add-to-tray
