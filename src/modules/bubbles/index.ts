@@ -1,32 +1,38 @@
-import OBR, { buildLabel, buildShape, Item } from "@owlbear-rodeo/sdk";
+import OBR, { buildLabel, Item } from "@owlbear-rodeo/sdk";
 
-// Bubbles module — renders HP / temp-HP / AC indicators on tokens.
+// Bubbles module — renders HP / temp-HP / AC info on tokens.
 //
-// Visual layout follows the canonical OBR token-stat convention
-// confirmed in the upstream README:
+// Visual: two indicators per token, both rendered as native OBR
+// Label primitives:
+//   • HP capsule along the BOTTOM EDGE of the token, color-ramped
+//     by the current/max ratio, showing "current/max" (with a
+//     "+temp" suffix when temp HP > 0)
+//   • AC circle at the TOP-RIGHT CORNER of the token, navy
+//     background, showing the AC value
 //
-//   • HP HEALTH BAR at the BOTTOM of the token, full width,
-//     straddling the bottom edge (≈50% above, ≈50% below).
-//     Composed of a dark background rectangle, a color-ramped fill
-//     rectangle whose width = current/max ratio, and a centered
-//     text overlay showing "current/max" (with a "+temp" suffix
-//     when temp HP is non-zero).
-//   • AC BUBBLE — a small navy circle at the TOP-RIGHT corner of
-//     the token, with the AC value inside.
+// Both labels use `minViewScale(1).maxViewScale(1)` so they stay
+// at a constant ON-SCREEN size regardless of camera zoom — the
+// canonical "stat indicator" behavior. Without these, OBR labels
+// scale 1:1 with the camera, which feels backwards (zoom in =
+// bubbles overpower the token, zoom out = bubbles vanish).
 //
-// Data-shape compatibility with the standalone Bubbles plugin's
-// metadata key is preserved so existing scenes keep their values:
+// SCALE attachment-inheritance is DISABLED so the token's own
+// scale doesn't get double-applied — we already factor it into
+// width / height math from `image.width / image.dpi * sceneDpi *
+// scale`, and OBR doubling on top of that would over-scale
+// 2-cell tokens. POSITION inheritance stays ON so the bubble
+// auto-follows drag / teleport.
+//
+// Data-shape compatibility: we read and write the same metadata
+// key namespace the standalone Bubbles extension uses, so scenes
+// previously using it migrate transparently.
 //
 //   tok.metadata["com.owlbear-rodeo-bubbles-extension/metadata"] =
 //     { health, "max health", "temporary health", "armor class", hide }
 //
-// All rendering is local-only (OBR.scene.local) and attached to the
-// parent token. POSITION inheritance auto-follows drag / teleport;
-// SCALE inheritance is DISABLED because we already factor the
-// token's own scale into our size math (otherwise it gets
-// double-applied). On any token signature change (scale or
-// image-size) the diff loop rebuilds that token's items so the
-// layout stays consistent.
+// Per-client toggles (localStorage):
+//   com.obr-suite/bubbles/enabled  ("0" / "1" — default 1)
+//   com.obr-suite/bubbles/scale    (0.6×–2× user knob, default 1)
 
 const PLUGIN_ID = "com.obr-suite/bubbles";
 const BUBBLE_OWNER_KEY = `${PLUGIN_ID}/owner`;
@@ -70,17 +76,13 @@ function dataHash(d: BubbleData): string {
   return `${d.hp}|${d.maxHp}|${d.tempHp}|${d.ac == null ? "_" : d.ac}|${d.hide ? 1 : 0}`;
 }
 
-// HP color ramp.
 function hpColor(ratio: number): string {
-  if (ratio > 0.6) return "#5bd96a"; // healthy green
-  if (ratio > 0.3) return "#f5a623"; // bloodied orange
-  return "#e74c3c";                  // critical red
+  if (ratio > 0.6) return "#5bd96a";
+  if (ratio > 0.3) return "#f5a623";
+  return "#e74c3c";
 }
 
 const AC_BG = "#1f2230";
-const AC_BORDER = "#5dade2";
-const BAR_BG = "#0a0c14";
-const BAR_BORDER = "#5dade2";
 const TEXT_COLOR = "#ffffff";
 const TEXT_HALO = "#000000";
 
@@ -94,6 +96,31 @@ const entries = new Map<string, BubbleEntry>();
 function tokenSignature(tok: Item): string {
   const a = tok as any;
   return `${a.image?.width ?? "_"}|${a.image?.height ?? "_"}|${a.image?.dpi ?? "_"}|${tok.scale?.x ?? 1}|${tok.scale?.y ?? 1}|${tok.position.x}|${tok.position.y}|${tok.visible ? 1 : 0}`;
+}
+
+interface TokenGeom {
+  cx: number; cy: number;
+  width: number; height: number;
+  left: number; right: number; top: number; bottom: number;
+}
+function tokenGeom(tok: Item, sceneDpi: number): TokenGeom {
+  const a = tok as any;
+  const imgW = a.image?.width ?? sceneDpi;
+  const imgH = a.image?.height ?? sceneDpi;
+  const imgDpi = a.image?.dpi ?? sceneDpi;
+  const sx = Math.abs(tok.scale?.x ?? 1);
+  const sy = Math.abs(tok.scale?.y ?? 1);
+  const width = (imgW / imgDpi) * sceneDpi * sx;
+  const height = (imgH / imgDpi) * sceneDpi * sy;
+  const cx = tok.position.x;
+  const cy = tok.position.y;
+  return {
+    cx, cy, width, height,
+    left: cx - width / 2,
+    right: cx + width / 2,
+    top: cy - height / 2,
+    bottom: cy + height / 2,
+  };
 }
 
 function readEnabled(): boolean {
@@ -119,8 +146,8 @@ function readUserScale(): number {
 let role: "GM" | "PLAYER" = "PLAYER";
 let unsubs: Array<() => void> = [];
 let inSync = false;
-let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedSync = false;
+let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleSync(): void {
   if (pendingTimer) return;
@@ -130,39 +157,10 @@ function scheduleSync(): void {
   }, 60);
 }
 
-// --- Item construction ----------------------------------------------------
-
-interface TokenGeom {
-  cx: number; cy: number;
-  width: number; height: number;
-  left: number; right: number; top: number; bottom: number;
-}
-
-function tokenGeom(tok: Item, sceneDpi: number): TokenGeom {
-  const a = tok as any;
-  const imgW = a.image?.width ?? sceneDpi;
-  const imgH = a.image?.height ?? sceneDpi;
-  const imgDpi = a.image?.dpi ?? sceneDpi;
-  const sx = Math.abs(tok.scale?.x ?? 1);
-  const sy = Math.abs(tok.scale?.y ?? 1);
-  const width = (imgW / imgDpi) * sceneDpi * sx;
-  const height = (imgH / imgDpi) * sceneDpi * sy;
-  const cx = tok.position.x;
-  const cy = tok.position.y;
-  return {
-    cx, cy, width, height,
-    left: cx - width / 2,
-    right: cx + width / 2,
-    top: cy - height / 2,
-    bottom: cy + height / 2,
-  };
-}
-
-const COMMON_ATTACH_DISABLES: ("ROTATION" | "SCALE" | "LOCKED")[] = [
+const COMMON_DISABLES: ("ROTATION" | "SCALE" | "LOCKED")[] = [
   "ROTATION", // bubble stays upright when token spins
-  "SCALE",    // we factor token scale into widths manually; OBR
-              // doubling on top would be wrong for our math
-  "LOCKED",   // we set our own .locked() so don't inherit parent
+  "SCALE",    // we factor token scale into widths manually
+  "LOCKED",   // honor our own .locked() regardless of parent
 ];
 
 function makeItems(
@@ -180,76 +178,21 @@ function makeItems(
   const items: any[] = [];
   const ids: string[] = [];
 
-  // -------- HP bar (3 items: bg, fill, text overlay) --------
+  // -------- HP capsule along the bottom edge --------
   if (showHp) {
-    // Bar dimensions scale with the token's actual rendered width
-    // so the bar always spans most of the token's footprint.
     const barW = g.width * 0.92 * userScale;
-    const barH = Math.max(14, g.width * 0.13 * userScale);
+    const barH = Math.max(16, g.width * 0.16 * userScale);
     const barLeft = g.cx - barW / 2;
-    const barTop = g.bottom - barH / 2; // straddles the bottom edge
-
-    // Background (dark rectangle).
-    const bg = buildShape()
-      .shapeType("RECTANGLE")
-      .width(barW)
-      .height(barH)
-      .fillColor(BAR_BG)
-      .fillOpacity(0.92)
-      .strokeColor(BAR_BORDER)
-      .strokeOpacity(0.55)
-      .strokeWidth(1.5)
-      .position({ x: barLeft, y: barTop })
-      .layer("ATTACHMENT")
-      .attachedTo(tok.id)
-      .locked(true)
-      .disableHit(true)
-      .visible(true)
-      .disableAutoZIndex(true)
-      .zIndex(100)
-      .disableAttachmentBehavior(COMMON_ATTACH_DISABLES)
-      .metadata({ [BUBBLE_OWNER_KEY]: tok.id })
-      .build();
-    items.push(bg);
-    ids.push(bg.id);
-
-    // Fill (color-ramped rectangle, width = ratio).
+    const barTop = g.bottom - barH / 2; // straddles bottom edge
     const ratio = Math.max(0, Math.min(1, data.hp / data.maxHp));
-    if (ratio > 0) {
-      const inset = 1.5;
-      const fillW = (barW - 2 * inset) * ratio;
-      const fillH = barH - 2 * inset;
-      const fill = buildShape()
-        .shapeType("RECTANGLE")
-        .width(fillW)
-        .height(fillH)
-        .fillColor(hpColor(ratio))
-        .fillOpacity(0.95)
-        .strokeOpacity(0)
-        .strokeWidth(0)
-        .position({ x: barLeft + inset, y: barTop + inset })
-        .layer("ATTACHMENT")
-        .attachedTo(tok.id)
-        .locked(true)
-        .disableHit(true)
-        .visible(true)
-        .disableAutoZIndex(true)
-        .zIndex(101)
-        .disableAttachmentBehavior(COMMON_ATTACH_DISABLES)
-        .metadata({ [BUBBLE_OWNER_KEY]: tok.id })
-        .build();
-      items.push(fill);
-      ids.push(fill.id);
-    }
-
-    // Text overlay — current/max with optional "+temp" suffix.
     const hpText = `${data.hp}/${data.maxHp}${showTemp ? ` +${data.tempHp}` : ""}`;
-    const fontSize = Math.max(10, barH * 0.62);
-    const text = buildLabel()
+    const fontSize = Math.max(11, barH * 0.58);
+
+    const hp = buildLabel()
       .plainText(hpText)
       .width(barW)
       .height(barH)
-      .padding(0)
+      .padding(2)
       .fontSize(fontSize)
       .fontWeight(800)
       .textAlign("CENTER")
@@ -258,10 +201,12 @@ function makeItems(
       .fillOpacity(1)
       .strokeColor(TEXT_HALO)
       .strokeOpacity(0.7)
-      .strokeWidth(1.6)
-      .backgroundColor("#000000")
-      .backgroundOpacity(0)        // transparent — bg comes from the Shape underneath
-      .cornerRadius(0)
+      .strokeWidth(1.5)
+      .backgroundColor(hpColor(ratio))
+      .backgroundOpacity(0.95)
+      .cornerRadius(barH / 2)            // capsule ends
+      .minViewScale(1)                   // ┐ clamp the camera-zoom
+      .maxViewScale(1)                   // ┘ → constant on-screen size
       .position({ x: barLeft, y: barTop })
       .layer("ATTACHMENT")
       .attachedTo(tok.id)
@@ -269,24 +214,24 @@ function makeItems(
       .disableHit(true)
       .visible(true)
       .disableAutoZIndex(true)
-      .zIndex(102)
-      .disableAttachmentBehavior(COMMON_ATTACH_DISABLES)
+      .zIndex(100)
+      .disableAttachmentBehavior(COMMON_DISABLES)
       .metadata({ [BUBBLE_OWNER_KEY]: tok.id })
       .build();
-    items.push(text);
-    ids.push(text.id);
+    items.push(hp);
+    ids.push(hp.id);
   }
 
-  // -------- AC bubble (1 circular label at the top-right corner) --------
+  // -------- AC circle at the top-right corner --------
   if (showAc) {
-    const diameter = Math.max(30, g.width * 0.32 * userScale);
-    // Center of the circle sits exactly on the top-right corner of
-    // the token — half inside, half peeking outside diagonally.
+    const diameter = Math.max(30, g.width * 0.34 * userScale);
+    // Center of the circle sits on the token's top-right corner —
+    // half inside, half peeking diagonally outward.
     const acLeft = g.right - diameter / 2;
     const acTop = g.top - diameter / 2;
-    const acFontSize = Math.max(11, diameter * 0.46);
+    const acFontSize = Math.max(12, diameter * 0.48);
 
-    const acLabel = buildLabel()
+    const ac = buildLabel()
       .plainText(`${data.ac}`)
       .width(diameter)
       .height(diameter)
@@ -301,8 +246,10 @@ function makeItems(
       .strokeOpacity(0.7)
       .strokeWidth(1.5)
       .backgroundColor(AC_BG)
-      .backgroundOpacity(0.95)
-      .cornerRadius(diameter / 2) // full circle
+      .backgroundOpacity(0.96)
+      .cornerRadius(diameter / 2)        // full circle
+      .minViewScale(1)
+      .maxViewScale(1)
       .position({ x: acLeft, y: acTop })
       .layer("ATTACHMENT")
       .attachedTo(tok.id)
@@ -311,32 +258,17 @@ function makeItems(
       .visible(true)
       .disableAutoZIndex(true)
       .zIndex(105)
-      .disableAttachmentBehavior(COMMON_ATTACH_DISABLES)
-      .metadata({
-        [BUBBLE_OWNER_KEY]: tok.id,
-        // Stroke the label like a shield outline by overlaying a
-        // tinted border via strokeColor on its background — Label's
-        // background draw includes its strokeColor when strokeWidth
-        // > 0. We use AC_BORDER cyan for the suite-themed accent.
-        [`${PLUGIN_ID}/role`]: "ac",
-      })
+      .disableAttachmentBehavior(COMMON_DISABLES)
+      .metadata({ [BUBBLE_OWNER_KEY]: tok.id })
       .build();
-    // Apply the cyan border via the underlying style fields exposed
-    // by the builder. (LabelBuilder supports strokeColor for the
-    // text — the BACKGROUND stroke is part of LabelStyle's default
-    // border which draws around the rounded background. Setting
-    // stroke* on Label affects the TEXT stroke; for the background
-    // border we leave it default — most OBR clients render a faint
-    // 1-px border on labels which reads as the bubble outline.)
-    items.push(acLabel);
-    ids.push(acLabel.id);
-    void AC_BORDER;
+    items.push(ac);
+    ids.push(ac.id);
   }
 
   return { items, ids };
 }
 
-// --- Sync loop ------------------------------------------------------------
+// --- Sync ----------------------------------------------------------------
 
 async function syncBubbles(): Promise<void> {
   if (inSync) {
@@ -376,7 +308,6 @@ async function syncBubbles(): Promise<void> {
       desired.set(id, d);
     }
 
-    // Drop bubbles for tokens that lost data or were deleted.
     const orphanItemIds: string[] = [];
     for (const [tokId, entry] of entries) {
       if (!desired.has(tokId) || !tokenById.has(tokId)) {
@@ -390,7 +321,6 @@ async function syncBubbles(): Promise<void> {
       });
     }
 
-    // Rebuild tokens whose data hash or token signature changed.
     const rebuildIds: string[] = [];
     const toAdd: any[] = [];
     const newEntries = new Map<string, BubbleEntry>();
@@ -456,7 +386,7 @@ async function clearAll(): Promise<void> {
   }
 }
 
-// --- Module lifecycle -----------------------------------------------------
+// --- Module lifecycle ----------------------------------------------------
 
 export async function setupBubbles(): Promise<void> {
   try { role = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch {}
@@ -491,7 +421,7 @@ export async function teardownBubbles(): Promise<void> {
   await clearAll();
 }
 
-// --- Public helper for other modules to write bubble data -----------------
+// --- Public helper for other modules to write bubble data ---------------
 export async function writeBubbleStats(
   tokenId: string,
   patch: { hp?: number; maxHp?: number; tempHp?: number; ac?: number | null; hide?: boolean; name?: string },
