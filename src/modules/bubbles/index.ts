@@ -341,7 +341,7 @@ half4 main(float2 coord) {
 //   tempBgId / tempTextId    — Temp HP stat bubble (2 items)
 interface BubbleEntry {
   ids: string[];                  // every local item id we own for this token
-  shimmerId: string | null;       // optional Effect that animates over the fill
+  shimmerIds: string[];           // every shader Effect we own (timer ticks iTime on these)
   hash: string;                   // matches dataHash(data)
   geomKey: string;                // matches the layout signature (position + width)
 }
@@ -360,20 +360,27 @@ let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 let animationTimer: ReturnType<typeof setInterval> | null = null;
 let animationStart = Date.now();
 
+let timerTickCount = 0;
 function ensureAnimationTimer(): void {
   if (animationTimer) return;
-  let active = 0;
-  for (const e of entries.values()) if (e.shimmerId) { active++; break; }
-  if (active === 0) return;
+  let any = false;
+  for (const e of entries.values()) if (e.shimmerIds.length) { any = true; break; }
+  if (!any) return;
   animationStart = Date.now();
+  timerTickCount = 0;
+  console.log("%c[bubbles] animation timer START", "color:#9a6cf2");
   animationTimer = setInterval(() => {
     const ids: string[] = [];
-    for (const e of entries.values()) if (e.shimmerId) ids.push(e.shimmerId);
+    for (const e of entries.values()) ids.push(...e.shimmerIds);
     if (ids.length === 0) {
       stopAnimationTimer();
       return;
     }
     const t = (Date.now() - animationStart) / 1000;
+    timerTickCount++;
+    if (timerTickCount % 30 === 1) {
+      console.log("[bubbles] timer tick", { ids: ids.length, t: t.toFixed(2) });
+    }
     OBR.scene.local.updateItems(ids, (drafts) => {
       for (const d of drafts) {
         const eff = d as any;
@@ -384,7 +391,7 @@ function ensureAnimationTimer(): void {
         }
         if (!found) eff.uniforms.push({ name: "iTime", value: t });
       }
-    }, true).catch(() => {});
+    }).catch((e) => console.warn("[bubbles] timer updateItems failed", e));
   }, 60);
 }
 
@@ -395,7 +402,9 @@ function stopAnimationTimer(): void {
   }
 }
 
+let scheduleSyncCount = 0;
 function scheduleSync(): void {
+  scheduleSyncCount++;
   if (pendingTimer) return;
   pendingTimer = setTimeout(() => {
     pendingTimer = null;
@@ -610,6 +619,187 @@ function buildHpShimmer(ctx: BuildContext, L: BarLayout, ratio: number): any {
     .build();
 }
 
+// --- TEST VARIANTS (debug-only) ----------------------------------------
+// Stack of 6 thin probe bars under the main HP bar. Each uses a
+// different (effectType × blendMode × shader) combo so the user
+// can eyeball which actually animates and report back; we'll then
+// keep that combo and delete the rest. Bars sit BELOW the token,
+// 60% of the main bar height each.
+
+const SKSL_CONST_MAGENTA = `
+half4 main(float2 c) {
+  return half4(1.0, 0.0, 1.0, 0.6);
+}
+`;
+
+const SKSL_PULSE = `
+uniform float iTime;
+half4 main(float2 c) {
+  float p = sin(iTime * 2.0) * 0.4 + 0.5;
+  return half4(p, 1.0 - p, 0.0, 0.7);
+}
+`;
+
+interface TestVariantSpec {
+  name: string;
+  kind: "effect" | "curve";
+  effectType?: "STANDALONE" | "ATTACHMENT" | "VIEWPORT";
+  blendMode?: "SRC_OVER" | "PLUS" | "MULTIPLY" | "SCREEN";
+  sksl?: string;
+  uniforms?: (L: BarLayout, ratio: number, height: number) => Array<{ name: string; value: any }>;
+  curveColor?: string;
+}
+
+const TEST_VARIANTS: TestVariantSpec[] = [
+  {
+    name: "1 STD/SRC anim",
+    kind: "effect",
+    effectType: "STANDALONE",
+    blendMode: "SRC_OVER",
+    sksl: HP_SHIMMER_SKSL,
+    uniforms: (L, ratio, h) => [
+      { name: "iTime", value: 0 },
+      { name: "iSize", value: { x: L.barWidth, y: h } },
+      { name: "ratio", value: ratio },
+    ],
+  },
+  {
+    name: "2 STD/PLUS anim",
+    kind: "effect",
+    effectType: "STANDALONE",
+    blendMode: "PLUS",
+    sksl: HP_SHIMMER_SKSL,
+    uniforms: (L, ratio, h) => [
+      { name: "iTime", value: 0 },
+      { name: "iSize", value: { x: L.barWidth, y: h } },
+      { name: "ratio", value: ratio },
+    ],
+  },
+  {
+    name: "3 ATT/SRC anim",
+    kind: "effect",
+    effectType: "ATTACHMENT",
+    blendMode: "SRC_OVER",
+    sksl: HP_SHIMMER_SKSL,
+    uniforms: (L, ratio, h) => [
+      { name: "iTime", value: 0 },
+      { name: "iSize", value: { x: L.barWidth, y: h } },
+      { name: "ratio", value: ratio },
+    ],
+  },
+  {
+    name: "4 STD/SRC magenta",       // tests Effect renders AT ALL
+    kind: "effect",
+    effectType: "STANDALONE",
+    blendMode: "SRC_OVER",
+    sksl: SKSL_CONST_MAGENTA,
+    uniforms: () => [],
+  },
+  {
+    name: "5 STD/SRC iTime pulse",   // tests iTime uniform updates
+    kind: "effect",
+    effectType: "STANDALONE",
+    blendMode: "SRC_OVER",
+    sksl: SKSL_PULSE,
+    uniforms: () => [{ name: "iTime", value: 0 }],
+  },
+  {
+    name: "6 control curve",         // no shader at all — confirms position
+    kind: "curve",
+    curveColor: "#ff00ff",
+  },
+];
+
+function buildTestVariant(
+  ctx: BuildContext,
+  L: BarLayout,
+  ratio: number,
+  index: number,
+  variant: TestVariantSpec,
+): any {
+  const testHeight = Math.max(8, L.barHeight * 0.6);
+  const gap = 2;
+  const testY = L.barOrigin.y + L.barHeight + gap + index * (testHeight + gap);
+
+  if (variant.kind === "effect") {
+    return buildEffect()
+      .effectType(variant.effectType!)
+      .blendMode(variant.blendMode!)
+      .width(L.barWidth)
+      .height(testHeight)
+      .sksl(variant.sksl!)
+      .uniforms(variant.uniforms ? variant.uniforms(L, ratio, testHeight) : [])
+      .position({ x: L.barOrigin.x, y: testY })
+      .layer("ATTACHMENT")
+      .attachedTo(ctx.token.id)
+      .locked(true)
+      .disableHit(true)
+      .visible(true)
+      .disableAutoZIndex(true)
+      .zIndex(25000 + index * 10)
+      .disableAttachmentBehavior(DISABLE_INHERIT)
+      .metadata(bubbleMeta(ctx.token.id, "hp-shimmer"))
+      .build();
+  }
+  // Curve control variant — straight rounded-rect with bright color.
+  return buildCurve()
+    .fillColor(variant.curveColor!)
+    .fillOpacity(0.7)
+    .strokeOpacity(0)
+    .strokeWidth(0)
+    .tension(0)
+    .closed(true)
+    .points(roundedRectanglePoints(L.barWidth, testHeight, testHeight / 2))
+    .position({ x: L.barOrigin.x, y: testY })
+    .layer("ATTACHMENT")
+    .attachedTo(ctx.token.id)
+    .locked(true)
+    .disableHit(true)
+    .visible(true)
+    .disableAutoZIndex(true)
+    .zIndex(25000 + index * 10)
+    .disableAttachmentBehavior(DISABLE_INHERIT)
+    .metadata(bubbleMeta(ctx.token.id, "hp-fill"))
+    .build();
+}
+
+function buildTestVariantLabel(
+  ctx: BuildContext,
+  L: BarLayout,
+  index: number,
+  name: string,
+): any {
+  const testHeight = Math.max(8, L.barHeight * 0.6);
+  const gap = 2;
+  const testY = L.barOrigin.y + L.barHeight + gap + index * (testHeight + gap);
+  return buildText()
+    .plainText(name)
+    .textType("PLAIN")
+    .textAlign("LEFT")
+    .textAlignVertical("MIDDLE")
+    .fontFamily(FONT_FAMILY)
+    .fontSize(testHeight * 0.7)
+    .fontWeight(700)
+    .fillColor("#ffffff")
+    .strokeColor("#000000")
+    .strokeOpacity(0.7)
+    .strokeWidth(1.0)
+    .lineHeight(0.95)
+    .width(220)
+    .height(testHeight)
+    .position({ x: L.barOrigin.x + L.barWidth + 4, y: testY })
+    .layer("TEXT")
+    .attachedTo(ctx.token.id)
+    .locked(true)
+    .disableHit(true)
+    .visible(true)
+    .disableAutoZIndex(true)
+    .zIndex(35000 + index)
+    .disableAttachmentBehavior(DISABLE_INHERIT)
+    .metadata(bubbleMeta(ctx.token.id, "hp-text"))
+    .build();
+}
+
 function buildBarText(ctx: BuildContext, L: BarLayout, data: BubbleData): any {
   const text = `${data.hp}/${data.maxHp}${data.tempHp > 0 ? ` +${data.tempHp}` : ""}`;
   // Stroke width tracks bar height too so the text outline doesn't
@@ -771,8 +961,11 @@ interface Wanted {
 // Dispatches by the `BUBBLE_ROLE_KEY` metadata each builder
 // stamps onto its item — that role tells us which fields to
 // update for that item type.
+let patchGeometryCount = 0;
 async function patchGeometry(patches: Array<{ entry: BubbleEntry; w: Wanted }>): Promise<void> {
   if (patches.length === 0) return;
+  patchGeometryCount++;
+  console.log("[bubbles] patchGeometry #" + patchGeometryCount, { patches: patches.length });
 
   const wantedByItemId = new Map<string, Wanted>();
   const allIds: string[] = [];
@@ -977,21 +1170,32 @@ async function syncBubbles(): Promise<void> {
       const newIds: string[] = [];
 
       // HP bar
-      let shimmerId: string | null = null;
+      const shimmerIds: string[] = [];
       if (w.data.maxHp > 0) {
         const ratio = Math.max(0, Math.min(1, w.data.hp / w.data.maxHp));
         const bg = buildBarBg(ctx, w.layout, w.statsVisible);
         const fill = buildBarFill(ctx, w.layout, ratio);
-        const shimmer = w.statsVisible ? buildHpShimmer(ctx, w.layout, ratio) : null;
         const text = buildBarText(ctx, w.layout, w.data);
         toAdd.push(bg, fill);
-        if (shimmer) {
-          toAdd.push(shimmer);
-          shimmerId = shimmer.id;
-        }
-        toAdd.push(text);
         newIds.push(bg.id, fill.id);
-        if (shimmer) newIds.push(shimmer.id);
+
+        // === DEBUG TEST VARIANTS ===
+        // 6 probe rows below the main bar so we can identify which
+        // (effectType, blendMode, shader) combo OBR actually
+        // animates. To be removed once the user reports which row
+        // works.
+        if (w.statsVisible) {
+          for (let i = 0; i < TEST_VARIANTS.length; i++) {
+            const v = TEST_VARIANTS[i];
+            const item = buildTestVariant(ctx, w.layout, ratio, i, v);
+            const label = buildTestVariantLabel(ctx, w.layout, i, v.name);
+            toAdd.push(item, label);
+            newIds.push(item.id, label.id);
+            if (v.kind === "effect") shimmerIds.push(item.id);
+          }
+        }
+
+        toAdd.push(text);
         newIds.push(text.id);
       }
       // AC shield (replaces the circular stat bubble)
@@ -1009,7 +1213,7 @@ async function syncBubbles(): Promise<void> {
         newIds.push(tempBg.id, tempText.id);
       }
 
-      entries.set(tokId, { ids: newIds, shimmerId, hash: w.hash, geomKey: w.geomKey });
+      entries.set(tokId, { ids: newIds, shimmerIds, hash: w.hash, geomKey: w.geomKey });
     }
 
     if (rebuildIds.length) {
@@ -1052,7 +1256,7 @@ async function syncBubbles(): Promise<void> {
     // shimmer effects are now alive — and let the timer self-stop
     // the next tick if `entries` is empty.
     let anyShimmer = false;
-    for (const e of entries.values()) if (e.shimmerId) { anyShimmer = true; break; }
+    for (const e of entries.values()) if (e.shimmerIds.length) { anyShimmer = true; break; }
     if (anyShimmer) ensureAnimationTimer();
     else stopAnimationTimer();
   } finally {
@@ -1085,7 +1289,22 @@ export async function setupBubbles(): Promise<void> {
     { role, enabled: readEnabled() },
   );
 
-  unsubs.push(OBR.scene.items.onChange(() => scheduleSync()));
+  // Diagnostic log on every items.onChange so the user can verify
+  // (in DevTools console) whether OBR is firing change events
+  // during a token resize gesture vs only on mouse-release.
+  let onChangeCount = 0;
+  unsubs.push(OBR.scene.items.onChange((items) => {
+    onChangeCount++;
+    if (onChangeCount % 5 === 1) {
+      const sample = items.find((it) => it.layer === "CHARACTER" || it.layer === "MOUNT" || it.layer === "PROP");
+      console.log("[bubbles] items.onChange #" + onChangeCount, {
+        total: items.length,
+        sampleScale: sample ? { x: sample.scale.x, y: sample.scale.y } : null,
+        samplePos: sample ? { x: sample.position.x, y: sample.position.y } : null,
+      });
+    }
+    scheduleSync();
+  }));
 
   const onStorage = (e: StorageEvent) => {
     if (e.key === LS_BUBBLES_ENABLED || e.key === LS_BUBBLES_SCALE) {
