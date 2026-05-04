@@ -25,7 +25,10 @@ export type ModuleId =
   | "search"
   | "dice"
   | "portals"
-  | "bubbles";
+  | "bubbles"
+  | "statusTracker"
+  | "metadataInspector"
+  | "vision";
 
 export type DataVersion = "2014" | "2024" | "all";
 export type Language = "zh" | "en";
@@ -59,6 +62,11 @@ export interface SuiteState {
   // metadata is omitted and the DM has to right-click → Add to
   // initiative manually. Default true (matches legacy behavior).
   bestiaryAutoInitiative: boolean;
+  // When true, monsters spawned from the bestiary panel start with
+  // `visible: false` so the DM can position them off-screen / behind
+  // fog before revealing. When false, spawned tokens are immediately
+  // visible to all players. Default true (matches legacy behavior).
+  bestiaryAutoHide: boolean;
   // Initiative tracker — focus the active token's owner camera onto
   // the next character whenever the turn advances. Default true.
   initiativeFocusOnTurnChange: boolean;
@@ -103,10 +111,26 @@ export const DEFAULT_STATE: SuiteState = {
     dice: true,
     portals: true,
     bubbles: true,
+    // Default OFF — status tracker is in active development (调试中).
+    // Each scene starts with it disabled; the user has to flip it
+    // on in Settings → 状态追踪 every scene reload until it ships
+    // as stable.
+    statusTracker: false,
+    // DM-only inspection tool. Default OFF — most users never need
+    // it; only enable when you specifically want to peek at what
+    // plugins have stamped onto a token / scene / room. The tool
+    // icon in the OBR sidebar only shows when this is enabled.
+    metadataInspector: false,
+    // Vision / fog plugin — light sources on tokens, raycast against
+    // walls, per-client fog mask. Default OFF because it's heavy
+    // (continuous raycast on token movement) and will conflict
+    // visually with OBR's own fog drawings if both are in use.
+    vision: false,
   },
   dataVersion: "2024",
   allowPlayerMonsters: false,
   bestiaryAutoInitiative: true,
+  bestiaryAutoHide: true,
   initiativeFocusOnTurnChange: true,
   initiativeAutoSnapOnPrep: false,
   crossSceneSyncSettings: false,
@@ -154,6 +178,8 @@ function merge(partial: any): SuiteState {
       partial.allowPlayerMonsters ?? DEFAULT_STATE.allowPlayerMonsters,
     bestiaryAutoInitiative:
       partial.bestiaryAutoInitiative ?? DEFAULT_STATE.bestiaryAutoInitiative,
+    bestiaryAutoHide:
+      partial.bestiaryAutoHide ?? DEFAULT_STATE.bestiaryAutoHide,
     initiativeFocusOnTurnChange:
       partial.initiativeFocusOnTurnChange ?? DEFAULT_STATE.initiativeFocusOnTurnChange,
     initiativeAutoSnapOnPrep:
@@ -170,6 +196,7 @@ function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
   if (a.dataVersion !== b.dataVersion) return false;
   if (a.allowPlayerMonsters !== b.allowPlayerMonsters) return false;
   if (a.bestiaryAutoInitiative !== b.bestiaryAutoInitiative) return false;
+  if (a.bestiaryAutoHide !== b.bestiaryAutoHide) return false;
   if (a.initiativeFocusOnTurnChange !== b.initiativeFocusOnTurnChange) return false;
   if (a.initiativeAutoSnapOnPrep !== b.initiativeAutoSnapOnPrep) return false;
   if (a.crossSceneSyncSettings !== b.crossSceneSyncSettings) return false;

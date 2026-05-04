@@ -44,6 +44,11 @@ export interface DieResult {
   // die has no burstParent. Drives the chain animation: parents pop,
   // children fly in afterwards.
   burstParent?: number;
+  // Subtraction dice (e.g. the d6 in 1d20-1d6). The die rolls and
+  // animates normally, but its face value is SUBTRACTED from the
+  // total. Receivers render these at lower opacity and prefix their
+  // chip text with "−" so the user sees what's being deducted.
+  subtract?: boolean;
 }
 
 export function rollDie(type: DiceType): number {

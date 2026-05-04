@@ -60,12 +60,36 @@ interface SavedCombo {
   id: string;
   name: string;
   expr: string;
+  // Optional category. Empty / undefined = uncategorized (rendered
+  // under a default group at the top of the list).
+  category?: string;
 }
+
+// Versioned persistence shape so we can migrate older saves without
+// dropping data. v1 was a bare SavedCombo[]. v2 wraps it in an
+// object with `combos` + `categoryOrder` so categories can sort
+// independently of the combos within them.
+interface CombosFile {
+  version: 2;
+  combos: SavedCombo[];
+  // Stable ordering of category names — used to sequence the section
+  // headers in the UI. Categories appearing in `combos` but missing
+  // from this array are appended at load time.
+  categoryOrder: string[];
+}
+
+const UNCATEGORIZED_KEY = "";
 
 // --- State ---
 let expression = "";
 let labelText = "";
-let combos: SavedCombo[] = loadCombos();
+let combos: SavedCombo[] = [];
+let categoryOrder: string[] = [];
+{
+  const f = loadCombos();
+  combos = f.combos;
+  categoryOrder = f.categoryOrder;
+}
 let history: DiceRollPayload[] = loadHistory();
 let lastRolledExpression: string = loadLastExpr();
 let activeTab: "roll" | "combos" | "history" = "roll";
@@ -98,16 +122,41 @@ const tabBtns      = document.querySelectorAll<HTMLButtonElement>(".tab");
 const tabPanes     = document.querySelectorAll<HTMLDivElement>(".tabPane");
 
 // --- localStorage helpers ---
-function loadCombos(): SavedCombo[] {
+function loadCombos(): { combos: SavedCombo[]; categoryOrder: string[] } {
   try {
     const v = localStorage.getItem(LS_COMBOS);
-    if (!v) return [];
+    if (!v) return { combos: [], categoryOrder: [] };
     const p = JSON.parse(v);
-    if (Array.isArray(p)) return p;
+    // Legacy v1: bare array of SavedCombo. Migrate by treating each
+    // entry's category as uncategorized.
+    if (Array.isArray(p)) {
+      return { combos: p as SavedCombo[], categoryOrder: [] };
+    }
+    if (p && typeof p === "object" && Array.isArray(p.combos)) {
+      const order = Array.isArray(p.categoryOrder)
+        ? p.categoryOrder.filter((x: any): x is string => typeof x === "string")
+        : [];
+      // Append any category names referenced by combos but missing
+      // from the saved order so they still render.
+      const seen = new Set(order);
+      for (const c of p.combos as SavedCombo[]) {
+        const cat = (c.category ?? "").trim();
+        if (cat && !seen.has(cat)) {
+          seen.add(cat);
+          order.push(cat);
+        }
+      }
+      return { combos: p.combos as SavedCombo[], categoryOrder: order };
+    }
   } catch {}
-  return [];
+  return { combos: [], categoryOrder: [] };
 }
-function saveCombos() { try { localStorage.setItem(LS_COMBOS, JSON.stringify(combos)); } catch {} }
+function saveCombos() {
+  try {
+    const file: CombosFile = { version: 2, combos, categoryOrder };
+    localStorage.setItem(LS_COMBOS, JSON.stringify(file));
+  } catch {}
+}
 function loadHistory(): DiceRollPayload[] {
   try {
     const v = localStorage.getItem(LS_HISTORY);
@@ -155,11 +204,14 @@ function saveLastExpr(v: string) { try { localStorage.setItem(LS_LAST_EXPR, v); 
 
 interface ExprGroup { type: string; count: number }
 interface PlainExpr { groups: ExprGroup[]; modifier: number }
-type WrapperKind = "adv" | "dis" | "max" | "min" | "reset" | "same" | "burst" | "repeat";
+type WrapperKind = "adv" | "dis" | "max" | "min" | "reset" | "resetmin" | "resetmax" | "same" | "burst" | "repeat";
 interface Wrapper {
   kind: WrapperKind;
   // adv/dis: extra sets (N from "adv(...,N)"); default 1.
-  // max/min/reset: the threshold/replacement value.
+  // max/min/reset/resetmin/resetmax: the threshold/replacement value.
+  //   reset(d, X)    — TRIGGERED reroll when value EQUALS X.
+  //   resetmin(d, X) — TRIGGERED reroll when value <= X.
+  //   resetmax(d, X) — TRIGGERED reroll when value >= X.
   // repeat: iteration count.
   // same/burst: undefined.
   param?: number;
@@ -214,7 +266,12 @@ function parsePlain(s: string): PlainExpr {
       modifier += sign * parseInt(m[4], 10);
     }
   }
-  return { groups: groups.filter((g) => g.count > 0), modifier };
+  // Drop zero-count groups but PRESERVE negative-count ones — they
+  // represent subtraction dice (e.g. `1d20-1d6` keeps `{type:"d6",
+  // count:-1}` so rollPlainSet can roll it and stamp `subtract:true`
+  // on each die. Removed-from-total dice are still rolled + animated
+  // for the visual.
+  return { groups: groups.filter((g) => g.count !== 0), modifier };
 }
 
 // Split a string at the LAST top-level comma — so "1d20+5,2" splits
@@ -281,7 +338,7 @@ function readWrapperHead(s: string): {
   inner: string;
   tail: string;
 } | null {
-  const m = /^(adv|dis|max|min|reset|same|burst|repeat)\(/i.exec(s);
+  const m = /^(adv|dis|max|min|resetmin|resetmax|reset|same|burst|repeat)\(/i.exec(s);
   if (!m) return null;
   const fnName = m[1].toLowerCase() as WrapperKind;
   const innerStart = m[0].length;
@@ -313,7 +370,10 @@ function readWrapperHead(s: string): {
       }
     }
     wrapper = { kind: fnName, param: extraSets };
-  } else if (fnName === "max" || fnName === "min" || fnName === "reset") {
+  } else if (
+    fnName === "max" || fnName === "min" ||
+    fnName === "reset" || fnName === "resetmin" || fnName === "resetmax"
+  ) {
     const lastComma = topLevelLastComma(innerRaw);
     if (lastComma < 0) return null;
     const t = innerRaw.slice(lastComma + 1);
@@ -362,7 +422,7 @@ function mergePlain(dst: PlainExpr, src: PlainExpr): void {
 // nothing reaches it at runtime.
 function peelOne(s: string, outerOut?: PlainExpr): { wrapper: Wrapper; combined: string } | null {
   // Find the first wrapper-call signature anywhere in the string.
-  const fnRe = /(adv|dis|max|min|reset|same|burst|repeat)\(/i;
+  const fnRe = /(adv|dis|max|min|resetmin|resetmax|reset|same|burst|repeat)\(/i;
   const m = s.match(fnRe);
   if (!m || m.index === undefined) return null;
   const fnName = m[1].toLowerCase() as WrapperKind;
@@ -403,7 +463,10 @@ function peelOne(s: string, outerOut?: PlainExpr): { wrapper: Wrapper; combined:
       }
     }
     wrapper = { kind: fnName, param: extraSets };
-  } else if (fnName === "max" || fnName === "min" || fnName === "reset") {
+  } else if (
+    fnName === "max" || fnName === "min" ||
+    fnName === "reset" || fnName === "resetmin" || fnName === "resetmax"
+  ) {
     const lastComma = topLevelLastComma(innerRaw);
     if (lastComma < 0) return null;
     const tail = innerRaw.slice(lastComma + 1);
@@ -432,7 +495,7 @@ function peelOne(s: string, outerOut?: PlainExpr): { wrapper: Wrapper; combined:
   // iteration handles them; until then we don't risk corrupting nested
   // wrapper syntax by stripping their internal dice.
   if ((wrapper.kind === "adv" || wrapper.kind === "dis") && outerOut) {
-    const wrapperRe = /(adv|dis|max|min|reset|same|burst|repeat)\(/i;
+    const wrapperRe = /(adv|dis|max|min|resetmin|resetmax|reset|same|burst|repeat)\(/i;
     const prefixHasWrapper = wrapperRe.test(prefix);
     const suffixHasWrapper = wrapperRe.test(suffix);
     let prefixOut = prefix;
@@ -576,8 +639,16 @@ function rollDieType(type: string): number {
 function rollPlainSet(plain: PlainExpr): DieResult[] {
   const dice: DieResult[] = [];
   for (const g of plain.groups) {
-    for (let i = 0; i < g.count; i++) {
-      dice.push({ type: g.type as DiceType, value: rollDieType(g.type) });
+    // Negative-count groups represent SUBTRACTION dice (1d20-1d6 →
+    // group {d6, count:-1}). Roll the same number of physical dice
+    // but mark each as `subtract:true` so totals subtract the value
+    // and the visual renders them at lower opacity.
+    const isSubtract = g.count < 0;
+    const n = Math.abs(g.count);
+    for (let i = 0; i < n; i++) {
+      const die: DieResult = { type: g.type as DiceType, value: rollDieType(g.type) };
+      if (isSubtract) die.subtract = true;
+      dice.push(die);
     }
   }
   return dice;
@@ -604,6 +675,8 @@ function formatSegment(seg: ParsedSegment): string {
       case "max":
       case "min":
       case "reset":
+      case "resetmin":
+      case "resetmax":
         body = `${w.kind}(${body},${w.param ?? 0})`;
         break;
       case "same":
@@ -643,24 +716,34 @@ function formatExpr(p: ParsedExpr): string {
   return out;
 }
 
-// Apply max/min/reset to a single die value. Stamps originalValue if
-// the value actually changed so the visual can render "new(orig)".
+// Apply max/min/reset/resetmin/resetmax to a single die value. Stamps
+// originalValue if the value actually changed so the visual can
+// render "new(orig)".
 //
 // Semantics:
-//   max(d, X)    — value bumped UP to at least X (floor)
-//   min(d, X)    — value capped DOWN to at most X (ceiling)
-//   reset(d, X)  — TRIGGERED reroll: if rolled value EQUALS X, reroll
-//                  the die ONCE (using its real side count) and use
-//                  the reroll. Original X is preserved as originalValue
-//                  so the visual can show "newRoll(X)". Hits no other
-//                  values.
-function applyValueClamp(d: DieResult, kind: "max" | "min" | "reset", X: number): DieResult {
+//   max(d, X)       — value bumped UP to at least X (floor)
+//   min(d, X)       — value capped DOWN to at most X (ceiling)
+//   reset(d, X)     — TRIGGERED reroll: if rolled value EQUALS X,
+//                      reroll once and use the reroll.
+//   resetmin(d, X)  — TRIGGERED reroll: if rolled value <= X,
+//                      reroll once and use the reroll.
+//   resetmax(d, X)  — TRIGGERED reroll: if rolled value >= X,
+//                      reroll once and use the reroll.
+function applyValueClamp(
+  d: DieResult,
+  kind: "max" | "min" | "reset" | "resetmin" | "resetmax",
+  X: number,
+): DieResult {
   if (d.loser) return d;     // discarded set is preserved as-rolled
-  if (kind === "reset") {
-    if (d.value !== X) return d;        // didn't hit the trigger
+  if (kind === "reset" || kind === "resetmin" || kind === "resetmax") {
+    const triggers =
+      kind === "reset" ? d.value === X :
+      kind === "resetmin" ? d.value <= X :
+      d.value >= X;
+    if (!triggers) return d;
     const sides = sidesOf(d.type);
     const newVal = Math.floor(Math.random() * sides) + 1;
-    if (newVal === d.value) return d;   // reroll happened to land on same — no visual delta
+    if (newVal === d.value) return d;
     return { ...d, originalValue: d.originalValue ?? d.value, value: newVal };
   }
   let nv = d.value;
@@ -713,9 +796,14 @@ function rollExpr(plain: PlainExpr, wrappers: Wrapper[]): { dice: DieResult[]; w
   let dice = innerResult.dice;
   let winnerIdx = innerResult.winnerIdx;
 
-  if (outer.kind === "max" || outer.kind === "min" || outer.kind === "reset") {
+  if (
+    outer.kind === "max" || outer.kind === "min" ||
+    outer.kind === "reset" || outer.kind === "resetmin" || outer.kind === "resetmax"
+  ) {
     const X = outer.param ?? 1;
-    dice = dice.map((d) => applyValueClamp(d, outer.kind as "max" | "min" | "reset", X));
+    dice = dice.map((d) =>
+      applyValueClamp(d, outer.kind as "max" | "min" | "reset" | "resetmin" | "resetmax", X),
+    );
   } else if (outer.kind === "burst") {
     const out: DieResult[] = [];
     for (const d of dice) {
@@ -915,32 +1003,139 @@ function refreshBadges() {
 
 // --- Combos / History rendering ---
 
-function renderCombos() {
-  if (!combos.length) {
-    comboList.innerHTML = `<div class="empty-state">${tt("diceComboEmpty")}</div>`;
-    return;
+// Group combos by category, returning [category, combos[]] pairs in
+// the user-defined `categoryOrder` sequence. Uncategorized combos
+// always render first under the empty-string key.
+function groupCombosByCategory(): Array<{ key: string; label: string; items: SavedCombo[] }> {
+  // Bucketize. Preserve in-array order inside each bucket — that's
+  // what the drag-reorder writes back, so the rendered order matches
+  // the persisted order without extra sorting.
+  const buckets = new Map<string, SavedCombo[]>();
+  for (const c of combos) {
+    const key = (c.category ?? "").trim();
+    let arr = buckets.get(key);
+    if (!arr) { arr = []; buckets.set(key, arr); }
+    arr.push(c);
   }
+  const out: Array<{ key: string; label: string; items: SavedCombo[] }> = [];
+  // Uncategorized first (if any combos lack a category).
+  if (buckets.has(UNCATEGORIZED_KEY)) {
+    out.push({
+      key: UNCATEGORIZED_KEY,
+      label: tt("diceComboCatUncategorized"),
+      items: buckets.get(UNCATEGORIZED_KEY)!,
+    });
+    buckets.delete(UNCATEGORIZED_KEY);
+  }
+  // Then in user-defined order.
+  for (const cat of categoryOrder) {
+    if (!buckets.has(cat)) {
+      // Empty category — still render the section so the user can
+      // see the header (and drop combos into it).
+      out.push({ key: cat, label: cat, items: [] });
+      continue;
+    }
+    out.push({ key: cat, label: cat, items: buckets.get(cat)! });
+    buckets.delete(cat);
+  }
+  // Any leftovers — categories referenced by combos but not in the
+  // ordered list. Append in alphabetical order.
+  const remaining = Array.from(buckets.keys()).sort();
+  for (const cat of remaining) {
+    out.push({ key: cat, label: cat, items: buckets.get(cat)! });
+  }
+  return out;
+}
+
+function renderCombos() {
   // DM-only 暗骰 button — same gating as the main panel's dark-roll.
   const darkBtn = isDM
     ? `<button class="btn dark-roll combo-dark" data-act="roll-dark" type="button">${tt("diceComboBtnDark")}</button>`
     : "";
-  comboList.innerHTML = combos.map((c) => {
-    const formula = formatExpr(parseExpr(c.expr));
-    return `
-      <div class="combo-card" data-id="${c.id}">
-        <div class="combo-name">${escapeHtml(c.name)}</div>
-        <div class="combo-formula">${escapeHtml(formula)}</div>
-        <div class="combo-actions">
-          <button class="btn primary" data-act="roll" type="button">${tt("diceComboBtnRoll")}</button>
-          ${darkBtn}
-          <button class="btn" data-act="load" type="button">${tt("diceComboBtnEdit")}</button>
-          <button class="btn danger" data-act="del" type="button">${tt("diceComboBtnDel")}</button>
+
+  const groups = groupCombosByCategory();
+  const hasAny = groups.some((g) => g.items.length > 0) || categoryOrder.length > 0;
+
+  // Toolbar across the top of the combos tab — drag hint + add-category
+  // button. Always rendered (even when empty) so a fresh user can
+  // create a category before saving any combos.
+  const toolbar = `
+    <div class="combo-toolbar">
+      <span class="combo-hint">${tt("diceComboDragHint")}</span>
+      <button class="btn small" id="combo-add-cat" type="button">${tt("diceComboCatNew")}</button>
+    </div>
+  `;
+
+  if (!hasAny) {
+    comboList.innerHTML = toolbar +
+      `<div class="empty-state">${tt("diceComboEmpty")}</div>`;
+    wireToolbar();
+    return;
+  }
+
+  const sectionsHtml = groups.map((g) => {
+    const cards = g.items.map((c) => {
+      const formula = formatExpr(parseExpr(c.expr));
+      return `
+        <div class="combo-card" data-id="${escapeHtml(c.id)}" data-cat="${escapeHtml(g.key)}" draggable="true">
+          <div class="combo-card-head">
+            <span class="combo-grip" title="${tt("diceComboDragHint")}" aria-hidden="true">⋮⋮</span>
+            <span class="combo-name">${escapeHtml(c.name)}</span>
+          </div>
+          <div class="combo-formula">${escapeHtml(formula)}</div>
+          <div class="combo-actions">
+            <button class="btn primary" data-act="roll" type="button">${tt("diceComboBtnRoll")}</button>
+            ${darkBtn}
+            <button class="btn" data-act="load" type="button">${tt("diceComboBtnEdit")}</button>
+            <button class="btn" data-act="cat" type="button">${tt("diceComboCatLabel")}</button>
+            <button class="btn danger" data-act="del" type="button">${tt("diceComboBtnDel")}</button>
+          </div>
         </div>
+      `;
+    }).join("");
+    // Categories other than uncategorized get rename/delete affordances
+    // on the header. The uncategorized header is always present for
+    // its label only — no rename / delete (it's the implicit fallback).
+    const headerActions = g.key === UNCATEGORIZED_KEY ? "" : `
+      <button class="cat-act" data-act="rename" type="button" title="${tt("diceComboCatRename")}">✎</button>
+      <button class="cat-act" data-act="del-cat" type="button" title="${tt("diceComboCatDelete")}">✕</button>
+    `;
+    return `
+      <div class="combo-section" data-cat="${escapeHtml(g.key)}">
+        <div class="combo-section-head">
+          <span class="combo-section-title">${escapeHtml(g.label)}</span>
+          <span class="combo-section-count">${g.items.length}</span>
+          ${headerActions}
+        </div>
+        <div class="combo-section-body" data-cat="${escapeHtml(g.key)}">${cards || `<div class="combo-empty-drop">—</div>`}</div>
       </div>
     `;
   }).join("");
-  comboList.querySelectorAll<HTMLButtonElement>(".combo-actions button").forEach((b) => {
-    b.addEventListener("click", () => {
+
+  comboList.innerHTML = toolbar + sectionsHtml;
+  wireToolbar();
+  wireCardActions();
+  wireDragAndDrop();
+}
+
+function wireToolbar() {
+  const addBtn = document.getElementById("combo-add-cat");
+  if (!addBtn) return;
+  addBtn.addEventListener("click", () => {
+    const name = window.prompt(tt("diceComboCatNewPrompt"), "");
+    if (!name) return;
+    const trimmed = name.trim().slice(0, 32);
+    if (!trimmed) return;
+    if (!categoryOrder.includes(trimmed)) categoryOrder.push(trimmed);
+    saveCombos();
+    renderCombos();
+  });
+}
+
+function wireCardActions() {
+  comboList.querySelectorAll<HTMLButtonElement>(".combo-card .combo-actions button").forEach((b) => {
+    b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
       const card = b.closest(".combo-card") as HTMLElement;
       const id = card.dataset.id!;
       const c = combos.find((x) => x.id === id);
@@ -955,11 +1150,167 @@ function renderCombos() {
         labelText = c.name;
         labelInput.value = labelText;
         switchTab("roll");
+      } else if (act === "cat") {
+        const next = window.prompt(
+          tt("diceComboCatChangePrompt"),
+          c.category ?? "",
+        );
+        if (next == null) return; // cancel
+        const trimmed = next.trim().slice(0, 32);
+        c.category = trimmed || undefined;
+        if (trimmed && !categoryOrder.includes(trimmed)) {
+          categoryOrder.push(trimmed);
+        }
+        saveCombos();
+        renderCombos();
       } else if (act === "del") {
         combos = combos.filter((x) => x.id !== id);
         saveCombos();
         renderCombos();
       }
+    });
+  });
+  // Header rename / delete-category actions.
+  comboList.querySelectorAll<HTMLButtonElement>(".combo-section .cat-act").forEach((b) => {
+    b.addEventListener("click", () => {
+      const section = b.closest(".combo-section") as HTMLElement;
+      const cat = section.dataset.cat!;
+      const act = b.dataset.act;
+      if (act === "rename") {
+        const next = window.prompt(tt("diceComboCatRenamePrompt"), cat);
+        if (!next) return;
+        const trimmed = next.trim().slice(0, 32);
+        if (!trimmed || trimmed === cat) return;
+        for (const c of combos) if (c.category === cat) c.category = trimmed;
+        const idx = categoryOrder.indexOf(cat);
+        if (idx >= 0) {
+          categoryOrder[idx] = trimmed;
+        } else {
+          categoryOrder.push(trimmed);
+        }
+        // Dedup in case rename collided with an existing category.
+        categoryOrder = categoryOrder.filter(
+          (v, i, arr) => arr.indexOf(v) === i,
+        );
+        saveCombos();
+        renderCombos();
+      } else if (act === "del-cat") {
+        for (const c of combos) if (c.category === cat) c.category = undefined;
+        categoryOrder = categoryOrder.filter((v) => v !== cat);
+        saveCombos();
+        renderCombos();
+      }
+    });
+  });
+}
+
+// HTML5 drag-and-drop. dragstart fires on the combo-card, dragover
+// computes the insertion index based on the cursor's vertical
+// position relative to siblings, and drop reorders + persists.
+// Cross-section drag changes the combo's category to the drop
+// target's section.
+function wireDragAndDrop() {
+  let draggedId: string | null = null;
+  comboList.querySelectorAll<HTMLElement>(".combo-card").forEach((card) => {
+    card.addEventListener("dragstart", (e) => {
+      draggedId = card.dataset.id!;
+      card.classList.add("dragging");
+      try {
+        e.dataTransfer?.setData("text/plain", draggedId);
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+      } catch {}
+    });
+    card.addEventListener("dragend", () => {
+      card.classList.remove("dragging");
+      draggedId = null;
+      comboList.querySelectorAll<HTMLElement>(".combo-card.drop-before").forEach(
+        (n) => n.classList.remove("drop-before"),
+      );
+      comboList.querySelectorAll<HTMLElement>(".combo-section.drop-target").forEach(
+        (n) => n.classList.remove("drop-target"),
+      );
+    });
+  });
+  comboList.querySelectorAll<HTMLElement>(".combo-section-body").forEach((body) => {
+    body.addEventListener("dragover", (e) => {
+      if (!draggedId) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      const section = body.closest(".combo-section") as HTMLElement;
+      section?.classList.add("drop-target");
+      // Highlight the card we'd drop BEFORE so the user can preview
+      // the insertion. Walk siblings to find the first one whose
+      // midpoint is below the cursor.
+      body.querySelectorAll<HTMLElement>(".combo-card.drop-before").forEach(
+        (n) => n.classList.remove("drop-before"),
+      );
+      const cards = Array.from(body.querySelectorAll<HTMLElement>(".combo-card"));
+      const y = e.clientY;
+      const target = cards.find((c) => {
+        const r = c.getBoundingClientRect();
+        return y < r.top + r.height / 2;
+      });
+      if (target && target.dataset.id !== draggedId) {
+        target.classList.add("drop-before");
+      }
+    });
+    body.addEventListener("dragleave", (e) => {
+      const section = body.closest(".combo-section") as HTMLElement;
+      // Only clear if the cursor truly left the section, not just
+      // moved between children. relatedTarget check guards that.
+      const rt = e.relatedTarget as Node | null;
+      if (!section || (rt && section.contains(rt))) return;
+      section.classList.remove("drop-target");
+      body.querySelectorAll<HTMLElement>(".combo-card.drop-before").forEach(
+        (n) => n.classList.remove("drop-before"),
+      );
+    });
+    body.addEventListener("drop", (e) => {
+      if (!draggedId) return;
+      e.preventDefault();
+      const section = body.closest(".combo-section") as HTMLElement;
+      const targetCat = body.dataset.cat ?? "";
+      const movedIdx = combos.findIndex((c) => c.id === draggedId);
+      if (movedIdx < 0) return;
+      const moved = combos[movedIdx];
+
+      // Determine insertion position within the bucket.
+      const cards = Array.from(body.querySelectorAll<HTMLElement>(".combo-card"));
+      const y = e.clientY;
+      let insertBeforeId: string | null = null;
+      for (const c of cards) {
+        if (c.dataset.id === draggedId) continue;
+        const r = c.getBoundingClientRect();
+        if (y < r.top + r.height / 2) {
+          insertBeforeId = c.dataset.id ?? null;
+          break;
+        }
+      }
+      // Apply category change first.
+      moved.category = targetCat || undefined;
+      // Splice out, then splice into the new position relative to the
+      // CURRENT array (after removal).
+      combos.splice(movedIdx, 1);
+      let insertAt: number;
+      if (insertBeforeId) {
+        insertAt = combos.findIndex((c) => c.id === insertBeforeId);
+        if (insertAt < 0) insertAt = combos.length;
+      } else {
+        // Drop at end of the target bucket: find last index whose
+        // category matches targetCat, insert just after it. If none,
+        // append at the very end.
+        let lastInBucket = -1;
+        for (let i = 0; i < combos.length; i++) {
+          if ((combos[i].category ?? "") === targetCat) lastInBucket = i;
+        }
+        insertAt = lastInBucket + 1;
+        if (insertAt < 0) insertAt = combos.length;
+      }
+      combos.splice(insertAt, 0, moved);
+
+      saveCombos();
+      section?.classList.remove("drop-target");
+      renderCombos();
     });
   });
 }
@@ -1005,23 +1356,85 @@ function renderHistoryList() {
     // For history, ignore loser dice in the formula recap — they're a
     // visual-only annotation of adv/dis.
     const kept = h.dice.filter((d) => !d.loser);
-    const grouped: Record<string, number> = {};
-    for (const d of kept) grouped[d.type] = (grouped[d.type] ?? 0) + 1;
-    const parts = Object.entries(grouped).map(([t, n]) => `${n}${t}`);
-    let formula = parts.join(" + ");
-    if (h.modifier) formula += `${formula ? (h.modifier > 0 ? " + " : " ") : ""}${h.modifier}`;
-    const dieChips = h.dice.map((d) => {
+
+    const labelStr = h.label ? ` · ${escapeHtml(h.label)}` : "";
+    const isCrit = kept.some((d) => d.type === "d20" && d.value === 20);
+    const isFail = kept.some((d) => d.type === "d20" && d.value === 1);
+    const cardCls = isCrit ? "crit" : isFail ? "fail" : "";
+
+    const sidesAndCls = (d: DieResult) => {
       const sides = sidesOf(d.type);
       const cls =
         d.value === sides ? "high" :
         d.value === 1     ? "low"  : "";
       const loserCls = d.loser ? " loser" : "";
       return `<span class="history-die ${cls}${loserCls}">${d.value}</span>`;
-    }).join("");
-    const labelStr = h.label ? ` · ${escapeHtml(h.label)}` : "";
-    const isCrit = kept.some((d) => d.type === "d20" && d.value === 20);
-    const isFail = kept.some((d) => d.type === "d20" && d.value === 1);
-    const cardCls = isCrit ? "crit" : isFail ? "fail" : "";
+    };
+
+    // -------- repeat(N, …) rows --------
+    // The roller stamps `rowStarts` whenever the outermost wrapper was
+    // `repeat`. Each row is an independent inner roll with its own dice
+    // span and its own total = (dice in row) + modifier. The history
+    // entry records the GRAND total, but the per-row recap is what the
+    // user actually wants to see ("3 separate +5 attacks → 23 / 12 / 18").
+    if (h.rowStarts && h.rowStarts.length > 0) {
+      const rows = h.rowStarts;
+      const N = rows.length;
+      // Reverse-engineer the inner formula from the dice in row 0.
+      // Same shape repeats for every row by definition of `repeat(...)`.
+      const row0End = rows.length > 1 ? rows[1] : h.dice.length;
+      const row0Kept = h.dice.slice(rows[0], row0End).filter((d) => !d.loser);
+      const grouped0: Record<string, number> = {};
+      for (const d of row0Kept) grouped0[d.type] = (grouped0[d.type] ?? 0) + 1;
+      const inner = Object.entries(grouped0).map(([t, n]) => `${n}${t}`).join("+")
+        + (h.modifier ? (h.modifier > 0 ? `+${h.modifier}` : `${h.modifier}`) : "");
+      const formula = `repeat(${N},${inner || "—"})`;
+
+      // Each iteration becomes a compact pill — they flow horizontally
+      // and only wrap to a new line when the available width can't
+      // hold the next pill. Matches the user's "顺序排列除非排不下
+      // 再换行（flow）" call. Grand-total Σ row stays on its own
+      // separator-prefixed line below.
+      const pills: string[] = [];
+      for (let r = 0; r < N; r++) {
+        const start = rows[r];
+        const end = r + 1 < N ? rows[r + 1] : h.dice.length;
+        const slice = h.dice.slice(start, end);
+        const rowKept = slice.filter((d) => !d.loser);
+        const rowSum =
+          rowKept.reduce((a, d) => a + (d.subtract ? -d.value : d.value), 0)
+          + h.modifier;
+        pills.push(`
+          <span class="repeat-pill">
+            <span class="repeat-pill-idx">#${r + 1}</span>
+            ${slice.map(sidesAndCls).join("")}
+            ${h.modifier ? `<span class="repeat-pill-mod">${h.modifier > 0 ? "+" : ""}${h.modifier}</span>` : ""}
+            <span class="history-total">${rowSum}</span>
+          </span>`);
+      }
+      return `
+        <div class="history-item ${cardCls}">
+          <div class="history-head">
+            <span class="history-player" style="color:${h.rollerColor}">${escapeHtml(h.rollerName)}${labelStr}</span>
+            <span>${ago}</span>
+          </div>
+          <div class="history-formula">${escapeHtml(formula)}</div>
+          <div class="repeat-pill-flow">${pills.join("")}</div>
+          <div class="history-rolls" style="margin-top:2px;border-top:1px dashed rgba(255,255,255,0.08);padding-top:3px">
+            <span style="color:#8a8e9c;font-size:11px">Σ</span>
+            <span class="history-total">${h.total}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // -------- single-row roll (default) --------
+    const grouped: Record<string, number> = {};
+    for (const d of kept) grouped[d.type] = (grouped[d.type] ?? 0) + 1;
+    const parts = Object.entries(grouped).map(([t, n]) => `${n}${t}`);
+    let formula = parts.join(" + ");
+    if (h.modifier) formula += `${formula ? (h.modifier > 0 ? " + " : " ") : ""}${h.modifier}`;
+    const dieChips = h.dice.map(sidesAndCls).join("");
     return `
       <div class="history-item ${cardCls}">
         <div class="history-head">
@@ -1202,12 +1615,17 @@ async function emitOneRoll(opts: {
   collectiveId?: string;
 }): Promise<void> {
   if (!opts.dice.length) return;
-  // Total: sum of all NON-loser dice. For repeat-mode the panel total
-  // is the grand sum; the visual computes per-row totals from rowStarts
-  // independently. modifier is added once per row visually but only
-  // once to the grand total here (history-friendly aggregate).
+  // Total: sum of all NON-loser dice. Subtraction dice contribute
+  // NEGATIVE to the sum (e.g. 1d20-1d6 with rolls 18 and 4 → 14).
+  // For repeat-mode the panel total is the grand sum; the visual
+  // computes per-row totals from rowStarts independently. modifier
+  // is added once per row visually but only once to the grand total
+  // here (history-friendly aggregate).
   const kept = opts.dice.filter((d) => !d.loser);
-  const baseTotal = kept.reduce((a, d) => a + d.value, 0);
+  const baseTotal = kept.reduce(
+    (a, d) => a + (d.subtract ? -d.value : d.value),
+    0,
+  );
   const total = opts.rowStarts && opts.rowStarts.length > 0
     ? baseTotal + opts.modifier * opts.rowStarts.length
     : baseTotal + opts.modifier;
@@ -1478,10 +1896,24 @@ function saveCurrentCombo() {
   const promptName = labelText.trim() || formatExpr(parsed);
   const name = window.prompt(tt("diceComboPrompt"), promptName);
   if (!name) return;
+  // Optional category — show the existing list as a hint so users
+  // don't have to remember the exact spelling.
+  const hintList = categoryOrder.length > 0
+    ? `\n（${categoryOrder.join(" / ")}）`
+    : "";
+  const cat = window.prompt(tt("diceComboCatPrompt") + hintList, "");
+  // Cancel of the category prompt is treated as "uncategorized" — it
+  // would be jarring to abort the save just because the user didn't
+  // want a category.
+  const trimmedCat = (cat ?? "").trim().slice(0, 32);
+  if (trimmedCat && !categoryOrder.includes(trimmedCat)) {
+    categoryOrder.push(trimmedCat);
+  }
   const combo: SavedCombo = {
     id: `${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
     name: name.trim().slice(0, 40),
     expr: expression,
+    category: trimmedCat || undefined,
   };
   combos.unshift(combo);
   saveCombos();
@@ -1745,6 +2177,8 @@ function renderRulesList() {
     `<code>max(1d20, 10)</code>${tt("diceRule4")}`,
     `<code>min(1d20, 15)</code>${tt("diceRule5")}`,
     `<code>reset(1d20, 12)</code>${tt("diceRule6")}`,
+    `<code>resetmin(1d20, 5)</code>${tt("diceRuleResetMin")}`,
+    `<code>resetmax(1d20, 18)</code>${tt("diceRuleResetMax")}`,
     `<code>repeat(3, 1d20+5)</code>${tt("diceRule7")}`,
     `<code>same(2d20)</code>${tt("diceRule8")}`,
     `<code>burst(2d6)</code>${tt("diceRule9")}`,

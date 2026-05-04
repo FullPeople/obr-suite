@@ -1,4 +1,5 @@
 import { Monster, ParsedMonster, MonsterEdition } from "./types";
+import { getAllLocalMonsters } from "../../utils/localContent";
 
 // "2014" = strictly PHB + MM (the original core books). "2024" = strictly
 // XPHB + XMM (the 2024 reprint). Every other source — DMG/XDMG, TCE, XGE,
@@ -73,7 +74,20 @@ function nameToTokenName(name: string): string {
 }
 
 function buildTokenUrl(m: any): string {
-  // Matches 5etools Renderer.monster.getTokenUrl logic
+  // Matches 5etools Renderer.monster.getTokenUrl logic, plus our
+  // homebrew extensions:
+  //   • `tokenHref: { type: "external", url }`  → external image (used
+  //     by local-content packs that ship their own token URLs instead
+  //     of relying on the IMG_BASE convention)
+  //   • `tokenHref: { type: "internal", path }` → IMG_BASE-relative
+  //   • `tokenUrl: "..."`                       → legacy direct URL
+  if (m.tokenHref && typeof m.tokenHref === "object") {
+    const th = m.tokenHref;
+    if (th.type === "external" && typeof th.url === "string" && th.url) return th.url;
+    if (th.type === "internal" && typeof th.path === "string" && th.path) {
+      return `${IMG_BASE}/${th.path.replace(/^\/+/, "")}`;
+    }
+  }
   if (m.tokenUrl) return m.tokenUrl; // legacy
   if (m.token?.source && m.token?.name) {
     return `${IMG_BASE}/bestiary/tokens/${m.token.source}/${encodeURIComponent(nameToTokenName(m.token.name))}.webp`;
@@ -110,6 +124,16 @@ function parseMon(m: any): ParsedMonster | null {
 let cachedMonsters: ParsedMonster[] | null = null;
 let loadingPromise: Promise<ParsedMonster[]> | null = null;
 const rawBySlug = new Map<string, any>();
+
+/** Drop the cached monster list so the next loadAllMonsters() pulls
+ *  fresh data. Called when the user imports / removes local content
+ *  via the settings panel — the bestiary module subscribes to the
+ *  BC_LOCAL_CONTENT_CHANGED broadcast and forwards it here. */
+export function clearMonsterCache(): void {
+  cachedMonsters = null;
+  loadingPromise = null;
+  rawBySlug.clear();
+}
 
 // slug uniquely identifies a monster across sources: "MM::Goblin"
 export function makeSlug(source: string, engName: string): string {
@@ -165,11 +189,23 @@ function applyMod(target: any, field: string, spec: any) {
 function resolveCopy(m: any, bySlug: Map<string, any>, stack: Set<string>): any {
   if (!m || !m._copy) return m;
   const parentSource = m._copy.source;
-  const parentName = m._copy.ENG_name || m._copy.name;
-  const parentSlug = makeSlug(parentSource, parentName);
-  if (stack.has(parentSlug)) return m; // cycle guard
-  const parent = bySlug.get(parentSlug);
+  // Some homebrew sources (notably WTTHC) reference the parent by
+  // Chinese name in `_copy.name` while the parent itself is keyed by
+  // `ENG_name`. Try both before giving up — if either match wins we
+  // still get a fully merged stat block.
+  const candidateNames = [
+    m._copy.ENG_name,
+    m._copy.name,
+  ].filter((x): x is string => typeof x === "string" && x.length > 0);
+  let parentSlug = "";
+  let parent: any = null;
+  for (const nm of candidateNames) {
+    const slug = makeSlug(parentSource, nm);
+    const found = bySlug.get(slug);
+    if (found) { parentSlug = slug; parent = found; break; }
+  }
   if (!parent) return m;
+  if (stack.has(parentSlug)) return m; // cycle guard
   stack.add(parentSlug);
   const resolvedParent = parent._copy ? resolveCopy(parent, bySlug, stack) : parent;
   stack.delete(parentSlug);
@@ -210,37 +246,99 @@ export async function loadAllMonsters(): Promise<ParsedMonster[]> {
     const bases = getEnabledLibraryBases();
     const perLibraryMonsters = await Promise.all(
       bases.map(async (base) => {
+        // Try the canonical 5etools layout first: a `bestiary/index.json`
+        // mapping `bestiary-<SOURCE>.json` → SOURCE. If that's missing
+        // (most user-hosted homebrew sites don't ship one), fall back
+        // to the search index — extract every c=1 (monster) entry's
+        // source code and synthesise the file list ourselves.
         try {
-          const indexRes = await fetch(`${base}/data/bestiary/index.json`);
-          if (!indexRes.ok) return [] as Monster[];
-          const index = await indexRes.json() as Record<string, string>;
-          const files = Object.entries(index);
+          const indexRes = await fetch(`${base}/data/bestiary/index.json`, { cache: "no-cache" });
+          if (indexRes.ok) {
+            const index = await indexRes.json() as Record<string, string>;
+            const files = Object.entries(index);
+            const results = await Promise.all(
+              files.map(async ([, filename]) => {
+                try {
+                  // No HTTP-cache so updates to library JSON show up
+                  // on the next loadAllMonsters() call (after the
+                  // user toggles libraries / re-opens the panel).
+                  const res = await fetch(`${base}/data/bestiary/${filename}`, { cache: "no-cache" });
+                  if (!res.ok) return [] as Monster[];
+                  const data = await res.json();
+                  return (data.monster || []) as Monster[];
+                } catch (e) {
+                  console.warn(`[obr-suite/bestiary] failed to load ${base}/data/bestiary/${filename}`, e);
+                  return [] as Monster[];
+                }
+              })
+            );
+            return results.flat();
+          }
+        } catch {}
+        // Fallback: read search/index.json, pick monster sources, fetch
+        // each `bestiary-<SOURCE>.json`. Lets a self-hosted homebrew
+        // library that only ships search/index.json + one bestiary file
+        // still appear in the bestiary panel.
+        try {
+          const idxRes = await fetch(`${base}/search/index.json`, { cache: "no-cache" });
+          if (!idxRes.ok) return [] as Monster[];
+          const idx = await idxRes.json() as { x?: any[] };
+          const xs = Array.isArray(idx.x) ? idx.x : [];
+          const monsterSources = new Set<string>();
+          for (const e of xs) {
+            if (!e || e.c !== 1) continue;
+            const s = typeof e.s === "string" ? e.s : null;
+            if (s) monsterSources.add(s);
+          }
+          if (monsterSources.size === 0) return [] as Monster[];
+          // Try each source under multiple case variants — GitHub
+          // Pages is case-sensitive but homebrew authors often use
+          // uppercase filenames while kiwee uses lowercase. We try
+          // them all and use whichever 200s.
           const results = await Promise.all(
-            files.map(async ([, filename]) => {
-              try {
-                const res = await fetch(`${base}/data/bestiary/${filename}`);
-                if (!res.ok) return [] as Monster[];
-                const data = await res.json();
-                return (data.monster || []) as Monster[];
-              } catch (e) {
-                console.warn(`[obr-suite/bestiary] failed to load ${base}/data/bestiary/${filename}`, e);
-                return [] as Monster[];
+            Array.from(monsterSources).map(async (src) => {
+              const cases = new Set<string>([src, src.toLowerCase(), src.toUpperCase()]);
+              for (const c of cases) {
+                try {
+                  const res = await fetch(`${base}/data/bestiary/bestiary-${c}.json`, { cache: "no-cache" });
+                  if (!res.ok) continue;
+                  const data = await res.json();
+                  const arr = (data.monster || []) as Monster[];
+                  return arr;
+                } catch {}
               }
+              console.warn(
+                `[obr-suite/bestiary] no working case variant for ${base}/data/bestiary/bestiary-${src}.json`,
+              );
+              return [] as Monster[];
             })
           );
           return results.flat();
         } catch (e) {
-          console.warn(`[obr-suite/bestiary] failed to load index from ${base}`, e);
+          console.warn(`[obr-suite/bestiary] failed to derive bestiary list from ${base}`, e);
           return [] as Monster[];
         }
       })
     );
-    const rawAll = perLibraryMonsters.flat();
+    // Imported local-content monsters get folded in alongside any
+    // URL-based libraries.
+    const localMonsters = getAllLocalMonsters() as Monster[];
+    const rawAll = [...perLibraryMonsters.flat(), ...localMonsters];
     // Build slug → raw lookup so spawn/info can read full monster data
-    // (abilities, actions, etc.) without re-fetching.
+    // (abilities, actions, etc.) without re-fetching. Index by BOTH
+    // ENG_name and name (zh) so `_copy` lookups succeed regardless of
+    // which form the child references — homebrew packs aren't always
+    // consistent with their parent references.
     for (const m of rawAll) {
       if (m && m.name) {
-        rawBySlug.set(makeSlug(m.source, m.ENG_name || m.name), m);
+        const eng = m.ENG_name;
+        if (eng) rawBySlug.set(makeSlug(m.source, eng), m);
+        if (!eng || eng !== m.name) {
+          // Don't overwrite an existing English-keyed entry with the
+          // zh slug — but DO add the zh slug for child _copy resolution.
+          const zhSlug = makeSlug(m.source, m.name);
+          if (!rawBySlug.has(zhSlug)) rawBySlug.set(zhSlug, m);
+        }
       }
     }
     // Resolve 5etools _copy inheritance so entries like BGDIA::Zariel
@@ -250,7 +348,18 @@ export async function loadAllMonsters(): Promise<ParsedMonster[]> {
         rawBySlug.set(slug, resolveCopy(m, rawBySlug, new Set()));
       }
     }
-    const all = Array.from(rawBySlug.values())
+    // Dedupe via identity Set — rawBySlug now keys some monsters
+    // under both their English and Chinese slugs (so `_copy` resolves
+    // either way). Iterating values() would emit duplicates without
+    // this guard.
+    const seenRaw = new Set<any>();
+    const uniqueRaw: any[] = [];
+    for (const m of rawBySlug.values()) {
+      if (seenRaw.has(m)) continue;
+      seenRaw.add(m);
+      uniqueRaw.push(m);
+    }
+    const all = uniqueRaw
       .map(parseMon)
       .filter((x): x is ParsedMonster => x !== null);
     // Sort by CR numerically, then by name
@@ -279,13 +388,25 @@ export function searchMonsters(
   monsters: ParsedMonster[],
   query: string,
   sortDesc: boolean = false,
-  enabledEditions: Set<MonsterEdition> = new Set(["2014", "2024", "other"])
+  enabledEditions: Set<MonsterEdition> = new Set(["2014", "2024", "other"]),
+  sourceFilter: string = "",
 ): ParsedMonster[] {
   // `other` is always implicitly enabled — the 2014/2024 toggles only
   // gate PHB/MM and XPHB/XMM respectively. Anything else passes through.
   let result = monsters.filter(
     (m) => m.edition === "other" || enabledEditions.has(m.edition)
   );
+
+  // Source-code filter (e.g. "PHB" / "MYHB" / "kiwee"). Case-
+  // insensitive substring match on m.source so a homebrew GM can
+  // narrow the panel to ONLY their imported entries by typing the
+  // source slug they used.
+  const srcQ = sourceFilter.trim().toLowerCase();
+  if (srcQ) {
+    result = result.filter((m) =>
+      String((m as any).source ?? "").toLowerCase().includes(srcQ),
+    );
+  }
 
   if (query.trim()) {
     const q = query.toLowerCase().trim();
@@ -306,5 +427,8 @@ export function searchMonsters(
     return sortDesc ? -diff : diff;
   });
 
-  return result.slice(0, 80);
+  // Bumped from 80 → 200 (2026-05-04) so heavily-populated homebrew
+  // packs (e.g. WTTHC, MYHB) don't quietly hide entries behind the
+  // truncation. The panel scrolls fine with 200 cards.
+  return result.slice(0, 200);
 }

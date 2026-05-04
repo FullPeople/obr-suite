@@ -34,10 +34,156 @@ html,body{
 .root::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}
 
 .hdr{display:flex;align-items:baseline;gap:10px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:7px}
+/* Drag grip (top-left of header). Pointer events route through
+   panelDrag.ts which broadcasts to bestiary/index.ts to re-anchor. */
+.drag-handle{
+  flex-shrink:0;
+  width:14px;height:18px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:grab;
+  color:rgba(255,255,255,0.30);
+  opacity:0.55;
+  transition:opacity .12s, color .12s;
+  touch-action:none;user-select:none;
+  align-self:center;
+}
+.drag-handle:hover{opacity:1;color:rgba(255,255,255,0.85)}
+.drag-handle.is-dragging{cursor:grabbing;opacity:1;color:#5dade2}
+.drag-handle svg{width:12px;height:18px;display:block;pointer-events:none}
 .name{font-size:15px;font-weight:700;color:#e94560;flex-shrink:0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub{font-size:11px;color:#aaa;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* Two-column top: chips (left) + six-abilities (right) */
+/* === HP / Temp / AC stat banner — same pattern as cc-info ============
+   HP red rounded pill, temp pink circle, AC heater shield. Writes
+   patch the bound monster token's bubbles metadata which the suite's
+   bubbles module reads to redraw the HP bar + heater shield. */
+.stat-banner{
+  display:flex;align-items:center;gap:8px;
+  /* Sticky to top of the scrollable .root so HP/AC stays visible
+     while the user scrolls through trait/action sections. */
+  position:sticky;
+  top:-10px;
+  z-index:20;
+  margin:0 0 8px;
+  padding:6px 2px 4px;
+  background:rgba(22,33,62,0.94);
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+}
+/* HP pill is now a two-layer stack: dark "track" fills the full pill
+   width while a red "fill" pseudo-element is masked to current/max
+   HP via the --hp-ratio CSS var. The numeric editor sits above both
+   layers via z-index. Mirrors the bubbles bar's progressive fill so
+   the panel reads as a HP bar AND a numeric editor. */
+.hp-pill{
+  flex:1;
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  display:flex;align-items:center;justify-content:center;gap:2px;
+  min-height:34px;
+  padding:0 12px;
+  background:linear-gradient(135deg,#3a1a18,#4a221d);
+  border:1px solid rgba(231,76,60,0.7);
+  border-radius:18px;
+  color:#fff;
+  font-weight:800;font-size:17px;
+  box-shadow:0 2px 6px rgba(231,76,60,0.32),0 0 0 1px rgba(0,0,0,0.18) inset;
+  letter-spacing:0.3px;
+}
+.hp-pill::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:linear-gradient(135deg,#c0392b,#e94560);
+  width:calc(var(--hp-ratio, 1) * 100%);
+  transition:width 0.18s ease-out;
+  z-index:0;
+  pointer-events:none;
+}
+.hp-pill > *{position:relative;z-index:1}
+.hp-pill .slash{font-size:14px;font-weight:400;opacity:0.55;margin:0 1px}
+.temp-pill{
+  flex-shrink:0;
+  width:36px;height:36px;
+  border-radius:50%;
+  background:linear-gradient(135deg,#f5a3c7,#ee7eaa);
+  border:1px solid rgba(232,138,174,0.75);
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-weight:800;font-size:13px;
+  box-shadow:0 2px 6px rgba(232,138,174,0.30),0 0 0 1px rgba(0,0,0,0.18) inset;
+}
+.ac-pill{
+  flex-shrink:0;
+  width:38px;height:42px;
+  background:linear-gradient(135deg,#7ec8f0,#3498db);
+  border:1px solid rgba(52,152,219,0.7);
+  clip-path:polygon(0% 8%,100% 8%,100% 60%,50% 100%,0% 60%);
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-weight:800;font-size:14px;
+  padding-bottom:8px;
+  filter:drop-shadow(0 2px 4px rgba(52,152,219,0.40));
+}
+.stat-cell{position:relative;display:inline-flex;align-items:center;justify-content:center}
+.stat-cell .prev-hint{
+  position:absolute;left:50%;bottom:calc(100% + 3px);
+  transform:translateX(-50%);
+  font-size:9.5px;font-weight:700;
+  color:rgba(255,255,255,0.92);
+  background:rgba(7,19,32,0.78);
+  padding:1px 6px;
+  border-radius:8px;
+  pointer-events:none;
+  white-space:nowrap;
+  opacity:0;
+  transition:opacity .12s, transform .12s;
+  z-index:20;
+  letter-spacing:0.3px;
+}
+.stat-cell.editing .prev-hint{opacity:1;transform:translateX(-50%) translateY(-2px)}
+.stat-input{
+  background:transparent;border:none;
+  color:inherit;
+  font-family:inherit;font-weight:inherit;font-size:inherit;
+  text-align:center;
+  outline:none;padding:0;
+  font-variant-numeric:tabular-nums;
+  width:1.8em;
+  caret-color:rgba(255,255,255,0.9);
+}
+.stat-input:focus{
+  text-decoration:underline;
+  text-decoration-color:rgba(255,255,255,0.65);
+  text-decoration-thickness:1px;
+  text-underline-offset:2px;
+}
+.hp-pill .stat-input{width:1.6em}
+.temp-pill .stat-input,.ac-pill .stat-input{width:1.5em}
+
+/* Lock button — same pattern as cc-info. Bestiary popover is
+   GM-only so it's always rendered. */
+.stat-lock{
+  flex-shrink:0;
+  width:28px;height:28px;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(245,166,35,0.18);
+  border:1px solid rgba(245,166,35,0.55);
+  border-radius:8px;
+  cursor:pointer;
+  color:#f5a623;
+  margin-left:auto;
+  padding:0;
+  transition:filter .12s, background .12s, border-color .12s, color .12s;
+}
+.stat-lock:hover{filter:brightness(1.18)}
+.stat-lock[data-locked="false"]{
+  background:rgba(93,173,226,0.18);
+  border-color:rgba(93,173,226,0.55);
+  color:#5dade2;
+}
+.stat-lock[data-locked="false"] .lock-shackle{
+  d:path("M5 7 V5 a3 3 0 0 1 6 0");
+}
 .top{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-bottom:7px}
 .chips{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;align-content:start;align-self:start}
 .chip{
@@ -53,6 +199,40 @@ html,body{
 /* Speed: smaller font (~50% of a normal chip value) and one line per type. */
 .chip.speed .v{font-size:9px;line-height:1.25;font-weight:600}
 .chip.speed .v div{display:block}
+
+/* Detail meta block — rows of "label: value" between abilities and
+   actions. Empty rows are filtered out by the renderer so the block
+   only shows for monsters with actual data; missing fields don't
+   leave dead space. */
+.meta{
+  display:flex;flex-direction:column;gap:2px;
+  margin:0 0 8px;
+  padding:6px 9px 7px;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:5px;
+  font-size:11px;line-height:1.55;
+}
+.meta-row{display:flex;align-items:flex-start;gap:6px}
+.meta-l{
+  flex-shrink:0;
+  min-width:42px;
+  color:#9aa0b3;font-weight:700;
+  letter-spacing:0.3px;
+  font-size:10.5px;
+}
+.meta-v{flex:1;color:#d8dce8}
+/* Skill rollable inside the meta block — slightly tighter padding so
+   the inline 、 separators don't break the line, and a subtle dotted
+   underline so players know it's clickable even before hover. */
+.meta-v .skill-roll{
+  padding:0 2px;
+  text-underline-offset:2px;
+  text-decoration: underline dotted rgba(127,195,235,0.45);
+}
+.meta-v .skill-roll:hover{
+  text-decoration: underline solid rgba(127,195,235,0.85);
+}
 
 .abil{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;align-content:start}
 .abl{

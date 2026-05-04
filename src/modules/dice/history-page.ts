@@ -2,6 +2,9 @@ import OBR from "@owlbear-rodeo/sdk";
 import { DieResult, sidesOf } from "./types";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
+import { bindPanelDrag } from "../../utils/panelDrag";
+import { PANEL_IDS } from "../../utils/panelLayout";
+import { installDebugOverlay } from "../../utils/debugOverlay";
 
 let lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -49,6 +52,12 @@ interface HistoryEntry {
   ts: number;
   hidden?: boolean;
   collectiveId?: string;
+  // Mirrors `DiceRollPayload.rowStarts` from panel-page — present when
+  // the roll was wrapped in `repeat(N, …)`. Each entry in `rowStarts`
+  // is the index in `dice[]` where that row starts. Used here so the
+  // strip can render `+mod × N` and a `repeat×N` tag instead of a
+  // single mod chip whose math no longer matches the total.
+  rowStarts?: number[];
 }
 
 // Currently-active replay's collective-id (LOCAL state — set when this
@@ -56,6 +65,138 @@ interface HistoryEntry {
 // can render the active row with a "lit up" border and so a second
 // click on the same row sends a CLOSE broadcast.
 let activeReplayCid: string | null = null;
+
+// Per-entry transient timer. Each new entry that arrives via the
+// reveal broadcast gets a 5-second window in which its row is
+// visible with a right-to-left progress bar; when the timer fires
+// the row is removed from the visible list (data still persists in
+// `history` so the detail / "show all" views can recover it).
+const TRANSIENT_DURATION_MS = 5_000;
+interface TransientState {
+  expiresAt: number;
+  timer: number;
+}
+const transientByPlayer = new Map<string, TransientState>();
+
+// View mode — "transient" (default; only the live progress-bar rows
+// are shown, auto-close fires when empty) or "all" (manual user-open
+// shows the full history with no progress bars or auto-close).
+type ViewMode = "transient" | "all";
+let viewMode: ViewMode = (() => {
+  try {
+    const m = new URLSearchParams(location.search).get("mode");
+    if (m === "all" || m === "transient") return m;
+  } catch {}
+  return "transient";
+})();
+
+// Avoid double-firing the auto-close when timers race or the user
+// clicks the trigger at the same moment as the last transient expires.
+let autoCloseSent = false;
+
+// Broadcast to background asking it to close the popover because the
+// transient list has emptied. Background owns the popover lifecycle;
+// it'll also reset its own `historyOpen` / trigger state.
+const BC_DICE_HISTORY_AUTO_CLOSE = "com.obr-suite/dice-history-auto-close";
+
+// Track whether at least one transient entry has appeared since
+// open — without this guard we'd send AUTO_CLOSE the moment the
+// iframe mounts (transient set is empty initially), making the
+// popover slam shut immediately on its first paint.
+let hasShownTransient = false;
+function maybeAutoClose(): void {
+  if (viewMode !== "transient") return;
+  if (!hasShownTransient) return;
+  if (transientByPlayer.size > 0) return;
+  if (detailRollerKey) return;
+  if (autoCloseSent) return;
+  autoCloseSent = true;
+  try {
+    OBR.broadcast.sendMessage(
+      BC_DICE_HISTORY_AUTO_CLOSE,
+      {},
+      { destination: "LOCAL" },
+    );
+  } catch {}
+}
+
+// Schedule the per-entry timer + progress-bar driver. The progress
+// bar's CSS uses `transform: scaleX(...)` so we don't have to hammer
+// width recomputes on every frame — just update the transform value.
+// Reset+restart when the SAME player gets a new roll inside the
+// existing window (the "freshness" of their latest roll moves the
+// expiry to now+5s instead of stacking).
+function startTransient(playerKey: string): void {
+  const prev = transientByPlayer.get(playerKey);
+  if (prev) clearTimeout(prev.timer);
+  const expiresAt = Date.now() + TRANSIENT_DURATION_MS;
+  const timer = window.setTimeout(() => {
+    transientByPlayer.delete(playerKey);
+    render();
+    maybeAutoClose();
+  }, TRANSIENT_DURATION_MS);
+  transientByPlayer.set(playerKey, { expiresAt, timer });
+  hasShownTransient = true;
+}
+
+// === Progress-bar driver =============================================
+// Single shared interval updates every visible `.row-progress-fill`'s
+// scaleX based on remaining ms / TRANSIENT_DURATION_MS. Self-stops
+// when no progress bars are visible.
+let progressInterval: number | null = null;
+function ensureProgressTimer(): void {
+  if (progressInterval != null) return;
+  const tick = () => {
+    const fills = rowsEl.querySelectorAll<HTMLDivElement>(".row-progress-fill");
+    if (!fills.length) {
+      stopProgressTimer();
+      return;
+    }
+    const now = Date.now();
+    fills.forEach((fill) => {
+      const key = fill.dataset.player ?? "";
+      const t = transientByPlayer.get(key);
+      if (!t) {
+        fill.style.transform = "scaleX(0)";
+        return;
+      }
+      const remaining = Math.max(0, t.expiresAt - now);
+      const ratio = remaining / TRANSIENT_DURATION_MS;
+      fill.style.transform = `scaleX(${ratio})`;
+    });
+  };
+  tick();
+  progressInterval = window.setInterval(tick, 100);
+}
+function stopProgressTimer(): void {
+  if (progressInterval != null) {
+    clearInterval(progressInterval);
+    progressInterval = null;
+  }
+}
+
+// === Popover auto-resize =============================================
+// Each visible row is roughly 56 px (44 px card + 4 px gap on each
+// side + 4 px outer padding). Plus 12 px outer padding for the rows
+// container. When detail view is open we use a fixed max height so
+// the user can browse comfortably.
+const ROW_PIX = 56;
+const MIN_HEIGHT = 56;
+const MAX_HEIGHT = 360;
+const POPOVER_ID_FOR_RESIZE = "com.obr-suite/dice-history";
+function requestPopoverResize(visibleRows: number): void {
+  let h: number;
+  if (detailRollerKey) {
+    h = MAX_HEIGHT;
+  } else if (viewMode === "all") {
+    h = MAX_HEIGHT;
+  } else if (visibleRows <= 0) {
+    h = MIN_HEIGHT;
+  } else {
+    h = Math.min(MAX_HEIGHT, MIN_HEIGHT + visibleRows * ROW_PIX);
+  }
+  try { OBR.popover.setHeight(POPOVER_ID_FOR_RESIZE, h); } catch {}
+}
 
 // Pending entries — received via BROADCAST_DICE_ROLL but not yet
 // committed to the visible history. Each one waits for the matching
@@ -75,7 +216,10 @@ function commitPending(rollId: string): void {
   // time we commit-pending here, the entry may already be present.
   // Without this guard we'd unshift a second copy → "集体 2" of the
   // same roll, which is the duplication the user hit.
+  const playerKey = p.entry.rollerId || p.entry.rollerName || "?";
   if (history.some((h) => h.rollId === rollId)) {
+    startTransient(playerKey);
+    autoCloseSent = false;
     render();
     if (detailRollerKey) renderDetail();
     return;
@@ -83,6 +227,8 @@ function commitPending(rollId: string): void {
   history.unshift(p.entry);
   if (history.length > HISTORY_CAP) history.length = HISTORY_CAP;
   saveHistory();
+  startTransient(playerKey);
+  autoCloseSent = false;
   render();
   if (detailRollerKey) {
     const k = p.entry.rollerId || p.entry.rollerName || "?";
@@ -94,7 +240,10 @@ let history: HistoryEntry[] = loadHistory();
 let myRole: "GM" | "PLAYER" | "" = "";
 
 const rowsEl = document.getElementById("rows") as HTMLDivElement;
-const headHint = document.getElementById("headHint") as HTMLSpanElement;
+// headHint was removed when the title bar was dropped from
+// dice-history.html. Keep a null-safe handle so the existing call
+// sites stay valid (no-op when the element isn't rendered).
+const headHint = document.getElementById("headHint") as HTMLSpanElement | null;
 const detailEl = document.getElementById("detail") as HTMLDivElement;
 const detailSwatch = document.getElementById("detailSwatch") as HTMLDivElement;
 const detailName = document.getElementById("detailName") as HTMLDivElement;
@@ -164,25 +313,47 @@ function chipsHtml(dice: DieResult[]): string {
       d.loser ? "loser" :
       d.value === sides ? "crit" :
       d.value === 1 ? "fail" : "";
+    // Subtraction dice show a leading "−" so users see what's being
+    // deducted at a glance, plus a `subtract` class for the dimmer
+    // styling (matches the effect-modal's faded subtract dice).
+    const subtractCls = d.subtract ? " subtract" : "";
+    const valueStr = d.subtract ? `−${d.value}` : String(d.value);
     parts.push(
-      `<span class="die-chip ${cls}">` +
+      `<span class="die-chip ${cls}${subtractCls}">` +
       `<img src="/suite/${imgFor(d.type)}.png" alt="${escapeHtml(d.type)}" draggable="false">` +
-      `<span>${d.value}</span>` +
+      `<span>${valueStr}</span>` +
       `</span>`,
     );
   }
   return parts.join("");
 }
-function buildFormula(entry: HistoryEntry): string {
+function buildFormula(entry: HistoryEntry, showLabel = true): string {
   const chips = chipsHtml(entry.dice);
   let modStr = "";
   if (entry.modifier !== 0) {
-    modStr = `<span class="mod">${entry.modifier > 0 ? `+${entry.modifier}` : entry.modifier}</span>`;
+    // For repeat(N, …) rolls the modifier is applied once per row, not
+    // once total — the entry.total is dice + modifier × N. Render the
+    // mod as `+5×3` so the chips → total arithmetic actually balances.
+    const N = entry.rowStarts?.length ?? 0;
+    const sign = entry.modifier > 0 ? "+" : "";
+    modStr = N > 1
+      ? `<span class="mod">${sign}${entry.modifier}×${N}</span>`
+      : `<span class="mod">${sign}${entry.modifier}</span>`;
   }
-  const labelStr = entry.label
+  // Repeat header: `repeat(N)` so the user sees at a glance this isn't
+  // a flat single roll but N independent ones.
+  const repeatTag = (entry.rowStarts?.length ?? 0) > 1
+    ? `<span class="label-tag" style="background:rgba(93,173,226,0.18);color:#9ad9ff">repeat×${entry.rowStarts!.length}</span>`
+    : "";
+  // `showLabel = false` in the detail view — the row's `.player`
+  // line already shows the label as the entry's title there, so an
+  // inline italic-grey duplicate would be visual noise. The
+  // popover-row solo path keeps `showLabel = true` since its title
+  // shows the roller's name, not the label.
+  const labelStr = showLabel && entry.label
     ? `<span class="label-tag">${escapeHtml(entry.label)}</span>`
     : "";
-  const list = `<div class="dice-list">${chips}${modStr}${labelStr}<span class="eq">=</span></div>`;
+  const list = `<div class="dice-list">${repeatTag}${chips}${modStr}${labelStr}<span class="eq">=</span></div>`;
   const total = `<span class="total">${entry.total}</span>`;
   return list + total;
 }
@@ -213,6 +384,49 @@ function buildMemberCard(m: HistoryEntry): string {
 
 function buildMemberStripHtml(members: HistoryEntry[]): string {
   return `<div class="member-strip">${members.map(buildMemberCard).join("")}</div>`;
+}
+
+// `repeat(N, inner)` rolls render as N stacked member-cards (one per
+// iteration) instead of a single flattened formula. Same visual
+// vocabulary as a collective member-strip, but vertical because all
+// rolls belong to ONE player and stacking matches the user's mental
+// model ("3 separate attacks, top-to-bottom"). Each card shows the
+// dice chips + modifier + per-row total — modifier is applied to
+// every row, never aggregated, so the math at a glance is unambiguous.
+function buildRepeatRowCard(entry: HistoryEntry, rowIdx: number, rowDice: DieResult[], rowTotal: number): string {
+  const chips = chipsHtml(rowDice);
+  const modStr = entry.modifier !== 0
+    ? `<span class="mod">${entry.modifier > 0 ? `+${entry.modifier}` : entry.modifier}</span>`
+    : "";
+  const kept = rowDice.filter((d) => !d.loser);
+  const isCrit = kept.some((d) => d.type === "d20" && d.value === 20);
+  const isFail = kept.some((d) => d.type === "d20" && d.value === 1);
+  const cls = ["member-card"];
+  if (isCrit) cls.push("crit");
+  else if (isFail) cls.push("fail");
+  if (entry.hidden) cls.push("hidden-roll");
+  return (
+    `<div class="${cls.join(" ")}" data-rollid="${escapeHtml(entry.rollId)}" data-cid="${escapeHtml(entry.collectiveId ?? entry.rollId)}">` +
+    `<span class="repeat-idx">#${rowIdx + 1}</span>` +
+    `${chips}${modStr}<span class="eq">=</span><span class="total">${rowTotal}</span>` +
+    `</div>`
+  );
+}
+
+function buildRepeatStripHtml(entry: HistoryEntry, layout: "flow" | "stack" = "stack"): string {
+  const rows = entry.rowStarts ?? [];
+  if (rows.length === 0) return "";
+  const out: string[] = [];
+  for (let r = 0; r < rows.length; r++) {
+    const start = rows[r];
+    const end = r + 1 < rows.length ? rows[r + 1] : entry.dice.length;
+    const rowDice = entry.dice.slice(start, end);
+    const kept = rowDice.filter((d) => !d.loser);
+    const rowTotal = kept.reduce((a, d) => a + d.value, 0) + entry.modifier;
+    out.push(buildRepeatRowCard(entry, r, rowDice, rowTotal));
+  }
+  const cls = layout === "flow" ? "repeat-strip is-flow" : "repeat-strip is-stack";
+  return `<div class="${cls}">${out.join("")}</div>`;
 }
 
 interface GroupedRow {
@@ -252,36 +466,59 @@ function latestPerPlayer(): GroupedRow[] {
 }
 
 function render(): void {
-  const rows = latestPerPlayer();
+  let rows = latestPerPlayer();
+  if (viewMode === "transient") {
+    // Only show players whose latest roll is still within its 5s
+    // window. The detail / "show all" view is unaffected.
+    rows = rows.filter((g) => {
+      const k = g.head.rollerId || g.head.rollerName || "?";
+      return transientByPlayer.has(k);
+    });
+  }
   if (!rows.length) {
     rowsEl.innerHTML = `<div class="empty">${tt("diceHistEmpty")}</div>`;
-    headHint.textContent = "";
+    if (headHint) headHint.textContent = "";
+    requestPopoverResize(0);
     return;
   }
-  headHint.textContent = lang === "zh" ? `${rows.length} 位` : `${rows.length}`;
+  if (headHint) headHint.textContent = lang === "zh" ? `${rows.length} 位` : `${rows.length}`;
   rowsEl.innerHTML = rows.map((g) => {
     const h = g.head;
     const isCollective = g.members.length > 1;
+    const isRepeat = !isCollective && (h.rowStarts?.length ?? 0) > 1;
     const dmTag = h.rollerId && myRoleIsDM(h) ? `<span class="dm-tag">DM</span>` : "";
     const darkTag = h.hidden ? `<span class="dark-tag">${tt("diceHistDarkTag")}</span>` : "";
     const collTag = isCollective ? `<span class="coll-tag">${tt("diceHistColl")} ${g.members.length}</span>` : "";
+    const repeatTag = isRepeat
+      ? `<span class="coll-tag" style="background:rgba(93,173,226,0.18);color:#9ad9ff">×${h.rowStarts!.length}</span>`
+      : "";
     const rowCls = ["row"];
     if (h.hidden) rowCls.push("hidden-roll");
-    // Collective row: each member's roll is its own little box in a
-    // wrap-friendly strip — no aggregate total. Clicking the row (or
-    // any member-card inside, via bubbling) still opens the detail
-    // view, where the same strip is repeated for every collective in
-    // this player's history. Solo rolls keep the existing per-entry
-    // formula with chips + total.
+    // Three render paths:
+    //   collective → wrap-friendly strip of member-cards (one per token)
+    //   repeat     → flow-wrap strip of member-cards (matches the
+    //                in-row visual rhythm of a collective; wraps to
+    //                a new line only when the strip can't fit)
+    //   solo       → flat formula with chips + total
     const bodyTail = isCollective
       ? buildMemberStripHtml(g.members)
+      : isRepeat
+      ? buildRepeatStripHtml(h, "flow")
       : `<div class="formula">${buildFormula(h)}</div>`;
+    // Progress bar — only attached in transient mode. Width is
+    // animated via JS-driven scaleX (set in the post-render pass
+    // below) so the bar actually depletes over the 5-second window.
+    const playerKey = h.rollerId || h.rollerName || "?";
+    const progressMarkup = viewMode === "transient" && transientByPlayer.has(playerKey)
+      ? `<div class="row-progress"><div class="row-progress-fill" data-player="${escapeHtml(playerKey)}"></div></div>`
+      : "";
     return `
-      <div class="${rowCls.join(" ")}" data-roller="${escapeHtml(h.rollerName)}" data-rollerid="${escapeHtml(h.rollerId)}">
+      <div class="${rowCls.join(" ")}" data-roller="${escapeHtml(h.rollerName)}" data-rollerid="${escapeHtml(h.rollerId)}" data-player="${escapeHtml(playerKey)}">
+        ${progressMarkup}
         <div class="swatch" style="--player-color:${h.rollerColor}"></div>
         <div class="body">
           <div class="line1">
-            <span class="player">${dmTag}${darkTag}${collTag}${escapeHtml(h.rollerName)}</span>
+            <span class="player">${dmTag}${darkTag}${collTag}${repeatTag}${escapeHtml(h.rollerName)}</span>
             <span class="ago">${formatAgo(Date.now() - h.ts)}</span>
           </div>
           ${bodyTail}
@@ -300,6 +537,13 @@ function render(): void {
       openDetail(rollerId || playerName, playerName);
     });
   });
+
+  // Drive every visible progress bar with a single 100ms interval
+  // (cheaper than a per-row rAF loop). Each call sets each bar's
+  // remaining transform based on its player's `expiresAt`.
+  if (viewMode === "transient") ensureProgressTimer();
+  // Auto-fit popover height to the visible row count.
+  requestPopoverResize(rows.length);
 }
 
 // Camera-focus the local viewport on the involved tokens. Single
@@ -350,12 +594,15 @@ async function focusCameraOnGroup(g: GroupedRow): Promise<void> {
 
 // Build the detail view for one player. Filter history to that
 // player's entries, render newest-first, scroll-to-top.
-function openDetail(rollerKey: string, playerName: string): void {
+function openDetail(rollerKey: string, _playerName: string): void {
   detailRollerKey = rollerKey;
   renderDetail();
   detailEl.classList.add("on");
   rowsEl.classList.add("shifted");
   detailList.scrollTop = 0;
+  // Detail view always uses max popover height so the user can scroll
+  // through the player's entire history without resizing.
+  requestPopoverResize(0);
 }
 
 function closeDetail(): void {
@@ -364,7 +611,13 @@ function closeDetail(): void {
   clearActiveReplay().catch(() => {});
   detailEl.classList.remove("on");
   rowsEl.classList.remove("shifted");
-  setTimeout(() => { detailRollerKey = null; }, 350);
+  setTimeout(() => {
+    detailRollerKey = null;
+    // Re-render to reapply the transient/all filter, and re-fit
+    // the popover to the new visible row count.
+    render();
+    maybeAutoClose();
+  }, 350);
 }
 
 function renderDetail(): void {
@@ -489,6 +742,23 @@ function renderEntryRow(h: HistoryEntry, cid: string, tight: boolean): string {
   if (kept.some((d) => d.type === "d20" && d.value === 1)) cls.push("fail");
   if (h.hidden && !tight) cls.push("hidden-roll");
   if (cid === activeReplayCid && !tight) cls.push("replay-on");
+  // Repeat-mode entries in the DETAIL view render as a flow strip
+  // (horizontal wrap), matching the latest-per-player popover row.
+  // Per the user's clarification: only the floating tooltip (which
+  // appears at the player's head when an entry is clicked — see
+  // `replay-page.ts`) uses the vertical-stack variant. Both the
+  // popover row AND the detail view stay in flow so the user can
+  // scan many rolls at once.
+  //
+  // `showLabel = false`: the entry's `.player` line already shows
+  // `h.label || h.rollerName` as the title, so duplicating the
+  // label inside the formula as italic grey small-text is just
+  // visual noise. The popover row keeps `showLabel = true` because
+  // its title is the roller's name, never the label.
+  const isRepeat = (h.rowStarts?.length ?? 0) > 1;
+  const body = isRepeat
+    ? buildRepeatStripHtml(h, "flow")
+    : `<div class="formula">${buildFormula(h, /* showLabel */ false)}</div>`;
   return `
     <div class="${cls.join(" ")}" data-cid="${escapeHtml(cid)}" style="--player-color:${h.rollerColor}">
       <div class="body">
@@ -496,7 +766,7 @@ function renderEntryRow(h: HistoryEntry, cid: string, tight: boolean): string {
           <span class="player">${h.hidden && !tight ? `<span class="dark-tag">${tt("diceHistDarkTag")}</span>` : ""}${escapeHtml(h.label || h.rollerName)}</span>
           <span class="ago">${ago}</span>
         </div>
-        <div class="formula">${buildFormula(h)}</div>
+        ${body}
       </div>
     </div>
   `;
@@ -559,11 +829,17 @@ let myPlayerId = "";
 // of bouncing to the dice panel's history tab.)
 
 OBR.onReady(async () => {
+  installDebugOverlay();
   try {
     const role = await OBR.player.getRole();
     myRole = role === "GM" ? "GM" : "PLAYER";
     myPlayerId = await OBR.player.getId();
   } catch {}
+
+  // Drag grip in the title bar — releases broadcast to dice/index.ts
+  // which re-issues OBR.popover.open() with the new offset.
+  const dragHandle = document.getElementById("drag-handle");
+  if (dragHandle) bindPanelDrag(dragHandle, PANEL_IDS.diceHistory);
 
   // X button — dismiss the popover for this session, BUT keep the
   // cluster's "投骰记录" toggle on so the next dice roll auto-reopens
@@ -633,6 +909,39 @@ OBR.onReady(async () => {
     }
   });
 
+  // Mount-time recovery: the iframe may have been (re)mounted by the
+  // auto-open path AFTER the BROADCAST_DICE_ROLL / BC_DICE_HISTORY_REVEAL
+  // pair already fired. Without this, the row that triggered the
+  // auto-open would never appear (transient set is empty until a
+  // future broadcast lands). Scan history for entries newer than the
+  // transient window, arm a transient timer per player so their row
+  // is immediately visible. Also handles the user's "再次投掷不触发"
+  // bug — every fresh open seeds transient state from the latest
+  // localStorage state, regardless of any prior expired-out players.
+  const RECENT_WINDOW_MS = TRANSIENT_DURATION_MS;
+  const seenAtMount = new Set<string>();
+  const now = Date.now();
+  for (const h of history) {
+    const playerKey = h.rollerId || h.rollerName || "?";
+    if (seenAtMount.has(playerKey)) continue;
+    seenAtMount.add(playerKey);
+    if (now - h.ts <= RECENT_WINDOW_MS) {
+      // Use the entry's actual age so the bar starts already partially
+      // depleted instead of resetting to a fresh 5s every reopen.
+      const remaining = Math.max(0, RECENT_WINDOW_MS - (now - h.ts));
+      if (remaining > 0) {
+        const expiresAt = now + remaining;
+        const timer = window.setTimeout(() => {
+          transientByPlayer.delete(playerKey);
+          render();
+          maybeAutoClose();
+        }, remaining);
+        transientByPlayer.set(playerKey, { expiresAt, timer });
+        hasShownTransient = true;
+      }
+    }
+  }
+
   applyI18nDom(lang);
   render();
 });
@@ -652,9 +961,30 @@ setInterval(() => {
 }, 30_000);
 
 // Cross-tab refresh: when the dice-panel modifies localStorage (e.g.
-// clearing history), update this view too.
+// clearing history), update this view too. Also a safety net for the
+// "every new roll triggers progress + row entrance" guarantee — if
+// BROADCAST_DICE_ROLL somehow misses our listener (popover unmounting
+// race, browser throttling), the LS update from dice-panel's eager
+// save still reaches us via this event and we can arm a transient
+// timer for any newly-arrived entry whose player isn't already live.
 window.addEventListener("storage", (e) => {
   if (e.key !== LS_HISTORY) return;
-  history = loadHistory();
+  const next = loadHistory();
+  // Detect newly-arrived rollIds (in `next` but not in current).
+  const known = new Set(history.map((h) => h.rollId));
+  const fresh: HistoryEntry[] = [];
+  for (const h of next) {
+    if (!known.has(h.rollId)) fresh.push(h);
+  }
+  history = next;
+  // For each fresh entry, re-arm its player's transient timer so a
+  // new roll always restarts the 5s window even if the player's
+  // previous row had already expired.
+  const now = Date.now();
+  for (const h of fresh) {
+    if (now - h.ts > TRANSIENT_DURATION_MS) continue;
+    startTransient(h.rollerId || h.rollerName || "?");
+    autoCloseSent = false;
+  }
   render();
 });

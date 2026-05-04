@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Drag Preview</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  height:100%;width:100%;
+  overflow:hidden;
+  background:transparent;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  color:#e6e8ee;
+}
+
+/* The blocker layer fills the OBR viewport while drag is in progress.
+   It captures every pointer event so the user can't accidentally
+   click through to the canvas (or the original popover) and break
+   the drag gesture mid-stream. Slight translucent tint helps signal
+   "you're in drag mode". */
+.blocker{
+  position:fixed;inset:0;
+  background:rgba(7,12,24,0.18);
+  cursor:grabbing;
+  user-select:none;
+  touch-action:none;
+}
+
+/* Ghost rectangle = the panel's preview. Sized & positioned via JS
+   to match the source panel's bbox, then translated by the drag
+   delta on each pointermove. Translucent fill + glowing accent
+   border make the destination obvious. */
+.ghost{
+  position:absolute;
+  border:2px solid rgba(93,173,226,0.95);
+  border-radius:10px;
+  background:rgba(93,173,226,0.10);
+  box-shadow:
+    0 0 0 1px rgba(7,19,32,0.55),
+    0 0 22px rgba(93,173,226,0.50),
+    inset 0 0 18px rgba(93,173,226,0.18);
+  pointer-events:none;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:#bfe2f5;
+  letter-spacing:0.6px;
+  text-transform:uppercase;
+  text-shadow:0 1px 2px rgba(0,0,0,0.6);
+  transition:none;
+}
+.ghost-label{
+  background:rgba(7,19,32,0.65);
+  border:1px solid rgba(93,173,226,0.4);
+  border-radius:14px;
+  padding:4px 10px;
+  font-size:10.5px;
+}
+</style>
+</head>
+<body>
+<div class="blocker" id="blocker">
+  <div class="ghost" id="ghost">
+    <span class="ghost-label" id="ghost-label">面板</span>
+  </div>
+</div>
+<script type="module" src="/src/drag-preview.ts"></script>
+</body>
+</html>

@@ -37,6 +37,11 @@ const translations = {
     gathered: "Initiative characters gathered",
     about: "About",
     endTurn: "End Turn",
+    makeInvisible: "Mark Invisible",
+    revealInvisible: "Reveal (Lift Invisibility)",
+    dragInAutoOn: "Drag-in auto-add",
+    dragInAutoOff: "Drag-in auto-add",
+    dragInAutoTitle: "When ON, dragging a character into the scene during prep/combat prompts to add them to initiative. Click to disable (strikethrough).",
   },
   zh: {
     initiative: "先攻",
@@ -73,6 +78,11 @@ const translations = {
     gathered: "先攻角色已集结",
     about: "关于",
     endTurn: "结束回合",
+    makeInvisible: "标记隐形",
+    revealInvisible: "解除隐形",
+    dragInAutoOn: "拖拽入场自动先攻",
+    dragInAutoOff: "拖拽入场自动先攻",
+    dragInAutoTitle: "开启后，准备/战斗中将角色拖入场景会弹窗询问是否加入先攻。点击切换（删除线表示已关闭）。",
   },
 } as const;
 

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>编辑光源</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:rgba(31,34,48,0.97);
+  --bg2:rgba(15,17,28,0.85);
+  --border:rgba(255,255,255,0.14);
+  --border-strong:rgba(245,166,35,0.45);
+  --text:#e6e8ee;
+  --text-dim:#9aa0b3;
+  --accent:#f5a623;
+  --accent-dim:#f0b94a;
+}
+html,body{
+  height:100%;width:100%;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Roboto,sans-serif;
+  font-size:12.5px;background:transparent;color:var(--text);
+  overflow:hidden;
+}
+body{padding:0;pointer-events:none;position:relative}
+.card{
+  position:absolute;inset:0;
+  background:var(--bg);
+  border:1px solid var(--border-strong);
+  border-radius:10px;
+  box-shadow:0 12px 36px rgba(0,0,0,0.55);
+  pointer-events:auto;
+  display:flex;flex-direction:column;
+  padding:12px 14px;
+}
+.head{
+  display:flex;align-items:center;gap:8px;
+  padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:10px;
+  flex-shrink:0;
+}
+.head .ic{font-size:16px;color:var(--accent-dim)}
+.head .ttl{flex:1;font-size:13px;font-weight:700;letter-spacing:0.2px}
+.head .x{
+  background:none;border:none;color:var(--text-dim);
+  cursor:pointer;font-size:16px;line-height:1;padding:2px 4px;
+  border-radius:4px;font-family:inherit;
+}
+.head .x:hover{color:var(--text);background:rgba(255,255,255,0.08)}
+.body{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.row{display:flex;align-items:center;gap:8px}
+.row .lbl{flex:1;font-size:11.5px;color:var(--text-dim)}
+.row input[type=number]{
+  width:70px;height:26px;padding:0 6px;
+  background:var(--bg2);border:1px solid var(--border);border-radius:4px;
+  color:var(--text);font-family:inherit;font-size:12px;outline:none;
+}
+.row input[type=number]:focus{border-color:var(--accent)}
+.row input[type=color]{
+  width:40px;height:26px;border:1px solid var(--border);border-radius:4px;
+  background:transparent;cursor:pointer;padding:0;
+}
+.unit{font-size:10.5px;color:var(--text-dim);margin-left:-4px}
+.desc{
+  font-size:10.5px;color:var(--text-dim);
+  line-height:1.5;margin-top:2px;
+}
+.foot{
+  display:flex;gap:6px;justify-content:flex-end;
+  padding-top:10px;border-top:1px solid var(--border);margin-top:10px;
+  flex-shrink:0;
+}
+.btn{
+  padding:6px 14px;border-radius:5px;font-size:12px;cursor:pointer;
+  border:1px solid transparent;font-family:inherit;font-weight:600;
+}
+.btn.cancel{background:var(--bg2);color:var(--text-dim);border-color:var(--border)}
+.btn.cancel:hover{color:var(--text)}
+.btn.save{
+  background:rgba(245,166,35,0.25);color:var(--accent-dim);
+  border-color:rgba(245,166,35,0.50);
+}
+.btn.save:hover{background:rgba(245,166,35,0.40)}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="head">
+    <span class="ic">💡</span>
+    <span class="ttl">编辑光源</span>
+    <button class="x" id="x">×</button>
+  </div>
+  <div class="body">
+    <div class="row">
+      <span class="lbl">明视半径（颜色视野）</span>
+      <input id="inp-color-r" type="number" min="0" max="500" step="5"/>
+      <span class="unit">尺</span>
+    </div>
+    <div class="row">
+      <span class="lbl">暗视半径（黑白延伸）</span>
+      <input id="inp-dark-r" type="number" min="0" max="500" step="5"/>
+      <span class="unit">尺</span>
+    </div>
+    <p class="desc">明视区显示完整颜色；暗视区在外圈，覆盖一层冷色调代表黑白视觉。两者相加 = 总能看到的最远距离。</p>
+
+    <div class="row" style="margin-top:8px">
+      <span class="lbl">光源颜色（仅视觉染色）</span>
+      <input id="inp-color" type="color"/>
+    </div>
+    <div class="row">
+      <span class="lbl">墙边软边淡出（尺）</span>
+      <input id="inp-falloff" type="number" min="0" max="40" step="1"/>
+    </div>
+    <div class="row">
+      <span class="lbl">射线数（精度）</span>
+      <input id="inp-rays" type="number" min="60" max="720" step="20"/>
+    </div>
+    <p class="desc">射线越多边缘越平滑但越费 CPU。240 是甜蜜点；地图墙壁很多时可以降到 120。</p>
+  </div>
+  <div class="foot">
+    <button class="btn cancel" id="btn-cancel">取消</button>
+    <button class="btn save" id="btn-save">保存</button>
+  </div>
+</div>
+<script type="module" src="/src/modules/vision/light-edit-page.ts"></script>
+</body>
+</html>

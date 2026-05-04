@@ -32,6 +32,11 @@ html, body, #root { height: 100%; background: transparent; }
   gap: 2px;
   padding: 4px 8px 4px;
   color: var(--text-primary);
+  /* Transparent again per latest user call. The cards themselves
+     have their own background fills, so the panel doesn't need a
+     surface — the user wanted to see the underlying map through
+     the gaps between cards. */
+  background: transparent;
   /* hidden vertical — prevents the scrollbar when content nudges past iframe
      height. Roll buttons and active bulge are tuned to fit inside. */
   overflow: hidden;
@@ -40,6 +45,38 @@ html, body, #root { height: 100%; background: transparent; }
 .app-hbar.transitioning,
 .app-pill.transitioning { visibility: hidden; }
 
+/* Drag grip — sits inline at the right end of .hbar-cluster (after the
+   combat controls / display-mode toggle), or right next to the pill
+   button when collapsed. Participates in flex layout instead of
+   overlapping content. */
+/* Drag handle — explicit opaque background so it's visible against the
+   transparent panel backdrop (was almost invisible at 0.55 opacity
+   on top of an empty-canvas panel). Same dark slate as the rest of
+   the suite's chips. */
+.drag-handle {
+  flex-shrink: 0;
+  width: 18px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: rgba(255, 255, 255, 0.65);
+  background: rgba(31, 34, 48, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 5px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition: filter 0.12s, color 0.12s, border-color 0.12s;
+  touch-action: none;
+  user-select: none;
+}
+.drag-handle:hover { color: #fff; filter: brightness(1.18); border-color: rgba(255, 255, 255, 0.28); }
+.drag-handle.is-dragging { cursor: grabbing; color: var(--accent); border-color: var(--accent); }
+.drag-handle svg { width: 10px; height: 16px; display: block; pointer-events: none; }
+/* Collapsed-pill variant: pair the grip with the round pill-btn
+   horizontally so the pill stays visually compact. */
+.app-pill { display: flex; align-items: center; gap: 4px; }
+
 .hbar-row {
   display: flex;
   align-items: flex-start;
@@ -47,12 +84,16 @@ html, body, #root { height: 100%; background: transparent; }
 }
 
 .hbar-row-items {
-  /* Fits: base card 80 OR active card 100 + 3px gap + 18px roll-button strip
-     + 22px extra so the horizontal scrollbar that appears when many entries
-     overflow doesn't clip the below-card buttons. Row stretches children so
-     the list reaches this height and the buttons aren't hidden by list
-     overflow. */
-  min-height: 144px;
+  /* Min height covers the smallest possible card layout (80 px
+     portrait, no roll buttons, no active-bulge — i.e. the idle
+     state). The popover-level height is what actually drives the
+     visible row size: in idle the popover is 129 px tall (29 px
+     gap → ~99 px for the items row), in combat 159 px (~129 px
+     row). The row stretches children so the list fills available
+     height and absolutely-positioned roll buttons aren't clipped
+     by sibling overflow. */
+  min-height: 80px;
+  flex: 1 1 auto;
   align-items: stretch;
   justify-content: center;
 }
@@ -74,7 +115,22 @@ html, body, #root { height: 100%; background: transparent; }
   flex-wrap: nowrap;
 }
 
-/* Items container — horizontal scroll when overflowing, vertical always fits. */
+/* Items container — horizontal scroll when overflowing, vertical always fits.
+   Scrollbar HIDDEN per user request — scroll via mouse wheel (translated to
+   horizontal in panel-page) and click-drag (also handled in panel-page).
+   `overscroll-behavior` keeps scroll-chaining off so wheel events don't
+   leak into the page beneath the popover iframe.
+
+   `user-select: none` is always on — the cards' count / mod / labels
+   would otherwise get text-selected during a drag (the previous round
+   only set this on `.is-dragging` which fired AFTER the threshold,
+   so the first 4 px of every drag still highlighted text). Inputs
+   re-enable selection inside themselves via `.count-input` etc.
+
+   `scroll-behavior: smooth` makes wheel events ease into the new
+   scrollLeft instead of snapping; touch-action: pan-y keeps the
+   browser from claiming horizontal pan as a native gesture (which
+   was causing wheel/pointer to no-op on some setups). */
 .initiative-list {
   min-width: 0;
   display: flex;
@@ -84,16 +140,28 @@ html, body, #root { height: 100%; background: transparent; }
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0 4px;
-  scrollbar-width: thin;
   max-width: 100%;
+  scrollbar-width: none;             /* Firefox */
+  -ms-overflow-style: none;          /* IE / old Edge */
+  overscroll-behavior-x: contain;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: pan-y;
+  scroll-behavior: smooth;
+}
+.initiative-list.is-dragging {
+  cursor: grabbing;
+  /* Disable smooth scroll while dragging — direct cursor follow needs
+     immediate scrollLeft updates, not eased ones. */
+  scroll-behavior: auto;
 }
 
-.initiative-list::-webkit-scrollbar { height: 3px; }
-.initiative-list::-webkit-scrollbar-track { background: transparent; }
-.initiative-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
-}
+/* Inputs nested inside the list re-enable text selection so the user
+   can still highlight digits to overwrite them. */
+.initiative-list input { user-select: text; -webkit-user-select: text; }
+
+.initiative-list::-webkit-scrollbar { display: none; }
 
 /* ===================== INITIATIVE ITEM — portrait card ===================== */
 .initiative-item {
@@ -106,6 +174,12 @@ html, body, #root { height: 100%; background: transparent; }
   cursor: pointer;
   background: rgba(22, 33, 62, 0.9);
   border: 2px solid rgba(255, 255, 255, 0.08);
+  /* Establish a stacking context so the roll-buttons inside can use
+     z-index:-1 to slip BEHIND the slot's content (image + count
+     footer) without going behind the slot's BACKGROUND. Without
+     `isolation:isolate`, z-index:-1 children would drop below the
+     parent's bg layer and become invisible. */
+  isolation: isolate;
   transition: height 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
               border-color 0.15s ease,
               box-shadow 0.15s ease;
@@ -141,11 +215,21 @@ html, body, #root { height: 100%; background: transparent; }
 }
 
 .item-img img {
+  /* Render the IMG box at 125% of the container height, but
+     ABSOLUTELY position it with `top: -12.5%`. Combined with
+     overflow:hidden on .item-img, this clips the top 10% AND bottom
+     10% of the rendered source — which was the user's "show middle
+     80%" intent. The previous setup (height:125% + center
+     positioning) only clipped the bottom; the top of the token
+     remained visible. */
   display: block;
+  position: absolute;
+  top: -12.5%;
+  left: 0;
   width: 100%;
-  height: 125%;                      /* show 80% of the source — crop bottom 20% */
+  height: 125%;
   object-fit: cover;
-  object-position: center top;       /* top-aligned */
+  object-position: center;
   user-select: none;
   -webkit-user-drag: none;
 }
@@ -172,17 +256,88 @@ html, body, #root { height: 100%; background: transparent; }
   pointer-events: none;
 }
 
-/* ----- Count footer — always visible, bottom strip ----- */
+/* ----- Count footer — always visible, bottom strip. Lifted +4% so
+   the (count+mod) formula has room for its parens descenders without
+   getting clipped at the card's bottom radius. ----- */
 .item-count {
   position: absolute;
   left: 0; right: 0; bottom: 0;
-  height: 20%;
+  height: 24%;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(15, 52, 96, 0.92);
   border-radius: 0 0 4px 4px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* "Final" display mode — count+modifier shown big with a small
+   formula sub-line beneath. Stack vertically and tighten line height
+   so the footer doesn't outgrow its 20% strip.
+
+   The `(count+mod)` formula sub-line was being clipped at the very
+   bottom of the footer (descenders on the parens swallowed by the
+   card's border-radius). Pull the whole stack upward inside the
+   footer and give the formula a touch more line-height so the
+   parens render cleanly. */
+.item-count.show-final {
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1;
+  padding-top: 1px;
+  padding-bottom: 2px;
+  justify-content: center;
+}
+.item-count.show-final .count-display {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.item-count .count-formula {
+  /* Slightly larger than before so descenders (parens) are fully
+     visible. The footer height was bumped to 24% to make room for
+     this without clipping. */
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.15;
+  margin-top: 0;
+  letter-spacing: 0.2px;
+}
+.initiative-item.active .item-count .count-formula {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* HP progress strip — sits at the very bottom of the image area,
+   immediately above the count footer. Numberless: just a thin
+   coloured bar whose width tracks current/max HP. The wrapper is
+   absolutely positioned so it doesn't disturb the image / footer
+   flexbox layout. The bar follows the bubbles module's color
+   palette (red fill on dark track) so the visual vocabulary is
+   consistent across canvas and panel. */
+/* HP track sits just above the count footer. Square corners (no
+   border-radius) per user spec — the bar should read as a clear
+   horizontal status strip, not a pill. */
+.item-hp-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 24%;                       /* lifted ABOVE the count footer */
+  height: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.item-hp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #c0392b, #e74c3c);
+  border-radius: 0;
+  transition: width 0.18s ease-out;
+}
+.initiative-item.active .item-hp-track {
+  background: rgba(0, 0, 0, 0.72);
 }
 
 .initiative-item.active .item-count {
@@ -193,6 +348,46 @@ html, body, #root { height: 100%; background: transparent; }
 .initiative-item.preparing.active .item-count {
   background: rgba(245, 166, 35, 0.85);
   color: #1a1a2e;
+}
+
+/* Display-mode toggle in the controls cluster — pill that reads as
+   text-only "Raw / Final" / "骰值 / 最终值".
+
+   The default ("骰值") state is opaque, using the suite's dark-card
+   token so the button reads against the now-transparent panel
+   background. `.on` ("最终值") lights it up with the initiative
+   panel's red accent so the user knows which mode is currently
+   active.
+
+   `min-width` reserves space for the wider of the two labels so
+   toggling between "骰值"(2) / "最终值"(3) — or "Raw" / "Final" —
+   doesn't reflow surrounding controls. `white-space: nowrap` keeps
+   the label on one line at all popover widths. */
+.display-mode-toggle {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  min-width: 48px;
+  text-align: center;
+  white-space: nowrap;
+  background: rgba(15, 52, 96, 0.92);            /* var(--bg-card) opacified */
+  color: var(--text-primary);
+  border: 1px solid rgba(93, 173, 226, 0.30);    /* suite-blue rim */
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  user-select: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+.display-mode-toggle:hover {
+  background: rgba(22, 33, 62, 0.95);
+  border-color: rgba(93, 173, 226, 0.55);
+}
+.display-mode-toggle.on {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 1px 4px rgba(233, 69, 96, 0.45);
 }
 
 .count-display {
@@ -259,63 +454,72 @@ html, body, #root { height: 100%; background: transparent; }
 .mod-input::-webkit-inner-spin-button,
 .mod-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 
-/* ----- Roll buttons — BELOW the card, fit EXACTLY the card width so rows
-        of adjacent items don't overlap each other. 3 × 18px + 2 × 1px gap
-        = 56px = card width. ----- */
+/* ----- Roll buttons — BELOW the card, with NEGATIVE overlap so they
+        tuck under the slot like brackets being covered. The slot
+        creates a stacking context (isolation:isolate, set on
+        .initiative-item below) so we can use z-index:-1 here to
+        push the buttons BEHIND the slot's content (image + count)
+        but still ABOVE the slot's background. ----- */
 .roll-buttons {
   position: absolute;
   top: 100%;
   left: 0;
   right: 0;
   display: flex;
-  gap: 1px;
-  margin-top: 3px;
+  gap: 0;
+  /* Pull buttons UP so the top half is hidden under the slot. */
+  margin-top: -8px;
   justify-content: center;
-  z-index: 4;
+  z-index: -1;
 }
 
+/* Roll buttons rendered as three colored bracket-blocks beneath the
+   slot — no text, no icons; the COLOR communicates which mode (red =
+   disadvantage, slate = normal, green = advantage). The trio reads
+   as one bracket spanning the full slot width: dis on left with a
+   bottom-LEFT-rounded corner, normal in the middle with no corners,
+   adv on right with a bottom-RIGHT-rounded corner. The 3-block strip
+   is exactly the slot's visual width so it tucks under the slot
+   like a colored shelf. */
 .roll-btn {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-  border: 1px solid rgba(0, 0, 0, 0.6);
-  border-radius: 3px;
-  background: rgba(240, 240, 240, 0.95);
+  flex: 1 1 0;
+  /* 16px tall — half (8px) hides under the slot, half pokes below. */
+  height: 16px;
+  width: auto;
+  border: none;
+  border-radius: 0;
   cursor: pointer;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45);
+  transition: filter 0.12s, transform 0.08s;
 }
-.roll-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.roll-btn:disabled { opacity: 0.32; cursor: not-allowed; }
+.roll-btn:hover:not(:disabled) { filter: brightness(1.18); }
+.roll-btn:active:not(:disabled) { transform: translateY(1px); }
 
-/* `color` drives the solid d20 fill in DiceIcons.tsx (fill=currentColor). */
-.roll-dis { color: #ff6b5b; }
-.roll-dis:hover:not(:disabled) { color: #ff8575; border-color: #9b1e0a; }
-
-.roll-normal { color: #d8dce8; }
-.roll-normal:hover:not(:disabled) { color: #fff; border-color: #4a5370; }
-
-.roll-adv { color: #55d38a; }
-.roll-adv:hover:not(:disabled) { color: #70e3a0; border-color: #165f35; }
-
-.d20-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
+/* dis = brick red, dark and saturated for "this hurts the roll"
+   normal = slate grey, neutral
+   adv  = forest green, healthy and clearly positive
+   Picked to be readable even at 8px height with no text/icon. */
+.roll-dis {
+  background: linear-gradient(180deg, #c0392b, #8e2419);
+  border-bottom-left-radius: 4px;
 }
-.d20-svg { width: 13px; height: 13px; display: block; }
-.d20-overlay {
-  position: absolute;
-  top: -1px; right: -1px;
-  width: 7px; height: 7px;
-  pointer-events: none;
-  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7));
+.roll-normal {
+  background: linear-gradient(180deg, #5a6076, #3a4054);
 }
+.roll-adv {
+  background: linear-gradient(180deg, #2ecc71, #1e8449);
+  border-bottom-right-radius: 4px;
+}
+
+/* `.d20-wrap` / `.d20-svg` / `.d20-overlay` are no-op now because the
+   buttons render no children — keep zero-size declarations so any
+   stale JSX doesn't accidentally inflate the buttons. */
+.d20-wrap, .d20-svg, .d20-overlay { display: none; }
 
 /* ----- End-turn button for the current active player (non-GM owner) ----- */
 .end-turn-btn {
@@ -506,6 +710,44 @@ html, body, #root { height: 100%; background: transparent; }
 .btn-end:hover { background: rgba(231, 76, 60, 0.95); }
 
 .btn-icon { font-size: 13px; }
+
+/* Drag-in auto-add toggle. Solid backgrounds matching the rest of the
+   button row (btn-prev / btn-cancel etc. all sit at 0.85+ opacity).
+   ON: solid green; OFF: solid gray with red strikethrough. */
+.btn-drag-in-auto {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  border-radius: 13px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  color: #fff;
+  transition: filter 0.12s, border-color 0.12s;
+}
+.btn-drag-in-auto.on {
+  background: linear-gradient(135deg, #27ae60, #1e8449);
+  border-color: rgba(46, 204, 113, 0.7);
+}
+.btn-drag-in-auto.on:hover {
+  filter: brightness(1.12);
+  border-color: rgba(46, 204, 113, 0.95);
+}
+.btn-drag-in-auto.off {
+  background: rgba(90, 95, 110, 0.95);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: rgba(255, 255, 255, 0.65);
+  text-decoration: line-through;
+  text-decoration-color: #e74c3c;
+  text-decoration-thickness: 2px;
+}
+.btn-drag-in-auto.off:hover {
+  background: rgba(110, 115, 130, 1);
+  border-color: rgba(255, 255, 255, 0.4);
+}
 
 /* ===================== EMPTY STATE ===================== */
 .empty-state {

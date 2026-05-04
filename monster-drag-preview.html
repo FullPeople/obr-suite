@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Monster Drag</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  height:100%;width:100%;
+  overflow:hidden;
+  background:transparent;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  color:#e6e8ee;
+}
+
+/* Fullscreen blocker — captures pointer events so the user can't
+   accidentally click through to the canvas / other popovers
+   mid-drag. Slight tint hints "you're in drag mode". */
+.blocker{
+  position:fixed;inset:0;
+  background:rgba(7,12,24,0.10);
+  cursor:grabbing;
+  user-select:none;
+  touch-action:none;
+}
+
+/* Token ghost — absolute-positioned. Updates left/top on every
+   pointermove. Hidden until the first move so we don't flash
+   the image at (0,0). */
+.ghost{
+  position:absolute;
+  width:var(--ghost-size,80px);
+  height:var(--ghost-size,80px);
+  pointer-events:none;
+  opacity:0;
+  filter:drop-shadow(0 4px 14px rgba(7,19,32,0.55));
+  transition:opacity .12s;
+}
+.ghost.is-visible{opacity:0.92}
+.ghost img{
+  width:100%;height:100%;
+  object-fit:contain;
+  border-radius:50%;
+  border:2px solid rgba(93,173,226,0.95);
+  box-shadow:0 0 0 1px rgba(7,19,32,0.45),
+             0 0 22px rgba(93,173,226,0.55);
+  background:rgba(7,19,32,0.4);
+}
+.ghost-label{
+  position:absolute;left:50%;top:100%;transform:translateX(-50%);
+  margin-top:6px;
+  background:rgba(7,19,32,0.78);
+  border:1px solid rgba(93,173,226,0.4);
+  border-radius:14px;
+  padding:3px 9px;
+  font-size:10.5px;font-weight:700;color:#bfe2f5;
+  letter-spacing:0.4px;
+  white-space:nowrap;
+  text-shadow:0 1px 2px rgba(0,0,0,0.6);
+}
+</style>
+</head>
+<body>
+<div class="blocker" id="blocker">
+  <div class="ghost" id="ghost">
+    <img id="ghost-img" alt="">
+    <span class="ghost-label" id="ghost-label"></span>
+  </div>
+</div>
+<script type="module" src="/src/monster-drag-preview.ts"></script>
+</body>
+</html>

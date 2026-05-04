@@ -53,7 +53,43 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
 }
 .tab:hover{background:rgba(255,255,255,0.04);color:var(--text)}
 .tab.on{background:rgba(93,173,226,0.10);color:#7ec8f0;border-left-color:var(--accent)}
+/* Inline "调试中" / BETA chip on tab labels for in-development modules.
+   Distinct color (warm amber) + tighter font so it doesn't crowd the
+   tab title. */
+.tab .tab-beta{
+  display:inline-block;
+  margin-left:6px;
+  padding:1px 5px;
+  font-size:9px;font-weight:800;
+  color:#1a1a2e;
+  background:rgba(245,166,35,0.85);
+  border-radius:3px;
+  letter-spacing:0.3px;
+  vertical-align:1px;
+}
 .tab .tab-sub{display:block;font-size:9.5px;color:var(--text-dim);margin-top:2px;letter-spacing:0.5px}
+
+/* Distinct accent colors for the first three "section" tabs so they
+   visually stand out from the per-module tabs underneath. Each gets its
+   own active border-left + active text tint. Inactive (rest) state
+   keeps a subtle hue badge so the user can spot them at a glance. */
+.tab[data-tab="support"]{color:#ff8aa8}
+.tab[data-tab="support"]:hover{background:rgba(231,72,113,0.10);color:#ffb3c5}
+.tab[data-tab="support"].on{background:rgba(231,72,113,0.18);color:#ff8aa8;border-left-color:#e94871}
+
+.tab[data-tab="important"]{color:#f5d76e}
+.tab[data-tab="important"]:hover{background:rgba(245,166,35,0.10);color:#ffe19a}
+.tab[data-tab="important"].on{background:rgba(245,166,35,0.18);color:#f5d76e;border-left-color:#f5a623}
+
+.tab[data-tab="version"]{color:#5fd692}
+.tab[data-tab="version"]:hover{background:rgba(46,204,113,0.10);color:#8de5b1}
+.tab[data-tab="version"].on{background:rgba(46,204,113,0.18);color:#5fd692;border-left-color:#27ae60}
+
+/* Library settings — purple accent so it visually stands out from the
+   per-module tabs (mirrors the section-tab convention above). */
+.tab[data-tab="libraries"]{color:#bb87dd}
+.tab[data-tab="libraries"]:hover{background:rgba(155,89,182,0.10);color:#d4a8ec}
+.tab[data-tab="libraries"].on{background:rgba(155,89,182,0.18);color:#bb87dd;border-left-color:#9b59b6}
 
 .content-wrap{
   flex:1;min-width:0;
@@ -80,6 +116,69 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
 .content::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.18);border-radius:3px}
 
 .content h3{font-size:12.5px;font-weight:700;color:var(--accent-warm);margin-top:14px;margin-bottom:6px;letter-spacing:0.3px}
+
+/* Bold text inside descriptions gets a tint so it actually pops
+   against the prose. Without this, <b> just bumps weight which is
+   nearly invisible on the dark background at 12.5px. Three tints:
+   - .content b — default warm gold for emphasised terms
+   - <em> — secondary lighter blue (used for "verb / button name"
+     references that still want highlight but not as loud as bold)
+   - <kbd> — pill-style chip for keystrokes. */
+.content b{color:#f5d076;font-weight:700}
+.content em{color:#9ad9ff;font-style:normal}
+.content kbd{
+  display:inline-block;
+  padding:1px 6px;
+  font-family:ui-monospace,Consolas,monospace;
+  font-size:10.5px;font-weight:700;
+  color:#fff7c2;
+  background:rgba(255,255,255,0.07);
+  border:1px solid rgba(255,255,255,0.20);
+  border-bottom-width:2px;
+  border-radius:4px;
+  letter-spacing:0.2px;
+  vertical-align:1px;
+}
+.content code{
+  font-family:ui-monospace,Consolas,monospace;
+  font-size:11px;
+  color:#7ec8f0;
+  background:rgba(93,173,226,0.10);
+  border:1px solid rgba(93,173,226,0.22);
+  border-radius:4px;
+  padding:0 4px;
+}
+
+/* Collapsible rule blocks (e.g. dice expression syntax) — keeps the
+   default state compact since most users don't need the full
+   reference card on every visit. */
+.rules-collapse{
+  border:1px solid rgba(255,255,255,0.12);
+  border-radius:6px;
+  margin:10px 0;
+  background:rgba(255,255,255,0.03);
+}
+.rules-collapse > summary{
+  cursor:pointer;
+  padding:8px 12px;
+  font-size:12px;
+  color:var(--text);
+  user-select:none;
+  border-radius:6px;
+  list-style:none;
+}
+.rules-collapse > summary::-webkit-details-marker{display:none}
+.rules-collapse > summary::before{
+  content:"▶";
+  display:inline-block;
+  margin-right:6px;
+  font-size:10px;
+  color:var(--accent);
+  transition:transform .15s;
+}
+.rules-collapse[open] > summary::before{transform:rotate(90deg)}
+.rules-collapse > summary:hover{background:rgba(255,255,255,0.04)}
+.rules-collapse > ul{padding:6px 14px 12px 30px}
 .content h3:first-child{margin-top:0}
 .content p{margin-bottom:8px;color:#cdd1de;font-size:12.5px}
 .content ul{padding-left:18px;margin-bottom:10px}
@@ -103,9 +202,14 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
 .tog.on::before{left:21px;background:#2ecc71}
 .tog:disabled{opacity:0.45;cursor:not-allowed}
 
-/* === 3-segment slider for data version === */
+/* === 3-segment slider for data version ===
+   Sized to its content (was visually extending toward the panel
+   edge thanks to surrounding flex children). `width:fit-content`
+   guarantees it hugs the buttons; the buttons themselves use
+   tighter horizontal padding so the overall pill is compact. */
 .seg{
   display:inline-flex;align-items:center;
+  width:fit-content;
   background:rgba(0,0,0,0.3);border:1px solid var(--border-strong);
   border-radius:8px;overflow:hidden;height:32px;
   margin:8px 0;
@@ -113,7 +217,7 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
 .seg button{
   background:transparent;border:none;
   color:var(--text-dim);font-family:inherit;font-size:11.5px;font-weight:700;
-  padding:0 18px;height:100%;cursor:pointer;letter-spacing:0.3px;
+  padding:0 12px;height:100%;cursor:pointer;letter-spacing:0.3px;
   border-right:1px solid var(--border);
   transition:background .12s, color .12s;
 }
@@ -162,6 +266,34 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
 .support-btn.afdian:hover{border-color:rgba(255,107,157,0.4)}
 .support-btn.afdian .ic{color:#ff6b9d}
 .support-btn .ic{font-size:14px;line-height:1}
+
+/* WeChat / Alipay QR thumbnails sit next to the Ko-fi / Afdian
+   buttons in the support-row. Kept compact (54×54) so they don't
+   tower over the buttons; hovering enlarges + dims the rest so the
+   user can scan with their phone without opening a separate page. */
+.qr-pair{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:3px 5px;
+  background:rgba(255,255,255,0.04);
+  border:1px solid var(--border);
+  border-radius:6px;
+}
+.qr-thumb{
+  width:54px;height:54px;
+  object-fit:cover;
+  border-radius:4px;
+  background:#fff;        /* QR codes need a white backing */
+  border:1px solid rgba(255,255,255,0.10);
+  cursor:zoom-in;
+  transition:transform .18s ease-out, box-shadow .18s ease-out, z-index 0s;
+}
+.qr-thumb:hover{
+  transform:scale(3.4);
+  transform-origin:center center;
+  box-shadow:0 8px 24px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.4);
+  position:relative;
+  z-index:50;
+}
 .contact-box{background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-top:10px;font-size:12px}
 .contact-box code{font-family:ui-monospace,Consolas,monospace;color:var(--accent)}
 
@@ -171,17 +303,17 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
    ripple along the row instead of pulsing in sync. */
 .backers-box{
   background:var(--bg-card);border:1px solid var(--border);border-radius:6px;
-  padding:10px 14px;margin-top:6px;font-size:12px;
+  padding:7px 10px;margin-top:6px;font-size:11px;
 }
-.backers-box p{margin:0 0 8px;font-size:12px;color:#cdd1de}
-.backers{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}
+.backers-box p{margin:0 0 5px;font-size:11px;color:#cdd1de}
+.backers{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0}
 .backer{
   display:inline-flex;align-items:center;
-  padding:4px 12px;border-radius:11px;
+  padding:2px 8px;border-radius:9px;
   background:rgba(255,255,255,0.04);
   border:1px solid rgba(167,139,250,0.45);
   color:#e6e8ee;
-  font-size:11.5px;font-weight:600;
+  font-size:10.5px;font-weight:600;
   letter-spacing:0.2px;
   animation:backer-rainbow 6s linear infinite;
 }
@@ -220,8 +352,9 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
   100% { border-color:rgba(245,166,35,0.55);  box-shadow:0 0 8px 1px rgba(245,166,35,0.45); }
 }
 .backers-extra{
-  font-size:11px;color:var(--text-dim);font-style:italic;
-  margin:8px 0 0 !important;
+  font-size:10px;color:var(--text-dim);font-style:italic;
+  margin:5px 0 0 !important;
+  line-height:1.4;
 }
 
 /* Important-notes tab: stepped instructions with screenshots */
@@ -278,6 +411,41 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
   width:14px;height:14px;cursor:pointer;
   accent-color:#5dade2;
 }
+
+/* Panel-layout reset button — appears in 基础设置 → 面板布局 block.
+   Solid red since it's a destructive-ish action (wipes per-client
+   panel-position memory). Compact, fits next to the description text. */
+.reset-panels-btn{
+  align-self:flex-start;
+  height:28px;
+  padding:0 14px;
+  background:rgba(192,57,43,0.85);
+  border:1px solid rgba(231,76,60,0.7);
+  border-radius:6px;
+  color:#fff;
+  font-family:inherit;font-size:11.5px;font-weight:600;
+  cursor:pointer;
+  transition:filter 0.12s, border-color 0.12s;
+}
+.reset-panels-btn:hover{filter:brightness(1.12);border-color:#e74c3c}
+.reset-panels-btn:active{filter:brightness(0.92)}
+
+/* Open-the-layout-editor button. Sits next to the reset button in
+   the same row. Blue to distinguish from the destructive red reset. */
+.layout-editor-btn{
+  align-self:flex-start;
+  height:28px;
+  padding:0 14px;
+  background:rgba(52,152,219,0.85);
+  border:1px solid rgba(93,173,226,0.7);
+  border-radius:6px;
+  color:#fff;
+  font-family:inherit;font-size:11.5px;font-weight:600;
+  cursor:pointer;
+  transition:filter 0.12s, border-color 0.12s;
+}
+.layout-editor-btn:hover{filter:brightness(1.12);border-color:#5dade2}
+.layout-editor-btn:active{filter:brightness(0.92)}
 
 /* === 库设置 === */
 .lib-warn{
@@ -356,6 +524,167 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
   transition:background .12s;
 }
 .lib-add-btn:hover{background:rgba(52,152,219,0.30)}
+
+/* Preview button + diagnostic panel inside each library row */
+.lib-preview-btn{
+  flex-shrink:0;
+  padding:5px 10px;
+  background:rgba(155,89,182,0.18);
+  border:1px solid rgba(155,89,182,0.40);
+  color:#cda9e8;font-weight:700;
+  border-radius:4px;font-size:11px;
+  cursor:pointer;font-family:inherit;
+  white-space:nowrap;
+  transition:background .12s;
+}
+.lib-preview-btn:hover:not(:disabled){background:rgba(155,89,182,0.30)}
+.lib-preview-btn:disabled{opacity:0.55;cursor:wait}
+.lib-preview{
+  margin-top:8px;
+  padding:10px 12px;
+  background:rgba(0,0,0,0.32);
+  border:1px solid rgba(255,255,255,0.10);
+  border-radius:5px;
+  font-size:11.5px;
+}
+.lib-preview-status{
+  font-weight:700;font-size:12px;
+  word-break:break-all;
+  display:block;
+}
+.lib-preview-status.ok{color:#7be0a0}
+.lib-preview-status.fail{color:#ff8b7a}
+.lib-preview-count{color:#9aa3b0;font-weight:500;font-size:11px;margin-left:6px}
+.lib-preview-section{margin-top:10px}
+.lib-preview-h{
+  font-weight:800;color:#cdd9ec;
+  font-size:11px;text-transform:uppercase;letter-spacing:0.4px;
+  margin-bottom:4px;
+}
+.lib-preview-srcmap{
+  display:flex;flex-wrap:wrap;gap:4px;
+}
+.lib-preview-srcmap code{
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.10);
+  border-radius:3px;
+  padding:1px 6px;
+  font-size:10.5px;
+}
+.lib-preview-tbl{
+  width:100%;border-collapse:collapse;font-size:10.5px;
+}
+.lib-preview-tbl thead th{
+  text-align:left;
+  background:rgba(255,255,255,0.04);
+  padding:3px 5px;
+  border-bottom:1px solid rgba(255,255,255,0.10);
+  font-weight:700;color:#9aa3b0;
+}
+.lib-preview-tbl tbody td{
+  padding:3px 5px;
+  border-bottom:1px solid rgba(255,255,255,0.04);
+  vertical-align:top;
+}
+.lib-preview-tbl tbody tr:hover td{background:rgba(255,255,255,0.03)}
+.lib-preview-tbl code{
+  background:rgba(255,255,255,0.04);
+  border-radius:2px;padding:0 4px;font-size:10px;
+}
+.lib-preview-probe{
+  display:flex;flex-direction:column;gap:1px;
+  padding:5px 7px;
+  border-radius:4px;
+  margin-bottom:3px;
+  font-size:10.5px;
+}
+.lib-preview-probe.ok{background:rgba(46,204,113,0.10);border:1px solid rgba(46,204,113,0.25)}
+.lib-preview-probe.fail{background:rgba(231,76,60,0.12);border:1px solid rgba(231,76,60,0.30)}
+.lib-preview-probe-label{font-weight:700;color:#dde}
+.lib-preview-probe.ok .lib-preview-probe-label{color:#9be0b3}
+.lib-preview-probe.fail .lib-preview-probe-label{color:#ff8b7a}
+.lib-preview-probe-url{color:#9aa3b0;font-family:ui-monospace,Consolas,monospace;font-size:10px;word-break:break-all}
+.lib-preview-probe-status{color:#cdd9ec;font-size:10.5px}
+.lib-preview-err{
+  background:rgba(231,76,60,0.10);
+  border:1px solid rgba(231,76,60,0.30);
+  border-radius:4px;
+  padding:8px 10px;
+  color:#ffbcb0;font-size:11px;
+  white-space:pre-wrap;word-break:break-word;
+  font-family:ui-monospace,Consolas,monospace;
+  margin-top:6px;
+}
+.lib-preview-hint{
+  margin-top:10px;color:#9ab;font-size:11px;line-height:1.6;
+}
+.lib-preview-empty{color:#9aa3b0;font-style:italic;font-size:11px;margin:4px 0}
+
+/* Local content block — sits between URL libraries and the tutorial */
+.lib-local{
+  margin:14px 0;
+  padding:10px 12px;
+  background:rgba(46,204,113,0.06);
+  border:1px solid rgba(46,204,113,0.22);
+  border-radius:6px;
+}
+.lib-local-h{
+  margin:0 0 4px;
+  font-size:13px;color:#9be0b3;
+  font-weight:800;
+}
+.lib-local-desc{
+  margin:0 0 8px;font-size:11.5px;line-height:1.6;color:#b8c4d0;
+}
+.lib-local-actions{
+  display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;
+}
+.lib-local-actions button{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 12px;
+  background:rgba(46,204,113,0.18);
+  border:1px solid rgba(46,204,113,0.45);
+  color:#a8e9c2;font-weight:700;
+  border-radius:6px;font-size:11.5px;
+  cursor:pointer;font-family:inherit;
+  transition:background .12s;
+}
+.lib-local-actions button:hover{background:rgba(46,204,113,0.30)}
+.lib-local-list{
+  display:flex;flex-direction:column;gap:4px;
+}
+.lib-local-empty{
+  margin:4px 0;color:#7e8794;font-size:11px;font-style:italic;
+}
+.lib-local-row{
+  display:flex;align-items:center;gap:8px;
+  padding:5px 8px;
+  background:rgba(0,0,0,0.18);
+  border:1px solid rgba(255,255,255,0.06);
+  border-radius:4px;
+  font-size:11.5px;
+}
+.lib-local-name{
+  flex:1;min-width:0;color:#dde;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-family:ui-monospace,Consolas,monospace;
+}
+.lib-local-meta{
+  flex-shrink:0;color:#9aa3b0;font-size:10.5px;
+}
+.lib-local-del{
+  flex-shrink:0;
+  width:22px;height:22px;
+  background:rgba(231,76,60,0.18);
+  border:1px solid rgba(231,76,60,0.35);
+  color:#ff8b7a;
+  border-radius:4px;font-size:11px;cursor:pointer;
+  font-family:inherit;
+  display:inline-flex;align-items:center;justify-content:center;
+  transition:background .12s;
+}
+.lib-local-del:hover:not(:disabled){background:rgba(231,76,60,0.30)}
+.lib-local-del:disabled{opacity:0.45;cursor:not-allowed}
 
 /* Tutorial collapsible */
 .lib-tut{

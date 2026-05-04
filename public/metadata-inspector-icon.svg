@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Telescope tube — slanted from upper-right (objective lens, wider) to lower-left (eyepiece) -->
+  <path d="M19.5 4.5 L21 6 L7.5 19.5 L6 18 Z"/>
+  <!-- Objective lens cap (wide end, top-right) -->
+  <line x1="18" y1="3" x2="22.5" y2="7.5"/>
+  <!-- Eyepiece (small barrel at bottom-left) -->
+  <line x1="5" y1="17" x2="8" y2="20"/>
+  <!-- Tripod legs (3 short strokes from eyepiece down) -->
+  <line x1="6.5" y1="18.5" x2="3.5" y2="22"/>
+  <line x1="6.5" y1="18.5" x2="6.5" y2="22"/>
+  <line x1="6.5" y1="18.5" x2="9.5" y2="22"/>
+  <!-- Tiny stars suggesting the telescope is looking at things -->
+  <circle cx="3.5" cy="3.5" r="0.5" fill="white" stroke="none"/>
+  <circle cx="3" cy="9" r="0.4" fill="white" stroke="none"/>
+</svg>

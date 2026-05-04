@@ -2,6 +2,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import { ICONS } from "../../icons";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
+import { assetUrl } from "../../asset-base";
 
 let lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -20,7 +21,6 @@ const BC_CARD_UPDATED = "com.obr-suite/cc-card-updated";
 // setHeight, the iframe always covers the viewport.
 const PANEL_MODAL_ID = "com.obr-suite/cc-panel";
 const API_BASE = "https://obr.dnd.center/api/character";
-const SERVER_ORIGIN = "https://obr.dnd.center";
 const SCENE_META_KEY = "com.character-cards/list";
 const LS_PREFIX = "character-cards/";
 
@@ -32,6 +32,37 @@ interface CardEntry {
   uploader: string;
   uploaded_at: string;
   url: string;
+  /** Visibility (added 2026-05-03):
+   *    - undefined / "public" → all clients see this card in the
+   *      sidebar list (default).
+   *    - "dm" → only the DM sees the card row. Other players don't
+   *      get it in their list at all.
+   *    - "owners" → DM + listed `owner_ids` see it. Useful for "this
+   *      is player A's secret backup character — only A and the DM
+   *      should see the card row".
+   *  Soft hide: the data.json on the server isn't access-controlled
+   *  (no auth layer), so a player who knows a card's URL could still
+   *  open it directly. The toggle hides it from the in-app discovery
+   *  flow, which covers the "DM doesn't want NPC cards in players'
+   *  sidebars" use case. */
+  visibility?: "public" | "dm" | "owners";
+  owner_ids?: string[];
+}
+
+function canSeeCard(card: CardEntry, isGM: boolean, playerId: string): boolean {
+  if (isGM) return true;
+  const v = card.visibility ?? "public";
+  if (v === "public") return true;
+  if (v === "owners") return Array.isArray(card.owner_ids) && card.owner_ids.includes(playerId);
+  return false;  // "dm" or unknown
+}
+
+function nextVisibilityLevel(v: CardEntry["visibility"]): CardEntry["visibility"] {
+  // Cycle: public → dm → public.
+  // (owners level is set via the owner-picker dialog; the cycle button
+  // skips it to keep the one-click flow simple.)
+  if (v === "dm") return "public";
+  return "dm";
 }
 
 interface ResourceDef {
@@ -56,6 +87,8 @@ type View =
 
 let roomId = "";
 let playerName = "anonymous";
+let myPlayerId = "";
+let isGM = false;
 let cards: CardEntry[] = [];
 let current: View = { type: "empty" };
 let maximized = false;
@@ -125,6 +158,18 @@ async function setMaximized(next: boolean) {
       // a minimized state. Close the modal entirely; the user re-opens via
       // the cluster's "角色卡界面" button.
       saveState();
+      // Tell index.ts the panel just closed so its cached `panelOpen`
+      // flag stays in sync. Without this notification the next
+      // cluster-button click runs a closeMainPopover() against an
+      // already-closed modal (no-op), and the user has to click a
+      // SECOND time to reopen.
+      try {
+        OBR.broadcast.sendMessage(
+          "com.obr-suite/cc-panel-closed",
+          {},
+          { destination: "LOCAL" },
+        );
+      } catch {}
       await OBR.modal.close(PANEL_MODAL_ID);
       return;
     }
@@ -158,6 +203,17 @@ function showStatus(msg: string) {
 function minimize() {
   saveState();
   setMaximized(false);
+}
+
+async function toggleCardVisibility(id: string) {
+  if (!isGM) return;
+  const next = cards.map((c) => {
+    if (c.id !== id) return c;
+    return { ...c, visibility: nextVisibilityLevel(c.visibility) };
+  });
+  cards = next;
+  await writeCardsToScene(next);
+  render();
 }
 
 async function readCardsFromScene(): Promise<CardEntry[]> {
@@ -278,7 +334,7 @@ async function refreshCardFromPicker(card: CardEntry): Promise<void> {
     await writeCardsToScene(cards);
     const iframe = cardIframes.get(card.id);
     if (iframe) {
-      iframe.src = SERVER_ORIGIN + updated.url + `?t=${Date.now()}`;
+      iframe.src = buildCardIframeSrc(card, true);
     }
     try {
       OBR.broadcast.sendMessage(
@@ -317,11 +373,26 @@ function selectResource(slug: string) {
   render();
 }
 
+/** Build the iframe src for a card. v2 (2026-05-03+) loads our own
+ *  data-driven Preact renderer (cc-fullscreen.html) which fetches
+ *  /characters/<room>/<card>/data.json directly. The legacy Jinja2-
+ *  rendered index.html on the server is still served for backward
+ *  compat (e.g. raw link sharing) but no longer embedded in the
+ *  panel — that lets us iterate on layout / edit / export / import
+ *  features without redeploying the server. */
+function buildCardIframeSrc(card: CardEntry, cacheBust = false): string {
+  const params = new URLSearchParams();
+  params.set("room", roomId);
+  params.set("card", card.id);
+  if (cacheBust) params.set("t", String(Date.now()));
+  return `${assetUrl("cc-fullscreen.html")}?${params.toString()}`;
+}
+
 function ensureCardIframe(card: CardEntry): HTMLIFrameElement {
   let f = cardIframes.get(card.id);
   if (!f) {
     f = document.createElement("iframe");
-    f.src = SERVER_ORIGIN + card.url;
+    f.src = buildCardIframeSrc(card);
     f.setAttribute("scrolling", "yes");
     f.dataset.kind = "card";
     f.dataset.id = card.id;
@@ -369,28 +440,59 @@ function ensureResourceIframe(def: ResourceDef): HTMLIFrameElement {
 }
 
 function render() {
-  // Sidebar list
+  // Sidebar list — filter by visibility per requestor's role + id.
+  // DM sees everything; players only see public + (owners they're in).
+  const visibleCards = cards.filter((c) => canSeeCard(c, isGM, myPlayerId));
+  // If the currently-active card was hidden by the DM and we're a
+  // player, drop the view back to empty so the iframe doesn't keep
+  // a stale reference visible.
+  if (current.type === "card" && !visibleCards.find((c) => c.id === current.id)) {
+    current = { type: "empty" };
+  }
   listEl.innerHTML = "";
-  if (cards.length === 0) {
+  if (visibleCards.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-list";
     empty.textContent = tt("ccPanelEmpty3");
     empty.style.whiteSpace = "pre-line";
     listEl.appendChild(empty);
   } else {
-    for (const c of cards) {
+    for (const c of visibleCards) {
       const card = document.createElement("div");
       const isActive = current.type === "card" && current.id === c.id;
-      card.className = "card" + (isActive ? " active" : "");
+      const v = c.visibility ?? "public";
+      const isHidden = v !== "public";  // DM-only flag for visual dim
+      card.className = "card" + (isActive ? " active" : "") + (isHidden ? " is-hidden" : "");
       card.dataset.id = c.id;
       card.addEventListener("click", () => selectCard(c.id));
 
       const name = document.createElement("div");
       name.className = "card-name";
-      name.textContent = c.name;
+      // Lock prefix on hidden cards so DM can spot them at a glance.
+      name.textContent = (isHidden ? "🔒 " : "") + c.name;
       const sub = document.createElement("div");
       sub.className = "card-sub";
-      sub.textContent = `${c.uploader} · ${timeAgo(c.uploaded_at)}`;
+      const visLabel = isHidden
+        ? (v === "dm" ? "仅 DM 可见" : `仅 ${(c.owner_ids || []).length + 1} 人可见`)
+        : "";
+      sub.textContent = `${c.uploader} · ${timeAgo(c.uploaded_at)}` + (visLabel ? ` · ${visLabel}` : "");
+
+      // 👁 / 🔒 visibility toggle — DM only. Cycles public ↔ dm.
+      // owners-mode (specific player allowlist) is set via a separate
+      // dialog; the cycle button keeps the one-click flow simple.
+      if (isGM) {
+        const visBtn = document.createElement("button");
+        visBtn.className = "card-vis";
+        visBtn.textContent = isHidden ? "🔒" : "👁";
+        visBtn.title = isHidden
+          ? "仅 DM 可见 — 点击改为公开"
+          : "公开 — 点击改为仅 DM 可见";
+        visBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          await toggleCardVisibility(c.id);
+        });
+        card.appendChild(visBtn);
+      }
 
       // ↻ refresh — every card row has one. Clicking opens a file
       // picker so the user can re-pick the (possibly newly-saved)
@@ -495,6 +597,18 @@ OBR.onReady(async () => {
   applyI18nDom(lang);
   roomId = safeRoomId(OBR.room.id || "default");
   try { playerName = (await OBR.player.getName()) || "anonymous"; } catch {}
+  try { myPlayerId = await OBR.player.getId(); } catch {}
+  try { isGM = (await OBR.player.getRole()) === "GM"; } catch {}
+  // Watch for role / id changes (rare, but happens after disconnect-
+  // reconnect or if the DM passes ownership). Re-render the list so
+  // the visibility filter follows.
+  OBR.player.onChange(async (p) => {
+    const nextGM = p.role === "GM";
+    let changed = false;
+    if (nextGM !== isGM) { isGM = nextGM; changed = true; }
+    if (p.id && p.id !== myPlayerId) { myPlayerId = p.id; changed = true; }
+    if (changed) render();
+  });
   // Resource column is visible to ALL players now (not just GM) — with only
   // 不全书 in the list it's lightweight enough to share. Pre-warm it so the
   // page is ready the moment anyone clicks the tab.
@@ -568,8 +682,9 @@ OBR.onReady(async () => {
     const data = event.data as { cardId?: string; url?: string } | undefined;
     if (!data?.cardId) return;
     const iframe = cardIframes.get(data.cardId);
-    if (iframe && data.url) {
-      iframe.src = SERVER_ORIGIN + data.url + `?t=${Date.now()}`;
+    const card = cards.find((c) => c.id === data.cardId);
+    if (iframe && card) {
+      iframe.src = buildCardIframeSrc(card, true);
     }
   });
 

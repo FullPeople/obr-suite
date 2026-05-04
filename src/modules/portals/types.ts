@@ -11,6 +11,11 @@ export interface PortalMeta {
   tag: string;
   // Trigger radius in scene-space pixels (same units as Item.position).
   radius: number;
+  // When true, the portal token renders its `name` as an on-scene
+  // text label (via OBR Image.text). The toggle button in the edit
+  // popover writes through immediately so re-opening the dialog
+  // shows the persisted state.
+  showName?: boolean;
 }
 
 export interface Presets {

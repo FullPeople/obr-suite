@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>状态追踪</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  height:100%;width:100%;overflow:hidden;
+  background:rgba(8,12,22,0.78);
+  color:#e6e8ee;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Roboto,sans-serif;
+  user-select:none;
+}
+
+/* ===== Stage = the central area where character tokens are drawn
+   at proportional viewport positions. Pointer events here pass to
+   token cards; the rest of the stage swallows clicks so the user
+   doesn't accidentally close the modal. */
+.stage{
+  position:absolute;inset:0;
+  overflow:hidden;
+}
+
+/* Top toolbar — title + close button */
+.topbar{
+  position:absolute;top:14px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:10px;
+  padding:7px 16px;
+  background:rgba(15,20,40,0.95);
+  border:1px solid rgba(255,255,255,0.18);
+  border-radius:14px;
+  z-index:50;
+}
+.topbar .title{font-size:13px;font-weight:700;color:#bfe2f5;letter-spacing:0.4px}
+.topbar .hint{font-size:11px;color:#9aa0b3}
+.topbar button{
+  height:26px;padding:0 12px;border-radius:6px;
+  font-family:inherit;font-size:11px;font-weight:600;
+  cursor:pointer;color:#fff;
+  background:rgba(255,255,255,0.07);
+  border:1px solid rgba(255,255,255,0.18);
+}
+.topbar button:hover{background:rgba(255,255,255,0.13)}
+
+/* Token cards rendered in the stage center */
+.tcard{
+  position:absolute;
+  width:96px;height:96px;
+  border-radius:14px;
+  border:2px solid rgba(93,173,226,0.6);
+  background-size:cover;background-position:center;
+  background-color:#222;
+  box-shadow:0 4px 14px rgba(0,0,0,0.5);
+  display:flex;align-items:flex-end;justify-content:center;
+  cursor:default;
+}
+.tcard .tname{
+  background:rgba(0,0,0,0.7);
+  color:#fff;font-size:10.5px;font-weight:700;
+  padding:1px 7px;border-radius:8px;
+  margin-bottom:-12px;
+  border:1px solid rgba(255,255,255,0.2);
+  white-space:nowrap;max-width:120%;overflow:hidden;text-overflow:ellipsis;
+}
+.tcard.drop-hover{
+  border-color:#f5a623;
+  box-shadow:0 0 0 3px rgba(245,166,35,0.3), 0 4px 14px rgba(0,0,0,0.5);
+}
+/* Buff bubbles attached visually to the card in the modal — same
+   arc layout idea as on canvas, but rendered with absolute-positioned
+   children inside .tcard. Each bubble itself is draggable. */
+.tcard .buff-orbit{
+  position:absolute;
+  pointer-events:none;
+  inset:-90px;            /* extend beyond the card so bubbles can sit further */
+}
+.bubble{
+  position:absolute;
+  display:inline-flex;align-items:center;
+  height:22px;padding:0 9px;border-radius:6px;
+  font-size:11px;font-weight:700;
+  border:1px solid rgba(0,0,0,0.55);
+  white-space:nowrap;
+  cursor:grab;pointer-events:auto;
+  box-shadow:0 1px 3px rgba(0,0,0,0.4);
+  transform:translate(-50%, -50%);
+}
+.bubble.is-dragging{cursor:grabbing;opacity:0.6}
+
+/* Right side panels */
+.side{
+  position:absolute;right:14px;top:60px;bottom:14px;
+  width:280px;
+  display:flex;flex-direction:column;gap:10px;
+  z-index:30;
+}
+.panel{
+  background:rgba(15,20,40,0.93);
+  border:1px solid rgba(255,255,255,0.16);
+  border-radius:10px;
+  padding:10px 12px;
+  display:flex;flex-direction:column;
+  min-height:0;
+}
+.panel h3{
+  font-size:12px;font-weight:700;color:#7ec8f0;
+  letter-spacing:0.4px;margin-bottom:8px;
+  display:flex;align-items:center;gap:6px;
+}
+.panel .body{
+  overflow:auto;flex:1;min-height:0;
+  scrollbar-width:thin;
+}
+
+/* Resource tracker (top of side) */
+.res-panel{flex:0 0 auto;max-height:42%}
+.res-row{
+  display:flex;align-items:center;gap:6px;
+  padding:5px 0;border-bottom:1px dashed rgba(255,255,255,0.06);
+}
+.res-row:last-child{border-bottom:none}
+.res-row .who{
+  flex:0 0 70px;
+  font-size:11px;font-weight:700;color:#cdd1de;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.res-row .name{
+  flex:1;font-size:11px;color:#9aa0b3;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.res-row .ctrl{display:inline-flex;align-items:center;gap:4px}
+.res-row button{
+  width:20px;height:20px;border-radius:4px;
+  background:rgba(255,255,255,0.07);
+  border:1px solid rgba(255,255,255,0.16);
+  color:#fff;cursor:pointer;font-family:inherit;font-size:11px;
+}
+.res-row button:hover{background:rgba(255,255,255,0.13)}
+.res-row .num{
+  font-size:11.5px;font-weight:700;
+  min-width:46px;text-align:center;
+  font-family:ui-monospace,Consolas,monospace;
+  color:#fff;
+}
+.res-row .del{margin-left:4px;color:#ff8b7a;border-color:rgba(231,76,60,0.4)}
+.res-add{
+  margin-top:8px;
+  display:flex;flex-direction:column;gap:4px;
+}
+.res-add .row{display:flex;gap:4px}
+.res-add input,.res-add select{
+  flex:1;min-width:0;
+  background:rgba(0,0,0,0.30);
+  border:1px solid rgba(255,255,255,0.10);
+  color:#fff;font-size:11px;
+  padding:4px 8px;border-radius:4px;font-family:inherit;
+}
+.res-add input.qty{flex:0 0 60px}
+.res-add button{
+  background:rgba(46,204,113,0.22);
+  border:1px solid rgba(46,204,113,0.45);
+  color:#a3e9bf;
+  font-weight:700;
+  border-radius:4px;font-family:inherit;font-size:11px;
+  padding:5px 10px;cursor:pointer;
+}
+.res-no-target{font-size:11px;color:#9aa0b3;font-style:italic;padding:4px 0}
+
+/* Buff palette (bottom of side) */
+.buff-panel{flex:1 1 auto;min-height:0}
+.buff-panel .filter{
+  display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;
+}
+.buff-panel .filter button{
+  background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.16);
+  color:#bfe2f5;
+  font-family:inherit;font-size:10px;font-weight:700;
+  padding:3px 8px;border-radius:5px;cursor:pointer;
+  letter-spacing:0.3px;
+}
+.buff-panel .filter button.on{
+  background:rgba(93,173,226,0.25);
+  border-color:rgba(93,173,226,0.5);
+  color:#fff;
+}
+.buff-grid{
+  display:flex;flex-wrap:wrap;gap:6px;
+  align-content:flex-start;
+}
+.buff-grid .bubble{
+  position:static;transform:none;cursor:grab;
+}
+
+/* Drop hint overlay */
+.drop-hint{
+  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+  font-size:13px;color:#fff;background:rgba(0,0,0,0.55);
+  padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);
+  pointer-events:none;opacity:0;transition:opacity .12s;
+  z-index:80;
+}
+.drop-hint.on{opacity:1}
+</style>
+</head>
+<body>
+<div class="stage" id="stage"></div>
+
+<div class="topbar">
+  <span class="title">状态追踪</span>
+  <span class="hint">从右下角拖动状态到角色 · 状态拖回空白处可清除</span>
+  <button id="btn-close" type="button">关闭 (Esc)</button>
+</div>
+
+<div class="side">
+  <section class="panel res-panel">
+    <h3>资源追踪</h3>
+    <div class="body" id="resBody"></div>
+    <div class="res-add">
+      <p style="font-size:10.5px;color:#9aa0b3;margin-bottom:4px">为选中的角色添加资源</p>
+      <div class="row">
+        <input type="text" id="resName" placeholder="名称（如 法术位 1 / 激励 / 弹药）" maxlength="22">
+        <input type="number" id="resMax" class="qty" placeholder="上限" min="1" max="999" value="3">
+      </div>
+      <button id="resAdd" type="button">+ 添加到选中角色</button>
+    </div>
+  </section>
+
+  <section class="panel buff-panel">
+    <h3>状态调色板（拖到角色应用）</h3>
+    <div class="filter" id="buffFilter"></div>
+    <div class="body buff-grid" id="buffGrid"></div>
+  </section>
+</div>
+
+<div class="drop-hint" id="dropHint">拖到角色上应用</div>
+
+<script type="module" src="/src/status-tracker-page.ts"></script>
+</body>
+</html>

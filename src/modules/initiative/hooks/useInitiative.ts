@@ -86,9 +86,24 @@ export function useInitiative() {
   // requests would never get a response and the buttons just confuse them).
   const [dicePlusAvailable, setDicePlusAvailable] = useState<boolean | null>(null);
 
+  // Player view: invisibility flag hides items from the panel except on
+  // their own active turn, where the entry is rendered as a `?` placeholder
+  // (no real name / image leaked). GM view: pass everything through; the
+  // shader overlay on the canvas + a small badge in the panel will
+  // indicate the stealth state instead.
   const items = useMemo(
-    () => allItems.filter((i) => i.visible),
-    [allItems]
+    () => {
+      const visible = allItems.filter((i) => i.visible);
+      if (isGM) return visible;
+      return visible
+        .filter((i) => !i.invisible || i.active)
+        .map((i) =>
+          i.invisible
+            ? { ...i, name: "?", imageUrl: "" }
+            : i
+        );
+    },
+    [allItems, isGM]
   );
 
   const prevActiveId = useRef<string | null>(null);
@@ -478,6 +493,14 @@ export function useInitiative() {
       }
     } catch {}
     if (!focusEnabled) return;
+    // Invisible target: DM still gets a local focus so they can manage the
+    // hidden character, but skip the broadcast so player cameras don't move
+    // (and therefore don't reveal a hidden token's location).
+    const target = allItemsRef.current.find((i) => i.id === itemId);
+    if (target?.invisible) {
+      focusItem(itemId);
+      return;
+    }
     OBR.broadcast.sendMessage(BROADCAST_FOCUS, { itemId });
     focusItem(itemId);
   }, [focusItem]);
@@ -515,17 +538,24 @@ export function useInitiative() {
   const rollInitiativeLocal = useCallback(async (itemId: string, type: RollType) => {
     const { rolls, winnerIdx, finalValue } = localRoll(type);
 
-    // Read this token's stored DEX modifier so the dice animation can
-    // SHOW the bonus alongside the d20. The stored count remains the
+    // Read this token's stored DEX modifier AND invisibility flag so the
+    // dice animation can SHOW the bonus alongside the d20 and route to
+    // a dark roll for stealth characters. The stored count remains the
     // RAW d20 (the panel adds the modifier when displaying) — but the
     // metadata write is deferred to the climax so the value visually
     // "lands" in the initiative column at the moment the dice modal
     // shows the final number (per spec).
     let dexMod = 0;
+    let isInvisible = false;
     try {
       const items = await OBR.scene.items.getItems([itemId]);
-      const m = (items[0] as any)?.metadata?.["com.initiative-tracker/dexMod"];
+      const tokenMeta = (items[0] as any)?.metadata ?? {};
+      const m = tokenMeta["com.initiative-tracker/dexMod"];
       if (typeof m === "number") dexMod = m;
+      const initData = tokenMeta[METADATA_KEY];
+      if (initData && typeof initData === "object") {
+        isInvisible = !!(initData as any).invisible;
+      }
     } catch {}
 
     // Spawn the dice animation above the token. The broadcast carries:
@@ -596,6 +626,10 @@ export function useInitiative() {
         rollerName,
         rollId,
         autoDismiss: true,
+        // Stealth tokens roll dark — only the DM's own client receives
+        // the dice broadcast (LOCAL only inside broadcastDiceRoll), so
+        // players never see the dice animation above the hidden token.
+        hidden: isInvisible,
       });
     } catch {}
   }, []);

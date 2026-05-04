@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>绘制碰撞图</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0e1018;
+  --bg2:#1a1d2c;
+  --bg-panel:rgba(20,22,34,0.94);
+  --border:rgba(255,255,255,0.12);
+  --border-strong:rgba(245,166,35,0.45);
+  --text:#e6e8ee;
+  --text-dim:#9aa0b3;
+  --accent:#f5a623;
+  --accent-dim:#f0b94a;
+  --green:#2ecc71;
+  --red:#e74c3c;
+}
+html,body{
+  width:100%;height:100%;
+  background:var(--bg);
+  color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Roboto,sans-serif;
+  font-size:13px;overflow:hidden;
+}
+body{display:grid;grid-template-rows:auto 1fr auto}
+
+.topbar{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 16px;
+  background:var(--bg2);
+  border-bottom:1px solid var(--border);
+}
+.topbar .ic{font-size:18px;color:var(--accent-dim)}
+.topbar .ttl{font-weight:700;font-size:14px;flex:1}
+.topbar .meta{font-size:11px;color:var(--text-dim);font-family:ui-monospace,Consolas,monospace}
+.topbar button{
+  padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;
+  border:1px solid var(--border);background:var(--bg);color:var(--text-dim);
+  font-family:inherit;font-weight:600;
+}
+.topbar button:hover{color:var(--text)}
+.topbar button.primary{
+  background:rgba(46,204,113,0.18);color:#6fdc94;border-color:rgba(46,204,113,0.45);
+}
+.topbar button.primary:hover{background:rgba(46,204,113,0.30)}
+.topbar button.danger{
+  background:rgba(231,76,60,0.16);color:#e88876;border-color:rgba(231,76,60,0.40);
+}
+.topbar button.danger:hover{background:rgba(231,76,60,0.28)}
+
+/* Main area: tool sidebar (left) + canvas (right) */
+.main{
+  display:grid;grid-template-columns:220px 1fr;
+  min-height:0;
+}
+.toolbar{
+  background:var(--bg2);
+  border-right:1px solid var(--border);
+  padding:12px 10px;
+  display:flex;flex-direction:column;gap:8px;
+  overflow-y:auto;
+}
+.tool-group{
+  background:rgba(0,0,0,0.20);
+  border:1px solid var(--border);
+  border-radius:6px;padding:8px;
+}
+.tool-group h4{
+  font-size:10.5px;font-weight:700;color:var(--text-dim);
+  letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px;
+}
+.tool-row{display:flex;flex-wrap:wrap;gap:4px}
+.tool-btn{
+  padding:6px 10px;border-radius:5px;font-size:11.5px;cursor:pointer;
+  border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--text-dim);
+  font-family:inherit;font-weight:600;flex:1 1 calc(50% - 4px);min-width:60px;
+}
+.tool-btn:hover{color:var(--text)}
+.tool-btn.on{
+  background:rgba(245,166,35,0.20);
+  border-color:rgba(245,166,35,0.55);
+  color:var(--accent-dim);
+}
+label.range{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);margin-top:6px}
+label.range input[type=range]{flex:1}
+label.range .val{
+  width:36px;text-align:right;font-family:ui-monospace,Consolas,monospace;
+  color:var(--text);
+}
+input[type=color]{
+  width:100%;height:30px;border:1px solid var(--border);border-radius:4px;
+  background:transparent;cursor:pointer;padding:0;
+}
+.hint{
+  font-size:10.5px;color:var(--text-dim);line-height:1.5;
+  background:rgba(0,0,0,0.20);border:1px solid var(--border);
+  border-radius:5px;padding:7px 9px;
+}
+.hint b{color:var(--accent-dim)}
+.hint kbd{
+  background:rgba(255,255,255,0.08);border:1px solid var(--border);
+  border-radius:3px;padding:1px 5px;font-family:ui-monospace,Consolas,monospace;
+  font-size:10px;color:var(--text);
+}
+
+.canvas-area{
+  position:relative;
+  background:#06070b;
+  overflow:hidden;
+}
+canvas{display:block;width:100%;height:100%;cursor:crosshair}
+canvas.pan{cursor:grab}
+canvas.pan-active{cursor:grabbing}
+
+.statusbar{
+  display:flex;align-items:center;gap:14px;
+  padding:6px 16px;
+  background:var(--bg2);
+  border-top:1px solid var(--border);
+  font-size:11px;color:var(--text-dim);
+  font-family:ui-monospace,Consolas,monospace;
+}
+.statusbar .seg{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="ic">🧱</span>
+  <span class="ttl">绘制碰撞图</span>
+  <span class="meta" id="map-meta">…</span>
+  <button id="btn-cancel" type="button">取消</button>
+  <button id="btn-save" class="primary" type="button">💾 保存为墙壁</button>
+</div>
+<div class="main">
+  <div class="toolbar">
+    <div class="tool-group">
+      <h4>工具</h4>
+      <div class="tool-row">
+        <button class="tool-btn on" data-tool="brush" type="button">画笔</button>
+        <button class="tool-btn" data-tool="eraser" type="button">橡皮</button>
+        <button class="tool-btn" data-tool="lasso" type="button">套索</button>
+        <button class="tool-btn" data-tool="picker" type="button">取色</button>
+      </div>
+      <label class="range">画笔尺寸<input id="r-brush" type="range" min="2" max="120" value="20"/><span class="val" id="r-brush-val">20</span></label>
+    </div>
+    <div class="tool-group">
+      <h4>颜色识别（取色后）</h4>
+      <div class="tool-row" style="margin-bottom:6px">
+        <button id="btn-detect-color" class="tool-btn" type="button" style="flex:1 1 100%">用取色检测墙壁</button>
+      </div>
+      <input id="picked-color" type="color" value="#000000"/>
+      <label class="range">阈值<input id="r-thresh" type="range" min="2" max="80" value="22"/><span class="val" id="r-thresh-val">22</span></label>
+      <p class="hint" style="margin-top:6px">用「取色」点一下地图上的墙颜色（比如阴线 / 黑色），然后点「用取色检测墙壁」会把所有相似颜色的像素标为墙。阈值越大覆盖范围越广。</p>
+    </div>
+    <div class="tool-group">
+      <h4>清理</h4>
+      <div class="tool-row">
+        <button id="btn-clear" class="tool-btn danger" type="button" style="flex:1 1 100%;background:rgba(231,76,60,0.14);color:#e88876;border-color:rgba(231,76,60,0.35)">全部清空</button>
+      </div>
+      <label class="range">缩简强度<input id="r-simplify" type="range" min="0" max="6" value="2"/><span class="val" id="r-simplify-val">2</span></label>
+      <p class="hint" style="margin-top:6px">保存时会用<b>等高线追踪</b>把涂的区域转成多边形墙。<b>缩简强度</b>= Douglas-Peucker 容差，越高墙越简单（点更少）也更"方"。</p>
+    </div>
+    <div class="hint">
+      <b>操作：</b><br>
+      • 鼠标左键：使用当前工具<br>
+      • 中键 / <kbd>Space</kbd>+左键拖动：平移<br>
+      • 滚轮：缩放<br>
+      • <kbd>Z</kbd> 撤销 · <kbd>Shift+Z</kbd> 重做<br>
+      • <kbd>1-4</kbd> 切换工具
+    </div>
+  </div>
+  <div class="canvas-area">
+    <canvas id="canvas"></canvas>
+  </div>
+</div>
+<div class="statusbar">
+  <span>工具：<span class="seg" id="st-tool">画笔</span></span>
+  <span>缩放：<span class="seg" id="st-zoom">1.00×</span></span>
+  <span>位置：<span class="seg" id="st-pos">0, 0</span></span>
+  <span style="margin-left:auto" id="st-info"></span>
+</div>
+<script type="module" src="/src/modules/vision/collision-edit-page.ts"></script>
+</body>
+</html>

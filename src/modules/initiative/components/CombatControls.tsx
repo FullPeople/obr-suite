@@ -7,6 +7,11 @@ import { ICONS } from "../../../icons";
 interface Props {
   combatState: CombatState;
   hasItems: boolean;
+  /** Drag-in auto-add toggle. ON = dragging a token in during prep/combat
+   *  triggers the "add to initiative?" modal. OFF (strikethrough) = silent.
+   *  GM-side preference — passed as null on player clients. */
+  dragInAuto: boolean;
+  onToggleDragInAuto: () => void;
   onStartPreparation: (effectType: EffectType) => void;
   onStartCombat: () => void;
   onCancelPreparation: () => void;
@@ -16,9 +21,29 @@ interface Props {
   lang: Lang;
 }
 
+function DragInAutoButton({
+  dragInAuto,
+  onToggle,
+  lang,
+}: { dragInAuto: boolean; onToggle: () => void; lang: Lang }) {
+  return (
+    <button
+      type="button"
+      className={`btn btn-drag-in-auto ${dragInAuto ? "on" : "off"}`}
+      onClick={onToggle}
+      title={t(lang, "dragInAutoTitle")}
+      aria-pressed={dragInAuto}
+    >
+      {t(lang, dragInAuto ? "dragInAutoOn" : "dragInAutoOff")}
+    </button>
+  );
+}
+
 export function CombatControls({
   combatState,
   hasItems,
+  dragInAuto,
+  onToggleDragInAuto,
   onStartPreparation,
   onStartCombat,
   onCancelPreparation,
@@ -58,6 +83,7 @@ export function CombatControls({
     return (
       <div className="combat-controls">
         <div className="prep-controls">
+          <DragInAutoButton dragInAuto={dragInAuto} onToggle={onToggleDragInAuto} lang={lang} />
           <button
             className="btn btn-start"
             onClick={onStartCombat}
@@ -80,6 +106,7 @@ export function CombatControls({
   return (
     <div className="combat-controls">
       <div className="turn-controls">
+        <DragInAutoButton dragInAuto={dragInAuto} onToggle={onToggleDragInAuto} lang={lang} />
         <button className="btn btn-prev" onClick={onPrevTurn}>
           {t(lang, "prev")}
         </button>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Stacked layers — represents "scene": a base map plus tokens on top -->
+  <path d="M3 8 L12 4 L21 8 L12 12 Z"/>
+  <path d="M3 13 L12 9 L21 13 L12 17 Z" stroke-opacity="0.7"/>
+  <path d="M3 18 L12 14 L21 18 L12 22 Z" stroke-opacity="0.4"/>
+</svg>

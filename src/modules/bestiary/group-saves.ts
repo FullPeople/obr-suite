@@ -3,6 +3,8 @@ import { fireQuickRoll } from "../dice/tags";
 import { broadcastDiceRoll } from "../dice";
 import { getLocalLang, onLangChange } from "../../state";
 import { assetUrl } from "../../asset-base";
+import { onViewportResize } from "../../utils/viewportAnchor";
+import { patchBubbles, readBubbles } from "../../utils/statEdit";
 
 // "Group save" popover — auto-shows when the GM box-selects 2+ tokens
 // that ALL have bestiary monster data bound. Six ability buttons fire
@@ -45,10 +47,16 @@ const BC_DICE_FADE_START = "com.obr-suite/dice-fade-start";
 // Broadcast channels (LOCAL only — single client lifecycle):
 const BC_FIRE = "com.obr-suite/bestiary-group-save-fire";
 const BC_FIRE_INIT = "com.obr-suite/bestiary-group-init-fire";
+// Group HP edit — page sends a {mode: "dmg"|"heal"|"set", value}
+// payload; bg patches every selected token's bubbles HP. Hidden
+// inside `initiative` (combat-prep) mode where the GM is rolling
+// not editing, but visible whenever the popover is in `save` mode.
+const BC_FIRE_HP = "com.obr-suite/bestiary-group-hp-fire";
 const BC_STATE = "com.obr-suite/bestiary-group-save-state";
 
 const POPOVER_WIDTH = 360;
-const POPOVER_HEIGHT = 96;
+// Save row (~52) + HP-edit row (~38) + head (~32) + paddings = ~140.
+const POPOVER_HEIGHT = 140;
 const TOP_OFFSET = 95;            // 45 (initiative TOP) + 40 (collapsed) + 10 gap
 const MIN_SELECTED = 2;           // hide for solo selections — single-monster info popup already covers that
 
@@ -333,6 +341,57 @@ async function fireInitiative(
   }
 }
 
+// Group HP edit — page sends one of three modes ("dmg" | "heal" |
+// "set") with a numeric value. We patch every selected token's
+// bubbles HP metadata via the shared `patchBubbles` helper. Damage
+// applies to TEMP HP first, then bleeds into HP; heal stops at maxHp;
+// set forces an exact value clamped to [0, maxHp]. Each iteration
+// reads the current HP fresh so the user can stack actions in
+// sequence (−5, −5, +10) without race conditions.
+async function fireGroupHp(
+  mode: "dmg" | "heal" | "set",
+  value: number,
+): Promise<void> {
+  if (lastSelection.length === 0) return;
+  for (const m of lastSelection) {
+    try {
+      const cur = await readBubbles(m.itemId);
+      const maxHp = typeof cur["max health"] === "number" ? (cur["max health"] as number) : null;
+      const hp = typeof cur["health"] === "number" ? (cur["health"] as number) : (maxHp ?? 0);
+      const temp = typeof cur["temporary health"] === "number" ? (cur["temporary health"] as number) : 0;
+      let nextHp = hp;
+      let nextTemp = temp;
+      if (mode === "set") {
+        nextHp = Math.max(0, value);
+        if (maxHp != null) nextHp = Math.min(nextHp, maxHp);
+      } else if (mode === "heal") {
+        nextHp = hp + value;
+        if (maxHp != null) nextHp = Math.min(nextHp, maxHp);
+      } else {
+        // dmg: bleed through temp HP first, then HP. Negative HP is
+        // pinned to 0 (matches the suite's standard "downed = 0 hp"
+        // convention; DMs that track negative HP can manually edit
+        // the token afterwards).
+        let dmg = value;
+        if (temp > 0) {
+          const absorb = Math.min(temp, dmg);
+          nextTemp = temp - absorb;
+          dmg -= absorb;
+        }
+        nextHp = Math.max(0, hp - dmg);
+      }
+      const patch: Record<string, number> = {};
+      if (nextHp !== hp) patch["health"] = nextHp;
+      if (nextTemp !== temp) patch["temporary health"] = nextTemp;
+      if (Object.keys(patch).length > 0) {
+        await patchBubbles(m.itemId, patch as any);
+      }
+    } catch (e) {
+      console.error("[obr-suite/group-saves] fireGroupHp failed for", m.itemId, e);
+    }
+  }
+}
+
 async function fireSave(
   ability: keyof SelectedMonster["saves"],
   opts: { hidden?: boolean; advMode?: "adv" | "dis" } = {},
@@ -369,6 +428,16 @@ async function fireSave(
 export async function setupGroupSaves(): Promise<void> {
   try { role = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch {}
   if (role !== "GM") return;
+
+  // Re-anchor the centered popover on browser resize. Same id + url
+  // → OBR updates position in place.
+  unsubs.push(
+    onViewportResize(async () => {
+      if (!popoverOpen) return;
+      popoverOpen = false;
+      await openPopover();
+    }),
+  );
 
   unsubs.push(
     OBR.player.onChange(async () => {
@@ -407,6 +476,17 @@ export async function setupGroupSaves(): Promise<void> {
       const v = data?.variant;
       if (v === "adv" || v === "normal" || v === "dis") {
         await fireInitiative(v);
+      }
+    }),
+  );
+  unsubs.push(
+    OBR.broadcast.onMessage(BC_FIRE_HP, async (event) => {
+      const data = event.data as { mode?: string; value?: number } | undefined;
+      const m = data?.mode;
+      const v = typeof data?.value === "number" ? data.value : NaN;
+      if (!Number.isFinite(v)) return;
+      if (m === "dmg" || m === "heal" || m === "set") {
+        await fireGroupHp(m, Math.max(0, Math.min(9999, Math.round(v))));
       }
     }),
   );

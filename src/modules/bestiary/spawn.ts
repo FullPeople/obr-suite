@@ -17,6 +17,17 @@ async function readBestiaryAutoInit(): Promise<boolean> {
   return true;
 }
 
+async function readBestiaryAutoHide(): Promise<boolean> {
+  try {
+    const meta = await OBR.scene.getMetadata();
+    const s = meta[SUITE_STATE_KEY] as { bestiaryAutoHide?: boolean } | undefined;
+    if (typeof s?.bestiaryAutoHide === "boolean") return s.bestiaryAutoHide;
+  } catch {}
+  // Default to legacy behavior — spawn invisible — so the DM has
+  // a beat to position the token before players see it.
+  return true;
+}
+
 const BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
 const BUBBLES_NAME = "com.owlbear-rodeo-bubbles-extension/name";
 const INITIATIVE_META = "com.initiative-tracker/data";
@@ -63,8 +74,43 @@ function getImageSize(url: string): Promise<{ w: number; h: number }> {
   });
 }
 
-export async function spawnMonster(monster: ParsedMonster) {
-  const tokenUrl = monster.tokenUrl || `https://obr.dnd.center/5etools-img/bestiary/tokens/MM/Commoner.webp`;
+/** Same as getImageSize but also reports whether the image actually
+ *  loaded. Lets spawnMonster fall back to a placeholder when a
+ *  homebrew monster has no token (the auto-built kiwee URL 404s). */
+function probeImage(url: string): Promise<{ ok: boolean; w: number; h: number }> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ ok: true, w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve({ ok: false, w: 280, h: 280 });
+    img.src = url;
+  });
+}
+
+const FALLBACK_TOKEN_URL = `https://obr.dnd.center/5etools-img/bestiary/tokens/MM/Commoner.webp`;
+
+export async function spawnMonster(
+  monster: ParsedMonster,
+  /** Explicit scene-coord drop position. When provided, the monster
+   *  spawns exactly there with no random offset (drag-spawn flow).
+   *  When omitted, falls back to the legacy "viewport center + random
+   *  jitter" behaviour for the click-to-spawn path. */
+  position?: { x: number; y: number },
+) {
+  // Probe the chosen tokenUrl up-front. If it 404s (typical for
+  // homebrew monsters whose auto-built kiwee URL doesn't exist),
+  // fall back to the Commoner placeholder so the token still spawns
+  // — DM can swap in a real image later via OBR's image picker.
+  let tokenUrl = monster.tokenUrl || FALLBACK_TOKEN_URL;
+  if (tokenUrl !== FALLBACK_TOKEN_URL) {
+    const probe = await probeImage(tokenUrl);
+    if (!probe.ok) {
+      console.warn(
+        "[obr-suite/bestiary] tokenUrl 404, using Commoner fallback:",
+        tokenUrl,
+      );
+      tokenUrl = FALLBACK_TOKEN_URL;
+    }
+  }
 
   const slug = makeSlug(monster.source, monster.engName);
   await ensureSharedMonsterData(slug, getRawMonster(slug));
@@ -80,10 +126,23 @@ export async function spawnMonster(monster: ParsedMonster) {
     getImageSize(tokenUrl),
   ]);
 
-  const worldX = (-vpPos.x + vpWidth / 2) / vpScale;
-  const worldY = (-vpPos.y + vpHeight / 2) / vpScale;
-  const offsetX = (Math.random() - 0.5) * 200;
-  const offsetY = (Math.random() - 0.5) * 200;
+  let worldX: number;
+  let worldY: number;
+  let offsetX = 0;
+  let offsetY = 0;
+  if (position) {
+    // Drag-drop: spawn exactly at the dropped scene position. No
+    // jitter — the user already chose the location.
+    worldX = position.x;
+    worldY = position.y;
+  } else {
+    // Click-to-spawn: viewport centre + random jitter so multiple
+    // clicks don't stack tokens at exactly the same point.
+    worldX = (-vpPos.x + vpWidth / 2) / vpScale;
+    worldY = (-vpPos.y + vpHeight / 2) / vpScale;
+    offsetX = (Math.random() - 0.5) * 200;
+    offsetY = (Math.random() - 0.5) * 200;
+  }
 
   const initiativeRoll = roll1d20();
   const halfW = imgSize.w / 2;
@@ -94,13 +153,25 @@ export async function spawnMonster(monster: ParsedMonster) {
   // initiative metadata off, and the DM has to right-click → Add to
   // initiative manually — useful when pre-staging tokens during prep.
   const autoInit = await readBestiaryAutoInit();
+  const autoHide = await readBestiaryAutoHide();
   const meta: Record<string, unknown> = {
     [BUBBLES_META]: {
       "health": monster.hp,
       "max health": monster.hp,
       "temporary health": 0,
       "armor class": monster.ac,
+      // `hide:true` is the EXTERNAL "Stat Bubbles for D&D" extension's
+      // "Dungeon Master Only" toggle. Players don't see the bubble
+      // at all when set. We default it ON for newly-spawned bestiary
+      // monsters so DMs running the external plugin get correct
+      // out-of-the-box behaviour.
       "hide": true,
+      // `locked:true` is the SUITE'S OWN bubbles module flag.
+      // Combined with "locked + in-combat → silhouette mode for
+      // players" it shows a quantised bar without exact numbers.
+      // Both fields share the same metadata key — external plugin
+      // reads hide, suite plugin reads locked.
+      "locked": true,
     },
     [BUBBLES_NAME]: monster.name,
     [INITIATIVE_MODKEY]: monster.dexMod,
@@ -128,7 +199,7 @@ export async function spawnMonster(monster: ParsedMonster) {
   )
     .position({ x: worldX + offsetX, y: worldY + offsetY })
     .name(monster.name)
-    .visible(false)
+    .visible(!autoHide)
     .layer("CHARACTER")
     .metadata(meta)
     .build();
@@ -136,18 +207,22 @@ export async function spawnMonster(monster: ParsedMonster) {
   await OBR.scene.items.addItems([item]);
 
   // ② Focus the DM's viewport on the newly spawned token so they can see
-  // where it landed without manual panning.
-  try {
-    const x = worldX + offsetX;
-    const y = worldY + offsetY;
-    OBR.viewport.animateTo({
-      position: {
-        x: -x * vpScale + vpWidth / 2,
-        y: -y * vpScale + vpHeight / 2,
-      },
-      scale: vpScale,
-    });
-  } catch {}
+  // where it landed without manual panning. Skipped for drag-spawn —
+  // the user just dropped the token at the spot they were looking at,
+  // re-centering would yank the camera away from where they aimed.
+  if (!position) {
+    try {
+      const x = worldX + offsetX;
+      const y = worldY + offsetY;
+      OBR.viewport.animateTo({
+        position: {
+          x: -x * vpScale + vpWidth / 2,
+          y: -y * vpScale + vpHeight / 2,
+        },
+        scale: vpScale,
+      });
+    } catch {}
+  }
 
   // Spawn notification removed per user feedback — silent.
 }

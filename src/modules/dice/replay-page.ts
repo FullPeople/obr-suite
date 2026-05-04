@@ -38,6 +38,13 @@ interface HistoryEntry {
   ts: number;
   hidden?: boolean;
   collectiveId?: string;
+  // Mirrors `DiceRollPayload.rowStarts` — present when the roll was
+  // wrapped in `repeat(N, …)`. Each entry is the index in `dice[]`
+  // where the corresponding iteration starts. The tooltip renders
+  // these as vertical rows (one per iteration) instead of one
+  // grand-total line, per the user's spec for the floating
+  // "玩家头顶骰子记录悬浮框".
+  rowStarts?: number[];
 }
 
 function loadHistory(): HistoryEntry[] {
@@ -63,8 +70,8 @@ function imgFor(type: string): string {
   return STANDARD_TYPES.has(type) ? type : "d100";
 }
 
-function buildBubbleInner(entry: HistoryEntry): string {
-  const dice = entry.dice.map((d) => {
+function chipsFor(slice: DieResult[]): string {
+  return slice.map((d) => {
     const sides = sidesOf(d.type);
     const cls =
       d.loser ? "loser" :
@@ -72,13 +79,41 @@ function buildBubbleInner(entry: HistoryEntry): string {
       d.value === 1 ? "fail" : "";
     return `<span class="die ${cls}"><img src="/suite/${imgFor(d.type)}.png" alt="">${d.value}</span>`;
   }).join("");
-  const mod = entry.modifier !== 0
-    ? `<span class="mod">${entry.modifier > 0 ? `+${entry.modifier}` : entry.modifier}</span>`
-    : "";
+}
+
+function buildBubbleInner(entry: HistoryEntry): string {
   const label = entry.label
     ? `<div class="label">${escapeHtml(entry.label)}</div>`
     : "";
-  return `${label}<div class="row1">${dice}${mod}<span class="eq">=</span><span class="total">${entry.total}</span></div>`;
+  const mod = entry.modifier !== 0
+    ? `<span class="mod">${entry.modifier > 0 ? `+${entry.modifier}` : entry.modifier}</span>`
+    : "";
+
+  // repeat(N, …): stack one row per iteration. No grand-total row,
+  // per user's spec — the tooltip shows each individual roll
+  // standalone instead of mashing them into a single line + sum.
+  const rows = entry.rowStarts ?? [];
+  if (rows.length > 1) {
+    const out: string[] = [];
+    for (let r = 0; r < rows.length; r++) {
+      const start = rows[r];
+      const end = r + 1 < rows.length ? rows[r + 1] : entry.dice.length;
+      const slice = entry.dice.slice(start, end);
+      const kept = slice.filter((d) => !d.loser);
+      const rowSum = kept.reduce((a, d) => a + d.value, 0) + entry.modifier;
+      out.push(
+        `<div class="row1 repeat-row">` +
+        `<span class="repeat-idx">#${r + 1}</span>` +
+        `${chipsFor(slice)}${mod}` +
+        `<span class="eq">=</span><span class="total">${rowSum}</span>` +
+        `</div>`,
+      );
+    }
+    return `${label}<div class="repeat-stack">${out.join("")}</div>`;
+  }
+
+  // Single roll (default).
+  return `${label}<div class="row1">${chipsFor(entry.dice)}${mod}<span class="eq">=</span><span class="total">${entry.total}</span></div>`;
 }
 
 const stage = document.getElementById("stage") as HTMLDivElement;

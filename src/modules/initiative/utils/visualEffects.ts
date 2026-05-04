@@ -1,4 +1,4 @@
-import OBR, { buildImage } from "@owlbear-rodeo/sdk";
+import OBR, { buildImage, buildEffect, Image } from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../../asset-base";
 
 // Persistent ring strategy: we keep ONE active ring and ONE hover ring alive
@@ -12,6 +12,12 @@ const HOVER_URL = assetUrl("ring-hover.svg?v=3");
 
 const TAG_ACTIVE = "com.initiative-tracker/ring-active";
 const TAG_HOVER = "com.initiative-tracker/ring-hover";
+// Stamped onto the hover ring every time it's (re-)shown so a
+// long-lived watchdog in the BG iframe can fade-park the ring even
+// when the panel iframe was torn down before its own auto-clear
+// timer could fire (the SDK call inside the React-cleanup path is
+// async and doesn't always survive iframe destruction).
+export const META_HOVER_LAST_SHOWN_TS = "com.initiative-tracker/ring-hover-last-shown-ts";
 
 // Park position for hidden rings — off any reasonable map.
 const PARK = { x: -1000000, y: -1000000 };
@@ -191,6 +197,11 @@ export async function setHoverRing(targetId: string | null) {
         for (const d of drafts) {
           d.visible = false;
           d.attachedTo = undefined;
+          // Park off-map. `visible = false` alone leaves a faint
+          // halo in OBR's renderer at the ring's last position —
+          // moving the geometry far outside any plausible scene
+          // makes the residual render unobservable.
+          d.position = PARK;
         }
       });
     } catch {}
@@ -210,6 +221,12 @@ export async function setHoverRing(targetId: string | null) {
         d.visible = true;
         d.attachedTo = targetId;
         d.position = targetPos;
+        // Stamp the show timestamp — bg poll uses this as the
+        // "freshness" marker. While the panel is open and re-firing
+        // hover events, the ts stays fresh and the bg watchdog skips
+        // the ring. When the panel closes (or the iframe is otherwise
+        // wedged), ts goes stale and the bg auto-hides ~3s later.
+        (d.metadata as any)[META_HOVER_LAST_SHOWN_TS] = Date.now();
       }
     });
   } catch { return; }
@@ -234,4 +251,203 @@ export async function clearAllRings() {
       }
     });
   } catch {}
+}
+
+// === Stealth overlays =====================================================
+// Per-client local Effect attached to each invisibility-flagged token. DM
+// gets a translucent shimmer (token visible underneath); players get an
+// opaque cover (token hidden visually). Both sides drive iTime via a
+// shared animation timer so the shader actually moves.
+
+const TAG_STEALTH = "com.initiative-tracker/stealth-overlay";
+
+// Translucent rippling shimmer with chromatic warping. DM-side. Soft
+// circular mask so it doesn't look like a hard square.
+const STEALTH_SHADER_DM = `
+half4 main(float2 fragCoord) {
+  float2 uv = fragCoord / iSize;
+  float2 c = uv - 0.5;
+  float r = length(c);
+  float ripple = sin(r * 28.0 - iTime * 3.5) * 0.5 + 0.5;
+  float warp = sin(uv.y * 16.0 + iTime * 2.0) * 0.5 + 0.5;
+  float mask = 1.0 - smoothstep(0.40, 0.50, r);
+  float a = mask * (0.20 + 0.30 * ripple) * 0.75;
+  half3 color = half3(0.40 + 0.20 * warp, 0.85, 1.0);
+  return half4(color * a, a);
+}
+`;
+
+// Player-side cover. Same ripple pattern but fully opaque inside the token
+// area so the underlying token is hidden. Edge fades out softly so the
+// cover doesn't look like a sharp disk.
+const STEALTH_SHADER_PLAYER = `
+half4 main(float2 fragCoord) {
+  float2 uv = fragCoord / iSize;
+  float2 c = uv - 0.5;
+  float r = length(c);
+  float mask = 1.0 - smoothstep(0.45, 0.50, r);
+  float ripple = sin(r * 18.0 - iTime * 1.8) * 0.05 + 0.95;
+  half3 color = half3(0.04, 0.08, 0.16) * ripple;
+  return half4(color * mask, mask);
+}
+`;
+
+// tokenId → effectId, mirroring per-client overlay state.
+const stealthByToken = new Map<string, string>();
+let stealthAnimTimer: ReturnType<typeof setInterval> | null = null;
+let stealthAnimStart = Date.now();
+let stealthRoleIsGM = false;
+
+function startStealthAnim(): void {
+  if (stealthAnimTimer) return;
+  if (stealthByToken.size === 0) return;
+  stealthAnimStart = Date.now();
+  stealthAnimTimer = setInterval(() => {
+    const ids = Array.from(stealthByToken.values());
+    if (ids.length === 0) {
+      stopStealthAnim();
+      return;
+    }
+    const t = (Date.now() - stealthAnimStart) / 1000;
+    OBR.scene.local
+      .updateItems(ids, (drafts) => {
+        for (const d of drafts) {
+          const eff = d as any;
+          if (!Array.isArray(eff.uniforms)) continue;
+          for (const u of eff.uniforms) {
+            if (u.name === "iTime") { u.value = t; break; }
+          }
+        }
+      })
+      .catch(() => {});
+  }, 80);
+}
+
+function stopStealthAnim(): void {
+  if (stealthAnimTimer) {
+    clearInterval(stealthAnimTimer);
+    stealthAnimTimer = null;
+  }
+}
+
+// Best-effort token bbox: image rendered size = (image.width / image.dpi)
+// * sceneDpi * item.scale.x. Falls back to 150×150 when the call fails or
+// the item isn't an Image — not all initiative tokens are images, but the
+// bestiary / character flow only adds images so this is mostly defensive.
+async function tokenRenderedSize(tokenId: string): Promise<{ w: number; h: number }> {
+  try {
+    const items = await OBR.scene.items.getItems([tokenId]);
+    const item = items[0] as Image | undefined;
+    if (!item || item.type !== "IMAGE") return { w: 150, h: 150 };
+    const sceneDpi = await OBR.scene.grid.getDpi().catch(() => 150);
+    // Image type stores grid info on the item itself (item.grid), not
+    // nested under item.image. item.image holds the intrinsic pixel
+    // size of the asset.
+    const imgDpi = item.grid?.dpi ?? sceneDpi;
+    const sx = item.scale?.x ?? 1;
+    const sy = item.scale?.y ?? 1;
+    const dpiRatio = sceneDpi / imgDpi;
+    const w = Math.abs(item.image.width * dpiRatio * sx);
+    const h = Math.abs(item.image.height * dpiRatio * sy);
+    return { w: Math.max(40, w), h: Math.max(40, h) };
+  } catch {
+    return { w: 150, h: 150 };
+  }
+}
+
+async function buildStealthOverlay(tokenId: string): Promise<string | null> {
+  try {
+    const { w, h } = await tokenRenderedSize(tokenId);
+    const sksl = stealthRoleIsGM ? STEALTH_SHADER_DM : STEALTH_SHADER_PLAYER;
+    // Position is auto-snapped to the token by OBR when `attachedTo` is
+    // set on a fresh add. Width/height are the shader's rasterization
+    // canvas — sized to (slightly larger than) the token bbox so the
+    // soft mask edges fit inside.
+    const canvas = Math.max(w, h) * 1.05;
+    const eff = buildEffect()
+      .effectType("STANDALONE")
+      .blendMode("SRC_OVER")
+      .width(canvas)
+      .height(canvas)
+      .sksl(sksl)
+      .uniforms([
+        { name: "iTime", value: 0 },
+        { name: "iSize", value: { x: canvas, y: canvas } },
+      ])
+      .position({ x: 0, y: 0 })
+      .attachedTo(tokenId)
+      .locked(true)
+      .disableHit(true)
+      .layer("ATTACHMENT")
+      .disableAutoZIndex(true)
+      .zIndex(50_000)
+      .visible(true)
+      .disableAttachmentBehavior(["LOCKED", "COPY"])
+      .metadata({ [TAG_STEALTH]: true })
+      .build();
+    await OBR.scene.local.addItems([eff]);
+    return eff.id;
+  } catch (e) {
+    console.warn("[obr-suite/initiative] buildStealthOverlay failed", e);
+    return null;
+  }
+}
+
+/**
+ * Reconcile stealth overlays against the current invisible-token list.
+ * Called from the bg iframe whenever scene items change. Adds overlays for
+ * newly-invisible tokens, removes overlays for tokens whose flag was
+ * cleared (or that are no longer in the scene). Idempotent.
+ */
+export async function syncStealthOverlays(
+  invisibleIds: Set<string>,
+  isGM: boolean,
+): Promise<void> {
+  // Role flip (rare, but possible when OBR re-broadcasts player change):
+  // tear down all existing overlays so they get rebuilt with the
+  // role-correct shader on next sync.
+  if (stealthRoleIsGM !== isGM && stealthByToken.size > 0) {
+    const oldIds = Array.from(stealthByToken.values());
+    stealthByToken.clear();
+    stopStealthAnim();
+    try { await OBR.scene.local.deleteItems(oldIds); } catch {}
+  }
+  stealthRoleIsGM = isGM;
+
+  // Clean up overlays for any token that's no longer invisible.
+  const toRemove: string[] = [];
+  for (const [tokenId, effectId] of stealthByToken.entries()) {
+    if (!invisibleIds.has(tokenId)) {
+      toRemove.push(effectId);
+      stealthByToken.delete(tokenId);
+    }
+  }
+  if (toRemove.length > 0) {
+    try { await OBR.scene.local.deleteItems(toRemove); } catch {}
+  }
+
+  // Add overlays for newly-invisible tokens.
+  const toAdd: string[] = [];
+  for (const tokenId of invisibleIds) {
+    if (!stealthByToken.has(tokenId)) toAdd.push(tokenId);
+  }
+  for (const tokenId of toAdd) {
+    const effectId = await buildStealthOverlay(tokenId);
+    if (effectId) stealthByToken.set(tokenId, effectId);
+  }
+
+  if (stealthByToken.size > 0) startStealthAnim();
+  else stopStealthAnim();
+}
+
+/**
+ * Tear down all stealth overlays. Called on scene change so we don't leak
+ * effect items from one scene into another.
+ */
+export async function clearStealthOverlays(): Promise<void> {
+  stopStealthAnim();
+  const ids = Array.from(stealthByToken.values());
+  stealthByToken.clear();
+  if (ids.length === 0) return;
+  try { await OBR.scene.local.deleteItems(ids); } catch {}
 }

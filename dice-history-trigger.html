@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Dice History Trigger</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#eee}
+
+/* Iframe is 92×64 to fit button (48px) + drag-grip (18px) inside the
+   iframe rect — anything outside is clipped by OBR. data-side="left"
+   means handle on the LEFT edge (default for this trigger which
+   anchors at viewport bottom-RIGHT). data-side="right" means handle
+   on the RIGHT (after user drags trigger to viewport-left half). */
+/* Same architecture as cluster: button + side-grip with negative
+   overlap. data-side="left" means grip on LEFT of button (default —
+   trigger anchored to viewport bottom-RIGHT, grip toward the
+   viewport interior). data-side="right" flips after the user drags
+   the trigger to the viewport-LEFT half.
+   DOM order is [button, grip], so flex-direction must be ROW-REVERSE
+   for "grip-on-left" (DOM-second grip ends up visually first / on
+   the left). The previous rules were swapped, putting the trigger
+   grip on the WRONG side and creating a mirror-image of cluster. */
+.wrap{
+  position:absolute;inset:0;
+  display:flex;align-items:center;
+  justify-content:center;
+  gap:0;
+  pointer-events:none;
+  isolation:isolate;
+}
+.wrap[data-side="left"]{flex-direction:row-reverse}
+.wrap[data-side="right"]{flex-direction:row}
+.main{
+  pointer-events:auto;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:48px;height:48px;
+  background:linear-gradient(135deg,#3a3f55,#252a3a);
+  border:1px solid rgba(255,255,255,0.22);
+  border-radius:10px;
+  cursor:pointer;
+  box-shadow:0 2px 8px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+  padding:0;
+  transition:filter .12s, transform .08s;
+  overflow:hidden;
+  flex-shrink:0;
+}
+.main:hover{filter:brightness(1.18)}
+.main:active{transform:scale(0.96)}
+.main:disabled{filter:grayscale(0.7) brightness(0.55);cursor:not-allowed}
+.main.is-on{
+  border-color:rgba(93,173,226,0.65);
+  box-shadow:0 0 0 1px rgba(93,173,226,0.55), 0 0 14px rgba(93,173,226,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.main img{width:34px;height:34px;display:block;image-rendering:auto;pointer-events:none;filter:drop-shadow(0 1px 1px rgba(0,0,0,0.5))}
+.main:disabled img{filter:none;opacity:0.5}
+
+/* Button covers grip's inner half. */
+.main{position:relative;z-index:1}
+
+/* Drag grip — same dimensions / rounding as the cluster grip but
+   mirrored. data-side="left" (default trigger position): grip on
+   LEFT of button, outer corners rounded on LEFT. */
+.drag-grip{
+  pointer-events:auto;
+  display:flex;align-items:center;justify-content:center;
+  width:30px;height:48px;
+  background:linear-gradient(135deg,#2c3245,#1d2231);
+  border:1px solid rgba(255,255,255,0.18);
+  color:rgba(255,255,255,0.55);
+  cursor:grab;
+  touch-action:none;user-select:none;
+  flex-shrink:0;
+  position:relative;
+  z-index:0;
+  transition:filter .12s, color .12s;
+  box-shadow:0 2px 8px rgba(0,0,0,0.45);
+}
+.wrap[data-side="left"] .drag-grip{
+  border-radius:10px 0 0 10px;
+  margin-right:-12px;
+  padding-right:5px;          /* shifts dots 5px toward visible edge */
+}
+.wrap[data-side="right"] .drag-grip{
+  border-radius:0 10px 10px 0;
+  margin-left:-12px;
+  padding-left:5px;
+}
+.drag-grip:hover{filter:brightness(1.18);color:#fff}
+.drag-grip.is-dragging{cursor:grabbing;color:#5dade2}
+.drag-grip svg{width:8px;height:18px;display:block;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap" data-side="left">
+  <button class="main" id="main" type="button" title="投骰记录 / Dice Log">
+    <img src="/suite/d20.png" alt="">
+  </button>
+  <div class="drag-grip" id="drag-handle" title="拖动 / Drag" aria-label="拖动投骰记录按钮">
+    <svg viewBox="0 0 8 18" aria-hidden="true">
+      <circle cx="2" cy="3" r="1.2" fill="currentColor"/><circle cx="6" cy="3" r="1.2" fill="currentColor"/>
+      <circle cx="2" cy="9" r="1.2" fill="currentColor"/><circle cx="6" cy="9" r="1.2" fill="currentColor"/>
+      <circle cx="2" cy="15" r="1.2" fill="currentColor"/><circle cx="6" cy="15" r="1.2" fill="currentColor"/>
+    </svg>
+  </div>
+</div>
+<script type="module" src="/src/modules/dice/history-trigger-page.ts"></script>
+</body>
+</html>

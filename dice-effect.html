@@ -236,6 +236,17 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 .dice.fail{filter:drop-shadow(0 0 18px rgba(231,76,60,0.85)) drop-shadow(0 8px 14px rgba(0,0,0,0.55))}
 .dice.fail .num{color:#ffe1e1;text-shadow:0 0 14px rgba(231,76,60,0.9), 0 2px 4px rgba(0,0,0,0.7)}
 
+/* Subtraction die — half-transparent throughout (the user wants
+   减骰 to read as faded but otherwise normal in animation). The
+   minus prefix is rendered via a pseudo-element so the existing
+   slot-machine numEl text stays untouched. */
+.dice.subtract{opacity:0.55}
+.dice.subtract .num::before{
+  content:"−";
+  margin-right:0.05em;
+  opacity:0.85;
+}
+
 /* Original-value tag — shown when max/min/reset replaced the rolled
    value. Positioned BELOW the main number as a small "(orig)" so the
    user can see "what the die actually rolled" alongside the post-rule

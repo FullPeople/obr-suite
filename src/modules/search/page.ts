@@ -11,6 +11,12 @@ import {
 import { formatTagsClickable, fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
 import { subscribeToSfx } from "../dice/sfx-broadcast";
 import { applyI18nDom } from "../../i18n";
+import {
+  getLocalIndexFile,
+  getLocalDataByKeySource,
+  getLocalContentSignature,
+  BC_LOCAL_CONTENT_CHANGED,
+} from "../../utils/localContent";
 
 // Suite-version of the search bar — independent top-right popover with
 // its OWN visible input row (not driven by cluster). The popover resizes
@@ -94,7 +100,18 @@ interface CategoryInfo {
   label: string;
   data?:
     | { file: string; key: string }
-    | { fileBySource: (src: string) => string; key: string };
+    | { fileBySource: (src: string) => string; key: string }
+    // Class-family lookup: 5etools splits each class into its own file
+    // (`class/class-{slug}.json`) and the search index entry doesn't
+    // expose the parent-class English slug. We fetch `class/index.json`
+    // → all listed files in parallel and merge their key arrays.
+    // Used by c=5 / 30 / 40 / 41.
+    | { allClassFiles: true; key: string }
+    // Same idea for itemProperty / itemMastery: weapon properties
+    // (轻型 / 灵巧 / 投掷 / 重型 …) live in `items-base.json` which
+    // isn't covered by the search index. We extract the names so
+    // clicking a property chip on a weapon row at least gets a hit.
+    | { itemsBaseKey: string; key: string };
 }
 
 const CATEGORY: Record<number, CategoryInfo> = {
@@ -102,7 +119,11 @@ const CATEGORY: Record<number, CategoryInfo> = {
   2:  { label: "法术", data: { fileBySource: (s) => `spells/spells-${s}.json`, key: "spell" } },
   3:  { label: "背景", data: { file: "backgrounds.json", key: "background" } },
   4:  { label: "物品", data: { file: "items.json", key: "item" } },
-  5:  { label: "职业" },
+  // 5etools classes are split into one file per class —
+  // `class/class-{className-slug}.json`. The search index doesn't
+  // surface the parent-class slug for features, so we fetch
+  // `class/index.json` and pool every file's key array together.
+  5:  { label: "职业", data: { allClassFiles: true, key: "class" } },
   6:  { label: "状态", data: { file: "conditionsdiseases.json", key: "condition" } },
   7:  { label: "专长", data: { file: "feats.json", key: "feat" } },
   8:  { label: "能力", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
@@ -125,7 +146,7 @@ const CATEGORY: Record<number, CategoryInfo> = {
   25: { label: "牌组" },
   27: { label: "奥术箭", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
   29: { label: "战斗风格", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
-  30: { label: "职业能力" },
+  30: { label: "职业能力", data: { allClassFiles: true, key: "classFeature" } },
   31: { label: "物品", data: { file: "items.json", key: "item" } },
   32: { label: "盟约", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
   33: { label: "武僧能力", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
@@ -133,8 +154,8 @@ const CATEGORY: Record<number, CategoryInfo> = {
   35: { label: "载具升级", data: { file: "vehicles.json", key: "vehicleUpgrade" } },
   36: { label: "船定制" },
   37: { label: "符文", data: { file: "optionalfeatures.json", key: "optionalfeature" } },
-  40: { label: "子职业" },
-  41: { label: "子职能力" },
+  40: { label: "子职业", data: { allClassFiles: true, key: "subclass" } },
+  41: { label: "子职能力", data: { allClassFiles: true, key: "subclassFeature" } },
   42: { label: "动作", data: { file: "actions.json", key: "action" } },
   43: { label: "语言", data: { file: "languages.json", key: "language" } },
   44: { label: "整本书", data: { file: "books.json", key: "book" } },
@@ -147,7 +168,13 @@ const CATEGORY: Record<number, CategoryInfo> = {
   51: { label: "感官" },
   52: { label: "牌组", data: { file: "decks.json", key: "deck" } },
   53: { label: "牌内容" },
-  54: { label: "武器精通", data: { file: "items.json", key: "itemMastery" } },
+  54: { label: "武器精通", data: { itemsBaseKey: "itemMastery", key: "itemMastery" } },
+  // c=58 is a SUITE-synthesised pseudo-category for weapon properties
+  // (轻型 / 灵巧 / 投掷 / …). 5etools doesn't index them, but we
+  // synthesise virtual search entries from items-base.json's
+  // itemProperty array so weapon-property chips on the cc-info popup
+  // can resolve a definition.
+  58: { label: "武器属性", data: { itemsBaseKey: "itemProperty", key: "itemProperty" } },
   55: { label: "地点" },
   56: { label: "物品集合", data: { file: "items.json", key: "itemGroup" } },
   57: { label: "物品", data: { file: "items.json", key: "item" } },
@@ -178,10 +205,11 @@ async function loadIndex(): Promise<IndexFile> {
   if (indexCache) return indexCache;
   if (indexLoading) return indexLoading;
   indexLoading = (async () => {
-    // Cache key is keyed on the active library set so switching
-    // libraries doesn't serve a stale merged index.
+    // Cache key is keyed on the active library set + local-content
+    // signature so switching libraries OR adding/removing local
+    // imports both invalidate the cached merged index.
     const bases = getEnabledLibraryBases();
-    const cacheKey = `${CACHE_KEY}:${bases.join("|")}`;
+    const cacheKey = `${CACHE_KEY}:${bases.join("|")}:${getLocalContentSignature()}`;
     try {
       const raw = localStorage.getItem(cacheKey);
       if (raw) {
@@ -198,7 +226,7 @@ async function loadIndex(): Promise<IndexFile> {
     const perLibrary = await Promise.all(
       bases.map(async (base) => {
         try {
-          const res = await fetch(`${base}/search/index.json`, { cache: "default" });
+          const res = await fetch(`${base}/search/index.json`, { cache: "no-cache" });
           if (!res.ok) return null;
           return (await res.json()) as IndexFile;
         } catch (e) {
@@ -208,7 +236,11 @@ async function loadIndex(): Promise<IndexFile> {
       })
     );
     const valid = perLibrary.filter((x): x is IndexFile => !!x && Array.isArray(x.x));
-    if (valid.length === 0) {
+    // Locally-imported homebrew gets synthesised into a virtual
+    // index file so it merges into the same flow as URL libraries.
+    const localIdx = getLocalIndexFile();
+    const allValid = localIdx.x.length > 0 ? [...valid, localIdx as unknown as IndexFile] : valid;
+    if (allValid.length === 0) {
       throw new Error("no library returned a valid search index");
     }
     // Naive merge — primary lib's source map wins, all entries pooled.
@@ -216,7 +248,7 @@ async function loadIndex(): Promise<IndexFile> {
     // two libraries collapses to one row (custom lib wins because
     // it's typically listed first).
     const merged: IndexFile = { x: [], m: { s: {} } };
-    for (const lib of valid) {
+    for (const lib of allValid) {
       if (lib.m?.s) {
         for (const [code, id] of Object.entries(lib.m.s)) {
           if (!(code in merged.m.s)) merged.m.s[code] = id;
@@ -224,7 +256,7 @@ async function loadIndex(): Promise<IndexFile> {
       }
     }
     const seen = new Set<string>();
-    for (const lib of valid) {
+    for (const lib of allValid) {
       for (const e of lib.x) {
         const key = `${e.cn || ""}|${e.n || ""}|${e.s ?? ""}|${e.c ?? ""}`;
         if (seen.has(key)) continue;
@@ -232,6 +264,39 @@ async function loadIndex(): Promise<IndexFile> {
         merged.x.push(e);
       }
     }
+    // Synthesise weapon-property entries from items-base.json's
+    // itemProperty array. 5etools doesn't add these to the search
+    // index because they're definitional, but the cc-info weapon
+    // chips need them to resolve. Best-effort — first library that
+    // 200s wins.
+    try {
+      for (const base of bases) {
+        try {
+          const r = await fetch(`${base}/data/items-base.json`, { cache: "no-cache" });
+          if (!r.ok) continue;
+          const j = await r.json();
+          const arr = (j.itemProperty ?? []) as any[];
+          let synthId = 9_000_000;
+          for (const p of arr) {
+            const inner = Array.isArray(p.entries) && p.entries[0] && typeof p.entries[0] === "object" ? p.entries[0] : null;
+            const cn = (p as any).name ?? inner?.name ?? "";
+            const en = (p as any).ENG_name ?? inner?.ENG_name ?? (p as any).abbreviation ?? "";
+            if (!cn && !en) continue;
+            const dedupeKey = `${cn}|${en}|prop`;
+            if (seen.has(dedupeKey)) continue;
+            seen.add(dedupeKey);
+            merged.x.push({
+              id: synthId++,
+              c: 58,
+              s: (p as any).source ?? "",
+              n: en,
+              cn,
+            } as any);
+          }
+          break;
+        } catch {}
+      }
+    } catch {}
     indexCache = merged;
     buildSourceMap(indexCache);
     try {
@@ -266,7 +331,7 @@ async function loadBooks(): Promise<void> {
       }
     } catch {}
     try {
-      const res = await fetch(booksUrl(getLocalLang()), { cache: "default" });
+      const res = await fetch(booksUrl(getLocalLang()), { cache: "no-cache" });
       if (!res.ok) return;
       const data = await res.json();
       const map: Record<string, string> = {};
@@ -303,6 +368,14 @@ const CORE_2024 = new Set(["XPHB", "XMM"]);
 
 function passesVersion(code: string, dv: DataVersion): boolean {
   if (dv === "all") return true;
+  // Custom / homebrew sources are "other" — always visible regardless
+  // of the 2014/2024 toggle. Mirrors bestiary/data.ts detectEdition,
+  // where anything not in the strict core sets falls into "other"
+  // which is unconditionally enabled. Without this, default
+  // dataVersion="2024" filtered out HOMEBREW / DEMO / etc. and the
+  // user could only see them by switching to "all".
+  const isCore = CORE_2014.has(code) || CORE_2024.has(code);
+  if (!isCore) return true;
   if (dv === "2014") return CORE_2014.has(code);
   if (dv === "2024") return CORE_2024.has(code);
   return true;
@@ -345,53 +418,340 @@ const dataPending = new Map<string, Promise<DataEntry[]>>();
 function dataCacheKey(c: number, src: string): string {
   return `${c}:${src.toLowerCase()}`;
 }
-async function loadCategoryData(entry: Entry): Promise<DataEntry[]> {
-  const cat = categoryInfo(entry.c);
+async function loadCategoryData(
+  entry: Entry,
+  catOverride?: CategoryInfo,
+): Promise<DataEntry[]> {
+  // findEntryData passes a `catOverride` with a swapped key (race →
+  // subrace, class → subclass / classFeature) when the primary
+  // lookup misses. Same file, different list inside.
+  const cat = catOverride ?? categoryInfo(entry.c);
   if (!cat.data) return [];
-  const src = srcCode(entry.s).toLowerCase();
-  const ck = dataCacheKey(entry.c, src);
+
+  // Class-family lookup: pool every class-*.json file. Cache key is
+  // independent of entry source/category since the pooled data covers
+  // all sources at once.
+  if ("allClassFiles" in cat.data) {
+    return loadAllClassData(cat.data.key);
+  }
+
+  // itemsBaseKey: weapon properties / item masteries pulled from
+  // items-base.json. The file isn't in the search index but the chip
+  // search flow still wants definitions for 灵巧 / 轻型 / 投掷 / etc.
+  if ("itemsBaseKey" in cat.data) {
+    return loadItemsBaseSubarray(cat.data.itemsBaseKey);
+  }
+
+  const srcOriginal = srcCode(entry.s);
+  const src = srcOriginal.toLowerCase();
+  // Cache key must include the data key (not just c+src) so
+  // race-vs-subrace lookups don't collide.
+  const ck = `${dataCacheKey(entry.c, src)}:${cat.data.key}`;
   const cached = dataCache.get(ck);
   if (cached) return cached;
   const pending = dataPending.get(ck);
   if (pending) return pending;
-  const base = dataBase(getLocalLang());
-  let url: string;
-  if ("fileBySource" in cat.data) {
-    url = `${base}/data/${cat.data.fileBySource(src)}`;
-  } else {
-    url = `${base}/data/${cat.data.file}`;
-  }
+  // Build candidate file paths. Different libraries follow different
+  // case conventions for the source segment in filenames:
+  //   - kiwee.top:        bestiary-mm.json (lowercase)
+  //   - homebrew/GitHub:  bestiary-HOMEBREW.json (uppercase)
+  // Try every case variant in parallel — case-sensitive servers like
+  // GitHub Pages 404 on the wrong case, so we have to send all
+  // candidates and merge whichever 200s.
+  const filePathsForSrc = (s: string) => "fileBySource" in cat.data!
+    ? [cat.data!.fileBySource(s)]
+    : [cat.data!.file];
+  const candidatePaths = new Set<string>([
+    ...filePathsForSrc(src),                  // lowercase
+    ...filePathsForSrc(srcOriginal),          // original case
+    ...filePathsForSrc(srcOriginal.toUpperCase()),  // uppercase
+  ]);
+  const bases = getEnabledLibraryBases();
   const p = (async () => {
+    // Local imports always win — if the user has a homebrew JSON
+    // imported with the matching source, prefer it over any URL.
     try {
-      const res = await fetch(url, { cache: "default" });
-      if (!res.ok) throw new Error(`data fetch failed: ${res.status}`);
-      const json = await res.json();
-      const arr = (json[cat.data!.key] ?? []) as DataEntry[];
-      dataCache.set(ck, arr);
-      return arr;
-    } catch {
-      dataCache.set(ck, []);
-      return [];
-    } finally {
-      dataPending.delete(ck);
+      const localArr = getLocalDataByKeySource(cat.data!.key, srcCode(entry.s));
+      if (localArr.length > 0) {
+        dataCache.set(ck, localArr as DataEntry[]);
+        return localArr as DataEntry[];
+      }
+    } catch (e) {
+      console.warn("[obr-suite/search] local data lookup failed", e);
     }
-  })();
+    // Fetch from every (base × candidatePath) combination in parallel
+    // and merge. First non-empty result keyed (ENG_name|source)
+    // survives. Built-in kiwee will typically have most entries;
+    // custom hosts contribute their homebrew without overwriting.
+    const responses = await Promise.all(
+      bases.flatMap((base) =>
+        [...candidatePaths].map(async (path) => {
+          try {
+            const res = await fetch(`${base}/data/${path}`, { cache: "no-cache" });
+            if (!res.ok) return null;
+            const json = await res.json();
+            return (json[cat.data!.key] ?? []) as DataEntry[];
+          } catch {
+            return null;
+          }
+        }),
+      ),
+    );
+    const merged: DataEntry[] = [];
+    const seen = new Set<string>();
+    for (const arr of responses) {
+      if (!arr) continue;
+      for (const e of arr) {
+        const key = `${(e.ENG_name || e.name || "").toLowerCase()}|${(e.source || "").toUpperCase()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(e);
+      }
+    }
+    dataCache.set(ck, merged);
+    return merged;
+  })().finally(() => { dataPending.delete(ck); });
   dataPending.set(ck, p);
   return p;
 }
 
+// === Class-family pooled loader ======================================
+// 5etools splits each class into its own JSON file; the search index
+// doesn't include the parent-class slug for features. We pool every
+// `class/class-*.json` listed in `class/index.json` and merge the
+// requested key (class / classFeature / subclass / subclassFeature).
+const classPoolCache = new Map<string, DataEntry[]>();
+const classPoolPending = new Map<string, Promise<DataEntry[]>>();
+async function loadAllClassData(key: string): Promise<DataEntry[]> {
+  const cached = classPoolCache.get(key);
+  if (cached) return cached;
+  const pending = classPoolPending.get(key);
+  if (pending) return pending;
+  const bases = getEnabledLibraryBases();
+  const p = (async () => {
+    const merged: DataEntry[] = [];
+    const seen = new Set<string>();
+    for (const base of bases) {
+      let index: Record<string, string> | null = null;
+      try {
+        const res = await fetch(`${base}/data/class/index.json`, { cache: "no-cache" });
+        if (res.ok) index = await res.json();
+      } catch {}
+      if (!index) continue;
+      const filenames = Object.values(index);
+      // Fetch all class files for this library in parallel.
+      const arrays = await Promise.all(
+        filenames.map(async (fn) => {
+          try {
+            const r = await fetch(`${base}/data/class/${fn}`, { cache: "no-cache" });
+            if (!r.ok) return null;
+            const j = await r.json();
+            return (j[key] ?? []) as DataEntry[];
+          } catch { return null; }
+        }),
+      );
+      for (const arr of arrays) {
+        if (!arr) continue;
+        for (const e of arr) {
+          // Dedupe across libraries by ENG_name + source — same
+          // approach as the per-source loader above.
+          const eng = (e.ENG_name || (e as any).name || "").toLowerCase();
+          const src = (e.source || "").toUpperCase();
+          const k = `${eng}|${src}|${(e as any).className ?? ""}|${(e as any).level ?? ""}`;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          merged.push(e);
+        }
+      }
+    }
+    classPoolCache.set(key, merged);
+    return merged;
+  })().finally(() => { classPoolPending.delete(key); });
+  classPoolPending.set(key, p);
+  return p;
+}
+
+// === items-base.json subarray loader ================================
+// Weapon properties / item masteries (轻型 / 灵巧 / 投掷 / 重型 …) live
+// in `items-base.json` under `itemProperty`. Not indexed by 5etools
+// search — we load lazily so weapon-property chip searches in
+// character-card popovers can resolve a definition.
+const itemsBaseCache = new Map<string, DataEntry[]>();
+const itemsBasePending = new Map<string, Promise<DataEntry[]>>();
+async function loadItemsBaseSubarray(key: string): Promise<DataEntry[]> {
+  const cached = itemsBaseCache.get(key);
+  if (cached) return cached;
+  const pending = itemsBasePending.get(key);
+  if (pending) return pending;
+  const bases = getEnabledLibraryBases();
+  const p = (async () => {
+    const merged: DataEntry[] = [];
+    const seen = new Set<string>();
+    for (const base of bases) {
+      try {
+        const r = await fetch(`${base}/data/items-base.json`, { cache: "no-cache" });
+        if (!r.ok) continue;
+        const j = await r.json();
+        const arr = (j[key] ?? []) as DataEntry[];
+        for (const e of arr) {
+          // itemProperty entries are nested: each has `entries[]` whose
+          // first item carries `name` (CN) + `ENG_name` (EN). Hoist
+          // those onto the top-level entry so the standard search
+          // matcher finds them.
+          const inner = (Array.isArray(e.entries) && e.entries[0] && typeof e.entries[0] === "object") ? e.entries[0] : null;
+          const top: DataEntry = {
+            ...e,
+            ENG_name: e.ENG_name ?? (inner as any)?.ENG_name ?? (e as any).abbreviation ?? "",
+            name: (e as any).name ?? (inner as any)?.name ?? "",
+            entries: inner?.entries ?? e.entries,
+          };
+          const eng = (top.ENG_name || top.name || "").toLowerCase();
+          const src = (top.source || "").toUpperCase();
+          const k = `${eng}|${src}`;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          merged.push(top);
+        }
+      } catch {}
+    }
+    itemsBaseCache.set(key, merged);
+    return merged;
+  })().finally(() => { itemsBasePending.delete(key); });
+  itemsBasePending.set(key, p);
+  return p;
+}
+
+// Parse the malformed `n` / `cn` fields the search index uses for
+// class-family entries:
+//   c=5  (class)             → n: "Wizard"             cn: "法师"
+//   c=30 (classFeature)      → n: "奇械师 1; Spellcasting}"
+//                                cn: "奇械师 1; 施法"
+//   c=40 (subclass)          → n: "School of Evocation"      cn: "塑能学派"
+//   c=41 (subclassFeature)   → n: "炼金师 奇械师 3; Alchemist"
+//                                cn: "炼金师 奇械师 3; 炼金师"
+// Returns a partial breakdown so the matcher can pick the right entry
+// out of the pooled class data.
+interface ParsedClassEntry {
+  classCn: string | null;       // parent-class CN ("奇械师")
+  level: number | null;         // 1, 2, 3, …
+  featureEng: string | null;    // "Spellcasting"
+  featureCn: string | null;     // "施法"
+}
+function parseClassFamilyEntry(entry: Entry): ParsedClassEntry {
+  const n = String(entry.n ?? "").replace(/\}+$/, "").trim();
+  const cn = String(entry.cn ?? "").replace(/\}+$/, "").trim();
+  // Level + feature pattern: "<class> <level>; <feature>"
+  const re = /^(.+?)\s+(\d+);\s*(.+)$/;
+  const mEn = re.exec(n);
+  const mCn = re.exec(cn);
+  if (mEn || mCn) {
+    return {
+      classCn: mCn ? mCn[1].trim() : null,
+      level: mEn ? parseInt(mEn[2], 10) : (mCn ? parseInt(mCn[2], 10) : null),
+      featureEng: mEn ? mEn[3].trim() : null,
+      featureCn: mCn ? mCn[3].trim() : null,
+    };
+  }
+  // No semicolon → it's a top-level class or subclass entry.
+  return {
+    classCn: cn || null,
+    level: null,
+    featureEng: n || null,
+    featureCn: cn || null,
+  };
+}
+
 async function findEntryData(entry: Entry): Promise<DataEntry | null> {
-  const arr = await loadCategoryData(entry);
-  if (arr.length === 0) return null;
+  let arr = await loadCategoryData(entry);
+  // Some 5etools categories are physically stored under MULTIPLE keys
+  // in the same JSON file. The category map points at one primary
+  // key, but if the lookup misses we widen to the fallback key(s).
+  // Common cases:
+  //   c=10 (race)   — top-level races at key "race", subraces (e.g.
+  //                    Pale Elf, Sea Elf) at key "subrace".
+  //   c=5 (class)   — primary "class", but sub-class data may also
+  //                    appear at "subclass" / "classFeature".
+  const fallbackKeys: Record<number, string[]> = {
+    10: ["subrace", "race"],
+    5: ["class", "subclass", "classFeature"],
+    30: ["classFeature", "subclassFeature"],
+  };
+  const tryKeys = fallbackKeys[entry.c] ?? [];
+  if (arr.length === 0 && tryKeys.length === 0) return null;
+
   const targetSrc = srcCode(entry.s).toUpperCase();
-  const found =
-    arr.find(
-      (e) =>
-        e.ENG_name?.toLowerCase() === entry.n.toLowerCase() &&
-        e.source?.toUpperCase() === targetSrc
-    ) ??
-    arr.find((e) => e.ENG_name?.toLowerCase() === entry.n.toLowerCase()) ??
-    null;
+  // For class-family entries the search index encodes `n` as
+  // "<className_cn> <level>; <featureName>" (with stray `}`); the
+  // CN side is in `cn`. We need to extract the feature name + parent
+  // class name to match against the pooled file data.
+  const isClassFamily = [5, 30, 40, 41].includes(entry.c);
+  const parsed = isClassFamily ? parseClassFamilyEntry(entry) : null;
+  const matchAny = (pool: DataEntry[]): DataEntry | null => {
+    if (parsed) {
+      // Match strategy for class/feature/subclass/subclassFeature:
+      //   1. (preferred) ENG_name + source + className all match
+      //   2. ENG_name + className match (any source)
+      //   3. ENG_name match alone
+      //   4. CN name match
+      const targetEng = parsed.featureEng?.toLowerCase();
+      const targetCn = parsed.featureCn;
+      const targetClass = parsed.classCn;
+      const lvl = parsed.level;
+      const matchByLevel = (e: any) =>
+        lvl == null || e.level == null || e.level === lvl;
+      return (
+        pool.find((e: any) =>
+          targetEng && e.ENG_name?.toLowerCase() === targetEng &&
+          e.source?.toUpperCase() === targetSrc &&
+          (targetClass ? e.className === targetClass : true) &&
+          matchByLevel(e),
+        ) ??
+        pool.find((e: any) =>
+          targetEng && e.ENG_name?.toLowerCase() === targetEng &&
+          (targetClass ? e.className === targetClass : true) &&
+          matchByLevel(e),
+        ) ??
+        pool.find((e: any) =>
+          targetEng && e.ENG_name?.toLowerCase() === targetEng,
+        ) ??
+        pool.find((e: any) => targetCn && e.name === targetCn) ??
+        null
+      );
+    }
+    return (
+      pool.find(
+        (e) =>
+          e.ENG_name?.toLowerCase() === entry.n.toLowerCase() &&
+          e.source?.toUpperCase() === targetSrc,
+      ) ??
+      pool.find((e) => e.ENG_name?.toLowerCase() === entry.n.toLowerCase()) ??
+      // Some subrace entries store the sub name in `name` only (e.g.
+      // "苍白精灵") with no separate ENG_name in the cn release.
+      pool.find((e) => (e as any).name?.toLowerCase() === entry.n.toLowerCase()) ??
+      null
+    );
+  };
+
+  let found = matchAny(arr);
+  if (!found && tryKeys.length > 0) {
+    const cat = categoryInfo(entry.c);
+    if (cat.data) {
+      // Refetch with each fallback key and try matching there.
+      for (const k of tryKeys) {
+        if (k === cat.data.key) continue; // already tried
+        const altCat: CategoryInfo = {
+          ...cat,
+          data: { ...cat.data, key: k } as CategoryInfo["data"],
+        };
+        const altArr = await loadCategoryData({ ...entry } as Entry, altCat);
+        const hit = matchAny(altArr);
+        if (hit) {
+          found = hit;
+          break;
+        }
+      }
+    }
+  }
   if (!found) return null;
   if (!found.entries && found._copy) {
     const cp = found._copy;
@@ -934,6 +1294,11 @@ let kbdActiveIdx = -1;
 let pinnedEntry: Entry | null = null;
 let lastHoverEntry: Entry | null = null;
 let collapsedKeepingQuery = false;
+// External callers (e.g. character-card name chips) can request that
+// the first search hit be auto-pinned so the preview pane shows
+// immediately. Cleared after one renderResults cycle so a stale flag
+// doesn't auto-pin the next typed query.
+let pendingAutoPin = false;
 
 function applyLangPlaceholder() {
   const lang = getLocalLang();
@@ -1014,6 +1379,14 @@ function renderResults(hits: Entry[], q: string) {
     row.addEventListener("click", () => onRowClick(idx));
     row.addEventListener("mousedown", (e) => e.preventDefault());
   });
+  if (pendingAutoPin && hits.length > 0) {
+    pendingAutoPin = false;
+    kbdActiveIdx = 0;
+    const firstRow = dropEl.querySelector<HTMLDivElement>('.row-item[data-idx="0"]');
+    if (firstRow) firstRow.classList.add("kbd-active");
+    onRowClick(0);
+    return;
+  }
   renderPreviewIdle();
 }
 
@@ -1174,11 +1547,20 @@ clearEl.addEventListener("click", async () => {
 const BC_SEARCH_QUERY = "com.obr-suite/search-query";
 OBR.onReady(() => {
   OBR.broadcast.onMessage(BC_SEARCH_QUERY, (event) => {
-    const q = (event.data as { q?: string } | undefined)?.q ?? "";
+    const data = (event.data as { q?: string; autoPin?: boolean } | undefined) ?? {};
+    const q = data.q ?? "";
     inputEl.value = q;
     if (debounceTimer) clearTimeout(debounceTimer);
-    onQueryChange(q).catch(() => {});
+    pendingAutoPin = !!data.autoPin && q.length > 0;
+    onQueryChange(q).catch(() => { pendingAutoPin = false; });
     if (q) inputEl.focus();
+  });
+  // Local-content imports / removals → drop the in-memory + LS
+  // index cache so the next search pulls a fresh merged index.
+  OBR.broadcast.onMessage(BC_LOCAL_CONTENT_CHANGED, () => {
+    indexCache = null;
+    dataCache.clear();
+    dataPending.clear();
   });
 });
 
@@ -1243,15 +1625,65 @@ inputEl.addEventListener("focus", () => {
 OBR.onReady(async () => {
   subscribeToSfx();
   try {
+    const { installDebugOverlay } = await import("../../utils/debugOverlay");
+    installDebugOverlay();
+  } catch {}
+  try {
     const role = await OBR.player.getRole();
     isGM = role === "GM";
+  } catch {}
+
+  // Drag handle — tab below/above the input row depending on the
+  // popover's vertical anchor. Background passed `?v=top|bottom`.
+  try {
+    const { bindPanelDrag } = await import("../../utils/panelDrag");
+    const { PANEL_IDS } = await import("../../utils/panelLayout");
+    const dragEl = document.getElementById("search-drag-handle") as HTMLElement | null;
+    if (dragEl) {
+      bindPanelDrag(dragEl, PANEL_IDS.search);
+    }
+  } catch {}
+
+  // Quadrant hints from background — `?h=left|right` controls which
+  // direction the bar GROWS when expanded (not the bar's anchor —
+  // that's already set on the OBR popover side). `?v=top|bottom`
+  // controls whether the detail panel renders above or below the
+  // input row (CSS flips child `order` per data-vert attribute).
+  try {
+    const params = new URLSearchParams(location.search);
+    const v = params.get("v");
+    const h = params.get("h");
+    const wrap = document.getElementById("wrap");
+    if (wrap) {
+      wrap.setAttribute("data-vert", v === "bottom" ? "bottom" : "top");
+      wrap.setAttribute("data-horiz", h === "right" ? "right" : "left");
+    }
   } catch {}
 
   startSceneSync();
   applyLangPlaceholder();
   applyI18nDom(getLocalLang());
+  // Track the library list so we only invalidate the merged-index
+  // cache when it actually changes (data-version / allowPlayerMonsters
+  // toggles also fire state-change but don't affect the index itself
+  // — only the filtered view).
+  let lastLibSig = JSON.stringify(getEnabledLibraryBases());
   onStateChange(() => {
-    if (inputEl.value) refilter();
+    const sig = JSON.stringify(getEnabledLibraryBases());
+    if (sig !== lastLibSig) {
+      lastLibSig = sig;
+      indexCache = null;
+      dataCache.clear();
+      dataPending.clear();
+      // Reload the index in the background so the next user input
+      // doesn't stall on a fetch. If the input is already populated,
+      // re-run the filter once the new index lands.
+      loadIndex()
+        .then(() => { if (inputEl.value) refilter(); })
+        .catch(() => {});
+    } else if (inputEl.value) {
+      refilter();
+    }
   });
   onLangChange((next) => {
     applyLangPlaceholder();

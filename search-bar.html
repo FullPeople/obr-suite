@@ -12,6 +12,21 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   display:flex;flex-direction:column;
   pointer-events:none;
 }
+/* Vertical-direction flipping. data-vert="top" (default): the search
+   row sits at the iframe top, detail panel grows DOWN below it (and
+   the drag-grip tab pokes out below the row). data-vert="bottom":
+   the row sits at the iframe BOTTOM, detail panel sits ABOVE it,
+   drag-grip pokes out ABOVE the row.
+   Implemented via flex `order` per child. */
+.wrap[data-vert="top"] .row{order:1}
+.wrap[data-vert="top"] .search-drag-grip{order:2}
+.wrap[data-vert="top"] .tools{order:3}
+.wrap[data-vert="top"] > .body{order:4}
+
+.wrap[data-vert="bottom"] > .body{order:1}
+.wrap[data-vert="bottom"] .tools{order:2}
+.wrap[data-vert="bottom"] .search-drag-grip{order:3}
+.wrap[data-vert="bottom"] .row{order:4}
 
 /* === Input row — always visible === */
 .row{
@@ -280,6 +295,45 @@ mark{
   0%   {background:rgba(93,173,226,0.55); transform:scale(1.18); display:inline-block}
   100% {background:transparent; transform:scale(1)}
 }
+
+/* Drag grip — same architecture as cluster + trigger but pinned to
+   the RIGHT of the input row regardless of which quadrant the bar
+   sits in. Height matches the input row (38px), width 32px. The
+   inner 12px of the grip overlaps the row; the row's z-index keeps
+   it in front so only the outer 20px is visible as a grab tab. The
+   six dots are shifted toward the visible (right) edge by 5px so
+   they look centred in the visible-only region. */
+.search-drag-grip{
+  pointer-events:auto;
+  position:absolute;
+  top:2px;
+  right:0;
+  width:32px;height:38px;
+  display:flex;align-items:center;justify-content:center;
+  padding-left:5px;            /* shift dots toward visible right edge */
+  background:linear-gradient(135deg,rgba(22,33,62,0.95),rgba(15,52,96,0.95));
+  border:1px solid rgba(255,255,255,0.18);
+  border-left:none;
+  border-radius:0 18px 18px 0; /* outer (right) corners match bar 18px */
+  color:rgba(255,255,255,0.55);
+  cursor:grab;
+  touch-action:none;user-select:none;
+  z-index:0;
+  transition:color .12s, filter .12s;
+  box-shadow:0 2px 6px rgba(0,0,0,0.32);
+}
+/* Row sits IN FRONT of the grip — covers the inner overlap. */
+.row{position:relative;z-index:1}
+.tools{position:relative;z-index:1}
+.wrap > .body{position:relative;z-index:1}
+/* Reserve 20px on the right for the grip's visible portion so the
+   input field doesn't crowd the dots. */
+.row,
+.tools,
+.wrap > .body{margin-right:20px}
+.search-drag-grip:hover{color:#fff;filter:brightness(1.18)}
+.search-drag-grip.is-dragging{cursor:grabbing;color:#5dade2}
+.search-drag-grip svg{width:8px;height:18px;display:block;pointer-events:none}
 </style>
 </head>
 <body>
@@ -293,6 +347,19 @@ mark{
            placeholder="搜索 5etools…（怪物/法术/物品/职业/种族…）"
            autocomplete="off" spellcheck="false">
     <button class="clear" id="clear" type="button" data-i18n-aria="searchClearAria" aria-label="清空">✕</button>
+  </div>
+
+  <!-- Drag-grip tab — pokes out from the side of the search row
+       (right end when bar grows leftward, left end when bar grows
+       rightward). Negative margin tucks half of the grip under the
+       input row; the row's z-index covers the overlap so only the
+       outer half is visible as a grab target. -->
+  <div class="search-drag-grip" id="search-drag-handle" title="拖动 / Drag" aria-label="拖动搜索栏">
+    <svg viewBox="0 0 8 18" aria-hidden="true">
+      <circle cx="2" cy="3" r="1.2" fill="currentColor"/><circle cx="6" cy="3" r="1.2" fill="currentColor"/>
+      <circle cx="2" cy="9" r="1.2" fill="currentColor"/><circle cx="6" cy="9" r="1.2" fill="currentColor"/>
+      <circle cx="2" cy="15" r="1.2" fill="currentColor"/><circle cx="6" cy="15" r="1.2" fill="currentColor"/>
+    </svg>
   </div>
 
   <!-- Tools row only shows the result count now — version + player-monster

@@ -142,6 +142,43 @@ html,body{
   background:rgba(93,173,226,0.32);
   border-color:rgba(93,173,226,0.55);
 }
+/* Lock-toggle button — square icon-style chip that flips between
+   "open padlock" (item.locked = false, default look) and "closed
+   padlock" (item.locked = true, warm-accent tint). Lives left of
+   Save / Cancel in the action row. */
+.btn.lock{
+  width:34px;
+  padding:7px 0;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:var(--bg-strong);
+  color:var(--text-dim);
+  border-color:var(--border);
+}
+.btn.lock svg{width:14px;height:14px;display:block}
+.btn.lock:hover{
+  background:var(--bg-card);color:var(--text);
+  border-color:var(--border-strong);
+}
+.btn.lock.on{
+  background:rgba(245,166,35,0.18);
+  color:var(--accent-warm);
+  border-color:rgba(245,166,35,0.45);
+}
+.btn.lock.on:hover{
+  background:rgba(245,166,35,0.28);
+  border-color:rgba(245,166,35,0.65);
+}
+/* Closed-shackle path is hidden when unlocked; flip on the .on state.
+   Lets us share one SVG between both states without re-render. */
+.btn.lock .shackle-closed{display:none}
+.btn.lock.on .shackle-open{display:none}
+.btn.lock.on .shackle-closed{display:inline}
+/* The visibility / show-name buttons piggyback on the .lock icon-chip
+   styling so the row reads as one consistent set of toggles. The eye
+   shows a strike line when ON-state semantics flip ("on" = visible,
+   so we hide the strike then; OFF = hidden, strike visible). */
+.btn.lock .visible-strike{display:inline}
+.btn.lock.on .visible-strike{display:none}
 
 .add-form{display:none;margin-top:5px;gap:5px}
 .add-form.on{display:flex}
@@ -179,13 +216,9 @@ html,body{
     <div class="chips-wrap">
       <div class="lbl-row">
         <span data-i18n="portalLblNamePresets">名字预设</span>
-        <button class="add" data-form="name" data-i18n="portalAdd">+ 添加</button>
+        <button class="add" id="btn-add-name" data-i18n="portalAdd">+ 添加当前</button>
       </div>
       <div class="chips" id="chips-names"></div>
-      <div class="add-form" id="form-name">
-        <input id="inp-add-name" type="text" data-i18n-placeholder="portalNewName" placeholder="新名字" maxlength="20">
-        <button id="btn-add-name" data-i18n="portalAddBtn">添加</button>
-      </div>
     </div>
 
     <div class="row">
@@ -195,20 +228,55 @@ html,body{
     <div class="chips-wrap">
       <div class="lbl-row">
         <span data-i18n="portalLblTagPresets">标签预设</span>
-        <button class="add" data-form="tag" data-i18n="portalAdd">+ 添加</button>
+        <button class="add" id="btn-add-tag" data-i18n="portalAdd">+ 添加当前</button>
       </div>
       <div class="chips" id="chips-tags"></div>
-      <div class="add-form" id="form-tag">
-        <input id="inp-add-tag" type="text" data-i18n-placeholder="portalNewTag" placeholder="新标签" maxlength="20">
-        <button id="btn-add-tag" data-i18n="portalAddBtn">添加</button>
-      </div>
     </div>
   </div>
 
+  <!-- Action row order: [Show-name] [Visible] [Lock] [Save] [Cancel].
+       Save = persist current name/tag and close. Cancel reverts.
+       Close (X) and Enter still auto-save. Show-name / Visible /
+       Lock toggles all write through to the portal item immediately
+       and persist on the item itself, so re-opening the dialog
+       reflects the actual scene state. -->
   <div class="btn-row">
-    <button class="btn del" id="btn-del" data-i18n="portalDel">删除传送门</button>
+    <button class="btn lock" id="btn-show-name" type="button"
+            title="显示 / 隐藏名字标签"
+            aria-label="显示 / 隐藏名字标签"
+            aria-pressed="false">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <text x="8" y="11" text-anchor="middle" font-size="9" font-weight="700"
+              font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+              fill="currentColor" stroke="none">A</text>
+      </svg>
+    </button>
+    <button class="btn lock" id="btn-visible" type="button"
+            title="玩家可见 / 对玩家隐藏"
+            aria-label="玩家可见 / 对玩家隐藏"
+            aria-pressed="false">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M2 8 c1.5 -3 4 -4.5 6 -4.5 s4.5 1.5 6 4.5 c-1.5 3 -4 4.5 -6 4.5 s-4.5 -1.5 -6 -4.5 z"/>
+        <circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/>
+        <line class="visible-strike" x1="3" y1="13" x2="13" y2="3" stroke-width="1.6"/>
+      </svg>
+    </button>
+    <button class="btn lock" id="btn-lock" type="button"
+            data-i18n-title="portalLockTitle"
+            title="锁定 / 解锁此传送门"
+            aria-label="锁定 / 解锁此传送门"
+            aria-pressed="false">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor" stroke="none"/>
+        <path class="shackle-open"   d="M5 7 V5 a3 3 0 0 1 6 0"/>
+        <path class="shackle-closed" d="M5 7 V5 a3 3 0 0 1 6 0 V7"/>
+      </svg>
+    </button>
+    <button class="btn save"   id="btn-save"   data-i18n="portalSave">保存</button>
     <button class="btn cancel" id="btn-cancel" data-i18n="portalCancel">取消</button>
-    <button class="btn save" id="btn-save" data-i18n="portalSave">保存</button>
   </div>
 </div>
 <script type="module" src="/src/modules/portals/edit-page.ts"></script>

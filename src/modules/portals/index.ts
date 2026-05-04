@@ -1,5 +1,14 @@
 import OBR, { buildImage, Item } from "@owlbear-rodeo/sdk";
 import {
+  PANEL_IDS,
+  getPanelOffset,
+  getPanelSize,
+  registerPanelBbox,
+  BC_PANEL_DRAG_END,
+  BC_PANEL_RESET,
+  type DragEndPayload,
+} from "../../utils/panelLayout";
+import {
   PLUGIN_ID,
   PORTAL_KEY,
   PortalMeta,
@@ -262,19 +271,47 @@ async function createPortal(center: { x: number; y: number }, radius: number) {
 
 // --- Edit popover ---------------------------------------------------------
 
+// Portal-edit popover bbox — CENTER/TOP anchor. Always returns the
+// expected bbox so the layout editor can pre-arrange the popover even
+// before any portal is being edited.
+registerPanelBbox(PANEL_IDS.portalEdit, async () => {
+  try {
+    const vw = await OBR.viewport.getWidth();
+    const userOff = getPanelOffset(PANEL_IDS.portalEdit);
+    const sizeOverride = getPanelSize(PANEL_IDS.portalEdit);
+    const w = sizeOverride?.width ?? EDIT_W;
+    const h = sizeOverride?.height ?? EDIT_H;
+    const anchorX = Math.round(vw / 2) + userOff.dx;
+    const anchorY = EDIT_TOP_OFFSET + userOff.dy;
+    return {
+      left: anchorX - w / 2,
+      top: anchorY,
+      width: w,
+      height: h,
+    };
+  } catch { return null; }
+});
+
 async function openEditPopover(portalId: string, isNew: boolean) {
   if (editPopoverOpen && currentEditId === portalId) return;
   if (editPopoverOpen) await closeEditPopover();
   try {
     const vw = await OBR.viewport.getWidth();
     const url = `${EDIT_URL}?id=${encodeURIComponent(portalId)}${isNew ? "&isNew=1" : ""}`;
+    const userOff = getPanelOffset(PANEL_IDS.portalEdit);
+    const sizeOverride = getPanelSize(PANEL_IDS.portalEdit);
+    const w = sizeOverride?.width ?? EDIT_W;
+    const h = sizeOverride?.height ?? EDIT_H;
     await OBR.popover.open({
       id: EDIT_POPOVER_ID,
       url,
-      width: EDIT_W,
-      height: EDIT_H,
+      width: w,
+      height: h,
       anchorReference: "POSITION",
-      anchorPosition: { left: Math.round(vw / 2), top: EDIT_TOP_OFFSET },
+      anchorPosition: {
+        left: Math.round(vw / 2) + userOff.dx,
+        top: EDIT_TOP_OFFSET + userOff.dy,
+      },
       anchorOrigin: { horizontal: "CENTER", vertical: "TOP" },
       transformOrigin: { horizontal: "CENTER", vertical: "TOP" },
       hidePaper: true,
@@ -460,19 +497,6 @@ async function onDragEnd() {
       if (!pm) continue;
       const d = dist(tok.position, portalCenter(p));
       if (d <= pm.radius) {
-        console.log("[obr-suite/portals] portal entry detected", {
-          dragger: "this client",
-          movedToken: tok.id,
-          movedTokenName: tok.name,
-          portal: p.id,
-          tokenPos: tok.position,
-          portalCenter: portalCenter(p),
-          portalRadius: pm.radius,
-          dist: d,
-          movedNow: [...movedNow],
-          selection,
-          groupCandidates: [...groupCandidates],
-        });
         await openDestinationPopover(p, items, [...groupCandidates]);
         return;
       }
@@ -551,10 +575,16 @@ async function openDestinationPopover(
   } catch {}
 
   const POPOVER_W = 240;
-  const ITEM_H = 38;
-  const BASE = 70; // header + paddings + tail
-  const visibleItems = Math.min(Math.max(candidates.length, 1), 4);
-  const POPOVER_H = BASE + visibleItems * ITEM_H;
+  // Initial height — generous so the iframe's first paint never clips.
+  // The destination iframe self-resizes via OBR.popover.setHeight() once
+  // it has rendered, so we don't need a tight fit here. ITEM_H/BASE used
+  // to be a static formula that undershot 1-/2-option layouts; the
+  // measure-and-resize-in-iframe path eliminates that class of bug
+  // entirely.
+  const ITEM_H = 36;
+  const BASE = 96;
+  const itemsForInitial = Math.min(Math.max(candidates.length, 1), 5);
+  const POPOVER_H = BASE + itemsForInitial * ITEM_H;
 
   const GAP = 14;
   let anchorTop = screenY - portalScreenRadius - GAP;
@@ -725,35 +755,10 @@ function findExtensionPositionKeys(metadata: Record<string, unknown>): string[] 
 
 async function snapshotExtensionMetadata(tokenIds: string[]): Promise<ExtMetaSnapshot> {
   const snap: ExtMetaSnapshot = new Map();
-  console.log(
-    "%c[obr-suite/portals] === TELEPORT SNAPSHOT START ===",
-    "background:#5dade2;color:#fff;padding:2px 6px;font-weight:bold;border-radius:3px",
-    { tokenIds },
-  );
   try {
     const items = await OBR.scene.items.getItems(tokenIds);
     for (const it of items) {
-      const allKeys = Object.keys(it.metadata as Record<string, unknown>);
       const matchedKeys = findExtensionPositionKeys(it.metadata as Record<string, unknown>);
-      // DIAGNOSTIC: log every metadata key on the token and which we
-      // matched. If teleport still bumps into Smoke & Spectre walls
-      // the user can copy this console output to share the exact
-      // metadata key namespace SS uses, and we extend the matcher.
-      console.log(
-        "%c[obr-suite/portals] token metadata",
-        "color:#7be0a0;font-weight:bold",
-        {
-          tokenId: it.id,
-          tokenName: it.name,
-          allMetadataKeys: allKeys,
-          matchedForStrip: matchedKeys,
-          matchedValues: matchedKeys.reduce<Record<string, unknown>>((acc, k) => {
-            acc[k] = (it.metadata as any)[k];
-            return acc;
-          }, {}),
-          fullMetadata: it.metadata,  // full dump so user can grep visually
-        },
-      );
       if (matchedKeys.length === 0) continue;
       const captured: Record<string, any> = {};
       for (const k of matchedKeys) captured[k] = (it.metadata as any)[k];
@@ -762,11 +767,6 @@ async function snapshotExtensionMetadata(tokenIds: string[]): Promise<ExtMetaSna
   } catch (e) {
     console.warn("[obr-suite/portals] snapshotExtensionMetadata failed", e);
   }
-  console.log(
-    "%c[obr-suite/portals] === TELEPORT SNAPSHOT END ===",
-    "background:#5dade2;color:#fff;padding:2px 6px;font-weight:bold;border-radius:3px",
-    { snappedKeys: [...snap.entries()].map(([id, v]) => ({ id, keys: Object.keys(v) })) },
-  );
   return snap;
 }
 
@@ -911,12 +911,6 @@ async function teleport(
     }
   } catch (e) {
     console.warn("[obr-suite/portals] local.getItemAttachments failed", e);
-  }
-  if (attachmentIds.length > 0 || localAttachmentIds.length > 0) {
-    console.log(
-      "[obr-suite/portals] hiding attachments for teleport",
-      { sceneAttachments: attachmentIds, localAttachments: localAttachmentIds },
-    );
   }
   try {
     if (attachmentIds.length > 0) {
@@ -1082,16 +1076,6 @@ async function migrateLegacyPortals(): Promise<void> {
 
 export async function setupPortals(): Promise<void> {
   try { role = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch {}
-
-  // Banner log so the user can confirm the module actually started
-  // on this client. If they see this in DevTools console, it means
-  // the bg iframe loaded. Subsequent portal logs (drag detection,
-  // metadata snapshots) are then guaranteed to fire when relevant.
-  console.log(
-    "%c[obr-suite/portals] setup OK",
-    "background:#9a6cf2;color:#fff;padding:2px 6px;font-weight:bold;border-radius:3px",
-    { role, base: import.meta.env.BASE_URL },
-  );
 
   // Quietly normalise old portals (image.width/height = 96 from earlier
   // versions) to the current ICON_SIZE so OBR stops warning on every
@@ -1354,6 +1338,29 @@ export async function setupPortals(): Promise<void> {
   // No initial pass — only player drag-end events trigger the popover.
   // If the player happens to have selected a token already inside a
   // portal at scene load, no popover opens until they drag the token.
+
+  // Layout-editor drag-end / global reset → re-anchor the edit
+  // popover with the new offset/size if it's currently open.
+  unsubs.push(
+    OBR.broadcast.onMessage(BC_PANEL_DRAG_END, async (event) => {
+      const payload = event.data as DragEndPayload | undefined;
+      if (payload?.panelId !== PANEL_IDS.portalEdit) return;
+      if (!editPopoverOpen || !currentEditId) return;
+      const id = currentEditId;
+      editPopoverOpen = false;
+      currentEditId = null;
+      await openEditPopover(id, false);
+    }),
+  );
+  unsubs.push(
+    OBR.broadcast.onMessage(BC_PANEL_RESET, async () => {
+      if (!editPopoverOpen || !currentEditId) return;
+      const id = currentEditId;
+      editPopoverOpen = false;
+      currentEditId = null;
+      await openEditPopover(id, false);
+    }),
+  );
 }
 
 export async function teardownPortals(): Promise<void> {

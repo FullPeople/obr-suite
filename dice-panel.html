@@ -370,14 +370,99 @@ html,body{
 .btn.force-clr:hover{background:rgba(231,76,60,0.1);color:#fff}
 
 /* === Saved combos === */
-.combo-list{display:flex;flex-direction:column;gap:6px}
+.combo-list{display:flex;flex-direction:column;gap:8px}
+/* Toolbar at the top of the combos tab — drag hint + add-category. */
+.combo-toolbar{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:8px;
+  padding:4px 2px 6px;
+}
+.combo-hint{
+  font-size:10.5px;color:var(--text-dim);
+  letter-spacing:0.2px;
+}
+.combo-toolbar .btn.small{
+  padding:3px 8px;font-size:11px;
+  background:rgba(93,173,226,0.16);
+  border:1px solid rgba(93,173,226,0.36);
+  color:var(--accent);font-weight:700;
+}
+.combo-toolbar .btn.small:hover{
+  background:rgba(93,173,226,0.26);
+}
+/* Category section — collapsible-looking header + body. The body is
+   the drop target; sections highlight when a card is being dragged
+   over them so the user has a clear "where will this land" cue. */
+.combo-section{
+  border:1px solid var(--border);
+  border-radius:8px;
+  overflow:hidden;
+  background:rgba(255,255,255,0.015);
+}
+.combo-section.drop-target{
+  border-color:rgba(93,173,226,0.55);
+  background:rgba(93,173,226,0.06);
+}
+.combo-section-head{
+  display:flex;align-items:center;gap:6px;
+  padding:5px 10px;
+  background:rgba(0,0,0,0.18);
+  border-bottom:1px solid var(--border);
+  font-size:11.5px;
+}
+.combo-section-title{
+  flex:1;color:var(--text);font-weight:700;letter-spacing:0.3px;
+}
+.combo-section-count{
+  color:var(--text-dim);font-size:10.5px;
+  padding:1px 6px;border-radius:9px;
+  background:rgba(255,255,255,0.06);
+  font-family:ui-monospace,monospace;
+}
+.combo-section .cat-act{
+  background:transparent;border:none;color:var(--text-dim);
+  cursor:pointer;font-size:11px;
+  padding:2px 5px;border-radius:4px;line-height:1;
+  font-family:inherit;
+  transition:background .12s,color .12s;
+}
+.combo-section .cat-act:hover{background:rgba(255,255,255,0.08);color:var(--text)}
+.combo-section-body{
+  display:flex;flex-direction:column;gap:6px;
+  padding:6px;
+  min-height:32px;
+}
+.combo-empty-drop{
+  padding:8px;color:var(--text-dim);font-size:11px;
+  text-align:center;letter-spacing:.4em;
+  border:1px dashed var(--border);border-radius:6px;
+}
 .combo-card{
   background:var(--bg-card);
   border:1px solid var(--border);
   border-radius:8px;
   padding:8px 10px;
+  cursor:default;
+  transition:transform .08s,opacity .08s,box-shadow .12s;
 }
-.combo-name{font-size:13px;font-weight:700;color:var(--text);margin-bottom:2px}
+.combo-card.drop-before{
+  box-shadow:0 -2px 0 var(--accent) inset, 0 0 0 1px rgba(93,173,226,0.45);
+}
+.combo-card.dragging{
+  opacity:0.4;transform:scale(0.98);
+}
+.combo-card-head{display:flex;align-items:center;gap:6px;margin-bottom:2px}
+.combo-grip{
+  flex-shrink:0;
+  cursor:grab;
+  color:var(--text-dim);
+  font-size:14px;font-weight:700;line-height:1;
+  letter-spacing:-2px;
+  padding:0 2px;
+  user-select:none;
+}
+.combo-card.dragging .combo-grip{cursor:grabbing}
+.combo-name{font-size:13px;font-weight:700;color:var(--text);flex:1}
 .combo-formula{
   font-size:11.5px;color:var(--text-dim);
   font-family:ui-monospace,monospace;margin-bottom:6px;
@@ -430,6 +515,36 @@ html,body{
 .history-die.low{color:#ff6b6b}
 .history-die.loser{opacity:0.4;text-decoration:line-through}
 .history-total{font-size:14px;font-weight:800;color:var(--accent-on);margin-left:auto}
+
+/* Repeat-roll pills — `repeat(N, …)` iterations laid out as inline
+   pills that flow left-to-right and wrap to a new line only when
+   they can't fit. Matches the user's "顺序排列除非排不下再换行
+   (flow)" call. Each pill = #N · dice chips · ±mod · row total. */
+.repeat-pill-flow{
+  display:flex;flex-wrap:wrap;
+  gap:4px;margin-top:3px;
+}
+.repeat-pill{
+  display:inline-flex;align-items:center;
+  gap:4px;padding:2px 6px;
+  background:var(--bg-strong);
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-family:ui-monospace,monospace;
+  font-size:11px;
+}
+.repeat-pill .history-die{
+  min-width:18px;height:16px;padding:0 4px;font-size:10.5px;
+  background:transparent;border:none;
+}
+.repeat-pill .history-total{
+  font-size:11.5px;font-weight:800;color:var(--accent-on);margin-left:0;
+}
+.repeat-pill-idx{
+  font-size:9.5px;font-weight:700;color:var(--text-dim);
+  min-width:16px;text-align:right;
+}
+.repeat-pill-mod{font-size:10.5px;color:var(--text-dim)}
 
 .history-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
 .seg{

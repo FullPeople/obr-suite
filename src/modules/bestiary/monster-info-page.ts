@@ -3,6 +3,24 @@ import { ICONS } from "../../icons";
 import { formatTagsClickable, fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
 import { bindRollableContextMenu } from "../dice/context-menu";
 import { subscribeToSfx } from "../dice/sfx-broadcast";
+import { bindPanelDrag } from "../../utils/panelDrag";
+import { PANEL_IDS } from "../../utils/panelLayout";
+import {
+  parseStatInput,
+  readBubbles,
+  patchBubbles,
+  clampStat,
+  type BubblesData,
+} from "../../utils/statEdit";
+
+// Token id paired with the currently-shown monster slug. Updated when
+// the SHOW_MSG broadcast fires (DM selects a different bestiary token).
+// Drives where the editable HP/AC stat rows write to.
+let currentItemId: string | null = null;
+// Latest bubbles snapshot for the current token, refreshed on every
+// render and after each commit. Lets stat-row inputs revert cleanly on
+// invalid input.
+let liveBubbles: BubblesData = {};
 
 const SHOW_MSG = "com.bestiary/info-show";
 const BESTIARY_DATA_KEY = "com.bestiary/monsters";
@@ -32,7 +50,7 @@ async function loadBestiaryIndexFor(base: string): Promise<Record<string, string
   const cached = indexCacheByBase.get(base);
   if (cached) return cached;
   try {
-    const res = await fetch(`${base}/data/bestiary/index.json`);
+    const res = await fetch(`${base}/data/bestiary/index.json`, { cache: "no-cache" });
     if (!res.ok) {
       indexCacheByBase.set(base, {});
       return {};
@@ -54,7 +72,7 @@ async function fetchMonsterFile(base: string, filename: string): Promise<any[]> 
   const cached = fileCache.get(key);
   if (cached) return cached;
   try {
-    const res = await fetch(`${base}/data/bestiary/${filename}`);
+    const res = await fetch(`${base}/data/bestiary/${filename}`, { cache: "no-cache" });
     if (!res.ok) {
       fileCache.set(key, []);
       return [];
@@ -207,6 +225,78 @@ function parseSpeedParts(speed: any): string[] {
   return parts.length ? parts : ["?"];
 }
 
+// 5etools-cn skill keys are sometimes English (acrobatics) and
+// sometimes Chinese (特技). The map covers the English keys; pass
+// any other key through unchanged so partially-localised data still
+// renders something sensible.
+const SKILL_CN: Record<string, string> = {
+  acrobatics: "特技", "animal handling": "驯兽", arcana: "奥秘",
+  athletics: "运动", deception: "欺瞒", history: "历史",
+  insight: "洞悉", intimidation: "威吓", investigation: "调查",
+  medicine: "医药", nature: "自然", perception: "察觉",
+  performance: "表演", persuasion: "游说", religion: "宗教",
+  "sleight of hand": "巧手", stealth: "隐匿", survival: "求生",
+};
+// Skill value (e.g. "+5", "5", 5) → numeric bonus.
+function parseSkillBonus(v: any): number | null {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const m = /([+-]?\s*\d+)/.exec(v);
+    if (m) return parseInt(m[1].replace(/\s+/g, ""), 10);
+  }
+  return null;
+}
+
+// Returns HTML directly — each skill is wrapped in a `.rollable` span
+// so left-click fires the existing 1d20+bonus check (same delegated
+// listener on root that ability checks use). Right-click opens the
+// shared rollable context menu (优势 / 劣势 / 暗骰 / 加入骰盘).
+function formatSkillList(skill: any): string {
+  if (!skill || typeof skill !== "object") return "";
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(skill)) {
+    const cn = SKILL_CN[k.toLowerCase()] ?? k;
+    const bn = parseSkillBonus(v);
+    if (bn == null) {
+      parts.push(`${escapeHtml(cn)} ${escapeHtml(String(v))}`);
+      continue;
+    }
+    const expr = `1d20${bn >= 0 ? `+${bn}` : bn}`;
+    const lbl = `${cn}检定`;
+    const display = `${escapeHtml(cn)} ${bn >= 0 ? "+" : ""}${bn}`;
+    parts.push(
+      `<span class="rollable skill-roll" data-expr="${escapeHtml(expr)}" data-label="${escapeHtml(lbl)}" title="${escapeHtml(lbl)} ${escapeHtml(expr)}">${display}</span>`,
+    );
+  }
+  return parts.join("、");
+}
+function formatList(value: any): string {
+  if (!value) return "";
+  if (Array.isArray(value)) return value.filter(Boolean).join("、");
+  if (typeof value === "string") return value;
+  return "";
+}
+// Damage resist / immune / vulnerable arrays may contain plain
+// strings ("fire") or condition-bracketed objects
+// ({ resist: ["fire"], note: "from non-magical attacks" }).
+// Flatten both shapes to a single human-readable comma list.
+function formatDmgList(arr: any): string {
+  if (!Array.isArray(arr)) return "";
+  return arr.map((x: any) => {
+    if (typeof x === "string") return x;
+    if (x && typeof x === "object") {
+      const inner = x.resist || x.immune || x.vulnerable || x.special || [];
+      const innerStr = Array.isArray(inner)
+        ? inner.map((y: any) => typeof y === "string" ? y : (y?.name ?? "")).filter(Boolean).join("、")
+        : "";
+      const note = x.note || x.cond || "";
+      const pre = x.preNote || "";
+      return [pre, innerStr, note].filter(Boolean).join(" ");
+    }
+    return "";
+  }).filter(Boolean).join("、");
+}
+
 function parseType(type: any): string {
   if (!type) return "?";
   if (typeof type === "string") return type;
@@ -307,6 +397,25 @@ const INFO_MIN_HEIGHT = 120;
 // shrink below it, never grow past it. Long content keeps the scrollbar.
 let INFO_MAX_HEIGHT = 340;
 
+// Role state — used to suppress DM-only affordances when the popover is
+// open for a player (allowPlayerMonsters in suite settings).
+let isGMRole = false;
+function applyRoleGating() {
+  // Stat inputs become read-only for non-GM. The lock button is
+  // hidden via CSS based on the body class.
+  document.body.classList.toggle("is-gm", isGMRole);
+  document.body.classList.toggle("is-player", !isGMRole);
+  root.querySelectorAll<HTMLInputElement>(".stat-input").forEach((el) => {
+    el.readOnly = !isGMRole;
+    if (!isGMRole) {
+      el.title = "玩家端只读";
+    }
+  });
+  root.querySelectorAll<HTMLButtonElement>(".stat-lock").forEach((el) => {
+    el.style.display = isGMRole ? "" : "none";
+  });
+}
+
 // After rendering, shrink the popover height to fit short content. Never
 // grows beyond the initial opened height — long content stays scrollable.
 async function adjustHeight() {
@@ -333,17 +442,116 @@ function render(m: any) {
     .map((s) => `<div>${escapeHtml(s)}</div>`)
     .join("");
 
+  // Fall back to the static monster data when no token is selected
+  // (rare — the popover is auto-opened on selection so currentItemId
+  // is usually present). Live values override the monster's default
+  // HP / max HP / AC so the panel matches the bubbles bar.
+  const liveHp = typeof liveBubbles.health === "number"
+    ? liveBubbles.health
+    : (typeof m.hp?.average === "number" ? m.hp.average : null);
+  const liveMaxHp = typeof liveBubbles["max health"] === "number"
+    ? liveBubbles["max health"]
+    : (typeof m.hp?.average === "number" ? m.hp.average : null);
+  const liveTempHp = typeof liveBubbles["temporary health"] === "number"
+    ? liveBubbles["temporary health"]
+    : 0;
+  const liveAc = typeof liveBubbles["armor class"] === "number"
+    ? liveBubbles["armor class"]
+    : (() => {
+        // Pull a numeric default from the static AC string if possible.
+        const acMatch = /(\d+)/.exec(String(ac));
+        return acMatch ? parseInt(acMatch[1], 10) : 10;
+      })();
+
+  // Stat banner — single-row HP red pill + temp pink circle + AC
+  // heater shield. Mirrors cc-info layout. Editable in place; commits
+  // patch the bound token's bubbles metadata so the bar above the
+  // token redraws live.
+  // HP fill ratio for the pill's mask — 1 = full, 0 = empty. Falls
+   // back to 1 when maxHp is missing/0 so the bar reads as a solid
+   // red pill (legacy look) instead of an empty dark slot.
+  const hpRatio = (typeof liveHp === "number" && typeof liveMaxHp === "number" && liveMaxHp > 0)
+    ? Math.max(0, Math.min(1, liveHp / liveMaxHp))
+    : 1;
+  const statBanner = currentItemId ? `
+    <div class="stat-banner">
+      <div class="hp-pill" style="--hp-ratio: ${hpRatio.toFixed(3)}">
+        <span class="stat-cell">
+          <span class="prev-hint" data-prev></span>
+          <input class="stat-input" type="text" inputmode="numeric"
+                 data-field="health" value="${escapeHtml(String(liveHp ?? ""))}"
+                 title="支持 20 / +5 / -3 / 15+5">
+        </span>
+        <span class="slash">/</span>
+        <span class="stat-cell">
+          <span class="prev-hint" data-prev></span>
+          <input class="stat-input" type="text" inputmode="numeric"
+                 data-field="max health" value="${escapeHtml(String(liveMaxHp ?? ""))}"
+                 title="支持 20 / +5 / -3 / 15+5">
+        </span>
+      </div>
+      <div class="temp-pill stat-cell">
+        <span class="prev-hint" data-prev></span>
+        <input class="stat-input" type="text" inputmode="numeric"
+               data-field="temporary health" value="${escapeHtml(String(liveTempHp))}"
+               title="支持 20 / +5 / -3 / 15+5">
+      </div>
+      <div class="ac-pill stat-cell">
+        <span class="prev-hint" data-prev></span>
+        <input class="stat-input" type="text" inputmode="numeric"
+               data-field="armor class" value="${escapeHtml(String(liveAc))}"
+               title="支持 20 / +5 / -3 / 15+5">
+      </div>
+      ${renderLockButton(liveBubbles.locked !== false)}
+    </div>
+  ` : "";
+
+  // Compact CR / speed chips (HP & AC moved into stat-rows above).
   const chips = `
-    <div class="chip hp"><span class="k">HP</span><span class="v">${escapeHtml(hp)}</span></div>
-    <div class="chip ac"><span class="k">AC</span><span class="v">${escapeHtml(ac)}</span></div>
     <div class="chip cr"><span class="k">CR</span><span class="v">${escapeHtml(cr)}</span></div>
     <div class="chip speed"><span class="k">速度</span><span class="v">${speedLines}</span></div>
   `;
+
+  // Meta block — skills, senses, languages, damage resistances /
+  // immunities / vulnerabilities, condition immunities. Each row
+  // skipped when its data is missing, so a goblin shows a tight
+  // 2-row block while an ancient dragon shows a full 7-row table.
+  const skillsStr = formatSkillList(m.skill);
+  const sensesStr = formatList(m.senses);
+  // 5etools attaches passive perception separately on most entries;
+  // append it inline behind the senses list when present.
+  const passive = typeof m.passive === "number" ? `被动察觉 ${m.passive}` : "";
+  const sensesFull = [sensesStr, passive].filter(Boolean).join("、");
+  const languagesStr = formatList(m.languages);
+  const resistStr = formatDmgList(m.resist);
+  const immuneStr = formatDmgList(m.immune);
+  const vulnerableStr = formatDmgList(m.vulnerable);
+  const condImmuneStr = formatDmgList(m.conditionImmune);
+  const metaRow = (label: string, value: string, raw = false) =>
+    value
+      ? `<div class="meta-row"><span class="meta-l">${label}</span><span class="meta-v">${raw ? value : formatTagsClickable(value)}</span></div>`
+      : "";
+  const meta = [
+    // Skills row already contains finalized HTML (`.rollable` spans
+    // wrapped in formatSkillList) — pass `raw=true` so it isn't
+    // re-escaped by formatTagsClickable.
+    metaRow("技能", skillsStr, true),
+    metaRow("感知", sensesFull),
+    metaRow("语言", languagesStr),
+    metaRow("抗性", resistStr),
+    metaRow("免疫", immuneStr),
+    metaRow("易伤", vulnerableStr),
+    metaRow("状态免疫", condImmuneStr),
+  ].filter(Boolean).join("");
+  const metaBlock = meta ? `<div class="meta">${meta}</div>` : "";
+
   const top = `
+    ${statBanner}
     <div class="top">
       <div class="chips">${chips}</div>
       <div class="abil">__ABIL__</div>
     </div>
+    ${metaBlock}
   `;
 
   const saves = m.save || {};
@@ -400,6 +608,16 @@ function render(m: any) {
 
   root.innerHTML = `
     <div class="hdr">
+      <div class="drag-handle" id="drag-handle" title="拖动 / Drag" aria-label="拖动面板">
+        <svg viewBox="0 0 12 18" aria-hidden="true">
+          <circle cx="3" cy="3" r="1.2" fill="currentColor"/>
+          <circle cx="9" cy="3" r="1.2" fill="currentColor"/>
+          <circle cx="3" cy="9" r="1.2" fill="currentColor"/>
+          <circle cx="9" cy="9" r="1.2" fill="currentColor"/>
+          <circle cx="3" cy="15" r="1.2" fill="currentColor"/>
+          <circle cx="9" cy="15" r="1.2" fill="currentColor"/>
+        </svg>
+      </div>
       <div class="name">${escapeHtml(name)}</div>
       <div class="sub">${escapeHtml(sub)}</div>
     </div>
@@ -411,12 +629,178 @@ function render(m: any) {
     ${reactions}
     ${legendary}
   `;
+  // Re-bind the drag listener — innerHTML reassignment GC's the
+  // previous handle node along with its event handlers.
+  const handle = root.querySelector<HTMLElement>("#drag-handle");
+  if (handle) {
+    if (currentMonsterDragUnbind) currentMonsterDragUnbind();
+    currentMonsterDragUnbind = bindPanelDrag(handle, PANEL_IDS.bestiaryInfo);
+  }
+  bindStatRowInputs();
+  // Re-apply role gating after each render — fresh DOM nodes need
+  // their readOnly / display state set.
+  applyRoleGating();
 }
 
-async function showMonster(slug: string) {
+let currentMonsterDragUnbind: (() => void) | null = null;
+
+// DM-only lock button. Bestiary panel is GM-only by definition so we
+// always render the button when the popover is open. Closed padlock
+// = locked (default — players see no bar in idle, silhouette in
+// combat); open padlock = unlocked (everyone sees full HP / AC).
+function renderLockButton(locked: boolean): string {
+  const titleZh = locked
+    ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
+    : "已解锁：所有玩家可见完整 HP / AC 数值";
+  const lockedAttr = locked ? "true" : "false";
+  return `
+    <button class="stat-lock" data-locked="${lockedAttr}" title="${escapeHtml(titleZh)}" aria-label="${escapeHtml(titleZh)}" type="button">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor" stroke="none"/>
+        <path class="lock-shackle" d="M5 7 V5 a3 3 0 0 1 6 0 V7"/>
+      </svg>
+    </button>
+  `;
+}
+
+// After a successful patch, refresh all four stat inputs so the user
+// sees the actual cross-field-clamped values (typed HP=999 with
+// maxHp=20 → input snaps to 20).
+function refreshStatInputs(live: BubblesData): void {
+  const fields: Array<keyof BubblesData> = [
+    "health", "max health", "temporary health", "armor class",
+  ];
+  for (const f of fields) {
+    const v = live[f];
+    if (v == null) continue;
+    const sel = `.stat-input[data-field="${f}"]`;
+    const el = root.querySelector<HTMLInputElement>(sel);
+    if (el) el.value = String(v);
+  }
+  // Re-paint the HP pill's fill ratio so the masked overlay tracks
+  // edits live (without this the pill text updates but the colored
+  // fill stays at the previous ratio until re-render).
+  const hp = typeof live["health"] === "number" ? (live["health"] as number) : null;
+  const maxHp = typeof live["max health"] === "number" ? (live["max health"] as number) : null;
+  const ratio = (hp != null && maxHp != null && maxHp > 0)
+    ? Math.max(0, Math.min(1, hp / maxHp))
+    : 1;
+  const pill = root.querySelector<HTMLElement>(".hp-pill");
+  if (pill) pill.style.setProperty("--hp-ratio", ratio.toFixed(3));
+}
+
+// Stat-row input wiring — mirrors cc-info's binder but writes to
+// whichever token id is currently selected (currentItemId).
+function bindStatRowInputs(): void {
+  if (!currentItemId) return;
+  const lockBtn = root.querySelector<HTMLButtonElement>(".stat-lock");
+  if (lockBtn) {
+    lockBtn.addEventListener("click", async () => {
+      const wasLocked = lockBtn.dataset.locked !== "false";
+      const next = !wasLocked;
+      lockBtn.dataset.locked = next ? "true" : "false";
+      lockBtn.title = next
+        ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
+        : "已解锁：所有玩家可见完整 HP / AC 数值";
+      try {
+        // Sync TWO fields on the same metadata key:
+        //   - `locked` → suite's own bubbles module (silhouette mode)
+        //   - `hide`   → external "Stat Bubbles for D&D" plugin
+        //                ("Dungeon Master Only" toggle — players don't
+        //                see the bubble at all)
+        // Both move in lockstep so the lock button does the right
+        // thing regardless of which bubbles plugin (or both) is
+        // active in the room.
+        await patchBubbles(
+          currentItemId!,
+          { locked: next, hide: next } as Partial<BubblesData>,
+        );
+        liveBubbles = { ...liveBubbles, locked: next, hide: next };
+      } catch (e) {
+        console.warn("[monster-info] toggle lock failed", e);
+        lockBtn.dataset.locked = wasLocked ? "true" : "false";
+      }
+    });
+  }
+  const inputs = root.querySelectorAll<HTMLInputElement>(".stat-input[data-field]");
+  inputs.forEach((input) => {
+    const field = input.dataset.field as keyof BubblesData | undefined;
+    if (!field) return;
+    let editStart = input.value;
+    const cell = input.closest<HTMLElement>(".stat-cell");
+    const prevHint = cell?.querySelector<HTMLElement>(".prev-hint");
+
+    const commit = async () => {
+      if (!currentItemId) {
+        input.value = editStart;
+        return;
+      }
+      const text = input.value;
+      const cur = parseFloat(editStart);
+      const parsed = parseStatInput(text, Number.isFinite(cur) ? cur : 0);
+      if (parsed == null) {
+        input.value = editStart;
+        return;
+      }
+      const next = clampStat(field, parsed);
+      try {
+        const final = await patchBubbles(
+          currentItemId,
+          { [field]: next } as Partial<BubblesData>,
+        );
+        liveBubbles = { ...liveBubbles, ...final };
+        refreshStatInputs(final);
+        editStart = input.value;
+      } catch (e) {
+        console.warn("[monster-info] patch bubbles failed", e);
+        input.value = editStart;
+      }
+    };
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        input.blur();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        input.value = editStart;
+        input.blur();
+      }
+    });
+    input.addEventListener("focus", () => {
+      editStart = input.value;
+      if (prevHint) prevHint.textContent = editStart;
+      cell?.classList.add("editing");
+      // Clear the input on focus (no blue text-selection rectangle).
+      // Empty blur reverts to editStart.
+      requestAnimationFrame(() => {
+        input.value = "";
+      });
+    });
+    input.addEventListener("blur", () => {
+      cell?.classList.remove("editing");
+      const text = input.value.trim();
+      if (text === "") {
+        input.value = editStart;
+        return;
+      }
+      if (text !== editStart) void commit();
+    });
+  });
+}
+
+async function showMonster(slug: string, itemId: string | null = currentItemId) {
   currentSlug = slug;
+  currentItemId = itemId;
+  // Load the bound token's bubbles snapshot in parallel with monster
+  // data — render() reads liveBubbles for the editable HP/AC rows.
+  const liveP = itemId ? readBubbles(itemId) : Promise.resolve({} as BubblesData);
   try {
-    const meta = await OBR.scene.getMetadata();
+    const [meta, live] = await Promise.all([
+      OBR.scene.getMetadata(),
+      liveP,
+    ]);
+    liveBubbles = live;
     const table = (meta[BESTIARY_DATA_KEY] as Record<string, any>) || {};
     let m = table[slug];
     if (!m) m = await fetchMonsterBySlug(slug);
@@ -483,22 +867,42 @@ bindRollableContextMenu(
   },
 );
 
-OBR.onReady(() => {
+OBR.onReady(async () => {
   subscribeToSfx();
   // Capture the popover's opened height as the ceiling for future resizes.
   if (window.innerHeight > 0) INFO_MAX_HEIGHT = window.innerHeight;
 
-  // Initial slug from URL — popover is opened on-demand with the slug in
-  // the query string. While popover stays open, background broadcasts
-  // in-place swaps when the DM selects a different monster.
+  // Determine role early — when player + allowPlayerMonsters is on
+  // the popover renders for them too, but with edit affordances
+  // suppressed (HP / AC inputs become read-only, lock button hidden).
+  // applyRoleGating() fires once at startup and again on player
+  // change so a role flip during the session reflects immediately.
+  try { isGMRole = (await OBR.player.getRole()) === "GM"; } catch {}
+  applyRoleGating();
+  OBR.player.onChange((p) => {
+    const next = p.role === "GM";
+    if (next !== isGMRole) {
+      isGMRole = next;
+      applyRoleGating();
+    }
+  });
+
+  // Initial slug + itemId from URL — popover is opened on-demand with
+  // both in the query string. While popover stays open, background
+  // broadcasts in-place swaps when the DM selects a different
+  // monster (or a different token bound to the same monster type).
   try {
     const params = new URLSearchParams(location.search);
     const slug = params.get("slug");
-    if (slug) showMonster(slug);
+    const itemId = params.get("itemId");
+    if (slug) showMonster(slug, itemId);
   } catch {}
 
   OBR.broadcast.onMessage(SHOW_MSG, (ev: any) => {
     const p = ev?.data || {};
-    if (p.slug) showMonster(String(p.slug));
+    if (p.slug) {
+      const itemId = typeof p.itemId === "string" ? p.itemId : null;
+      showMonster(String(p.slug), itemId);
+    }
   });
 });

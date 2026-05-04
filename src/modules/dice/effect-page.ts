@@ -57,6 +57,10 @@ interface ParsedDie {
   loser: boolean;
   originalValue?: number;
   burstParent?: number;
+  // Subtraction die (e.g. d6 in `1d20-1d6`). Renders at lower opacity
+  // and prefixes its number chip with "−" so the user sees what's
+  // being deducted.
+  subtract?: boolean;
 }
 function parseDice(): ParsedDie[] {
   const dtypes = (params.get("dtypes") ?? "").split(",").filter(Boolean);
@@ -64,6 +68,7 @@ function parseDice(): ParsedDie[] {
     .split(",")
     .filter(Boolean);
   const dlosers = (params.get("dlosers") ?? "").split(",");
+  const dsubtract = (params.get("dsubtract") ?? "").split(",");
   // Parallel arrays — empty string means "no annotation" for that die.
   const doriginals = (params.get("doriginals") ?? "").split(",");
   const dparents = (params.get("dparents") ?? "").split(",");
@@ -84,6 +89,7 @@ function parseDice(): ParsedDie[] {
       const p = parseInt(parentRaw, 10);
       if (Number.isFinite(p)) die.burstParent = p;
     }
+    if (dsubtract[i] === "1") die.subtract = true;
     out.push(die);
   }
   return out.length ? out : [{ type: "d20", value: 1, loser: false }];
@@ -448,7 +454,13 @@ const HIDDEN_TINT = 0.5;
 const ALPHA_CEILING = isHidden ? HIDDEN_TINT : 1;
 const LOSER_REST_ALPHA = 0.3;
 const LOSER_FADE_MS = 380;
-const baseAlpha = dice.map(() => ALPHA_CEILING);
+// Subtraction dice render at LOSER_REST_ALPHA throughout (lower than
+// the rest of the kept dice) so the player can visually distinguish
+// "this die is being SUBTRACTED" from "this die is being added".
+// This matches the user's spec ("减骰以半透明显示，正常参与动画计算").
+const baseAlpha = dice.map((d) =>
+  d.subtract ? ALPHA_CEILING * LOSER_REST_ALPHA : ALPHA_CEILING,
+);
 // `revealed[i]` flips false → true the moment a burst child becomes
 // visible (its parent's burst animation called revealBurstChild). Dice
 // that aren't burst children start true. The frame loop checks this
@@ -461,6 +473,7 @@ for (let i = 0; i < N_DICE; i++) {
   const el = document.createElement("div");
   el.className = "dice";
   if (dice[i].loser) el.classList.add("loser");
+  if (dice[i].subtract) el.classList.add("subtract");
   el.dataset.type = dice[i].type;
   const size = dieSizes[i];
   // Per-die size override — d4 visibly smaller than d20, d100 a bit
@@ -1718,17 +1731,20 @@ const ANTICIPATE_MS = 180;
 const FLY_MS = 560;
 const FLY_END_SCALE = 0.16;
 
-// History popover position constants — must stay in sync with
-// HISTORY_LEFT_OFFSET / HISTORY_BOTTOM_OFFSET / HISTORY_W in index.ts.
-const HISTORY_LEFT = 16;
-const HISTORY_BOTTOM = 70;
-const HISTORY_W_ = 320;
-const HISTORY_H_ = 280;
+// Trigger position constants — must stay in sync with
+// HISTORY_TRIGGER_RIGHT_OFFSET / HISTORY_TRIGGER_BOTTOM_OFFSET /
+// HISTORY_TRIGGER_W / _H in index.ts. Fly target is the CENTER of the
+// trigger button on the bottom-right (was the bottom-LEFT history
+// popover; user re-targeted to the trigger so the dice visually
+// "land into" the d20 button that lights up to indicate new history).
+const TRIGGER_RIGHT = 75;
+const TRIGGER_BOTTOM = 5;
+const TRIGGER_W_ = 92;
+const TRIGGER_H_ = 64;
 
 function flyTargetScreen(): { x: number; y: number } {
-  // Aim near the TOP of the popover so dice land where new rows insert.
-  const x = HISTORY_LEFT + HISTORY_W_ / 2;
-  const y = window.innerHeight - HISTORY_BOTTOM - HISTORY_H_ + 30;
+  const x = window.innerWidth - TRIGGER_RIGHT - TRIGGER_W_ / 2;
+  const y = window.innerHeight - TRIGGER_BOTTOM - TRIGGER_H_ / 2;
   return { x, y };
 }
 

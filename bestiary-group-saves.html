@@ -119,6 +119,51 @@ html,body{
   background:rgba(231,76,60,0.16);
   border-color:rgba(231,76,60,0.45);
 }
+
+/* HP edit row — sits below the save row in `save` mode. Input takes
+   the user's number; minus/plus/set apply it to every selected
+   monster's bubbles HP metadata via a single bg broadcast. */
+.row-hp{
+  display:flex;align-items:stretch;gap:5px;
+  padding:0 10px 10px;
+  flex-shrink:0;
+}
+.row-hp .hp-input{
+  flex:0 0 56px;
+  background:rgba(0,0,0,0.32);
+  border:1px solid var(--border);
+  border-radius:8px;
+  color:var(--text);
+  font-family:inherit;font-size:13px;font-weight:700;
+  text-align:center;
+  outline:none;
+  padding:0;
+}
+.row-hp .hp-input::-webkit-inner-spin-button,
+.row-hp .hp-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.row-hp .hp-btn{
+  flex:1 1 0;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--bg-soft);
+  border:1px solid var(--border);
+  border-radius:8px;
+  cursor:pointer;
+  font-family:inherit;color:var(--text);
+  font-size:12px;font-weight:700;
+  transition:background .12s, border-color .12s, transform .06s;
+  user-select:none;
+}
+.row-hp .hp-btn:active{transform:scale(0.96)}
+.row-hp .hp-btn.dmg{color:#ff8b7a}
+.row-hp .hp-btn.dmg:hover{background:rgba(231,76,60,0.16);border-color:rgba(231,76,60,0.45)}
+.row-hp .hp-btn.heal{color:#7be0a0}
+.row-hp .hp-btn.heal:hover{background:rgba(46,204,113,0.16);border-color:rgba(46,204,113,0.45)}
+.row-hp .hp-btn.set{color:#9ad9ff}
+.row-hp .hp-btn.set:hover{background:rgba(93,173,226,0.18);border-color:rgba(93,173,226,0.45)}
+.row-hp .hp-btn.flash{
+  background:rgba(46,204,113,0.30);
+  border-color:rgba(46,204,113,0.65);
+}
 </style>
 </head>
 <body>
@@ -138,6 +183,17 @@ html,body{
     <button class="btn" data-ab="cha"><span class="ab" data-l="abCha">魅力</span><span class="lbl">CHA</span></button>
   </div>
 
+  <!-- "save" mode HP-edit row — type a number, then click −HP / +HP /
+       =HP to subtract / add / set the value on every selected
+       bestiary-bound monster's bubbles HP. Hidden in initiative
+       mode (combat prep) since the GM is rolling, not editing. -->
+  <div class="row-hp" id="rowHp">
+    <input class="hp-input" id="hpInput" type="number" min="0" max="9999" step="1" value="10" />
+    <button class="hp-btn dmg" data-hp="dmg" title="减 HP / Damage selected"><span data-l="hpDmg">−HP</span></button>
+    <button class="hp-btn heal" data-hp="heal" title="加 HP / Heal selected"><span data-l="hpHeal">+HP</span></button>
+    <button class="hp-btn set" data-hp="set" title="设 HP / Set selected"><span data-l="hpSet">=HP</span></button>
+  </div>
+
   <!-- "initiative" mode: 3 variant buttons (hidden by default; the bg
        module flips display based on combat state). 优势/普通/劣势 — when
        combat is being prepared, the GM's natural multi-select gesture
@@ -154,6 +210,7 @@ import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
 
 const BC_FIRE = "com.obr-suite/bestiary-group-save-fire";
 const BC_FIRE_INIT = "com.obr-suite/bestiary-group-init-fire";
+const BC_FIRE_HP = "com.obr-suite/bestiary-group-hp-fire";
 const BC_STATE = "com.obr-suite/bestiary-group-save-state";
 const BC_STATE_REQUEST = "com.obr-suite/bestiary-group-save-state-request";
 
@@ -186,22 +243,24 @@ function readLang(){
 }
 const T = {
   zh: {
-    title: "群体豁免",
+    title: "群体豁免 / HP",
     titleInit: "群体先攻",
     hint: "左键投掷 · 右键更多",
     hintInit: "战斗准备阶段 · 1d20 + 各自敏捷调整值",
     countSel: (n) => `${n} 个目标`,
     abStr: "力量", abDex: "敏捷", abCon: "体质", abInt: "智力", abWis: "感知", abCha: "魅力",
     ivAdv: "优势", ivNormal: "普通", ivDis: "劣势",
+    hpDmg: "−HP", hpHeal: "+HP", hpSet: "=HP",
   },
   en: {
-    title: "Group Save",
+    title: "Group Save / HP",
     titleInit: "Group Initiative",
     hint: "left-click roll · right-click more",
     hintInit: "Combat prep · 1d20 + each token's DEX modifier",
     countSel: (n) => `${n} targets`,
     abStr: "Str", abDex: "Dex", abCon: "Con", abInt: "Int", abWis: "Wis", abCha: "Cha",
     ivAdv: "Advantage", ivNormal: "Normal", ivDis: "Disadvantage",
+    hpDmg: "−HP", hpHeal: "+HP", hpSet: "=HP",
   },
 };
 let currentMode = "save"; // "save" | "initiative"
@@ -224,8 +283,12 @@ function applyMode(mode) {
   currentMode = mode === "initiative" ? "initiative" : "save";
   const saveRow = document.getElementById("rowSave");
   const initRow = document.getElementById("rowInit");
+  const hpRow = document.getElementById("rowHp");
   if (saveRow) saveRow.style.display = currentMode === "initiative" ? "none" : "grid";
   if (initRow) initRow.style.display = currentMode === "initiative" ? "grid" : "none";
+  // HP edit row tags along with save mode — combat-prep mode hides
+  // it so the GM isn't tempted to pre-edit HP while rolling init.
+  if (hpRow) hpRow.style.display = currentMode === "initiative" ? "none" : "flex";
   applyLang(currentLang);
 }
 
@@ -299,6 +362,28 @@ OBR.onReady(() => {
   // case the post-open broadcast raced ahead of our listener
   // registration here.
   OBR.broadcast.sendMessage(BC_STATE_REQUEST, {}, { destination: "LOCAL" }).catch(() => {});
+
+  // HP-edit row — the input + 3 action buttons. Left-click on a
+  // button reads the current input value, broadcasts BC_FIRE_HP with
+  // the action mode and value; bg writes to every selected token's
+  // bubbles HP metadata and the bars + popover stats refresh live.
+  const hpInput = document.getElementById("hpInput");
+  document.querySelectorAll(".row-hp .hp-btn").forEach((b) => {
+    b.addEventListener("click", () => {
+      const mode = b.dataset.hp;       // "dmg" | "heal" | "set"
+      if (!mode) return;
+      const raw = parseInt((hpInput?.value ?? "").trim(), 10);
+      const value = Number.isFinite(raw) ? Math.max(0, Math.min(9999, raw)) : 0;
+      if (value <= 0 && mode !== "set") return; // 0 dmg / 0 heal is a no-op
+      b.classList.add("flash");
+      setTimeout(() => b.classList.remove("flash"), 250);
+      OBR.broadcast.sendMessage(
+        BC_FIRE_HP,
+        { mode, value },
+        { destination: "LOCAL" },
+      ).catch(() => {});
+    });
+  });
 
   document.querySelectorAll(".btn").forEach((b) => {
     // Left-click — semantics depend on which row the button lives in.

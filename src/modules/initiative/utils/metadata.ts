@@ -23,6 +23,23 @@ export function itemToInitiativeItem(item: Item): InitiativeItem | null {
   if (!data) return null;
   const modKey = "com.initiative-tracker/dexMod";
   const mod = typeof item.metadata[modKey] === "number" ? item.metadata[modKey] as number : 0;
+  // Pull HP fields from the shared bubbles-extension metadata namespace
+  // so the panel can render a small numberless HP track above each
+  // count chip without standing up an independent data source.
+  const BUBBLES_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
+  const bm = (item.metadata as any)?.[BUBBLES_KEY];
+  let hp = -1;
+  let maxHp = -1;
+  let bubblesLocked = true;
+  if (bm && typeof bm === "object") {
+    const hpRaw = Number(bm["health"]);
+    const maxRaw = Number(bm["max health"]);
+    if (Number.isFinite(maxRaw) && maxRaw > 0) {
+      maxHp = maxRaw;
+      hp = Number.isFinite(hpRaw) ? Math.max(0, Math.min(hpRaw, maxRaw)) : maxRaw;
+    }
+    bubblesLocked = bm["locked"] === undefined ? true : !!bm["locked"];
+  }
   return {
     id: item.id,
     name: item.name,
@@ -39,6 +56,10 @@ export function itemToInitiativeItem(item: Item): InitiativeItem | null {
     // the character to a player, which caused delegated owners to lose
     // their roll / edit buttons.
     ownerId: item.createdUserId || data.ownerId || "",
+    invisible: !!data.invisible,
+    hp,
+    maxHp,
+    bubblesLocked,
   };
 }
 

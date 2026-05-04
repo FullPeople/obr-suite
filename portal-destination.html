@@ -174,6 +174,38 @@ async function dismiss() {
   try { await OBR.popover.close(POPOVER_ID); } catch {}
 }
 
+// Auto-size the popover to the content's natural height. The bg-side
+// caller passes a generous initial height (large enough for ~5 options);
+// once the iframe has rendered we measure each block and ask the SDK
+// to shrink/grow the popover to fit precisely. Avoids the "too short
+// for 1-2 options" bug where the static `BASE + N * ITEM_H` formula
+// undershot 1-/2-option layouts.
+function resizeToContent() {
+  const head = document.querySelector(".head");
+  const sub = document.querySelector(".sub");
+  const list = document.getElementById("list");
+  if (!head || !sub || !list) return;
+
+  // Sum natural heights of list children (each .opt or the .empty fallback)
+  // — the list itself has `flex:1` so its own offsetHeight equals whatever
+  // the popover gave us, not the content's intrinsic height.
+  const kids = Array.from(list.children);
+  let listH = 0;
+  for (const c of kids) listH += c.offsetHeight || 0;
+  if (kids.length > 1) listH += (kids.length - 1) * 3;          // .list gap
+  if (kids.length === 0 || listH === 0) listH = 38;             // .empty min
+
+  // CSS-derived constants for the parts we don't measure:
+  //   .bubble padding 9 + 8 = 17
+  //   .head margin-bottom 6
+  //   .sub margin-bottom 5 + padding-bottom 4 = 9
+  //   .bubble outer reserve 8 (top) + 14 (bottom for the tail) = 22
+  //   safety buffer 6
+  const inner = 17 + head.offsetHeight + 6 + sub.offsetHeight + 9 + listH;
+  const desired = inner + 22 + 6;
+  try { OBR.popover.setHeight(POPOVER_ID, desired); } catch {}
+}
+
 OBR.onReady(async () => {
   document.querySelectorAll(".opt").forEach((el) => {
     el.addEventListener("click", async () => {
@@ -197,6 +229,10 @@ OBR.onReady(async () => {
   });
   window.addEventListener("beforeunload", () => { void notifyClosed(); });
   window.addEventListener("pagehide", () => { void notifyClosed(); });
+
+  // Resize after layout settles (one rAF for first paint, plus a follow-up
+  // rAF so any web-font / CSS-derived metrics are stable before measuring).
+  requestAnimationFrame(() => requestAnimationFrame(resizeToContent));
 });
 </script>
 </body>

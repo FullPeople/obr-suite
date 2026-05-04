@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Full Suite · DM 公告</title>
+<style>
+:root {
+  --bg-soft: rgba(31, 34, 48, 0.97);
+  --bg-card: rgba(15, 17, 28, 0.85);
+  --border: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(245, 166, 35, 0.55);
+  --accent: #5dade2;
+  --accent-dim: #7ec8f0;
+  --warn: #f5a623;
+  --warn-dim: #f0b94a;
+  --text: #e6e8ee;
+  --text-dim: #9aa0b3;
+  --text-mute: #777b8a;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  height: 100%; width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
+  font-size: 13px;
+  background: transparent;
+  color: var(--text);
+  overflow: hidden;
+}
+body {
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px;
+}
+.card {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6),
+              0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+              0 0 32px rgba(245, 166, 35, 0.10);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(245, 166, 35, 0.10), transparent);
+}
+.head .icon {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(245, 166, 35, 0.18);
+  border: 1px solid rgba(245, 166, 35, 0.4);
+  border-radius: 50%;
+  font-size: 17px; color: var(--warn-dim);
+  flex-shrink: 0;
+}
+.head .title {
+  font-size: 14.5px; font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.3px;
+}
+.head .sub {
+  font-size: 11px; font-weight: 600;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.head .spacer { flex: 1; }
+/* Independent CN|EN toggle — same visual as Settings' lang-switch but
+   only filters this announcement modal (per-client localStorage,
+   doesn't touch the suite-wide language). */
+.lang-switch{
+  display:flex;background:rgba(0,0,0,0.3);border:1px solid var(--border);
+  border-radius:5px;overflow:hidden;
+  flex-shrink:0;
+}
+.lang-switch button{
+  background:transparent;border:none;color:var(--text-dim);
+  padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;
+  font-family:inherit;letter-spacing:0.5px;
+}
+.lang-switch button.on{background:rgba(93,173,226,0.25);color:#7ec8f0}
+.lang-switch button + button{border-left:1px solid var(--border)}
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px 8px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.body::-webkit-scrollbar { width: 6px; }
+.body::-webkit-scrollbar-track { background: transparent; }
+.body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+}
+.alert-row {
+  display: flex; gap: 8px;
+  padding: 9px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 12.5px; line-height: 1.55;
+}
+.alert-row.warn {
+  border-color: rgba(245, 166, 35, 0.45);
+  background: linear-gradient(180deg, rgba(245, 166, 35, 0.10), rgba(245, 166, 35, 0.04));
+}
+.alert-row.info {
+  border-color: rgba(93, 173, 226, 0.35);
+  background: linear-gradient(180deg, rgba(93, 173, 226, 0.08), rgba(93, 173, 226, 0.02));
+}
+.alert-row .dot {
+  flex-shrink: 0;
+  width: 6px; height: 6px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+.alert-row.warn .dot { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+.alert-row.info .dot { background: var(--accent); }
+.alert-row .text { flex: 1; color: var(--text); }
+.alert-row b {
+  color: var(--warn-dim);
+  font-weight: 700;
+}
+.alert-row.info b { color: var(--accent-dim); }
+.alert-row code {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 11.5px;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+  color: var(--accent-dim);
+}
+.alert-row a {
+  color: var(--accent-dim);
+  text-decoration: none;
+  font-weight: 600;
+}
+.alert-row a:hover { text-decoration: underline; }
+
+.section-title {
+  font-size: 11.5px; font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+  padding-left: 2px;
+}
+.todo-list {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.todo-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 12px; color: var(--text);
+  line-height: 1.45;
+}
+.todo-item .marker {
+  flex-shrink: 0;
+  width: 14px; height: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10.5px;
+  color: var(--accent);
+  margin-top: 1px;
+}
+.todo-item .desc { flex: 1; }
+.todo-item .tag {
+  flex-shrink: 0;
+  font-size: 9.5px; font-weight: 700;
+  padding: 1px 6px;
+  margin-top: 1px;
+  background: rgba(93, 173, 226, 0.18);
+  color: var(--accent-dim);
+  border: 1px solid rgba(93, 173, 226, 0.38);
+  border-radius: 8px;
+  letter-spacing: 0.3px;
+}
+.todo-item .tag.large {
+  background: rgba(245, 166, 35, 0.16);
+  color: var(--warn-dim);
+  border-color: rgba(245, 166, 35, 0.40);
+}
+
+/* Changelog list — version chip + description per row. Slightly
+   tighter than the todo list so several versions fit at a glance. */
+.changelog-list {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.cl-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 11.5px; color: var(--text);
+  line-height: 1.5;
+}
+.cl-row .cl-version {
+  flex-shrink: 0;
+  font-family: ui-monospace, "JetBrains Mono", Consolas, monospace;
+  font-size: 10.5px; font-weight: 700;
+  padding: 1px 7px;
+  background: rgba(93, 173, 226, 0.20);
+  color: var(--accent);
+  border: 1px solid rgba(93, 173, 226, 0.40);
+  border-radius: 9px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+.cl-row .cl-desc { flex: 1; }
+.cl-row .cl-desc code {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 10.5px;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.03), transparent);
+}
+.foot .credit {
+  font-size: 10.5px; color: var(--text-mute);
+  font-style: italic;
+}
+.btn {
+  font-family: inherit;
+  font-size: 12.5px; font-weight: 700;
+  padding: 7px 18px;
+  background: var(--accent);
+  color: #0d1828;
+  border: 1px solid var(--accent-dim);
+  border-radius: 7px;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  transition: background 0.12s, transform 0.06s;
+}
+.btn:hover { background: var(--accent-dim); }
+.btn:active { transform: translateY(1px); }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="head">
+    <div class="icon">!</div>
+    <div>
+      <div class="title">Full Suite</div>
+      <div class="sub">公告 / Announcement</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="lang-switch">
+      <button id="ann-lang-zh" class="on" type="button">CN</button>
+      <button id="ann-lang-en" type="button">EN</button>
+    </div>
+  </div>
+
+  <!-- Body and credit are populated at runtime from public/announcement.md.
+       The user edits that file to change the announcement; no code change
+       is needed. See src/dm-announcement.ts for the parser. -->
+  <div class="body" id="body">
+    <div style="padding:14px 18px;color:#888;font-size:12px;">加载公告中…</div>
+  </div>
+
+  <div class="foot">
+    <div class="credit" id="credit"></div>
+    <button class="btn" id="btn-close">我知道了</button>
+  </div>
+</div>
+<script type="module" src="/src/dm-announcement.ts"></script>
+</body>
+</html>

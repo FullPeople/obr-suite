@@ -1,0 +1,52 @@
+{
+  "monster": [
+    {
+      "name": "示例苔藓兽",
+      "ENG_name": "Example Moss Beast",
+      "source": "DEMO",
+      "page": 0,
+      "size": "M",
+      "type": "plant",
+      "alignment": ["N"],
+      "ac": [{"ac": 13, "from": ["natural armor"]}],
+      "hp": {"average": 22, "formula": "4d8 + 4"},
+      "speed": {"walk": 20, "burrow": 10},
+      "str": 14, "dex": 8, "con": 14,
+      "int": 4, "wis": 10, "cha": 6,
+      "skill": {"perception": "+2"},
+      "senses": "tremorsense 30 ft., passive Perception 12",
+      "languages": "—",
+      "cr": "1/4",
+      "trait": [
+        {"name": "False Appearance", "entries": ["静止时与岩石无异。"]}
+      ],
+      "action": [
+        {"name": "Slam", "entries": ["{@atk mw} {@hit 4} to hit, reach 5 ft. {@h}{@damage 1d6+2} bludgeoning damage."]}
+      ]
+    },
+    {
+      "name": "幽光萤兽",
+      "ENG_name": "Glowmoth Wisp",
+      "source": "DEMO",
+      "page": 0,
+      "size": "T",
+      "type": "fey",
+      "alignment": ["CN"],
+      "ac": [{"ac": 14}],
+      "hp": {"average": 9, "formula": "2d4 + 4"},
+      "speed": {"walk": 10, "fly": 40, "hover": true},
+      "str": 4, "dex": 18, "con": 14,
+      "int": 11, "wis": 13, "cha": 12,
+      "skill": {"stealth": "+6"},
+      "senses": "darkvision 60 ft., passive Perception 11",
+      "languages": "Sylvan",
+      "cr": "1/2",
+      "trait": [
+        {"name": "Light Aura", "entries": ["在 10 尺内散发暗淡光芒。"]}
+      ],
+      "action": [
+        {"name": "Ember Touch", "entries": ["{@atk ms} {@hit 6} to hit, reach 5 ft. {@h}{@damage 1d6+4} fire damage."]}
+      ]
+    }
+  ]
+}

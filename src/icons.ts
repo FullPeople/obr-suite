@@ -18,6 +18,50 @@ function svg(content: string, opts: { fill?: string; sw?: number } = {}): string
 }
 
 export const ICONS = {
+  // 📦 — box / package, used by the World Pack tab. Slanted 3D look
+  // so it reads as "container with stuff inside" rather than a flat
+  // square.
+  box: svg(
+    `<path d="M3 7 L12 3 L21 7 L21 17 L12 21 L3 17 Z"/>` +
+    `<path d="M3 7 L12 11 L21 7"/>` +
+    `<line x1="12" y1="11" x2="12" y2="21"/>` +
+    `<path d="M7.5 5 L16.5 9" stroke-dasharray="2 2"/>`,
+    { sw: 1.7 }
+  ),
+  // 🔭 — telescope tube on tripod. Same artwork as
+  // public/metadata-inspector-icon.svg so the OBR tool icon and the
+  // Settings tab use the same glyph.
+  telescope: svg(
+    `<path d="M19.5 4.5 L21 6 L7.5 19.5 L6 18 Z"/>` +
+    `<line x1="18" y1="3" x2="22.5" y2="7.5"/>` +
+    `<line x1="5" y1="17" x2="8" y2="20"/>` +
+    `<line x1="6.5" y1="18.5" x2="3.5" y2="22"/>` +
+    `<line x1="6.5" y1="18.5" x2="6.5" y2="22"/>` +
+    `<line x1="6.5" y1="18.5" x2="9.5" y2="22"/>`,
+    { sw: 1.6 }
+  ),
+  // 👁️ — eye + light rings, vision plugin glyph. Mirrors
+  // public/vision-icon.svg.
+  eye: svg(
+    `<path d="M2 12 c2.5 -4.5 5.7 -6.5 10 -6.5 s7.5 2 10 6.5 c-2.5 4.5 -5.7 6.5 -10 6.5 s-7.5 -2 -10 -6.5 z"/>` +
+    `<circle cx="12" cy="12" r="3.2"/>` +
+    `<circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/>`,
+    { sw: 1.8 }
+  ),
+  // ⊙ — central circle ringed by 4 cardinal + 4 diagonal dots,
+  // mirrors public/status-icon.svg (status-tracker glyph used by
+  // the SCG-style condition wheel UI).
+  statusWheel: svg(
+    `<circle cx="12" cy="12" r="3.2"/>` +
+    `<circle cx="12" cy="4" r="1.6"/>` +
+    `<circle cx="20" cy="12" r="1.6"/>` +
+    `<circle cx="12" cy="20" r="1.6"/>` +
+    `<circle cx="4" cy="12" r="1.6"/>` +
+    `<circle cx="17.5" cy="6.5" r="1.2"/>` +
+    `<circle cx="6.5" cy="17.5" r="1.2"/>` +
+    `<circle cx="17.5" cy="17.5" r="1.2"/>` +
+    `<circle cx="6.5" cy="6.5" r="1.2"/>`
+  ),
   // 💖 — heart with a small 4-point spark; soft fill for warmth
   heartSpark: svg(
     `<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z" fill="currentColor" fill-opacity="0.18"/>` +
@@ -48,13 +92,22 @@ export const ICONS = {
     `<line x1="12" y1="6" x2="12" y2="2"/>` +
     `<line x1="12" y1="22" x2="12" y2="18"/>`
   ),
-  // 🐉 — horned creature head (bestiary)
+  // Three-panel folding screen / triptych unfolding toward the viewer
+  // — bestiary tool glyph. Mirrors public/bestiary-icon.svg so the
+  // OBR tool icon and the settings tab use the same artwork.
   dragon: svg(
-    `<path d="M5 3l3 4M19 3l-3 4"/>` +
-    `<path d="M8 7c0-2 2-3 4-3s4 1 4 3v4c0 4-2 7-4 9-2-2-4-5-4-9V7z"/>` +
-    `<circle cx="10" cy="11" r="0.8" fill="currentColor"/>` +
-    `<circle cx="14" cy="11" r="0.8" fill="currentColor"/>` +
-    `<path d="M10.5 16h3"/>`
+    // Left wing
+    `<path d="M2.7 6.3 L7.5 5 L7.5 19 L2.7 17.7 Z"/>` +
+    `<line x1="5.1" y1="7.5" x2="5.1" y2="16.5"/>` +
+    // Centre panel
+    `<path d="M7.5 5 L16.5 5 L16.5 19 L7.5 19 Z"/>` +
+    `<line x1="12" y1="6" x2="12" y2="18"/>` +
+    // Right wing
+    `<path d="M16.5 5 L21.3 6.3 L21.3 17.7 L16.5 19 Z"/>` +
+    `<line x1="18.9" y1="7.5" x2="18.9" y2="16.5"/>` +
+    // Top + bottom trim
+    `<path d="M2.7 6.3 L7.5 5 L16.5 5 L21.3 6.3"/>` +
+    `<path d="M2.7 17.7 L7.5 19 L16.5 19 L21.3 17.7"/>`
   ),
   // 📇 — id card (character cards)
   idCard: svg(

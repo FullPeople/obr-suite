@@ -52,6 +52,8 @@ export default defineConfig(({ command }) => ({
       input: {
         background: resolve(__dirname, "background.html"),
         cluster: resolve(__dirname, "cluster.html"),
+        "cluster-row": resolve(__dirname, "cluster-row.html"),
+        "dice-history-trigger": resolve(__dirname, "dice-history-trigger.html"),
         settings: resolve(__dirname, "settings.html"),
         "timestop-overlay": resolve(__dirname, "timestop-overlay.html"),
         "search-bar": resolve(__dirname, "search-bar.html"),
@@ -76,6 +78,7 @@ export default defineConfig(({ command }) => ({
         "cc-panel": resolve(__dirname, "cc-panel.html"),
         "cc-info": resolve(__dirname, "cc-info.html"),
         "cc-bind": resolve(__dirname, "cc-bind.html"),
+        "cc-fullscreen": resolve(__dirname, "cc-fullscreen.html"),
         "dice-effect": resolve(__dirname, "dice-effect.html"),
         "dice-panel": resolve(__dirname, "dice-panel.html"),
         "dice-history": resolve(__dirname, "dice-history.html"),
@@ -84,10 +87,17 @@ export default defineConfig(({ command }) => ({
         "portal-edit": resolve(__dirname, "portal-edit.html"),
         "portal-destination": resolve(__dirname, "portal-destination.html"),
         "portal-blink": resolve(__dirname, "portal-blink.html"),
-        // Dev-only entry; the bg module that loads it self-gates on
-        // SUITE_BASE so stable builds skip the tool registration even
-        // though the html file is still present in the bundle.
-        "test-panel": resolve(__dirname, "test-panel.html"),
+        "dm-announcement": resolve(__dirname, "dm-announcement.html"),
+        "drag-preview": resolve(__dirname, "drag-preview.html"),
+        "layout-editor": resolve(__dirname, "layout-editor.html"),
+        "monster-drag-preview": resolve(
+          __dirname,
+          "monster-drag-preview.html"
+        ),
+        "status-tracker": resolve(__dirname, "status-tracker.html"),
+        "metadata-inspector": resolve(__dirname, "metadata-inspector.html"),
+        "vision-light-edit": resolve(__dirname, "vision-light-edit.html"),
+        "vision-collision-edit": resolve(__dirname, "vision-collision-edit.html"),
       },
     },
   },

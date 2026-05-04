@@ -1,10 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <!-- Matches ICONS.dragon in src/icons.ts so the OBR tool / context
-       menu glyph is consistent with the settings tab. -->
-  <path d="M5 3l3 4M19 3l-3 4"/>
-  <path d="M8 7c0-2 2-3 4-3s4 1 4 3v4c0 4-2 7-4 9-2-2-4-5-4-9V7z"/>
-  <circle cx="10" cy="11" r="0.8" fill="white"/>
-  <circle cx="14" cy="11" r="0.8" fill="white"/>
-  <path d="M10.5 16h3"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Bestiary tool icon: a three-panel folding screen / triptych
+       opening toward the viewer. The centre panel faces the viewer
+       head-on; the two outer wings are angled forward (toward us)
+       so they read as three flat trapezoids fanning out. Each panel
+       has a small ornamental top cap and a vertical accent line in
+       the middle of its body, evoking a trifold rulebook display. -->
+
+  <!-- Left wing — slants up-left toward the viewer (wider at front). -->
+  <path d="M2.7 6.3 L7.5 5 L7.5 19 L2.7 17.7 Z" fill="rgba(255,255,255,0.05)"/>
+  <!-- Decorative vertical line on left wing -->
+  <line x1="5.1" y1="7.5" x2="5.1" y2="16.5"/>
+
+  <!-- Centre panel — flat, facing viewer. -->
+  <path d="M7.5 5 L16.5 5 L16.5 19 L7.5 19 Z" fill="rgba(255,255,255,0.08)"/>
+  <!-- Decorative vertical line on centre panel -->
+  <line x1="12" y1="6" x2="12" y2="18"/>
+
+  <!-- Right wing — slants up-right toward the viewer (mirror of left). -->
+  <path d="M16.5 5 L21.3 6.3 L21.3 17.7 L16.5 19 Z" fill="rgba(255,255,255,0.05)"/>
+  <!-- Decorative vertical line on right wing -->
+  <line x1="18.9" y1="7.5" x2="18.9" y2="16.5"/>
+
+  <!-- Top + bottom horizontal trim across all three panels (gives the
+       screen its "rule" feel + a unifying eyebrow). -->
+  <path d="M2.7 6.3 L7.5 5 L16.5 5 L21.3 6.3"/>
+  <path d="M2.7 17.7 L7.5 19 L16.5 19 L21.3 17.7"/>
 </svg>

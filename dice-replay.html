@@ -93,6 +93,22 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
   margin-left:3px;
   letter-spacing:-0.5px;
 }
+/* repeat(N, …) tooltip: stack one row per iteration, no grand-total
+   row. Each row shows its own dice + modifier + per-row total. */
+.bubble .repeat-stack{
+  display:flex;flex-direction:column;gap:2px;
+}
+.bubble .row1.repeat-row{
+  /* Same flex row as a normal single roll, plus a thin top divider
+     between iterations so the eye groups them vertically. */
+  border-top:1px dashed rgba(255,255,255,0.10);
+  padding-top:2px;
+}
+.bubble .row1.repeat-row:first-child{border-top:none;padding-top:0}
+.bubble .repeat-idx{
+  font-size:9.5px;font-weight:700;color:#a0a8ba;
+  min-width:16px;text-align:right;
+}
 
 /* Hint at the top-center: "click overlay to close" / "click again on history row to close" */
 .hint{

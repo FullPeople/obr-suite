@@ -130,11 +130,38 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
 .card{padding:9px 10px;margin-bottom:3px;border-radius:6px;background:rgba(255,255,255,0.04);border:1px solid transparent;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;gap:2px;position:relative}
 .card:hover{background:rgba(255,255,255,0.08)}
 .card.active{background:rgba(52,152,219,0.18);border-color:rgba(52,152,219,0.5)}
-.card-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
+.card-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:42px}
 .card-sub{font-size:10px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card-del{position:absolute;top:4px;right:4px;background:transparent;border:none;color:#666;cursor:pointer;width:18px;height:18px;font-size:13px;display:none;border-radius:3px;font-family:inherit;padding:0;line-height:1}
 .card:hover .card-del{display:block}
 .card-del:hover{background:rgba(231,76,60,0.25);color:#e74c3c}
+
+/* Visibility toggle (DM only). Sits next to the refresh button at
+   the right edge of the card row. Hidden until row hover or "active"
+   state — pinned visible for cards already in dm-only mode so the
+   DM can re-public them with one click. */
+.card-vis{
+  position:absolute;top:4px;right:42px;
+  background:transparent;border:none;color:#888;cursor:pointer;
+  width:18px;height:18px;font-size:11px;line-height:1;
+  border-radius:3px;font-family:inherit;padding:0;
+  display:none;opacity:0.55;
+  transition:opacity .12s, background .12s, color .12s;
+}
+.card:hover .card-vis,
+.card.is-hidden .card-vis{display:block;opacity:1}
+.card-vis:hover{background:rgba(245,166,35,0.22);color:#f5a623}
+
+/* DM-side visual for hidden cards: dim + amber-tinted border so the
+   DM at a glance knows "this card is NOT visible to players". */
+.card.is-hidden{
+  background:rgba(245,166,35,0.06);
+  border-color:rgba(245,166,35,0.30);
+  opacity:0.85;
+}
+.card.is-hidden:hover{opacity:1}
+.card.is-hidden .card-name{color:#f5d76e}
+.card.is-hidden .card-sub{color:rgba(245,166,35,0.65)}
 
 .empty-list{padding:30px 12px;text-align:center;color:#666;font-size:11px;line-height:1.6;white-space:pre-line}
 .err{padding:8px 12px;font-size:11px;color:#e74c3c;background:rgba(231,76,60,0.1);border-top:1px solid rgba(231,76,60,0.2)}
