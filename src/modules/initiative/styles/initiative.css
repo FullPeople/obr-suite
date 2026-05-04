@@ -483,8 +483,11 @@ html, body, #root { height: 100%; background: transparent; }
    like a colored shelf. */
 .roll-btn {
   flex: 1 1 0;
-  /* 16px tall — half (8px) hides under the slot, half pokes below. */
-  height: 16px;
+  /* Was 16px (half hidden under the slot, only 8px clickable) — bumped
+     to 22px so the visible band below the slot is 14px, much easier
+     to hit reliably. The strip still tucks visually under the slot
+     because of the negative margin-top on `.roll-buttons`. */
+  height: 22px;
   width: auto;
   border: none;
   border-radius: 0;

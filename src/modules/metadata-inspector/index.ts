@@ -19,6 +19,7 @@
 
 import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
+import { IS_MOBILE } from "../../feature-flags";
 
 const TOOL_ID = "com.obr-suite/metadata-inspector";
 const MODE_DEFAULT = `${TOOL_ID}/mode-default`;
@@ -199,6 +200,12 @@ async function syncItemFromSelection(): Promise<void> {
 }
 
 export async function setupMetadataInspector(): Promise<void> {
+  // Mobile clients skip setup — the inspector tool icon + popover
+  // overlay would just clutter the limited touch UI.
+  if (IS_MOBILE) {
+    console.info("[metadata-inspector] mobile client — skipping setup");
+    return;
+  }
   const role = await OBR.player.getRole().catch(() => "PLAYER");
   if (role !== "GM") return;
 

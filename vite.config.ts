@@ -95,9 +95,12 @@ export default defineConfig(({ command }) => ({
           "monster-drag-preview.html"
         ),
         "status-tracker": resolve(__dirname, "status-tracker.html"),
+        "status-tracker-capture": resolve(__dirname, "status-tracker-capture.html"),
+        "status-tracker-manage": resolve(__dirname, "status-tracker-manage.html"),
         "metadata-inspector": resolve(__dirname, "metadata-inspector.html"),
         "vision-light-edit": resolve(__dirname, "vision-light-edit.html"),
         "vision-collision-edit": resolve(__dirname, "vision-collision-edit.html"),
+        "hp-bar": resolve(__dirname, "hp-bar.html"),
       },
     },
   },

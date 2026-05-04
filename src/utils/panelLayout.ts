@@ -33,6 +33,16 @@ export const PANEL_IDS = {
   ccInfo: "cc-info",
   search: "search",
   portalEdit: "portal-edit",
+  /** Status-tracker buff palette (the bottom-right pop-up). Drag the
+   *  header to relocate; participates in the layout-editor along
+   *  with everything else. */
+  statusPalette: "status-palette",
+  /** Standalone HP / Temp / AC bar that auto-pops on selection of a
+   *  lightweight token (no bestiary slug, no character-card binding,
+   *  but with the per-token `hp-bar-enabled` flag set via the
+   *  right-click menu). Same drag mechanics as the bestiary info /
+   *  cc-info popovers. */
+  hpBar: "hp-bar",
 } as const;
 
 export type PanelId = (typeof PANEL_IDS)[keyof typeof PANEL_IDS];

@@ -88,6 +88,25 @@ function probeImage(url: string): Promise<{ ok: boolean; w: number; h: number }>
 
 const FALLBACK_TOKEN_URL = `https://obr.dnd.center/5etools-img/bestiary/tokens/MM/Commoner.webp`;
 
+/** Detect the right MIME type from a token URL extension. OBR's
+ *  image-fetcher validates the ImageContent.mime field against the
+ *  actual fetched response; if we hardcode "image/webp" but the URL
+ *  is a .png from a homebrew bestiary, the validation rejects the
+ *  image AFTER it lands in the scene — that's the "panel + drag
+ *  preview look fine but the spawned token shows the broken-image
+ *  icon" bug. Defaults to webp because the official 5etools
+ *  bestiary URLs all end in .webp. */
+function mimeFromUrl(url: string): string {
+  const u = url.toLowerCase();
+  if (/\.svg(\?|#|$)/.test(u)) return "image/svg+xml";
+  if (/\.png(\?|#|$)/.test(u)) return "image/png";
+  if (/\.(jpe?g)(\?|#|$)/.test(u)) return "image/jpeg";
+  if (/\.gif(\?|#|$)/.test(u)) return "image/gif";
+  if (/\.bmp(\?|#|$)/.test(u)) return "image/bmp";
+  if (/\.avif(\?|#|$)/.test(u)) return "image/avif";
+  return "image/webp";
+}
+
 export async function spawnMonster(
   monster: ParsedMonster,
   /** Explicit scene-coord drop position. When provided, the monster
@@ -193,7 +212,7 @@ export async function spawnMonster(
       width: imgSize.w,
       height: imgSize.h,
       url: tokenUrl,
-      mime: "image/webp",
+      mime: mimeFromUrl(tokenUrl),
     },
     { dpi: imgSize.w, offset: { x: halfW, y: halfH } }
   )

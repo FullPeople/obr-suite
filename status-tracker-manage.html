@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>buff 管理</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+
+:root{
+  --bg:#1a1a2e;
+  --bg-card:#16213e;
+  --bg-strong:#0f1830;
+  --border:rgba(255,255,255,0.10);
+  --border-strong:rgba(255,255,255,0.18);
+  --text:#e6e8ee;
+  --text-dim:#9aa0b3;
+  --text-mute:#666b78;
+  --accent:#5dade2;
+  --accent-dim:#7ec8f0;
+  --warn:#c89251;
+  --red:#c0392b;
+  --green:#2ecc71;
+}
+
+html,body{
+  height:100%;width:100%;overflow:hidden;background:transparent;
+  color:var(--text);
+  font-family:"Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji","Twemoji Mozilla","EmojiOne Color",
+    -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Roboto,sans-serif;
+  user-select:none;
+}
+
+.card{
+  position:absolute;inset:0;
+  background:var(--bg);
+  border:1px solid var(--border-strong);
+  border-radius:10px;
+  display:flex;flex-direction:column;
+  box-shadow:0 8px 24px rgba(0,0,0,0.45);
+  overflow:hidden;
+}
+
+.head{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 10px 6px 10px;
+  background:var(--bg-card);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.head .ttl{
+  flex:1;font-size:12px;font-weight:700;color:var(--accent-dim);
+  letter-spacing:0.3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.head .x{
+  background:transparent;border:1px solid var(--border);
+  color:var(--text-dim);
+  cursor:pointer;font-family:inherit;
+  width:22px;height:22px;padding:0;border-radius:4px;
+  font-size:13px;font-weight:600;
+}
+.head .x:hover{color:var(--text);border-color:var(--border-strong)}
+
+.body{
+  flex:1;overflow-y:auto;
+  padding:8px 10px;
+  display:flex;flex-wrap:wrap;gap:5px;
+  align-content:flex-start;
+}
+.body::-webkit-scrollbar{width:5px}
+.body::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:3px}
+
+.bubble{
+  display:inline-flex;align-items:center;
+  height:23px;padding:0 8px;border-radius:5px;
+  font-size:11px;font-weight:700;
+  border:1px solid rgba(0,0,0,0.50);
+  white-space:nowrap;
+  cursor:grab;
+  box-shadow:0 1px 2px rgba(0,0,0,0.30);
+  user-select:none;
+}
+.bubble:hover{filter:brightness(1.10)}
+.bubble:active{cursor:grabbing}
+
+.empty{
+  width:100%;
+  text-align:center;
+  font-size:11px;
+  color:var(--text-mute);
+  font-style:italic;
+  padding:12px 0;
+}
+
+.foot{
+  padding:6px 10px;
+  border-top:1px solid var(--border);
+  font-size:9.5px;color:var(--text-mute);
+  flex-shrink:0;
+  line-height:1.5;
+  text-align:center;
+}
+.foot b{color:var(--text-dim)}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head">
+    <span class="ttl" id="title">buff 管理</span>
+    <button class="x" id="btnClose" type="button" title="关闭">×</button>
+  </div>
+  <div class="body" id="grid"></div>
+  <div class="foot">
+    拖到 <b>其他角色</b> = 转移 · 拖到 <b>外面</b> = 取消
+  </div>
+</div>
+<script type="module" src="/src/status-tracker-manage-page.ts"></script>
+</body>
+</html>

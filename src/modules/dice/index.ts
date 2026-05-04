@@ -675,17 +675,26 @@ export async function setupDice(): Promise<void> {
     })
   );
 
-  // 3. Bottom-right history popover. ON by default per-client (LS pref
-  // controls whether it's open at scene-ready). Trigger button click
-  // broadcasts BC_DICE_HISTORY_TOGGLE which directly toggles open /
-  // close + persists the new state to LS so it survives reload.
-  if (isHistoryAutoOn()) {
-    await openHistory();
-  } else {
-    // Even when closed, broadcast initial state so the trigger button
-    // doesn't render as "on" by default.
-    broadcastHistoryState(false);
-  }
+  // 3. Bottom-right history popover. Spec change 2026-05-04: the
+  // popover ALWAYS starts CLOSED on scene load (regardless of the
+  // per-client LS preference). New dice rolls re-auto-open it in
+  // transient mode (see the dice-roll receive handler below), and
+  // the user can click the trigger to bring it back permanently in
+  // "all" mode. The closed-on-load behaviour matches the user's
+  // expectation that the history shouldn't pre-occupy screen space
+  // when nothing has rolled yet.
+  broadcastHistoryState(false);
+  // Close history every time the scene re-becomes ready. Idempotent
+  // when nothing's open. Symmetric guard for scenes where the
+  // trigger panel itself isn't being rendered (module disabled by
+  // user mid-session).
+  unsubs.push(
+    OBR.scene.onReadyChange(async (ready) => {
+      if (ready && historyOpen) {
+        await closeHistory();
+      }
+    }),
+  );
   unsubs.push(
     OBR.broadcast.onMessage(BC_DICE_HISTORY_TOGGLE, async () => {
       historyManuallyDismissed = false;

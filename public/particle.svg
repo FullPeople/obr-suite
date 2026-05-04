@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100" width="100" height="100">
+  <!-- Default particle: 4-point sparkle. Used when a buff has an
+       effect mode set but no custom imageUrl. White fill so it works
+       reasonably against any background; users who want per-buff
+       colour identification can upload their own coloured PNGs via
+       the palette ✎ popup. -->
+  <path d="M0,-40 L8,-8 L40,0 L8,8 L0,40 L-8,8 L-40,0 L-8,-8 Z"
+        fill="#ffffff" stroke="none"/>
+</svg>

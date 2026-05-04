@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>血条</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;transition:none!important;animation:none!important}
+
+html,body{
+  height:100%;width:100%;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:#eee;background:transparent;
+  user-select:none;
+}
+
+.card{
+  position:absolute;inset:0;
+  background:rgba(22,33,62,0.94);
+  border-radius:10px;
+  box-shadow:0 6px 20px rgba(0,0,0,0.50);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  padding:8px 10px;
+  display:flex;align-items:center;gap:6px;
+}
+
+/* Drag grip — same affordance as bestiary info / cc-info popovers. */
+.drag-handle{
+  flex-shrink:0;
+  width:14px;height:30px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:grab;
+  color:rgba(255,255,255,0.30);
+  opacity:0.55;
+  touch-action:none;user-select:none;
+}
+.drag-handle:hover{opacity:1;color:rgba(255,255,255,0.85)}
+.drag-handle.is-dragging{cursor:grabbing;opacity:1;color:#5dade2}
+.drag-handle svg{width:12px;height:18px;display:block;pointer-events:none}
+
+/* HP / Temp / AC banner — copied from bestiary-monster-info.html so
+   the standalone bar visually matches the editor in the bestiary
+   popover. Same CSS variable --hp-ratio drives the fill width. */
+.stat-banner{
+  flex:1;
+  display:flex;align-items:center;gap:6px;
+}
+.hp-pill{
+  flex:1;
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  display:flex;align-items:center;justify-content:center;gap:2px;
+  min-height:34px;
+  padding:0 12px;
+  background:linear-gradient(135deg,#3a1a18,#4a221d);
+  border:1px solid rgba(231,76,60,0.7);
+  border-radius:18px;
+  color:#fff;
+  font-weight:800;font-size:15px;
+  box-shadow:0 2px 6px rgba(231,76,60,0.32),0 0 0 1px rgba(0,0,0,0.18) inset;
+  letter-spacing:0.3px;
+}
+.hp-pill::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:linear-gradient(135deg,#c0392b,#e94560);
+  width:calc(var(--hp-ratio, 1) * 100%);
+  transition:width 0.18s ease-out;
+  z-index:0;
+  pointer-events:none;
+}
+.hp-pill > *{position:relative;z-index:1}
+.hp-pill .slash{font-size:13px;font-weight:400;opacity:0.55;margin:0 1px}
+
+.temp-pill{
+  flex-shrink:0;
+  width:32px;height:32px;
+  border-radius:50%;
+  background:linear-gradient(135deg,#f5a3c7,#ee7eaa);
+  border:1px solid rgba(232,138,174,0.75);
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-weight:800;font-size:12px;
+  box-shadow:0 2px 6px rgba(232,138,174,0.30),0 0 0 1px rgba(0,0,0,0.18) inset;
+}
+.ac-pill{
+  flex-shrink:0;
+  width:34px;height:38px;
+  background:linear-gradient(135deg,#7ec8f0,#3498db);
+  border:1px solid rgba(52,152,219,0.7);
+  clip-path:polygon(0% 8%,100% 8%,100% 60%,50% 100%,0% 60%);
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-weight:800;font-size:13px;
+  padding-bottom:8px;
+  filter:drop-shadow(0 2px 4px rgba(52,152,219,0.40));
+}
+.stat-cell{position:relative;display:inline-flex;align-items:center;justify-content:center}
+.stat-input{
+  background:transparent;border:none;
+  color:inherit;
+  font-family:inherit;font-weight:inherit;font-size:inherit;
+  text-align:center;
+  outline:none;padding:0;
+  font-variant-numeric:tabular-nums;
+  width:1.6em;
+  caret-color:rgba(255,255,255,0.9);
+}
+.stat-input:focus{
+  text-decoration:underline;
+  text-decoration-color:rgba(255,255,255,0.65);
+  text-decoration-thickness:1px;
+  text-underline-offset:2px;
+}
+.hp-pill .stat-input{width:1.5em}
+.temp-pill .stat-input,.ac-pill .stat-input{width:1.4em}
+
+/* DM-only lock button — same affordance as bestiary monster-info /
+   cc-info popovers. Toggles `metadata.locked` on the bubbles meta
+   key, which gates whether players see HP details / AC. Hidden
+   from players entirely (set display:none for non-GM clients via
+   the JS body class). */
+.stat-lock{
+  flex-shrink:0;
+  width:30px;height:30px;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(245,166,35,0.18);
+  border:1px solid rgba(245,166,35,0.55);
+  border-radius:8px;
+  cursor:pointer;
+  color:#f5a623;
+  padding:0;
+  transition:filter .12s, background .12s, border-color .12s, color .12s;
+}
+.stat-lock:hover{filter:brightness(1.18)}
+.stat-lock[data-locked="false"]{
+  background:rgba(93,173,226,0.18);
+  border-color:rgba(93,173,226,0.55);
+  color:#5dade2;
+}
+body.is-player .stat-lock{display:none}
+.stat-lock svg{width:14px;height:14px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="drag-handle" id="dragHandle" title="拖动重新定位">
+    <svg viewBox="0 0 6 16" fill="currentColor"><circle cx="2" cy="2" r="1"/><circle cx="2" cy="8" r="1"/><circle cx="2" cy="14" r="1"/><circle cx="5" cy="2" r="1"/><circle cx="5" cy="8" r="1"/><circle cx="5" cy="14" r="1"/></svg>
+  </div>
+  <div class="stat-banner">
+    <div class="hp-pill" id="hpPill" style="--hp-ratio: 1">
+      <span class="stat-cell">
+        <input class="stat-input" data-field="health" type="text" value="0"/>
+      </span>
+      <span class="slash">/</span>
+      <span class="stat-cell">
+        <input class="stat-input" data-field="max health" type="text" value="0"/>
+      </span>
+    </div>
+    <div class="temp-pill" title="临时生命">
+      <input class="stat-input" data-field="temporary health" type="text" value="0"/>
+    </div>
+    <div class="ac-pill" title="护甲等级">
+      <input class="stat-input" data-field="armor class" type="text" value="0"/>
+    </div>
+    <button class="stat-lock" id="lockBtn" type="button" data-locked="true" title="锁定 = 战斗外向玩家隐藏血条详情；解锁 = 全员可见">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+        <rect x="3" y="7" width="10" height="7" rx="1.5"/>
+        <path class="lock-shackle" d="M5 7 V5 a3 3 0 0 1 6 0 v2"/>
+      </svg>
+    </button>
+  </div>
+</div>
+<script type="module" src="/src/hp-bar-page.ts"></script>
+</body>
+</html>

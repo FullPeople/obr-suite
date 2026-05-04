@@ -13,6 +13,7 @@ import { setupDice, teardownDice } from "./modules/dice";
 import { setupPortals, teardownPortals } from "./modules/portals";
 import { setupBubbles, teardownBubbles } from "./modules/bubbles";
 import { setupStatusTracker, teardownStatusTracker } from "./modules/statusTracker";
+import { setupHpBar, teardownHpBar } from "./modules/hpBar";
 import { setupMetadataInspector, teardownMetadataInspector } from "./modules/metadata-inspector";
 import { setupVision, teardownVision } from "./modules/vision";
 import { setupCrossSceneCards } from "./modules/cross-scene-cards";
@@ -137,7 +138,9 @@ const BC_MOBILE_PRESENCE = "com.obr-suite/mobile-presence";
 const seenMobilePlayers = new Set<string>();
 
 function disabledFeaturesText(lang: "zh" | "en"): string {
-  return lang === "zh" ? "角色卡全屏面板、全局搜索" : "Character Card panel + Global Search";
+  return lang === "zh"
+    ? "角色卡全屏面板、全局搜索、状态追踪、元数据检查"
+    : "Character Card panel, Global Search, Status Tracker, Metadata Inspector";
 }
 
 async function announceMobilePresence(): Promise<void> {
@@ -407,6 +410,7 @@ OBR.onReady(() => {
       PANEL_IDS.bestiaryInfo,
       PANEL_IDS.ccInfo,
       PANEL_IDS.portalEdit,
+      PANEL_IDS.statusPalette,
     ];
     for (const id of panelIds) {
       try {
@@ -533,6 +537,7 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   dice: { setup: setupDice, teardown: teardownDice },
   portals: { setup: setupPortals, teardown: teardownPortals },
   bubbles: { setup: setupBubbles, teardown: teardownBubbles },
+  hpBar: { setup: setupHpBar, teardown: teardownHpBar },
   metadataInspector: {
     setup: async () => { await setupMetadataInspector(); },
     teardown: async () => { teardownMetadataInspector(); },

@@ -35,7 +35,18 @@ function getEnabledLibraryBases(): string[] {
     const bases = libs
       .filter((l) => l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim().length > 0)
       .map((l) => l.baseUrl.replace(/\/+$/, ""));
-    return bases.length > 0 ? bases : [DEFAULT_BASE];
+    // Dedup — when two libraries share the same baseUrl (e.g. the
+    // partnered kiwee entry which differs only in its `indexPath`
+    // vs the main entry), the BESTIARY only knows about baseUrl,
+    // so fetching twice would just waste bandwidth and produce
+    // identical entries that the slug-dedup later collapses.
+    const seen = new Set<string>();
+    const unique = bases.filter((b) => {
+      if (seen.has(b)) return false;
+      seen.add(b);
+      return true;
+    });
+    return unique.length > 0 ? unique : [DEFAULT_BASE];
   } catch {
     return [DEFAULT_BASE];
   }
@@ -99,6 +110,27 @@ function buildTokenUrl(m: any): string {
   return `${IMG_BASE}/bestiary/tokens/${src}/${encodeURIComponent(nameToTokenName(nm))}.webp`;
 }
 
+/** Parse a 5etools-style HP block to a single number. The standard
+ *  shape is `{ average: 63, formula: "7d10+21" }` but homebrew /
+ *  custom bestiary entries sometimes use `{ special: "96" }` (or
+ *  `{ special: 96 }`) when the author just wants to specify a flat
+ *  number without a formula. We accept both forms. Falls back to 0
+ *  when none of the recognised shapes are present. */
+export function parseHpNumber(hp: any): number {
+  if (typeof hp === "number") return hp;
+  if (hp && typeof hp === "object") {
+    if (typeof hp.average === "number") return hp.average;
+    if (typeof hp.special === "number") return hp.special;
+    if (typeof hp.special === "string") {
+      // Try plain integer first, then leading-digit extract for
+      // values like "96 (8d8 + 60)".
+      const n = parseInt(hp.special, 10);
+      if (!isNaN(n)) return n;
+    }
+  }
+  return 0;
+}
+
 function parseMon(m: any): ParsedMonster | null {
   try {
     if (!m || !m.name) return null;
@@ -108,7 +140,7 @@ function parseMon(m: any): ParsedMonster | null {
       engName: m.ENG_name || m.name || "???",
       source,
       ac: parseAC(m.ac),
-      hp: m.hp?.average ?? 0,
+      hp: parseHpNumber(m.hp),
       dexMod: Math.floor(((m.dex || 10) - 10) / 2),
       cr: m.cr ?? "?",
       size: SIZE_MAP[m.size?.[0]] || m.size?.[0] || "?",
@@ -359,9 +391,25 @@ export async function loadAllMonsters(): Promise<ParsedMonster[]> {
       seenRaw.add(m);
       uniqueRaw.push(m);
     }
-    const all = uniqueRaw
+    let all = uniqueRaw
       .map(parseMon)
       .filter((x): x is ParsedMonster => x !== null);
+    // Cross-library dedup: when two libraries (e.g. kiwee main +
+    // kiwee partnered) ship the same monster under slightly
+    // different source-code casing or whitespace, the slug-based
+    // dedup above misses them. Apply a final normalised-key pass
+    // here that combines source.toUpperCase() + engName.toLowerCase()
+    // + tokenUrl as a stricter identity. First occurrence wins
+    // (which respects the library order).
+    const seenKey = new Set<string>();
+    all = all.filter((m) => {
+      const src = (m.source || "").trim().toUpperCase();
+      const eng = (m.engName || m.name || "").trim().toLowerCase();
+      const key = `${src}::${eng}`;
+      if (seenKey.has(key)) return false;
+      seenKey.add(key);
+      return true;
+    });
     // Sort by CR numerically, then by name
     all.sort((a, b) => {
       const crA = parseCR(a.cr);

@@ -27,6 +27,7 @@ export type ModuleId =
   | "portals"
   | "bubbles"
   | "statusTracker"
+  | "hpBar"
   | "metadataInspector"
   | "vision";
 
@@ -44,12 +45,18 @@ export interface LibraryConfig {
   id: string;
   /** Display name shown in search-result row + chips. */
   name: string;
-  /** Base URL — must serve `search/index.json` + `data/<file>.json`. */
+  /** Base URL — must serve `search/<indexPath>` + `data/<file>.json`. */
   baseUrl: string;
   /** Whether the library is currently active (data fetched + merged). */
   enabled: boolean;
   /** Built-in libraries can't be deleted, only enabled/disabled. */
   builtin?: boolean;
+  /** Path (relative to baseUrl) for the search index file. Defaults
+   *  to `search/index.json` when omitted, which matches the standard
+   *  5etools layout. The kiwee partnered listing uses a different
+   *  filename (`search/index-partnered.json`) so the field overrides
+   *  it per-library. */
+  indexPath?: string;
 }
 
 export interface SuiteState {
@@ -98,6 +105,19 @@ export const DEFAULT_LIBRARIES: LibraryConfig[] = [
     enabled: true,
     builtin: true,
   },
+  {
+    id: "5etools-kiwee-partnered",
+    name: "5etools (kiwee.top, 合作版)",
+    baseUrl: "https://5e.kiwee.top",
+    // Kiwee hosts a separate index for partnered third-party content
+    // alongside the main one. Same data shape, different filename —
+    // the indexPath override is what makes this library reachable
+    // (without it the loader 404s on /search/index.json with the
+    // partnered URL hint).
+    indexPath: "search/index-partnered.json",
+    enabled: true,
+    builtin: true,
+  },
 ];
 
 export const DEFAULT_STATE: SuiteState = {
@@ -111,11 +131,16 @@ export const DEFAULT_STATE: SuiteState = {
     dice: true,
     portals: true,
     bubbles: true,
-    // Default OFF — status tracker is in active development (调试中).
-    // Each scene starts with it disabled; the user has to flip it
-    // on in Settings → 状态追踪 every scene reload until it ships
-    // as stable.
-    statusTracker: false,
+    // Status tracker — promoted out of beta 2026-05-04. Default ON.
+    // The right-click "状态追踪" pill on the Select tool + the new
+    // toolbar tool both work for everyone (no role gate); per-token
+    // buff metadata is enforced by OBR's normal item-edit permissions.
+    statusTracker: true,
+    // HP bar component — standalone draggable HP/Temp/AC popover
+    // that auto-shows on selection of "lightweight" tokens (no
+    // bestiary binding, no character-card binding). Right-click
+    // menu adds / removes the per-token flag. Default ON.
+    hpBar: true,
     // DM-only inspection tool. Default OFF — most users never need
     // it; only enable when you specifically want to peek at what
     // plugins have stamped onto a token / scene / room. The tool
@@ -163,6 +188,9 @@ function merge(partial: any): SuiteState {
           baseUrl: String(lib.baseUrl ?? ""),
           enabled: lib.enabled !== false,
           builtin: !!lib.builtin,
+          indexPath: typeof lib.indexPath === "string" && lib.indexPath.length > 0
+            ? lib.indexPath
+            : undefined,
         });
       }
     }

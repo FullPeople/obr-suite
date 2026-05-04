@@ -91,7 +91,7 @@ const SUPPORTERS: string[] = [
   "Misaka Mikoto","森海飞霞🐿","每日 1/? Fen²","北省","得君所见","蜗","鱼喵",
   "52Hertz","咩","饭盒是阿玛利斯靴子","白烏鴉","不周","喵呜嗷","咖啡","FyingFuji",
   "过路的蔚星","cc","豹式装甲启动","浮生若梦，为欢几何","守矢豆","星锑的TV","蠕行的漆黑","姜川安.",
-  "机智大狐"
+  "机智大狐","\\-似雨悲灵-/","粥粥粥","打不中的猎人","电子甜妹","希尔薇"
 ];
 
 function supportersHtml(lang: Language): string {
@@ -1780,13 +1780,36 @@ const TABS: TabDef[] = [
         } catch {}
         return 25;
       })();
+      // Per-client bubble scale — multiplier applied to BAR_HEIGHT /
+      // DIAMETER / font size in modules/bubbles/index.ts. 0.5..2.0
+      // covers everything from "tiny minimap-friendly" to "the table
+      // can read it from across the room".
+      const bubbleScale = (() => {
+        try {
+          const v = localStorage.getItem("com.obr-suite/bubbles/scale");
+          if (v != null && v !== "") {
+            const n = Number(v);
+            if (Number.isFinite(n) && n >= 0.4 && n <= 2.5) return n;
+          }
+        } catch {}
+        return 1;
+      })();
       const desc = lang === "zh"
-        ? `<p>每个 token 头顶的<b>紧凑信息条</b>：HP 条（按比例填充）+ AC 盾牌。自动跟随<em>拖动 / 缩放 / 传送</em>，旋转时保持竖直。</p>
+        ? `<p>每个 token 下方的<b>紧凑信息条</b>：HP 条（按比例填充）+ AC 盾牌。自动跟随<em>拖动 / 缩放 / 传送</em>，旋转时保持竖直。</p>
 <ul>
-  <li><b>绑定怪物图鉴</b> → 自动写入 HP/AC，<em>默认对玩家隐藏</em>（与图鉴一致）</li>
+  <li><b>设置可见性</b> → 通过血条最右侧的上锁按钮决定是否对玩家可见</li>
+  <li><b>绑定怪物图鉴</b> → 自动写入 HP/AC，<em>非战斗状态下默认对玩家隐藏</em>（与图鉴一致）</li>
   <li><b>绑定角色卡</b> → 同步当前 / 最大 / 临时 HP 与 AC，所有人可见</li>
   <li>HP / Max HP / Temp HP / AC <b>编辑入口</b>在怪物 / 角色卡的悬浮窗里</li>
   <li><b>本地渲染</b>（OBR.scene.local），不同步给其他玩家</li>
+</ul>
+<h3 style="margin-top:14px">血条组件 (新)</h3>
+<p>对于<b>没有绑定角色卡 / 怪物图鉴</b>但仍需要 HP / AC 的 token（房屋规则的 NPC、Boss 召唤物、阵法符等），右键菜单提供<b>添加血条组件 / 移除血条组件</b>，DM 和玩家都能用。</p>
+<ul>
+  <li>已经显示血量气泡的 token，<b>选中即弹出</b>编辑面板（自动判断、自动添加 flag）</li>
+  <li>面板支持<b>就地编辑</b> HP / Max HP / 临时 HP / AC，DM 端额外有<b>锁定按钮</b>控制玩家可见性</li>
+  <li>面板可拖动，参与统一的<b>面板布局</b>系统持久化位置</li>
+  <li>取消选中即关闭</li>
 </ul>`
         : `<p><b>Compact info row</b> over every token: HP bar + AC shield. Auto-follows <em>drag / scale / teleport</em>, stays upright on rotation.</p>
 <ul>
@@ -1794,6 +1817,14 @@ const TABS: TabDef[] = [
   <li><b>Card-bound</b> → syncs current / max / temp HP + AC, visible to everyone</li>
   <li>HP / Max HP / Temp HP / AC <b>edit entry points</b> live in the monster + card popups</li>
   <li><b>Local render</b> (OBR.scene.local) — does not sync to others</li>
+</ul>
+<h3 style="margin-top:14px">HP Bar Component (new)</h3>
+<p>For tokens with <b>no character-card / bestiary binding</b> that still need HP / AC (house-rule NPCs, boss summons, glyph tokens…), the right-click menu offers <b>Add HP Bar / Remove HP Bar</b>. Both DM and players can use it.</p>
+<ul>
+  <li>Tokens that already show HP bubbles: <b>just select to pop</b> the editor (auto-detect, auto-add the component flag)</li>
+  <li>Editor supports <b>in-place</b> HP / Max HP / Temp HP / AC editing; DM also gets a <b>lock button</b> controlling player visibility</li>
+  <li>Drag the popover by its grip — position persists via the unified <b>panel layout</b> system</li>
+  <li>Closes automatically on deselect</li>
 </ul>`;
       const offsetLbl = lang === "zh" ? "上下偏移" : "Vertical offset";
       const offsetDesc = lang === "zh"
@@ -1803,8 +1834,22 @@ const TABS: TabDef[] = [
       const thresholdDesc = lang === "zh"
         ? "上锁角色对玩家显示的血条进度按这个百分比量化。默认 25：玩家只在血量降至 75% / 50% / 25% / 0% 时看到血条变化。设为 0 则连续显示真实比例，100 则始终显示满血（玩家看不到任何进度）。"
         : "Locked tokens' HP ratio shown to players quantises to this percent. Default 25 → players see the bar change only at 75% / 50% / 25% / 0%. 0 = continuous, 100 = always full (progress hidden).";
+      const sizeLbl = lang === "zh" ? "气泡大小" : "Bubble size";
+      const sizeDesc = lang === "zh"
+        ? "本机偏好。乘到 HP 条 / AC 盾 / 字号上的统一缩放。0.5 紧凑（小图小屏），2.0 放大（远观看牌或老花眼）。默认 1.0。"
+        : "Per-client preference. Multiplier applied to the HP bar / AC shield / font size. 0.5 = compact, 2.0 = chunky. Default 1.0.";
       return `
         <h3>${lang === "zh" ? "选项" : "Options"}</h3>
+        <div class="row">
+          <div class="lbl">
+            ${sizeLbl}
+            <div class="desc"><em>${sizeDesc}</em></div>
+          </div>
+          <input type="range" min="0.5" max="2" step="0.05" value="${bubbleScale}"
+                 data-key="bubblesScale"
+                 style="flex:1 1 auto;align-self:center;max-width:160px"/>
+          <span data-key="bubblesScaleVal" style="flex:0 0 50px;text-align:right;color:#9aa0b3;font-size:11px;font-variant-numeric:tabular-nums">${bubbleScale.toFixed(2)}×</span>
+        </div>
         <div class="row">
           <div class="lbl">
             ${offsetLbl}
@@ -1878,12 +1923,30 @@ const TABS: TabDef[] = [
           if (e.key === "Enter") { e.preventDefault(); thrInput.blur(); }
         });
       }
+      // Bubble size slider — live-update on input so the user sees
+      // the bubbles resize as they drag (the bubbles module's
+      // storage-event listener kicks off a clearAll + syncBubbles).
+      // We persist on every move; the storage event fires per-write
+      // anyway, and the user expects WYSIWYG drag behaviour.
+      const sizeInput = root.querySelector<HTMLInputElement>('input[data-key="bubblesScale"]');
+      const sizeVal = root.querySelector<HTMLElement>('[data-key="bubblesScaleVal"]');
+      if (sizeInput) {
+        const commit = () => {
+          const n = Number(sizeInput.value);
+          if (!Number.isFinite(n)) return;
+          const clamped = Math.max(0.5, Math.min(2, Math.round(n * 20) / 20));
+          if (sizeVal) sizeVal.textContent = `${clamped.toFixed(2)}×`;
+          try { localStorage.setItem("com.obr-suite/bubbles/scale", String(clamped)); } catch {}
+        };
+        sizeInput.addEventListener("input", commit);
+        sizeInput.addEventListener("change", commit);
+      }
     },
   },
   {
     id: "statusTracker",
-    zh: `${ICONS.statusWheel} 状态追踪 <span class="tab-beta">调试中</span>`,
-    en: `${ICONS.statusWheel} Status Tracker <span class="tab-beta">BETA</span>`,
+    zh: `${ICONS.statusWheel} 状态追踪`,
+    en: `${ICONS.statusWheel} Status Tracker`,
     moduleId: "statusTracker",
     body: {
       zh: `<p><b>全屏追踪</b>：状态、buff、消耗性资源（法术位 / 激励 / 子弹 …）一站式管理。</p>
@@ -1972,30 +2035,44 @@ const TABS: TabDef[] = [
     en: `${ICONS.eye} Vision / Fog`,
     moduleId: "vision",
     body: {
-      zh: `<p><b>动态视野系统</b>。给 token 挂上「光源」，光会被墙壁阻挡，墙之外是黑色迷雾，每个客户端单独渲染（玩家只看自己 token 的视野，DM 看全部）。</p>
+      zh: `<div style="background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.45);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12.5px;line-height:1.55">
+⚠ <b>当前无法使用</b>，仍在<b>未来计划</b>中。如果你对以下未来展望非常兴奋，可以通过<b>支持我</b>来加速 —— 好消息是我目前没有工作，如果真的有支持，我真的会全力开发。
+</div>
+<h3 style="margin-top:6px">未来展望和思路</h3>
+<p>针对地图直接进行<b>灰度 / 曝光处理</b>，通过绘画等方式直截了当地做出<b>墙壁和遮挡物</b>。通过不同功能的画笔来确定：</p>
 <ul>
-  <li><b>添加光源</b>：右键任何 token → <b>添加光源</b> → 弹窗里设半径、颜色、暗视半径。</li>
-  <li><b>双层半径</b>：内圈是<b>明视</b>（彩色），外圈再延伸是<b>暗视</b>（黑白覆冷调），代指 darkvision 之类。</li>
-  <li><b>墙壁来源</b>：① OBR 自带「迷雾」工具画的墙；② 通过下方<b>绘制碰撞图</b>自动生成的墙（地图右键即可进入）。</li>
-  <li><b>共享视野（下方开关）</b>：默认开启 = 全员看到所有 token 的视野并集；关闭 = 每个玩家只看自己 owner 的 token 视野（DM 始终看全部）。</li>
+  <li><b>普通遮挡物</b>：完全挡视线（典型的墙）</li>
+  <li><b>可见遮挡物</b>：可看到内部内容但看不到后面遮挡（类似窗、栏杆）</li>
+  <li><b>困难地形</b>：影响移动但不挡视线</li>
 </ul>
-<h3 style="margin-top:14px">绘制碰撞图（自动识别墙壁）</h3>
-<p>右键地图（MAP layer 上的 image item）→ <b>绘制碰撞图（自动识别墙壁）</b> → 全屏编辑器：</p>
-<ul>
-  <li><b>取色 + 阈值识别</b>：点地图上的墙颜色（比如阴线 / 黑色），调阈值，一键把所有相似像素标为墙 —— 大幅减少手动画线。</li>
-  <li><b>画笔 / 橡皮 / 套索</b>：手动微调（画笔尺寸可调，套索一拖填充区域）。</li>
-  <li><b>缩简强度</b>：保存时用 Douglas-Peucker 把涂的区域转成多边形墙，强度越高线越简单。</li>
-  <li><b>保存</b>：墙变成<b>锁定的不可选 item</b>，<b>跟随地图移动 / 缩放 / 旋转</b>，不会被误选误删，再次进编辑器可以重新涂改（保存时自动替换旧的）。</li>
+<p>每个客户端独立渲染，玩家只看自己 token 的视野，DM 看全部。</p>
+<h3 style="margin-top:14px">原计划的初版（已搁置）</h3>
+<p style="color:var(--text-dim);font-size:11.5px">下面这套是 v0 思路（光源 + 墙壁 + 共享视野），保留作为后续设计参考；当前不会启用。</p>
+<ul style="color:var(--text-dim);font-size:11.5px">
+  <li><b>动态视野系统</b>：给 token 挂上「光源」，光会被墙壁阻挡，墙之外是黑色迷雾。</li>
+  <li><b>双层半径</b>：内圈是明视（彩色），外圈再延伸是暗视（黑白覆冷调）。</li>
+  <li><b>墙壁来源</b>：① OBR 自带「迷雾」工具画的墙；② 通过<b>绘制碰撞图</b>自动生成。</li>
+  <li><b>共享视野</b>：默认开启 = 全员看到所有 token 的视野并集；关闭 = 每个玩家只看自己 owner 的 token 视野（DM 始终看全部）。</li>
 </ul>`,
-      en: `<p><b>Dynamic vision system.</b> Attach a "light source" to any token; light is blocked by walls, the rest of the scene is fogged. Per-client rendering — players only see their tokens' vision, DM sees everything.</p>
+      en: `<div style="background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.45);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12.5px;line-height:1.55">
+⚠ <b>Currently unavailable</b> — still on the <b>future-plans</b> list. If you're excited about the vision below, you can <b>support me</b> to speed it up. Good news: I don't currently have a job, so any real support gets reinvested as full-time development.
+</div>
+<h3 style="margin-top:6px">Future direction</h3>
+<p>Apply <b>grayscale / exposure processing</b> directly to the map, with <b>painted walls and obstacles</b> on top. Different paint functions distinguish:</p>
 <ul>
-  <li><b>Add light:</b> right-click any token → "Add light" → popover sets radius, color, darkvision range.</li>
-  <li><b>Two-tier radius:</b> inner ring = <b>color vision</b>; outer extension = <b>darkvision</b> (greyscale tint).</li>
-  <li><b>Wall sources:</b> ① OBR's native fog/wall drawing tool; ② walls auto-generated from the collision-map editor.</li>
-  <li><b>Shared vision toggle (below):</b> ON (default) = all players see the union of every token's vision; OFF = per-owner only (DM always sees all).</li>
+  <li><b>Normal obstacles:</b> fully block line-of-sight (typical walls)</li>
+  <li><b>See-through obstacles:</b> reveal what's inside but block what's behind (windows, railings)</li>
+  <li><b>Difficult terrain:</b> affects movement but not vision</li>
 </ul>
-<h3 style="margin-top:14px">Collision-map editor</h3>
-<p>Right-click a map → "绘制碰撞图" → full-screen editor with color-pick auto-detect, brush / eraser / lasso, Douglas-Peucker simplification. Save → locked walls attached to the map.</p>`,
+<p>Per-client rendering — players only see their tokens' vision, DM sees everything.</p>
+<h3 style="margin-top:14px">Original v0 (shelved)</h3>
+<p style="color:var(--text-dim);font-size:11.5px">The earlier "lights + walls + shared-vision toggle" approach is kept here as a design reference; not active.</p>
+<ul style="color:var(--text-dim);font-size:11.5px">
+  <li><b>Dynamic vision:</b> attach a "light source" to any token; light blocked by walls.</li>
+  <li><b>Two-tier radius:</b> inner = color vision, outer = darkvision (greyscale tint).</li>
+  <li><b>Wall sources:</b> ① OBR's native fog/wall drawing tool; ② collision-map editor.</li>
+  <li><b>Shared vision:</b> ON = all players see the union; OFF = per-owner only (DM always all).</li>
+</ul>`,
     },
     dynamicBody: (lang) => {
       const isZh = lang === "zh";
@@ -2319,10 +2396,16 @@ function renderContent() {
     });
 
   // ---- Body ----
-  let body = "";
-  if (tab.dynamicBody) body = tab.dynamicBody(lang, isGM);
-  else if (tab.body) body = tab.body[lang];
-  contentEl.innerHTML = body;
+  // 2026-05-04 fix: render BOTH `body` and `dynamicBody` when both
+  // are present. The previous logic was an `else if`, so dynamicBody
+  // (used by tabs that need toggleable widgets) silently masked the
+  // static `body` description. That's why edits to body never
+  // appeared in the rendered panel — most-recent example: vision/
+  // fog future-plans note + bubbles size description.
+  const parts: string[] = [];
+  if (tab.body) parts.push(tab.body[lang] || "");
+  if (tab.dynamicBody) parts.push(tab.dynamicBody(lang, isGM) || "");
+  contentEl.innerHTML = parts.join("");
   if (tab.afterRender) tab.afterRender(contentEl, isGM);
 }
 

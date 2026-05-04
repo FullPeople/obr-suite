@@ -14,9 +14,14 @@ import {
   onLangChange,
 } from "../../state";
 import { assetUrl } from "../../asset-base";
-import { syncStealthOverlays, clearStealthOverlays } from "./utils/visualEffects";
+// `syncStealthOverlays` removed alongside the stealth context menu
+// (2026-05-04 — feature was unfinished). `clearStealthOverlays` is
+// kept so we can sweep legacy overlay items on scene ready.
+import { clearStealthOverlays } from "./utils/visualEffects";
 import { onViewportResize } from "../../utils/viewportAnchor";
-import { STABLE_HIDES } from "../../feature-flags";
+// STABLE_HIDES previously gated the stealth context menu — that
+// menu was deleted 2026-05-04 (see registerContextMenus). Import
+// removed.
 import {
   PANEL_IDS,
   getPanelOffset,
@@ -147,7 +152,7 @@ const TOP_OFFSET = 45;
 
 const CTX_TOGGLE = `${METADATA_KEY}/context-menu`;
 const CTX_GATHER = `${METADATA_KEY}/gather-empty`;
-const CTX_INVISIBLE = `${METADATA_KEY}/invisibility`;
+// CTX_INVISIBLE removed 2026-05-04 — see registerContextMenus().
 
 const unsubs: Array<() => void> = [];
 let knownItemIds = new Set<string>();
@@ -222,7 +227,9 @@ async function initKnownItems() {
 async function registerContextMenus(lang: Lang) {
   try { await OBR.contextMenu.remove(CTX_TOGGLE); } catch {}
   try { await OBR.contextMenu.remove(CTX_GATHER); } catch {}
-  try { await OBR.contextMenu.remove(CTX_INVISIBLE); } catch {}
+  // Legacy CTX_INVISIBLE id — still removed on teardown so any
+  // session that already had it registered cleans up properly.
+  try { await OBR.contextMenu.remove(`${METADATA_KEY}/invisibility`); } catch {}
 
   await OBR.contextMenu.create({
     id: CTX_TOGGLE,
@@ -324,55 +331,12 @@ async function registerContextMenus(lang: Lang) {
     },
   });
 
-  // Stable channel hides the GM-only stealth toggle (mark invisible /
-  // reveal). Dev keeps it for ongoing iteration. Existing scenes that
-  // had tokens already flagged invisible are harmlessly read by the
-  // overlay sync below (which is also gated under STABLE_HIDES).
-  if (!STABLE_HIDES) {
-    await OBR.contextMenu.create({
-      id: CTX_INVISIBLE,
-      icons: [
-        {
-          icon: ICON_URL,
-          label: t(lang, "makeInvisible"),
-          filter: {
-            roles: ["GM"],
-            every: [
-              { key: "type", value: "IMAGE" },
-              { key: ["metadata", METADATA_KEY], value: undefined, operator: "!=" },
-              { key: ["metadata", METADATA_KEY, "invisible"], value: true, operator: "!=" },
-            ],
-          },
-        },
-        {
-          icon: ICON_URL,
-          label: t(lang, "revealInvisible"),
-          filter: {
-            roles: ["GM"],
-            every: [
-              { key: "type", value: "IMAGE" },
-              { key: ["metadata", METADATA_KEY], value: undefined, operator: "!=" },
-              { key: ["metadata", METADATA_KEY, "invisible"], value: true },
-            ],
-          },
-        },
-      ],
-      onClick: async (context) => {
-        const ids = context.items.map((i) => i.id);
-        const anyInvisible = context.items.some((it) => {
-          const meta = (it.metadata[METADATA_KEY] ?? {}) as any;
-          return !!meta.invisible;
-        });
-        const nextValue = !anyInvisible;
-        await OBR.scene.items.updateItems(ids, (drafts) => {
-          for (const d of drafts) {
-            const ex = (d.metadata[METADATA_KEY] ?? {}) as any;
-            d.metadata[METADATA_KEY] = { ...ex, invisible: nextValue };
-          }
-        });
-      },
-    });
-  }
+  // Stealth toggle (mark invisible / reveal) deleted 2026-05-04 —
+  // the underlying overlay shader was never finished, so exposing
+  // a context menu that flips a flag with no visible effect is
+  // user-hostile. The metadata key (`METADATA_KEY.invisible`) is
+  // still read elsewhere; if any old scenes have it set, it just
+  // sits there harmlessly until / unless we revive the feature.
 }
 
 export async function setupInitiative(): Promise<void> {
@@ -455,49 +419,21 @@ export async function setupInitiative(): Promise<void> {
     }),
   );
 
-  // --- Stealth overlay sync (all roles) ---
-  // Stable channel hides this: no overlay shimmer/cover for invisible
-  // initiative tokens (since users can't flag them anyway). Dev keeps
-  // it for ongoing iteration.
-  if (!STABLE_HIDES) {
-    let stealthIsGM = false;
-    try {
-      stealthIsGM = (await OBR.player.getRole()) === "GM";
-    } catch {}
-    const reconcileStealth = async () => {
-      try {
-        if (!(await OBR.scene.isReady())) return;
-        const items = await OBR.scene.items.getItems(
-          (i) => {
-            const m = (i.metadata[METADATA_KEY] ?? {}) as any;
-            return m && m.invisible === true;
-          },
-        );
-        const ids = new Set(items.map((i) => i.id));
-        await syncStealthOverlays(ids, stealthIsGM);
-      } catch {}
-    };
-    unsubs.push(
-      OBR.scene.items.onChange(() => { void reconcileStealth(); }),
-    );
-    unsubs.push(
-      OBR.scene.onReadyChange(async (ready) => {
-        if (ready) await reconcileStealth();
-        else await clearStealthOverlays();
-      }),
-    );
-    unsubs.push(
-      OBR.player.onChange(async (p) => {
-        const nextGM = p.role === "GM";
-        if (nextGM !== stealthIsGM) {
-          stealthIsGM = nextGM;
-          await reconcileStealth();
-        }
-      }),
-    );
-    // Initial pass.
-    await reconcileStealth();
-  }
+  // Stealth overlay sync removed 2026-05-04 along with the right-
+  // click context menu — see registerContextMenus() above. Any
+  // legacy `metadata.invisible: true` flags are now dormant; if
+  // we revive the feature the overlay sync should be the SECOND
+  // step (after the menu, since the menu is what flips the flag).
+  // Sweep any stale overlay items once per scene-ready in case the
+  // user is upgrading from a build that left them around.
+  unsubs.push(
+    OBR.scene.onReadyChange(async (ready) => {
+      if (ready) {
+        try { await clearStealthOverlays(); } catch {}
+      }
+    }),
+  );
+  try { if (await OBR.scene.isReady()) await clearStealthOverlays(); } catch {}
 
   // --- GM: track new tokens to prompt initiative during active combat ---
   try {
@@ -563,7 +499,9 @@ export async function setupInitiative(): Promise<void> {
 export async function teardownInitiative(): Promise<void> {
   try { await OBR.contextMenu.remove(CTX_TOGGLE); } catch {}
   try { await OBR.contextMenu.remove(CTX_GATHER); } catch {}
-  try { await OBR.contextMenu.remove(CTX_INVISIBLE); } catch {}
+  // Legacy CTX_INVISIBLE id — still removed on teardown so any
+  // session that already had it registered cleans up properly.
+  try { await OBR.contextMenu.remove(`${METADATA_KEY}/invisibility`); } catch {}
   for (const u of unsubs.splice(0)) u();
   knownItemIds.clear();
   await closePanel();

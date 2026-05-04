@@ -2,240 +2,476 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>状态追踪</title>
+<title>状态调色板</title>
+<!-- Google Fonts: Noto Color Emoji has comprehensive Unicode 14
+     coverage so newer glyphs (🪢 🪨 🫵 🪽 etc.) render even on
+     older Windows / mobile Safari. The crossorigin preconnect
+     speeds up the first paint; @font-face is the single weight we
+     need so total transfer stays small. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
+
+/* Suite color palette (matches src/utils/debugOverlay + cc-fullscreen
+   tokens — solid colors only, no gradients, dark navy + accent
+   blue). */
+:root{
+  --bg:#1a1a2e;
+  --bg-card:#16213e;
+  --bg-strong:#0f1830;
+  --border:rgba(255,255,255,0.10);
+  --border-strong:rgba(255,255,255,0.18);
+  --text:#e6e8ee;
+  --text-dim:#9aa0b3;
+  --text-mute:#666b78;
+  --accent:#5dade2;
+  --accent-dim:#7ec8f0;
+  --warn:#c89251;
+  --red:#c0392b;
+  --green:#2ecc71;
+}
+
 html,body{
-  height:100%;width:100%;overflow:hidden;
-  background:rgba(8,12,22,0.78);
-  color:#e6e8ee;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Roboto,sans-serif;
+  height:100%;width:100%;overflow:hidden;background:transparent;
+  color:var(--text);
+  /* Emoji fonts FIRST so colour-emoji glyphs (💘 ⚡ 🪨 ❄️ 😶‍🌫️ etc)
+     pick up Noto Color Emoji (loaded via Google Fonts) before
+     "Microsoft YaHei" / "Segoe UI" claim them as monochrome boxes.
+     CJK characters fall through to the system stack since the
+     emoji fonts don't cover those ranges. */
+  font-family:"Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji","Twemoji Mozilla","EmojiOne Color",
+    -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Roboto,sans-serif;
   user-select:none;
 }
 
-/* ===== Stage = the central area where character tokens are drawn
-   at proportional viewport positions. Pointer events here pass to
-   token cards; the rest of the stage swallows clicks so the user
-   doesn't accidentally close the modal. */
-.stage{
+.card{
   position:absolute;inset:0;
+  background:var(--bg);
+  border:1px solid var(--border-strong);
+  border-radius:10px;
+  display:flex;flex-direction:column;
+  box-shadow:0 8px 24px rgba(0,0,0,0.45);
   overflow:hidden;
 }
 
-/* Top toolbar — title + close button */
-.topbar{
-  position:absolute;top:14px;left:50%;transform:translateX(-50%);
-  display:flex;align-items:center;gap:10px;
-  padding:7px 16px;
-  background:rgba(15,20,40,0.95);
-  border:1px solid rgba(255,255,255,0.18);
-  border-radius:14px;
-  z-index:50;
+/* ====================================================================
+   HEADER — split into two rows. Row 1 = drag-handle + title +
+   close. Row 2 = edit toggle + JSON import/export. */
+.head{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 10px 6px 6px;
+  background:var(--bg-card);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
 }
-.topbar .title{font-size:13px;font-weight:700;color:#bfe2f5;letter-spacing:0.4px}
-.topbar .hint{font-size:11px;color:#9aa0b3}
-.topbar button{
-  height:26px;padding:0 12px;border-radius:6px;
-  font-family:inherit;font-size:11px;font-weight:600;
-  cursor:pointer;color:#fff;
-  background:rgba(255,255,255,0.07);
-  border:1px solid rgba(255,255,255,0.18);
+.drag-handle{
+  flex-shrink:0;
+  width:18px;height:24px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:grab;
+  color:var(--text-mute);
+  opacity:0.65;
+  transition:opacity .12s, color .12s;
+  touch-action:none;
+  user-select:none;
 }
-.topbar button:hover{background:rgba(255,255,255,0.13)}
+.drag-handle:hover{opacity:1;color:var(--text)}
+.drag-handle.is-dragging{cursor:grabbing;opacity:1;color:var(--accent)}
+.drag-handle svg{width:12px;height:18px;display:block;pointer-events:none}
 
-/* Token cards rendered in the stage center */
-.tcard{
-  position:absolute;
-  width:96px;height:96px;
-  border-radius:14px;
-  border:2px solid rgba(93,173,226,0.6);
-  background-size:cover;background-position:center;
-  background-color:#222;
-  box-shadow:0 4px 14px rgba(0,0,0,0.5);
-  display:flex;align-items:flex-end;justify-content:center;
-  cursor:default;
-}
-.tcard .tname{
-  background:rgba(0,0,0,0.7);
-  color:#fff;font-size:10.5px;font-weight:700;
-  padding:1px 7px;border-radius:8px;
-  margin-bottom:-12px;
-  border:1px solid rgba(255,255,255,0.2);
-  white-space:nowrap;max-width:120%;overflow:hidden;text-overflow:ellipsis;
-}
-.tcard.drop-hover{
-  border-color:#f5a623;
-  box-shadow:0 0 0 3px rgba(245,166,35,0.3), 0 4px 14px rgba(0,0,0,0.5);
-}
-/* Buff bubbles attached visually to the card in the modal — same
-   arc layout idea as on canvas, but rendered with absolute-positioned
-   children inside .tcard. Each bubble itself is draggable. */
-.tcard .buff-orbit{
-  position:absolute;
-  pointer-events:none;
-  inset:-90px;            /* extend beyond the card so bubbles can sit further */
-}
-.bubble{
-  position:absolute;
-  display:inline-flex;align-items:center;
-  height:22px;padding:0 9px;border-radius:6px;
-  font-size:11px;font-weight:700;
-  border:1px solid rgba(0,0,0,0.55);
-  white-space:nowrap;
-  cursor:grab;pointer-events:auto;
-  box-shadow:0 1px 3px rgba(0,0,0,0.4);
-  transform:translate(-50%, -50%);
-}
-.bubble.is-dragging{cursor:grabbing;opacity:0.6}
-
-/* Right side panels */
-.side{
-  position:absolute;right:14px;top:60px;bottom:14px;
-  width:280px;
-  display:flex;flex-direction:column;gap:10px;
-  z-index:30;
-}
-.panel{
-  background:rgba(15,20,40,0.93);
-  border:1px solid rgba(255,255,255,0.16);
-  border-radius:10px;
-  padding:10px 12px;
-  display:flex;flex-direction:column;
-  min-height:0;
-}
-.panel h3{
-  font-size:12px;font-weight:700;color:#7ec8f0;
-  letter-spacing:0.4px;margin-bottom:8px;
-  display:flex;align-items:center;gap:6px;
-}
-.panel .body{
-  overflow:auto;flex:1;min-height:0;
-  scrollbar-width:thin;
-}
-
-/* Resource tracker (top of side) */
-.res-panel{flex:0 0 auto;max-height:42%}
-.res-row{
-  display:flex;align-items:center;gap:6px;
-  padding:5px 0;border-bottom:1px dashed rgba(255,255,255,0.06);
-}
-.res-row:last-child{border-bottom:none}
-.res-row .who{
-  flex:0 0 70px;
-  font-size:11px;font-weight:700;color:#cdd1de;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-}
-.res-row .name{
-  flex:1;font-size:11px;color:#9aa0b3;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-}
-.res-row .ctrl{display:inline-flex;align-items:center;gap:4px}
-.res-row button{
-  width:20px;height:20px;border-radius:4px;
-  background:rgba(255,255,255,0.07);
-  border:1px solid rgba(255,255,255,0.16);
-  color:#fff;cursor:pointer;font-family:inherit;font-size:11px;
-}
-.res-row button:hover{background:rgba(255,255,255,0.13)}
-.res-row .num{
-  font-size:11.5px;font-weight:700;
-  min-width:46px;text-align:center;
-  font-family:ui-monospace,Consolas,monospace;
-  color:#fff;
-}
-.res-row .del{margin-left:4px;color:#ff8b7a;border-color:rgba(231,76,60,0.4)}
-.res-add{
-  margin-top:8px;
-  display:flex;flex-direction:column;gap:4px;
-}
-.res-add .row{display:flex;gap:4px}
-.res-add input,.res-add select{
-  flex:1;min-width:0;
-  background:rgba(0,0,0,0.30);
-  border:1px solid rgba(255,255,255,0.10);
-  color:#fff;font-size:11px;
-  padding:4px 8px;border-radius:4px;font-family:inherit;
-}
-.res-add input.qty{flex:0 0 60px}
-.res-add button{
-  background:rgba(46,204,113,0.22);
-  border:1px solid rgba(46,204,113,0.45);
-  color:#a3e9bf;
-  font-weight:700;
-  border-radius:4px;font-family:inherit;font-size:11px;
-  padding:5px 10px;cursor:pointer;
-}
-.res-no-target{font-size:11px;color:#9aa0b3;font-style:italic;padding:4px 0}
-
-/* Buff palette (bottom of side) */
-.buff-panel{flex:1 1 auto;min-height:0}
-.buff-panel .filter{
-  display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;
-}
-.buff-panel .filter button{
-  background:rgba(255,255,255,0.06);
-  border:1px solid rgba(255,255,255,0.16);
-  color:#bfe2f5;
-  font-family:inherit;font-size:10px;font-weight:700;
-  padding:3px 8px;border-radius:5px;cursor:pointer;
+.head .ttl{
+  flex:1;font-size:12.5px;font-weight:700;color:var(--accent-dim);
   letter-spacing:0.3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.buff-panel .filter button.on{
-  background:rgba(93,173,226,0.25);
-  border-color:rgba(93,173,226,0.5);
-  color:#fff;
+.head .x{
+  background:transparent;border:1px solid var(--border);
+  color:var(--text-dim);
+  cursor:pointer;font-family:inherit;
+  width:22px;height:22px;padding:0;border-radius:4px;
+  font-size:13px;font-weight:600;
 }
-.buff-grid{
-  display:flex;flex-wrap:wrap;gap:6px;
+.head .x:hover{color:var(--text);border-color:var(--border-strong)}
+
+.toolbar{
+  display:flex;align-items:center;gap:6px;
+  padding:5px 10px;
+  background:var(--bg-strong);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.toolbar button{
+  background:transparent;border:1px solid var(--border);
+  color:var(--text-dim);
+  cursor:pointer;font-family:inherit;
+  height:26px;padding:0 9px;border-radius:4px;
+  font-size:11px;font-weight:600;
+  display:inline-flex;align-items:center;gap:5px;
+}
+.toolbar button:hover{color:var(--text);border-color:var(--border-strong)}
+.toolbar button.on{
+  background:var(--bg-card);
+  border-color:var(--accent);
+  color:var(--accent-dim);
+}
+.toolbar button svg{
+  width:13px;height:13px;flex-shrink:0;
+  pointer-events:none;
+}
+.toolbar .tb-sp{flex:1}
+
+/* ====================================================================
+   FILTERS (apply-mode = category filter row; edit-mode = editable
+   category buttons + a "+" affordance for adding a new category).
+   The same row morphs between modes via class toggles. */
+.filters{
+  display:flex;flex-wrap:wrap;gap:4px;
+  padding:6px 10px;
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+  align-items:center;
+}
+.cat-btn{
+  background:var(--bg-strong);
+  border:1px solid var(--border);
+  color:var(--text-dim);
+  font-family:inherit;font-size:10.5px;font-weight:600;
+  padding:3px 9px;border-radius:4px;cursor:pointer;
+  letter-spacing:0.2px;
+}
+.cat-btn.on{
+  background:var(--bg-card);
+  border-color:var(--accent);
+  color:var(--accent-dim);
+}
+.cat-btn:hover:not(.on){color:var(--text)}
+
+/* Edit-mode tweaks for category buttons */
+body.edit-mode .cat-btn[draggable="true"]{cursor:grab}
+body.edit-mode .cat-btn[draggable="true"]:active{cursor:grabbing}
+body.edit-mode .cat-btn[draggable="true"]{
+  border-color:var(--border-strong);
+  color:var(--text);
+}
+body.edit-mode .cat-btn[draggable="true"]:hover{
+  border-color:var(--accent);
+  color:var(--accent-dim);
+}
+body.edit-mode .cat-btn.dragging{opacity:0.45}
+body.edit-mode .cat-btn.drop-target{
+  border-color:var(--warn);
+  background:rgba(200,146,81,0.20);
+  color:var(--warn);
+}
+.cat-add{
+  background:var(--bg-strong);
+  border:1px dashed var(--accent);
+  color:var(--accent-dim);
+  font-family:inherit;font-size:13px;font-weight:700;
+  padding:0 10px;height:24px;border-radius:4px;cursor:pointer;
+  letter-spacing:0;
+  display:inline-flex;align-items:center;justify-content:center;
+  line-height:1;
+}
+.cat-add:hover{
+  background:var(--bg-card);
+  color:var(--text);
+}
+.cat-input{
+  background:var(--bg-strong);
+  border:1px solid var(--accent);
+  color:var(--text);
+  font-family:inherit;font-size:10.5px;font-weight:600;
+  padding:0 7px;height:24px;border-radius:4px;
+  outline:none;
+  width:90px;
+}
+.cat-input:focus{
+  border-color:var(--accent-dim);
+  box-shadow:0 0 0 1px var(--accent);
+}
+
+/* ====================================================================
+   BODY GRID — flat wrap of buff bubbles. Eraser pill + buff bubbles
+   in apply mode; bubbles + a "+ 新 buff" affordance in edit mode. */
+.body{
+  flex:1;overflow-y:auto;
+  padding:7px 9px;
+  display:flex;flex-wrap:wrap;gap:5px;
   align-content:flex-start;
 }
-.buff-grid .bubble{
-  position:static;transform:none;cursor:grab;
+.body::-webkit-scrollbar{width:5px}
+.body::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:3px}
+
+.bubble{
+  display:inline-flex;align-items:center;
+  height:23px;padding:0 8px;border-radius:5px;
+  font-size:11px;font-weight:700;
+  border:1px solid rgba(0,0,0,0.50);
+  white-space:nowrap;
+  cursor:grab;
+  box-shadow:0 1px 2px rgba(0,0,0,0.30);
+  user-select:none;
+}
+.bubble:hover{filter:brightness(1.10)}
+.bubble:active{cursor:grabbing}
+
+/* Eraser pill — solid red, no gradient */
+.bubble.eraser{
+  background:var(--red)!important;
+  color:#fff!important;
+  border-color:rgba(0,0,0,0.55)!important;
+  flex:0 0 100%;
+  justify-content:center;
+  height:26px;font-size:11.5px;letter-spacing:0.3px;
 }
 
-/* Drop hint overlay */
-.drop-hint{
-  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
-  font-size:13px;color:#fff;background:rgba(0,0,0,0.55);
-  padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);
-  pointer-events:none;opacity:0;transition:opacity .12s;
-  z-index:80;
+/* Manage pill — solid warm orange so it reads as a distinct "this
+   one opens a popup, the red one nukes everything" affordance. */
+.bubble.manage{
+  background:var(--warn)!important;
+  color:#fff!important;
+  border-color:rgba(0,0,0,0.55)!important;
+  flex:0 0 100%;
+  justify-content:center;
+  height:26px;font-size:11.5px;letter-spacing:0.3px;
 }
-.drop-hint.on{opacity:1}
+
+/* Edit-mode bubble interactions */
+body.edit-mode .bubble.editable{cursor:pointer}
+body.edit-mode .bubble.editable:hover{
+  filter:brightness(1.12);
+  outline:1px solid var(--accent);
+  outline-offset:1px;
+}
+body.edit-mode .bubble.dragging{opacity:0.4}
+body.edit-mode .bubble.drop-before{
+  box-shadow:-3px 0 0 0 var(--accent),0 1px 2px rgba(0,0,0,0.30);
+}
+body.edit-mode .bubble.drop-after{
+  box-shadow:3px 0 0 0 var(--accent),0 1px 2px rgba(0,0,0,0.30);
+}
+.bubble.add-pill{
+  background:transparent!important;
+  border:1px dashed var(--accent)!important;
+  color:var(--accent-dim)!important;
+  cursor:pointer!important;
+  box-shadow:none!important;
+  letter-spacing:0.3px;
+}
+.bubble.add-pill:hover{
+  background:var(--bg-card)!important;
+  color:var(--text)!important;
+  filter:none!important;
+}
+
+/* ====================================================================
+   FLOATING EDIT POPUP — pops near a clicked bubble in edit mode.
+   Color picker + name input + delete / cancel / save + experimental
+   effect mode picker. Pinned to the .card via absolute positioning
+   so it can't escape the panel. */
+.popup{
+  position:absolute;
+  z-index:50;
+  background:var(--bg-card);
+  border:1px solid var(--accent);
+  border-radius:6px;
+  padding:8px;
+  display:none;
+  flex-direction:column;
+  gap:6px;
+  box-shadow:0 6px 18px rgba(0,0,0,0.55);
+  min-width:240px;
+  max-width:300px;
+}
+.popup.open{display:flex}
+.pop-row{display:flex;align-items:center;gap:6px}
+.pop-color{
+  flex-shrink:0;width:30px;height:28px;
+  padding:0;border:1px solid var(--border-strong);border-radius:4px;
+  background:transparent;cursor:pointer;
+}
+.pop-color::-webkit-color-swatch-wrapper{padding:1px}
+.pop-color::-webkit-color-swatch{border:none;border-radius:3px}
+.pop-name{
+  flex:1;
+  background:var(--bg-strong);
+  border:1px solid var(--accent);
+  color:var(--text);font-family:inherit;
+  font-size:11.5px;font-weight:700;
+  padding:0 8px;height:28px;border-radius:4px;
+  outline:none;
+}
+.pop-name:focus{
+  border-color:var(--accent-dim);
+  box-shadow:0 0 0 1px var(--accent);
+}
+
+/* Experimental effect-mode segmented toggle. Six pill-buttons in a
+   2×3 wrap — labelled with the Chinese name. Selected segment uses
+   the accent stripe. */
+.pop-fx-label{
+  font-size:9.5px;font-weight:700;color:var(--text-mute);
+  letter-spacing:0.6px;text-transform:uppercase;
+  padding:2px 0 0;
+}
+.pop-fx-row{
+  display:flex;flex-wrap:wrap;gap:3px;
+}
+.pop-fx-seg{
+  background:var(--bg-strong);
+  border:1px solid var(--border);
+  color:var(--text-dim);
+  font-family:inherit;font-size:10.5px;font-weight:600;
+  padding:3px 9px;border-radius:4px;
+  cursor:pointer;
+  letter-spacing:0.4px;
+  flex:1 1 30%;
+  text-align:center;
+  min-width:60px;
+}
+.pop-fx-seg:hover{color:var(--text);border-color:var(--border-strong)}
+.pop-fx-seg.on{
+  background:var(--bg-card);
+  border-color:var(--accent);
+  color:var(--accent-dim);
+  box-shadow:inset 0 -2px 0 0 var(--accent);
+}
+
+/* Per-effect image-URL row — only shown when an effect mode is
+   picked. URL input + asset-picker icon button. */
+.pop-img-row{gap:4px}
+.pop-img-url{
+  flex:1;
+  background:var(--bg-strong);
+  border:1px solid var(--accent);
+  color:var(--text);font-family:inherit;
+  font-size:10.5px;
+  padding:0 8px;height:28px;border-radius:4px;
+  outline:none;
+}
+.pop-img-url:focus{
+  border-color:var(--accent-dim);
+  box-shadow:0 0 0 1px var(--accent);
+}
+.pop-img-url::placeholder{
+  color:var(--text-mute);
+  opacity:0.7;
+}
+.pop-img-pick{
+  flex-shrink:0;
+  width:32px;height:28px;
+  padding:0;border-radius:4px;
+  background:transparent;
+  border:1px solid var(--border-strong);
+  color:var(--text-dim);
+  font-size:14px;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.pop-img-pick:hover{
+  color:var(--text);
+  border-color:var(--accent);
+}
+
+.pop-actions{padding-top:1px}
+.pop-save,.pop-cancel,.pop-del{
+  background:transparent;
+  border:1px solid var(--border);
+  font-family:inherit;font-size:10.5px;font-weight:700;
+  height:24px;padding:0 10px;border-radius:4px;
+  cursor:pointer;
+}
+.pop-save{color:var(--green);border-color:rgba(46,204,113,0.45)}
+.pop-save:hover{color:#fff;background:var(--green);border-color:var(--green)}
+.pop-cancel{color:var(--text-dim)}
+.pop-cancel:hover{color:var(--text);border-color:var(--border-strong)}
+.pop-del{color:var(--red);border-color:rgba(192,57,43,0.45)}
+.pop-del:hover{color:#fff;background:var(--red);border-color:var(--red)}
+
+/* ====================================================================
+   FOOTER — multi-line per feature so each affordance reads on its
+   own row instead of being a long unwrapping run-on. */
+.foot{
+  padding:6px 10px;
+  border-top:1px solid var(--border);
+  font-size:9.5px;color:var(--text-mute);
+  flex-shrink:0;
+  line-height:1.55;
+  display:flex;flex-direction:column;gap:2px;
+}
+.foot-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.foot kbd{
+  background:var(--bg-strong);border:1px solid var(--border-strong);
+  border-radius:3px;padding:0 4px;font-family:ui-monospace,Consolas,monospace;
+  font-size:9px;color:var(--text);
+}
+.foot b{color:var(--text-dim)}
+.foot.edit-foot .foot-line b{color:var(--accent-dim)}
+
+/* JSON import file input is hidden — triggered by the button click. */
+#fileImport{display:none}
 </style>
 </head>
 <body>
-<div class="stage" id="stage"></div>
-
-<div class="topbar">
-  <span class="title">状态追踪</span>
-  <span class="hint">从右下角拖动状态到角色 · 状态拖回空白处可清除</span>
-  <button id="btn-close" type="button">关闭 (Esc)</button>
-</div>
-
-<div class="side">
-  <section class="panel res-panel">
-    <h3>资源追踪</h3>
-    <div class="body" id="resBody"></div>
-    <div class="res-add">
-      <p style="font-size:10.5px;color:#9aa0b3;margin-bottom:4px">为选中的角色添加资源</p>
-      <div class="row">
-        <input type="text" id="resName" placeholder="名称（如 法术位 1 / 激励 / 弹药）" maxlength="22">
-        <input type="number" id="resMax" class="qty" placeholder="上限" min="1" max="999" value="3">
-      </div>
-      <button id="resAdd" type="button">+ 添加到选中角色</button>
+<div class="card" id="card">
+  <div class="head">
+    <div class="drag-handle" id="dragHandle" title="拖动 / Drag" aria-label="拖动调色板">
+      <svg viewBox="0 0 12 18" aria-hidden="true">
+        <circle cx="3" cy="3" r="1.2" fill="currentColor"/>
+        <circle cx="9" cy="3" r="1.2" fill="currentColor"/>
+        <circle cx="3" cy="9" r="1.2" fill="currentColor"/>
+        <circle cx="9" cy="9" r="1.2" fill="currentColor"/>
+        <circle cx="3" cy="15" r="1.2" fill="currentColor"/>
+        <circle cx="9" cy="15" r="1.2" fill="currentColor"/>
+      </svg>
     </div>
-  </section>
-
-  <section class="panel buff-panel">
-    <h3>状态调色板（拖到角色应用）</h3>
-    <div class="filter" id="buffFilter"></div>
-    <div class="body buff-grid" id="buffGrid"></div>
-  </section>
+    <span class="ttl">状态调色板</span>
+    <button class="x" id="btnClose" type="button" title="关闭 (])">×</button>
+  </div>
+  <div class="toolbar">
+    <!-- Edit toggle. SVG = pencil icon, follows currentColor for the
+         on/off state colours. -->
+    <button id="btnEdit" type="button" title="编辑 buff 库">
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11.5 2.5l2 2-8 8H3.5v-2l8-8z"/>
+        <path d="M10.5 3.5l2 2"/>
+      </svg>
+      <span>编辑</span>
+    </button>
+    <span class="tb-sp"></span>
+    <!-- Export = download (arrow into tray) -->
+    <button id="btnExport" type="button" title="导出 buff 库为 JSON">
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 2v8"/>
+        <path d="M4.5 7L8 10.5 11.5 7"/>
+        <path d="M3 13h10"/>
+      </svg>
+      <span>导出</span>
+    </button>
+    <!-- Import = upload (arrow out of tray) -->
+    <button id="btnImport" type="button" title="导入 buff 库 JSON">
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 11V3"/>
+        <path d="M4.5 6.5L8 3l3.5 3.5"/>
+        <path d="M3 13h10"/>
+      </svg>
+      <span>导入</span>
+    </button>
+    <input id="fileImport" type="file" accept=".json,application/json"/>
+  </div>
+  <div class="filters" id="filters"></div>
+  <div class="body" id="grid"></div>
+  <div class="foot" id="foot">
+    <div class="foot-line"><b>左键</b>拖到目标释放 = 应用 buff</div>
+    <div class="foot-line"><b>右键</b>拖过角色 = 路径切换 (有则去)</div>
+    <div class="foot-line"><b>左键</b>拖红色 ✕ = 单个清除</div>
+    <div class="foot-line"><b>右键</b>拖红色 ✕ = 路径全清</div>
+    <div class="foot-line"><kbd>]</kbd> 关闭面板</div>
+  </div>
+  <div class="popup" id="popup"></div>
 </div>
-
-<div class="drop-hint" id="dropHint">拖到角色上应用</div>
-
 <script type="module" src="/src/status-tracker-page.ts"></script>
 </body>
 </html>

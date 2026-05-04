@@ -205,8 +205,31 @@ function parseAc(ac: any): string {
 function parseHp(hp: any): string {
   if (!hp) return "?";
   if (typeof hp === "number") return String(hp);
-  if (typeof hp === "object") return String(hp.average ?? "?");
+  if (typeof hp === "object") {
+    if (typeof hp.average === "number") return String(hp.average);
+    // Homebrew / custom bestiary may use `{ special: "96" }` instead
+    // of the standard `{ average, formula }` shape — surface that
+    // value as-is so it still reads correctly in the panel.
+    if (typeof hp.special === "number") return String(hp.special);
+    if (typeof hp.special === "string") return hp.special;
+    return "?";
+  }
   return "?";
+}
+
+/** Numeric HP for live-stat overrides (bubble bars, max HP). Same
+ *  spec coverage as `parseHp` but always returns a number. */
+function hpToNumber(hp: any): number | null {
+  if (typeof hp === "number") return hp;
+  if (hp && typeof hp === "object") {
+    if (typeof hp.average === "number") return hp.average;
+    if (typeof hp.special === "number") return hp.special;
+    if (typeof hp.special === "string") {
+      const n = parseInt(hp.special, 10);
+      if (!isNaN(n)) return n;
+    }
+  }
+  return null;
 }
 
 // Returns a list of speed segments, one per movement type. The caller renders
@@ -317,13 +340,30 @@ function parseSizeStr(size: any): string {
 
 // --- Section renderers for spellcasting + legendary preamble ---
 
+/** Strip HTML tags from a snippet to get the plain spell name we
+ *  feed into the global search broadcast. Cheap regex — the only
+ *  HTML formatTagsClickable produces is `<span class="rollable">` /
+ *  text-format spans, none of them nested. */
+function stripHtmlTags(s: string): string {
+  return s.replace(/<[^>]*>/g, "").trim();
+}
+
 function renderSpellList(arr: any): string {
   if (!Array.isArray(arr)) return "";
-  // Spell names with 5etools tags — make rollable where applicable
-  // ({@spell ...} is cosmetic, but if a spell entry includes inline
-  // {@dice} it'll be clickable). The split by "、" stays string-safe
-  // because formatTagsClickable escapes the surrounding text.
-  return arr.map((s) => formatTagsClickable(String(s))).filter(Boolean).join("、");
+  // Each spell name is wrapped in a `.spell-chip` so clicking it
+  // broadcasts BC_SEARCH_QUERY to open the global search popup
+  // pre-filled with the spell name. formatTagsClickable still
+  // handles inline {@dice}/{@damage} tags inside spell-name strings
+  // (rare, e.g. "Magic Missile {@damage 1d4+1}"), but we wrap the
+  // whole formatted result in the chip so the chip fires search and
+  // any nested .rollable inside fires its own roll first (closest()
+  // resolves to the most-specific match).
+  return arr.map((s) => {
+    const display = formatTagsClickable(String(s));
+    const cleanName = stripHtmlTags(display);
+    if (!cleanName) return "";
+    return `<span class="spell-chip" data-q="${escapeHtml(cleanName)}" title="点击搜索: ${escapeHtml(cleanName)}">${display}</span>`;
+  }).filter(Boolean).join("、");
 }
 
 function renderSpellLevels(spells: any): string {
@@ -448,10 +488,10 @@ function render(m: any) {
   // HP / max HP / AC so the panel matches the bubbles bar.
   const liveHp = typeof liveBubbles.health === "number"
     ? liveBubbles.health
-    : (typeof m.hp?.average === "number" ? m.hp.average : null);
+    : hpToNumber(m.hp);
   const liveMaxHp = typeof liveBubbles["max health"] === "number"
     ? liveBubbles["max health"]
-    : (typeof m.hp?.average === "number" ? m.hp.average : null);
+    : hpToNumber(m.hp);
   const liveTempHp = typeof liveBubbles["temporary health"] === "number"
     ? liveBubbles["temporary health"]
     : 0;
@@ -836,11 +876,41 @@ async function fireRollableFromBestiary(target: HTMLElement, hidden: boolean) {
 }
 
 root.addEventListener("click", async (e) => {
-  const target = (e.target as HTMLElement | null)?.closest<HTMLElement>(".rollable");
-  if (!target) return;
-  e.preventDefault();
-  e.stopPropagation();
-  await fireRollableFromBestiary(target, false); // left click → open roll
+  // Rollable check first — it's the more specific element, and
+  // .rollable spans can be nested INSIDE .spell-chip wrappers (a
+  // spell name with inline {@dice} markup). We want the inner roll
+  // to fire when clicked, not the outer search.
+  const rollable = (e.target as HTMLElement | null)?.closest<HTMLElement>(".rollable");
+  if (rollable) {
+    e.preventDefault();
+    e.stopPropagation();
+    await fireRollableFromBestiary(rollable, false);
+    return;
+  }
+  // Spell-chip click → broadcast BC_SEARCH_QUERY so the global
+  // search popup opens with the spell name pre-filled. Same
+  // protocol as the character-card search chips (info-page.ts).
+  const chip = (e.target as HTMLElement | null)?.closest<HTMLElement>(".spell-chip");
+  if (chip) {
+    e.preventDefault();
+    e.stopPropagation();
+    const q = chip.dataset.q ?? "";
+    if (q) {
+      try {
+        OBR.broadcast.sendMessage(
+          "com.obr-suite/search-query",
+          { q, autoPin: true },
+          { destination: "LOCAL" },
+        );
+      } catch {}
+      // Visual flash so the click registers even when the popup is
+      // off-screen / closed.
+      chip.classList.remove("spell-chip-flash");
+      void chip.offsetWidth;
+      chip.classList.add("spell-chip-flash");
+    }
+    return;
+  }
 });
 
 // Right-click → context menu (投掷 / 优势 / 劣势 / 添加到骰盘).

@@ -46,6 +46,27 @@ function getEnabledLibraryBases(): string[] {
   }
 }
 
+/** Like getEnabledLibraryBases but also returns each library's
+ *  configured `indexPath` (defaults to `search/index.json` when
+ *  unset). Used by `loadIndex` so the partnered kiwee listing
+ *  (`search/index-partnered.json`) gets fetched correctly. */
+function getEnabledLibrarySources(): Array<{ base: string; indexPath: string }> {
+  try {
+    const libs = getState().libraries || [];
+    const out = libs
+      .filter((l) => l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim().length > 0)
+      .map((l) => ({
+        base: l.baseUrl.replace(/\/+$/, ""),
+        indexPath: typeof l.indexPath === "string" && l.indexPath.length > 0
+          ? l.indexPath.replace(/^\/+/, "")
+          : "search/index.json",
+      }));
+    return out.length > 0 ? out : [{ base: DEFAULT_BASE, indexPath: "search/index.json" }];
+  } catch {
+    return [{ base: DEFAULT_BASE, indexPath: "search/index.json" }];
+  }
+}
+
 function dataBase(_lang: Language): string {
   // First enabled lib is the "primary" — used for per-entry data
   // fetches that look up by source code (we walk every base when
@@ -60,8 +81,11 @@ const BAR_W_OPEN = 720;
 const BAR_H_IDLE = 40;
 const BAR_H_OPEN = 440;
 
-const CACHE_KEY = "obr-suite/search-index-v1";
-const BOOKS_CACHE_KEY = "obr-suite/search-books-v1";
+// v2 (2026-05-04): bumped to force re-fetch after the partnered
+// kiwee library + cross-library dedup changes. Old v1 caches under
+// `obr-suite/search-index-v1*` are stale and ignored.
+const CACHE_KEY = "obr-suite/search-index-v2";
+const BOOKS_CACHE_KEY = "obr-suite/search-books-v2";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_RESULTS = 50;
 
@@ -208,8 +232,10 @@ async function loadIndex(): Promise<IndexFile> {
     // Cache key is keyed on the active library set + local-content
     // signature so switching libraries OR adding/removing local
     // imports both invalidate the cached merged index.
-    const bases = getEnabledLibraryBases();
-    const cacheKey = `${CACHE_KEY}:${bases.join("|")}:${getLocalContentSignature()}`;
+    const sources = getEnabledLibrarySources();
+    // Cache key encodes both base AND indexPath so toggling between
+    // index.json and index-partnered.json invalidates the cache.
+    const cacheKey = `${CACHE_KEY}:${sources.map((s) => `${s.base}|${s.indexPath}`).join("||")}:${getLocalContentSignature()}`;
     try {
       const raw = localStorage.getItem(cacheKey);
       if (raw) {
@@ -224,13 +250,13 @@ async function loadIndex(): Promise<IndexFile> {
     // Fetch all libraries in parallel; merge `x` (entries) by
     // (cn / n / source) and the source map `m.s` by code.
     const perLibrary = await Promise.all(
-      bases.map(async (base) => {
+      sources.map(async ({ base, indexPath }) => {
         try {
-          const res = await fetch(`${base}/search/index.json`, { cache: "no-cache" });
+          const res = await fetch(`${base}/${indexPath}`, { cache: "no-cache" });
           if (!res.ok) return null;
           return (await res.json()) as IndexFile;
         } catch (e) {
-          console.warn(`[obr-suite/search] index fetch failed for ${base}`, e);
+          console.warn(`[obr-suite/search] index fetch failed for ${base}/${indexPath}`, e);
           return null;
         }
       })
@@ -255,10 +281,31 @@ async function loadIndex(): Promise<IndexFile> {
         }
       }
     }
+    // 2026-05-04 dedupe overhaul: the partnered kiwee library
+    // overlaps significantly with the main kiwee one (same monsters
+    // listed in both). The naive `s` field won't dedupe across
+    // libraries because the same source can be assigned different
+    // numeric ids in each lib's `m.s` map. Resolve the entry's
+    // source to its CODE STRING per-library, normalise to lower-
+    // case, and use that in the dedupe key. Result: identical
+    // monsters from two libraries collapse to one row regardless
+    // of how each lib chose to number its sources.
+    const resolveSourceCode = (e: Entry, lib: IndexFile): string => {
+      if (e.s == null) return "";
+      if (typeof e.s === "string") return e.s.toLowerCase();
+      const map = lib.m?.s || {};
+      for (const [code, id] of Object.entries(map)) {
+        if (id === e.s) return code.toLowerCase();
+      }
+      return String(e.s).toLowerCase();
+    };
     const seen = new Set<string>();
     for (const lib of allValid) {
       for (const e of lib.x) {
-        const key = `${e.cn || ""}|${e.n || ""}|${e.s ?? ""}|${e.c ?? ""}`;
+        const cn = (e.cn || "").trim().toLowerCase();
+        const n = (e.n || "").trim().toLowerCase();
+        const src = resolveSourceCode(e, lib);
+        const key = `${cn}|${n}|${src}|${e.c ?? ""}`;
         if (seen.has(key)) continue;
         seen.add(key);
         merged.x.push(e);
@@ -688,32 +735,55 @@ async function findEntryData(entry: Entry): Promise<DataEntry | null> {
   const parsed = isClassFamily ? parseClassFamilyEntry(entry) : null;
   const matchAny = (pool: DataEntry[]): DataEntry | null => {
     if (parsed) {
-      // Match strategy for class/feature/subclass/subclassFeature:
-      //   1. (preferred) ENG_name + source + className all match
-      //   2. ENG_name + className match (any source)
-      //   3. ENG_name match alone
-      //   4. CN name match
+      // Match strategy for class/feature/subclass/subclassFeature.
+      // Falls back through progressively looser matches so homebrew
+      // packs (where ENG_name is often missing or set to a Chinese
+      // string) still resolve content. The key insight for homebrew
+      // is that featureEng will frequently equal featureCn — the
+      // index regex extracts whatever's in `n` regardless of script.
       const targetEng = parsed.featureEng?.toLowerCase();
       const targetCn = parsed.featureCn;
       const targetClass = parsed.classCn;
       const lvl = parsed.level;
       const matchByLevel = (e: any) =>
         lvl == null || e.level == null || e.level === lvl;
+      const matchByClass = (e: any) =>
+        targetClass ? (e.className === targetClass) : true;
+      // Helper: case-insensitive name comparison that also tries the
+      // raw `name` field (homebrew packs sometimes only set `name`).
+      const nameMatches = (e: any, target: string | null | undefined): boolean => {
+        if (!target) return false;
+        const t = target.toLowerCase();
+        const eng = (e.ENG_name || "").toLowerCase();
+        const nm = (e.name || "").toLowerCase();
+        return eng === t || nm === t;
+      };
       return (
+        // 1. ENG_name + source + className + level
         pool.find((e: any) =>
-          targetEng && e.ENG_name?.toLowerCase() === targetEng &&
+          nameMatches(e, targetEng) &&
           e.source?.toUpperCase() === targetSrc &&
-          (targetClass ? e.className === targetClass : true) &&
+          matchByClass(e) &&
           matchByLevel(e),
         ) ??
+        // 2. ENG_name + className + level (any source)
         pool.find((e: any) =>
-          targetEng && e.ENG_name?.toLowerCase() === targetEng &&
-          (targetClass ? e.className === targetClass : true) &&
+          nameMatches(e, targetEng) &&
+          matchByClass(e) &&
           matchByLevel(e),
         ) ??
+        // 3. featureCn + className + level (homebrew often has
+        //    only Chinese names with featureEng === featureCn)
         pool.find((e: any) =>
-          targetEng && e.ENG_name?.toLowerCase() === targetEng,
+          nameMatches(e, targetCn) &&
+          matchByClass(e) &&
+          matchByLevel(e),
         ) ??
+        // 4. ENG_name alone
+        pool.find((e: any) => nameMatches(e, targetEng)) ??
+        // 5. featureCn alone
+        pool.find((e: any) => nameMatches(e, targetCn)) ??
+        // 6. CN name only via raw `name` field (last resort)
         pool.find((e: any) => targetCn && e.name === targetCn) ??
         null
       );

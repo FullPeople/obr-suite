@@ -185,6 +185,33 @@ function App() {
     });
     return unsub;
   }, []);
+
+  // Refetch monster data when the library configuration changes
+  // (add / delete / edit URL / enable / disable). Without this the
+  // panel keeps showing the old set even though `index.ts` has
+  // already invalidated the underlying cache. Per user spec:
+  // "删除和修改库时也要删除数据" — the panel reflects deletion
+  // immediately rather than the next time the panel reopens.
+  useEffect(() => {
+    let lastLibSig = JSON.stringify(
+      (getState().libraries || []).map((l) => `${l.id}|${l.enabled}|${l.baseUrl}`),
+    );
+    const unsub = onStateChange(() => {
+      const sig = JSON.stringify(
+        (getState().libraries || []).map((l) => `${l.id}|${l.enabled}|${l.baseUrl}`),
+      );
+      if (sig === lastLibSig) return;
+      lastLibSig = sig;
+      setLoading(true);
+      loadAllMonsters()
+        .then((all) => {
+          setMonsters(all);
+          setLoading(false);
+        })
+        .catch(() => setLoading(false));
+    });
+    return unsub;
+  }, []);
   const inputRef = useRef<HTMLInputElement>(null);
   // Mirror of `monsters` for closures that need the latest list (e.g.
   // the BC_MONSTER_DROP handler — it can't use the state value
@@ -410,32 +437,40 @@ function App() {
               </svg>
             </div>
           )}
-          <div class="search-wrap">
-            <input
-              ref={inputRef}
-              type="text"
-              class="search"
-              placeholder={t(lang, "bestiarySearchPh")}
-              value={query}
-              onInput={handleSearch}
-            />
-            {query && (
-              <button
-                class="search-clear"
-                onClick={handleClearSearch}
-                title={t(lang, "bestiaryClearSearch")}
-                aria-label={t(lang, "bestiaryClearSearch")}
-                type="button"
-              >
-                ✕
-              </button>
-            )}
-          </div>
+          {/* Search bar only renders when there's actually data to
+              search through. With no enabled libraries (or all
+              libraries disabled / empty), monsters.length === 0 and
+              the bar would just be a no-op input. Per user spec:
+              "有新数据时搜索框也要启用，无数据时搜索框也要消失". */}
+          {monsters.length > 0 && (
+            <div class="search-wrap">
+              <input
+                ref={inputRef}
+                type="text"
+                class="search"
+                placeholder={t(lang, "bestiarySearchPh")}
+                value={query}
+                onInput={handleSearch}
+              />
+              {query && (
+                <button
+                  class="search-clear"
+                  onClick={handleClearSearch}
+                  title={t(lang, "bestiaryClearSearch")}
+                  aria-label={t(lang, "bestiaryClearSearch")}
+                  type="button"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <div class="header-row">
           <span class="count">
             {loading ? t(lang, "bestiaryLoading") : `${filtered.length} / ${monsters.length}`}
           </span>
+          {monsters.length > 0 && (
           <div class="source-filter-wrap">
             <input
               type="text"
@@ -458,6 +493,7 @@ function App() {
               </button>
             )}
           </div>
+          )}
           {role === "GM" && (
             <button
               class={`auto-init-toggle ${autoHide ? "on" : "off"}`}

@@ -288,6 +288,28 @@ html,body{
   0%   {background:rgba(93,173,226,0.55); transform:scale(1.18); display:inline-block}
   100% {background:transparent; transform:scale(1)}
 }
+
+/* Spell-name chip — clicking broadcasts BC_SEARCH_QUERY so the
+   global search popup opens pre-filled with this spell. Subtle
+   purple tint to distinguish from the bluer .rollable dice spans. */
+.spell-chip{
+  cursor:pointer;
+  color:#c8a2e0;
+  border-radius:3px;
+  padding:0 2px;
+  transition:background .12s, color .12s;
+}
+.spell-chip:hover{
+  background:rgba(155,109,213,0.22);
+  color:#e0c8ee;
+}
+.spell-chip.spell-chip-flash{
+  animation: bestSpellFlash 0.4s ease-out;
+}
+@keyframes bestSpellFlash{
+  0%   {background:rgba(155,109,213,0.55); transform:scale(1.12); display:inline-block}
+  100% {background:transparent; transform:scale(1)}
+}
 </style>
 </head>
 <body>
