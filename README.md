@@ -7,7 +7,7 @@
 An [Owlbear Rodeo](https://owlbear.rodeo) extension that bundles eight modules behind a single manifest: dice, initiative tracker, bestiary, character cards, global search, time stop, sync viewport, and portals.
 
 ```
-https://obr.dnd.center/suite/manifest.json
+https://obr.dnd.center/suite-dev/manifest-dev.json
 ```
 
 ---
