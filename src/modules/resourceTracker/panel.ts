@@ -45,6 +45,52 @@ const BC_OPEN_EDIT = `${PLUGIN_ID}/edit-open`;
 // a card. LOCAL+REMOTE so all players in the room see the change.
 const BC_RESOURCE_CHANGED = `${PLUGIN_ID}/changed`;
 
+// Mirror of the metadata keys the hp-bar / cc-info / bestiary modules
+// write. Duplicated here so this file (which mounts inside multiple
+// iframes) doesn't import from those modules.
+const CC_BIND_KEY = "com.character-cards/boundCardId";
+const CC_LIST_KEY = "com.character-cards/list";
+const BUBBLES_NAME_KEY = "com.owlbear-rodeo-bubbles-extension/name";
+
+async function resolveTokenDisplayName(itemId: string): Promise<string> {
+  let item: any = null;
+  try {
+    const items = await OBR.scene.items.getItems([itemId]);
+    item = items[0] ?? null;
+  } catch {}
+  if (!item) return "";
+  const meta = (item.metadata ?? {}) as Record<string, unknown>;
+  // 2026-05-12 — name priority per user spec: 角色卡名 > 怪物图鉴绑定名
+  // > 图片 (item) 名. Same priority as the standalone hp-bar popover.
+  // 1. CC binding → look up scene's `com.character-cards/list` for
+  //    the card's display name.
+  const cardId = meta[CC_BIND_KEY];
+  if (typeof cardId === "string" && cardId) {
+    try {
+      const sceneMeta = await OBR.scene.getMetadata();
+      const list = sceneMeta[CC_LIST_KEY];
+      if (Array.isArray(list)) {
+        const card = (list as any[]).find((c) => c && c.id === cardId);
+        if (card && typeof card.name === "string" && card.name.trim()) {
+          return String(card.name).trim();
+        }
+      }
+    } catch {}
+  }
+  // 2. Bestiary monster name (BUBBLES_NAME meta is set by bestiary
+  //    bind / writeBubbleStats).
+  const bubblesName = meta[BUBBLES_NAME_KEY];
+  if (typeof bubblesName === "string" && bubblesName.trim()) {
+    return String(bubblesName).trim();
+  }
+  // 3. OBR item name (the image's filename or whatever the user
+  //    renamed it to).
+  if (typeof item.name === "string" && item.name.trim()) {
+    return String(item.name).trim();
+  }
+  return "";
+}
+
 async function broadcastChanged(
   itemId: string,
   resource: Resource,
@@ -52,13 +98,7 @@ async function broadcastChanged(
   prevValue: number,
 ): Promise<void> {
   if (delta === 0) return;
-  // Resolve the token's display name on this client so the toast
-  // shows "<token>·<resource>" when it pops on every other client.
-  let tokenName = "";
-  try {
-    const its = await OBR.scene.items.getItems([itemId]);
-    if (its[0]?.name) tokenName = String(its[0].name);
-  } catch {}
+  const tokenName = await resolveTokenDisplayName(itemId);
   try {
     const payload = { tokenId: itemId, tokenName, resource, delta, prevValue };
     await Promise.all([
@@ -135,26 +175,28 @@ export function mountResourcePanel(opts: MountOptions): {
     const item = items[0] ?? null;
     const next = readResources(item);
     const nextJson = JSON.stringify(next);
-    // Structural change check: did the SET of resource ids change?
-    // A new resource appearing or one being deleted MUST re-render
-    // (new row markup needs to be created); but a same-id-set with
-    // only value diffs can stay in the suppress-render path.
-    const prevIds = currentRender.map((r) => r.id).sort().join("|");
-    const nextIds = next.map((r) => r.id).sort().join("|");
-    const structureChanged = prevIds !== nextIds;
-    const inSuppressWindow = Date.now() < suppressRenderUntil;
-
     if (nextJson === lastSnapshotJson) {
-      // Snapshots match — fastest path. Fast-forward state and bail.
+      // Identical state — fast bail.
       currentRender = next;
       return;
     }
-    if (inSuppressWindow && !structureChanged) {
-      // We just committed a value mutation; the metadata echo is
-      // shaped slightly differently from our optimistic snapshot
-      // (field ordering, etc.) but the resource ID set is unchanged.
-      // Patch existing DOM nodes with the canonical values + skip
-      // render() to keep scroll position + slide state intact.
+    // 2026-05-12 — strictly avoid innerHTML rewrite when only values
+    // changed. Earlier round used a 800 ms "suppress" window; user
+    // reported flicker still happening so the suppress fallback was
+    // either racing (window expired before echo arrived in some
+    // cases) or the JSON snapshots failed to match for reasons
+    // unrelated to suppression. Now we make it unconditional: if
+    // the .rt-list DOM exists AND the resource ID set is unchanged,
+    // we patch values in place and never touch innerHTML. Only adds
+    // / deletes (set-of-ids changed) and cold-start (no DOM yet)
+    // take the full render path.
+    const prevIds = currentRender.map((r) => r.id).sort().join("|");
+    const nextIds = next.map((r) => r.id).sort().join("|");
+    const structureChanged = prevIds !== nextIds;
+    const haveListDom = !!container.querySelector(".rt-list");
+    void suppressRenderUntil; // legacy, no longer drives the gate
+
+    if (haveListDom && !structureChanged && next.length > 0) {
       currentRender = next;
       lastSnapshotJson = nextJson;
       patchAllRowsFromCurrent();
