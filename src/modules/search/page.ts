@@ -16,6 +16,7 @@ import {
   getLocalIndexFile,
   getLocalDataByKeySource,
   getLocalContentSignature,
+  initLocalContent,
   BC_LOCAL_CONTENT_CHANGED,
 } from "../../utils/localContent";
 
@@ -250,6 +251,10 @@ async function loadIndex(): Promise<IndexFile> {
   if (indexCache) return indexCache;
   if (indexLoading) return indexLoading;
   indexLoading = (async () => {
+    // 2026-05-10 — warm the IDB-backed local-content cache before we
+    // call getLocalContentSignature() / getLocalIndexFile() below.
+    // Idempotent.
+    await initLocalContent();
     // Cache key is keyed on the active library set + local-content
     // signature so switching libraries OR adding/removing local
     // imports both invalidate the cached merged index.

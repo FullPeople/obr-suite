@@ -1,5 +1,5 @@
 import { Monster, ParsedMonster, MonsterEdition } from "./types";
-import { getAllLocalMonsters } from "../../utils/localContent";
+import { getAllLocalMonsters, initLocalContent } from "../../utils/localContent";
 
 // "2014" = strictly PHB + MM (the original core books). "2024" = strictly
 // XPHB + XMM (the 2024 reprint). Every other source — DMG/XDMG, TCE, XGE,
@@ -298,6 +298,9 @@ export async function loadAllMonsters(): Promise<ParsedMonster[]> {
   if (loadingPromise) return loadingPromise;
 
   loadingPromise = (async () => {
+    // 2026-05-10 — warm the IDB-backed local-content cache before
+    // we read getAllLocalMonsters() below. Idempotent.
+    await initLocalContent();
     // Fetch from EVERY enabled library and merge. Libraries may
     // disagree on which sources they ship (custom Cloudflare libs
     // typically only have a handful of homebrew monsters); merging

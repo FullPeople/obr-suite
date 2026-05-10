@@ -31,6 +31,7 @@ import {
   importLocalJson,
   importLocalMd,
   removeLocalFile,
+  initLocalContent,
   getLocalFiles,
   BC_LOCAL_CONTENT_CHANGED,
   type LocalFileMeta,
@@ -1526,7 +1527,7 @@ function wireLibrariesBody(root: HTMLElement): void {
 
   // Local content delete
   root.querySelectorAll<HTMLButtonElement>(".lib-local-del").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       if (!isGM) return;
       const row = btn.closest<HTMLDivElement>(".lib-local-row");
       if (!row) return;
@@ -1534,7 +1535,7 @@ function wireLibrariesBody(root: HTMLElement): void {
       if (!id) return;
       const ok = window.confirm(getLocalLang() === "zh" ? "删除此本地内容？" : "Remove this local file?");
       if (!ok) return;
-      removeLocalFile(id);
+      await removeLocalFile(id);
       try {
         OBR.broadcast.sendMessage(BC_LOCAL_CONTENT_CHANGED, {}, { destination: "LOCAL" });
       } catch {}
@@ -2872,6 +2873,12 @@ langEnEl.addEventListener("click", () => {
 
 OBR.onReady(async () => {
   try { isGM = (await OBR.player.getRole()) === "GM"; } catch {}
+  // 2026-05-10 — warm the IDB-backed local-content cache before the
+  // first render so the "📁 本地内容" list isn't empty for ~50 ms
+  // after open. Idempotent: subsequent calls share the same promise.
+  void initLocalContent().then(() => {
+    if (activeTab === "library") renderContent();
+  });
   await refreshBubbleSettings();
   void loadSupporters().then(() => {
     if (activeTab === "support") renderContent();

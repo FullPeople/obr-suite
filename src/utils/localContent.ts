@@ -1,24 +1,51 @@
 // Local-content store. Lets the user import .json (5etools shape) or
 // .md (YAML-frontmatter shape) files DIRECTLY into the suite without
 // needing to host them on a public HTTPS site. Each imported file is
-// stored in localStorage; its entries are merged into the search
-// index + bestiary panel + per-entry data fetches.
+// stored in IndexedDB; its entries are merged into the search index +
+// bestiary panel + per-entry data fetches.
+//
+// 2026-05-10 — migrated localStorage → IndexedDB. localStorage capped a
+// single origin at ~5–10 MB and JSON-stringified everything; users
+// importing larger homebrew packs hit "存储失败 — localStorage 容量
+// 已满" with no recovery path. IDB lifts the cap to ~60% of free disk
+// and stores native objects (no stringify roundtrip). The storage
+// layer is now async, but every existing public sync getter
+// (`getLocalFiles`, `getLocalIndexFile`, `getAllLocalMonsters`, etc.)
+// still works by reading from a module-level in-memory mirror that
+// `initLocalContent()` populates from IDB at startup. Callers that
+// need a guaranteed-warm cache should `await initLocalContent()`
+// before reading; everyone else gets best-effort current state.
+//
+// Migration: on first init we look in IDB. If empty AND the legacy
+// localStorage keys still hold data, we copy them in then clear the
+// localStorage entries. Re-runs of init are idempotent — if IDB has
+// data, the migration step is skipped.
+
+import { idbGet, idbPut, idbDelete, idbGetAll, idbClear } from "./idbStore";
 
 /** Broadcast id used to invalidate search/bestiary in-memory caches
  *  whenever the local content set changes. Listeners (search/page,
  *  bestiary/data) drop their cached data and re-derive on next read. */
 export const BC_LOCAL_CONTENT_CHANGED = "com.obr-suite/local-content-changed";
 //
-// Storage layout:
-//   obr-suite/local-content/index → { files: LocalFileMeta[] }
-//   obr-suite/local-content/file:<id> → original parsed JSON content
+// IDB key layout (mirrored 1:1 of the old localStorage layout for
+// migration simplicity):
+//   "index"       → { files: LocalFileMeta[] }
+//   "file:<id>"   → original parsed JSON content
 //
 // The synthesized search index entries are computed on demand in
-// `getLocalIndexFile()` so the data is always derived from the live
-// stored files (no separate cache to keep in sync).
+// `getLocalIndexFile()` from the in-memory mirror, so the data is
+// always derived from the live stored files (no separate cache to
+// keep in sync).
 
-const LS_INDEX = "obr-suite/local-content/index";
-const LS_FILE_PREFIX = "obr-suite/local-content/file:";
+const IDB_INDEX_KEY = "index";
+const IDB_FILE_PREFIX = "file:";
+
+// Legacy localStorage keys — used ONLY by the one-shot migration in
+// initLocalContent(). After migration completes the legacy entries
+// are wiped.
+const LEGACY_LS_INDEX = "obr-suite/local-content/index";
+const LEGACY_LS_FILE_PREFIX = "obr-suite/local-content/file:";
 
 /** Top-level kind of a single imported file. Maps to the JSON top-level
  *  key (`"monster"` → bestiary, `"spell"` → spells, etc.). */
@@ -89,44 +116,136 @@ interface LocalIndexState {
   files: LocalFileMeta[];
 }
 
-function readIndex(): LocalIndexState {
+// === In-memory cache layer ===
+//
+// All reads come out of these maps; init() populates them from IDB
+// (with a one-shot migration from localStorage if needed). Writes go
+// through both the cache AND IDB so the next read sees the new state
+// without waiting on disk. RAM cost is bounded by what the user has
+// imported — typical homebrew packs are a few MB at most.
+let memIndex: LocalIndexState = { files: [] };
+const memFiles = new Map<string, any>();
+
+let initPromise: Promise<void> | null = null;
+
+/** Initialise the local-content store. Idempotent — repeated calls
+ *  return the same promise so concurrent callers all wait on the
+ *  same warm-up. Resolves once the in-memory mirror is populated
+ *  from IDB. The bestiary / search / settings entry points each
+ *  await this before doing their first read; sync getters before
+ *  init resolves return whatever's in the in-memory cache (empty
+ *  on cold-start, possibly stale during the brief init window). */
+export function initLocalContent(): Promise<void> {
+  if (!initPromise) initPromise = doInit();
+  return initPromise;
+}
+
+async function doInit(): Promise<void> {
+  // 1. Try to read the IDB index. If we have entries, this is a
+  //    normal warm-up — no migration needed.
+  let idbHasData = false;
   try {
-    const raw = localStorage.getItem(LS_INDEX);
-    if (!raw) return { files: [] };
-    const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.files)) return { files: [] };
-    return parsed as LocalIndexState;
-  } catch {
-    return { files: [] };
+    const idx = await idbGet<LocalIndexState>(IDB_INDEX_KEY);
+    if (idx && Array.isArray(idx.files) && idx.files.length > 0) {
+      idbHasData = true;
+      memIndex = { files: [...idx.files] };
+      // Pull every file row in one batch — saves N round-trips on a
+      // user with many imports.
+      const all = await idbGetAll();
+      for (const [k, v] of all) {
+        if (k.startsWith(IDB_FILE_PREFIX)) {
+          memFiles.set(k.slice(IDB_FILE_PREFIX.length), v);
+        }
+      }
+    } else if (idx) {
+      // Empty index already in IDB — fresh-but-touched store. Skip
+      // migration so we don't accidentally restore stale localStorage
+      // entries that the user explicitly cleared.
+      idbHasData = true;
+      memIndex = { files: [] };
+    }
+  } catch (e) {
+    console.warn("[obr-suite/localContent] IDB init failed; falling back to legacy localStorage", e);
+  }
+
+  // 2. If IDB was empty, see if the legacy localStorage layout has
+  //    data. If so, migrate it across in one shot, then clean the
+  //    legacy keys so we never run this branch twice.
+  if (!idbHasData) {
+    try {
+      const raw = typeof localStorage !== "undefined"
+        ? localStorage.getItem(LEGACY_LS_INDEX)
+        : null;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.files)) {
+          const legacyIdx = parsed as LocalIndexState;
+          memIndex = { files: [...legacyIdx.files] };
+          // Persist the migrated index up front so that even if a
+          // file-content read fails below the next init still sees
+          // the index in IDB.
+          try { await idbPut(IDB_INDEX_KEY, memIndex); } catch {}
+          for (const meta of legacyIdx.files) {
+            try {
+              const txt = localStorage.getItem(LEGACY_LS_FILE_PREFIX + meta.id);
+              if (!txt) continue;
+              const content = JSON.parse(txt);
+              memFiles.set(meta.id, content);
+              try { await idbPut(IDB_FILE_PREFIX + meta.id, content); } catch (e) {
+                console.warn("[obr-suite/localContent] migrate file failed", meta.id, e);
+              }
+            } catch (e) {
+              console.warn("[obr-suite/localContent] parse legacy file failed", meta.id, e);
+            }
+          }
+          // Wipe legacy localStorage entries — IDB is now the source
+          // of truth. Wrapped in try-catch so a clear failure (e.g.
+          // private-mode quota mid-clear) doesn't block init.
+          try {
+            for (const meta of legacyIdx.files) {
+              localStorage.removeItem(LEGACY_LS_FILE_PREFIX + meta.id);
+            }
+            localStorage.removeItem(LEGACY_LS_INDEX);
+          } catch {}
+          console.info(`[obr-suite/localContent] migrated ${legacyIdx.files.length} file(s) from localStorage → IndexedDB`);
+        }
+      }
+    } catch (e) {
+      console.warn("[obr-suite/localContent] legacy localStorage migration failed", e);
+    }
   }
 }
 
-function writeIndex(state: LocalIndexState): void {
-  try { localStorage.setItem(LS_INDEX, JSON.stringify(state)); } catch {}
+function readIndex(): LocalIndexState {
+  return memIndex;
+}
+
+async function writeIndex(state: LocalIndexState): Promise<void> {
+  memIndex = state;
+  try { await idbPut(IDB_INDEX_KEY, state); }
+  catch (e) { console.warn("[obr-suite/localContent] writeIndex failed", e); }
 }
 
 function readFile(id: string): any | null {
-  try {
-    const raw = localStorage.getItem(LS_FILE_PREFIX + id);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  return memFiles.has(id) ? memFiles.get(id) : null;
 }
 
-function writeFile(id: string, content: any): void {
+async function writeFile(id: string, content: any): Promise<void> {
+  memFiles.set(id, content);
   try {
-    localStorage.setItem(LS_FILE_PREFIX + id, JSON.stringify(content));
+    await idbPut(IDB_FILE_PREFIX + id, content);
   } catch (e) {
-    // Most likely localStorage quota; surface as console error.
+    // IDB quota or open failure. Roll back the in-memory entry so
+    // the index stays consistent with what's actually persisted.
+    memFiles.delete(id);
     console.error("[obr-suite/localContent] writeFile failed", e);
     throw e;
   }
 }
 
-function deleteFile(id: string): void {
-  try { localStorage.removeItem(LS_FILE_PREFIX + id); } catch {}
+async function deleteFile(id: string): Promise<void> {
+  memFiles.delete(id);
+  try { await idbDelete(IDB_FILE_PREFIX + id); } catch {}
 }
 
 /** Public read: ordered list of imported files (newest first). */
@@ -278,6 +397,7 @@ export type ImportResult =
   | { ok: false; error: string };
 
 export async function importLocalJson(filename: string, jsonText: string): Promise<ImportResult> {
+  await initLocalContent();
   let parsed: any;
   try {
     parsed = JSON.parse(jsonText);
@@ -293,15 +413,15 @@ export async function importLocalJson(filename: string, jsonText: string): Promi
   }
   const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    writeFile(id, parsed);
-  } catch {
-    return { ok: false, error: "存储失败 —— localStorage 容量已满" };
+    await writeFile(id, parsed);
+  } catch (e: any) {
+    return { ok: false, error: `存储失败 —— IndexedDB 写入异常：${e?.message || String(e)}` };
   }
   const count = Array.isArray(parsed[kind]) ? parsed[kind].length : 0;
   const meta: LocalFileMeta = { id, filename, kind, count, addedAt: Date.now() };
   const state = readIndex();
   state.files.push(meta);
-  writeIndex(state);
+  await writeIndex(state);
   return { ok: true, meta };
 }
 
@@ -332,6 +452,7 @@ export async function importLocalJson(filename: string, jsonText: string): Promi
  *  The output is a synthetic single-monster JSON file in the same shape
  *  as a 5etools bestiary file. */
 export async function importLocalMd(filename: string, mdText: string): Promise<ImportResult> {
+  await initLocalContent();
   const m = mdText.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
   if (!m) {
     return {
@@ -366,9 +487,9 @@ export async function importLocalMd(filename: string, mdText: string): Promise<I
   const synth = { monster: [monster] };
   const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    writeFile(id, synth);
-  } catch {
-    return { ok: false, error: "存储失败 —— localStorage 容量已满" };
+    await writeFile(id, synth);
+  } catch (e: any) {
+    return { ok: false, error: `存储失败 —— IndexedDB 写入异常：${e?.message || String(e)}` };
   }
   const meta: LocalFileMeta = {
     id,
@@ -379,7 +500,7 @@ export async function importLocalMd(filename: string, mdText: string): Promise<I
   };
   const state = readIndex();
   state.files.push(meta);
-  writeIndex(state);
+  await writeIndex(state);
   return { ok: true, meta };
 }
 
@@ -492,15 +613,26 @@ function parseMdBodySections(body: string): {
   return out;
 }
 
-export function removeLocalFile(id: string): void {
+export async function removeLocalFile(id: string): Promise<void> {
+  await initLocalContent();
   const state = readIndex();
   state.files = state.files.filter((f) => f.id !== id);
-  writeIndex(state);
-  deleteFile(id);
+  await writeIndex(state);
+  await deleteFile(id);
 }
 
-export function clearAllLocal(): void {
-  const state = readIndex();
-  for (const f of state.files) deleteFile(f.id);
-  writeIndex({ files: [] });
+export async function clearAllLocal(): Promise<void> {
+  await initLocalContent();
+  // Wipe in-memory + the entire IDB store in one shot. Faster than
+  // looping per-file, and guarantees we clear orphan keys (legacy
+  // imports whose meta got dropped but file content lingered).
+  memFiles.clear();
+  memIndex = { files: [] };
+  try { await idbClear(); } catch (e) {
+    console.warn("[obr-suite/localContent] clearAllLocal: idbClear failed", e);
+  }
+  // Re-seed the empty index so the next init takes the
+  // "idbHasData / fresh-but-touched" branch instead of attempting
+  // a legacy localStorage migration.
+  try { await idbPut(IDB_INDEX_KEY, memIndex); } catch {}
 }
