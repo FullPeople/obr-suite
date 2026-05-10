@@ -3,6 +3,7 @@ import { ICONS } from "../../icons";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
 import { assetUrl } from "../../asset-base";
+import { reconcileUploadedCardShieldState } from "./xlsx-shield-state";
 
 let lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -267,6 +268,25 @@ async function uploadFile(file: File) {
       throw new Error(err || `HTTP ${r.status}`);
     }
     const entry = (await r.json()) as CardEntry;
+    try {
+      const corrected = await reconcileUploadedCardShieldState({
+        apiBase: API_BASE,
+        roomId,
+        cardId: entry.id,
+        xlsx: file,
+      });
+      if (corrected) {
+        try {
+          OBR.broadcast.sendMessage(
+            BC_CARD_UPDATED,
+            { cardId: entry.id, url: `${entry.url}data.json` },
+            { destination: "REMOTE" },
+          );
+        } catch {}
+      }
+    } catch (e) {
+      console.warn("[cc-panel] shield equipped reconcile after upload failed", e);
+    }
     const updated = [entry, ...cards];
     await writeCardsToScene(updated);
     cards = updated;
@@ -372,6 +392,25 @@ async function refreshCardFromPicker(card: CardEntry): Promise<void> {
     );
     if (!r.ok) throw new Error((await r.text()) || `HTTP ${r.status}`);
     const updated = (await r.json()) as CardEntry;
+    try {
+      const corrected = await reconcileUploadedCardShieldState({
+        apiBase: API_BASE,
+        roomId,
+        cardId: updated.id,
+        xlsx: file,
+      });
+      if (corrected) {
+        try {
+          OBR.broadcast.sendMessage(
+            BC_CARD_UPDATED,
+            { cardId: updated.id, url: `${updated.url}data.json` },
+            { destination: "REMOTE" },
+          );
+        } catch {}
+      }
+    } catch (e) {
+      console.warn("[cc-panel] shield equipped reconcile after refresh failed", e);
+    }
     cards = cards.map((c) => (c.id === updated.id ? { ...c, ...updated } : c));
     await writeCardsToScene(cards);
     const iframe = cardIframes.get(card.id);

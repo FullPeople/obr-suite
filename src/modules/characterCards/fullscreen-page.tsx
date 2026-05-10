@@ -4,6 +4,8 @@ import OBR from "@owlbear-rodeo/sdk";
 import { fireQuickRoll } from "../dice/tags";
 import { subscribeToSfx } from "../dice/sfx-broadcast";
 import { patchBubbles } from "../../utils/statEdit";
+import { normalizeCombatGearFlags, readBooleanFlag } from "./data-normalize";
+import { reconcileUploadedCardShieldState } from "./xlsx-shield-state";
 
 // Token-binding metadata key — must mirror modules/characterCards/index.ts
 // so we can locate every token in the scene that's bound to the
@@ -399,6 +401,10 @@ function CombatSection({ data }: { data: CharacterData }) {
   const armor = cb.armor || {};
   const shield = cb.shield || {};
   const weapons: any[] = Array.isArray(cb.weapons) ? cb.weapons : [];
+  const armorEquipped = readBooleanFlag(armor.equipped);
+  const armorAttuned = readBooleanFlag(armor.attuned);
+  const shieldEquipped = readBooleanFlag(shield.equipped);
+  const shieldAttuned = readBooleanFlag(shield.attuned);
 
   return (
     <div class="sec">
@@ -410,8 +416,8 @@ function CombatSection({ data }: { data: CharacterData }) {
           <div class="weap" style={{ background: "rgba(138,111,63,0.06)" }}>
             <div class="weap-name">
               🛡 {armor.name || "护甲"}
-              {armor.equipped && <span class="weap-prof">已装备</span>}
-              {armor.attuned && <span class="weap-prof">同调</span>}
+              {armorEquipped && <span class="weap-prof">已装备</span>}
+              {armorAttuned && <span class="weap-prof">同调</span>}
             </div>
             <div class="weap-atk" title="基础 AC + 敏捷上限">
               AC {armor.ac_base ?? "?"}
@@ -426,8 +432,8 @@ function CombatSection({ data }: { data: CharacterData }) {
         {shield.ac_bonus != null && (
           <div class="weap" style={{ background: "rgba(138,111,63,0.06)" }}>
             <div class="weap-name">⛨ 盾牌
-              {shield.equipped && <span class="weap-prof">已装备</span>}
-              {shield.attuned && <span class="weap-prof">同调</span>}
+              <span class={`weap-prof${shieldEquipped ? "" : " is-off"}`}>{shieldEquipped ? "已装备" : "未装备"}</span>
+              {shieldAttuned && <span class="weap-prof">同调</span>}
             </div>
             <div class="weap-atk">+{shield.ac_bonus} AC</div>
             <div class="weap-dmg" style={{ visibility: "hidden" }}>—</div>
@@ -814,7 +820,7 @@ function App() {
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      setData(json);
+      setData(normalizeCombatGearFlags(json));
     } catch (e: any) {
       setError(`加载失败：${e?.message || String(e)}`);
     }
@@ -849,7 +855,7 @@ function App() {
   // through the upstream-compat key (`health` / `max health` / etc.)
   // that the bubbles renderer already listens to.
   const onPatch = useCallback((patch: Partial<CharacterData>) => {
-    setData((prev) => prev ? { ...prev, ...patch } : prev);
+    setData((prev) => prev ? normalizeCombatGearFlags({ ...prev, ...patch }) : prev);
     // Translate `core_stats.hp.* / .ac` deltas into the bubbles patch
     // shape and push to OBR. Nothing to do if the patch doesn't touch
     // core_stats — saves a scene-items query on every keystroke that
@@ -924,7 +930,7 @@ function App() {
             summary.push(`✕ ${f.name} (不像角色卡 JSON，缺少 identity / abilities 字段)`);
             continue;
           }
-          setData(parsed);
+          setData(normalizeCombatGearFlags(parsed));
           try {
             const url = `${SERVER_ORIGIN}/api/character/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data`;
             const res = await fetch(url, {
@@ -974,6 +980,25 @@ function App() {
             summary.push(`✕ ${f.name} (xlsx 上传失败 HTTP ${r.status}: ${body.slice(0, 120)})`);
           } else {
             const entry = await r.json();
+            try {
+              const corrected = await reconcileUploadedCardShieldState({
+                apiBase: `${SERVER_ORIGIN}/api/character`,
+                roomId,
+                cardId: entry.id,
+                xlsx: f,
+              });
+              if (corrected) {
+                try {
+                  OBR.broadcast.sendMessage(
+                    BC_CARD_UPDATED,
+                    { cardId: entry.id, url: `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(entry.id)}/` },
+                    { destination: "REMOTE" },
+                  );
+                } catch {}
+              }
+            } catch (e: any) {
+              summary.push(`⚠ ${f.name} (盾牌着装纠偏失败: ${e?.message || String(e)})`);
+            }
             summary.push(`✓ ${f.name} → 新卡 "${entry.name}"`);
           }
         } catch (e: any) {
