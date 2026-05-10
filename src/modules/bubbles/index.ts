@@ -1613,6 +1613,37 @@ async function clearAll(): Promise<void> {
   }
 }
 
+/** Per-token reset — wipes the cache + every local item we own for
+ *  ONE token, then schedules a fresh sync so the bubbles rebuild
+ *  from scratch. Used by the hp-bar popover's reset button when a
+ *  token's bar drifts out of position (typically caused by an
+ *  intermediate parent transform we missed). 2026-05-11. */
+async function resetTokenBubble(tokenId: string): Promise<void> {
+  if (!tokenId) return;
+  // 1. Drop the in-memory entry so the next sync treats this token
+  //    as never-rendered (full create path) instead of patching.
+  const e = entries.get(tokenId);
+  if (e) entries.delete(tokenId);
+  // 2. Sweep ALL items metadata-tagged for this token, including any
+  //    orphans not in `entries` (e.g. from a previous session whose
+  //    rebuildHash diverged before we wrote back). Match by
+  //    BUBBLE_OWNER_KEY so we don't miss anything.
+  try {
+    const owned = await OBR.scene.local.getItems((it) => {
+      const meta = (it.metadata as any) ?? {};
+      return meta[BUBBLE_OWNER_KEY] === tokenId;
+    });
+    if (owned.length > 0) {
+      await OBR.scene.local.deleteItems(owned.map((i) => i.id));
+    }
+  } catch (err) {
+    console.warn("[obr-suite/bubbles] resetTokenBubble sweep failed", err);
+  }
+  // 3. Trigger a fresh sync. scheduleSync coalesces nearby calls so
+  //    rapid resets don't queue redundant work.
+  scheduleSync();
+}
+
 
 /** Scan scene.local for ANY item carrying our `BUBBLE_OWNER_KEY` and
  *  delete it. Called once at setup so stale items from a previous
@@ -1740,6 +1771,21 @@ export async function setupBubbles(): Promise<void> {
   // Sweep any legacy guard mode left over from a previous install so
   // its pointerdown handler doesn't keep half-intercepting Select.
   try { await OBR.tool.removeMode(LEGACY_GUARD_MODE_ID); } catch {}
+
+  // 2026-05-11 — listen for "reset this token's bubble" broadcasts
+  // from the hp-bar popover's reset button. Wipes the cached entry +
+  // every local item tagged with this tokenId so the next sync
+  // rebuilds from scratch. Useful when the on-canvas bar drifts off
+  // its anchor (typically because we mis-patched a transform).
+  unsubs.push(
+    OBR.broadcast.onMessage("com.obr-suite/bubbles-reset-token", async (event) => {
+      const data = event.data as { tokenId?: string } | undefined;
+      const id = data?.tokenId;
+      if (typeof id === "string" && id) {
+        await resetTokenBubble(id);
+      }
+    }),
+  );
 
   // First-run sweep: any local items left over from a previous session
   // (different scheme, different layout) get wiped before we build

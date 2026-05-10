@@ -582,6 +582,13 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
   const pinned = readPanelPinned();
   root.innerHTML = `
     <div class="hdr">
+      <button class="reset-btn" id="bubbles-reset-btn" type="button"
+        title="重置画面血条 — 清缓存重画，修复偶发的位置漂移">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 8 a5 5 0 1 0 1.5 -3.5"/>
+          <path d="M3.2 3 V5.5 H5.5"/>
+        </svg>
+      </button>
       <div class="drag-handle" id="drag-handle" title="拖动 / Drag" aria-label="拖动面板">
         <svg viewBox="0 0 12 18" aria-hidden="true">
           <circle cx="3" cy="3" r="1.2" fill="currentColor"/>
@@ -627,6 +634,26 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
       e.preventDefault();
       e.stopPropagation();
       togglePanelPinned();
+    });
+  }
+  // 2026-05-11 — bubble reset button (mirror of monster-info). LOCAL
+  // broadcast tells the bubbles bg to drop the cached entry for the
+  // bound token + sweep its local items + re-render. Fixes the
+  // "blood bar drifted off-anchor" bug.
+  const resetBtn = root.querySelector<HTMLButtonElement>("#bubbles-reset-btn");
+  if (resetBtn && boundItemId) {
+    resetBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        OBR.broadcast.sendMessage(
+          "com.obr-suite/bubbles-reset-token",
+          { tokenId: boundItemId },
+          { destination: "LOCAL" },
+        );
+      } catch (err) { console.warn("[cc-info] reset broadcast failed", err); }
+      resetBtn.classList.add("flash");
+      setTimeout(() => resetBtn.classList.remove("flash"), 400);
     });
   }
   const nameBtn = root.querySelector<HTMLButtonElement>(".name-btn[data-name-text]");

@@ -58,6 +58,24 @@ html,body{
 }
 .panel-pin-btn.pinned:hover{color:#ffc857}
 .panel-pin-btn svg{width:14px;height:14px;display:block;pointer-events:none}
+/* 2026-05-11 — reset button (mirror of monster-info). LOCAL broadcast
+   tells the bubbles bg to drop the cached entry for the bound token
+   and re-render. Fixes occasional "blood bar drifted off-anchor". */
+.reset-btn{
+  flex-shrink:0;
+  width:18px;height:18px;
+  display:flex;align-items:center;justify-content:center;
+  background:transparent;border:none;padding:0;margin:0;
+  cursor:pointer;
+  color:rgba(255,255,255,0.30);
+  opacity:0.55;
+  transition:opacity .12s, color .12s, transform .25s;
+  border-radius:3px;
+}
+.reset-btn:hover{opacity:1;color:#f5a623}
+.reset-btn:active{transform:rotate(180deg)}
+.reset-btn.flash{opacity:1;color:#f5a623;transform:rotate(180deg)}
+.reset-btn svg{width:13px;height:13px;display:block;pointer-events:none}
 .root{padding:10px 12px;height:100%;overflow-y:auto}
 .root::-webkit-scrollbar{width:3px}
 .root::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}

@@ -62,41 +62,58 @@ html,body{
 .body::-webkit-scrollbar{width:4px}
 .body::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:2px}
 
-/* Per-token result list. Each row shows the token's name + the
-   final total. The DC threshold below is compared against this
-   number when applying. */
+/* Per-token result chips — flow-wrap inline rather than one-per-row.
+   Each chip shows "<name> <total>"; the DC threshold below tints
+   the total span pass/fail when filled. */
 .results{
-  display:flex;flex-direction:column;
+  display:flex;flex-wrap:wrap;
+  gap:6px;
+  padding:8px 10px;
   border:1px solid var(--border);
   border-radius:8px;
-  overflow:hidden;
+  background:rgba(0,0,0,0.18);
 }
-.results .row{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:6px 10px;
-  font-size:12px;
+.results .empty{
+  width:100%;text-align:center;
+  font-size:12px;color:var(--text-dim);padding:4px 0;
 }
-.results .row + .row{border-top:1px solid var(--border)}
-.results .name{color:var(--text)}
-.results .total{
+.results .chip{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 8px;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:14px;
+  font-size:11.5px;color:var(--text);
+  max-width:100%;
+}
+.results .chip .name{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  max-width:140px;
+}
+.results .chip .total{
   font-family:ui-monospace,Consolas,monospace;
-  font-weight:800;font-size:13px;
+  font-weight:800;font-size:12px;
   font-variant-numeric:tabular-nums;
-  padding:1px 8px;border-radius:4px;
+  padding:0 6px;border-radius:4px;
+  background:rgba(255,255,255,0.06);
 }
-.results .total.fail{background:rgba(231,76,60,0.18);color:var(--bad)}
-.results .total.pass{background:rgba(46,204,113,0.18);color:var(--good)}
+.results .chip.fail .total{background:rgba(231,76,60,0.22);color:var(--bad)}
+.results .chip.pass .total{background:rgba(46,204,113,0.22);color:var(--good)}
 
-/* Numeric input row — DC + value, then ±/= action buttons. */
+/* Single-line input row: DC + 字段下拉 + 数值, all inline. */
 .input-row{
-  display:grid;
-  grid-template-columns:auto 1fr;
-  gap:6px 10px;
-  align-items:center;
+  display:flex;align-items:stretch;gap:6px;
+  flex-wrap:nowrap;
 }
-.input-row label{
-  font-size:11px;color:var(--text-dim);
-  letter-spacing:0.3px;text-transform:uppercase;
+.input-row .grp{
+  display:flex;align-items:center;gap:4px;
+  flex-shrink:0;
+}
+.input-row .grp.flex{flex:1;min-width:0}
+.input-row .lbl{
+  font-size:10.5px;color:var(--text-dim);
+  letter-spacing:0.3px;
+  white-space:nowrap;
 }
 .input-row input,.input-row select{
   height:32px;
@@ -104,29 +121,38 @@ html,body{
   border:1px solid var(--border);
   border-radius:6px;
   color:var(--text);
-  padding:0 10px;
+  padding:0 8px;
   font-family:ui-monospace,Consolas,monospace;
-  font-size:14px;font-weight:700;
+  font-size:13.5px;font-weight:700;
   font-variant-numeric:tabular-nums;
   outline:none;
+  min-width:0;
 }
+.input-row input{width:60px}
+.input-row .grp.flex input{width:100%}
 .input-row input:focus,.input-row select:focus{border-color:var(--accent)}
-.input-row select{font-family:inherit;font-size:12px;font-weight:600}
+.input-row select{
+  font-family:inherit;font-size:12px;font-weight:600;
+  cursor:pointer;
+  padding-right:18px;
+}
 
 .actions{
   display:grid;
-  grid-template-columns:1fr 1fr 1fr;
+  grid-template-columns:3fr 1fr 1fr;
   gap:6px;
 }
 .btn-act{
-  height:38px;
+  height:36px;
   background:var(--bg-strong);
   border:1px solid var(--border-strong);
   color:var(--text);
   border-radius:6px;
-  font-size:13px;font-weight:800;
+  font-size:12.5px;font-weight:800;
   font-family:inherit;cursor:pointer;
   transition:background .12s, color .12s, border-color .12s;
+  padding:0 8px;
+  line-height:1.1;
 }
 .btn-act.dmg{color:var(--bad);border-color:rgba(231,76,60,0.40)}
 .btn-act.dmg:hover{background:rgba(231,76,60,0.18);border-color:rgba(231,76,60,0.65)}
@@ -174,35 +200,32 @@ html,body{
   <div class="card">
     <div class="head">
       <div class="ttl">⚖ 群体豁免结算 <span id="abilityLbl" style="color:var(--text-dim);font-weight:600;font-size:12px"></span></div>
-      <div class="sub">输入 <b>DC</b> 与 <b>HP 数值</b>，按 <span style="color:var(--bad)">−</span> 时：豁免 <b>失败</b>（结果 &lt; DC）扣全额，<b>成功</b>扣一半（向下取整）。<span style="color:var(--text-dim)">+</span> / <span style="color:var(--text-dim)">=</span> 不参与豁免分组。</div>
     </div>
 
     <div class="body">
-      <div class="results" id="results"><!-- per-token rows injected by JS --></div>
+      <div class="results" id="results"><!-- per-token chips injected by JS --></div>
 
       <div class="input-row">
-        <label>DC</label>
-        <input id="dcInput" type="number" min="0" max="40" step="1" placeholder="例：14">
-
-        <label>字段</label>
-        <select id="fieldSelect">
-          <option value="health">HP</option>
-          <option value="max health">Max HP</option>
-          <option value="armor class">AC</option>
-        </select>
-
-        <label>数值</label>
-        <input id="valueInput" type="number" min="0" max="9999" step="1" placeholder="例：30">
+        <div class="grp">
+          <span class="lbl">本次豁免DC</span>
+          <input id="dcInput" type="number" min="0" max="40" step="1" placeholder="14">
+        </div>
+        <div class="grp">
+          <select id="fieldSelect" title="选择要修改的字段">
+            <option value="health">HP</option>
+            <option value="max health">Max HP</option>
+            <option value="armor class">AC</option>
+          </select>
+        </div>
+        <div class="grp flex">
+          <input id="valueInput" type="number" min="0" max="9999" step="1" placeholder="数值">
+        </div>
       </div>
 
       <div class="actions">
-        <button class="btn-act dmg"  data-mode="dmg"  type="button">−（失败全扣 / 成功半扣）</button>
-        <button class="btn-act heal" data-mode="heal" type="button">+（统一加）</button>
-        <button class="btn-act set"  data-mode="set"  type="button">=（设为）</button>
-      </div>
-
-      <div class="hint">
-        例：DC <code>14</code>、数值 <code>30</code> 点 <span style="color:var(--bad)">−</span>：投出 <code>13</code> 的 token 扣 30，投出 <code>17</code> 的 token 扣 15。可多次操作叠加（如先 −30 再 +5），最后再点 <b>好了</b> 关闭。
+        <button class="btn-act dmg"  data-mode="dmg"  type="button">−（失败全额 / 成功减半向下取整）</button>
+        <button class="btn-act heal" data-mode="heal" type="button">+</button>
+        <button class="btn-act set"  data-mode="set"  type="button">=</button>
       </div>
     </div>
 
@@ -253,19 +276,22 @@ let lastResults = []; // [{itemId, name, total}]
 function paintResults() {
   const dc = Number.parseInt(dcInput.value, 10);
   const haveDc = Number.isFinite(dc);
+  if (lastResults.length === 0) {
+    resultsEl.innerHTML = `<div class="empty">（暂无投掷结果，等待动画结束…）</div>`;
+    return;
+  }
+  // 2026-05-11 — chip layout (was one-per-row). Wraps to fill the
+  // card horizontally so a 6-token batch fits without scrolling.
   resultsEl.innerHTML = lastResults
     .map((r) => {
-      // Pass / fail tint shows only when the DC field is filled —
-      // before that, totals render neutrally so the user doesn't see
-      // a misleading "all failed" colour band.
       const cls = !haveDc ? "" : (r.total < dc ? "fail" : "pass");
       return `
-        <div class="row">
+        <span class="chip ${cls}">
           <span class="name">${escapeHtml(r.name)}</span>
-          <span class="total ${cls}">${r.total}</span>
-        </div>`;
+          <span class="total">${r.total}</span>
+        </span>`;
     })
-    .join("") || `<div class="row" style="color:var(--text-dim);justify-content:center">（暂无投掷结果，等待中…）</div>`;
+    .join("");
 }
 
 function showApplied(text) {

@@ -27,10 +27,34 @@ const dragHandle = document.getElementById("dragHandle") as HTMLDivElement;
 const hpPillEl = document.getElementById("hpPill") as HTMLDivElement;
 const lockBtn = document.getElementById("lockBtn") as HTMLButtonElement | null;
 const pinBtn = document.getElementById("panelPinBtn") as HTMLButtonElement | null;
+const resetBtn = document.getElementById("resetBtn") as HTMLButtonElement | null;
 const nameRowEl = document.getElementById("nameRow") as HTMLDivElement | null;
 const inputs = Array.from(
   document.querySelectorAll<HTMLInputElement>(".stat-input"),
 );
+
+// 2026-05-11 — reset button. Broadcasts to the bubbles bg module to
+// drop the cached entry for the currently-selected token + sweep
+// every local item it owns, then trigger a fresh sync. Used when the
+// on-canvas HP bar / heater shield drift away from their token; this
+// is the "force a re-render" escape hatch.
+const BC_BUBBLES_RESET_TOKEN = "com.obr-suite/bubbles-reset-token";
+resetBtn?.addEventListener("click", () => {
+  if (!itemId) return;
+  try {
+    OBR.broadcast.sendMessage(
+      BC_BUBBLES_RESET_TOKEN,
+      { tokenId: itemId },
+      { destination: "LOCAL" },
+    );
+  } catch (e) {
+    console.warn("[hp-bar] reset broadcast failed", e);
+  }
+  // Visual flash so the user knows the click registered even before
+  // the on-canvas redraw lands.
+  resetBtn.classList.add("flash");
+  setTimeout(() => resetBtn.classList.remove("flash"), 400);
+});
 
 // Metadata keys we read for name resolution. Mirrors the constants in
 // modules/hpBar/index.ts and modules/characterCards/* — duplicated here

@@ -458,6 +458,14 @@ interface PendingResolve {
   expected: number;
   results: Map<string, { name: string; total: number }>;
   selection: SelectedMonster[];
+  // 2026-05-11 — track rollIds so we can wait for BC_DICE_FADE_START
+  // (the climax broadcast at the END of each roll's animation, fired
+  // from effect-page.ts signalUnlockReady). Earlier round opened the
+  // modal as soon as BROADCAST_DICE_ROLL arrived, which is BEFORE the
+  // animation runs; the user reported it felt premature.
+  rollIds: Set<string>;
+  rollIdsAnimDone: Set<string>;
+  rollIdToItemId: Map<string, string>;
   timer: ReturnType<typeof setTimeout> | null;
   modalOpen: boolean;
 }
@@ -528,26 +536,34 @@ function startResolveBatch(cid: string, ability: keyof SelectedMonster["saves"])
   // name might be edited mid-roll otherwise).
   const selection: SelectedMonster[] = lastSelection.map((m) => ({ ...m, saves: { ...m.saves } }));
   if (selection.length === 0) return;
-  // Safety timer: if some rolls never broadcast (effect modal crashed,
-  // network blip), still open the modal after 8 s with whatever we
-  // have. The resolve logic just skips tokens with no result.
+  // Safety timer — extended to 12 s so the slowest dice animation
+  // (rush mode + many tokens, ≈8 s end-to-end) still has slack.
+  // If somehow a fade-start never arrives we still open the modal
+  // with whatever totals we collected.
   const timer = setTimeout(() => {
     const p = pendingResolves.get(cid);
     if (!p) return;
     if (p.modalOpen) return;
     void openResolveModal(p);
-  }, 8000);
+  }, 12000);
   pendingResolves.set(cid, {
     cid,
     ability,
     expected: selection.length,
     results: new Map(),
     selection,
+    rollIds: new Set(),
+    rollIdsAnimDone: new Set(),
+    rollIdToItemId: new Map(),
     timer,
     modalOpen: false,
   });
 }
 
+// Step 1 of the gating flow: capture per-token TOTAL from
+// BROADCAST_DICE_ROLL. This fires BEFORE the dice animation runs,
+// so we just store the result; the modal won't open until the
+// matching fade-start arrives.
 function recordResolveResult(payload: DiceRollPayload): void {
   const cid = payload.collectiveId;
   if (!cid) return;
@@ -561,9 +577,37 @@ function recordResolveResult(payload: DiceRollPayload): void {
   const seen = p.selection.find((m) => m.itemId === itemId);
   if (!seen) return; // payload's itemId isn't in our batch
   p.results.set(itemId, { name: seen.name, total: payload.total });
-  if (p.results.size >= p.expected) {
-    if (p.timer) { clearTimeout(p.timer); p.timer = null; }
-    void openResolveModal(p);
+  // Track rollId so we can match its later BC_DICE_FADE_START.
+  if (payload.rollId) {
+    p.rollIds.add(payload.rollId);
+    p.rollIdToItemId.set(payload.rollId, itemId);
+  }
+  // NOTE: we no longer open the modal here — that's deferred until
+  // the matching fade-start broadcasts arrive in
+  // recordResolveAnimDone() below.
+}
+
+// Step 2 of the gating flow: BC_DICE_FADE_START fires from
+// effect-page.ts at the climax of each roll's animation (the final
+// scale/punch). Once we've seen one for every rollId in this batch,
+// the modal opens. This is what the user asked for ("真的监听到骰
+// 子动画结束的那一刻").
+function recordResolveAnimDone(rollId: string): void {
+  if (!rollId) return;
+  // O(n) scan of pending batches looking for this rollId. Typically
+  // there's at most one batch in-flight, so this is fine.
+  for (const p of pendingResolves.values()) {
+    if (!p.rollIds.has(rollId)) continue;
+    if (p.rollIdsAnimDone.has(rollId)) return; // dedupe LOCAL+REMOTE
+    p.rollIdsAnimDone.add(rollId);
+    if (
+      p.rollIdsAnimDone.size >= p.expected &&
+      p.results.size >= p.expected
+    ) {
+      if (p.timer) { clearTimeout(p.timer); p.timer = null; }
+      void openResolveModal(p);
+    }
+    return;
   }
 }
 
@@ -728,17 +772,30 @@ export async function setupGroupSaves(): Promise<void> {
 
   // 2026-05-11 — group-save resolve flow listeners.
   //
-  // (1) Capture per-token roll totals as they arrive. We listen on
-  //     BROADCAST_DICE_ROLL so we work for ANY roll path (fireQuickRoll
-  //     fan-out goes through dice/index.ts handleQuickRoll →
-  //     broadcastDiceRoll). The recordResolveResult helper filters by
-  //     collectiveId so unrelated rolls (initiative, ad-hoc, etc.) are
-  //     ignored.
+  // (1a) Capture per-token roll totals + rollIds from BROADCAST_DICE_ROLL.
+  //      This fires BEFORE the animation. We just stash the result;
+  //      the modal stays closed until the matching fade-start fires.
   unsubs.push(
     OBR.broadcast.onMessage(BROADCAST_DICE_ROLL, (event) => {
       const data = event.data as DiceRollPayload | undefined;
       if (!data || !data.collectiveId) return;
       recordResolveResult(data);
+    }),
+  );
+
+  // (1b) BC_DICE_FADE_START fires from effect-page.ts at each roll's
+  //      climax (the final scale/punch animation step). When all
+  //      rolls in a pending batch have animated out, THAT'S when we
+  //      open the modal. Earlier rounds opened on (1a) which felt
+  //      premature ("弹窗速度有点慢，并没有真的监听到骰子动画结束的
+  //      那一刻") because the dice were still tumbling on screen.
+  unsubs.push(
+    OBR.broadcast.onMessage("com.obr-suite/dice-fade-start", (event) => {
+      const data = event.data as { rollId?: string } | undefined;
+      const rollId = data?.rollId;
+      if (typeof rollId === "string" && rollId) {
+        recordResolveAnimDone(rollId);
+      }
     }),
   );
 

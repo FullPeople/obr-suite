@@ -53,6 +53,37 @@ html,body{
 .drag-handle.is-dragging{cursor:grabbing;opacity:1;color:#5dade2}
 .drag-handle svg{width:12px;height:18px;display:block;pointer-events:none}
 
+/* 2026-05-11 — Reset button. Wipes the bubbles plugin's per-token
+   cache via a LOCAL broadcast, forcing a full re-render. Used when
+   the on-canvas HP bar / AC shield drift out of position. Sits at
+   the very LEFT of the row (before drag handle + pin) so it's the
+   first thing the user reaches when they need it. */
+.reset-btn{
+  flex-shrink:0;
+  width:24px;height:24px;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:transparent;
+  border:1px solid rgba(255,255,255,0.20);
+  border-radius:5px;
+  color:rgba(255,255,255,0.60);
+  cursor:pointer;
+  padding:0;
+  transition:color .12s, border-color .12s, background .12s, transform .15s;
+}
+.reset-btn:hover{
+  color:rgba(255,255,255,0.95);
+  border-color:rgba(245,166,35,0.55);
+  background:rgba(245,166,35,0.10);
+}
+.reset-btn:active{transform:rotate(180deg)}
+.reset-btn.flash{
+  color:var(--gold,#f5a623);
+  border-color:var(--gold,#f5a623);
+  background:rgba(245,166,35,0.18);
+  transform:rotate(180deg);
+}
+.reset-btn svg{width:13px;height:13px;display:block;pointer-events:none}
+
 /* HP / Temp / AC banner — copied from bestiary-monster-info.html so
    the standalone bar visually matches the editor in the bestiary
    popover. Same CSS variable --hp-ratio drives the fill width. */
@@ -204,6 +235,13 @@ body.is-player .stat-lock{display:none}
 <div class="card">
   <div class="name-row" id="nameRow" title="">—</div>
   <div class="row">
+    <button class="reset-btn" id="resetBtn" type="button"
+            title="重置画面血条 — 清掉缓存重画，修复偶发的位置漂移">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 8 a5 5 0 1 0 1.5 -3.5"/>
+        <path d="M3.2 3 V5.5 H5.5"/>
+      </svg>
+    </button>
     <div class="drag-handle" id="dragHandle" title="拖动重新定位">
       <svg viewBox="0 0 6 16" fill="currentColor"><circle cx="2" cy="2" r="1"/><circle cx="2" cy="8" r="1"/><circle cx="2" cy="14" r="1"/><circle cx="5" cy="2" r="1"/><circle cx="5" cy="8" r="1"/><circle cx="5" cy="14" r="1"/></svg>
     </div>

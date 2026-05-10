@@ -821,10 +821,48 @@ export async function setupDice(): Promise<void> {
   // 4. Quick-roll listener — accepts a simple expression from any
   // iframe (search results, character card panel, 5etools tag click
   // handlers) and pushes through the normal dice pipeline.
+  //
+  // 2026-05-11 — defensive request-signature dedupe. User reported
+  // tag-quick-rolls intermittently playing twice locally with only
+  // one history entry, which doesn't fit any single failure mode in
+  // the existing pipeline (BROADCAST_DICE_ROLL has its own per-rollId
+  // dedupe, BC_QUICK_ROLL is sent LOCAL-only, popup buttons have one
+  // listener each, root cause elusive). The simplest robust fix is
+  // to dedupe identical BC_QUICK_ROLL payloads arriving within a
+  // short window so even if the root cause is somewhere upstream
+  // (e.g. an OBR delivery quirk on rapid clicks, an iframe lifecycle
+  // race), only one roll fires per user intent.
+  const recentQuickRolls = new Map<string, number>();
+  const QUICK_ROLL_DEDUPE_MS = 250;
   unsubs.push(
     OBR.broadcast.onMessage(BC_QUICK_ROLL, async (event) => {
       const req = event.data as QuickRollRequest | undefined;
       if (!req || typeof req.expression !== "string" || !req.expression.trim()) return;
+      const sig = [
+        req.expression.trim(),
+        req.label ?? "",
+        req.itemId ?? "",
+        req.advMode ?? "",
+        req.critMode ? "1" : "",
+        req.hidden ? "1" : "",
+        req.collectiveId ?? "",
+      ].join("|");
+      const now = Date.now();
+      const last = recentQuickRolls.get(sig);
+      if (last != null && now - last < QUICK_ROLL_DEDUPE_MS) {
+        // Same request within the dedupe window — drop. Reset the
+        // timestamp so a sustained burst still gets blocked.
+        recentQuickRolls.set(sig, now);
+        return;
+      }
+      recentQuickRolls.set(sig, now);
+      // Light-weight cleanup so the map doesn't grow unbounded over
+      // a long session.
+      if (recentQuickRolls.size > 64) {
+        for (const [k, t] of recentQuickRolls) {
+          if (now - t > QUICK_ROLL_DEDUPE_MS * 4) recentQuickRolls.delete(k);
+        }
+      }
       try {
         await handleQuickRoll(req);
       } catch (e) {
