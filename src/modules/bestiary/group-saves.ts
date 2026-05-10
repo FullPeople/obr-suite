@@ -315,6 +315,14 @@ async function fireInitiative(
     // timeout so the column doesn't stay stale forever.
     setTimeout(() => { writeFinalValue(); try { unsub(); } catch {} }, 6000);
 
+    // 2026-05-09: invisible-flagged tokens roll dark (initiative
+    // metadata flag set by the right-click "Mark Invisible" menu).
+    // Read here per-token instead of upfront because each iteration
+    // already has the item handy via `itemMap`.
+    const initData = (it.metadata as any)?.[INITIATIVE_DATA_KEY];
+    const isInvisible =
+      !!(initData && typeof initData === "object" && initData.invisible);
+
     try {
       await broadcastDiceRoll({
         itemId: m.itemId,
@@ -334,6 +342,7 @@ async function fireInitiative(
         rollId,
         autoDismiss: true,
         collectiveId,
+        hidden: isInvisible,
       });
     } catch (e) {
       console.error("[obr-suite/group-saves] fireInitiative broadcast failed for", m.itemId, e);
@@ -351,6 +360,7 @@ async function fireInitiative(
 async function fireGroupHp(
   mode: "dmg" | "heal" | "set",
   value: number,
+  field: "health" | "max health" | "armor class" = "health",
 ): Promise<void> {
   if (lastSelection.length === 0) return;
   for (const m of lastSelection) {
@@ -359,6 +369,12 @@ async function fireGroupHp(
       const maxHp = typeof cur["max health"] === "number" ? (cur["max health"] as number) : null;
       const hp = typeof cur["health"] === "number" ? (cur["health"] as number) : (maxHp ?? 0);
       const temp = typeof cur["temporary health"] === "number" ? (cur["temporary health"] as number) : 0;
+      if (field === "max health" || field === "armor class") {
+        const current = typeof cur[field] === "number" ? (cur[field] as number) : (field === "max health" ? (maxHp ?? hp) : 0);
+        const next = mode === "set" ? value : mode === "heal" ? current + value : current - value;
+        await patchBubbles(m.itemId, { [field]: Math.max(field === "max health" ? 1 : 0, next) } as any);
+        continue;
+      }
       let nextHp = hp;
       let nextTemp = temp;
       if (mode === "set") {
@@ -394,7 +410,7 @@ async function fireGroupHp(
 
 async function fireSave(
   ability: keyof SelectedMonster["saves"],
-  opts: { hidden?: boolean; advMode?: "adv" | "dis" } = {},
+  opts: { hidden?: boolean; advMode?: "adv" | "dis"; critMode?: boolean } = {},
 ): Promise<void> {
   if (lastSelection.length === 0) return;
   const lang = getLocalLang();
@@ -403,9 +419,8 @@ async function fireSave(
   // Per-token roll. Each one carries its own save bonus so the dice
   // animation + history reflect each monster's individual outcome.
   // collectiveId groups them in the history popover as one collective.
-  // hidden / advMode propagate to fireQuickRoll → handleQuickRoll →
-  // broadcastDiceRoll, so the dark-roll + adv/dis branches all work
-  // identically to a single quick-roll.
+  // hidden / advMode / critMode propagate to fireQuickRoll →
+  // handleQuickRoll → broadcastDiceRoll.
   for (const m of lastSelection) {
     const bn = m.saves[ability];
     const expr = `1d20${bn >= 0 ? `+${bn}` : `${bn}`}`;
@@ -418,6 +433,7 @@ async function fireSave(
         hidden: !!opts.hidden,
         collectiveId,
         ...(opts.advMode ? { advMode: opts.advMode } : {}),
+        ...(opts.critMode ? { critMode: true } : {}),
       });
     } catch (e) {
       console.error("[obr-suite/group-saves] fireSave failed for", m.itemId, e);
@@ -453,7 +469,8 @@ export async function setupGroupSaves(): Promise<void> {
     }),
   );
   unsubs.push(
-    OBR.scene.onMetadataChange(async () => {
+    OBR.scene.onMetadataChange(async (meta) => {
+      if (!(BESTIARY_DATA_KEY in meta)) return;
       // Monster data table writes (e.g. fresh bind) — re-resolve so a
       // newly-populated row enables the popover instantly.
       try { await refresh(); } catch {}
@@ -462,11 +479,20 @@ export async function setupGroupSaves(): Promise<void> {
   unsubs.push(
     OBR.broadcast.onMessage(BC_FIRE, async (event) => {
       const data = event.data as
-        | { ability?: string; hidden?: boolean; advMode?: "adv" | "dis" }
+        | {
+            ability?: string;
+            hidden?: boolean;
+            advMode?: "adv" | "dis";
+            critMode?: boolean;
+          }
         | undefined;
       const a = data?.ability;
       if (a === "str" || a === "dex" || a === "con" || a === "int" || a === "wis" || a === "cha") {
-        await fireSave(a, { hidden: data?.hidden, advMode: data?.advMode });
+        await fireSave(a, {
+          hidden: data?.hidden,
+          advMode: data?.advMode,
+          critMode: data?.critMode,
+        });
       }
     }),
   );
@@ -481,12 +507,13 @@ export async function setupGroupSaves(): Promise<void> {
   );
   unsubs.push(
     OBR.broadcast.onMessage(BC_FIRE_HP, async (event) => {
-      const data = event.data as { mode?: string; value?: number } | undefined;
+      const data = event.data as { mode?: string; value?: number; field?: string } | undefined;
       const m = data?.mode;
       const v = typeof data?.value === "number" ? data.value : NaN;
+      const f = data?.field === "max health" || data?.field === "armor class" ? data.field : "health";
       if (!Number.isFinite(v)) return;
       if (m === "dmg" || m === "heal" || m === "set") {
-        await fireGroupHp(m, Math.max(0, Math.min(9999, Math.round(v))));
+        await fireGroupHp(m, Math.max(0, Math.min(9999, Math.round(v))), f);
       }
     }),
   );

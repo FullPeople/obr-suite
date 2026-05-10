@@ -22,6 +22,13 @@
   animation: flash 0.3s ease-out forwards;
 }
 
+/* Stealth variant: no white flash (would betray a fight beginning).
+   Animation is suppressed so the flash element stays at opacity 0. */
+.color-gray.phase-enter .effect-flash {
+  animation: none !important;
+  opacity: 0 !important;
+}
+
 @keyframes flash {
   0% { opacity: 0; }
   30% { opacity: 0.7; }
@@ -41,6 +48,12 @@
 
 .color-gold .effect-vignette {
   background: radial-gradient(ellipse at center, transparent 50%, rgba(245, 166, 35, 0.4) 100%);
+}
+
+/* Gray stealth variant — softer vignette than red/gold so it reads as
+   a quiet "something passes by" rather than urgent. */
+.color-gray .effect-vignette {
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(160, 160, 170, 0.32) 100%);
 }
 
 .phase-fly .effect-vignette {
@@ -88,6 +101,22 @@
     0 0 20px rgba(245, 166, 35, 0.8),
     0 0 60px rgba(245, 166, 35, 0.4),
     0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Gray stealth — light gray fill, gray outline + halo. Lower contrast
+   than red/gold so it reads as "subtle hint" not "alarm". Also drop
+   the uppercase + letter-spacing for a less-shouty feel since the
+   text is "Someone is hiding..." not "AMBUSH!". */
+.color-gray .flying-text {
+  color: #d8d8dc;
+  text-transform: none;
+  letter-spacing: 2px;
+  font-weight: 700;
+  -webkit-text-stroke: 1px rgba(80, 80, 90, 0.85);
+  text-shadow:
+    0 0 18px rgba(200, 200, 210, 0.55),
+    0 0 48px rgba(160, 160, 170, 0.30),
+    0 2px 4px rgba(0, 0, 0, 0.55);
 }
 
 /* Fly from left: enter from left -> slow in center -> exit to right */

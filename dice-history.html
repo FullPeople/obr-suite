@@ -37,6 +37,18 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
   overflow:hidden;
   box-shadow:none;
 }
+/* Bottom toolbar — drag handle on the left, X-dismiss button on the
+   right. Replaces the earlier absolute-positioned corner widgets so
+   the controls share a single row at the bottom of the popover. The
+   footer is always rendered; the X button visibility is gated by
+   `.has-rows` on the parent. */
+.foot{
+  flex-shrink:0;
+  display:flex;align-items:center;
+  gap:6px;padding:4px 6px;
+  border-top:1px solid var(--border);
+  background:rgba(0,0,0,0.18);
+}
 
 .head{
   display:flex;align-items:center;justify-content:space-between;
@@ -101,13 +113,15 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 }
 .rows::-webkit-scrollbar{width:0;height:0;display:none}
 
-/* Each player row — fixed height ~44px, last roll inline. */
+/* Each player row — comfortable ~36px tall (≈30% taller than the
+   previous draft). Popover height 168 = ~30 footer + 4 rows × ~33 +
+   gaps + outer padding. */
 .row{
   display:flex;align-items:center;gap:8px;
-  padding:7px 9px;
+  padding:5px 9px;
   background:var(--bg-card);
   border:1px solid var(--border);
-  border-radius:8px;
+  border-radius:7px;
   cursor:pointer;
   transition:background .12s, border-color .12s, transform .08s;
 }
@@ -130,7 +144,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 }
 
 .swatch{
-  width:8px;height:32px;
+  width:6px;height:26px;
   border-radius:3px;
   background:var(--player-color, #5dade2);
   flex-shrink:0;
@@ -140,16 +154,17 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
   flex:1;min-width:0;
   display:flex;flex-direction:column;
   gap:1px;
+  line-height:1.2;
 }
 
 .line1{
   display:flex;align-items:baseline;justify-content:space-between;
-  gap:6px;
+  gap:6px;line-height:1.2;
 }
 .player{
-  font-size:12.5px;font-weight:700;color:var(--text);
+  font-size:12px;font-weight:700;color:var(--text);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  min-width:0;flex:1;
+  min-width:0;flex:1;line-height:1.2;
 }
 .dm-tag{
   flex-shrink:0;
@@ -482,39 +497,12 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 }
 .detail-back:active{background:rgba(60,75,110,0.85)}
 
-/* Per-entry progress bar — sits at the very top of an entry; width
-   shrinks from 100% → 0 over PROGRESS_DURATION_MS, after which the
-   row is removed from history. Animation is JS-driven (transform
-   scaleX) so it survives DOM detach/attach without restarting. */
-.row-progress{
-  position:absolute;
-  top:0;left:0;right:0;
-  height:2px;
-  background:rgba(93,173,226,0.18);
-  overflow:hidden;
-  border-radius:8px 8px 0 0;
-  pointer-events:none;
-}
-.row-progress-fill{
-  position:absolute;top:0;right:0;
-  height:100%;
-  width:100%;
-  background:linear-gradient(90deg, rgba(93,173,226,0.55), rgba(127,195,235,0.95));
-  transform-origin:right center;
-  transform:scaleX(1);
-  transition:transform 0.1s linear;
-  /* Shrinks right→left so the leftmost edge is the "current time"
-     marker — matches the user's "right-to-left" spec. */
-}
-.row{position:relative}
-
-/* Bottom-right drag handle — small horizontal pill matching the
-   user's spec ("a small horizontal button at the bottom-right"). */
-.bottom-drag-grip{
-  position:absolute;
-  bottom:4px;right:4px;
+/* Drag handle inside the bottom toolbar. Pointer events route through
+   panelDrag.ts; release broadcasts the offset to dice/index.ts which
+   re-anchors the popover. */
+.foot-drag{
   display:inline-flex;align-items:center;justify-content:center;
-  height:12px;width:32px;
+  height:18px;width:36px;
   background:rgba(31,34,48,0.72);
   border:1px solid rgba(255,255,255,0.16);
   border-radius:6px;
@@ -522,12 +510,35 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
   cursor:grab;
   touch-action:none;user-select:none;
   transition:color .12s, background .12s;
-  z-index:5;
-  box-shadow:0 1px 4px rgba(0,0,0,0.4);
+  flex-shrink:0;
 }
-.bottom-drag-grip:hover{color:#fff;background:rgba(50,55,75,0.92)}
-.bottom-drag-grip.is-dragging{cursor:grabbing;color:#5dade2}
-.bottom-drag-grip svg{width:18px;height:8px;display:block;pointer-events:none}
+.foot-drag:hover{color:#fff;background:rgba(50,55,75,0.92)}
+.foot-drag.is-dragging{cursor:grabbing;color:#5dade2}
+.foot-drag svg{width:18px;height:8px;display:block;pointer-events:none}
+
+/* Circular X dismiss button — Owl-bear sky-blue (枭熊蓝, var(--accent)
+   = #5dade2) per the user's call. Visible only when there's at least
+   one row to dismiss. Click → BC_DICE_HISTORY_DISMISS → background
+   closes the popover; the next dice roll re-auto-opens it. */
+.dismiss-btn{
+  margin-left:auto;
+  width:22px;height:22px;
+  border-radius:50%;
+  background:rgba(93,173,226,0.85);
+  border:1px solid rgba(127,195,235,0.7);
+  color:#fff;
+  display:none;
+  align-items:center;justify-content:center;
+  font-size:13px;line-height:1;
+  cursor:pointer;
+  font-family:inherit;
+  flex-shrink:0;
+  box-shadow:0 1px 4px rgba(0,0,0,0.45);
+  transition:filter 0.12s, transform 0.08s;
+}
+.dismiss-btn:hover{filter:brightness(1.18)}
+.dismiss-btn:active{transform:scale(0.92)}
+.box.has-rows .dismiss-btn{display:inline-flex}
 </style>
 </head>
 <body>
@@ -546,14 +557,17 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
     <div class="detail-list" id="detailList"></div>
     <button class="detail-back" id="detailBack" type="button" data-i18n="diceHistBack">← 返回</button>
   </div>
-  <!-- Bottom-right drag grip — moves the whole dice-history popover.
-       Special-cased per the user's spec: small horizontal pill in
-       the corner instead of a side-anchored grip. -->
-  <div class="bottom-drag-grip" id="drag-handle" title="拖动 / Drag" aria-label="拖动投骰记录面板">
-    <svg viewBox="0 0 18 8" aria-hidden="true">
-      <circle cx="3" cy="2" r="1" fill="currentColor"/><circle cx="9" cy="2" r="1" fill="currentColor"/><circle cx="15" cy="2" r="1" fill="currentColor"/>
-      <circle cx="3" cy="6" r="1" fill="currentColor"/><circle cx="9" cy="6" r="1" fill="currentColor"/><circle cx="15" cy="6" r="1" fill="currentColor"/>
-    </svg>
+  <!-- Bottom toolbar — single row at the very bottom holding the
+       drag handle (left) and the circular X dismiss button (right,
+       only visible when there's at least one row to dismiss). -->
+  <div class="foot">
+    <div class="foot-drag" id="drag-handle" title="拖动 / Drag" aria-label="拖动投骰记录面板">
+      <svg viewBox="0 0 18 8" aria-hidden="true">
+        <circle cx="3" cy="2" r="1" fill="currentColor"/><circle cx="9" cy="2" r="1" fill="currentColor"/><circle cx="15" cy="2" r="1" fill="currentColor"/>
+        <circle cx="3" cy="6" r="1" fill="currentColor"/><circle cx="9" cy="6" r="1" fill="currentColor"/><circle cx="15" cy="6" r="1" fill="currentColor"/>
+      </svg>
+    </div>
+    <button class="dismiss-btn" id="btnDismiss" type="button" title="关闭 / Dismiss" aria-label="关闭投骰记录">×</button>
   </div>
 </div>
 <script type="module" src="/src/modules/dice/history-page.ts"></script>

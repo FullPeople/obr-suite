@@ -48,7 +48,8 @@ const CC_BIND_KEY = "com.character-cards/boundCardId";
 // bar over. The HP bar component is now tied to this — selecting
 // any token that already has bubbles + no other binding auto-
 // enables the HP bar component on the fly.
-const BUBBLES_META_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
+const BUBBLES_META_KEY = "com.obr-suite/bubbles/data";
+const EXTERNAL_BUBBLES_META_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
 
 const CTX_ADD = "com.obr-suite/hp-bar-add";
 const CTX_REMOVE = "com.obr-suite/hp-bar-remove";
@@ -65,6 +66,8 @@ const TOP_OFFSET = 100;
 const unsubs: Array<() => void> = [];
 let popoverOpen = false;
 let currentItemId: string | null = null;
+let hpBarIsGM = false;
+let hpBarPlayerId = "";
 
 async function popoverAnchor(): Promise<{ left: number; top: number }> {
   let vw = 1280, vh = 720;
@@ -127,7 +130,8 @@ async function closePopover(): Promise<void> {
 /** Returns true if the token has any HP/AC bubble values written
  *  to it (i.e. the bubbles plugin renders something for it). */
 function hasBubblesMetadata(item: any): boolean {
-  const m = (item?.metadata || {})[BUBBLES_META_KEY];
+  const meta = item?.metadata || {};
+  const m = meta[BUBBLES_META_KEY] ?? meta[EXTERNAL_BUBBLES_META_KEY];
   if (!m || typeof m !== "object") return false;
   const r = m as Record<string, unknown>;
   // Any of: health, max health, temp HP, AC. Even a 0-value AC
@@ -136,6 +140,21 @@ function hasBubblesMetadata(item: any): boolean {
     || r["max health"] != null
     || r["temporary health"] != null
     || r["armor class"] != null;
+}
+
+function isBubblesLocked(item: any): boolean {
+  const meta = item?.metadata || {};
+  const m = meta[BUBBLES_META_KEY] ?? meta[EXTERNAL_BUBBLES_META_KEY];
+  if (!m || typeof m !== "object") return true;
+  const raw = (m as Record<string, unknown>)["locked"];
+  return raw === undefined ? true : !!raw;
+}
+
+function isBubblesHidden(item: any): boolean {
+  const meta = item?.metadata || {};
+  const m = meta[BUBBLES_META_KEY] ?? meta[EXTERNAL_BUBBLES_META_KEY];
+  if (!m || typeof m !== "object") return false;
+  return !!(m as Record<string, unknown>)["hide"];
 }
 
 async function handleSelection(selection: string[] | undefined): Promise<void> {
@@ -159,6 +178,15 @@ async function handleSelection(selection: string[] | undefined): Promise<void> {
     return;
   }
   const meta = (item.metadata || {}) as Record<string, unknown>;
+  const ownsItem = !!hpBarPlayerId && (item as any).createdUserId === hpBarPlayerId;
+  if (!hpBarIsGM && (!ownsItem || isBubblesHidden(item))) {
+    if (popoverOpen) await closePopover();
+    return;
+  }
+  if (hpBarIsGM && isBubblesHidden(item)) {
+    if (popoverOpen) await closePopover();
+    return;
+  }
   // Defer to bestiary / character-card popovers ONLY when their
   // own auto-popup is enabled — those modules will show their
   // own HP editor in that case, so the standalone HP bar would
@@ -166,18 +194,12 @@ async function handleSelection(selection: string[] | undefined): Promise<void> {
   // popup (Settings → 怪物图鉴 / 角色卡 → 自动弹出) the standalone
   // HP bar takes over so the user still gets a quick HP/AC editor.
   if (meta[BESTIARY_SLUG_KEY] != null) {
-    if (isBestiaryAutoPopupOn()) {
-      if (popoverOpen) await closePopover();
-      return;
-    }
-    // Bestiary auto-popup OFF → fall through to HP bar.
+    if (popoverOpen) await closePopover();
+    return;
   }
   if (meta[CC_BIND_KEY] != null) {
-    if (isCcAutoPopupOn()) {
-      if (popoverOpen) await closePopover();
-      return;
-    }
-    // CC auto-popup OFF → fall through to HP bar.
+    if (popoverOpen) await closePopover();
+    return;
   }
   // Auto-add: when the token already has bubbles displayed (HP/AC
   // metadata) but no HP_BAR_FLAG_KEY, set the flag now so the
@@ -224,6 +246,8 @@ function isCcAutoPopupOn(): boolean {
 }
 
 export async function setupHpBar(): Promise<void> {
+  try { hpBarIsGM = (await OBR.player.getRole()) === "GM"; } catch {}
+  try { hpBarPlayerId = await OBR.player.getId(); } catch {}
   // Bbox for layout editor / drag preview.
   registerPanelBbox(PANEL_IDS.hpBar, async () => {
     if (!popoverOpen) return null; // hide from editor when closed
@@ -256,20 +280,26 @@ export async function setupHpBar(): Promise<void> {
               { key: ["metadata", BESTIARY_SLUG_KEY], value: undefined },
               { key: ["metadata", CC_BIND_KEY], value: undefined },
             ],
-            // At least one must not yet have the flag — otherwise
-            // nothing to do and the menu would just be noise.
+            // 2026-05-10: at least one CHARACTER-layer item that
+            // doesn't yet have the flag — handler skips non-character
+            // items in mixed selections.
             some: [
+              { key: "layer", value: "CHARACTER" },
               { key: ["metadata", HP_BAR_FLAG_KEY], value: undefined },
             ],
           },
         },
       ],
       onClick: async (ctx) => {
-        // Filter to tokens that DON'T already have the flag — adding
-        // is idempotent so writing again is harmless, but skipping
-        // saves a metadata write per redundant token.
+        // Filter to CHARACTER-layer tokens that DON'T already have the
+        // flag — adding is idempotent so writing again is harmless,
+        // but skipping saves a metadata write per redundant token.
         const ids = ctx.items
-          .filter((it) => !(it.metadata as any)?.[HP_BAR_FLAG_KEY])
+          .filter(
+            (it) =>
+              it.layer === "CHARACTER" &&
+              !(it.metadata as any)?.[HP_BAR_FLAG_KEY],
+          )
           .map((i) => i.id);
         if (ids.length === 0) return;
         try {
@@ -302,20 +332,28 @@ export async function setupHpBar(): Promise<void> {
             every: [
               { key: "type", value: "IMAGE" },
             ],
-            // Show only when at least one has the flag — otherwise
-            // there's nothing to remove.
+            // 2026-05-10: at least one CHARACTER token that has the
+            // flag — handler skips non-character items in mixed
+            // selections, so a box-select with both can still hit the
+            // menu and clear the character bubbles only.
             some: [
+              { key: "layer", value: "CHARACTER" },
               { key: ["metadata", HP_BAR_FLAG_KEY], operator: "!=", value: undefined },
             ],
           },
         },
       ],
       onClick: async (ctx) => {
-        // Only touch tokens that actually have the flag; leave
-        // untouched the ones that don't (they were caught up in
-        // the multi-select but aren't HP-bar-flagged).
+        // Only touch CHARACTER-layer tokens that actually have the
+        // flag; leave untouched the ones that don't (they were caught
+        // up in the multi-select but aren't HP-bar-flagged or aren't
+        // characters).
         const ids = ctx.items
-          .filter((it) => (it.metadata as any)?.[HP_BAR_FLAG_KEY] != null)
+          .filter(
+            (it) =>
+              it.layer === "CHARACTER" &&
+              (it.metadata as any)?.[HP_BAR_FLAG_KEY] != null,
+          )
           .map((i) => i.id);
         if (ids.length === 0) return;
         try {
@@ -343,6 +381,8 @@ export async function setupHpBar(): Promise<void> {
   // Selection listener.
   unsubs.push(
     OBR.player.onChange(async (player) => {
+      hpBarIsGM = player.role === "GM";
+      hpBarPlayerId = player.id || hpBarPlayerId;
       try { await handleSelection(player.selection); } catch (e) {
         console.warn("[hp-bar] handleSelection threw:", e);
       }

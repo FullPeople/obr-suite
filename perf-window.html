@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Perf</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  height:100%;width:100%;
+  /* margin:0 belongs to the global * reset above, but include it
+     explicitly here too — some OBR-host iframes hand us a `body`
+     with non-zero default margin in Firefox / Safari. */
+  margin:0;padding:0;
+  overflow:hidden;background:transparent;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  color:#e6e8ee;
+  user-select:none;
+}
+/* OBR's popover host wraps each iframe with its own rounded outer
+   shadow + clip mask, even when `hidePaper:true`. We match that
+   shape with our own border-radius so the inner card aligns
+   pixel-for-pixel with the outer mask — no triangle of OBR backdrop
+   showing through at the corners. inset:0 keeps the box flush to
+   the iframe's full content area (margin/padding already reset on
+   html/body above). */
+.box{
+  position:absolute;inset:0;
+  background:rgba(15,17,28,0.92);
+  border:1px solid rgba(93,173,226,0.45);
+  border-radius:8px;
+  display:flex;flex-direction:column;
+  overflow:hidden;
+}
+/* Drag handle: top strip clickable area; the rest of the card body
+   reads metrics. The handle's grippy dots tell DMs they can move it. */
+.head{
+  flex-shrink:0;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:3px 6px;
+  background:rgba(93,173,226,0.15);
+  border-bottom:1px solid rgba(93,173,226,0.30);
+  cursor:grab;
+  touch-action:none;
+}
+.head.is-dragging{cursor:grabbing}
+.head .grip{
+  display:inline-flex;align-items:center;justify-content:center;
+  color:rgba(255,255,255,0.55);
+  width:14px;height:10px;
+}
+.head .grip svg{width:10px;height:8px;display:block}
+.head .ttl{
+  font-size:10px;font-weight:700;letter-spacing:0.4px;
+  color:#7ec8f0;text-transform:uppercase;
+}
+.body{
+  flex:1;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:6px 10px;gap:14px;
+  font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
+}
+.metric{
+  display:flex;flex-direction:column;align-items:flex-start;gap:1px;
+}
+.metric .lbl{
+  font-size:8.5px;color:#9aa0b3;font-weight:700;
+  letter-spacing:0.5px;text-transform:uppercase;
+}
+.metric .val{
+  font-size:18px;font-weight:900;color:#e6e8ee;
+  font-variant-numeric:tabular-nums;
+  line-height:1;
+}
+.metric .val.warn{color:#f0a96a}
+.metric .val.bad{color:#ff8b7a}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="head" id="drag-handle" title="拖动 / Drag">
+    <span class="grip" aria-hidden="true">
+      <svg viewBox="0 0 10 8">
+        <circle cx="2" cy="2" r="1" fill="currentColor"/><circle cx="5" cy="2" r="1" fill="currentColor"/><circle cx="8" cy="2" r="1" fill="currentColor"/>
+        <circle cx="2" cy="6" r="1" fill="currentColor"/><circle cx="5" cy="6" r="1" fill="currentColor"/><circle cx="8" cy="6" r="1" fill="currentColor"/>
+      </svg>
+    </span>
+    <span class="ttl">PERF</span>
+    <span style="width:14px"></span>
+  </div>
+  <div class="body">
+    <div class="metric">
+      <span class="lbl">FPS</span>
+      <span class="val" id="fps">—</span>
+    </div>
+    <div class="metric">
+      <span class="lbl">DRAW</span>
+      <span class="val" id="draw">—</span>
+    </div>
+  </div>
+</div>
+<script type="module" src="/src/perf-window-page.ts"></script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 import { render } from "preact";
 import { useEffect, useState, useCallback, useRef } from "preact/compat";
 import OBR from "@owlbear-rodeo/sdk";
+import { installDebugOverlay } from "../../utils/debugOverlay";
 import { ParsedMonster, MonsterEdition } from "./types";
 import { loadAllMonsters, searchMonsters, getRawMonster, makeSlug } from "./data";
 import { spawnMonster } from "./spawn";
@@ -24,7 +25,7 @@ const _tt = (k: Parameters<typeof t>[1]) => t(_lang, k);
 // picker mode (?pickerForItemId=…) writes to these so the bound token
 // gets the chosen monster's HP / AC / DEX-mod alongside the slug
 // reference.
-const BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
+const BUBBLES_META = "com.obr-suite/bubbles/data";
 const BUBBLES_NAME = "com.owlbear-rodeo-bubbles-extension/name";
 const INITIATIVE_MODKEY = "com.initiative-tracker/dexMod";
 const BESTIARY_SLUG_KEY = "com.bestiary/slug";
@@ -80,19 +81,7 @@ async function bindMonsterToTokens(mon: ParsedMonster, itemIds: string[]): Promi
           "max health": mon.hp,
           "temporary health": 0,
           "armor class": mon.ac,
-          // `hide: true` is the EXTERNAL "Stat Bubbles for D&D"
-          // extension's "Dungeon Master Only" toggle — players never
-          // see the bubbles for this token at all when this is set.
-          // We set it by default on bestiary-bound monsters so DMs
-          // who use the external Stat Bubbles plugin get DM-only
-          // bubbles automatically.
-          hide: true,
-          // `locked: true` is the SUITE'S OWN bubbles module flag
-          // (different from the external plugin's hide). Combined
-          // with "locked + in-combat → silhouette mode for players"
-          // it shows players a quantised bar without exact numbers.
-          // Both flags coexist on the same metadata key — external
-          // plugin reads hide, suite plugin reads locked.
+          hide: false,
           locked: true,
         };
         d.metadata[BUBBLES_NAME] = mon.name;
@@ -110,6 +99,61 @@ async function bindMonsterToTokens(mon: ParsedMonster, itemIds: string[]): Promi
 // callers; new code should use bindMonsterToTokens.
 async function bindMonsterToToken(mon: ParsedMonster, itemId: string): Promise<void> {
   return bindMonsterToTokens(mon, [itemId]);
+}
+
+// 2026-05-10: heal-pass for the scene-meta `monsters` table. Walks
+// every scene token whose metadata carries a bestiary slug; for any
+// slug missing from the table, looks up the raw record via
+// getRawMonster(slug) (rawBySlug must already be hydrated by
+// loadAllMonsters) and adds it. One batched setMetadata call per
+// pass — early-out when nothing's missing.
+async function healSceneMonsterTable(): Promise<void> {
+  let items: any[] = [];
+  let table: Record<string, any> = {};
+  try {
+    const [meta, all] = await Promise.all([
+      OBR.scene.getMetadata(),
+      OBR.scene.items.getItems(),
+    ]);
+    items = all;
+    table = (meta[BESTIARY_DATA_KEY] as Record<string, any>) || {};
+  } catch (e) {
+    console.warn("[bestiary] heal: read failed", e);
+    return;
+  }
+  // Collect unique missing slugs from items.
+  const missing = new Set<string>();
+  for (const it of items) {
+    const slug = (it.metadata as any)?.[BESTIARY_SLUG_KEY];
+    if (typeof slug !== "string" || !slug) continue;
+    if (table[slug]) continue;
+    missing.add(slug);
+  }
+  if (missing.size === 0) return;
+  const additions: Record<string, any> = {};
+  for (const slug of missing) {
+    const raw = getRawMonster(slug);
+    if (raw) additions[slug] = raw;
+  }
+  const addCount = Object.keys(additions).length;
+  if (addCount === 0) {
+    // Slugs exist but rawBySlug doesn't have them — likely the source
+    // library is disabled or a homebrew slug points to data that's no
+    // longer reachable. Log + give up; a re-bind through the picker
+    // will fix it next time the user notices.
+    console.warn(
+      `[bestiary] heal: ${missing.size} token(s) reference missing monster data; ` +
+      `re-bind to refresh: ${[...missing].slice(0, 5).join(", ")}${missing.size > 5 ? "…" : ""}`,
+    );
+    return;
+  }
+  try {
+    const next = { ...table, ...additions };
+    await OBR.scene.setMetadata({ [BESTIARY_DATA_KEY]: next });
+    console.info(`[bestiary] heal: filled ${addCount} missing monsters in scene-meta table`);
+  } catch (e) {
+    console.warn("[bestiary] heal: setMetadata failed", e);
+  }
 }
 
 // Persisted UI state (keys are shared across panel opens / reloads).
@@ -178,10 +222,18 @@ function App() {
   const [autoHide, setAutoHide] = useState<boolean>(() =>
     getState().bestiaryAutoHide !== false,
   );
+  // Auto-name toggle — when ON, freshly spawned monsters write their
+  // display name into the OBR-native plainText label (the small text
+  // under the token). Default OFF; the DM can opt in when they want
+  // labels to appear automatically without click-syncing per token.
+  const [autoName, setAutoName] = useState<boolean>(() =>
+    getState().bestiaryAutoName === true,
+  );
   useEffect(() => {
     const unsub = onStateChange(() => {
       setAutoInit(getState().bestiaryAutoInitiative !== false);
       setAutoHide(getState().bestiaryAutoHide !== false);
+      setAutoName(getState().bestiaryAutoName === true);
     });
     return unsub;
   }, []);
@@ -229,9 +281,7 @@ function App() {
   useEffect(() => {
     OBR.player.getRole().then(setRole);
     readSuiteDataVersion().then(setDataVersion);
-    const unsub = OBR.scene.onMetadataChange(() => {
-      readSuiteDataVersion().then(setDataVersion);
-    });
+    const unsub = onStateChange((s) => setDataVersion(s.dataVersion));
 
     // Pull suite state (scene metadata → suite cache) BEFORE
     // loadAllMonsters so getEnabledLibraryBases() inside data.ts
@@ -245,6 +295,21 @@ function App() {
       .then((all) => {
         setMonsters(all);
         setLoading(false);
+        // 2026-05-10: heal-pass for the scene-meta `monsters` table.
+        // Past versions of the bestiary spawn / bind paths could
+        // leave a token with a `slug` metadata reference whose entry
+        // never made it into the scene-shared `monsters` table —
+        // typically because `getRawMonster(slug)` returned null at
+        // spawn time (rawBySlug not yet hydrated) so
+        // `ensureSharedMonsterData` early-returned. Symptom: group
+        // saves / group initiative skips that token because
+        // `buildSelectedMonster` requires `table[slug]` to exist.
+        //
+        // Now that loadAllMonsters has resolved, rawBySlug is full.
+        // Walk every scene token with a bestiary slug, look up its
+        // raw record locally, and fill any missing table entries in
+        // a single batched setMetadata write.
+        void healSceneMonsterTable();
       });
     return unsub;
   }, []);
@@ -522,6 +587,20 @@ function App() {
               {lang === "zh" ? "自动先攻" : "Auto-init"}
             </button>
           )}
+          {role === "GM" && (
+            <button
+              class={`auto-init-toggle ${autoName ? "on" : "off"}`}
+              onClick={async () => {
+                await setState({ bestiaryAutoName: !autoName });
+              }}
+              title={lang === "zh"
+                ? "加入场景时自动把怪物名字写到 token 的 plainText（OBR 原生显示在 token 下方的小字标签）"
+                : "Auto-fill the token's native plainText label with the monster name"}
+              aria-pressed={autoName}
+            >
+              {lang === "zh" ? "自动命名" : "Auto-name"}
+            </button>
+          )}
           <button class="sort-btn" onClick={toggleSort} title={t(lang, "bestiarySortByCR")}>
             CR {sortDesc ? "↓" : "↑"}
           </button>
@@ -709,7 +788,10 @@ function PluginGate() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    OBR.onReady(() => setReady(true));
+    OBR.onReady(() => {
+      installDebugOverlay();
+      setReady(true);
+    });
   }, []);
 
   if (!ready) return <div class="app"><div class="empty">{_tt("bestiaryLoading")}</div></div>;

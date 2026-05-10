@@ -21,7 +21,13 @@ import { DieResult, sidesOf } from "./types";
 const params = new URLSearchParams(location.search);
 const cid = params.get("cid") ?? "";
 
-const LS_HISTORY = "obr-suite/dice/history";
+// Per-room history key — see history-page.ts for rationale. Read
+// after OBR.onReady when room.id is available.
+const LS_HISTORY_BASE = "obr-suite/dice/history";
+function safeRoomKey(rid: string): string {
+  return rid.replace(/[^a-zA-Z0-9_-]/g, "_") || "default";
+}
+let LS_HISTORY = `${LS_HISTORY_BASE}:default`;
 const BC_DICE_REPLAY = "com.obr-suite/dice-replay";
 
 interface HistoryEntry {
@@ -126,6 +132,10 @@ interface OverlaySlot {
 }
 const overlays: OverlaySlot[] = [];
 
+// Resolved at OBR.onReady time before buildOverlays runs.
+let myRole: "GM" | "PLAYER" = "PLAYER";
+let myPlayerId = "";
+
 function buildOverlays(): void {
   const history = loadHistory();
   const members = history.filter((h) => h.collectiveId === cid || h.rollId === cid);
@@ -136,19 +146,38 @@ function buildOverlays(): void {
   }
   for (const entry of members) {
     if (!entry.itemId) continue;       // tokenless dark roll → no anchor
+
+    // 2026-05-09: dark members in a mixed-collective replay must NOT
+    // leak to non-DM non-roller clients (they shouldn't even see a
+    // bubble exists). DM still gets a bubble but at reduced opacity
+    // so it visually distinguishes from the bright members.
+    if (entry.hidden) {
+      const isReceiverDmOrRoller =
+        myRole === "GM" || entry.rollerId === myPlayerId;
+      if (!isReceiverDmOrRoller) continue;   // hide from this client
+    }
+    const dimDark = !!entry.hidden && myRole === "GM";
+
     const el = document.createElement("div");
     el.className = "overlay";
-    el.innerHTML = `<div class="bubble" style="--player-color:${entry.rollerColor}">${buildBubbleInner(entry)}</div>`;
+    const bubbleClass = dimDark ? "bubble dim-dark" : "bubble";
+    el.innerHTML = `<div class="${bubbleClass}" style="--player-color:${entry.rollerColor}">${buildBubbleInner(entry)}</div>`;
     el.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      // Click any bubble → broadcast a toggle to close (LOCAL + REMOTE
-      // so all clients close together).
+      // Click any bubble → broadcast a close (LOCAL + REMOTE so all
+      // clients close together).
       OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action: "close" }, { destination: "LOCAL" }).catch(() => {});
       OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action: "close" }, { destination: "REMOTE" }).catch(() => {});
     });
     stage.appendChild(el);
     overlays.push({ el, itemId: entry.itemId, entry });
+  }
+  // Edge case: every member was hidden and this client filtered them
+  // all out → no bubbles to show → close gracefully so the modal
+  // doesn't sit there empty.
+  if (overlays.length === 0) {
+    OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action: "close" }, { destination: "LOCAL" }).catch(() => {});
   }
 }
 
@@ -207,6 +236,15 @@ function frame(): void {
 }
 
 OBR.onReady(async () => {
+  // Resolve room-scoped history key BEFORE buildOverlays calls
+  // loadHistory(). Also resolve role + player id so the dark-member
+  // filter below can decide whether to render or skip each bubble.
+  try {
+    const rid = (OBR.room?.id as string | undefined) ?? "";
+    LS_HISTORY = `${LS_HISTORY_BASE}:${safeRoomKey(rid)}`;
+  } catch {}
+  try { myRole = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch {}
+  try { myPlayerId = await OBR.player.getId(); } catch {}
   buildOverlays();
   await updatePositions();
   // Reveal after first paint so overlays don't flash at (0,0).

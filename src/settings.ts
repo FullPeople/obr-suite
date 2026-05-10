@@ -25,6 +25,8 @@ import {
 import { ICONS } from "./icons";
 import { assetUrl } from "./asset-base";
 import { STABLE_HIDES } from "./feature-flags";
+import bundledSupportersZh from "../public/supporters.zh.json";
+import bundledSupportersEn from "../public/supporters.en.json";
 import {
   importLocalJson,
   importLocalMd,
@@ -33,6 +35,7 @@ import {
   BC_LOCAL_CONTENT_CHANGED,
   type LocalFileMeta,
 } from "./utils/localContent";
+import { repairLegacyHiddenBubbles } from "./modules/bubbles";
 
 // Merged Settings + About panel.
 //
@@ -57,9 +60,10 @@ import {
 
 const POPOVER_ID = "com.obr-suite/settings";
 const KOFI_URL = "https://ko-fi.com/fullpeople";
-const AFDIAN_URL = "https://ifdian.net/a/fullpeople";
 const EMAIL = "1763086701@qq.com";
 const GITHUB_URL = "https://github.com/FullPeople";
+const BUBBLES_SETTINGS_KEY = "com.obr-suite/bubbles/settings";
+const DEFAULT_BUBBLES_PLAYER_THRESHOLD = 25;
 
 interface BilingualHtml { zh: string; en: string; }
 interface TabDef {
@@ -78,39 +82,160 @@ interface TabDef {
 
 let activeTab = "support";
 let isGM = false;
+let bubblePlayerThreshold = DEFAULT_BUBBLES_PLAYER_THRESHOLD;
+let bubbleAutoScaleText = false;
 
-// Backers credited in the support tab. Edit this array to add new
-// supporter names — keep order roughly chronological for fairness.
-const SUPPORTERS: string[] = [
-  "fu读机", "折云", "咸鱼", "呸呸", "Ejectam719",
-  "皓天", "莫西斯", "艾迪", "诺雁",
-  "愛睡眠（好崩溃睡不着ver）", "这只冒险小队没有人类了",
-  "奶牛饭", "DK", "黄烟", "盲人过北极", "1234",
-  "浩然正气","青灯栖凰","深白色(●—●)","白辰","瀞聆","滑而不稽则罔","Aisle","PB27",
-  "蚀星ErosionStar","消炎药","SiriusTGT","悠悠向青山","小舟","孤月映寒","Joe","武御",
-  "Misaka Mikoto","森海飞霞🐿","每日 1/? Fen²","北省","得君所见","蜗","鱼喵",
-  "52Hertz","咩","饭盒是阿玛利斯靴子","白烏鴉","不周","喵呜嗷","咖啡","FyingFuji",
-  "过路的蔚星","cc","豹式装甲启动","浮生若梦，为欢几何","守矢豆","星锑的TV","蠕行的漆黑","姜川安.",
-  "机智大狐","\\-似雨悲灵-/","粥粥粥","打不中的猎人","电子甜妹","希尔薇"
-];
+interface Supporter {
+  name: string;
+  amount: number;
+}
+
+let sharedSupportersZh: Supporter[] = normalizeSupporterArray(bundledSupportersZh);
+let sharedSupportersEn: Supporter[] = normalizeSupporterArray(bundledSupportersEn);
+
+// Single-source-of-truth for the supporter list is `shared/supporters.zh.json`
+// (and `shared/supporters.en.json`). Each deploy script does
+//   `cp ../shared/supporters.zh.json public/supporters.zh.json`
+// before `vite build`, so editing only `shared/...` is enough — the public/
+// copy gets refreshed automatically. To keep `npm run dev` (no deploy) in
+// sync, also commit the same change to `obr-suite/public/supporters.zh.json`.
+//
+// There is intentionally no hardcoded fallback array here: an empty supporter
+// list rendering as "no backers" is correct if the JSON is genuinely empty,
+// and a stale hardcoded list silently shadowing real data has bitten us
+// before (see git history around 2026-05-08).
 
 function supportersHtml(lang: Language): string {
-  const list = SUPPORTERS.map(
-    (n) => `<span class="backer">${n}</span>`,
-  ).join("");
+  const source =
+    lang === "en" && sharedSupportersEn.length > 0
+      ? sharedSupportersEn
+      : sharedSupportersZh;
+  const list = source.map((s) => {
+    const tier = supporterTier(s.amount);
+    const amount = Number.isInteger(s.amount) ? String(s.amount) : String(s.amount);
+    const size = supporterFontSize(s.amount);
+    return `<span class="backer ${tier}" data-amount="${escapeAttr(amount)}" style="font-size:${size}px">${escapeAttr(s.name)}</span>`;
+  }).join("");
   return lang === "zh"
     ? `<h3>${ICONS.heart} 鸣谢</h3>
        <div class="backers-box">
          <p>感谢以下支持过作者的小伙伴：</p>
          <div class="backers">${list}</div>
-         <p class="backers-extra">还有其他没留下名字的支持者们 — 你们让我能继续维持服务器费用和开发这个插件，泪目（如果想被列上来，赞助时备注一下昵称就行）。</p>
        </div>`
     : `<h3>${ICONS.heart} Thanks</h3>
        <div class="backers-box">
          <p>Thanks to everyone who's chipped in to keep this project alive:</p>
          <div class="backers">${list}</div>
-         <p class="backers-extra">…and to every supporter who didn't leave a name — you let me keep paying the server bills and shipping new features. *tearing up* (Drop a nickname in your tip note if you'd like to be listed.)</p>
        </div>`;
+}
+
+function supporterTier(amount: number): string {
+  if (amount >= 100) return "tier5";
+  if (amount >= 50) return "tier4";
+  if (amount >= 30) return "tier3";
+  if (amount >= 20) return "tier2";
+  return "tier1";
+}
+
+function supporterFontSize(amount: number): number {
+  // Continuous sqrt scaling so every donation amount renders at a
+  // slightly different size. The previous 4-tier staircase (¥20-29
+  // = 11px, ¥30-49 = 13px, ...) bucketed obviously different
+  // contributions into the same visual weight — ¥20 and ¥25 looked
+  // identical even though one is 25% larger. sqrt gives meaningful
+  // gradation at the low/mid range while diminishing returns at the
+  // top so a ¥150 doesn't dwarf a ¥100. Clamped to [9.5, 24] to
+  // keep the chip row from blowing out the panel width.
+  //
+  // Sample points: ¥5 → 10.5 / ¥10 → 11.9 / ¥20 → 13.9 / ¥25 →
+  // 14.8 / ¥30 → 15.5 / ¥50 → 18.0 / ¥100 → 22.5 / ¥150 → 24
+  // (clamped). Tier classes (font-weight / halo) still come from
+  // supporterTier so the visual hierarchy of "big donors" is also
+  // expressed via boldness, not just size.
+  const raw = 7 + 1.55 * Math.sqrt(Math.max(0, amount));
+  const clamped = Math.max(9.5, Math.min(24, raw));
+  return Math.round(clamped * 10) / 10;
+}
+
+function normalizeSupporter(v: unknown): Supporter | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as { name?: unknown; amount?: unknown };
+  const name = typeof o.name === "string" ? o.name.trim() : "";
+  if (!name) return null;
+  const raw = typeof o.amount === "number" ? o.amount : Number(o.amount);
+  return { name, amount: Number.isFinite(raw) ? raw : 10 };
+}
+
+function normalizeSupporterArray(v: unknown): Supporter[] {
+  return Array.isArray(v)
+    ? v.map(normalizeSupporter).filter((item): item is Supporter => !!item)
+    : [];
+}
+
+async function loadSupporterFile(path: string): Promise<Supporter[]> {
+  const res = await fetch(assetUrl(path), { cache: "no-cache" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  return Array.isArray(json)
+    ? json.map(normalizeSupporter).filter((v): v is Supporter => !!v)
+    : [];
+}
+
+async function loadSupporters(): Promise<void> {
+  try {
+    const next = await loadSupporterFile("supporters.zh.json");
+    if (next.length > 0) sharedSupportersZh = next;
+  } catch (e) { console.warn("[obr-suite/settings] supporters.zh.json refresh failed", e); }
+  try {
+    sharedSupportersEn = await loadSupporterFile("supporters.en.json");
+  } catch (e) { console.warn("[obr-suite/settings] supporters.en.json refresh failed", e); }
+}
+
+function readBubbleThresholdFromMeta(meta: Record<string, unknown>): number {
+  const settings = meta[BUBBLES_SETTINGS_KEY] as { playerThreshold?: unknown } | undefined;
+  const n = Number(settings?.playerThreshold);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : DEFAULT_BUBBLES_PLAYER_THRESHOLD;
+}
+
+function readBubbleAutoScaleFromMeta(meta: Record<string, unknown>): boolean {
+  const settings = meta[BUBBLES_SETTINGS_KEY] as { autoScaleText?: unknown } | undefined;
+  return !!settings?.autoScaleText;
+}
+
+async function refreshBubbleSettings(): Promise<void> {
+  try {
+    const meta = await OBR.scene.getMetadata();
+    bubblePlayerThreshold = readBubbleThresholdFromMeta(meta as Record<string, unknown>);
+    bubbleAutoScaleText = readBubbleAutoScaleFromMeta(meta as Record<string, unknown>);
+  } catch {
+    bubblePlayerThreshold = DEFAULT_BUBBLES_PLAYER_THRESHOLD;
+    bubbleAutoScaleText = false;
+  }
+}
+
+// Merge-write: read the current settings object first so we don't
+// blow away unrelated fields when toggling one of them. OBR's
+// setMetadata replaces the whole `BUBBLES_SETTINGS_KEY` value, not
+// just the named field.
+async function setBubblePlayerThreshold(value: number): Promise<void> {
+  const clamped = Math.max(0, Math.min(100, Math.round(value)));
+  bubblePlayerThreshold = clamped;
+  await OBR.scene.setMetadata({
+    [BUBBLES_SETTINGS_KEY]: {
+      playerThreshold: clamped,
+      autoScaleText: bubbleAutoScaleText,
+    },
+  });
+}
+
+async function setBubbleAutoScaleText(value: boolean): Promise<void> {
+  bubbleAutoScaleText = !!value;
+  await OBR.scene.setMetadata({
+    [BUBBLES_SETTINGS_KEY]: {
+      playerThreshold: bubblePlayerThreshold,
+      autoScaleText: bubbleAutoScaleText,
+    },
+  });
 }
 
 const SUPPORT: BilingualHtml = {
@@ -118,7 +243,6 @@ const SUPPORT: BilingualHtml = {
     <p>这套插件由 <b>弗人 FullPeople</b> 利用业余时间维护，所有代码开源于 GitHub。如果它对你的跑团有帮助，欢迎以下方式支持作者：</p>
     <div class="support-row">
       <a class="support-btn kofi" href="${KOFI_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.coffee}</span> Support on Ko-fi</a>
-      <a class="support-btn afdian" href="${AFDIAN_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.heart}</span> 前往爱发电</a>
       <span class="qr-pair" title="微信 / 支付宝">
         <img class="qr-thumb" src="${assetUrl("wx.png")}" alt="微信" loading="lazy">
         <img class="qr-thumb" src="${assetUrl("zfb.jpg")}" alt="支付宝" loading="lazy">
@@ -140,7 +264,6 @@ const SUPPORT: BilingualHtml = {
     <p>This plugin suite is built and maintained by <b>弗人 FullPeople</b> in spare time, with all code open-sourced on GitHub. If you find it useful for your campaigns, here are ways to support the author:</p>
     <div class="support-row">
       <a class="support-btn kofi" href="${KOFI_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.coffee}</span> Support on Ko-fi</a>
-      <a class="support-btn afdian" href="${AFDIAN_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.heart}</span> Afdian (Chinese Patreon)</a>
       <span class="qr-pair" title="WeChat / Alipay (CN)">
         <img class="qr-thumb" src="${assetUrl("wx.png")}" alt="WeChat Pay" loading="lazy">
         <img class="qr-thumb" src="${assetUrl("zfb.jpg")}" alt="Alipay" loading="lazy">
@@ -426,6 +549,66 @@ const DICE_DESC: BilingualHtml = {
 
 <p style="font-size:11px;color:#9aa0b3;margin-top:10px">Dice icon: <a href="https://www.flaticon.com/" target="_blank" rel="noopener">flaticon</a> · by <a href="https://www.flaticon.com/authors/freepik" target="_blank" rel="noopener">Freepik</a></p>
 <p style="font-size:11px;color:#9aa0b3;margin-top:4px">Dice SFX: Sound Effect by <a href="https://pixabay.com/users/freesound_community-46691455/" target="_blank" rel="noopener">freesound_community</a> and ksjsbwuil from <a href="https://pixabay.com/" target="_blank" rel="noopener">Pixabay</a></p>`,
+};
+const CIRCLEIMAGE_DESC: BilingualHtml = {
+  zh: `<p>左侧 tool 栏的「<b>圆形图片 / 去底</b>」是个<b>本地图片处理 + 上传到 OBR 资源库</b>的小工具，做<b>圆形头像 / 临时 token / 去白底立绘</b>等场景标记很方便。</p>
+<p><b>两种处理模式</b>（顶部标签切换）：</p>
+<ul>
+  <li><b>圆形裁剪</b>：拖图进去 → 画面里 <b>拖动 = 平移、滚轮 = 缩放</b>（也有滑块）→ 可加自定义颜色 + 宽度的<b>外环</b>（宽度 0 = 不画环）→ 输出方形 PNG，圆外是透明</li>
+  <li><b>白底黑底剔除</b>：自动把纯白 / 纯黑背景变透明，<b>容差</b>调多大算"接近背景色"，<b>羽化</b>让边缘平滑过渡（避免锯齿）。适合从立绘 / 怪物素描里抠掉白底</li>
+</ul>
+<p><b>导入</b>：弹窗里 <b>拖图 / 点击选择 / Ctrl+V 粘贴</b>，支持 JPG / PNG / WebP / SVG，最大 10 MB。</p>
+<p><b>用法</b>：调好后点底部绿色「<b>添加到资源库</b>」按钮 → 图片自动上传到你的 OBR 资源库 → 之后从 OBR 自带的资源库面板<b>拖到场景</b>使用（跟你导入任何其他图片到 OBR 是同一个流程）。<b>不会出现在玩家的资源库里</b>——是你账号下的私人资源。</p>
+<p style="font-size:11px;color:#9aa0b3;margin-top:8px"><em>为什么不直接拖到场景？因为 OBR 的 Image item 不收 data URL，本地图片只能走 OBR 资源库这一条路。如果以后 OBR 开放直拖 API 了，会改回原来的"拖到指定位置"的体验。</em></p>`,
+  en: `<p>The <b>Circle Image / BG Remove</b> tool on the left rail is a tiny <b>local image processor that uploads to your OBR asset library</b>. Useful for making circular avatars, ad-hoc tokens, or stripping white backgrounds off character portraits.</p>
+<p><b>Two modes</b> (switch via the tabs at the top):</p>
+<ul>
+  <li><b>Circle crop</b>: drop an image, <b>drag = pan</b> the source / <b>scroll = zoom</b> (or use sliders), add an optional coloured <b>rim ring</b> (width 0 = no ring). Output is a square PNG with transparent corners.</li>
+  <li><b>BG remove</b>: zero out alpha on pixels close to pure white (or pure black). <b>Tolerance</b> = how far from the target colour still counts as "background"; <b>feather</b> smooths the alpha cut-off so edges aren't jagged. Great for stripping the white backing off character portraits.</li>
+</ul>
+<p><b>Import</b>: in the popover, <b>drop / click / paste</b> (Ctrl+V) an image. JPG / PNG / WebP / SVG up to 10 MB.</p>
+<p><b>Use</b>: click the green <b>"Add to Library"</b> button at the bottom → the image uploads to your OBR asset library → drag from there to your scene with OBR's normal library-drag gesture (same flow as importing any other image to OBR). The asset is private to your account, not visible to players' libraries.</p>
+<p style="font-size:11px;color:#9aa0b3;margin-top:8px"><em>Why not drop straight onto the canvas? OBR's Image items don't accept data URLs in <code>image.url</code>; locally-generated images have to go through the asset library. If OBR ever exposes a direct-blob spawn API we'll restore the original drag-to-position UX.</em></p>`,
+};
+const FOLLOW_DESC: BilingualHtml = {
+  zh: `<p>左侧 tool 栏的「<b>跟随</b>」工具用来给一个 token 绑定<b>自动跟随</b>另一个 token 的关系。<b>DM 限定</b>。</p>
+<ul>
+  <li><b>开始绑定</b>：在 tokenA 上右键 → 跟随 → 自动切到「跟随绑定」工具，tokenA 与鼠标之间画出蓝色虚线</li>
+  <li><b>完成绑定</b>：左键点击想要跟随的 tokenB，立即生效。系统记录此时 tokenA / tokenB 的<b>相对偏移</b>，之后无论 tokenB 怎么走，tokenA 都保持这个相对位置（典型场景：宠物跟主人 / 队尾跟队首）</li>
+  <li><b>解除绑定</b>：右键 tokenA → <b>取消跟随</b></li>
+  <li><b>触发时机</b>：OBR 的 API 只在<b>松手提交</b>那一刻把新位置告诉我们，所以跟随是在 tokenB 每次拖拽完成后<b>立刻</b>同步——不是 token 拖拽过程中实时跟，但延迟一般 &lt; 100ms</li>
+  <li><b>循环检测</b>：如果绑定会形成循环（A 跟 B、B 跟 A），系统会拒绝并弹通知</li>
+  <li><b>多客户端</b>：所有客户端都能看到跟随效果，但只有 DM 能创建 / 删除绑定</li>
+</ul>`,
+  en: `<p>The <b>Follow</b> tool on the left rail binds a token to <b>auto-follow</b> another token. <b>GM only</b>.</p>
+<ul>
+  <li><b>Bind</b>: right-click tokenA → Follow → auto-switches to the "Follow Bind" tool; a dashed blue line tracks from tokenA to your cursor</li>
+  <li><b>Confirm</b>: left-click the target tokenB. The plugin captures the current <b>relative offset</b> between them — from now on, whenever tokenB moves, tokenA snaps back to that same offset (pets following players, formation rear, etc.)</li>
+  <li><b>Unbind</b>: right-click tokenA → <b>Stop Following</b></li>
+  <li><b>Timing</b>: OBR only delivers a token's new position at <b>drag commit</b> (mouse release), not mid-drag. So the follower jumps the instant tokenB releases — typically &lt; 100ms latency, feels live</li>
+  <li><b>Cycle detection</b>: bindings that would form a loop (A→B, B→A) are rejected with a notification</li>
+  <li><b>Multi-client</b>: all clients see the follow movement, but only the GM can create / delete bindings</li>
+</ul>`,
+};
+const TRICKSTER_DESC: BilingualHtml = {
+  zh: `<p>左侧 tool 栏的「<b>捣蛋鬼在哪？</b>」用于在场景里画出隐藏的触发圆——指定的 token 一旦走进圆里，就会自动开启<b>时停</b>并把镜头聚焦到它身上，做<b>伏击触发器</b> / 暗门 / 陷阱很方便。</p>
+<ul>
+  <li><b>新建</b>：选中工具，地图上<b>拖拽画圆</b> → 松手即建。圆心放紫色 SVG 标记，半径为触发范围</li>
+  <li>松手会弹出编辑面板：取名 / 选触发对象（所有 / 仅玩家 / 仅 NPC）/ 一次性 / 玩家可见 / 锁定。<b>取消</b>等于不创建，<b>保存</b>则提交</li>
+  <li>编辑已有触发区时，点取消只是关面板，不会删除</li>
+  <li><b>默认玩家不可见</b>：玩家完全看不到那个紫圈，DM 仍能看到半透明残影；这样才有"伏击"的味道</li>
+  <li><b>仅触发一次</b>（默认开）：触发后自动锁定，玩家再走进去也不会重复触发，可在面板里"重置已触发"重新启用</li>
+  <li><b>限制说明</b>：OBR 的 API 只在拖拽<b>松手提交</b>那一刻把新位置告诉我们，做不到"拖到一半就触发"——所以严格来说时停是<b>松手瞬间</b>触发的，不过延迟一般 &lt; 100ms，体感跟"边走边触发"差不多</li>
+</ul>`,
+  en: `<p>The <b>Trickster Marker</b> tool on the left rail places hidden trigger circles. When a target token drag-commits into the circle, the plugin auto-fires <b>Time Stop</b> + camera focus on the entering token — perfect for <b>ambush triggers</b>, hidden traps, scripted reveals.</p>
+<ul>
+  <li><b>Create</b>: activate the tool, <b>click-drag a circle</b> → release to commit. Magenta SVG marker at the centre, drag distance = trigger radius</li>
+  <li>Release pops the edit panel: name / target group (all / players only / NPCs only) / one-shot / player-visible / locked. <b>Cancel</b> = don't create, <b>Save</b> = commit</li>
+  <li>Editing an existing trickster, Cancel just closes the panel — doesn't delete the item</li>
+  <li><b>Hidden from players by default</b>: players can't see the marker at all, DM still sees a translucent ghost. That's the whole point</li>
+  <li><b>One-shot</b> (default on): after firing, the marker auto-locks; re-entering won't re-trigger. Use "Reset" in the panel to re-arm</li>
+  <li><b>Caveat</b>: OBR's API only delivers a token's new position at <b>drag-commit</b> (mouse release), not mid-drag. So time stop fires the instant the player releases the drag — typically &lt; 100ms latency, feels like "fires while moving"</li>
+</ul>`,
 };
 const PORTALS_DESC: BilingualHtml = {
   zh: `<p>左侧 tool 栏的「<b>传送门</b>」用于在场景里画出可触发的传送圆。</p>
@@ -833,6 +1016,10 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
     : "";
   const disable = isGM ? "" : "disabled";
   const editable = isGM && !lib.builtin;
+  const disabledCount = (lib.disabledSources ?? []).length;
+  const sourcesLabel = lang === "zh"
+    ? `📚 来源${disabledCount > 0 ? ` (${disabledCount} 已禁)` : ""}`
+    : `📚 Sources${disabledCount > 0 ? ` (${disabledCount} off)` : ""}`;
   return `
     <div class="lib-row" data-lib-id="${escapeAttr(lib.id)}">
       <div class="lib-row-head">
@@ -840,6 +1027,8 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
         ${builtinLock}
         <button class="tog ${lib.enabled ? "on" : ""}" data-field="enabled" type="button" ${disable}
           aria-pressed="${lib.enabled}" title="${lang === "zh" ? "启用 / 禁用此库" : "Enable / disable"}"></button>
+        <button class="lib-sources-btn" type="button" ${disable}
+          title="${lang === "zh" ? "管理此库内的具体来源（按来源代码禁用 / 启用，例如 BOOKOFEBONTIDES）" : "Manage individual sources within this library (e.g. disable BOOKOFEBONTIDES)"}">${sourcesLabel}</button>
         <button class="lib-preview-btn" type="button" title="${lang === "zh" ? "预览：检测此库的索引和数据文件能否加载" : "Preview: probe this library's index + data files"}">${lang === "zh" ? "🔍 预览" : "🔍 Preview"}</button>
         ${
           !lib.builtin
@@ -853,6 +1042,7 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
           placeholder="https://example.com">
       </div>
       <div class="lib-preview" hidden></div>
+      <div class="lib-sources" hidden></div>
     </div>
   `;
 }
@@ -1111,6 +1301,111 @@ function wireLibrariesBody(root: HTMLElement): void {
       await setState({ libraries: next });
     });
 
+    // 2026-05-09: per-source enable/disable picker. Fetches the
+    // library's index file, lists every source code from `m.s`, and
+    // lets the user check/uncheck each one. Persisted into the
+    // library's `disabledSources` array (lower-cased on read; we
+    // store as-displayed for readability in the UI).
+    const sourcesBtn = row.querySelector<HTMLButtonElement>(".lib-sources-btn");
+    const sourcesBox = row.querySelector<HTMLDivElement>(".lib-sources");
+    sourcesBtn?.addEventListener("click", async () => {
+      if (!sourcesBox) return;
+      if (!sourcesBox.hidden) {
+        sourcesBox.hidden = true;
+        sourcesBox.innerHTML = "";
+        return;
+      }
+      const cur = (getState().libraries ?? []).find((l) => l.id === id);
+      if (!cur) return;
+      sourcesBox.hidden = false;
+      const lang = getLocalLang();
+      sourcesBox.innerHTML = `<div class="lib-sources-loading">${lang === "zh" ? "⏳ 加载库索引…" : "⏳ Fetching index…"}</div>`;
+      // Use the same indexPath logic as the search loader so the
+      // partnered listing fetches index-partnered.json.
+      const indexPath = typeof cur.indexPath === "string" && cur.indexPath.length > 0
+        ? cur.indexPath.replace(/^\/+/, "")
+        : "search/index.json";
+      let codes: string[] = [];
+      let entryCounts = new Map<string, number>();
+      try {
+        const res = await fetch(`${cur.baseUrl.replace(/\/+$/, "")}/${indexPath}`, { cache: "no-cache" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const idx = await res.json();
+        // Source map: { [code]: id }. We list all codes, but rank by
+        // entry count so the most-used sources are at the top.
+        const map = (idx?.m?.s ?? {}) as Record<string, number>;
+        codes = Object.keys(map);
+        if (Array.isArray(idx?.x)) {
+          for (const e of idx.x) {
+            let code: string | null = null;
+            if (typeof e?.s === "string") code = e.s;
+            else if (typeof e?.s === "number") {
+              for (const [k, v] of Object.entries(map)) {
+                if (v === e.s) { code = k; break; }
+              }
+            }
+            if (code) entryCounts.set(code, (entryCounts.get(code) ?? 0) + 1);
+          }
+        }
+        codes.sort((a, b) => (entryCounts.get(b) ?? 0) - (entryCounts.get(a) ?? 0) || a.localeCompare(b));
+      } catch (e: any) {
+        sourcesBox.innerHTML = `<div class="lib-sources-err">${lang === "zh" ? "加载失败：" : "Failed: "}${escapeAttr(e?.message ?? String(e))}</div>`;
+        return;
+      }
+      if (codes.length === 0) {
+        sourcesBox.innerHTML = `<div class="lib-sources-empty">${lang === "zh" ? "（此库索引未声明任何 source 代码）" : "(no source codes declared in this library's index)"}</div>`;
+        return;
+      }
+      const disabledLower = new Set(
+        (cur.disabledSources ?? []).map((s) => String(s).toLowerCase()),
+      );
+      const head = lang === "zh"
+        ? `<div class="lib-sources-head">勾选 = 启用，去勾 = 禁用此来源在该库的全部条目（搜索 / 怪物图鉴 / 角色卡均会跳过）。</div>`
+        : `<div class="lib-sources-head">Checked = enabled, unchecked = ignore all entries from this source within this library.</div>`;
+      const cbDisable = isGM ? "" : "disabled";
+      const itemsHtml = codes.map((code) => {
+        const codeLower = code.toLowerCase();
+        const enabled = !disabledLower.has(codeLower);
+        const count = entryCounts.get(code) ?? 0;
+        return `
+          <label class="lib-source-row">
+            <input type="checkbox" class="lib-source-cb" data-code="${escapeAttr(code)}" ${enabled ? "checked" : ""} ${cbDisable}>
+            <span class="lib-source-code">${escapeAttr(code)}</span>
+            <span class="lib-source-count">${count}</span>
+          </label>
+        `;
+      }).join("");
+      sourcesBox.innerHTML = `${head}<div class="lib-sources-list">${itemsHtml}</div>`;
+      // Wire each checkbox: commit the new disabledSources array.
+      sourcesBox.querySelectorAll<HTMLInputElement>(".lib-source-cb").forEach((cb) => {
+        cb.addEventListener("change", async () => {
+          if (!isGM) return;
+          const code = cb.dataset.code ?? "";
+          if (!code) return;
+          const cur2 = (getState().libraries ?? []).find((l) => l.id === id);
+          if (!cur2) return;
+          const cur2Disabled = new Set((cur2.disabledSources ?? []).map((s) => s));
+          if (cb.checked) {
+            // Re-enable — drop both exact and case-variants from list.
+            for (const s of [...cur2Disabled]) {
+              if (s.toLowerCase() === code.toLowerCase()) cur2Disabled.delete(s);
+            }
+          } else {
+            cur2Disabled.add(code);
+          }
+          await commit({ disabledSources: [...cur2Disabled] });
+          // Re-render the row's outer button label so the count
+          // displayed next to "📚 来源" updates ("(N 已禁)").
+          const newDisabled = (getState().libraries ?? []).find((l) => l.id === id)?.disabledSources ?? [];
+          const newCount = newDisabled.length;
+          const newLabel = lang === "zh"
+            ? `📚 来源${newCount > 0 ? ` (${newCount} 已禁)` : ""}`
+            : `📚 Sources${newCount > 0 ? ` (${newCount} off)` : ""}`;
+          if (sourcesBtn) sourcesBtn.textContent = newLabel;
+        });
+      });
+    });
+
     // Preview button toggles the diagnostic panel below the row.
     const previewBtn = row.querySelector<HTMLButtonElement>(".lib-preview-btn");
     const previewBox = row.querySelector<HTMLDivElement>(".lib-preview");
@@ -1320,7 +1615,6 @@ const TABS: TabDef[] = [
           ${!isGM ? `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
         </div>
 
-        ${STABLE_HIDES ? "" : `
         <div class="basics-block" style="margin-top:14px">
           <div class="basics-h">${lang === "zh" ? "面板布局" : "Panel layout"}</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
@@ -1337,7 +1631,6 @@ const TABS: TabDef[] = [
               : "The cluster, dice history, initiative bar, bestiary panel and character-card info popover can all be repositioned by dragging the ⋮⋮ grip in their top-left corner. Positions are stored per-client and never synced to other players."
           }</p>
         </div>
-        `}
 
         <div class="basics-block" style="margin-top:14px">
           <div class="basics-h">${lang === "zh" ? "调试模式" : "Debug mode"}</div>
@@ -1351,6 +1644,17 @@ const TABS: TabDef[] = [
               }</em></div>
             </div>
             <button class="tog" data-key="debugOverlay" type="button" aria-pressed="false"></button>
+          </div>
+          <div class="row">
+            <div class="lbl">
+              ${lang === "zh" ? "性能监视器（FPS / 绘制数）" : "Perf monitor (FPS / drawcall)"}
+              <div class="desc"><em>${
+                lang === "zh"
+                  ? "在屏幕左上角显示一个小窗口，实时显示 <b>FPS</b> 和 <b>绘制数</b>（场景里 item 总数 — OBR 没有真实 drawcall API，这是近似值）。<b>仅本地</b>，可拖拽。"
+                  : "Shows a tiny top-left window with live <b>FPS</b> and <b>drawcall</b> (= scene item count; OBR exposes no true drawcall counter, so this is an approximation). <b>Local only</b>, draggable."
+              }</em></div>
+            </div>
+            <button class="tog" data-key="perfWindow" type="button" aria-pressed="false"></button>
           </div>
         </div>
       `;
@@ -1378,6 +1682,26 @@ const TABS: TabDef[] = [
           debugBtn.setAttribute("aria-pressed", String(next));
           const m = await import("./utils/debugOverlay");
           m.setDebugOverlay(next);
+        });
+      }
+      // Perf-window toggle (per-client). Reads / writes the same LS
+      // key the perfWindow module reads on setup, so the popover
+      // open/close matches the toggle's pressed state across reloads.
+      const perfBtn = root.querySelector<HTMLButtonElement>('.tog[data-key="perfWindow"]');
+      if (perfBtn) {
+        const isOn = (() => {
+          try { return localStorage.getItem("obr-suite/perf-window/visible") === "1"; }
+          catch { return false; }
+        })();
+        perfBtn.classList.toggle("on", isOn);
+        perfBtn.setAttribute("aria-pressed", String(isOn));
+        perfBtn.addEventListener("click", async () => {
+          const cur = perfBtn.classList.contains("on");
+          const next = !cur;
+          perfBtn.classList.toggle("on", next);
+          perfBtn.setAttribute("aria-pressed", String(next));
+          const m = await import("./modules/perfWindow");
+          m.setPerfWindowVisible(next);
         });
       }
       root.querySelectorAll<HTMLButtonElement>(".seg button[data-dv]").forEach((b) => {
@@ -1748,6 +2072,27 @@ const TABS: TabDef[] = [
     },
   },
   {
+    id: "trickster",
+    zh: `${ICONS.trickster} 捣蛋鬼在哪？`,
+    en: `${ICONS.trickster} Trickster Marker`,
+    moduleId: "trickster",
+    body: TRICKSTER_DESC,
+  },
+  {
+    id: "circleImage",
+    zh: `${ICONS.circleImage} 圆形图片`,
+    en: `${ICONS.circleImage} Circle Image`,
+    moduleId: "circleImage",
+    body: CIRCLEIMAGE_DESC,
+  },
+  {
+    id: "follow",
+    zh: `${ICONS.follow} 跟随`,
+    en: `${ICONS.follow} Follow`,
+    moduleId: "follow",
+    body: FOLLOW_DESC,
+  },
+  {
     id: "bubbles",
     zh: `${ICONS.heart} 血量气泡`,
     en: `${ICONS.heart} HP Bubbles`,
@@ -1767,18 +2112,20 @@ const TABS: TabDef[] = [
         } catch {}
         return -20;
       })();
+      // 2026-05-09: new per-client toggle. ON = bubbles offset upward
+      // by the auto-scale-text font-size px (TOKEN_TEXT_FONT_BASE = 20
+      // baked native, scales with token via SCALE inheritance), and
+      // the manual `offset` slider is ignored.
+      const offsetByText = (() => {
+        try {
+          return localStorage.getItem("com.obr-suite/bubbles/offset-by-text") === "1";
+        } catch { return false; }
+      })();
       // Player visibility threshold — see LS_BUBBLES_PLAYER_THRESHOLD
       // in modules/bubbles/index.ts. 0..100. Locked tokens shown to
       // players quantise their HP ratio to multiples of this percent.
       const threshold = (() => {
-        try {
-          const v = localStorage.getItem("com.obr-suite/bubbles/player-threshold");
-          if (v != null && v !== "") {
-            const n = Number(v);
-            if (Number.isFinite(n) && n >= 0 && n <= 100) return n;
-          }
-        } catch {}
-        return 25;
+        return bubblePlayerThreshold;
       })();
       // Per-client bubble scale — multiplier applied to BAR_HEIGHT /
       // DIAMETER / font size in modules/bubbles/index.ts. 0.5..2.0
@@ -1828,8 +2175,12 @@ const TABS: TabDef[] = [
 </ul>`;
       const offsetLbl = lang === "zh" ? "上下偏移" : "Vertical offset";
       const offsetDesc = lang === "zh"
-        ? "本机偏好。负值向上偏移（远离 token），正值向下。默认 -20 让气泡不和角色名字标签重叠。"
-        : "Per-client preference. Negative shifts up (away from token), positive shifts down. Default -20 keeps bubbles clear of the OBR name label.";
+        ? "本机偏好。负值向上偏移（远离 token），正值向下。默认 -20 让气泡不和角色名字标签重叠。开启「按字号偏移」后此项灰掉不生效。"
+        : "Per-client preference. Negative shifts up (away from token), positive shifts down. Default -20 keeps bubbles clear of the OBR name label. Greyed out when 'offset by font size' is on.";
+      const offsetByTextLbl = lang === "zh" ? "按字号上偏移" : "Offset by font size";
+      const offsetByTextDesc = lang === "zh"
+        ? "开启后气泡向上偏移文字字号的像素数（即「字号随 token 自动缩放」中的字号，默认 20 px），自动随 token 缩放。开启时上方「上下偏移」灰掉。"
+        : "When ON, bubbles offset upward by the font-size px (same number as 'auto-scale text with token', default 20). Scales naturally with token. The manual 'vertical offset' above is greyed out while this is on.";
       const thresholdLbl = lang === "zh" ? "玩家进度阈值" : "Player threshold";
       const thresholdDesc = lang === "zh"
         ? "上锁角色对玩家显示的血条进度按这个百分比量化。默认 25：玩家只在血量降至 75% / 50% / 25% / 0% 时看到血条变化。设为 0 则连续显示真实比例，100 则始终显示满血（玩家看不到任何进度）。"
@@ -1838,6 +2189,10 @@ const TABS: TabDef[] = [
       const sizeDesc = lang === "zh"
         ? "本机偏好。乘到 HP 条 / AC 盾 / 字号上的统一缩放。0.5 紧凑（小图小屏），2.0 放大（远观看牌或老花眼）。默认 1.0。"
         : "Per-client preference. Multiplier applied to the HP bar / AC shield / font size. 0.5 = compact, 2.0 = chunky. Default 1.0.";
+      const autoScaleLbl = lang === "zh" ? "字号随 token 自动缩放" : "Auto-scale text with token";
+      const autoScaleDesc = lang === "zh"
+        ? "DM 全局开关。开启后 token 名字标签的字号会跟着 token 大小缩放（小怪物小字、巨型生物大字）。关闭时字号在所有 token 上保持一致。该开关只影响字号，不影响气泡上下偏移（要用「按字号上偏移」单独控制）。"
+        : "DM-wide toggle. When ON, the OBR-native token name label font-size scales with token size (small monster small font, big monster big font). When OFF, font size is constant across tokens. This setting only affects the font; bubble vertical offset is controlled separately by 'offset by font size'.";
       return `
         <h3>${lang === "zh" ? "选项" : "Options"}</h3>
         <div class="row">
@@ -1857,8 +2212,30 @@ const TABS: TabDef[] = [
           </div>
           <input type="number" step="1" value="${offset}"
                  data-key="bubblesVerticalOffset"
-                 style="flex:0 0 80px;align-self:center;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:3px 6px;color:#fff;font:inherit;text-align:right"/>
+                 ${offsetByText ? "disabled" : ""}
+                 style="flex:0 0 80px;align-self:center;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:3px 6px;color:#fff;font:inherit;text-align:right${offsetByText ? ";opacity:0.45" : ""}"/>
           <span style="flex:0 0 28px;text-align:right;color:#9aa0b3;font-size:11px">px</span>
+        </div>
+        <div class="row">
+          <div class="lbl">
+            ${offsetByTextLbl}
+            <div class="desc"><em>${offsetByTextDesc}</em></div>
+          </div>
+          <button type="button"
+                  class="tog ${offsetByText ? "on" : ""}"
+                  data-key="bubblesOffsetByText"
+                  aria-pressed="${offsetByText ? "true" : "false"}"></button>
+        </div>
+        <div class="row">
+          <div class="lbl">
+            ${autoScaleLbl}
+            <div class="desc"><em>${autoScaleDesc}</em></div>
+          </div>
+          <button type="button"
+                  class="tog ${bubbleAutoScaleText ? "on" : ""}"
+                  data-key="bubblesAutoScaleText"
+                  ${isGM ? "" : "disabled"}
+                  aria-pressed="${bubbleAutoScaleText ? "true" : "false"}"></button>
         </div>
         <div class="row">
           <div class="lbl">
@@ -1867,9 +2244,24 @@ const TABS: TabDef[] = [
           </div>
           <input type="number" min="0" max="100" step="5" value="${threshold}"
                  data-key="bubblesPlayerThreshold"
+                 ${isGM ? "" : "disabled"}
                  style="flex:0 0 80px;align-self:center;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:3px 6px;color:#fff;font:inherit;text-align:right"/>
           <span style="flex:0 0 28px;text-align:right;color:#9aa0b3;font-size:11px">%</span>
         </div>
+        ${isGM ? `
+        <h3 style="margin-top:14px">${lang === "zh" ? "维护" : "Maintenance"}</h3>
+        <div class="row">
+          <div class="lbl">
+            ${lang === "zh" ? "修复历史血条" : "Repair legacy hidden bars"}
+            <div class="desc"><em>${lang === "zh"
+              ? `因为<b>血量元数据迁移</b>，旧场景里很多 token 仍然带着 <code>hide=true</code>，导致玩家完全看不到血条。点击后会清除当前场景<b>所有 token</b> 的 hide 标志。修复后：<b>未上锁</b>的 token 血条对玩家常态可见；<b>上锁</b>的 token 仅在<b>战斗中</b>显示无数值剪影、非战斗状态隐藏。每个场景需要单独点一次。`
+              : `Due to the <b>HP metadata migration</b>, many tokens in pre-migration scenes still carry <code>hide=true</code>, hiding the bar from players entirely. Clicking will clear the flag from <b>every token</b> in the current scene. After repair: <b>unlocked</b> tokens show their bar to all players full-time; <b>locked</b> tokens show a numberless silhouette during <b>combat</b> only and stay hidden out-of-combat. Run this once per scene.`}</em></div>
+          </div>
+          <button data-key="bubblesRepairLegacyHide" class="reset-panels-btn" type="button">${
+            lang === "zh" ? "修复当前场景" : "Repair current scene"
+          }</button>
+        </div>
+        ` : ""}
         ${desc}
       `;
     },
@@ -1905,17 +2297,18 @@ const TABS: TabDef[] = [
       const thrInput = root.querySelector<HTMLInputElement>('input[data-key="bubblesPlayerThreshold"]');
       if (thrInput) {
         const commit = () => {
+          if (!isGM) return;
           const raw = thrInput.value.trim();
           if (raw === "") {
             thrInput.value = "25";
-            try { localStorage.setItem("com.obr-suite/bubbles/player-threshold", "25"); } catch {}
+            void setBubblePlayerThreshold(25);
             return;
           }
           const n = Number(raw);
           if (!Number.isFinite(n)) return;
           const clamped = Math.max(0, Math.min(100, Math.round(n)));
           thrInput.value = String(clamped);
-          try { localStorage.setItem("com.obr-suite/bubbles/player-threshold", String(clamped)); } catch {}
+          void setBubblePlayerThreshold(clamped);
         };
         thrInput.addEventListener("change", commit);
         thrInput.addEventListener("blur", commit);
@@ -1941,6 +2334,67 @@ const TABS: TabDef[] = [
         sizeInput.addEventListener("input", commit);
         sizeInput.addEventListener("change", commit);
       }
+      // DM-only auto-scale-text toggle. Scene-metadata. Now
+      // controls ONLY the OBR-native plainText label font scaling —
+      // bubble offset is handled separately by bubblesOffsetByText
+      // (per-client, see below).
+      const autoScaleBtn = root.querySelector<HTMLButtonElement>('button[data-key="bubblesAutoScaleText"]');
+      if (autoScaleBtn && isGM) {
+        autoScaleBtn.addEventListener("click", async () => {
+          if (autoScaleBtn.disabled) return;
+          await setBubbleAutoScaleText(!bubbleAutoScaleText);
+          if (activeTab === "bubbles") renderContent();
+        });
+      }
+      // Per-client offset-by-text toggle. Writes localStorage; the
+      // bubbles module's `storage` event listener picks up the
+      // change and re-syncs.
+      const offsetByTextBtn = root.querySelector<HTMLButtonElement>('button[data-key="bubblesOffsetByText"]');
+      if (offsetByTextBtn) {
+        offsetByTextBtn.addEventListener("click", () => {
+          // Re-read inside the handler so the toggle reflects current
+          // LS even if the user navigated away & back without
+          // re-rendering.
+          let cur = false;
+          try {
+            cur = localStorage.getItem("com.obr-suite/bubbles/offset-by-text") === "1";
+          } catch {}
+          try {
+            localStorage.setItem("com.obr-suite/bubbles/offset-by-text", cur ? "0" : "1");
+          } catch {}
+          if (activeTab === "bubbles") renderContent();
+        });
+      }
+      // DM-only one-shot repair: clears legacy `hide=true` from every
+      // bubble metadata blob in the current scene.
+      const repairBtn = root.querySelector<HTMLButtonElement>('button[data-key="bubblesRepairLegacyHide"]');
+      if (repairBtn && isGM) {
+        repairBtn.addEventListener("click", async () => {
+          if (repairBtn.disabled) return;
+          const lang = getLocalLang();
+          const confirmMsg = lang === "zh"
+            ? "确认修复当前场景的所有血条？\n\n这会清除每个 token 的 hide=true 标志。修复后：\n• 未上锁的 token 血条对玩家常态可见\n• 上锁的 token 仅在战斗中显示无数值剪影"
+            : "Repair all HP bars in the current scene?\n\nThis clears the hide=true flag from every token. After repair:\n• Unlocked tokens show the bar to players full-time\n• Locked tokens show a numberless silhouette only during combat";
+          if (!window.confirm(confirmMsg)) return;
+          const origText = repairBtn.textContent ?? "";
+          repairBtn.disabled = true;
+          repairBtn.textContent = lang === "zh" ? "修复中…" : "Repairing…";
+          try {
+            const { touched, total } = await repairLegacyHiddenBubbles();
+            const ok = lang === "zh"
+              ? `已修复 ${touched} 个 token（共扫描 ${total}）。`
+              : `Repaired ${touched} token${touched === 1 ? "" : "s"} (scanned ${total}).`;
+            try { await OBR.notification.show(ok, "SUCCESS"); } catch { window.alert(ok); }
+          } catch (e) {
+            console.warn("[obr-suite/settings] repair failed", e);
+            const fail = lang === "zh" ? "修复失败，请查看 DevTools 控制台。" : "Repair failed — see DevTools console.";
+            try { await OBR.notification.show(fail, "ERROR"); } catch { window.alert(fail); }
+          } finally {
+            repairBtn.disabled = false;
+            repairBtn.textContent = origText;
+          }
+        });
+      }
     },
   },
   {
@@ -1949,21 +2403,17 @@ const TABS: TabDef[] = [
     en: `${ICONS.statusWheel} Status Tracker`,
     moduleId: "statusTracker",
     body: {
-      zh: `<p><b>全屏追踪</b>：状态、buff、消耗性资源（法术位 / 激励 / 子弹 …）一站式管理。</p>
+      zh: `<p><b>全屏追踪</b>：状态、buff 一站式管理。</p>
 <ul>
   <li><b>打开</b>：Select 工具下按 <kbd>]</kbd>，或点击工具栏的状态追踪按钮</li>
-  <li><b>中央舞台</b>按视口比例显示场景里的所有角色 token</li>
   <li><b>右下调色板</b>：拖状态到角色 = 应用；状态文字会以弧形气泡浮在 token 头顶</li>
   <li>已应用的 buff <b>拖到别人</b> = 转移，<b>拖到空白</b> = 删除</li>
-  <li><b>右上资源追踪</b>：选中角色 → 添加自定义资源（命名 + 上限），战斗中按 ＋／− 计数</li>
 </ul>`,
-      en: `<p><b>Full-screen tracker</b> for status effects, buffs, and consumables (spell slots, bardic inspiration, ammo …) — one place to manage them all.</p>
+      en: `<p><b>Full-screen tracker</b> for status effects + buffs — one place to manage them all.</p>
 <ul>
   <li><b>Open</b>: press <kbd>]</kbd> while in the Select tool, or click the toolbar action</li>
-  <li><b>Centre stage</b> shows every character token in the scene at its viewport-proportional position</li>
   <li><b>Bottom-right palette</b>: drag a status onto a character to apply it. The buff label appears as an arc-style bubble above the token</li>
   <li>Applied buffs: <b>drag to another</b> = transfer, <b>drag to empty space</b> = remove</li>
-  <li><b>Top-right resource tracker</b>: select a character → add a custom resource (name + max). Tap ＋ / − during play to count usage</li>
 </ul>`,
     },
   },
@@ -2030,85 +2480,69 @@ const TABS: TabDef[] = [
     },
   },
   {
-    id: "vision",
-    zh: `${ICONS.eye} 视野迷雾`,
-    en: `${ICONS.eye} Vision / Fog`,
-    moduleId: "vision",
+    id: "fullFog",
+    zh: `${ICONS.eye} 地图迷雾`,
+    en: `${ICONS.eye} Map Fog`,
+    moduleId: "fullFog",
     body: {
-      zh: `<div style="background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.45);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12.5px;line-height:1.55">
-⚠ <b>当前无法使用</b>，仍在<b>未来计划</b>中。如果你对以下未来展望非常兴奋，可以通过<b>支持我</b>来加速 —— 好消息是我目前没有工作，如果真的有支持，我真的会全力开发。
-</div>
-<h3 style="margin-top:6px">未来展望和思路</h3>
-<p>针对地图直接进行<b>灰度 / 曝光处理</b>，通过绘画等方式直截了当地做出<b>墙壁和遮挡物</b>。通过不同功能的画笔来确定：</p>
+      zh: `<h3>地图迷雾编辑器</h3>
+<p>右键 MAP 图层的地图图片 → <b>编辑地图迷雾</b> → 全屏编辑器。整体思路接近 Photoshop 的<b>阈值/曲线 + 选区 + 画笔</b>工作流，目标是把地图上的墙体 / 障碍物提取成几何数据。</p>
+<h4 style="margin-top:14px">自动算法</h4>
 <ul>
-  <li><b>普通遮挡物</b>：完全挡视线（典型的墙）</li>
-  <li><b>可见遮挡物</b>：可看到内部内容但看不到后面遮挡（类似窗、栏杆）</li>
-  <li><b>困难地形</b>：影响移动但不挡视线</li>
+  <li><b>灰度阈值</b>：T 滑块手动控制，最直观</li>
+  <li><b>Otsu 自动</b>：算法自动选最佳全局阈值，适合室内地图</li>
+  <li><b>自适应 Gaussian</b>：每个像素跟邻域比，光照不均也准</li>
+  <li><b>颜色距离</b>：取色器选目标色 + 容差，默认黑色</li>
+  <li><b>颜色排除（HSV）</b>：自动排除饱和绿色（森林）/ 棕色（小路），保留暗低饱和（线稿），适合手绘地图</li>
+  <li><b>饱和度感知</b>：暗色 AND 低饱和度才识别（线稿专用）</li>
 </ul>
-<p>每个客户端独立渲染，玩家只看自己 token 的视野，DM 看全部。</p>
-<h3 style="margin-top:14px">原计划的初版（已搁置）</h3>
-<p style="color:var(--text-dim);font-size:11.5px">下面这套是 v0 思路（光源 + 墙壁 + 共享视野），保留作为后续设计参考；当前不会启用。</p>
-<ul style="color:var(--text-dim);font-size:11.5px">
-  <li><b>动态视野系统</b>：给 token 挂上「光源」，光会被墙壁阻挡，墙之外是黑色迷雾。</li>
-  <li><b>双层半径</b>：内圈是明视（彩色），外圈再延伸是暗视（黑白覆冷调）。</li>
-  <li><b>墙壁来源</b>：① OBR 自带「迷雾」工具画的墙；② 通过<b>绘制碰撞图</b>自动生成。</li>
-  <li><b>共享视野</b>：默认开启 = 全员看到所有 token 的视野并集；关闭 = 每个玩家只看自己 owner 的 token 视野（DM 始终看全部）。</li>
-</ul>`,
-      en: `<div style="background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.45);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12.5px;line-height:1.55">
-⚠ <b>Currently unavailable</b> — still on the <b>future-plans</b> list. If you're excited about the vision below, you can <b>support me</b> to speed it up. Good news: I don't currently have a job, so any real support gets reinvested as full-time development.
-</div>
-<h3 style="margin-top:6px">Future direction</h3>
-<p>Apply <b>grayscale / exposure processing</b> directly to the map, with <b>painted walls and obstacles</b> on top. Different paint functions distinguish:</p>
+<h4 style="margin-top:10px">手动工具</h4>
 <ul>
-  <li><b>Normal obstacles:</b> fully block line-of-sight (typical walls)</li>
-  <li><b>See-through obstacles:</b> reveal what's inside but block what's behind (windows, railings)</li>
-  <li><b>Difficult terrain:</b> affects movement but not vision</li>
+  <li><b>画笔 / 橡皮</b>：直接增减 mask</li>
+  <li><b>套索 / 多边形 / 矩形</b>：圈选区域填充</li>
+  <li><b>魔棒</b>：点击图像，选中相邻颜色相近的所有像素</li>
+  <li><b>油漆桶</b>：在 mask 内 floodFill，常用于把空心矩形墙的内部填实</li>
+  <li><b>取色器</b>：拾取像素颜色给颜色距离算法用</li>
 </ul>
-<p>Per-client rendering — players only see their tokens' vision, DM sees everything.</p>
-<h3 style="margin-top:14px">Original v0 (shelved)</h3>
-<p style="color:var(--text-dim);font-size:11.5px">The earlier "lights + walls + shared-vision toggle" approach is kept here as a design reference; not active.</p>
-<ul style="color:var(--text-dim);font-size:11.5px">
-  <li><b>Dynamic vision:</b> attach a "light source" to any token; light blocked by walls.</li>
-  <li><b>Two-tier radius:</b> inner = color vision, outer = darkvision (greyscale tint).</li>
-  <li><b>Wall sources:</b> ① OBR's native fog/wall drawing tool; ② collision-map editor.</li>
-  <li><b>Shared vision:</b> ON = all players see the union; OFF = per-owner only (DM always all).</li>
-</ul>`,
-    },
-    dynamicBody: (lang) => {
-      const isZh = lang === "zh";
-      const sharedRaw = (() => { try { return localStorage.getItem("com.obr-suite/vision/shared"); } catch { return null; } })();
-      const shared = sharedRaw === null ? true : sharedRaw === "1";
-      return `
-        <div class="row" style="margin-top:8px">
-          <div class="lbl">
-            ${isZh ? "共享视野（玩家可见所有 token 的视野并集）" : "Shared vision (every player sees the union of all tokens' vision)"}
-            <div class="desc">${isZh
-              ? "默认开启。<b>关闭</b>后每个玩家只看自己 owner 的 token 的视野，DM 始终看全部。"
-              : "On by default. When OFF, each player only sees vision from tokens they own; the DM always sees everything."}</div>
-          </div>
-          <button class="tog ${shared ? "on" : ""}" id="vision-shared" type="button" aria-pressed="${shared}"></button>
-        </div>
-      `;
-    },
-    afterRender: (root) => {
-      const btn = root.querySelector<HTMLButtonElement>("#vision-shared");
-      btn?.addEventListener("click", () => {
-        let cur = true;
-        try { cur = localStorage.getItem("com.obr-suite/vision/shared") !== "0"; } catch {}
-        const next = !cur;
-        try { localStorage.setItem("com.obr-suite/vision/shared", next ? "1" : "0"); } catch {}
-        btn.classList.toggle("on", next);
-        btn.setAttribute("aria-pressed", next ? "true" : "false");
-        // Manually fire a storage event so the vision module's own
-        // listener (in the background iframe) re-reads. localStorage
-        // doesn't auto-fire `storage` for the SAME window.
-        try {
-          window.dispatchEvent(new StorageEvent("storage", {
-            key: "com.obr-suite/vision/shared",
-            newValue: next ? "1" : "0",
-          }));
-        } catch {}
-      });
+<h4 style="margin-top:10px">清理 / 后处理</h4>
+<ul>
+  <li><b>开运算</b>：去毛刺、断细噪</li>
+  <li><b>闭运算</b>：连接断点</li>
+  <li><b>面积过滤</b>：删除小于 N 像素的连通块</li>
+  <li><b>选择性填洞</b>：只填面积小于阈值的封闭区域，避免把整张图填满</li>
+</ul>
+<h4 style="margin-top:10px">输出</h4>
+<p>保存后生成<b>单个 Path item</b>（多 subpath，evenodd fillRule），attached 到地图，跟随地图缩放/位移/旋转。低 drawcall，未来可作为视野计算的几何源。</p>
+<p style="color:var(--text-dim);font-size:11.5px">⚠ Dev 通道功能，stable 不可见。</p>`,
+      en: `<h3>Map Fog Editor</h3>
+<p>Right-click a MAP-layer image → <b>Edit Map Fog</b> → fullscreen editor. Workflow is roughly Photoshop's <b>threshold/curves + selection + brush</b> applied to map images, aimed at extracting walls / obstacles as geometry data.</p>
+<h4 style="margin-top:14px">Auto algorithms</h4>
+<ul>
+  <li><b>Grayscale threshold</b>: manual T slider, most predictable</li>
+  <li><b>Otsu</b>: auto-picks the best global T; great for indoor maps</li>
+  <li><b>Adaptive Gaussian</b>: per-pixel neighborhood compare; handles uneven illumination</li>
+  <li><b>Color distance</b>: pick target color + tolerance; defaults to black</li>
+  <li><b>Color exclude (HSV)</b>: drops saturated green (forest) / brown (paths), keeps dark low-saturation pixels — designed for hand-drawn maps</li>
+  <li><b>Saturation-aware</b>: dark AND low-saturation only — for line-art maps</li>
+</ul>
+<h4 style="margin-top:10px">Manual tools</h4>
+<ul>
+  <li><b>Brush / Eraser</b>: direct mask edits</li>
+  <li><b>Lasso / Polygon / Rectangle</b>: enclose region and fill</li>
+  <li><b>Magic wand</b>: click image, selects all adjacent same-color pixels</li>
+  <li><b>Paint bucket</b>: floodFill on the mask — fills hollow wall rectangles</li>
+  <li><b>Picker</b>: pick a pixel color to feed the color-distance algorithm</li>
+</ul>
+<h4 style="margin-top:10px">Refinement</h4>
+<ul>
+  <li><b>Open</b>: removes thin noise</li>
+  <li><b>Close</b>: bridges small gaps</li>
+  <li><b>Area filter</b>: drops connected components below threshold</li>
+  <li><b>Selective hole-fill</b>: fills only enclosed regions below an area cap, so the whole-map background isn't filled</li>
+</ul>
+<h4 style="margin-top:10px">Output</h4>
+<p>Saves as a <b>single Path item</b> (multi-subpath, evenodd fillRule), attached to the map, follows scale / translation / rotation. Low drawcall, ready for future vision-cone calculation.</p>
+<p style="color:var(--text-dim);font-size:11.5px">⚠ Dev-channel feature; not visible in stable.</p>`,
     },
   },
   {
@@ -2316,10 +2750,10 @@ const TABS: TabDef[] = [
   },
 ];
 
-// Stable channel hides: drop tabs whose backing module is hidden
-// behind STABLE_HIDES so the user never sees the entry. Dev channel
-// keeps everything.
-const HIDDEN_TAB_IDS = new Set<string>(STABLE_HIDES ? ["search", "statusTracker"] : []);
+// Stable channel hides modules still in dev; dev keeps them visible.
+const HIDDEN_TAB_IDS = new Set<string>(
+  STABLE_HIDES ? ["fullFog", "follow"] : [],
+);
 const VISIBLE_TABS = TABS.filter((t) => !HIDDEN_TAB_IDS.has(t.id));
 
 // --- DOM refs ---
@@ -2348,6 +2782,12 @@ function moduleLabelKey(id: ModuleId): string {
     case "portals": return lang === "zh" ? "传送门" : "Portals";
     case "bubbles": return lang === "zh" ? "血量气泡" : "HP Bubbles";
     case "statusTracker": return lang === "zh" ? "状态追踪" : "Status Tracker";
+    case "hpBar": return lang === "zh" ? "小血条组件" : "HP Bar";
+    case "metadataInspector": return lang === "zh" ? "元数据检查" : "Metadata Inspector";
+    case "fullFog": return lang === "zh" ? "迷雾编辑" : "Fog Editor";
+    case "trickster": return lang === "zh" ? "捣蛋鬼在哪？" : "Trickster Marker";
+    case "circleImage": return lang === "zh" ? "圆形图片" : "Circle Image";
+    case "follow": return lang === "zh" ? "跟随" : "Follow";
   }
 }
 
@@ -2432,6 +2872,10 @@ langEnEl.addEventListener("click", () => {
 
 OBR.onReady(async () => {
   try { isGM = (await OBR.player.getRole()) === "GM"; } catch {}
+  await refreshBubbleSettings();
+  void loadSupporters().then(() => {
+    if (activeTab === "support") renderContent();
+  });
   // Install debug-overlay listener so this iframe also shows the
   // yellow tint when the user toggles the new debug-mode switch.
   try {
@@ -2439,6 +2883,15 @@ OBR.onReady(async () => {
     m.installDebugOverlay();
   } catch {}
   startSceneSync();
+  OBR.scene.onMetadataChange((meta) => {
+    const next = readBubbleThresholdFromMeta(meta as Record<string, unknown>);
+    const nextAutoScale = readBubbleAutoScaleFromMeta(meta as Record<string, unknown>);
+    if (next !== bubblePlayerThreshold || nextAutoScale !== bubbleAutoScaleText) {
+      bubblePlayerThreshold = next;
+      bubbleAutoScaleText = nextAutoScale;
+      if (activeTab === "bubbles") renderContent();
+    }
+  });
   // Re-render content (including the per-tab toggles + dynamic body) on
   // any suite state change. Language changes are handled separately so the
   // panel reflects another iframe (e.g. cluster) toggling lang.

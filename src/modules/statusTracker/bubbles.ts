@@ -64,6 +64,8 @@ import OBR, {
 import {
   PLUGIN_ID,
   STATUS_BUFFS_KEY,
+  STATUS_BUFF_ROUNDS_KEY,
+  STATUS_RESOURCES_KEY,
   STATUS_EFFECTS_ENABLED,
   BuffDef,
   BuffEffect,
@@ -733,6 +735,9 @@ function hasPluginMetadata(item: Item): boolean {
   if (!m || typeof m !== "object") return false;
   const prefix = `${PLUGIN_ID}/`;
   for (const k of Object.keys(m)) {
+    // These keys live on real tokens. They are state, not rendered
+    // status items, so sweep must never delete the owning character.
+    if (k === STATUS_BUFFS_KEY || k === STATUS_BUFF_ROUNDS_KEY || k === STATUS_RESOURCES_KEY) continue;
     if (k.startsWith(prefix)) return true;
   }
   return false;
@@ -779,6 +784,17 @@ export function readTokenBuffIds(token: Item): string[] {
   const v = token.metadata?.[STATUS_BUFFS_KEY];
   if (Array.isArray(v)) return v.filter((x) => typeof x === "string");
   return [];
+}
+
+export function readTokenBuffRounds(token: Item): Record<string, number> {
+  const v = token.metadata?.[STATUS_BUFF_ROUNDS_KEY];
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  const out: Record<string, number> = {};
+  for (const [id, raw] of Object.entries(v as Record<string, unknown>)) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) out[id] = Math.floor(n);
+  }
+  return out;
 }
 
 /** Write buff-id list to a token's metadata. */

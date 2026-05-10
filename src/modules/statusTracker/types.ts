@@ -2,6 +2,7 @@
 
 export const PLUGIN_ID = "com.obr-suite/status";
 export const STATUS_BUFFS_KEY = `${PLUGIN_ID}/buffs`;
+export const STATUS_BUFF_ROUNDS_KEY = `${PLUGIN_ID}/buff-rounds`;
 export const STATUS_RESOURCES_KEY = `${PLUGIN_ID}/resources`;
 
 export const SCENE_BUFF_CATALOG_KEY = `${PLUGIN_ID}/buff-catalog`;
@@ -67,6 +68,8 @@ export interface BuffDef {
   name: string;
   /** Hex color like #ff00d0. Used as the bubble background. */
   color: string;
+  /** Default remaining combat rounds when the buff is applied. */
+  rounds?: number;
   group?: string;
   /** Visual mode. Defaults to "default" (static curved bubble). */
   effect?: BuffEffect;

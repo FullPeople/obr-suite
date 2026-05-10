@@ -69,6 +69,8 @@ const ICON_URL = assetUrl("cc-icon.svg");
 
 const BIND_META = `${PLUGIN_ID}/boundCardId`;
 const SCENE_META_KEY = `${PLUGIN_ID}/list`;
+const BUBBLES_META_KEY = "com.obr-suite/bubbles/data";
+const EXTERNAL_BUBBLES_META_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
 const AUTO_INFO_KEY = "character-cards/auto-info";
 const TOGGLE_MSG = `${PLUGIN_ID}/auto-info-toggled`;
 const INFO_SHOW_MSG = `${PLUGIN_ID}/info-show`;
@@ -94,6 +96,8 @@ let currentInfoCard: string | null = null;
 // URL would force OBR to reload the iframe).
 let currentInfoItemId: string | null = null;
 let panelOpen = false;
+let ccMyId = "";
+let ccRole: "GM" | "PLAYER" = "PLAYER";
 
 function isAutoInfoEnabled(): boolean {
   try {
@@ -207,8 +211,18 @@ async function showInfoFor(cardId: string, itemId: string | null = null) {
 }
 
 async function hideInfo() {
+  // 2026-05-10: when the user has pinned the panel via the new
+  // panel-pin button, selection-driven close is suppressed. Explicit
+  // closes (closeInfoPopover via panel-close action, scene unload)
+  // still go through.
+  if (isCcInfoPinned()) return;
   if (!infoPopoverOpen && currentInfoCard === null) return;
   await closeInfoPopover();
+}
+
+const LS_CC_INFO_PINNED = "obr-suite/cc-info-pinned";
+function isCcInfoPinned(): boolean {
+  try { return localStorage.getItem(LS_CC_INFO_PINNED) === "1"; } catch { return false; }
 }
 
 async function getSceneCardIds(): Promise<Set<string>> {
@@ -231,10 +245,23 @@ async function handleSelection(selection: string[] | undefined) {
     return;
   }
   let boundId: string | null = null;
+  let ownsItem = false;
+  let hasAnyPlayerOwner = false;
+  let locked = true; // default locked
+  const itemId = selection[0];
   try {
     const items = await OBR.scene.items.getItems(selection);
-    const m = items[0]?.metadata?.[BIND_META];
+    const item = items[0];
+    const m = item?.metadata?.[BIND_META];
     if (typeof m === "string") boundId = m;
+    const createdUserId = (item as any)?.createdUserId;
+    if (item && createdUserId === ccMyId) ownsItem = true;
+    if (typeof createdUserId === "string" && createdUserId.length > 0) hasAnyPlayerOwner = true;
+    // Check bubbles lock state
+    const bubblesMeta = item?.metadata?.[BUBBLES_META_KEY] ?? item?.metadata?.[EXTERNAL_BUBBLES_META_KEY];
+    if (bubblesMeta && typeof bubblesMeta === "object" && "locked" in bubblesMeta) {
+      locked = !!bubblesMeta.locked;
+    }
   } catch {}
   if (!boundId) {
     if (currentInfoCard) await hideInfo();
@@ -242,6 +269,11 @@ async function handleSelection(selection: string[] | undefined) {
   }
   const known = await getSceneCardIds();
   if (!known.has(boundId)) {
+    if (currentInfoCard) await hideInfo();
+    return;
+  }
+  const canShow = ccRole === "GM" || ownsItem || (!locked && hasAnyPlayerOwner);
+  if (!canShow) {
     if (currentInfoCard) await hideInfo();
     return;
   }
@@ -255,6 +287,12 @@ async function handleSelection(selection: string[] | undefined) {
 }
 
 export async function setupCharacterCards(): Promise<void> {
+  try {
+    const p = await OBR.player.getRole();
+    ccRole = (p as "GM" | "PLAYER") || "PLAYER";
+    ccMyId = await OBR.player.getId();
+  } catch {}
+
   // The main panel opens/closes on broadcast from the cluster button or
   // from the Shift keyboard shortcut registered below.
   unsubs.push(
@@ -315,7 +353,9 @@ export async function setupCharacterCards(): Promise<void> {
     })
   );
 
-  // Right-click context menu (GM only) to bind a card.
+  // Right-click context menu (GM only) to bind a card. Restricted to
+  // CHARACTER-layer tokens — non-character props can't be bound to
+  // a character card (2026-05-10).
   await OBR.contextMenu.create({
     id: CTX_BIND,
     icons: [
@@ -324,7 +364,10 @@ export async function setupCharacterCards(): Promise<void> {
         label: "绑定角色卡",
         filter: {
           roles: ["GM"],
-          every: [{ key: "type", value: "IMAGE" }],
+          every: [
+            { key: "type", value: "IMAGE" },
+            { key: "layer", value: "CHARACTER" },
+          ],
           max: 1,
         },
       },
@@ -370,8 +413,9 @@ export async function setupCharacterCards(): Promise<void> {
   // Hide info if the bound card was deleted from scene metadata, or its
   // host token was removed.
   unsubs.push(
-    OBR.scene.onMetadataChange(async () => {
+    OBR.scene.onMetadataChange(async (meta) => {
       if (!currentInfoCard) return;
+      if (!("com.character-cards/list" in meta)) return;
       const known = await getSceneCardIds();
       if (!known.has(currentInfoCard)) await hideInfo();
     })

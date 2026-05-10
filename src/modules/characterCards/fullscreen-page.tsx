@@ -1,7 +1,31 @@
 import { render } from "preact";
 import { useEffect, useState, useMemo, useCallback } from "preact/hooks";
+import OBR from "@owlbear-rodeo/sdk";
 import { fireQuickRoll } from "../dice/tags";
 import { subscribeToSfx } from "../dice/sfx-broadcast";
+import { patchBubbles } from "../../utils/statEdit";
+
+// Token-binding metadata key — must mirror modules/characterCards/index.ts
+// so we can locate every token in the scene that's bound to the
+// currently-open card. Used by the StatsBanner edit handlers to push
+// HP / AC changes through to the bubbles plugin.
+const BIND_META_KEY = "com.character-cards/boundCardId";
+
+// Click a spell / feature / feat name → fire BC_SEARCH_QUERY so the
+// global-search popover opens with that name pre-filled and auto-pins
+// the first hit. LOCAL only — sending REMOTE causes every receiving
+// client to also open their own search.
+function fireNameSearch(q: string): void {
+  const trimmed = (q || "").trim();
+  if (!trimmed) return;
+  try {
+    OBR.broadcast.sendMessage(
+      "com.obr-suite/search-query",
+      { q: trimmed, autoPin: true },
+      { destination: "LOCAL" },
+    );
+  } catch {}
+}
 
 // ============================================================
 // Full-screen character card v2 — data-driven Preact renderer
@@ -31,6 +55,12 @@ import { subscribeToSfx } from "../dice/sfx-broadcast";
 // third-party widget.
 
 const SERVER_ORIGIN = "https://obr.dnd.center";
+
+// Broadcast id mirrored from panel-page.ts. When any client uploads,
+// refreshes, or imports a card data.json, it sends BC_CARD_UPDATED so
+// every other client viewing the same cardId can re-fetch and stay in
+// sync without a manual refresh.
+const BC_CARD_UPDATED = "com.obr-suite/cc-card-updated";
 
 // ===== Types ================================================
 interface CharacterData {
@@ -237,7 +267,7 @@ function StatsBanner({
 
 function rollExpr(label: string, expr: string, advMode?: "adv" | "dis") {
   if (!expr) return;
-  fireQuickRoll({ expression: expr, label, advMode }).catch(() => {});
+  fireQuickRoll({ expression: expr, label, advMode });
 }
 
 function AbilitiesAndSkills({ data }: { data: CharacterData }) {
@@ -491,11 +521,15 @@ function SpellsSection({ data }: { data: CharacterData }) {
       <>
         <div class="spell"
           onClick={() => setOpenSpell(isOpen ? null : key)}
-          title="点击展开法术详情">
+          title="点击展开法术详情 · 点击名字直接搜索">
           <span class={`spell-lv ${(s.level ?? 0) === 0 ? "cantrip" : ""}`}>
             {(s.level ?? 0) === 0 ? "戏" : `${s.level}环`}
           </span>
-          <span class="spell-name">{s.name}</span>
+          <span
+            class="spell-name srch-name"
+            title={`搜索 ${s.name}`}
+            onClick={(e: MouseEvent) => { e.stopPropagation(); fireNameSearch(s.name); }}
+          >{s.name}</span>
           {s.meta?.concentration && <span class="spell-tag conc">专注</span>}
           {s.meta?.ritual && <span class="spell-tag ritual">仪式</span>}
         </div>
@@ -599,9 +633,17 @@ function FeatureBlock({ title, items }: { title: string; items: any[] }) {
         const isOpen = openIdx === i;
         return (
           <div class={`feat ${isOpen ? "is-open" : ""}`}>
-            <div class="feat-h" onClick={() => setOpenIdx(isOpen ? null : i)}>
+            <div
+              class="feat-h"
+              onClick={() => setOpenIdx(isOpen ? null : i)}
+              title="点击展开 · 点击名字直接搜索"
+            >
               <span class="feat-name">
-                {f.name}
+                <span
+                  class="srch-name"
+                  title={`搜索 ${f.name}`}
+                  onClick={(e: MouseEvent) => { e.stopPropagation(); fireNameSearch(f.name); }}
+                >{f.name}</span>
                 {f.level != null && <span class="lv">Lv{f.level}</span>}
                 {f.category && <span class="lv" style={{ borderColor: "var(--teal-soft)", color: "var(--teal)" }}>{f.category}</span>}
               </span>
@@ -780,11 +822,60 @@ function App() {
 
   useEffect(() => { void loadData(); }, [loadData]);
 
-  // Patch handler — for now updates local state only. Future: PUT to
-  // server when /api/character/<room>/<card>/data endpoint exists.
+  // Multi-client sync — when another client imports / refreshes this
+  // same card, BC_CARD_UPDATED arrives on REMOTE; we re-fetch
+  // data.json so the open fullscreen panel reflects the change live
+  // (no manual refresh button click).
+  useEffect(() => {
+    if (!cardId) return;
+    const unsub = OBR.broadcast.onMessage(BC_CARD_UPDATED, (event) => {
+      const payload = event.data as { cardId?: string } | undefined;
+      if (payload?.cardId !== cardId) return;
+      void loadData();
+    });
+    return unsub;
+  }, [cardId, loadData]);
+
+  // Patch handler — updates local state AND propagates HP / AC edits
+  // to the bound token(s)' bubbles metadata so the HP-bar overlay on
+  // canvas reflects the change in real time.
+  //
+  // 2026-05-10 fix: previously the fullscreen edit path only updated
+  // local in-iframe state, so the bubbles plugin (which reads OBR
+  // scene metadata) showed stale data — user reported "血条数据错了，
+  // 还在使用 Stat Bubbles 的元数据". The propagation step finds every
+  // token in the scene whose `com.character-cards/boundCardId` equals
+  // this card's id and calls `patchBubbles` for each, which writes
+  // through the upstream-compat key (`health` / `max health` / etc.)
+  // that the bubbles renderer already listens to.
   const onPatch = useCallback((patch: Partial<CharacterData>) => {
     setData((prev) => prev ? { ...prev, ...patch } : prev);
-  }, []);
+    // Translate `core_stats.hp.* / .ac` deltas into the bubbles patch
+    // shape and push to OBR. Nothing to do if the patch doesn't touch
+    // core_stats — saves a scene-items query on every keystroke that
+    // edits unrelated fields.
+    const cs = (patch as any)?.core_stats;
+    if (!cs || typeof cs !== "object") return;
+    const bubblesPatch: Record<string, unknown> = {};
+    if (cs.hp && typeof cs.hp === "object") {
+      if (typeof cs.hp.current === "number") bubblesPatch["health"] = cs.hp.current;
+      if (typeof cs.hp.max === "number")     bubblesPatch["max health"] = cs.hp.max;
+      if (typeof cs.hp.temp === "number")    bubblesPatch["temporary health"] = cs.hp.temp;
+    }
+    if (typeof cs.ac === "number") bubblesPatch["armor class"] = cs.ac;
+    if (Object.keys(bubblesPatch).length === 0) return;
+    void (async () => {
+      try {
+        const items = await OBR.scene.items.getItems(
+          (it: any) =>
+            (it.metadata as Record<string, unknown> | undefined)?.[BIND_META_KEY] === cardId,
+        );
+        await Promise.all(items.map((it) => patchBubbles(it.id, bubblesPatch)));
+      } catch (e) {
+        console.warn("[cc-fullscreen] bubbles propagate failed", e);
+      }
+    })();
+  }, [cardId]);
 
   const onExport = useCallback(() => {
     if (!data) return;
@@ -798,55 +889,129 @@ function App() {
     if (!inp) return;
     inp.value = "";
     inp.onchange = async () => {
-      const f = inp.files?.[0];
-      if (!f) return;
-      try {
-        const text = await f.text();
-        const parsed = JSON.parse(text);
-        if (!parsed || typeof parsed !== "object" || !("abilities" in parsed || "identity" in parsed)) {
-          window.alert("JSON 不像是角色卡数据（缺少 identity / abilities 字段）");
-          return;
-        }
-        // Update local state immediately for snappy UI feedback.
-        setData(parsed);
-
-        // Persist to server so other clients pick it up on their
-        // next fetch / refresh. Falls back to local-only preview
-        // when the PUT endpoint isn't available (e.g. older server
-        // build that doesn't have /data PUT yet).
-        try {
-          const url = `${SERVER_ORIGIN}/api/character/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data`;
-          const res = await fetch(url, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(parsed),
-          });
-          if (!res.ok) {
-            const body = await res.text();
-            window.alert(
-              `已加载本地 JSON。\n但保存到服务器失败（HTTP ${res.status}），仅本地预览：\n${body.slice(0, 200)}`,
-            );
-            return;
-          }
-          const result = await res.json();
-          if (result.render_warning) {
-            window.alert(
-              `已保存到服务器，但旧版静态 HTML 渲染失败：${result.render_warning}\n（不影响新全屏面板查看）`,
-            );
-          } else {
-            window.alert(`✓ 已保存为 ${result.name}\n其他客户端刷新后可看到。`);
-          }
-        } catch (e: any) {
-          window.alert(
-            `已加载本地 JSON。\n但保存到服务器失败，仅本地预览：${e?.message || String(e)}`,
-          );
-        }
-      } catch (e: any) {
-        window.alert(`导入失败：${e?.message || String(e)}`);
-      }
+      const files = inp.files ? Array.from(inp.files) : [];
+      if (files.length === 0) return;
+      await processImportFiles(files);
     };
     inp.click();
   }, [roomId, cardId]);
+
+  // 2026-05-10: multi-file import. Each file is dispatched by
+  // extension:
+  //   .json   → PUT to /data on a card. The FIRST json updates the
+  //             current card (matches the legacy single-import flow);
+  //             subsequent jsons need a destination, so we surface
+  //             them in the summary as "skipped — already imported
+  //             current card".
+  //   .xlsx   → POST to /upload (creates a new card with the room).
+  //             Multiple xlsx → multiple new cards, sequentially.
+  // The summary alert at the end reports per-file outcomes.
+  const processImportFiles = useCallback(async (files: File[]) => {
+    const summary: string[] = [];
+    let currentJsonImported = false;
+
+    for (const f of files) {
+      const lower = f.name.toLowerCase();
+      if (lower.endsWith(".json")) {
+        if (currentJsonImported) {
+          summary.push(`⏭ ${f.name} (跳过 — 已导入当前卡，多个 JSON 无法批量替换)`);
+          continue;
+        }
+        try {
+          const text = await f.text();
+          const parsed = JSON.parse(text);
+          if (!parsed || typeof parsed !== "object" || !("abilities" in parsed || "identity" in parsed)) {
+            summary.push(`✕ ${f.name} (不像角色卡 JSON，缺少 identity / abilities 字段)`);
+            continue;
+          }
+          setData(parsed);
+          try {
+            const url = `${SERVER_ORIGIN}/api/character/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data`;
+            const res = await fetch(url, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(parsed),
+            });
+            if (!res.ok) {
+              const body = await res.text();
+              summary.push(`⚠ ${f.name} (本地预览，服务器保存失败 HTTP ${res.status}: ${body.slice(0, 120)})`);
+            } else {
+              const result = await res.json();
+              try {
+                OBR.broadcast.sendMessage(
+                  BC_CARD_UPDATED,
+                  { cardId, url: `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/` },
+                  { destination: "REMOTE" },
+                );
+              } catch {}
+              summary.push(`✓ ${f.name} → ${result.name || "current card"}`);
+              if (result.render_warning) {
+                summary.push(`  (旧版 HTML 渲染告警：${result.render_warning})`);
+              }
+            }
+          } catch (e: any) {
+            summary.push(`⚠ ${f.name} (服务器保存失败: ${e?.message || String(e)})`);
+          }
+          currentJsonImported = true;
+        } catch (e: any) {
+          summary.push(`✕ ${f.name} (JSON 解析失败: ${e?.message || String(e)})`);
+        }
+      } else if (lower.endsWith(".xlsx")) {
+        // POST /upload — same endpoint as cc-panel's xlsx upload
+        // path. Creates a new card. We don't have the player name
+        // here (it lives in cc-panel state), so use "fullscreen-import"
+        // as the uploader label.
+        try {
+          const fd = new FormData();
+          fd.append("file", f);
+          const u = encodeURIComponent("fullscreen-import");
+          const r = await fetch(
+            `${SERVER_ORIGIN}/api/character/upload?room=${encodeURIComponent(roomId)}&uploader=${u}`,
+            { method: "POST", body: fd },
+          );
+          if (!r.ok) {
+            const body = await r.text();
+            summary.push(`✕ ${f.name} (xlsx 上传失败 HTTP ${r.status}: ${body.slice(0, 120)})`);
+          } else {
+            const entry = await r.json();
+            summary.push(`✓ ${f.name} → 新卡 "${entry.name}"`);
+          }
+        } catch (e: any) {
+          summary.push(`✕ ${f.name} (xlsx 上传失败: ${e?.message || String(e)})`);
+        }
+      } else {
+        summary.push(`✕ ${f.name} (不支持的扩展名 — 仅支持 .json / .xlsx)`);
+      }
+    }
+
+    window.alert(
+      `导入结果（${files.length} 个文件）：\n\n${summary.join("\n")}` +
+      `\n\n（其他客户端会自动刷新已存在的卡片；新建的卡片需要他们刷新一下面板列表。）`,
+    );
+  }, [roomId, cardId]);
+
+  // 2026-05-10: drag-drop multi-file import. Drop anywhere on the
+  // fullscreen view to trigger processImportFiles. dragOver suppresses
+  // the default "open file in browser" behaviour.
+  useEffect(() => {
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) {
+        e.preventDefault();
+      }
+    };
+    const onDrop = async (e: DragEvent) => {
+      const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
+      if (files.length === 0) return;
+      e.preventDefault();
+      await processImportFiles(files);
+    };
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, [processImportFiles]);
 
   if (error) {
     return <div class="cc-error">{error}</div>;

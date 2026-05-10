@@ -117,7 +117,8 @@ export async function setupCrossSceneCards(): Promise<void> {
     }),
   );
   unsubs.push(
-    OBR.scene.onMetadataChange(async () => {
+    OBR.scene.onMetadataChange(async (meta) => {
+      if (!(SCENE_CARDS_KEY in meta)) return;
       await mirrorCardsIfChanged();
     }),
   );

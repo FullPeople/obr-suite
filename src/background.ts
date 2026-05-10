@@ -11,12 +11,17 @@ import {
 } from "./modules/characterCards";
 import { setupDice, teardownDice } from "./modules/dice";
 import { setupPortals, teardownPortals } from "./modules/portals";
+import { setupTrickster, teardownTrickster } from "./modules/trickster";
+import { setupCircleImage, teardownCircleImage } from "./modules/circleImage";
+import { setupFollow, teardownFollow } from "./modules/follow";
+import { setupResourceTracker } from "./modules/resourceTracker";
 import { setupBubbles, teardownBubbles } from "./modules/bubbles";
 import { setupStatusTracker, teardownStatusTracker } from "./modules/statusTracker";
 import { setupHpBar, teardownHpBar } from "./modules/hpBar";
 import { setupMetadataInspector, teardownMetadataInspector } from "./modules/metadata-inspector";
-import { setupVision, teardownVision } from "./modules/vision";
+import { setupFullFog, teardownFullFog } from "./modules/fullFog";
 import { setupCrossSceneCards } from "./modules/cross-scene-cards";
+import { setupPerfWindow } from "./modules/perfWindow";
 import { assetUrl } from "./asset-base";
 import { onViewportResize } from "./utils/viewportAnchor";
 import { STABLE_HIDES } from "./feature-flags";
@@ -104,6 +109,13 @@ const TRIGGER_LEFT_OFFSET = 60;
 const TRIGGER_BOTTOM_OFFSET = 5;
 const MOBILE_TRIGGER_LEFT_OFFSET = 16;
 const MOBILE_TRIGGER_BOTTOM_OFFSET = 5;
+// On mobile the trigger renders at half size so it doesn't dominate
+// the (already cramped) screen real estate. The iframe's CSS reads
+// `?mobile=1` from the URL and applies `transform: scale(0.5)`-style
+// adjustments to the inner buttons; here we just shrink the popover
+// dimensions so its hit-area matches the rendered visual.
+const MOBILE_TRIGGER_W = 46;
+const MOBILE_TRIGGER_H = 32;
 
 // Row popover hugs the LEFT viewport edge (independent of the
 // trigger's horizontal offset). Width caps at 640px; height fixed
@@ -136,6 +148,30 @@ const IS_MOBILE = isMobileDevice();
 //   • 全局搜索 / Global Search           (popover not registered)
 const BC_MOBILE_PRESENCE = "com.obr-suite/mobile-presence";
 const seenMobilePlayers = new Set<string>();
+const ANNOUNCEMENT_MODAL_ID = "com.obr-suite/dm-announcement";
+const LS_ANNOUNCEMENT_AUTO_DATE = "obr-suite/announcement-auto-date";
+
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function openDailyAnnouncement(): Promise<void> {
+  const today = todayKey();
+  try {
+    if (localStorage.getItem(LS_ANNOUNCEMENT_AUTO_DATE) === today) return;
+    localStorage.setItem(LS_ANNOUNCEMENT_AUTO_DATE, today);
+  } catch {}
+  try {
+    await OBR.modal.open({
+      id: ANNOUNCEMENT_MODAL_ID,
+      url: assetUrl("dm-announcement.html?auto=1"),
+      width: 560,
+      height: 580,
+    });
+  } catch (e) {
+    console.warn("[obr-suite] daily announcement open failed", e);
+  }
+}
 
 function disabledFeaturesText(lang: "zh" | "en"): string {
   return lang === "zh"
@@ -184,22 +220,31 @@ function setupMobilePresenceListener(): void {
 
 function getTriggerLeft(): number { return IS_MOBILE ? MOBILE_TRIGGER_LEFT_OFFSET : TRIGGER_LEFT_OFFSET; }
 function getTriggerBottom(): number { return IS_MOBILE ? MOBILE_TRIGGER_BOTTOM_OFFSET : TRIGGER_BOTTOM_OFFSET; }
+function getTriggerW(): number { return IS_MOBILE ? MOBILE_TRIGGER_W : TRIGGER_W; }
+function getTriggerH(): number { return IS_MOBILE ? MOBILE_TRIGGER_H : TRIGGER_H; }
 
 async function openCluster() {
   try {
     const vh = await OBR.viewport.getHeight();
     const userOff = getPanelOffset(PANEL_IDS.cluster);
     const left = getTriggerLeft() + userOff.dx;
-    const bottom = getTriggerBottom() + userOff.dy;
+    // DY SIGN: anchorOrigin=BOTTOM so anchorPosition.top = vh - bottom
+    // is the y of the panel's BOTTOM edge. Positive userOff.dy (user
+    // dragged DOWN) should move the panel down → panel-bottom-y bigger
+    // → bottom-distance smaller → SUBTRACT dy. Was using `+ dy` which
+    // inverted: drag-down moved panel UP, eventually clamping it
+    // against the top edge of the viewport so subsequent vertical
+    // drags had no effect — the user-reported "only horizontal" bug.
+    const bottom = getTriggerBottom() - userOff.dy;
     // Side-aware drag handle — compute up front so the iframe can
     // render its handle on the correct edge from first paint instead
     // of relying on the post-broadcast flip.
     const side = await computePanelSideAndBroadcast(PANEL_IDS.cluster);
     await OBR.popover.open({
       id: CLUSTER_POPOVER_ID,
-      url: `${CLUSTER_URL}?side=${side}`,
-      width: TRIGGER_W,
-      height: TRIGGER_H,
+      url: `${CLUSTER_URL}?side=${side}${IS_MOBILE ? "&mobile=1" : ""}`,
+      width: getTriggerW(),
+      height: getTriggerH(),
       anchorReference: "POSITION",
       anchorPosition: { left, top: vh - bottom },
       anchorOrigin: { horizontal: "LEFT", vertical: "BOTTOM" },
@@ -231,7 +276,7 @@ async function openClusterRow() {
     // top via rowOff alone.
     const rowOff = getPanelOffset(PANEL_IDS.clusterRow);
     const triggerBottomDefault = getTriggerBottom();
-    const triggerTopDefault = triggerBottomDefault + TRIGGER_H;
+    const triggerTopDefault = triggerBottomDefault + getTriggerH();
     const rowAnchorTop = vh - (triggerTopDefault + ROW_GAP) + rowOff.dy;
     const rowAnchorLeft = ROW_LEFT_OFFSET + rowOff.dx;
     const side = await computePanelSideAndBroadcast(PANEL_IDS.clusterRow);
@@ -277,17 +322,18 @@ let clusterIsOpen = false;
 let clusterRowIsOpen = false;
 
 // Cluster bbox provider — bottom-LEFT, fixed-size trigger.
+// Sign convention matches openCluster (subtract dy from bottom-distance).
 registerPanelBbox(PANEL_IDS.cluster, async () => {
   try {
     const vh = await OBR.viewport.getHeight();
     const userOff = getPanelOffset(PANEL_IDS.cluster);
     const left = getTriggerLeft() + userOff.dx;
-    const bottom = getTriggerBottom() + userOff.dy;
+    const bottom = getTriggerBottom() - userOff.dy;
     return {
       left,
-      top: vh - bottom - TRIGGER_H,
-      width: TRIGGER_W,
-      height: TRIGGER_H,
+      top: vh - bottom - getTriggerH(),
+      width: getTriggerW(),
+      height: getTriggerH(),
     };
   } catch { return null; }
 });
@@ -301,7 +347,7 @@ registerPanelBbox(PANEL_IDS.clusterRow, async () => {
     const vh = await OBR.viewport.getHeight();
     const rowOff = getPanelOffset(PANEL_IDS.clusterRow);
     const triggerBottomDefault = getTriggerBottom();
-    const triggerTopDefault = triggerBottomDefault + TRIGGER_H;
+    const triggerTopDefault = triggerBottomDefault + getTriggerH();
     const rowTop = vh - (triggerTopDefault + ROW_GAP) + rowOff.dy - ROW_H;
     const rowLeft = ROW_LEFT_OFFSET + rowOff.dx;
     return {
@@ -309,38 +355,6 @@ registerPanelBbox(PANEL_IDS.clusterRow, async () => {
       top: rowTop,
       width: ROW_W,
       height: ROW_H,
-    };
-  } catch { return null; }
-});
-
-// Dice-history TRIGGER button bbox. Dice module's bottom-right d20
-// button — independent panel so the layout editor can show / move
-// it without touching the history popover above it. Width matches
-// HISTORY_TRIGGER_W in dice/index.ts (92px after the drag-grip
-// expansion).
-registerPanelBbox(PANEL_IDS.diceHistoryTrigger, async () => {
-  try {
-    const [vw, vh] = await Promise.all([
-      OBR.viewport.getWidth(),
-      OBR.viewport.getHeight(),
-    ]);
-    const userOff = getPanelOffset(PANEL_IDS.diceHistoryTrigger);
-    const W = 92;
-    const H = 64;
-    // Default base offsets must match dice/index.ts'
-    // HISTORY_TRIGGER_RIGHT_OFFSET (75) and
-    // HISTORY_TRIGGER_BOTTOM_OFFSET (5). The earlier `bottom = 0 - dy`
-    // was off by 5px which caused the drag-preview ghost to start at
-    // a y-position 5px below the actual rendered iframe — and after
-    // accumulated drags the panel could pin against the bottom edge
-    // because each ghost-vs-real mismatch nudged the offset further.
-    const right = 75 - userOff.dx;
-    const bottom = 5 - userOff.dy;
-    return {
-      left: vw - right - W,
-      top: vh - bottom - H,
-      width: W,
-      height: H,
     };
   } catch { return null; }
 });
@@ -402,8 +416,8 @@ OBR.onReady(() => {
     const panelIds = [
       PANEL_IDS.cluster,
       PANEL_IDS.clusterRow,
-      PANEL_IDS.diceHistoryTrigger,
       PANEL_IDS.diceHistory,
+      PANEL_IDS.perfWindow,
       PANEL_IDS.search,
       PANEL_IDS.initiative,
       PANEL_IDS.bestiaryPanel,
@@ -542,17 +556,22 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
     setup: async () => { await setupMetadataInspector(); },
     teardown: async () => { teardownMetadataInspector(); },
   },
-  vision: {
-    setup: async () => { await setupVision(); },
-    teardown: async () => { await teardownVision(); },
-  },
-  // Stable channel hides search + status-tracker until they're polished
-  // enough for the public listing. Dev keeps them in.
+  statusTracker: { setup: setupStatusTracker, teardown: teardownStatusTracker },
+  search: { setup: setupSearch, teardown: teardownSearch },
+  // Trickster + circle-image promoted from dev to stable on 2026-05-08.
+  trickster: { setup: setupTrickster, teardown: teardownTrickster },
+  circleImage: { setup: setupCircleImage, teardown: teardownCircleImage },
+  // fullFog stays dev-only — door / window cutting still in design.
   ...(STABLE_HIDES
     ? {}
     : {
-        statusTracker: { setup: setupStatusTracker, teardown: teardownStatusTracker },
-        search: { setup: setupSearch, teardown: teardownSearch },
+        fullFog: {
+          setup: async () => { await setupFullFog(); },
+          teardown: async () => { await teardownFullFog(); },
+        },
+        // Follow plugin — dev-only on first ship; promote once
+        // cycles / dead-target / cross-scene scenarios are tested.
+        follow: { setup: setupFollow, teardown: teardownFollow },
       }),
 };
 
@@ -565,10 +584,11 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
 type ModuleState = "off" | "starting" | "on" | "stopping";
 const moduleStatus = new Map<string, ModuleState>();
 
-async function syncModules() {
+async function syncModules(onlyIds?: Set<string>) {
   const state = getState();
   for (const [id, hooks] of Object.entries(modules)) {
     if (!hooks) continue;
+    if (onlyIds && !onlyIds.has(id)) continue;
     const wantOn = !!state.enabled[id as keyof typeof state.enabled];
     const status = moduleStatus.get(id) ?? "off";
     if (wantOn && status === "off") {
@@ -597,10 +617,29 @@ async function syncModules() {
   }
 }
 
+let lastEnabledSnapshot: Record<string, boolean> | null = null;
+function changedEnabledIds(): Set<string> | undefined {
+  const enabled = getState().enabled as Record<string, boolean>;
+  if (!lastEnabledSnapshot) {
+    lastEnabledSnapshot = { ...enabled };
+    return undefined;
+  }
+  const changed = new Set<string>();
+  for (const id of Object.keys(enabled)) {
+    if (enabled[id] !== lastEnabledSnapshot[id]) changed.add(id);
+  }
+  lastEnabledSnapshot = { ...enabled };
+  return changed.size > 0 ? changed : new Set<string>();
+}
+
 OBR.onReady(async () => {
   // Sync state, then open cluster + activate all enabled modules.
   startSceneSync();
-  onStateChange(() => syncModules());
+  onStateChange(() => {
+    const changed = changedEnabledIds();
+    if (changed && changed.size === 0) return;
+    void syncModules(changed);
+  });
 
   // Mobile-presence: every client listens; phones additionally
   // broadcast their flag at scene-ready so others know which player
@@ -612,6 +651,20 @@ OBR.onReady(async () => {
   // module so it's a no-op when the user hasn't enabled the toggle.
   void setupCrossSceneCards();
 
+  // Perf window — per-client opt-in via localStorage. The setup call
+  // is cheap (just a localStorage read + maybe one popover.open) so
+  // we always run it; it's a no-op when the user hasn't enabled it.
+  void setupPerfWindow();
+
+  // Resource tracker — owns the lifecycle of the edit modal that
+  // pops out of the bestiary / character-card panels. Setup just
+  // wires four broadcast listeners; nothing happens until the
+  // resource-tracker UI inside a popover broadcasts an open
+  // request, so it's safe to always run. The panel-side mount
+  // (monster-info-page.ts) is gated by STABLE_HIDES so the tab
+  // strip only appears in dev for now.
+  void setupResourceTracker();
+
   // (metadataInspector is now wired through the module registry —
   // its enable flag lives in state.enabled.metadataInspector and is
   // toggled in Settings → 元数据检查.)
@@ -620,8 +673,10 @@ OBR.onReady(async () => {
     try {
       if (await OBR.scene.isReady()) {
         await openCluster();
+        changedEnabledIds();
         await syncModules();
         void announceMobilePresence();
+        void openDailyAnnouncement();
         // (Auto-show removed — the cluster's megaphone button drives
       // the announcement modal now; see cluster.ts.)
       } else {
@@ -635,6 +690,7 @@ OBR.onReady(async () => {
       await openCluster();
       await syncModules();
       void announceMobilePresence();
+      void openDailyAnnouncement();
       // (Auto-show removed — the cluster's megaphone button drives
       // the announcement modal now; see cluster.ts.)
     } else {

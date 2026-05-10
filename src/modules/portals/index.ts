@@ -11,6 +11,8 @@ import {
 import {
   PLUGIN_ID,
   PORTAL_KEY,
+  CREATE_PREFS_KEY,
+  CreatePrefs,
   PortalMeta,
 } from "./types";
 import { t } from "../../i18n";
@@ -231,7 +233,15 @@ async function clearPreview() {
 // --- Create portal --------------------------------------------------------
 
 async function createPortal(center: { x: number; y: number }, radius: number) {
-  const meta: PortalMeta = { name: "", tag: "", radius };
+  let prefs: CreatePrefs = {};
+  try {
+    const raw = localStorage.getItem(CREATE_PREFS_KEY);
+    if (raw) prefs = JSON.parse(raw) as CreatePrefs;
+  } catch {}
+  const showName = prefs.showName === true;
+  const visible = prefs.visible !== false;
+  const locked = prefs.locked === true;
+  const meta: PortalMeta = { name: "", tag: "", radius, showName, visible, locked };
   // Same pattern as the bestiary's monster spawn (modules/bestiary/spawn.ts):
   //   - dpi = ICON_SIZE → with scale=1 the icon renders at exactly 1 cell.
   //   - offset = image-center → OBR places the offset point at `position`,
@@ -260,8 +270,8 @@ async function createPortal(center: { x: number; y: number }, radius: number) {
     .scale({ x: s, y: s })
     .name(_t("portalToolName"))
     .layer("PROP")
-    .visible(true)
-    .locked(false)
+    .visible(visible)
+    .locked(locked)
     .metadata({ [PORTAL_KEY]: meta })
     .build();
   await OBR.scene.items.addItems([img]);
@@ -1300,6 +1310,9 @@ export async function setupPortals(): Promise<void> {
               name: data.name,
               tag: data.tag,
               radius: cur.radius,
+              showName: cur.showName,
+              visible: cur.visible,
+              locked: cur.locked,
             };
           }
         });

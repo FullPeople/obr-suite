@@ -14,6 +14,7 @@ import {
 import { BC_LOCAL_CONTENT_CHANGED } from "../../utils/localContent";
 import { clearMonsterCache } from "./data";
 import { onStateChange, getState } from "../../state";
+import { createCanvasDragMode } from "../../utils/canvasDragMode";
 
 // Bestiary list panel bbox — RIGHT/TOP anchor. Always returns the
 // expected bbox even when the panel isn't open (layout editor uses
@@ -110,7 +111,8 @@ const BC_MONSTER_DRAG_CANCEL = "com.obr-suite/bestiary-drag-cancel";
 
 // Bubbles + Initiative metadata keys used when binding (must match
 // spawn.ts so existing tokens look identical to freshly-spawned ones).
-const BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
+const BUBBLES_META = "com.obr-suite/bubbles/data";
+const EXTERNAL_BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
 const BUBBLES_NAME = "com.owlbear-rodeo-bubbles-extension/name";
 const INITIATIVE_MODKEY = "com.initiative-tracker/dexMod";
 
@@ -229,8 +231,18 @@ async function showInfoFor(slug: string, itemId: string | null) {
 }
 
 async function hideInfo() {
+  // 2026-05-10: respect the user-driven pin via the new panel-pin
+  // button. Selection-driven hide gets skipped when pinned. Explicit
+  // closes (scene unload, manual teardown) call closeInfoPopover()
+  // directly and bypass this guard.
+  if (isMonsterInfoPinned()) return;
   if (!infoPopoverOpen && currentInfoSlug === null) return;
   await closeInfoPopover();
+}
+
+const LS_MONSTER_INFO_PINNED = "obr-suite/monster-info-pinned";
+function isMonsterInfoPinned(): boolean {
+  try { return localStorage.getItem(LS_MONSTER_INFO_PINNED) === "1"; } catch { return false; }
 }
 
 async function handleSelection(selection: string[] | undefined) {
@@ -244,13 +256,20 @@ async function handleSelection(selection: string[] | undefined) {
   }
   let slug: string | null = null;
   let ownsItem = false;
+  let locked = true;
   const itemId = selection[0];
   try {
     const items = await OBR.scene.items.getItems(selection);
-    const m = items[0]?.metadata?.[BESTIARY_SLUG_KEY];
+    const item = items[0] as any;
+    const m = item?.metadata?.[BESTIARY_SLUG_KEY];
     if (typeof m === "string") slug = m;
-    const createdUserId = (items[0] as any)?.createdUserId;
-    if (items[0] && createdUserId === bestiaryMyId) ownsItem = true;
+    const createdUserId = item?.createdUserId;
+    if (item && createdUserId === bestiaryMyId) ownsItem = true;
+    const bubblesMeta = item?.metadata?.[BUBBLES_META] ?? item?.metadata?.[EXTERNAL_BUBBLES_META];
+    if (bubblesMeta && typeof bubblesMeta === "object") {
+      const raw = (bubblesMeta as Record<string, unknown>)["locked"];
+      locked = raw === undefined ? true : !!raw;
+    }
   } catch (e) {
     console.warn("[obr-suite/bestiary] handleSelection getItems failed", e);
   }
@@ -304,19 +323,18 @@ export async function setupBestiary(): Promise<void> {
 
   // Library list change → also clear the monster cache. Without this
   // the panel keeps showing the old set even after a homebrew URL is
-  // added or removed in settings.
-  let lastLibSig = JSON.stringify(
+  // added/removed OR a per-source blacklist toggled in settings.
+  // Signature includes baseUrl + disabledSources so both kinds of
+  // mutation invalidate.
+  const libSig = () => JSON.stringify(
     (getState().libraries || [])
       .filter((l) => l.enabled)
-      .map((l) => l.baseUrl)
+      .map((l) => `${l.baseUrl}|${(l.disabledSources ?? []).slice().sort().join(",")}`),
   );
+  let lastLibSig = libSig();
   unsubs.push(
     onStateChange(() => {
-      const sig = JSON.stringify(
-        (getState().libraries || [])
-          .filter((l) => l.enabled)
-          .map((l) => l.baseUrl)
-      );
+      const sig = libSig();
       if (sig !== lastLibSig) {
         lastLibSig = sig;
         clearMonsterCache();
@@ -335,24 +353,32 @@ export async function setupBestiary(): Promise<void> {
         filter: { roles: ["GM"] },
       },
     ],
+    // Without `defaultMode`, OBR doesn't auto-activate any mode when
+    // the tool becomes active — its modes only fire if the user
+    // manually clicks one. Pointing this at our drag mode means the
+    // moment the GM activates the bestiary tool, the drag handlers
+    // are live.
+    defaultMode: `${TOOL_ID}/mode`,
     onClick: async () => {
       await OBR.tool.activateTool(TOOL_ID);
       return false;
     },
   });
 
-  // Passthrough mode — required for tools to be selectable, but we don't
-  // intercept any pointer events.
-  await OBR.tool.createMode({
-    id: `${TOOL_ID}/mode`,
-    icons: [
-      {
-        icon: ICON_URL,
-        label: "浏览",
-        filter: { activeTools: [TOOL_ID] },
-      },
-    ],
-    cursors: [{ cursor: "default" }],
+  // Browse mode — uses the shared canvasDragMode util so the GM can
+  // drag tokens / box-select while the bestiary panel is open. The
+  // util implements token-move + marquee + transformer no-op the
+  // same way the bubble-guard mode under Select does.
+  //
+  // (Earlier rounds tried `preventDrag: never-match`, hoping OBR's
+  // canvas-level token-move fallback would kick in. Empirically that
+  // fallback doesn't run for plugin-owned tools, so token drags
+  // silently no-oped. The util takes over the gesture explicitly.)
+  await createCanvasDragMode({
+    modeId: `${TOOL_ID}/mode`,
+    toolId: TOOL_ID,
+    icon: ICON_URL,
+    label: "浏览",
   });
 
   // Track previous tool + open/close panel based on which tool is active.
@@ -559,6 +585,12 @@ export async function setupBestiary(): Promise<void> {
     }
   };
   try {
+    // 2026-05-10: bestiary context entries are now restricted to
+    // CHARACTER-layer tokens. Single-target menus (max:1) require the
+    // selected item to be CHARACTER. Group menus require at least one
+    // CHARACTER in the selection — handlers further filter to that
+    // subset before doing anything, so a mixed box-select silently
+    // skips non-character props.
     await OBR.contextMenu.create({
       id: CTX_BIND,
       icons: [
@@ -569,6 +601,7 @@ export async function setupBestiary(): Promise<void> {
             roles: ["GM"],
             every: [
               { key: "type", value: "IMAGE" },
+              { key: "layer", value: "CHARACTER" },
               { key: ["metadata", BESTIARY_SLUG_KEY], value: undefined },
             ],
             max: 1,
@@ -590,6 +623,7 @@ export async function setupBestiary(): Promise<void> {
             roles: ["GM"],
             every: [
               { key: "type", value: "IMAGE" },
+              { key: "layer", value: "CHARACTER" },
               { key: ["metadata", BESTIARY_SLUG_KEY], operator: "!=", value: undefined },
             ],
             max: 1,
@@ -611,6 +645,7 @@ export async function setupBestiary(): Promise<void> {
             roles: ["GM"],
             every: [
               { key: "type", value: "IMAGE" },
+              { key: "layer", value: "CHARACTER" },
               { key: ["metadata", BESTIARY_SLUG_KEY], operator: "!=", value: undefined },
             ],
             max: 1,
@@ -647,15 +682,20 @@ export async function setupBestiary(): Promise<void> {
           filter: {
             roles: ["GM"],
             // ALL selected tokens must be IMAGE; metadata state can
-            // be anything (bind overwrites whatever was there).
+            // be anything (bind overwrites whatever was there). Show
+            // only when at least one CHARACTER-layer token is in the
+            // selection — handler trims to the character subset.
             every: [{ key: "type", value: "IMAGE" }],
+            some: [{ key: "layer", value: "CHARACTER" }],
             min: 2,
           },
         },
       ],
       onClick: (ctx) => {
-        const ids = ctx.items.map((i) => i.id);
-        if (ids.length >= 2) void openPicker(ids);
+        const ids = ctx.items
+          .filter((it) => it.layer === "CHARACTER")
+          .map((i) => i.id);
+        if (ids.length >= 1) void openPicker(ids);
       },
     });
     await OBR.contextMenu.create({
@@ -666,12 +706,15 @@ export async function setupBestiary(): Promise<void> {
           label: "群体移除怪物图鉴",
           filter: {
             roles: ["GM"],
-            // Show only when at least one selected token actually
-            // has a binding to remove. The handler then iterates
-            // and removes the metadata from the bound subset only;
-            // unbound tokens are skipped so we don't waste a write.
+            // Show only when at least one CHARACTER-layer token in the
+            // selection actually has a binding. (Both predicates apply
+            // to the SAME item — `some` requires AT LEAST ONE item to
+            // satisfy the AND of every condition listed inside it.)
+            // The handler then iterates and removes the metadata from
+            // the bound character subset only.
             every: [{ key: "type", value: "IMAGE" }],
             some: [
+              { key: "layer", value: "CHARACTER" },
               { key: ["metadata", BESTIARY_SLUG_KEY], operator: "!=", value: undefined },
             ],
             min: 2,
@@ -679,10 +722,14 @@ export async function setupBestiary(): Promise<void> {
         },
       ],
       onClick: async (ctx) => {
-        // Filter to only those with the slug — no point writing to
-        // tokens that don't have it.
+        // Filter to character tokens with a slug — no point writing
+        // to non-character props or already-unbound tokens.
         const ids = ctx.items
-          .filter((it) => (it.metadata as any)?.[BESTIARY_SLUG_KEY] != null)
+          .filter(
+            (it) =>
+              it.layer === "CHARACTER" &&
+              (it.metadata as any)?.[BESTIARY_SLUG_KEY] != null,
+          )
           .map((i) => i.id);
         if (ids.length === 0) return;
         try {

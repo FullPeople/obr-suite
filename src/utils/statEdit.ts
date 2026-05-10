@@ -2,11 +2,10 @@
 // and bestiary monster-info popovers.
 //
 // Both panels render four editable stat rows (HP / Max HP / Temp HP /
-// AC) that read from and write to the token's "Stat Bubbles for D&D"
-// metadata key (`com.owlbear-rodeo-bubbles-extension/metadata`). The
-// suite's bubbles module already reads from that key to draw the HP
-// bar / heater shield above the token, so writing here makes the bar
-// update live.
+// AC) that read from and write to the suite-owned metadata key. Older
+// scenes may still carry the upstream "Stat Bubbles for D&D" metadata;
+// reads migrate from it, and writes mirror to it only when it already
+// exists so existing external-plugin tables keep working.
 //
 // Input format (parseStatInput):
 //   "20"      → absolute set
@@ -19,7 +18,8 @@
 
 import OBR from "@owlbear-rodeo/sdk";
 
-export const BUBBLES_META_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
+export const BUBBLES_META_KEY = "com.obr-suite/bubbles/data";
+export const EXTERNAL_BUBBLES_META_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
 
 export interface BubblesData {
   health?: number;
@@ -31,6 +31,15 @@ export interface BubblesData {
    *  When true, players see a combat-gated silhouette of the bar
    *  (no numbers, no AC). When false, full data visible to all. */
   locked?: boolean;
+}
+
+function readDataFromMetadata(meta: Record<string, unknown> | undefined): BubblesData {
+  if (!meta) return {};
+  const own = meta[BUBBLES_META_KEY];
+  if (own && typeof own === "object") return { ...(own as BubblesData) };
+  const external = meta[EXTERNAL_BUBBLES_META_KEY];
+  if (external && typeof external === "object") return { ...(external as BubblesData) };
+  return {};
 }
 
 export function parseStatInput(input: string, current: number): number | null {
@@ -55,8 +64,7 @@ export function parseStatInput(input: string, current: number): number | null {
 export async function readBubbles(itemId: string): Promise<BubblesData> {
   try {
     const items = await OBR.scene.items.getItems([itemId]);
-    const meta = items[0]?.metadata?.[BUBBLES_META_KEY];
-    if (meta && typeof meta === "object") return { ...(meta as BubblesData) };
+    return readDataFromMetadata(items[0]?.metadata as Record<string, unknown> | undefined);
   } catch (e) {
     console.warn("[statEdit] readBubbles failed", e);
   }
@@ -77,7 +85,7 @@ export async function patchBubbles(
   try {
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       for (const d of drafts) {
-        const existing = (d.metadata[BUBBLES_META_KEY] as BubblesData) ?? {};
+        const existing = readDataFromMetadata(d.metadata as Record<string, unknown>);
         const merged: BubblesData = { ...existing, ...patch };
         if (
           typeof merged.health === "number" &&
@@ -93,6 +101,9 @@ export async function patchBubbles(
           merged["temporary health"] = 0;
         }
         d.metadata[BUBBLES_META_KEY] = merged;
+        if (d.metadata[EXTERNAL_BUBBLES_META_KEY] != null) {
+          d.metadata[EXTERNAL_BUBBLES_META_KEY] = merged;
+        }
         finalState = merged;
       }
     });

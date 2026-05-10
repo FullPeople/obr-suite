@@ -28,6 +28,7 @@
 // We accept either on read; we always write v2 on save.
 
 import OBR from "@owlbear-rodeo/sdk";
+import { installDebugOverlay } from "./utils/debugOverlay";
 import {
   PLUGIN_ID,
   SCENE_BUFF_CATALOG_KEY,
@@ -89,6 +90,15 @@ let groupOrder: string[] = [];
 let activeFilter: string | null = readPersistedFilter();
 let editMode = false;
 
+// Newly-created buffs (via "+ 新 buff" in edit mode) start with an
+// empty name and an auto-opened edit popup. If the user closes the
+// popup (cancel / outside-click / Escape) without entering a name,
+// the placeholder buff is deleted from the catalog so we don't leave
+// an unnamed entry behind. The set is the bookkeeping for that —
+// add on creation, remove on save (committed) or on the close-side
+// cleanup (rolled back).
+const newlyCreatedBuffIds = new Set<string>();
+
 // Inline "+ category" input is open when this is true. Replaces the
 // "+" button in the filter row with an <input>.
 let addCatPending = false;
@@ -96,8 +106,34 @@ let addCatPending = false;
 let popupBuffId: string | null = null;
 
 // === Catalog load / save ====================================================
+//
+// 2026-05-09: catalog moved from scene-metadata (shared) to
+// localStorage (per-client) so each player can customise their own
+// palette independently. Applied-buff metadata on tokens stays shared
+// — that's actual game state. Customising the palette only changes
+// what THIS browser sees in the popover + the colours/effects this
+// browser uses to render bubbles for the buff IDs it knows about.
+//
+// Migration: on first run with empty LS, fall back to ANY existing
+// scene-metadata catalog so upgrading users don't lose customisation.
+
+const LS_BUFF_CATALOG = "obr-suite/status/buff-catalog";
 
 async function loadCatalog(): Promise<void> {
+  // 1) Local storage — primary source post-2026-05-09.
+  try {
+    const raw = localStorage.getItem(LS_BUFF_CATALOG);
+    if (raw) {
+      const parsed = parseCatalog(JSON.parse(raw));
+      if (parsed) {
+        buffs = parsed.buffs;
+        groupOrder = parsed.groupOrder;
+        if (!popupBuffId) render();
+        return;
+      }
+    }
+  } catch {}
+  // 2) One-time migration from scene metadata when LS is empty.
   try {
     const meta = await OBR.scene.getMetadata();
     const v = meta[SCENE_BUFF_CATALOG_KEY] as unknown;
@@ -105,9 +141,14 @@ async function loadCatalog(): Promise<void> {
     if (parsed) {
       buffs = parsed.buffs;
       groupOrder = parsed.groupOrder;
+      // Persist locally so the migration only runs once.
+      try {
+        const file: CatalogFile = { version: 2, buffs, groupOrder };
+        localStorage.setItem(LS_BUFF_CATALOG, JSON.stringify(file));
+      } catch {}
     }
   } catch {}
-  render();
+  if (!popupBuffId) render();
 }
 
 function parseCatalog(v: unknown): { buffs: BuffDef[]; groupOrder: string[] } | null {
@@ -144,6 +185,8 @@ function parseBuffArray(arr: any[]): BuffDef[] {
       color: typeof e.color === "string" ? e.color : "#ffffff",
       group: typeof e.group === "string" && e.group.length > 0 ? e.group : undefined,
     };
+    const rounds = Math.floor(Number(e.rounds));
+    if (Number.isFinite(rounds) && rounds > 0) def.rounds = rounds;
     const eff = parseEffect(e.effect);
     if (eff && eff !== "default") def.effect = eff;
     // effectParams: imageUrl (+ cached dims) / speed / count
@@ -179,14 +222,37 @@ async function saveCatalog(): Promise<void> {
   const order = mergedGroupOrder(groupOrder, buffs);
   const file: CatalogFile = { version: 2, buffs, groupOrder: order };
   groupOrder = order;
+  // Per-client LS instead of shared scene metadata. Also broadcast a
+  // local "catalog changed" event so the background renderer (in the
+  // same browser) re-syncs token bubbles immediately.
   try {
-    await OBR.scene.setMetadata({ [SCENE_BUFF_CATALOG_KEY]: file });
+    localStorage.setItem(LS_BUFF_CATALOG, JSON.stringify(file));
+    try {
+      OBR.broadcast.sendMessage(
+        "com.obr-suite/status/catalog-changed",
+        {},
+        { destination: "LOCAL" },
+      );
+    } catch {}
   } catch (e) {
     console.warn("[status/palette] saveCatalog failed", e);
   }
 }
 
 function mergedGroupOrder(prior: string[], list: BuffDef[]): string[] {
+  // Preserve every group the user has explicitly added to `prior`,
+  // even if it currently has zero buffs. Auto-discovered groups
+  // (encountered on a buff but not yet in `prior`) get appended at
+  // the end. Explicit deletion happens in onRenameCategory's
+  // "rename to empty" branch which does its own confirm + filter —
+  // this function is the WRITE path, not the cleanup path.
+  //
+  // Earlier the filter was `g === UNCATEGORIZED || list.some(b =>
+  // b.group === g)` which silently dropped any user-created empty
+  // category on the very next save, breaking the new-category flow
+  // (user clicks +, types name, presses Enter — saveCatalog runs,
+  // mergedGroupOrder strips the empty group, write goes out without
+  // it, render shows old groups).
   const seen = new Set(prior);
   const out = prior.slice();
   for (const b of list) {
@@ -196,11 +262,7 @@ function mergedGroupOrder(prior: string[], list: BuffDef[]): string[] {
       out.push(g);
     }
   }
-  // Drop empty groups (except UNCATEGORIZED, which we keep as a
-  // landing pad even when no buffs occupy it).
-  return out.filter((g) =>
-    g === UNCATEGORIZED || list.some((b) => (b.group ?? UNCATEGORIZED) === g),
-  );
+  return out;
 }
 
 // === Helpers ================================================================
@@ -227,6 +289,10 @@ function renderFilters(): void {
     html += `<button class="cat-btn ${activeFilter === null ? "on" : ""}" data-g="">全部</button>`;
   }
   for (const g of groups) {
+    // Category-button drag (re-order categories) is edit-mode only,
+    // and so is the buff-drop receiver. The 2026-05-08 attempt to
+    // also accept buff drops in apply mode broke drag-to-token and
+    // got reverted (see renderGrid + onBubblePointerDown comments).
     const dragAttr = editMode ? `draggable="true"` : "";
     const isOn = (!editMode && activeFilter === g) ? "on" : "";
     html += `<button class="cat-btn ${isOn}" data-g="${escapeHtml(g)}" ${dragAttr}>${escapeHtml(g)}</button>`;
@@ -245,7 +311,13 @@ function renderFilters(): void {
     const g = b.dataset.g || "";
 
     if (!editMode) {
-      // Apply mode: click filters (persisted per-client).
+      // Apply mode: click filters (persisted per-client). No
+      // dragover/drop receiver wiring — apply-mode bubbles aren't
+      // `draggable="true"` (see renderGrid for why), so there's no
+      // dragged buff-id payload that could reach this handler. The
+      // 2026-05-08 attempt to also accept buff drops here was part
+      // of the same regression that broke drag-to-token in apply
+      // mode and got reverted.
       b.addEventListener("click", () => {
         activeFilter = g === "" ? null : g;
         writePersistedFilter(activeFilter);
@@ -374,12 +446,28 @@ function renderGrid(): void {
   }
   for (const b of list) {
     const fg = textColorFor(b.color);
+    // Edit-mode-only `draggable="true"`. The 2026-05-08 attempt to
+    // also enable HTML5 drag in apply mode (so users could drop a
+    // buff on a category to change groups) broke the apply-mode
+    // drag-to-token flow: the browser starts an HTML5 drag the
+    // moment the cursor moves, fires `pointercancel`, the global
+    // pointercancel handler broadcasts BC_DRAG_END, and the capture
+    // overlay closes before the user finishes dragging onto a
+    // token. The two interactions share the same pointerdown gesture
+    // and there's no in-browser way to disambiguate after the drag
+    // has already started — drag-to-category in apply mode needs a
+    // different gesture (right-click menu, long-press, modifier
+    // key, etc.) which we'll revisit separately.
     const dragAttr = editMode ? `draggable="true"` : "";
     const cls = editMode ? "bubble editable" : "bubble";
+    // 2026-05-10: pass the buff colour through `--bubble-bg` so the
+    // jelly CSS can apply 80%-alpha + a glassy highlight overlay.
+    // Plain inline `background:` was opaque; color-mix in the
+    // stylesheet now handles the translucency.
     html += `<div class="${cls}"
                   data-id="${escapeHtml(b.id)}"
                   ${dragAttr}
-                  style="background:${escapeHtml(b.color)};color:${escapeHtml(fg)}">
+                  style="--bubble-bg:${escapeHtml(b.color)};color:${escapeHtml(fg)}">
                ${escapeHtml(b.name)}
              </div>`;
   }
@@ -454,6 +542,13 @@ function renderGrid(): void {
 async function onBubblePointerDown(e: PointerEvent, el: HTMLElement): Promise<void> {
   if (editMode) return;
   if (e.button !== 0 && e.button !== 2) return;
+  // preventDefault is critical here: it stops the browser from
+  // initiating an HTML5 drag (which would fire pointercancel and
+  // cause the global handler to broadcast BC_DRAG_END, slamming the
+  // capture overlay shut before the user finishes dragging onto a
+  // token). The trade-off is that apply-mode bubbles can't use
+  // HTML5 drag for cross-group moves; that gesture needs a separate
+  // mechanism (TODO: long-press / right-click menu).
   e.preventDefault();
   e.stopPropagation();
   const id = el.dataset.id ?? "";
@@ -555,6 +650,12 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
       <input class="pop-color" type="color" value="${escapeHtml(buff.color)}"/>
       <input class="pop-name" type="text" maxlength="20" value="${escapeHtml(buff.name)}" placeholder="名称"/>
     </div>
+    <div class="pop-row rounds">
+      <span class="pop-rounds-label">持续轮数</span>
+      <input class="pop-rounds" type="number" min="0" max="99" step="1"
+             value="${buff.rounds ?? ""}" placeholder="0"/>
+      <span class="pop-rounds-label">0=不限</span>
+    </div>
     ${effectsBlock}
     <div class="pop-row pop-actions">
       <button class="pop-del" type="button">删除</button>
@@ -585,6 +686,7 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
 
   const nameInp = popupEl.querySelector<HTMLInputElement>(".pop-name")!;
   const colorInp = popupEl.querySelector<HTMLInputElement>(".pop-color")!;
+  const roundsInp = popupEl.querySelector<HTMLInputElement>(".pop-rounds")!;
   const save = popupEl.querySelector<HTMLButtonElement>(".pop-save")!;
   const cancel = popupEl.querySelector<HTMLButtonElement>(".pop-cancel")!;
   const del = popupEl.querySelector<HTMLButtonElement>(".pop-del")!;
@@ -633,18 +735,36 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
   }
 
   const close = (): void => {
+    const dropped = discardUnnamedBuffIfPending(id);
     popupBuffId = null;
     popupEl.classList.remove("open");
     popupEl.innerHTML = "";
+    if (dropped) render();
   };
 
   save.addEventListener("click", async () => {
     const name = nameInp.value.trim();
-    if (!name) return;
+    if (!name) {
+      // Empty-name save also closes the popup and discards a
+      // newly-created placeholder buff. Differs from existing buffs
+      // (which never get a save with empty name because their input
+      // pre-fills with the real name) — those would stay open if the
+      // user manually cleared their name and clicked save, but that's
+      // an edge case the user accepted.
+      close();
+      return;
+    }
+    // User committed a real name — drop the new-buff placeholder
+    // tracking BEFORE we mutate the catalog so the close handler
+    // doesn't re-delete the buff if something goes wrong.
+    newlyCreatedBuffIds.delete(id);
     const target = buffs.find((b) => b.id === id);
     if (target) {
       target.name = name;
       target.color = colorInp.value;
+      const rounds = Math.floor(Number(roundsInp.value));
+      if (Number.isFinite(rounds) && rounds > 0) target.rounds = rounds;
+      else delete target.rounds;
       target.effect = pendingEffect === "default" ? undefined : pendingEffect;
       // effectParams: persist imageUrl + cached dims when user has
       // configured a particle image. Empty URL → no effectParams,
@@ -696,9 +816,14 @@ function handleOutsidePopupClick(e: MouseEvent): void {
   if (popupEl.contains(tgt)) return;
   const bubble = (tgt as HTMLElement).closest?.(".bubble.editable");
   if (bubble) return;
+  // Same close-side cleanup as the popup's own close(): discard a
+  // newly-created placeholder buff whose name was never filled in.
+  let dropped = false;
+  if (popupBuffId) dropped = discardUnnamedBuffIfPending(popupBuffId);
   popupBuffId = null;
   popupEl.classList.remove("open");
   popupEl.innerHTML = "";
+  if (dropped) render();
 }
 window.addEventListener("click", handleOutsidePopupClick, true);
 
@@ -709,6 +834,15 @@ async function onRenameCategory(oldName: string): Promise<void> {
   if (next === null) return;
   const trimmed = next.trim();
   if (trimmed === "") {
+    // Refuse to delete the last named group — the user must always
+    // have somewhere to drop new buffs into. (UNCATEGORIZED still
+    // exists implicitly but isn't a "named" group the user can
+    // rename / reorder, so leaving zero named groups breaks the
+    // create-buff-into-active-filter UX.)
+    if (groupOrder.length <= 1) {
+      window.alert(`至少保留一个分组，无法删除「${oldName}」。`);
+      return;
+    }
     if (!window.confirm(`删除分类「${oldName}」？该分类下的 buff 会移到「${UNCATEGORIZED}」。`)) return;
     for (const b of buffs) if ((b.group ?? UNCATEGORIZED) === oldName) b.group = undefined;
     groupOrder = groupOrder.filter((g) => g !== oldName);
@@ -781,11 +915,16 @@ async function onAddBuff(): Promise<void> {
   const id = genId();
   const newBuff: BuffDef = {
     id,
-    name: "新 buff",
+    // Default name intentionally empty (user request 2026-05-08): the
+    // popup auto-opens with focus on the name field, so the user types
+    // a real name before saving. If they bail out without naming, the
+    // close-side cleanup (newlyCreatedBuffIds) drops the placeholder.
+    name: "",
     color: "#5dade2",
     group,
   };
   buffs.push(newBuff);
+  newlyCreatedBuffIds.add(id);
   await saveCatalog();
   render();
   // Auto-open the edit popup so the user can rename / recolour
@@ -794,6 +933,22 @@ async function onAddBuff(): Promise<void> {
     const el = gridEl.querySelector<HTMLElement>(`.bubble[data-id="${cssEscape(id)}"]`);
     if (el) openEditPopup(id, el);
   });
+}
+
+/** Drop a newly-created buff from the catalog if its name is still
+ *  empty when the popup closes. Called from EVERY close path of the
+ *  edit popup (save-with-empty bail, cancel, outside-click, escape).
+ *  Returns true if a buff was actually deleted (so the caller can
+ *  re-render). */
+function discardUnnamedBuffIfPending(id: string): boolean {
+  if (!newlyCreatedBuffIds.has(id)) return false;
+  newlyCreatedBuffIds.delete(id);
+  const buff = buffs.find((b) => b.id === id);
+  if (!buff) return false;
+  if (buff.name.trim() !== "") return false;
+  buffs = buffs.filter((b) => b.id !== id);
+  void saveCatalog();
+  return true;
 }
 
 // CSS.escape polyfill for the auto-open bubble lookup. CSS.escape
@@ -916,11 +1071,9 @@ fileImport.addEventListener("change", async () => {
       window.alert("JSON 文件格式错误：应为 buff 数组或 { buffs, groupOrder } 对象。");
       return;
     }
-    await OBR.scene.setMetadata({
-      [SCENE_BUFF_CATALOG_KEY]: { version: 2, buffs: parsed.buffs, groupOrder: parsed.groupOrder } as CatalogFile,
-    });
     buffs = parsed.buffs;
     groupOrder = parsed.groupOrder;
+    await saveCatalog();
     render();
   } catch (e: any) {
     window.alert(`导入失败：${e?.message ?? String(e)}`);
@@ -930,6 +1083,12 @@ fileImport.addEventListener("change", async () => {
 // === Boot ===================================================================
 
 OBR.onReady(async () => {
+  installDebugOverlay();
   await loadCatalog();
-  OBR.scene.onMetadataChange(() => { void loadCatalog(); });
+  // Cross-tab refresh — same client, two iframes (e.g. palette popover
+  // + manage popover) editing the catalog. The `storage` event fires
+  // when the OTHER tab writes localStorage; reload + render here.
+  window.addEventListener("storage", (e) => {
+    if (e.key === LS_BUFF_CATALOG) void loadCatalog();
+  });
 });

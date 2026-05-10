@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>光源设置 · fullFog</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; padding: 12px 14px; height: 100%;
+        background: #1c1f27; color: #e6e8ee;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                     "Microsoft YaHei", Roboto, sans-serif;
+        font-size: 13px;
+        user-select: none;
+      }
+      h2 { font-size: 14px; margin: 0 0 12px; font-weight: 600; }
+      .row { margin: 0 0 11px; }
+      .lbl {
+        display: flex; justify-content: space-between; align-items: baseline;
+        font-size: 12px; margin-bottom: 4px;
+      }
+      .lbl .val { color: #f5a623; font-variant-numeric: tabular-nums; font-weight: 600; }
+      input[type=range] { width: 100%; accent-color: #f5a623; }
+      .desc { font-size: 11px; color: #9aa0ad; line-height: 1.4; margin-top: 2px; }
+      .actions {
+        display: flex; gap: 8px; margin-top: 10px;
+      }
+      button {
+        flex: 1;
+        background: #252934; color: #e6e8ee;
+        border: 1px solid #4a4f5e; border-radius: 4px;
+        padding: 6px 10px; cursor: pointer; font-size: 12px;
+        font-family: inherit;
+      }
+      button:hover { background: #2e3340; }
+      button.danger { border-color: #6c2a2a; color: #ffb0b0; }
+      button.danger:hover { background: #3a1d1d; }
+    </style>
+  </head>
+  <body>
+    <h2 id="title">光源设置</h2>
+
+    <div class="row">
+      <label class="lbl">
+        <span>光照半径（格）</span>
+        <span class="val" id="radius-val">6 格</span>
+      </label>
+      <input type="range" id="radius" min="0.5" max="24" step="0.5" value="6" />
+      <div class="desc">每格按当前网格 dpi 换算。6 格 ≈ 30 尺火把光照范围。</div>
+    </div>
+
+    <div class="row">
+      <label class="lbl">
+        <span>核心半径（px）</span>
+        <span class="val" id="source-val">25 px</span>
+      </label>
+      <input type="range" id="source" min="5" max="120" step="1" value="25" />
+      <div class="desc">中心保持全亮的小圆半径。值小一些（25 左右）才能从 5 尺门洞中通过。</div>
+    </div>
+
+    <div class="row">
+      <label class="lbl">
+        <span>边缘衰减</span>
+        <span class="val" id="falloff-val">0.20</span>
+      </label>
+      <input type="range" id="falloff" min="0.05" max="2.0" step="0.05" value="0.2" />
+      <div class="desc">越大边缘越柔和；0.2 = 硬边火把，1.5 = 柔光月亮。</div>
+    </div>
+
+    <div class="actions">
+      <button id="btn-remove" class="danger">移除光源</button>
+    </div>
+
+    <script type="module" src="/src/modules/fullFog/light/edit-page.ts"></script>
+  </body>
+</html>

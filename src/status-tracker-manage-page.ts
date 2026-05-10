@@ -22,6 +22,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import {
   PLUGIN_ID,
   STATUS_BUFFS_KEY,
+  STATUS_BUFF_ROUNDS_KEY,
   SCENE_BUFF_CATALOG_KEY,
   DEFAULT_BUFFS,
   BuffDef,
@@ -41,6 +42,7 @@ const btnClose = document.getElementById("btnClose") as HTMLButtonElement;
 
 let catalog: BuffDef[] = [];
 let myBuffIds: string[] = [];
+let myBuffRounds: Record<string, number> = {};
 let tokenName = "角色";
 
 function escapeHtml(s: string): string {
@@ -66,6 +68,7 @@ async function loadCatalog(): Promise<void> {
           name: String(e.name ?? e.id),
           color: typeof e.color === "string" ? e.color : "#ffffff",
           group: typeof e.group === "string" && e.group.length > 0 ? e.group : undefined,
+          rounds: Number.isFinite(Number(e.rounds)) && Number(e.rounds) > 0 ? Math.floor(Number(e.rounds)) : undefined,
         } as BuffDef));
       // 2026-05-05 bug fix: when the user has applied default-catalog
       // buffs to tokens but never opened the palette's ✎ edit popup
@@ -96,8 +99,17 @@ async function loadTokenState(): Promise<void> {
     tokenName = tok.name || "角色";
     const ids = (tok.metadata as any)[STATUS_BUFFS_KEY];
     myBuffIds = Array.isArray(ids) ? ids.filter((x: any) => typeof x === "string") : [];
+    const rounds = (tok.metadata as any)[STATUS_BUFF_ROUNDS_KEY];
+    myBuffRounds = {};
+    if (rounds && typeof rounds === "object" && !Array.isArray(rounds)) {
+      for (const [id, raw] of Object.entries(rounds as Record<string, unknown>)) {
+        const n = Math.floor(Number(raw));
+        if (Number.isFinite(n) && n > 0) myBuffRounds[id] = n;
+      }
+    }
   } catch {
     myBuffIds = [];
+    myBuffRounds = {};
   }
 }
 
@@ -116,8 +128,10 @@ function render(): void {
 
   gridEl.innerHTML = myBuffs.map((b) => {
     const fg = textColorFor(b.color);
+    const rounds = myBuffRounds[b.id];
+    const label = rounds > 0 ? `${b.name} ${rounds}` : b.name;
     return `<div class="bubble" data-id="${escapeHtml(b.id)}"
-                 style="background:${escapeHtml(b.color)};color:${escapeHtml(fg)}">${escapeHtml(b.name)}</div>`;
+                 style="background:${escapeHtml(b.color)};color:${escapeHtml(fg)}">${escapeHtml(label)}</div>`;
   }).join("");
 
   gridEl.querySelectorAll<HTMLElement>(".bubble").forEach((el) => {
@@ -180,26 +194,39 @@ OBR.onReady(async () => {
 
   // Re-render when the catalog changes (e.g. user edits a buff
   // colour from the palette while this popover is open).
-  OBR.scene.onMetadataChange(async () => {
-    await loadCatalog();
-    render();
+  OBR.scene.onMetadataChange(async (meta) => {
+    if (!(SCENE_BUFF_CATALOG_KEY in meta)) return;
+    try {
+      await loadCatalog();
+      render();
+    } catch (e) {
+      console.warn("[status/manage] scene metadata handler failed", e);
+    }
   });
   // Re-render when the token's buff list changes — including
   // changes WE just made via a manage-transfer drag (the capture
   // overlay's metadata write triggers items.onChange here too).
   OBR.scene.items.onChange(async () => {
-    await loadTokenState();
-    render();
+    try {
+      await loadTokenState();
+      render();
+    } catch (e) {
+      console.warn("[status/manage] scene items handler failed", e);
+    }
   });
 
   // If the token disappears from the scene (deleted while the
   // popover is open), close ourselves rather than showing stale
   // data forever.
   OBR.scene.items.onChange(async (items) => {
-    if (!tokenId) return;
-    const stillThere = items.some((it) => it.id === tokenId);
-    if (!stillThere) {
-      try { await OBR.popover.close(POPOVER_ID); } catch {}
+    try {
+      if (!tokenId) return;
+      const stillThere = items.some((it) => it.id === tokenId);
+      if (!stillThere) {
+        try { await OBR.popover.close(POPOVER_ID); } catch {}
+      }
+    } catch (e) {
+      console.warn("[status/manage] token disappearance handler failed", e);
     }
   });
 });

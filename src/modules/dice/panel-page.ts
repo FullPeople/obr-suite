@@ -3,6 +3,7 @@ import { DiceType, DieResult, sidesOf } from "./types";
 import { subscribeToSfx } from "./sfx-broadcast";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
+import { assetUrl } from "../../asset-base";
 
 let lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -20,10 +21,23 @@ const BC_DICE_FADE_START = "com.obr-suite/dice-fade-start";
 // the panel to switch to the History tab + select that player as the
 // filter. Always sent LOCAL — only this client's panel reacts.
 const BC_DICE_HISTORY_FILTER = "com.obr-suite/dice-history-filter";
+// Replay-overlay channel. Click a history row → broadcast
+// `{ cid, action: "toggle" }` LOCAL+REMOTE. The dice background module
+// owns the open/close logic — same cid twice = close, different cid =
+// reopen on top. The bottom-right history modal also broadcasts on
+// this channel and listens for "close" so both UIs stay in sync.
+const BC_DICE_REPLAY = "com.obr-suite/dice-replay";
 const ANIM_FALLBACK_MS = 6000;
 
 const LS_COMBOS  = "obr-suite/dice/combos";
-const LS_HISTORY = "obr-suite/dice/history";
+// Per-room dice history. See history-page.ts for the rationale —
+// suffix the key with `OBR.room.id` so different rooms keep
+// independent scrollbacks.
+const LS_HISTORY_BASE = "obr-suite/dice/history";
+function safeRoomKey(rid: string): string {
+  return rid.replace(/[^a-zA-Z0-9_-]/g, "_") || "default";
+}
+let LS_HISTORY = `${LS_HISTORY_BASE}:default`;
 const LS_LAST_EXPR = "obr-suite/dice/last-expr";
 const HISTORY_CAP = 80;
 
@@ -94,6 +108,27 @@ let history: DiceRollPayload[] = loadHistory();
 let lastRolledExpression: string = loadLastExpr();
 let activeTab: "roll" | "combos" | "history" = "roll";
 let historyFilter = "";
+// Currently-active replay's collective-id (LOCAL state). Set when this
+// client clicks a history row, cleared when the replay closes — so the
+// row that triggered it lights up with a "replay-active" border, and a
+// second click on the same row toggles it back off.
+// 2026-05-10: also persisted in localStorage under
+// `obr-suite/dice/active-replay-cid` whenever it changes — the
+// bottom-left history popover writes there too, so a panel that
+// opens AFTER the user clicked a history row still picks up the
+// highlight on its own init (broadcasts can't be replayed to a
+// listener that wasn't subscribed yet).
+const LS_ACTIVE_REPLAY_CID = "obr-suite/dice/active-replay-cid";
+let activeReplayCid: string | null = (() => {
+  try { return localStorage.getItem(LS_ACTIVE_REPLAY_CID); } catch { return null; }
+})();
+function setActiveReplayCid(v: string | null) {
+  activeReplayCid = v;
+  try {
+    if (v) localStorage.setItem(LS_ACTIVE_REPLAY_CID, v);
+    else localStorage.removeItem(LS_ACTIVE_REPLAY_CID);
+  } catch {}
+}
 let isAnimating = false;
 let animationTimer: number | null = null;
 // Roll IDs the panel itself spawned. Used to filter BC_DICE_FADE_START
@@ -114,6 +149,7 @@ const btnClear     = document.getElementById("btnClear")     as HTMLButtonElemen
 const btnForceClr  = document.getElementById("btnForceClr")  as HTMLButtonElement;
 const btnAdv       = document.getElementById("btnAdv")       as HTMLButtonElement;
 const btnDis       = document.getElementById("btnDis")       as HTMLButtonElement;
+const btnCrit      = document.getElementById("btnCrit")      as HTMLButtonElement | null;
 const comboList    = document.getElementById("comboList")    as HTMLDivElement;
 const historyList  = document.getElementById("historyList")  as HTMLDivElement;
 const historySeg   = document.getElementById("historySeg")   as HTMLDivElement;
@@ -655,8 +691,19 @@ function rollPlainSet(plain: PlainExpr): DieResult[] {
 }
 
 function formatPlain(p: PlainExpr): string {
-  const parts = p.groups.map((g) => `${g.count}${g.type}`);
-  let s = parts.join(" + ");
+  // 2026-05-10: stitch with separate `+`/`-` separators so negative
+  // counts render as `... - 1d4` instead of `... + -1d4`. First term
+  // keeps its native sign (`-1d4` if it leads, `1d20` otherwise).
+  let s = "";
+  p.groups.forEach((g, i) => {
+    if (i === 0) {
+      s = `${g.count}${g.type}`;
+    } else if (g.count < 0) {
+      s += ` - ${Math.abs(g.count)}${g.type}`;
+    } else {
+      s += ` + ${g.count}${g.type}`;
+    }
+  });
   if (p.modifier > 0) s += `${s ? " + " : ""}${p.modifier}`;
   else if (p.modifier < 0) s += `${s ? " " : ""}${p.modifier}`;
   return s || "—";
@@ -922,18 +969,27 @@ function adjustExprForType(type: DiceType, delta: number) {
   const parsed = parseExpr(expression);
   // Add to outerPlain — outside any wrapper. Each click of a die
   // button always lands as a free-standing additive term so the user
-  // can stack `adv(1d20) + 1d6` by clicking adv then d6 etc. For
-  // simple `1d20+5` (no wrapper) outerPlain IS where the dice live, so
-  // this also matches the old behavior. Decrement only fires when
-  // there's an existing entry to subtract from — matches the legacy
-  // "right-click on a die button removes one" UX.
+  // can stack `adv(1d20) + 1d6` by clicking adv then d6 etc.
+  //
+  // 2026-05-10: right-click on a die button now ALSO supports going
+  // BELOW zero — if there's no existing entry of `type`, a `-1d{type}`
+  // term is added (decrement). Use case: building an expression like
+  // `2d20 - 1d4` where the d4 has no positive sibling. Previous
+  // behaviour silently dropped the click when count <= 0 (legacy
+  // "right-click only removes existing").
   const dst = parsed.outerPlain;
   const ex = dst.groups.find((g) => g.type === type);
   if (ex) {
     ex.count += delta;
-    if (ex.count <= 0) dst.groups = dst.groups.filter((g) => g !== ex);
-  } else if (delta > 0) {
-    dst.groups.push({ type, count: delta });
+    // Drop the group entirely only when count lands at 0 (clean
+    // toggle off). Negative counts stay — formatPlain renders e.g.
+    // -1d4 as "-1d4" and the rest of the parser reads it correctly
+    // on the next round-trip.
+    if (ex.count === 0) dst.groups = dst.groups.filter((g) => g !== ex);
+  } else {
+    // No existing entry — push with the requested delta directly.
+    // delta may be -1 (right-click) or +1 (left-click). +0 is a no-op.
+    if (delta !== 0) dst.groups.push({ type, count: delta });
   }
   setExpression(formatExpr(parsed));
 }
@@ -1086,8 +1142,8 @@ function renderCombos() {
           <div class="combo-actions">
             <button class="btn primary" data-act="roll" type="button">${tt("diceComboBtnRoll")}</button>
             ${darkBtn}
+            <button class="btn combo-crit" data-act="roll-crit" type="button" title="${tt("diceTitleCrit")}">${tt("diceComboBtnCrit")}</button>
             <button class="btn" data-act="load" type="button">${tt("diceComboBtnEdit")}</button>
-            <button class="btn" data-act="cat" type="button">${tt("diceComboCatLabel")}</button>
             <button class="btn danger" data-act="del" type="button">${tt("diceComboBtnDel")}</button>
           </div>
         </div>
@@ -1142,27 +1198,20 @@ function wireCardActions() {
       if (!c) return;
       const act = b.dataset.act;
       if (act === "roll") {
-        rollFromCombo(c.expr, c.name, false, b);
+        rollFromCombo(c.expr, c.name, { hidden: false }, b);
       } else if (act === "roll-dark") {
-        rollFromCombo(c.expr, c.name, true, b);
+        rollFromCombo(c.expr, c.name, { hidden: true }, b);
+      } else if (act === "roll-crit") {
+        // 重击 — double dice counts in the combo's saved expression
+        // before rolling. Pure pre-roll text transform; the combo's
+        // stored expression isn't mutated.
+        const critExpr = doubleDiceCounts(c.expr);
+        rollFromCombo(critExpr, c.name, { hidden: false }, b);
       } else if (act === "load") {
         setExpression(c.expr);
         labelText = c.name;
         labelInput.value = labelText;
         switchTab("roll");
-      } else if (act === "cat") {
-        const next = window.prompt(
-          tt("diceComboCatChangePrompt"),
-          c.category ?? "",
-        );
-        if (next == null) return; // cancel
-        const trimmed = next.trim().slice(0, 32);
-        c.category = trimmed || undefined;
-        if (trimmed && !categoryOrder.includes(trimmed)) {
-          categoryOrder.push(trimmed);
-        }
-        saveCombos();
-        renderCombos();
       } else if (act === "del") {
         combos = combos.filter((x) => x.id !== id);
         saveCombos();
@@ -1343,6 +1392,174 @@ function renderHistorySeg() {
   });
 }
 
+// === History rendering helpers ============================================
+//
+// These mirror the bottom-right history modal's renderers (history-page.ts).
+// Goal: identical visual vocabulary in both UIs — dice as PNG icons inside
+// pill-shaped chips, collective rolls collapsed into a member-strip with
+// one card per token, repeat rolls into a flow-wrap repeat-strip, solo
+// rolls as a single formula line. Each rendered block is an `.entry`
+// container with a roller-color-bound left border + click target wired to
+// BC_DICE_REPLAY (handled by the panel's historyList click delegate).
+
+const STANDARD_DIE_TYPES = new Set(["d4", "d6", "d8", "d10", "d12", "d20", "d100"]);
+function dieImgUrl(type: string): string {
+  return assetUrl(`${STANDARD_DIE_TYPES.has(type) ? type : "d100"}.png`);
+}
+
+function chipsHtml(dice: DieResult[]): string {
+  const parts: string[] = [];
+  for (const d of dice) {
+    const sides = sidesOf(d.type);
+    const cls =
+      d.loser ? "loser" :
+      d.value === sides ? "crit" :
+      d.value === 1 ? "fail" : "";
+    const subtractCls = d.subtract ? " subtract" : "";
+    const valueStr = d.subtract ? `−${d.value}` : String(d.value);
+    parts.push(
+      `<span class="die-chip ${cls}${subtractCls}">` +
+      `<img src="${dieImgUrl(d.type)}" alt="${escapeHtml(d.type)}" draggable="false">` +
+      `<span>${valueStr}</span>` +
+      `</span>`,
+    );
+  }
+  return parts.join("");
+}
+
+function buildFormulaInner(entry: DiceRollPayload, showLabel = true): string {
+  const chips = chipsHtml(entry.dice);
+  let modStr = "";
+  if (entry.modifier !== 0) {
+    const N = entry.rowStarts?.length ?? 0;
+    const sign = entry.modifier > 0 ? "+" : "";
+    modStr = N > 1
+      ? `<span class="mod">${sign}${entry.modifier}×${N}</span>`
+      : `<span class="mod">${sign}${entry.modifier}</span>`;
+  }
+  const repeatTag = (entry.rowStarts?.length ?? 0) > 1
+    ? `<span class="label-tag" style="background:rgba(93,173,226,0.18);color:#9ad9ff">repeat×${entry.rowStarts!.length}</span>`
+    : "";
+  const labelStr = showLabel && entry.label
+    ? `<span class="label-tag">${escapeHtml(entry.label)}</span>`
+    : "";
+  const list = `<div class="dice-list">${repeatTag}${chips}${modStr}${labelStr}<span class="eq">=</span></div>`;
+  const total = `<span class="total">${entry.total}</span>`;
+  return list + total;
+}
+
+function buildMemberCard(m: DiceRollPayload): string {
+  const chips = chipsHtml(m.dice);
+  const modStr = m.modifier !== 0
+    ? `<span class="mod">${m.modifier > 0 ? `+${m.modifier}` : m.modifier}</span>`
+    : "";
+  const kept = m.dice.filter((d) => !d.loser);
+  const isCrit = kept.some((d) => d.type === "d20" && d.value === 20);
+  const isFail = kept.some((d) => d.type === "d20" && d.value === 1);
+  const cardCls = ["member-card"];
+  if (isCrit) cardCls.push("crit");
+  else if (isFail) cardCls.push("fail");
+  if (m.hidden) cardCls.push("hidden-roll");
+  return `<div class="${cardCls.join(" ")}" data-rollid="${escapeHtml(m.rollId)}" data-cid="${escapeHtml(m.collectiveId ?? m.rollId)}">${chips}${modStr}<span class="eq">=</span><span class="total">${m.total}</span></div>`;
+}
+
+function buildMemberStripHtml(members: DiceRollPayload[]): string {
+  return `<div class="member-strip">${members.map(buildMemberCard).join("")}</div>`;
+}
+
+function buildRepeatRowCard(entry: DiceRollPayload, rowIdx: number, rowDice: DieResult[], rowTotal: number): string {
+  const chips = chipsHtml(rowDice);
+  const modStr = entry.modifier !== 0
+    ? `<span class="mod">${entry.modifier > 0 ? `+${entry.modifier}` : entry.modifier}</span>`
+    : "";
+  const kept = rowDice.filter((d) => !d.loser);
+  const isCrit = kept.some((d) => d.type === "d20" && d.value === 20);
+  const isFail = kept.some((d) => d.type === "d20" && d.value === 1);
+  const cls = ["member-card"];
+  if (isCrit) cls.push("crit");
+  else if (isFail) cls.push("fail");
+  if (entry.hidden) cls.push("hidden-roll");
+  return (
+    `<div class="${cls.join(" ")}" data-rollid="${escapeHtml(entry.rollId)}" data-cid="${escapeHtml(entry.collectiveId ?? entry.rollId)}">` +
+    `<span class="repeat-idx">#${rowIdx + 1}</span>` +
+    `${chips}${modStr}<span class="eq">=</span><span class="total">${rowTotal}</span>` +
+    `</div>`
+  );
+}
+
+function buildRepeatStripHtml(entry: DiceRollPayload): string {
+  const rows = entry.rowStarts ?? [];
+  if (rows.length === 0) return "";
+  const out: string[] = [];
+  for (let r = 0; r < rows.length; r++) {
+    const start = rows[r];
+    const end = r + 1 < rows.length ? rows[r + 1] : entry.dice.length;
+    const rowDice = entry.dice.slice(start, end);
+    const kept = rowDice.filter((d) => !d.loser);
+    const rowTotal = kept.reduce((a, d) => a + d.value, 0) + entry.modifier;
+    out.push(buildRepeatRowCard(entry, r, rowDice, rowTotal));
+  }
+  return `<div class="repeat-strip is-flow">${out.join("")}</div>`;
+}
+
+function renderEntrySolo(h: DiceRollPayload): string {
+  const cid = h.collectiveId ?? h.rollId;
+  const ago = formatAgo(Date.now() - h.ts);
+  const cls = ["entry"];
+  const kept = h.dice.filter((d) => !d.loser);
+  if (kept.some((d) => d.type === "d20" && d.value === 20)) cls.push("crit");
+  if (kept.some((d) => d.type === "d20" && d.value === 1)) cls.push("fail");
+  if (h.hidden) cls.push("hidden-roll");
+  if (cid === activeReplayCid) cls.push("replay-on");
+  const isRepeat = (h.rowStarts?.length ?? 0) > 1;
+  const body = isRepeat
+    ? buildRepeatStripHtml(h)
+    : `<div class="formula">${buildFormulaInner(h, /* showLabel */ false)}</div>`;
+  const darkTag = h.hidden ? `<span class="dark-tag">${tt("diceHistDarkTag")}</span>` : "";
+  const titleText = escapeHtml(h.label || h.rollerName);
+  return `
+    <div class="${cls.join(" ")}" data-cid="${escapeHtml(cid)}" style="--player-color:${h.rollerColor}" title="${tt("diceHistoryReplayTooltip")}">
+      <div class="body">
+        <div class="line1">
+          <span class="player">${darkTag}${titleText}</span>
+          <span class="ago">${ago}</span>
+        </div>
+        ${body}
+      </div>
+    </div>
+  `;
+}
+
+function renderEntryCollective(cid: string, members: DiceRollPayload[]): string {
+  const head = members[0];
+  const ago = formatAgo(Date.now() - head.ts);
+  const cls = ["entry", "coll-entry"];
+  if (cid === activeReplayCid) cls.push("replay-on");
+  if (head.hidden) cls.push("hidden-roll");
+  const hasCrit = members.some((m) =>
+    m.dice.some((d) => !d.loser && d.type === "d20" && d.value === 20),
+  );
+  const hasFail = members.some((m) =>
+    m.dice.some((d) => !d.loser && d.type === "d20" && d.value === 1),
+  );
+  if (hasCrit) cls.push("crit");
+  else if (hasFail) cls.push("fail");
+  const darkTag = head.hidden ? `<span class="dark-tag">${tt("diceHistDarkTag")}</span>` : "";
+  const collTag = `<span class="coll-tag">${tt("diceHistColl")} ${members.length}</span>`;
+  const labelOrName = escapeHtml(head.label || head.rollerName);
+  return `
+    <div class="${cls.join(" ")}" data-cid="${escapeHtml(cid)}" style="--player-color:${head.rollerColor}" title="${tt("diceHistoryReplayTooltip")}">
+      <div class="body">
+        <div class="line1">
+          <span class="player">${darkTag}${collTag}${labelOrName}</span>
+          <span class="ago">${ago}</span>
+        </div>
+        ${buildMemberStripHtml(members)}
+      </div>
+    </div>
+  `;
+}
+
 function renderHistoryList() {
   const filtered = historyFilter
     ? history.filter((h) => h.rollerName === historyFilter)
@@ -1351,105 +1568,31 @@ function renderHistoryList() {
     historyList.innerHTML = `<div class="empty-state">${tt("diceHistoryEmpty")}</div>`;
     return;
   }
-  historyList.innerHTML = filtered.map((h) => {
-    const ago = formatAgo(Date.now() - h.ts);
-    // For history, ignore loser dice in the formula recap — they're a
-    // visual-only annotation of adv/dis.
-    const kept = h.dice.filter((d) => !d.loser);
-
-    const labelStr = h.label ? ` · ${escapeHtml(h.label)}` : "";
-    const isCrit = kept.some((d) => d.type === "d20" && d.value === 20);
-    const isFail = kept.some((d) => d.type === "d20" && d.value === 1);
-    const cardCls = isCrit ? "crit" : isFail ? "fail" : "";
-
-    const sidesAndCls = (d: DieResult) => {
-      const sides = sidesOf(d.type);
-      const cls =
-        d.value === sides ? "high" :
-        d.value === 1     ? "low"  : "";
-      const loserCls = d.loser ? " loser" : "";
-      return `<span class="history-die ${cls}${loserCls}">${d.value}</span>`;
-    };
-
-    // -------- repeat(N, …) rows --------
-    // The roller stamps `rowStarts` whenever the outermost wrapper was
-    // `repeat`. Each row is an independent inner roll with its own dice
-    // span and its own total = (dice in row) + modifier. The history
-    // entry records the GRAND total, but the per-row recap is what the
-    // user actually wants to see ("3 separate +5 attacks → 23 / 12 / 18").
-    if (h.rowStarts && h.rowStarts.length > 0) {
-      const rows = h.rowStarts;
-      const N = rows.length;
-      // Reverse-engineer the inner formula from the dice in row 0.
-      // Same shape repeats for every row by definition of `repeat(...)`.
-      const row0End = rows.length > 1 ? rows[1] : h.dice.length;
-      const row0Kept = h.dice.slice(rows[0], row0End).filter((d) => !d.loser);
-      const grouped0: Record<string, number> = {};
-      for (const d of row0Kept) grouped0[d.type] = (grouped0[d.type] ?? 0) + 1;
-      const inner = Object.entries(grouped0).map(([t, n]) => `${n}${t}`).join("+")
-        + (h.modifier ? (h.modifier > 0 ? `+${h.modifier}` : `${h.modifier}`) : "");
-      const formula = `repeat(${N},${inner || "—"})`;
-
-      // Each iteration becomes a compact pill — they flow horizontally
-      // and only wrap to a new line when the available width can't
-      // hold the next pill. Matches the user's "顺序排列除非排不下
-      // 再换行（flow）" call. Grand-total Σ row stays on its own
-      // separator-prefixed line below.
-      const pills: string[] = [];
-      for (let r = 0; r < N; r++) {
-        const start = rows[r];
-        const end = r + 1 < N ? rows[r + 1] : h.dice.length;
-        const slice = h.dice.slice(start, end);
-        const rowKept = slice.filter((d) => !d.loser);
-        const rowSum =
-          rowKept.reduce((a, d) => a + (d.subtract ? -d.value : d.value), 0)
-          + h.modifier;
-        pills.push(`
-          <span class="repeat-pill">
-            <span class="repeat-pill-idx">#${r + 1}</span>
-            ${slice.map(sidesAndCls).join("")}
-            ${h.modifier ? `<span class="repeat-pill-mod">${h.modifier > 0 ? "+" : ""}${h.modifier}</span>` : ""}
-            <span class="history-total">${rowSum}</span>
-          </span>`);
+  // Walk newest-first; pack consecutive collective members into one shared
+  // entry block. Same algorithm as history-page.ts's renderDetail. A
+  // `consumedIdx` Set keeps the local entries array intact so iterating
+  // never trips on a nullified element.
+  const consumedIdx = new Set<number>();
+  const blocks: string[] = [];
+  for (let i = 0; i < filtered.length; i++) {
+    if (consumedIdx.has(i)) continue;
+    const h = filtered[i];
+    const cid = h.collectiveId ?? h.rollId;
+    const members: DiceRollPayload[] = [];
+    for (let j = i; j < filtered.length; j++) {
+      if (consumedIdx.has(j)) continue;
+      const e = filtered[j];
+      if ((e.collectiveId ?? e.rollId) === cid) {
+        members.push(e);
+        consumedIdx.add(j);
       }
-      return `
-        <div class="history-item ${cardCls}">
-          <div class="history-head">
-            <span class="history-player" style="color:${h.rollerColor}">${escapeHtml(h.rollerName)}${labelStr}</span>
-            <span>${ago}</span>
-          </div>
-          <div class="history-formula">${escapeHtml(formula)}</div>
-          <div class="repeat-pill-flow">${pills.join("")}</div>
-          <div class="history-rolls" style="margin-top:2px;border-top:1px dashed rgba(255,255,255,0.08);padding-top:3px">
-            <span style="color:#8a8e9c;font-size:11px">Σ</span>
-            <span class="history-total">${h.total}</span>
-          </div>
-        </div>
-      `;
     }
-
-    // -------- single-row roll (default) --------
-    const grouped: Record<string, number> = {};
-    for (const d of kept) grouped[d.type] = (grouped[d.type] ?? 0) + 1;
-    const parts = Object.entries(grouped).map(([t, n]) => `${n}${t}`);
-    let formula = parts.join(" + ");
-    if (h.modifier) formula += `${formula ? (h.modifier > 0 ? " + " : " ") : ""}${h.modifier}`;
-    const dieChips = h.dice.map(sidesAndCls).join("");
-    return `
-      <div class="history-item ${cardCls}">
-        <div class="history-head">
-          <span class="history-player" style="color:${h.rollerColor}">${escapeHtml(h.rollerName)}${labelStr}</span>
-          <span>${ago}</span>
-        </div>
-        <div class="history-formula">${escapeHtml(formula || "—")}</div>
-        <div class="history-rolls">
-          ${dieChips}
-          ${h.modifier ? `<span style="color:#8a8e9c">${h.modifier > 0 ? "+" : ""}${h.modifier}</span>` : ""}
-          <span class="history-total">${h.total}</span>
-        </div>
-      </div>
-    `;
-  }).join("");
+    if (!members.length) continue;
+    blocks.push(members.length === 1
+      ? renderEntrySolo(members[0])
+      : renderEntryCollective(cid, members));
+  }
+  historyList.innerHTML = blocks.join("");
 }
 
 function formatAgo(ms: number): string {
@@ -1488,6 +1631,17 @@ function switchTab(t: typeof activeTab) {
 // token, auto-target that single token. Removes the "click your own
 // token first" friction in the common case where a player only has
 // one PC.
+// Token has an active character-card binding when its metadata carries a
+// non-empty boundCardId. Used by the player auto-target path to break
+// ties between multiple owned tokens — when exactly one of the owned
+// tokens has a card bound, we roll on that one without forcing a manual
+// selection.
+const CC_BOUND_KEY = "com.character-cards/boundCardId";
+function hasBoundCard(it: any): boolean {
+  const v = (it?.metadata as any)?.[CC_BOUND_KEY];
+  return typeof v === "string" && v.length > 0;
+}
+
 async function getOwnedSelectedTokenIds(): Promise<string[]> {
   try {
     const sel = await OBR.player.getSelection();
@@ -1499,9 +1653,14 @@ async function getOwnedSelectedTokenIds(): Promise<string[]> {
         .map((it: any) => it.id);
       if (filtered.length) return filtered;
     }
-    // Player auto-target fallback. GM doesn't get this — they can
-    // own many tokens and shouldn't accidentally roll on a random
-    // one without selecting it.
+    // Player auto-target with multi-owner disambiguation:
+    //   1 owned          → roll on that one (always)
+    //   N owned, 1 has cc → roll on the cc-bound one (the user's
+    //                       "main" character; the others are e.g.
+    //                       summons / familiars without sheets)
+    //   N owned, 0 has cc → no auto-target → empty array → caller
+    //                       shows the "请选中角色" warning
+    //   N owned, ≥2 cc    → ambiguous → same warning
     if (!isDM) {
       const items = await OBR.scene.items.getItems(
         (it: any) =>
@@ -1511,7 +1670,48 @@ async function getOwnedSelectedTokenIds(): Promise<string[]> {
           it.createdUserId === myId,
       );
       if (items.length === 1) return [items[0].id];
+      if (items.length > 1) {
+        const carded = items.filter(hasBoundCard);
+        if (carded.length === 1) return [carded[0].id];
+        // Multiple carded or zero carded → ambiguous, force manual
+        // selection.
+      }
+      return [];
     }
+    // DM auto-target: pick the character / mount whose CENTER is
+    // closest to the screen center (the dice-panel crosshair marks
+    // that exact point). Caller will then `focusCameraOnTokens` to
+    // pan the camera over the picked token before the roll fires.
+    const candidates = await OBR.scene.items.getItems(
+      (it: any) =>
+        it.type === "IMAGE" &&
+        (it.layer === "CHARACTER" || it.layer === "MOUNT") &&
+        it.visible,
+    );
+    if (!candidates.length) return [];
+    let bestId: string | null = null;
+    let bestD2 = Infinity;
+    try {
+      const [vw, vh] = await Promise.all([
+        OBR.viewport.getWidth(),
+        OBR.viewport.getHeight(),
+      ]);
+      const cx = vw / 2;
+      const cy = vh / 2;
+      for (const it of candidates) {
+        const p = (it as any).position;
+        if (!p) continue;
+        const sp = await OBR.viewport.transformPoint(p);
+        const dx = sp.x - cx;
+        const dy = sp.y - cy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          bestId = (it as any).id ?? null;
+        }
+      }
+    } catch {}
+    return bestId ? [bestId] : [];
   } catch {}
   return [];
 }
@@ -1829,7 +2029,27 @@ async function performRoll(opts: { hidden: boolean }): Promise<void> {
 // Combos tab roll. Same flow as performRoll — the panel just builds
 // dice + broadcasts. The button passed in receives the failure shake
 // so feedback stays attached to the actual click target.
-async function rollFromCombo(expr: string, label: string, hidden: boolean = false, sourceBtn?: HTMLButtonElement): Promise<void> {
+/** Doubles the count of every NdM term in a dice expression (1d8 →
+ *  2d8, 2d6 → 4d6). The modifier and any non-dice tokens are left
+ *  untouched. Used by the combo card's 重击 button to apply 5e crit
+ *  damage rules without mutating the saved expression. */
+function doubleDiceCounts(expr: string): string {
+  return expr.replace(
+    /(\d*)d(\d+)/gi,
+    (_m, count: string, sides: string) => {
+      const c = count ? parseInt(count, 10) : 1;
+      return `${c * 2}d${sides}`;
+    },
+  );
+}
+
+async function rollFromCombo(
+  expr: string,
+  label: string,
+  opts: { hidden?: boolean } = {},
+  sourceBtn?: HTMLButtonElement,
+): Promise<void> {
+  const hidden = opts.hidden ?? false;
   const btnSelf = sourceBtn ?? btnRoll;
   if (isAnimating) {
     shakeButtonWithReason(btnSelf, tt("diceShakeAnim"));
@@ -1985,6 +2205,33 @@ function applyAdvWrap(kind: "adv" | "dis") {
 btnAdv.addEventListener("click", () => applyAdvWrap("adv"));
 btnDis.addEventListener("click", () => applyAdvWrap("dis"));
 
+// 重击 — toggles dice-count doubling on the current expression. Pure
+// string transform: every `\d*d\d+` term has its count doubled (1d8 →
+// 2d8, 2d6 → 4d6). Modifier untouched. Re-clicking halves the count
+// back if the expression still looks doubled (best-effort heuristic:
+// if every NdM count is even, we revert by halving).
+btnCrit?.addEventListener("click", () => {
+  const expr = exprInput.value.trim();
+  if (!expr) return;
+  const terms = [...expr.matchAll(/(\d*)d(\d+)/gi)];
+  const allEven =
+    terms.length > 0 &&
+    terms.every(([, c]) => {
+      const n = c ? parseInt(c, 10) : 1;
+      return n > 0 && n % 2 === 0;
+    });
+  const transformed = expr.replace(
+    /(\d*)d(\d+)/gi,
+    (_m, count: string, sides: string) => {
+      const c = count ? parseInt(count, 10) : 1;
+      const next = allEven ? Math.max(1, Math.floor(c / 2)) : c * 2;
+      return `${next}d${sides}`;
+    },
+  );
+  setExpression(transformed);
+  if (btnCrit) btnCrit.classList.toggle("on", !allEven);
+});
+
 // ± buttons next to the expression input. Bumps the flat modifier
 // by 1 so the user can dial in attack/save/skill bonuses without
 // retyping the whole expression.
@@ -2077,6 +2324,17 @@ document.querySelectorAll<HTMLButtonElement>("#examplesRow .example-btn").forEac
 
 btnClearHist.addEventListener("click", () => {
   if (!confirm(tt("diceConfirmClearHistory"))) return;
+  // Close any active replay overlay before wiping history — otherwise
+  // the on-canvas bubbles would keep referencing a roll whose entry
+  // is gone, with no way for the user to dismiss them from this UI.
+  if (activeReplayCid) {
+    const cid = activeReplayCid;
+    setActiveReplayCid(null);
+    try {
+      OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action: "close" }, { destination: "LOCAL" });
+      OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action: "close" }, { destination: "REMOTE" });
+    } catch {}
+  }
   history = [];
   saveHistory();
   renderHistorySeg();
@@ -2090,6 +2348,16 @@ tabBtns.forEach((b) => {
 // --- Live history + lock-release subscriptions ---
 
 OBR.onReady(async () => {
+  // Per-room history key — rebuild after onReady so OBR.room.id is
+  // populated, then reload the panel's history slice from THIS room.
+  try {
+    const rid = (OBR.room?.id as string | undefined) ?? "";
+    LS_HISTORY = `${LS_HISTORY_BASE}:${safeRoomKey(rid)}`;
+    history = loadHistory();
+    if (activeTab === "history") renderHistoryList();
+    refreshBadges();
+  } catch {}
+
   // The dice panel is the iframe the user clicks "投掷" in — its
   // AudioContext warms up immediately and is the most reliable path
   // for SFX broadcast playback.
@@ -2104,6 +2372,10 @@ OBR.onReady(async () => {
   } catch {}
   const btnDark = document.getElementById("btnDarkRoll") as HTMLButtonElement | null;
   if (btnDark) btnDark.style.display = isDM ? "" : "none";
+  // 清空历史 hidden for non-GM (user request 2026-05-08). The wipe is
+  // local-only (history is in localStorage), but exposing the button
+  // to players invites accidental clears of their own scrollback.
+  if (btnClearHist) btnClearHist.style.display = isDM ? "" : "none";
   // Re-render combos so the per-card 暗骰 button shows up for DM
   // (initial paint ran before isDM was resolved).
   renderCombos();
@@ -2123,12 +2395,21 @@ OBR.onReady(async () => {
     }
   });
 
-  // Right-click "添加到骰盘" — pre-fill the expression input. We don't
-  // auto-roll; the user reviews and clicks 投掷.
+  // Right-click "添加到骰盘" — pre-fill the expression input AND the
+  // 备注 (label) field with the rollable's source name (e.g. the skill
+  // or save the user clicked on). We don't auto-roll; the user
+  // reviews and clicks 投掷.
   OBR.broadcast.onMessage("com.obr-suite/dice-panel-fill", (event) => {
-    const data = event.data as { expression?: string } | undefined;
+    const data = event.data as {
+      expression?: string;
+      label?: string;
+    } | undefined;
     if (!data || typeof data.expression !== "string") return;
     setExpression(data.expression);
+    if (typeof data.label === "string" && data.label) {
+      labelInput.value = data.label;
+      labelText = data.label;
+    }
     switchTab("roll");
     setTimeout(() => exprInput.focus(), 50);
     // Consume the localStorage fallback if the live broadcast got
@@ -2159,6 +2440,81 @@ OBR.onReady(async () => {
     historyFilter = data.playerName;
     switchTab("history");
   });
+
+  // Replay overlay sync. Mirrors history-page.ts's listener — when the
+  // overlay closes (from another client / from the overlay itself /
+  // from the same row clicked twice), drop our own `replay-active`
+  // highlight so the row de-illuminates.
+  //
+  // 2026-05-10: also auto-switch to the history tab + scroll the
+  // matching row into view when an "open" arrives. Lets a click in
+  // the bottom-left history popover sync straight into the dice
+  // action panel's history view (instead of leaving the user to
+  // hunt for the highlighted row themselves).
+  OBR.broadcast.onMessage(BC_DICE_REPLAY, (event) => {
+    const data = event.data as { cid?: string; action?: string } | undefined;
+    if (!data?.cid) return;
+    if (data.action === "close") {
+      if (activeReplayCid === data.cid) {
+        setActiveReplayCid(null);
+        if (activeTab === "history") renderHistoryList();
+      }
+      return;
+    }
+    if (data.action === "open") {
+      setActiveReplayCid(data.cid);
+      // 2026-05-10: always switch tab + re-render even when activeTab
+      // was already "history" — the previous "only re-render if
+      // wasDifferent" branch missed the case where the panel had
+      // activeReplayCid stuck on a stale cid from a previous open
+      // that never reset, and the new open wouldn't visually update
+      // the highlight border.
+      if (activeTab !== "history") {
+        switchTab("history");   // calls renderHistoryList internally
+      } else {
+        renderHistoryList();
+      }
+      const targetCid = data.cid;
+      setTimeout(() => {
+        const sel = typeof CSS !== "undefined" && CSS.escape
+          ? CSS.escape(targetCid)
+          : targetCid.replace(/["\\]/g, "\\$&");
+        const row = document.querySelector<HTMLElement>(
+          `.entry[data-cid="${sel}"]`,
+        );
+        if (row) {
+          row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+      }, 30);
+      return;
+    }
+    // Legacy "toggle" path — only fires from older sender clients.
+    if (activeReplayCid && activeReplayCid !== data.cid) {
+      setActiveReplayCid(data.cid);
+      if (activeTab === "history") renderHistoryList();
+    }
+  });
+});
+
+// Click a history row → toggle the replay overlay for that roll's
+// collective. The bottom-right history modal does the same; this lets
+// the user replay a roll without leaving the dice panel.
+historyList.addEventListener("click", (e) => {
+  const item = (e.target as HTMLElement | null)?.closest<HTMLElement>(".entry");
+  if (!item) return;
+  const cid = item.dataset.cid;
+  if (!cid) return;
+  // Send EXPLICIT open / close instead of "toggle" so receivers that
+  // had a stale local state (history popover never got our previous
+  // toggle) all converge to the same state. Was the source of the
+  // "click twice to clear bubble" bug the user reported 2026-05-09.
+  const action = activeReplayCid === cid ? "close" : "open";
+  setActiveReplayCid(action === "open" ? cid : null);
+  renderHistoryList();
+  try {
+    OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action }, { destination: "LOCAL" });
+    OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action }, { destination: "REMOTE" });
+  } catch {}
 });
 
 // --- i18n bootstrap ---
@@ -2209,13 +2565,62 @@ renderHistorySeg();
 renderHistoryList();
 refreshBadges();
 
+// 2026-05-10: cold-start "show history" handshake. The bottom-right
+// history popover sets this flag in localStorage right before it
+// broadcasts BC_PANEL_TOGGLE { open: true }. The panel mounts AFTER
+// the broadcast, so the live BC_DICE_REPLAY listener at the bottom
+// of this file misses the original "open" broadcast — without this
+// hook the panel would land on the default "roll" tab and the user
+// would have to find the highlighted row themselves.
+//
+// Consume + delete: a stale flag from a previous session must not
+// hijack the next manual panel open.
+try {
+  const pendingShowHistory =
+    localStorage.getItem("obr-suite/dice/pending-show-history") === "1";
+  if (pendingShowHistory) {
+    localStorage.removeItem("obr-suite/dice/pending-show-history");
+    if (activeReplayCid) {
+      switchTab("history");
+      // After-paint scroll so the now-highlighted row is in view.
+      const targetCid = activeReplayCid;
+      setTimeout(() => {
+        const sel = typeof CSS !== "undefined" && CSS.escape
+          ? CSS.escape(targetCid)
+          : targetCid.replace(/["\\]/g, "\\$&");
+        const row = document.querySelector<HTMLElement>(
+          `.entry[data-cid="${sel}"]`,
+        );
+        if (row) row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }, 30);
+    }
+  }
+} catch {}
+
 // Pick up a pending prefill written by the bg module just before
 // `OBR.action.open()`. Covers the cold-start case where the broadcast
 // from "添加到骰盘" raced ahead of this iframe's listener registration.
+//
+// New shape: JSON {expression, label}. Legacy shape: bare string with
+// just the expression — still parsed for back-compat with prefill
+// payloads stashed by older builds.
 try {
   const pending = localStorage.getItem("obr-suite/dice-pending-prefill");
   if (pending) {
-    setExpression(pending);
+    let expression = pending;
+    let label = "";
+    if (pending.startsWith("{")) {
+      try {
+        const obj = JSON.parse(pending);
+        if (obj && typeof obj.expression === "string") expression = obj.expression;
+        if (obj && typeof obj.label === "string") label = obj.label;
+      } catch {}
+    }
+    setExpression(expression);
+    if (label) {
+      labelInput.value = label;
+      labelText = label;
+    }
     switchTab("roll");
     localStorage.removeItem("obr-suite/dice-pending-prefill");
     setTimeout(() => exprInput.focus(), 50);

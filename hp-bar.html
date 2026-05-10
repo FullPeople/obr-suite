@@ -94,7 +94,13 @@ html,body{
   padding-bottom:8px;
   filter:drop-shadow(0 2px 4px rgba(52,152,219,0.40));
 }
-.stat-cell{position:relative;display:inline-flex;align-items:center;justify-content:center}
+/* Stat cells now fill the parent pill so clicking ANYWHERE inside
+   the pill focuses the input — easier than threading the needle on
+   2 ch of digits. The slash between the two HP cells is a thin
+   visual divider with pointer-events:none so the two halves stay
+   independently clickable. */
+.stat-cell{position:relative;display:flex;align-items:center;justify-content:center;cursor:text}
+.hp-pill .stat-cell{flex:1;align-self:stretch}
 .stat-input{
   background:transparent;border:none;
   color:inherit;
@@ -102,7 +108,8 @@ html,body{
   text-align:center;
   outline:none;padding:0;
   font-variant-numeric:tabular-nums;
-  width:1.6em;
+  width:100%;height:100%;
+  cursor:text;
   caret-color:rgba(255,255,255,0.9);
 }
 .stat-input:focus{
@@ -111,8 +118,8 @@ html,body{
   text-decoration-thickness:1px;
   text-underline-offset:2px;
 }
-.hp-pill .stat-input{width:1.5em}
-.temp-pill .stat-input,.ac-pill .stat-input{width:1.4em}
+.hp-pill .slash{pointer-events:none}
+.temp-pill,.ac-pill{cursor:text}
 
 /* DM-only lock button — same affordance as bestiary monster-info /
    cc-info popovers. Toggles `metadata.locked` on the bubbles meta
@@ -123,19 +130,21 @@ html,body{
   flex-shrink:0;
   width:30px;height:30px;
   display:flex;align-items:center;justify-content:center;
-  background:rgba(245,166,35,0.18);
-  border:1px solid rgba(245,166,35,0.55);
-  border-radius:8px;
+  background:rgba(190,24,24,0.38);
+  border:1px solid rgba(248,113,113,0.95);
+  border-radius:7px;
   cursor:pointer;
-  color:#f5a623;
+  color:#fecaca;
+  box-shadow:0 0 0 2px rgba(127,29,29,0.28),0 0 12px rgba(248,113,113,0.35);
   padding:0;
   transition:filter .12s, background .12s, border-color .12s, color .12s;
 }
 .stat-lock:hover{filter:brightness(1.18)}
 .stat-lock[data-locked="false"]{
-  background:rgba(93,173,226,0.18);
-  border-color:rgba(93,173,226,0.55);
-  color:#5dade2;
+  background:transparent;
+  border-color:transparent;
+  color:rgba(255,255,255,0.48);
+  box-shadow:none;
 }
 body.is-player .stat-lock{display:none}
 .stat-lock svg{width:14px;height:14px}

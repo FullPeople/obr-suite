@@ -46,9 +46,38 @@ function getEnabledLibraryBases(): string[] {
       seen.add(b);
       return true;
     });
-    return unique.length > 0 ? unique : [DEFAULT_BASE];
+    // 2026-05-10: empty result means EMPTY (no fallback to kiwee).
+    // Lets users disable both built-in libraries and play with only
+    // local-content imports if they want a homebrew-only canvas.
+    return unique;
   } catch {
-    return [DEFAULT_BASE];
+    return [];
+  }
+}
+
+/** Union of every enabled library's `disabledSources` (lower-cased)
+ *  used as a post-fetch blacklist against `monster.source`. Bestiary
+ *  fetches by baseUrl which may not 1:1 with library entries (kiwee
+ *  main + partnered share a base), so per-library filtering at fetch
+ *  time isn't precise. The union is correct for the "I never want
+ *  monsters from BOOKOFEBONTIDES regardless of which library shipped
+ *  it" use case, which is what the user wants. */
+function getUnionDisabledSources(): Set<string> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getState } = require("../../state") as typeof import("../../state");
+    const libs = getState().libraries || [];
+    const out = new Set<string>();
+    for (const l of libs) {
+      if (!l.enabled) continue;
+      for (const s of l.disabledSources ?? []) {
+        const v = String(s).toLowerCase();
+        if (v) out.add(v);
+      }
+    }
+    return out;
+  } catch {
+    return new Set<string>();
   }
 }
 // Images: proxied through our own server so OBR can load them as WebGL textures
@@ -410,6 +439,19 @@ export async function loadAllMonsters(): Promise<ParsedMonster[]> {
       seenKey.add(key);
       return true;
     });
+
+    // 2026-05-09: per-library source blacklist — drop any monster
+    // whose source code is in the union of every enabled library's
+    // disabledSources list. Lets the user disable e.g.
+    // BOOKOFEBONTIDES from showing up in the bestiary panel even
+    // though the kiwee partnered library still ships it.
+    const blacklist = getUnionDisabledSources();
+    if (blacklist.size > 0) {
+      all = all.filter((m) => {
+        const src = (m.source || "").trim().toLowerCase();
+        return !blacklist.has(src);
+      });
+    }
     // Sort by CR numerically, then by name
     all.sort((a, b) => {
       const crA = parseCR(a.cr);

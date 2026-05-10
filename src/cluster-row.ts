@@ -19,11 +19,10 @@ import { installDebugOverlay } from "./utils/debugOverlay";
 // toggled on. Holds the actual action buttons. The row popover is
 // opened/closed by background.ts based on the trigger's broadcast.
 
-function isMobileDevice(): boolean {
-  const ua = navigator.userAgent || "";
-  return /Mobi|Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(ua);
-}
-const IS_MOBILE = isMobileDevice();
+// Strengthened detector from feature-flags handles iPad-as-Mac and
+// Android desktop-mode correctly; the local UA-only regex below
+// missed those.
+import { IS_MOBILE } from "./feature-flags";
 
 const SETTINGS_POPOVER_ID = "com.obr-suite/settings";
 const SETTINGS_URL = assetUrl("settings.html");
@@ -377,13 +376,6 @@ OBR.onReady(async () => {
   startSceneSync();
   onStateChange(() => renderRow());
   onLangChange(() => renderRow());
-
-  OBR.scene.onMetadataChange(() => {
-    refreshFromScene().then(() => renderRow());
-  });
-  OBR.broadcast.onMessage("com.obr-suite/state-changed", () => {
-    refreshFromScene().then(() => renderRow());
-  });
 
   await refreshFromScene();
   renderRow();

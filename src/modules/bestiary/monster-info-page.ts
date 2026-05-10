@@ -1,7 +1,8 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { installDebugOverlay } from "../../utils/debugOverlay";
 import { ICONS } from "../../icons";
-import { formatTagsClickable, fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
-import { bindRollableContextMenu } from "../dice/context-menu";
+import { formatTagsClickable, resolveClickRollTarget } from "../dice/tags";
+import { bindRollableContextMenu, bindRollableClickPopup } from "../dice/context-menu";
 import { subscribeToSfx } from "../dice/sfx-broadcast";
 import { bindPanelDrag } from "../../utils/panelDrag";
 import { PANEL_IDS } from "../../utils/panelLayout";
@@ -12,6 +13,44 @@ import {
   clampStat,
   type BubblesData,
 } from "../../utils/statEdit";
+import { mountResourcePanel } from "../resourceTracker/panel";
+import { STABLE_HIDES } from "../../feature-flags";
+import { getLocalLang, onLangChange } from "../../state";
+
+// 2026-05-10: language-aware section titles, ability labels, save /
+// check labels, etc. Foreign players using the kiwee Chinese mirror
+// were stuck seeing Chinese chrome around the Chinese-prose entries;
+// labels at least are now in their language. The actual prose stays
+// in whatever language the data-source ships.
+let _curLang: "zh" | "en" = (() => {
+  try { return (getLocalLang() as "zh" | "en") ?? "zh"; } catch { return "zh"; }
+})();
+
+// 2026-05-10: pin-panel feature for monster-info (mirror of cc-info).
+const LS_MONSTER_INFO_PINNED = "obr-suite/monster-info-pinned";
+const BC_MONSTER_INFO_PIN_CHANGED = "com.obr-suite/monster-info-pin-changed";
+
+function readMonsterInfoPinned(): boolean {
+  try { return localStorage.getItem(LS_MONSTER_INFO_PINNED) === "1"; } catch { return false; }
+}
+
+function toggleMonsterInfoPinned(): void {
+  const next = !readMonsterInfoPinned();
+  try { localStorage.setItem(LS_MONSTER_INFO_PINNED, next ? "1" : "0"); } catch {}
+  try {
+    OBR.broadcast.sendMessage(
+      BC_MONSTER_INFO_PIN_CHANGED,
+      { pinned: next },
+      { destination: "LOCAL" },
+    );
+  } catch {}
+  const btn = document.querySelector<HTMLButtonElement>("#panel-pin-btn");
+  if (btn) {
+    btn.classList.toggle("pinned", next);
+    btn.setAttribute("aria-pressed", String(next));
+    btn.title = next ? "已置顶（取消则恢复随选择关闭）" : "置顶面板（取消选中也保持显示）";
+  }
+}
 
 // Token id paired with the currently-shown monster slug. Updated when
 // the SHOW_MSG broadcast fires (DM selects a different bestiary token).
@@ -157,6 +196,39 @@ function escapeHtml(s: unknown) {
   );
 }
 
+function renderNameButton(name: string, clickable: boolean): string {
+  if (!clickable) {
+    return `<div class="name">${escapeHtml(name)}</div>`;
+  }
+  const title = `点击 → 同步 / 清除 token 名字：${name}`;
+  return `<button class="name name-btn" type="button" data-name-text="${escapeHtml(name)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(name)}</button>`;
+}
+
+async function toggleTokenNameText(itemId: string, name: string, btn: HTMLButtonElement): Promise<void> {
+  const cleanName = name.trim();
+  if (!cleanName) return;
+  btn.disabled = true;
+  try {
+    const items = await OBR.scene.items.getItems([itemId]);
+    const current = String((items[0] as any)?.text?.plainText ?? "").trim();
+    const next = current === cleanName ? "" : cleanName;
+    await OBR.scene.items.updateItems([itemId], (drafts) => {
+      for (const d of drafts) {
+        const anyDraft = d as any;
+        anyDraft.text = {
+          ...(anyDraft.text ?? {}),
+          type: anyDraft.text?.type ?? "PLAIN",
+          plainText: next,
+        };
+      }
+    });
+  } catch (e) {
+    console.warn("[monster-info] toggle token name text failed", e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function mod(score: number): number {
   return Math.floor((score - 10) / 2);
 }
@@ -260,6 +332,21 @@ const SKILL_CN: Record<string, string> = {
   performance: "表演", persuasion: "游说", religion: "宗教",
   "sleight of hand": "巧手", stealth: "隐匿", survival: "求生",
 };
+// 2026-05-10: English skill labels for the en-language path. Same keys
+// as 5etools' canonical lower-case skill names so unhandled niche
+// skills (e.g. variant rules) still pass through.
+const SKILL_EN: Record<string, string> = {
+  acrobatics: "Acrobatics", "animal handling": "Animal Handling",
+  arcana: "Arcana", athletics: "Athletics", deception: "Deception",
+  history: "History", insight: "Insight", intimidation: "Intimidation",
+  investigation: "Investigation", medicine: "Medicine", nature: "Nature",
+  perception: "Perception", performance: "Performance", persuasion: "Persuasion",
+  religion: "Religion", "sleight of hand": "Sleight of Hand",
+  stealth: "Stealth", survival: "Survival",
+};
+function skillLabel(key: string, lang: "zh" | "en"): string {
+  return (lang === "en" ? SKILL_EN[key] : SKILL_CN[key]) ?? key;
+}
 // Skill value (e.g. "+5", "5", 5) → numeric bonus.
 function parseSkillBonus(v: any): number | null {
   if (typeof v === "number") return v;
@@ -276,22 +363,26 @@ function parseSkillBonus(v: any): number | null {
 // shared rollable context menu (优势 / 劣势 / 暗骰 / 加入骰盘).
 function formatSkillList(skill: any): string {
   if (!skill || typeof skill !== "object") return "";
+  // 2026-05-10 i18n — both the skill name AND the trailing "Check" /
+  // "检定" suffix swap to match user language.
+  const en = _curLang === "en";
+  const checkSfx = en ? " Check" : "检定";
   const parts: string[] = [];
   for (const [k, v] of Object.entries(skill)) {
-    const cn = SKILL_CN[k.toLowerCase()] ?? k;
+    const lbl = skillLabel(k.toLowerCase(), _curLang);
     const bn = parseSkillBonus(v);
     if (bn == null) {
-      parts.push(`${escapeHtml(cn)} ${escapeHtml(String(v))}`);
+      parts.push(`${escapeHtml(lbl)} ${escapeHtml(String(v))}`);
       continue;
     }
     const expr = `1d20${bn >= 0 ? `+${bn}` : bn}`;
-    const lbl = `${cn}检定`;
-    const display = `${escapeHtml(cn)} ${bn >= 0 ? "+" : ""}${bn}`;
+    const rollLbl = `${lbl}${checkSfx}`;
+    const display = `${escapeHtml(lbl)} ${bn >= 0 ? "+" : ""}${bn}`;
     parts.push(
-      `<span class="rollable skill-roll" data-expr="${escapeHtml(expr)}" data-label="${escapeHtml(lbl)}" title="${escapeHtml(lbl)} ${escapeHtml(expr)}">${display}</span>`,
+      `<span class="rollable skill-roll" data-expr="${escapeHtml(expr)}" data-label="${escapeHtml(rollLbl)}" title="${escapeHtml(rollLbl)} ${escapeHtml(expr)}">${display}</span>`,
     );
   }
-  return parts.join("、");
+  return parts.join(en ? ", " : "、");
 }
 function formatList(value: any): string {
   if (!value) return "";
@@ -398,34 +489,38 @@ function renderSpellGroup(label: string, arr: any): string {
 
 function renderSpellcasting(sc: any): string {
   if (!Array.isArray(sc) || sc.length === 0) return "";
+  const en = _curLang === "en";
   const blocks = sc.map((entry: any) => {
-    const name = entry.name || "施法";
+    const name = entry.name || (en ? "Spellcasting" : "施法");
     const header = flattenEntries(entry.headerEntries);
     const leveled = renderSpellLevels(entry.spells);
-    const will = renderSpellGroup("随意", entry.will);
+    const will = renderSpellGroup(en ? "At Will" : "随意", entry.will);
     const daily = renderSpellDaily(entry.daily);
-    const rest = renderSpellGroup("短休回复", entry.rest);
+    const rest = renderSpellGroup(en ? "Short Rest" : "短休回复", entry.rest);
     return `<div class="act spell">
       <div class="sc-hdr"><span class="n">${escapeHtml(name)}</span></div>
       ${header ? `<div class="t">${formatTagsClickable(header)}</div>` : ""}
       ${will}${daily}${rest}${leveled}
     </div>`;
   });
-  return `<div class="sect">${ICONS.sparkles} 施法</div>${blocks.join("")}`;
+  return `<div class="sect">${ICONS.sparkles} ${en ? "Spellcasting" : "施法"}</div>${blocks.join("")}`;
 }
 
 function renderLegendary(m: any, displayName: string): string {
   const items = m.legendary;
   if (!Array.isArray(items) || items.length === 0) return "";
+  const en = _curLang === "en";
   const headerText = Array.isArray(m.legendaryHeader)
     ? flattenEntries(m.legendaryHeader)
-    : `${displayName}可进行 ${m.legendaryActions ?? 3} 个传奇动作，从下列选项中选择。同时只能使用一项，且只能在其他生物的回合结束时进行。${displayName}的每回合开始时，用完的传奇动作次数会重置。`;
+    : (en
+        ? `${displayName} can take ${m.legendaryActions ?? 3} legendary actions, choosing from the options below. Only one can be used at a time and only at the end of another creature's turn. Spent legendary actions are regained at the start of ${displayName}'s turn.`
+        : `${displayName}可进行 ${m.legendaryActions ?? 3} 个传奇动作，从下列选项中选择。同时只能使用一项，且只能在其他生物的回合结束时进行。${displayName}的每回合开始时，用完的传奇动作次数会重置。`);
   const rows = items.map((a: any) => {
     const n = a.name || "?";
     const t = flattenEntries(a.entries);
     return `<div class="act legendary"><span class="n">${formatTagsClickable(n)}</span><span class="t">${formatTagsClickable(t)}</span></div>`;
   }).join("");
-  return `<div class="sect">${ICONS.star} 传奇动作</div><div class="preamble">${formatTagsClickable(headerText)}</div>${rows}`;
+  return `<div class="sect">${ICONS.star} ${en ? "Legendary Actions" : "传奇动作"}</div><div class="preamble">${formatTagsClickable(headerText)}</div>${rows}`;
 }
 
 let currentSlug: string | null = null;
@@ -469,6 +564,11 @@ async function adjustHeight() {
 }
 
 function render(m: any) {
+  // 2026-05-10: snapshot language at the top of every render so all
+  // i18n branches see the same value, even if the user flips lang
+  // mid-render via a broadcast (would otherwise produce mixed-lang
+  // output for the same monster).
+  const en = _curLang === "en";
   const name = m.name || "???";
   const eng = m.ENG_name || "";
   const cr = m.cr?.cr ?? m.cr ?? "?";
@@ -560,8 +660,9 @@ function render(m: any) {
   const sensesStr = formatList(m.senses);
   // 5etools attaches passive perception separately on most entries;
   // append it inline behind the senses list when present.
-  const passive = typeof m.passive === "number" ? `被动察觉 ${m.passive}` : "";
-  const sensesFull = [sensesStr, passive].filter(Boolean).join("、");
+  const passiveLabel = en ? "Passive Perception" : "被动察觉";
+  const passive = typeof m.passive === "number" ? `${passiveLabel} ${m.passive}` : "";
+  const sensesFull = [sensesStr, passive].filter(Boolean).join(en ? ", " : "、");
   const languagesStr = formatList(m.languages);
   const resistStr = formatDmgList(m.resist);
   const immuneStr = formatDmgList(m.immune);
@@ -571,31 +672,45 @@ function render(m: any) {
     value
       ? `<div class="meta-row"><span class="meta-l">${label}</span><span class="meta-v">${raw ? value : formatTagsClickable(value)}</span></div>`
       : "";
+  const metaLabels = en
+    ? { skills: "Skills", senses: "Senses", languages: "Languages",
+        resist: "Resistances", immune: "Immunities",
+        vuln: "Vulnerabilities", condImmune: "Condition Immunities" }
+    : { skills: "技能", senses: "感知", languages: "语言",
+        resist: "抗性", immune: "免疫", vuln: "易伤",
+        condImmune: "状态免疫" };
   const meta = [
     // Skills row already contains finalized HTML (`.rollable` spans
     // wrapped in formatSkillList) — pass `raw=true` so it isn't
     // re-escaped by formatTagsClickable.
-    metaRow("技能", skillsStr, true),
-    metaRow("感知", sensesFull),
-    metaRow("语言", languagesStr),
-    metaRow("抗性", resistStr),
-    metaRow("免疫", immuneStr),
-    metaRow("易伤", vulnerableStr),
-    metaRow("状态免疫", condImmuneStr),
+    metaRow(metaLabels.skills, skillsStr, true),
+    metaRow(metaLabels.senses, sensesFull),
+    metaRow(metaLabels.languages, languagesStr),
+    metaRow(metaLabels.resist, resistStr),
+    metaRow(metaLabels.immune, immuneStr),
+    metaRow(metaLabels.vuln, vulnerableStr),
+    metaRow(metaLabels.condImmune, condImmuneStr),
   ].filter(Boolean).join("");
   const metaBlock = meta ? `<div class="meta">${meta}</div>` : "";
 
-  const top = `
-    ${statBanner}
-    <div class="top">
-      <div class="chips">${chips}</div>
-      <div class="abil">__ABIL__</div>
-    </div>
-    ${metaBlock}
-  `;
+  // statBanner stays ABOVE the tab strip — name + HP / AC must remain
+  // visible regardless of which tab is active. Tab strip + sliding
+  // pane are dev-only for now (gated on STABLE_HIDES).
+  const stickyTop = STABLE_HIDES
+    ? statBanner
+    : `${statBanner}${renderTabStrip()}`;
 
   const saves = m.save || {};
-  const monsterName = stripTags(m.name ?? m.ENG_name ?? "怪物");
+  const monsterName = stripTags(m.name ?? m.ENG_name ?? (en ? "Monster" : "怪物"));
+  // 2026-05-10 i18n — ability abbreviations + check / save labels.
+  const ABBR_FOR_LANG: Record<string, string> = en
+    ? { str: "Str", dex: "Dex", con: "Con", int: "Int", wis: "Wis", cha: "Cha" }
+    : ABBR;
+  const FULL_FOR_LANG: Record<string, string> = en
+    ? { str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma" }
+    : FULL;
+  const checkSuffix = en ? " Check" : "检定";
+  const saveSuffix = en ? " Save" : "豁免";
   const abl = ORDER
     .map((k) => {
       const score = typeof m[k] === "number" ? m[k] : 10;
@@ -603,7 +718,7 @@ function render(m: any) {
       const aMod = mod(score);
       // Ability check: 1d20+modifier
       const aExpr = `1d20${aMod >= 0 ? `+${aMod}` : aMod}`;
-      const aLbl = `${FULL[k] ?? ABBR[k]}检定`;
+      const aLbl = `${FULL_FOR_LANG[k] ?? ABBR_FOR_LANG[k]}${checkSuffix}`;
       // Saving throw — for proficient saves, m.save[k] holds the bonus
       // string ("+5" / "5"). Otherwise it's the same as the modifier.
       const saveBonusRaw = saves[k];
@@ -615,9 +730,9 @@ function render(m: any) {
         saveBn = saveBonusRaw;
       }
       const saveExpr = `1d20${saveBn >= 0 ? `+${saveBn}` : saveBn}`;
-      const saveLbl = `${FULL[k] ?? ABBR[k]}豁免`;
+      const saveLbl = `${FULL_FOR_LANG[k] ?? ABBR_FOR_LANG[k]}${saveSuffix}`;
       return `<div class="abl${isProf ? " prof" : ""}">
-        <span class="a rollable" data-expr="${saveExpr}" data-label="${escapeHtml(saveLbl)}" title="${escapeHtml(saveLbl)} ${saveExpr}">${ABBR[k]}</span>
+        <span class="a rollable" data-expr="${saveExpr}" data-label="${escapeHtml(saveLbl)}" title="${escapeHtml(saveLbl)} ${saveExpr}">${ABBR_FOR_LANG[k]}</span>
         <span class="t">${score}</span>
         <span class="m rollable" data-expr="${aExpr}" data-label="${escapeHtml(aLbl)}" title="${escapeHtml(aLbl)} ${aExpr}">${fmtMod(aMod)}</span>
       </div>`;
@@ -639,13 +754,56 @@ function render(m: any) {
     return `<div class="sect">${title}</div>${rows}`;
   };
 
-  const traits = sectionHtml(m.trait, "trait", `${ICONS.sparkle4} 特性`);
+  // 2026-05-10 i18n — section titles + ability/save labels switch on
+  // user language. The actual entry prose stays whatever the data
+  // source provides (kiwee mirror = Chinese). `en` was captured at
+  // the top of render().
+  const sectTitles = en
+    ? { traits: "Traits", actions: "Actions", bonus: "Bonus Actions",
+        reactions: "Reactions" }
+    : { traits: "特性", actions: "动作", bonus: "附赠动作", reactions: "反应" };
+
+  const traits = sectionHtml(m.trait, "trait", `${ICONS.sparkle4} ${sectTitles.traits}`);
   const spellcasting = renderSpellcasting(m.spellcasting);
-  const actions = sectionHtml(m.action, "", `${ICONS.swords} 动作`);
-  const bonus = sectionHtml(m.bonus, "bonus", `${ICONS.zap} 附赠动作`);
-  const reactions = sectionHtml(m.reaction, "reaction", `${ICONS.shield} 反应`);
+  const actions = sectionHtml(m.action, "", `${ICONS.swords} ${sectTitles.actions}`);
+  const bonus = sectionHtml(m.bonus, "bonus", `${ICONS.zap} ${sectTitles.bonus}`);
+  const reactions = sectionHtml(m.reaction, "reaction", `${ICONS.shield} ${sectTitles.reactions}`);
   const legendary = renderLegendary(m, name);
 
+  // Combined attribute pane content — chips / abilities / meta /
+  // actions etc all in one block. On stable this renders flat; on
+  // dev it gets wrapped in a sliding rt-clip alongside the resource
+  // pane so switching tabs translates the whole content horizontally.
+  const attrInner = `
+    <div class="top">
+      <div class="chips">${chips}</div>
+      <div class="abil">${abl}</div>
+    </div>
+    ${metaBlock}
+    ${traits}
+    ${spellcasting}
+    ${actions}
+    ${bonus}
+    ${reactions}
+    ${legendary}
+  `;
+  const contentBlock = STABLE_HIDES
+    ? attrInner
+    : `
+      <div class="rt-clip" data-active="${activeRtTab}">
+        <div class="rt-pane" data-pane="attr">${attrInner}</div>
+        <div class="rt-pane" data-pane="res">
+          <div id="rt-mount" style="position:relative; min-height:80px"></div>
+        </div>
+      </div>
+    `;
+
+  // 2026-05-10: pin button — same UX as cc-info. When ON, the
+  // monster-info popover stays open after deselect / different-token
+  // selection (data still updates when a different bound token is
+  // selected). Per-client localStorage key + LOCAL broadcast picked
+  // up by bestiary/index.ts.
+  const pinned = readMonsterInfoPinned();
   root.innerHTML = `
     <div class="hdr">
       <div class="drag-handle" id="drag-handle" title="拖动 / Drag" aria-label="拖动面板">
@@ -658,17 +816,25 @@ function render(m: any) {
           <circle cx="9" cy="15" r="1.2" fill="currentColor"/>
         </svg>
       </div>
-      <div class="name">${escapeHtml(name)}</div>
+      <button class="panel-pin-btn ${pinned ? "pinned" : ""}" id="panel-pin-btn" type="button"
+        aria-pressed="${pinned}"
+        title="${pinned ? "已置顶（取消则恢复随选择关闭）" : "置顶面板（取消选中也保持显示）"}">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .707c-.48.48-1.072.588-1.503.588-.177 0-.339-.016-.484-.041L7.176 13.04a.5.5 0 0 1-.708 0L3.633 10.207 1.4 12.439a.5.5 0 0 1-.707-.707L2.926 9.5.74 7.314a.5.5 0 0 1 0-.708l1.51-1.51c.41-.41.945-.625 1.482-.711.534-.085 1.139-.097 1.683-.024.546.073 1.169.114 1.643-.04.305-.099.62-.281.94-.602.193-.193.282-.467.348-.749.066-.281.117-.572.196-.793a1.51 1.51 0 0 1 .31-.508c.094-.092.215-.174.357-.232a.5.5 0 0 1 .19-.04Z" fill="currentColor"/>
+        </svg>
+      </button>
+      <div class="name-wrap">
+        ${renderNameButton(name, !!currentItemId)}
+      </div>
       <div class="sub">${escapeHtml(sub)}</div>
     </div>
-    ${top.replace("__ABIL__", abl)}
-    ${traits}
-    ${spellcasting}
-    ${actions}
-    ${bonus}
-    ${reactions}
-    ${legendary}
+    ${stickyTop}
+    ${contentBlock}
   `;
+  if (!STABLE_HIDES) {
+    setupTabSwitching();
+    void ensureResourceMount();
+  }
   // Re-bind the drag listener — innerHTML reassignment GC's the
   // previous handle node along with its event handlers.
   const handle = root.querySelector<HTMLElement>("#drag-handle");
@@ -676,13 +842,139 @@ function render(m: any) {
     if (currentMonsterDragUnbind) currentMonsterDragUnbind();
     currentMonsterDragUnbind = bindPanelDrag(handle, PANEL_IDS.bestiaryInfo);
   }
+  const pinBtn = root.querySelector<HTMLButtonElement>("#panel-pin-btn");
+  if (pinBtn) {
+    pinBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleMonsterInfoPinned();
+    });
+  }
   bindStatRowInputs();
+  const nameBtn = root.querySelector<HTMLButtonElement>(".name-btn[data-name-text]");
+  if (nameBtn && currentItemId) {
+    nameBtn.addEventListener("click", () => {
+      void toggleTokenNameText(currentItemId!, nameBtn.dataset.nameText || name, nameBtn);
+    });
+  }
   // Re-apply role gating after each render — fresh DOM nodes need
   // their readOnly / display state set.
   applyRoleGating();
 }
 
 let currentMonsterDragUnbind: (() => void) | null = null;
+
+// === Resource-tracker tab strip =============================================
+//
+// A tabbed switcher between the existing attribute view and the new
+// resource tracker. The HP / AC stat banner stays above the tabs and
+// is never hidden — switching tabs only hides / shows the content
+// blocks below.
+//
+// Hover OR click switches tabs (per user spec: "鼠标进入这些区域会
+// 直接平滑切换"). Smooth opacity transition is via CSS, not a true
+// crossfade — keeping the cost low so this stays responsive on
+// large stat-blocks.
+
+type RtTabId = "attr" | "res";
+let activeRtTab: RtTabId = "attr";
+
+function renderTabStrip(): string {
+  return `
+    <div class="rt-tabstrip">
+      <div class="rt-tab-indicator" data-rt-indicator></div>
+      <button class="rt-tab ${activeRtTab === "attr" ? "on" : ""}" data-rt-tab="attr" type="button">属性</button>
+      <button class="rt-tab ${activeRtTab === "res" ? "on" : ""}" data-rt-tab="res" type="button">资源</button>
+    </div>
+  `;
+}
+
+function setupTabSwitching(): void {
+  const strip = root.querySelector<HTMLElement>(".rt-tabstrip");
+  const clip = root.querySelector<HTMLElement>(".rt-clip");
+  if (!strip) return;
+  const buttons = strip.querySelectorAll<HTMLButtonElement>(".rt-tab");
+  const indicator = strip.querySelector<HTMLElement>("[data-rt-indicator]");
+
+  // Position-helpers for the sliding tab indicator.
+  const moveIndicatorTo = (target: HTMLElement | null) => {
+    if (!indicator || !target) return;
+    indicator.style.transform = `translateX(${target.offsetLeft}px)`;
+    indicator.style.width = `${target.offsetWidth}px`;
+  };
+  const findActiveButton = (): HTMLElement | null =>
+    strip.querySelector<HTMLElement>(`.rt-tab[data-rt-tab="${activeRtTab}"]`);
+
+  // === Slide-clip height tracking ==========================================
+  //
+  // Both panes are absolutely positioned inside the clip (so the
+  // inactive pane can sit at translateX(±100%) without contributing
+  // to layout height). The clip itself needs an explicit height
+  // matching the active pane, otherwise it collapses to 0. We
+  // measure offsetHeight on switch + via ResizeObserver so the clip
+  // grows / shrinks smoothly when content changes (e.g. a new
+  // resource is added).
+  const updateClipHeight = () => {
+    if (!clip) return;
+    const active = clip.querySelector<HTMLElement>(`.rt-pane[data-pane="${activeRtTab}"]`);
+    if (active) clip.style.height = `${active.offsetHeight}px`;
+  };
+  if (clip) {
+    requestAnimationFrame(updateClipHeight);
+    // Re-measure when either pane's intrinsic height changes (resource
+    // added, ability score row reflows, etc).
+    const ro = new ResizeObserver(() => updateClipHeight());
+    clip.querySelectorAll<HTMLElement>(".rt-pane").forEach((p) => ro.observe(p));
+  }
+
+  requestAnimationFrame(() => moveIndicatorTo(findActiveButton()));
+
+  const switchTo = (next: RtTabId) => {
+    if (next === activeRtTab) return;
+    activeRtTab = next;
+    buttons.forEach((b) => b.classList.toggle("on", b.dataset.rtTab === next));
+    moveIndicatorTo(findActiveButton());
+    // Drive the horizontal slide by flipping the clip's data-active.
+    // CSS handles the `transform:translateX` on .rt-pane based on
+    // [data-active] selectors.
+    if (clip) clip.setAttribute("data-active", next);
+    updateClipHeight();
+    if (next === "res") void ensureResourceMount();
+  };
+
+  // Hover on a tab button: indicator follows the cursor instantly
+  // (just slides the indicator); a 200 ms debounce gates the actual
+  // pane switch so quick mouse pass-throughs don't whiplash.
+  let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+  buttons.forEach((b) => {
+    const target = (b.dataset.rtTab as RtTabId) ?? "attr";
+    b.addEventListener("click", () => switchTo(target));
+    b.addEventListener("mouseenter", () => {
+      moveIndicatorTo(b);
+      if (hoverTimer) clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => switchTo(target), 200);
+    });
+    b.addEventListener("mouseleave", () => {
+      if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    });
+  });
+  strip.addEventListener("mouseleave", () => moveIndicatorTo(findActiveButton()));
+}
+
+let resourceMountHandle: { refresh: () => Promise<void>; unmount: () => void } | null = null;
+async function ensureResourceMount(): Promise<void> {
+  const container = root.querySelector<HTMLElement>("#rt-mount");
+  if (!container) return;
+  // mount() is idempotent per container — innerHTML overwrites of
+  // root rip the previous container DOM, so we always re-create the
+  // handle here.
+  resourceMountHandle?.unmount();
+  resourceMountHandle = mountResourcePanel({
+    container,
+    getItemId: () => currentItemId,
+  });
+  await resourceMountHandle.refresh();
+}
 
 // DM-only lock button. Bestiary panel is GM-only by definition so we
 // always render the button when the popover is open. Closed padlock
@@ -743,19 +1035,11 @@ function bindStatRowInputs(): void {
         ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
         : "已解锁：所有玩家可见完整 HP / AC 数值";
       try {
-        // Sync TWO fields on the same metadata key:
-        //   - `locked` → suite's own bubbles module (silhouette mode)
-        //   - `hide`   → external "Stat Bubbles for D&D" plugin
-        //                ("Dungeon Master Only" toggle — players don't
-        //                see the bubble at all)
-        // Both move in lockstep so the lock button does the right
-        // thing regardless of which bubbles plugin (or both) is
-        // active in the room.
         await patchBubbles(
           currentItemId!,
-          { locked: next, hide: next } as Partial<BubblesData>,
+          { locked: next } as Partial<BubblesData>,
         );
-        liveBubbles = { ...liveBubbles, locked: next, hide: next };
+        liveBubbles = { ...liveBubbles, locked: next };
       } catch (e) {
         console.warn("[monster-info] toggle lock failed", e);
         lockBtn.dataset.locked = wasLocked ? "true" : "false";
@@ -859,37 +1143,18 @@ async function showMonster(slug: string, itemId: string | null = currentItemId) 
   }
 }
 
-// Delegated click for any 5etools rollable tag inside the monster
-// stat-block. Left-click = OPEN roll (all players see it) — matches
-// the "DM is just rolling out loud" common case. Right-click pops the
-// context menu, which has its own 暗骰 entry for when the DM wants a
-// hidden roll.
-async function fireRollableFromBestiary(target: HTMLElement, hidden: boolean) {
-  const expression = target.dataset.expr ?? "";
-  const label = target.dataset.label ?? "";
-  if (!expression) return;
-  const itemId = await resolveClickRollTarget();
-  fireQuickRoll({ expression, label, itemId, focus: !!itemId, hidden });
-  target.classList.remove("rollable-flash");
-  void target.offsetWidth;
-  target.classList.add("rollable-flash");
-}
-
+// 2026-05-10 spec change: LEFT click on a .rollable now opens the
+// dice quick-pick popup (劣势 / 普通 / 优势 + 重击). The popup is
+// installed below via `bindRollableClickPopup`; this in-page click
+// handler only deals with .spell-chip clicks, since rollables are
+// captured by the popup binder before they bubble here.
 root.addEventListener("click", async (e) => {
-  // Rollable check first — it's the more specific element, and
-  // .rollable spans can be nested INSIDE .spell-chip wrappers (a
-  // spell name with inline {@dice} markup). We want the inner roll
-  // to fire when clicked, not the outer search.
-  const rollable = (e.target as HTMLElement | null)?.closest<HTMLElement>(".rollable");
-  if (rollable) {
-    e.preventDefault();
-    e.stopPropagation();
-    await fireRollableFromBestiary(rollable, false);
-    return;
-  }
   // Spell-chip click → broadcast BC_SEARCH_QUERY so the global
   // search popup opens with the spell name pre-filled. Same
   // protocol as the character-card search chips (info-page.ts).
+  // Note: a `.rollable` nested INSIDE a `.spell-chip` is handled
+  // first by `bindRollableClickPopup`'s capture-phase listener,
+  // which calls stopPropagation, so we never reach here for those.
   const chip = (e.target as HTMLElement | null)?.closest<HTMLElement>(".spell-chip");
   if (chip) {
     e.preventDefault();
@@ -924,23 +1189,46 @@ root.addEventListener("click", async (e) => {
 // is 50 in bestiary/index.ts; pulled in via constant to stay aligned
 // if it ever changes.
 const INFO_TOP_OFFSET = 60; // matches bestiary/index.ts
+const iframeOriginGetter = async () => {
+  const vw = await OBR.viewport.getWidth().catch(() => 1280);
+  return {
+    left: Math.round(vw / 2 - window.innerWidth / 2),
+    top: INFO_TOP_OFFSET,
+  };
+};
 bindRollableContextMenu(
   root,
   () => "dark",
   () => resolveClickRollTarget(),
-  async () => {
-    const vw = await OBR.viewport.getWidth().catch(() => 1280);
-    return {
-      left: Math.round(vw / 2 - window.innerWidth / 2),
-      top: INFO_TOP_OFFSET,
-    };
-  },
+  iframeOriginGetter,
+);
+// LEFT-click → quick-pick popup (劣势 / 普通 / 优势 + 重击).
+bindRollableClickPopup(
+  root,
+  () => resolveClickRollTarget(),
+  iframeOriginGetter,
 );
 
 OBR.onReady(async () => {
+  installDebugOverlay();
   subscribeToSfx();
   // Capture the popover's opened height as the ceiling for future resizes.
   if (window.innerHeight > 0) INFO_MAX_HEIGHT = window.innerHeight;
+
+  // 2026-05-10: re-render on language flip so labels (section titles,
+  // ability abbreviations, "Hit:" / "Save:" / "Recharge" prefixes)
+  // swap without requiring the user to reselect the monster.
+  onLangChange((next) => {
+    const norm: "zh" | "en" = next === "en" ? "en" : "zh";
+    if (norm === _curLang) return;
+    _curLang = norm;
+    if (currentSlug) {
+      const slug = currentSlug;
+      // Re-fire showMonster — looks the slug up again from cache /
+      // fetch and runs render(m), which reads _curLang at the top.
+      showMonster(slug, currentItemId);
+    }
+  });
 
   // Determine role early — when player + allowPlayerMonsters is on
   // the popover renders for them too, but with edit affordances

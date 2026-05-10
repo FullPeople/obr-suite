@@ -22,11 +22,7 @@ export const PANEL_IDS = {
    *  editor can reposition it independently of the trigger. */
   clusterRow: "cluster-row",
   diceHistory: "dice-history",
-  /** Dice-history TRIGGER button at the bottom-right (the d20 chip
-   *  the user clicks to toggle the history popover). Independent
-   *  panel so users can move the trigger out of OBR's bottom-right
-   *  hot-zone if it overlaps something else. */
-  diceHistoryTrigger: "dice-history-trigger",
+  perfWindow: "perf-window",
   initiative: "initiative",
   bestiaryPanel: "bestiary-panel",
   bestiaryInfo: "bestiary-info",

@@ -63,6 +63,14 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
   filter:drop-shadow(0 1px 1px rgba(0,0,0,0.5));
 }
 
+/* Dark members in a mixed-collective replay (GM-only — players don't
+   even get the bubble built). Half-opacity + slight grayscale so it
+   visually reads as "this one was hidden". */
+.bubble.dim-dark{
+  opacity:0.5;
+  filter:grayscale(0.35);
+}
+
 .bubble .label{
   font-size:10px;font-weight:700;color:#cdd2e0;
   letter-spacing:0.3px;

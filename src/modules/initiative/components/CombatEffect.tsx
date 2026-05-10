@@ -3,7 +3,7 @@ import { useEffect, useState } from "preact/compat";
 interface Props {
   onComplete: () => void;
   lang: string;
-  type: "prepare" | "ambush" | "combat";
+  type: "prepare" | "ambush" | "combat" | "stealth";
 }
 
 export function CombatEffect({ onComplete, lang, type }: Props) {
@@ -20,12 +20,20 @@ export function CombatEffect({ onComplete, lang, type }: Props) {
   } else if (type === "ambush") {
     line1 = isZh ? "突袭！" : "AMBUSH!";
     line2 = "";
+  } else if (type === "stealth") {
+    // 2026-05-09 stealth turn — gray, lower-impact than ambush.
+    // Single line, no urgency punctuation.
+    line1 = isZh ? "有人在暗处..." : "Someone is hiding...";
+    line2 = "";
   } else {
     line1 = isZh ? "战斗" : "COMBAT";
     line2 = isZh ? "开始！" : "BEGIN!";
   }
 
-  const colorClass = type === "prepare" ? "color-gold" : "color-red";
+  const colorClass =
+    type === "prepare" ? "color-gold"
+    : type === "stealth" ? "color-gray"
+    : "color-red";
 
   useEffect(() => {
     // enter: brief flash, then start flying

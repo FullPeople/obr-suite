@@ -84,6 +84,7 @@ const TR: Dict = {
   diceTitleDicePm: { zh: "左键 +1，右键 −1", en: "Left-click +1, right-click −1" },
   diceBtnAdv: { zh: "优势", en: "Adv" },
   diceBtnDis: { zh: "劣势", en: "Dis" },
+  diceBtnCrit: { zh: "重击", en: "Crit" },
   diceTitleAdv: {
     zh: "优势 = 投两次 d20，取较高（不会自动投掷）",
     en: "Advantage = roll d20 twice, keep higher (does not auto-roll)",
@@ -91,6 +92,10 @@ const TR: Dict = {
   diceTitleDis: {
     zh: "劣势 = 投两次 d20，取较低（不会自动投掷）",
     en: "Disadvantage = roll d20 twice, keep lower (does not auto-roll)",
+  },
+  diceTitleCrit: {
+    zh: "重击 = 把表达式里所有骰子数量翻倍（加值不变）。点击应用，再次点击取消。",
+    en: "Critical = double every dice term in the expression (modifier unchanged). Click to apply; click again to undo.",
   },
   diceExprPlaceholder: {
     zh: "例如 2d6 + 1d20 + 5  或  adv(1d20) 等",
@@ -172,8 +177,10 @@ const TR: Dict = {
   },
   diceHistoryEmpty: { zh: "还没有掷骰记录", en: "No roll history yet" },
   diceHistoryAll: { zh: "全部", en: "All" },
+  diceHistoryReplayTooltip: { zh: "点击：在 token 上回放气泡", en: "Click: replay bubble over the token" },
   diceComboBtnRoll: { zh: "投掷", en: "Roll" },
   diceComboBtnDark: { zh: "暗骰", en: "Dark" },
+  diceComboBtnCrit: { zh: "重击", en: "Crit" },
   diceComboBtnEdit: { zh: "编辑", en: "Edit" },
   diceComboBtnDel: { zh: "删除", en: "Delete" },
   diceJustNow: { zh: "刚刚", en: "just now" },
@@ -304,6 +311,10 @@ const TR: Dict = {
   ccPanelUploading: { zh: "⏳ 上传中…", en: "⏳ Uploading…" },
   ccPanelUploaded: { zh: "已上传", en: "Uploaded" },
   ccPanelUploadFailed: { zh: "上传失败", en: "Upload failed" },
+  ccPanelUploadHint: {
+    zh: "请检查：① 角色卡版本是否受支持（v1.0.0 / v1.0.12 / v1.0.12-2014mode 悲灵卡）；② 角色卡内是否嵌入了损坏 / 超大图片（先在 Excel 里删除图片再上传）。",
+    en: "Please check: (1) sheet version is supported (v1.0.0 / v1.0.12 / v1.0.12-2014mode 悲灵 sheets); (2) no broken or oversized embedded images (remove images in Excel first, then re-upload).",
+  },
   ccPanelOnlyXlsx: { zh: "只支持 .xlsx 文件", en: "Only .xlsx files are supported" },
   ccPanelRefreshed: { zh: "已刷新", en: "Refreshed" },
   ccPanelRefreshFailed: { zh: "刷新失败", en: "Refresh failed" },

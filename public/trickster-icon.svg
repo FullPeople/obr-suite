@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <radialGradient id="tricksterGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#d8b4fe" stop-opacity="0.55"/>
+      <stop offset="55%" stop-color="#a06bd9" stop-opacity="0.32"/>
+      <stop offset="92%" stop-color="#5e2c8d" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#2a1144" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Magenta-purple glow fills the full 64×64 viewBox so the rendered
+       diameter equals 2×radius scene-units, matching the trigger zone 1:1. -->
+  <circle cx="32" cy="32" r="32" fill="url(#tricksterGlow)"/>
+
+  <!-- HARD perimeter outline — the user feedback was that the soft
+       gradient fade made the actual trigger boundary ambiguous on the
+       map. A solid stroked ring at radius 31 (one px inside the viewBox
+       to keep antialiasing clean) makes the zone edge unmistakable
+       regardless of zoom level. We use a dual-line trick (dark outer
+       stroke + bright inner stroke) so the ring reads on both light
+       and dark map backgrounds. -->
+  <circle cx="32" cy="32" r="31" fill="none"
+          stroke="#1a0530" stroke-width="2.4" opacity="0.85"/>
+  <circle cx="32" cy="32" r="31" fill="none"
+          stroke="#f3e8ff" stroke-width="1.0" opacity="0.95"
+          stroke-dasharray="3 3"/>
+
+  <!-- Two trickster heads peeking from behind a low wall — V3 line-art
+       style (no filled silhouettes) so the icon stays minimal and the
+       boundary ring is the dominant visual. -->
+  <g stroke="#f3e8ff" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.95">
+    <!-- Wall (cover that hides the bottom halves) -->
+    <path d="M14 38 h36 v14 h-36 z" stroke-width="2.2" fill="rgba(243,232,255,0.06)"/>
+    <!-- Left head -->
+    <path d="M19 38 c0 -8 4.4 -13 10 -13 c5.6 0 10 5 10 13" stroke-width="2.4"/>
+    <!-- Right head — smaller, peeks less -->
+    <path d="M37 38 c0 -6 3.5 -10 7.5 -10 c4 0 7.5 4 7.5 10" stroke-width="2.2"/>
+  </g>
+
+  <!-- Eye whites — solid for unambiguous "creature" reading -->
+  <circle cx="25.6" cy="32" r="2.4" fill="#f3e8ff"/>
+  <circle cx="33"   cy="32" r="2.4" fill="#f3e8ff"/>
+  <circle cx="42"   cy="33.4" r="2.0" fill="#f3e8ff"/>
+  <circle cx="48"   cy="33.6" r="2.0" fill="#f3e8ff"/>
+</svg>

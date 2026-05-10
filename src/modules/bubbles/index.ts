@@ -33,6 +33,7 @@ import OBR, {
   Math2,
   Vector2,
 } from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../../asset-base";
 
 const PLUGIN_ID = "com.obr-suite/bubbles";
 const BUBBLE_OWNER_KEY = `${PLUGIN_ID}/owner`;
@@ -58,6 +59,12 @@ export const LS_BUBBLES_SCALE = `${PLUGIN_ID}/scale`;
 // just below the bubble row.
 export const LS_BUBBLES_VERTICAL_OFFSET = `${PLUGIN_ID}/vertical-offset`;
 const DEFAULT_VERTICAL_OFFSET = -20;
+// New 2026-05-09 setting. When ON, bubble cluster offsets up by
+// TOKEN_TEXT_FONT_BASE (= 20) NATIVE pixels — SCALE inheritance
+// then multiplies by parent.scale at draw time, so the visual
+// offset matches the auto-scaling font label height. When ON, the
+// `vertical-offset` slider is ignored.
+export const LS_BUBBLES_OFFSET_BY_TEXT = `${PLUGIN_ID}/offset-by-text`;
 
 // Per-DM-room player visibility threshold (in percent, 0-100). For
 // LOCKED tokens, the player-side displayed HP ratio is quantised to
@@ -67,15 +74,17 @@ const DEFAULT_VERTICAL_OFFSET = -20;
 // tables can pick their own granularity.
 export const LS_BUBBLES_PLAYER_THRESHOLD = `${PLUGIN_ID}/player-threshold`;
 const DEFAULT_PLAYER_THRESHOLD = 25;
+const SCENE_BUBBLES_SETTINGS_KEY = `${PLUGIN_ID}/settings`;
 
 // Initiative-tracker scene metadata key — bubbles reads it to decide
 // whether locked tokens should show their bar to players right now
 // (during prep / combat) or stay hidden (idle).
 const COMBAT_STATE_KEY = "com.initiative-tracker/combat";
 
-// Compatibility namespace — shared with the upstream extension so a
-// scene previously using it migrates transparently.
-export const BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
+// Suite-owned HP/AC namespace. We still read the upstream extension key
+// as a migration fallback, but all new suite writes should target this.
+export const BUBBLES_META = "com.obr-suite/bubbles/data";
+export const EXTERNAL_BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
 
 // Suite binding markers — bubbles only renders for tokens that the
 // suite has explicitly tagged as a bestiary monster or a character
@@ -108,28 +117,47 @@ const BUBBLE_FONT_SIZE = DIAMETER - 8;          // 22, fits 1–2 digits
 const BUBBLE_FONT_SIZE_TIGHT = DIAMETER - 15;   // 15, used for 3 digits
 const TEXT_VERTICAL_OFFSET = -0.3;              // OBR text rendering nudge
 
+// OBR Image item's `text.style.fontSize` baseline at tokenScale = 1.0
+// (a 5-foot / 1-cell token). Auto-scale-text mode multiplies this by
+// tokenScale per token so a 3-cell ogre gets a name label 3× the
+// height of a 1-cell goblin's. 20 was picked over OBR's default 33
+// because tokens with two-digit HP / AC bubbles overlap the upstream
+// default in cramped grids.
+const TOKEN_TEXT_FONT_BASE = 20;
+
 // Stat bubble palette. HP_FILL is a darker, more saturated red so
 // the bar stays legible at lower opacities and against varied map
 // art (was the lighter #e74c3c earlier).
 const HP_FILL = "#a52424";
 const HP_BG = "#A4A4A4";
-const HP_BG_HIDDEN = "#000000";    // GM-only when stats are hidden from players
+const HP_BG_HIDDEN = "#3b0f12";    // GM-only dark-red bar when hidden from players
 const TEMP_HP_COLOR = "#3b82f6";    // blue
 const AC_COLOR = "#c0c4cc";         // silver
 
 const FONT_FAMILY = "Roboto, sans-serif";
 
-// Single inheritance config: SCALE attachment-inheritance disabled
-// for ALL bubble item types. This is v1.0.42's baseline — many
-// rounds of trying split-by-type or NATIVE+SCALE-on recipes for
-// Effects vs Curves traded one bug for another (drag-revert,
-// position-stuck-on-commit, double-scale, etc). v1.0.42 + this
-// config has the cleanest steady state: static / initial / post-
-// commit are all correct; gesture-time live tracking is sacrificed.
-// HP bar polish work is parked at the lowest priority — picking
-// correctness in the common case over fidelity in the gesture
-// preview.
-const DISABLE_INHERIT: Array<"SCALE" | "ROTATION" | "LOCKED" | "COPY"> = [
+// 2026-05-09 rewrite: re-enable SCALE inheritance, keep ROTATION
+// disabled.
+//
+// 2026-05-10 REVERT to 1.0.30-era model: SCALE inheritance is back
+// on the disable list, so bubbles do NOT auto-scale with the parent.
+// Every dimension is baked in RENDERED scene units (parent.scale
+// magnitude already applied) and every position is in world coords.
+// The renderer does NOT multiply by parent.scale at draw time, so
+// the math is invariant to scale sign — negative parent.scale (token
+// horizontally flipped) is handled by `getImageCenter` returning
+// the correct visual centre, with no per-builder flipX hack.
+//
+// The trade-off vs. the SCALE-inherit model: bubbles snap on
+// gesture-end instead of tracking the visual scale during the
+// gesture itself (items.onChange + getItemBounds both only fire
+// at commit). Earlier "live scale" experiments depended on the
+// renderer multiplication, which the user reported as broken for
+// (a) initial scales != 1 and (b) negative scales. Rolling back to
+// the all-inherit-disabled model fixes both at the cost of a
+// single-frame snap on resize commit, which the user has accepted
+// in prior iterations.
+const DISABLE_INHERIT: Array<"SCALE" | "ROTATION" | "POSITION" | "VISIBLE" | "LOCKED" | "COPY" | "DELETE"> = [
   "SCALE",
   "ROTATION",
   "LOCKED",
@@ -153,7 +181,8 @@ interface BubbleData {
 }
 
 function readBubbleData(item: Item): BubbleData | null {
-  const m = (item.metadata as any)?.[BUBBLES_META];
+  const meta = (item.metadata as any) ?? {};
+  const m = meta[BUBBLES_META] ?? meta[EXTERNAL_BUBBLES_META];
   if (!m || typeof m !== "object") return null;
   const hpRaw = Number(m["health"]);
   const maxRaw = Number(m["max health"]);
@@ -230,15 +259,16 @@ function readVerticalOffset(): number {
   return DEFAULT_VERTICAL_OFFSET;
 }
 
-function readPlayerThreshold(): number {
+function readOffsetByText(): boolean {
   try {
-    const v = localStorage.getItem(LS_BUBBLES_PLAYER_THRESHOLD);
-    if (v != null && v !== "") {
-      const n = Number(v);
-      if (Number.isFinite(n) && n >= 0 && n <= 100) return n;
-    }
+    const v = localStorage.getItem(LS_BUBBLES_OFFSET_BY_TEXT);
+    if (v === "1") return true;
   } catch {}
-  return DEFAULT_PLAYER_THRESHOLD;
+  return false;
+}
+
+function readPlayerThreshold(): number {
+  return cachedPlayerThreshold;
 }
 
 /** Quantise a 0..1 ratio to the nearest ceiling step of size T/100.
@@ -259,9 +289,29 @@ function quantiseRatio(ratio: number, thresholdPercent: number): number {
 // scene metadata on every tick. Refreshed on scene-ready and on
 // metadata-change events.
 let cachedCombatActive = false;
+let cachedPlayerThreshold = DEFAULT_PLAYER_THRESHOLD;
+let cachedAutoScaleText = false;
 function readCombatActive(meta: Record<string, unknown>): boolean {
   const c = meta[COMBAT_STATE_KEY] as { inCombat?: boolean; preparing?: boolean } | undefined;
   return !!(c?.inCombat || c?.preparing);
+}
+function readScenePlayerThreshold(meta: Record<string, unknown>): number {
+  const settings = meta[SCENE_BUBBLES_SETTINGS_KEY] as { playerThreshold?: unknown } | undefined;
+  const n = Number(settings?.playerThreshold);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : DEFAULT_PLAYER_THRESHOLD;
+}
+// Auto-scale-text: when ON, the HP-bar / AC / temp bubble font size
+// follows the token's renderedSize (in addition to the user's
+// per-client `bubbleScale`). When OFF, font size is fixed across
+// token sizes (only the user's manual scale slider affects it). The
+// flag also gates whether the manual `verticalOffset` setting is
+// honored — in auto-scale mode the offset becomes a function of the
+// font size so big tokens push their bubble cluster up further than
+// small tokens automatically. DM-controlled, lives in scene metadata
+// so all clients render the same way.
+function readSceneAutoScaleText(meta: Record<string, unknown>): boolean {
+  const settings = meta[SCENE_BUBBLES_SETTINGS_KEY] as { autoScaleText?: unknown } | undefined;
+  return !!settings?.autoScaleText;
 }
 
 type ViewMode = "full" | "hidden" | "silhouette";
@@ -289,15 +339,17 @@ function computeViewMode(
   ownsItem: boolean,
   isBestiaryBound: boolean,
 ): ViewMode {
-  if (isGM || ownsItem) return "full";
-  if (d.hide) return "hidden";
-  // Bestiary-bound monsters: when combat is preparing or active,
-  // ALWAYS show silhouette (HP bar progress visible, numbers + AC
-  // hidden) regardless of whether the DM has locked them. Out of
-  // combat they default to hidden so the canvas stays clean.
-  // This matches the "DM revealing combatants" affordance: combat
-  // starts → players SEE who's hurt without seeing exact HP.
-  if (isBestiaryBound) return inCombat ? "silhouette" : "hidden";
+  if (d.hide) return isGM ? "full" : "hidden";
+  if (isGM) return "full";
+  if (ownsItem) return "full";
+  // Bestiary-bound monsters: respect lock state. Unlocked means full
+  // visibility (HP numbers + AC visible to all players). Locked means
+  // silhouette in combat (HP bar progress visible, numbers hidden).
+  // Out of combat, locked monsters are hidden.
+  if (isBestiaryBound) {
+    if (d.locked) return inCombat ? "silhouette" : "hidden";
+    return "full";
+  }
   if (d.locked) return inCombat ? "silhouette" : "hidden";
   return "full";
 }
@@ -327,6 +379,57 @@ function getRenderedSize(image: Image, sceneDpi: number) {
   };
 }
 
+// Sync the OBR-native `text.style.fontSize` on every character / mount
+// image so the parent token's plainText label scales with `tokenScale`
+// when the DM enables auto-scale-text.
+//
+// **OFF-mode is a no-op** — once the toggle is off, this plugin must
+// not touch fontSize again. Otherwise the user can't manually set a
+// custom size in OBR's own token-edit panel without us overwriting
+// it on the next sync pass.
+//
+// DM-only — the token data path is shared, so writing once on the GM
+// client propagates to every player automatically. The dedupe guard
+// (only push tokens whose fontSize differs from the target) keeps
+// items.onChange from looping forever.
+async function syncTokenTextFontSize(
+  items: Item[],
+  sceneDpi: number,
+  autoScale: boolean,
+): Promise<void> {
+  if (!autoScale) return;
+  const targetIds: string[] = [];
+  const targetSize = new Map<string, number>();
+  for (const it of items) {
+    if (it.layer !== "CHARACTER" && it.layer !== "MOUNT") continue;
+    if (!isImage(it)) continue;
+    const text = (it as any).text as { style?: { fontSize?: number } } | undefined;
+    if (!text || !text.style) continue;
+    const cur = Number(text.style.fontSize ?? TOKEN_TEXT_FONT_BASE);
+    const size = getRenderedSize(it as Image, sceneDpi);
+    const tokenScale = Math.max(0.05, Math.min(size.width, size.height) / sceneDpi);
+    const want = Math.round(TOKEN_TEXT_FONT_BASE * tokenScale);
+    if (cur === want) continue;
+    targetIds.push(it.id);
+    targetSize.set(it.id, want);
+  }
+  if (!targetIds.length) return;
+  try {
+    await OBR.scene.items.updateItems(targetIds, (drafts) => {
+      for (const d of drafts) {
+        const want = targetSize.get(d.id);
+        if (want == null) continue;
+        const t = (d as any).text as { style?: { fontSize?: number } } | undefined;
+        if (t?.style && t.style.fontSize !== want) {
+          t.style.fontSize = want;
+        }
+      }
+    });
+  } catch (e) {
+    console.warn("[obr-suite/bubbles] syncTokenTextFontSize failed", e);
+  }
+}
+
 // Image dimensions and visible centre at NATIVE (image.scale = 1).
 //
 // With SCALE inheritance on, the parent's scale.x/y is applied by the
@@ -354,6 +457,21 @@ function getImageNativeCenter(image: Image, sceneDpi: number): Vector2 {
   // applies that itself when SCALE inheritance is on.
   p = Math2.rotate(p, { x: 0, y: 0 }, image.rotation);
   return Math2.add(p, image.position);
+}
+
+/** Pre-scale, pre-rotation, pre-position offset from the parent's
+ *  position to the image's visual centre. With SCALE inheritance ON
+ *  and ROTATION inheritance OFF, the renderer computes a child's
+ *  world position as `parent.position + S(parent.scale) * field`,
+ *  so the bubble's `position` field is interpreted as this local
+ *  pre-transform offset. For typical center-anchored tokens
+ *  (image.grid.offset === image.size/2) this returns (0, 0). */
+function getImageNativeLocalCenter(image: Image, sceneDpi: number): Vector2 {
+  let p: Vector2 = { x: image.image.width / 2, y: image.image.height / 2 };
+  p = Math2.subtract(p, image.grid.offset);
+  p = Math2.multiply(p, sceneDpi / image.grid.dpi);
+  // No rotation, no scale, no parent.position addition.
+  return p;
 }
 
 // Polygon points for a rounded rectangle anchored at (0, 0) extending
@@ -549,20 +667,15 @@ half4 main(float2 coord) {
 interface BubbleEntry {
   ids: string[];                  // every local item id we own for this token
   shimmerIds: string[];           // every shader Effect we own (timer ticks iTime on these)
-  hash: string;                   // matches dataHash(data); kept for diagnostics
-  structureHash: string;          // matches structureHash(data) — controls rebuild
-  valueHash: string;              // matches valueHash(data) — value-only diffs route to patchGeometry
-  geomKey: string;                // matches the layout signature (position + width)
-  data: BubbleData;               // cached so the bounds-poll can re-layout without re-reading the token
-  statsVisible: boolean;          // cached for patchGeometry → buildContext path
-  // Last barWidth/barHeight the shimmer Effect was built with. OBR's
-  // renderer ignores `width/height` field updates for Effect items
-  // sent through the partial-update path (verified via the bubble
-  // diagnostic output: post-resize commit, `curveBounds.w` updated
-  // but `effectBounds.w` stayed at creation size). When a resize
-  // commit changes these, we have to delete and re-add the shimmer
-  // — this field lets the patch-vs-rebuild branch detect that.
-  shimmerSize?: { w: number; h: number };
+  /** Rebuild trigger — combines structure + value + flip + intrinsic
+   *  geometry into one string. Rebuilt = full delete + add. Things
+   *  NOT included here (parent.position, parent.scale magnitude,
+   *  parent.rotation) are handled by OBR's attachment inheritance
+   *  at draw time, so a sync that finds no rebuildHash change can
+   *  skip everything. */
+  rebuildHash: string;
+  data: BubbleData;
+  statsVisible: boolean;
 }
 const entries = new Map<string, BubbleEntry>();
 
@@ -659,6 +772,14 @@ function scheduleSync(): void {
 // occupies roughly the same fraction of the token's footprint.
 
 interface BarLayout {
+  /** sign of parent.scale.x at creation. NOT applied as child.scale
+   *  any more — that was the buggy "compensation" that shifted the
+   *  bar off to the side. Kept as a metric in case future code
+   *  wants to react to flip-state changes (e.g., re-bake text-only
+   *  items differently). For now, parent flip just mirrors text
+   *  inside the bar; bar position stays centred. */
+  flipX: number;
+  flipY: number;
   /** anchor at the token's bottom-center in scene coords */
   origin: Vector2;
   /** bar's TOP-LEFT in scene coords (already RENDERED-scale-aware) */
@@ -690,11 +811,27 @@ interface BarLayout {
   tokenScale: number;
 }
 
-// Layout computation from RENDERED metrics (centre + width/height in
-// scene units, both already including image.scale). With SCALE
-// attachment-inheritance disabled for all bubble items, geometry IS
-// the visual — no renderer-side multiplication. So we bake
-// `parent.scale` (= tokenScale) into every dimension here.
+// Layout computation — MIXED frames:
+//
+//   - `position` fields (origin, barOrigin, acCenter, tempCenter) are
+//     in WORLD coords at the CURRENT parent.scale. OBR's `position`
+//     is always interpreted as world; SCALE attachment-inheritance
+//     responds to FUTURE scale changes by reapplying the recorded
+//     local-relative offset times the new parent.scale.
+//
+//   - INTRINSIC dimensions (barWidth, barHeight, font sizes, diameter,
+//     curve point arrays) are baked at NATIVE × userScale (no
+//     parent.scale baked in). The renderer multiplies by parent.scale
+//     at draw time, so visual size = native × userScale × parent.scale.
+//
+// Earlier draft ran the entire layout in pre-scale-local coords —
+// that broke because OBR doesn't reinterpret `position` as local
+// when SCALE inheritance is on; it just applies the parent's transform
+// to whatever world value was recorded at creation. With local
+// position values like (-73, 33) baked, the bar rendered near world
+// origin instead of next to the token. This MIXED frame keeps the
+// bar visually correct at any parent.scale + propagates live during
+// scale drags via the renderer.
 function computeLayoutFromMetrics(
   centerX: number,
   centerY: number,
@@ -704,15 +841,25 @@ function computeLayoutFromMetrics(
   data: BubbleData,
   userScale: number,
   verticalOffset: number,
+  offsetByText: boolean,
+  autoScaleText: boolean,
+  flipX: number,
+  flipY: number,
 ): BarLayout {
-  // Token-size-proportional scale. A standard 1-cell token (rendered
-  // width = sceneDpi worth of scene units) yields tokenScale = 1.0;
-  // a 0.5-cell familiar 0.5; a 3-cell ogre 3.0. Min(width, height)
-  // keeps very wide / tall token images from blowing up the bar past
-  // their narrower dimension.
+  // 2026-05-10 REVERT — see DISABLE_INHERIT comment. Every dimension
+  // returned here is RENDERED (i.e. token's parent.scale magnitude
+  // already baked in via `t = min(rW, rH) / dpi`), and every position
+  // is a world coordinate produced from `getImageCenter` which is
+  // already scale-aware. SCALE inheritance is OFF on the items, so
+  // the renderer draws them at exactly these dimensions / positions
+  // — no per-builder flipX/flipY hacks needed.
   const tokenScale = Math.max(0.05, Math.min(renderedWidth, renderedHeight) / sceneDpi);
-  const s = tokenScale * userScale;
+  const t = tokenScale;
+  const u = userScale;
+  const s = t * u;
 
+  // RENDERED dimensions. Every constant is multiplied through `s`
+  // so the visual size matches the token's actual rendered footprint.
   const barHeight = BAR_HEIGHT * s;
   const barPadding = BAR_PADDING * s;
   const barCornerRadius = barHeight / 2;
@@ -722,26 +869,35 @@ function computeLayoutFromMetrics(
   const bubbleFontSize = BUBBLE_FONT_SIZE * s;
   const bubbleFontSizeTight = BUBBLE_FONT_SIZE_TIGHT * s;
   const bubbleTextOffset = TEXT_VERTICAL_OFFSET * s;
-
-  // verticalOffset is in scene-coord pixels (negative = up). Applied to
-  // the bubble cluster's anchor so it shifts as a single unit instead
-  // of per-element. Default -20 lifts the whole row 20 px above the
-  // token's bottom edge so it doesn't visually fight with the OBR
-  // token name label that hangs just below.
-  const origin: Vector2 = { x: centerX, y: centerY + renderedHeight / 2 + verticalOffset };
-
-  // Bar inset by `barPadding` on each side; sits 2*s scene units
-  // above the bottom edge so there's a small gap to the token edge.
   const barWidth = Math.max(barHeight, renderedWidth - barPadding * 2);
+
+  // Vertical-offset semantics:
+  //   - "offset by text" ON  → offset matches the OBR auto-scaling
+  //     token name label, which scales with the token. Multiply by
+  //     `t` so the visual gap shrinks/grows with the token.
+  //   - manual slider value → user-relative scene units. Don't scale,
+  //     so a user-set "+5" stays at +5 regardless of token size.
+  void autoScaleText;
+  const effectiveVerticalOffset = offsetByText
+    ? -TOKEN_TEXT_FONT_BASE * t
+    : verticalOffset;
+  const origin: Vector2 = { x: centerX, y: centerY + renderedHeight / 2 + effectiveVerticalOffset };
+
+  // Canonical bar position — TOP-LEFT in scene coords. Bar visually
+  // spans [origin.x - barWidth/2, origin.x + barWidth/2] horizontally,
+  // and sits a small gap (`2 * s`) above origin.y (the token's bottom
+  // edge + vertical offset). flipX / flipY are no longer needed for
+  // the curve points → they're kept on BarLayout as informational
+  // metadata only (some downstream code uses them as a hint).
+  void flipX; void flipY;
   const barOrigin: Vector2 = {
     x: origin.x - barWidth / 2,
     y: origin.y - barHeight - 2 * s,
   };
 
-  // Stat bubbles sit right-aligned ABOVE the bar's top edge, with the
-  // rightmost bubble nestled at the token's right edge. All gaps and
-  // diameters scale with the token, so a tiny familiar's bubbles
-  // proportionally hug the bar instead of looming over the top.
+  // Stat bubble centres — world coords. With SCALE inheritance OFF
+  // the visual diameter == `diameter` (already RENDERED), so layout
+  // math and visual span match exactly.
   const showHp = data.maxHp > 0;
   const bubbleGap = 4 * s;
   const bubbleSpacing = 8 * s;
@@ -751,7 +907,6 @@ function computeLayoutFromMetrics(
 
   let acCenter: Vector2 | null = null;
   let tempCenter: Vector2 | null = null;
-
   let nextRightEdge = origin.x + renderedWidth / 2 - edgeInset;
   if (data.ac != null) {
     acCenter = { x: nextRightEdge - diameter / 2, y: bubbleCenterY };
@@ -763,11 +918,12 @@ function computeLayoutFromMetrics(
 
   void showHp;
   return {
+    flipX: 1, flipY: 1,
     origin, barOrigin, barWidth,
     barHeight, barCornerRadius, barFontSize, barTextOffset,
     diameter, bubbleFontSize, bubbleFontSizeTight, bubbleTextOffset,
     acCenter, tempCenter,
-    tokenScale,
+    tokenScale: t,
   };
 }
 
@@ -777,12 +933,21 @@ function computeLayout(
   data: BubbleData,
   userScale: number,
   verticalOffset: number,
+  offsetByText: boolean,
+  autoScaleText: boolean,
 ): BarLayout {
+  // World centre + rendered size. Sign of parent.scale (signed,
+  // not |scale|) feeds into every position-offset computation so
+  // negative-scale tokens get their bar visually mirrored INTO place
+  // rather than flying off to one side.
   const center = getImageCenter(image, sceneDpi);
   const size = getRenderedSize(image, sceneDpi);
+  const flipX = (image.scale?.x ?? 1) < 0 ? -1 : 1;
+  const flipY = (image.scale?.y ?? 1) < 0 ? -1 : 1;
   return computeLayoutFromMetrics(
     center.x, center.y, size.width, size.height,
-    sceneDpi, data, userScale, verticalOffset,
+    sceneDpi, data, userScale, verticalOffset, offsetByText, autoScaleText,
+    flipX, flipY,
   );
 }
 
@@ -954,6 +1119,15 @@ function buildStatBubbleBg(ctx: BuildContext, L: BarLayout, center: Vector2, col
 // the shield outline. A thin white stroke gives the rim a touch of
 // shine.
 function buildAcShield(ctx: BuildContext, L: BarLayout, center: Vector2, color: string): any {
+  // L.diameter is INTRINSIC (native × userScale); the renderer
+  // multiplies it by parent.scale at draw time. For centring math
+  // (top-left of bbox = visual_centre − visual_half), multiply by
+  // tokenScale × sign(parent.scale). When parent.scale is negative,
+  // the curve points render in the opposite direction, so the bbox's
+  // top-left in NORMAL frame is the bbox's "top-right" — which after
+  // the renderer mirrors maps back to the visual top-left.
+  // 2026-05-10 REVERT: L.diameter is RENDERED; SCALE inheritance off
+  // so canonical top-left = center − diameter/2.
   const W = L.diameter;
   const H = L.diameter;
   return buildCurve()
@@ -965,7 +1139,10 @@ function buildAcShield(ctx: BuildContext, L: BarLayout, center: Vector2, color: 
     .tension(0)
     .closed(true)
     .points(shieldPoints(W, H))
-    .position({ x: center.x - W / 2, y: center.y - H / 2 })
+    .position({
+      x: center.x - W / 2,
+      y: center.y - H / 2,
+    })
     .layer("ATTACHMENT")
     .attachedTo(ctx.token.id)
     .locked(true)
@@ -990,8 +1167,10 @@ function buildStatBubbleText(ctx: BuildContext, L: BarLayout, center: Vector2, v
   const fontSize = text.length >= 3 ? L.bubbleFontSizeTight : L.bubbleFontSize;
   const strokeWidth = L.diameter < 20 ? 0 : Math.max(0.4, L.diameter * 0.05);
   // Shield's visual centroid sits above its geometric center
-  // (because the bottom point is thin); nudge AC text up by 8%
-  // of the bbox so the number looks centered on the shield body.
+  // (because the bottom point is thin); nudge AC text by 8% of
+  // the bbox in the "visual up" direction.
+  // 2026-05-10 REVERT: L.diameter is RENDERED; SCALE inheritance off
+  // so canonical top-left = center − diameter/2 (no flipX/flipY).
   const yShift = role === "ac-text" ? -L.diameter * 0.08 : 0;
   return buildText()
     .plainText(text.length > 3 ? "…" : text)
@@ -1032,10 +1211,7 @@ interface Wanted {
   data: BubbleData;
   viewMode: ViewMode;
   layout: BarLayout;
-  hash: string;
-  structureHash: string;
-  valueHash: string;
-  geomKey: string;
+  rebuildHash: string;
   statsVisible: boolean;
 }
 
@@ -1131,7 +1307,12 @@ async function patchGeometry(patches: Array<{ entry: BubbleEntry; w: Wanted }>):
         }
         case "ac-shield": {
           if (L.acCenter) {
-            da.position = { x: L.acCenter.x - D / 2, y: L.acCenter.y - D / 2 };
+            // 2026-05-10 REVERT: D is RENDERED, SCALE inheritance off,
+            // canonical top-left = center − D/2.
+            da.position = {
+              x: L.acCenter.x - D / 2,
+              y: L.acCenter.y - D / 2,
+            };
             da.points = shieldPoints(D, D);
             da.style = { ...(da.style ?? {}), strokeWidth: Math.max(0.6, D * 0.04) };
           }
@@ -1221,7 +1402,9 @@ async function syncBubbles(): Promise<void> {
 
     const userScale = readUserScale();
     const verticalOffset = readVerticalOffset();
+    const offsetByTextFlag = readOffsetByText();
     const playerThreshold = readPlayerThreshold();
+    const autoScaleText = cachedAutoScaleText;
     // Refresh the cached combat-active flag at sync time so a player
     // who joins during combat picks up the right view mode without
     // waiting for the next metadata-change event.
@@ -1230,6 +1413,15 @@ async function syncBubbles(): Promise<void> {
       cachedCombatActive = readCombatActive(meta);
     } catch {}
     const isGM = role === "GM";
+
+    // Sync OBR-native plainText font size on every character/mount
+    // BEFORE we walk items for bubble layout — keeping the sync
+    // inline with the rest of the sync loop is cheaper than a
+    // separate pass + has dedupe baked in (we only `updateItems`
+    // tokens whose fontSize is currently wrong).
+    if (isGM) {
+      void syncTokenTextFontSize(allItems, sceneDpi, autoScaleText);
+    }
 
     const wanted = new Map<string, Wanted>();
     for (const it of allItems) {
@@ -1264,13 +1456,13 @@ async function syncBubbles(): Promise<void> {
       // downstream build/patch path sees the quantised ratio without
       // having to know about the threshold logic.
       let effectiveData = d;
-      if (viewMode === "silhouette" && d.maxHp > 0) {
+      if (viewMode === "silhouette" && !d.hide && d.maxHp > 0) {
         const q = quantiseRatio(d.hp / d.maxHp, playerThreshold);
         effectiveData = { ...d, hp: Math.round(q * d.maxHp), tempHp: 0 };
       }
 
       const statsVisible = !d.hide;
-      const layout = computeLayout(it, sceneDpi, effectiveData, userScale, verticalOffset);
+      const layout = computeLayout(it, sceneDpi, effectiveData, userScale, verticalOffset, offsetByTextFlag, autoScaleText);
       // Silhouette suppresses AC and the temp bubble entry. The
       // geometryKey reflects what items will exist so a viewMode
       // flip drives a structure-rebuild instead of slipping
@@ -1280,15 +1472,38 @@ async function syncBubbles(): Promise<void> {
         ac: viewMode === "silhouette" ? false : (d.ac != null),
         temp: effectiveData.tempHp > 0 && effectiveData.maxHp > 0,
       };
+      // rebuildHash combines every variable that requires items to
+      // be torn down + rebuilt: structure (which items exist),
+      // values (HP / AC / temp numbers), flip signs (negative scale
+      // compensation), and intrinsic dimensions (native bar width
+      // depends on token native size + userScale, can change if
+      // image swaps). Variables NOT in this hash — parent.position,
+      // parent.scale magnitude, parent.rotation — are handled by
+      // OBR's attachment inheritance at draw time, so a sync that
+      // sees an unchanged rebuildHash can do absolutely nothing.
+      const rebuildHash = [
+        structureHash(effectiveData),
+        viewMode,
+        valueHash(effectiveData),
+        layout.barWidth.toFixed(2),
+        layout.barHeight.toFixed(2),
+        layout.diameter.toFixed(2),
+        has.hp, has.ac, has.temp,
+        // Toggling these changes the bake position; without them in
+        // the hash, the user wouldn't see the toggle take effect
+        // until a separate data edit triggers the rebuild.
+        offsetByTextFlag ? "T" : "F",
+        verticalOffset.toFixed(2),
+        // parent.scale sign — flips position-offset signs in builders.
+        // Need a rebuild on flip so the new bake takes effect.
+        layout.flipX, layout.flipY,
+      ].join("|");
       wanted.set(it.id, {
         tok: it,
         data: effectiveData,
         viewMode,
         layout,
-        hash: dataHash(effectiveData),
-        structureHash: structureHash(effectiveData) + ":" + viewMode,
-        valueHash: valueHash(effectiveData),
-        geomKey: geometryKey(layout, has),
+        rebuildHash,
         statsVisible,
       });
     }
@@ -1307,183 +1522,78 @@ async function syncBubbles(): Promise<void> {
       );
     }
 
-    // For each wanted: rebuild on data hash change OR geometry change.
-    // Earlier rounds tried position-only patches on geometry change,
-    // but the Curve's polygon points are baked in at create time —
-    // patching position alone makes the bar appear "anchored at its
-    // bottom-left" because position shifts but width/shape doesn't.
-    // Full rebuild on width change keeps the visual correct.
-    const rebuildIds: string[] = [];
+    // 2026-05-09 rewrite: full rebuild whenever rebuildHash changes;
+    // otherwise nothing — OBR's attachment inheritance handles every
+    // visible difference (move / scale / rotation drag) at draw time
+    // without us touching the items. Position changes never enter
+    // rebuildHash, so a token drag commits flow through here as
+    // total no-ops. Earlier patchGeometry path raced OBR's drag-time
+    // snapshot, causing bubbles to flash their CREATION value during
+    // scale gestures — the snapshot was taken at drag start and our
+    // partial-update text changes never made it in.
     const toAdd: any[] = [];
-    // Tokens whose data is unchanged but whose geometry shifted
-    // (drag, resize, scale change). Patched in-place via
-    // patchGeometry — keeps the live update during a token resize
-    // gesture instead of the user only seeing the new size on
-    // mouse-release.
-    const geomPatches: Array<{ entry: BubbleEntry; w: Wanted }> = [];
-    // Effects need a delete + re-add round-trip on size change because
-    // OBR's renderer doesn't propagate `width / height` updates for
-    // Effect items via the partial-update path. Curves (`points`) and
-    // Shapes / Texts patch in place fine — only the shimmer is broken.
-    const shimmerRebuildIds: string[] = [];
-    const shimmerToAdd: any[] = [];
+    const toDelete: string[] = [];
 
     for (const [tokId, w] of wanted) {
       const existing = entries.get(tokId);
-      // Fast path: nothing to do.
-      if (
-        existing &&
-        existing.structureHash === w.structureHash &&
-        existing.valueHash === w.valueHash &&
-        existing.geomKey === w.geomKey
-      ) continue;
-
-      // Structural change (HP bar appears/disappears, AC appears/
-      // disappears, hide-mode toggles) → full rebuild. These change
-      // WHICH items exist or HOW they're styled at construction time.
-      if (!existing || existing.structureHash !== w.structureHash) {
-        if (existing) rebuildIds.push(...existing.ids);
-        // fall through to the build-and-add block below
-      } else {
-        // Same structure — value and/or geometry changed. Curves /
-        // shapes / texts patch in place via patchGeometry (HP fill
-        // ratio, plainText, position, font sizes). No delete-and-add
-        // flicker for the bar itself.
-        //
-        // The HP-shimmer Effect is the exception: OBR's renderer
-        // drops `width / height` AND `uniforms.ratio` updates sent
-        // through the partial-update path, so the shader keeps
-        // rendering at the OLD ratio even though the curve underneath
-        // has the NEW length — resulting in a brief flash of the old
-        // length and a stuck shader at a wrong fill. Whenever the
-        // value or size changed, we rebuild ONLY the shimmer
-        // (delete + re-add). The bar curves stay put.
-        const newW = w.layout.barWidth;
-        const newH = w.layout.barHeight;
-        const sizeChanged =
-          !existing.shimmerSize ||
-          Math.abs(existing.shimmerSize.w - newW) > 0.5 ||
-          Math.abs(existing.shimmerSize.h - newH) > 0.5;
-        const valueChanged = existing.valueHash !== w.valueHash;
-
-        if (
-          (sizeChanged || valueChanged) &&
-          existing.shimmerIds.length > 0 &&
-          w.statsVisible &&
-          w.data.maxHp > 0
-        ) {
-          shimmerRebuildIds.push(...existing.shimmerIds);
-          const ctx: BuildContext = { token: w.tok, visible: w.tok.visible };
-          const ratio = Math.max(0, Math.min(1, w.data.hp / w.data.maxHp));
-          const newShimmer = buildHpShimmer(ctx, w.layout, ratio);
-          shimmerToAdd.push(newShimmer);
-          const oldShimmerSet = new Set(existing.shimmerIds);
-          existing.ids = existing.ids.filter((id) => !oldShimmerSet.has(id));
-          existing.ids.push(newShimmer.id);
-          existing.shimmerIds = [newShimmer.id];
-          existing.shimmerSize = { w: newW, h: newH };
-        }
-
-        geomPatches.push({ entry: existing, w });
-        existing.valueHash = w.valueHash;
-        existing.geomKey = w.geomKey;
-        existing.data = w.data;
-        existing.hash = w.hash;
-        continue;
-      }
+      if (existing && existing.rebuildHash === w.rebuildHash) continue;
+      if (existing) toDelete.push(...existing.ids);
 
       const ctx: BuildContext = { token: w.tok, visible: w.tok.visible };
       const newIds: string[] = [];
-
-      // HP bar + shimmer + text. In silhouette mode (player view of
-      // a locked token during combat) we still render bg + fill +
-      // shimmer so the player sees the proportion change at threshold
-      // boundaries, but we OMIT the text overlay (no exact numbers).
-      const isSilhouette = w.viewMode === "silhouette";
       const shimmerIds: string[] = [];
+      const isSilhouette = w.viewMode === "silhouette";
+
       if (w.data.maxHp > 0) {
         const ratio = Math.max(0, Math.min(1, w.data.hp / w.data.maxHp));
         const bg = buildBarBg(ctx, w.layout, w.statsVisible);
         const fill = buildBarFill(ctx, w.layout, ratio);
         toAdd.push(bg, fill);
         newIds.push(bg.id, fill.id);
-
-        // Shimmer Effect (animated blood-cell flow shader) is
-        // disabled for now — the constant uniform updates were
-        // causing perceptible lag on token-heavy scenes. The bar
-        // still shows the static bg + fill curves so HP / shield
-        // remain readable. (Re-enable by uncommenting this block.)
-        // if (w.statsVisible) {
-        //   const shimmer = buildHpShimmer(ctx, w.layout, ratio);
-        //   toAdd.push(shimmer);
-        //   newIds.push(shimmer.id);
-        //   shimmerIds.push(shimmer.id);
-        // }
-
         if (!isSilhouette) {
           const text = buildBarText(ctx, w.layout, w.data);
           toAdd.push(text);
           newIds.push(text.id);
         }
       }
-      // AC shield + text — fully suppressed in silhouette mode.
       if (!isSilhouette && w.layout.acCenter && w.data.ac != null) {
         const acShield = buildAcShield(ctx, w.layout, w.layout.acCenter, AC_COLOR);
         const acText = buildStatBubbleText(ctx, w.layout, w.layout.acCenter, w.data.ac, "ac-text");
         toAdd.push(acShield, acText);
         newIds.push(acShield.id, acText.id);
       }
-      // Temp HP previously rendered as its own blue circle to the left
-      // of the shield. Per user request that's been removed — the
-      // " +N" suffix on the HP text already conveys the same info
-      // without a second floating bubble. The case "temp-bg" /
-      // "temp-text" branches in patchGeometry are now dead but kept
-      // for orphan tolerance during the upgrade transition (any
-      // lingering items get cleaned up by the `orphans` collector at
-      // the top of syncBubbles when their entry no longer references
-      // them).
 
       entries.set(tokId, {
         ids: newIds,
         shimmerIds,
-        hash: w.hash,
-        structureHash: w.structureHash,
-        valueHash: w.valueHash,
-        geomKey: w.geomKey,
+        rebuildHash: w.rebuildHash,
         data: w.data,
         statsVisible: w.statsVisible,
-        shimmerSize:
-          w.statsVisible && w.data.maxHp > 0
-            ? { w: w.layout.barWidth, h: w.layout.barHeight }
-            : undefined,
       });
     }
 
-    const allDeleteIds = [...rebuildIds, ...shimmerRebuildIds];
-    if (allDeleteIds.length) {
-      await OBR.scene.local.deleteItems(allDeleteIds).catch((err) =>
-        console.warn("[obr-suite/bubbles] delete-for-rebuild failed", err),
-      );
-    }
-    const allAddItems = [...toAdd, ...shimmerToAdd];
-    if (allAddItems.length) {
-      await OBR.scene.local.addItems(allAddItems).catch((err) =>
+    // ADD-THEN-DELETE order: new items appear on screen BEFORE the
+    // old ones are removed, so the user never sees a missing-bubble
+    // frame. Both sets briefly overlap; OBR draws same-zIndex items
+    // in insertion order so the new ones sit on top, hiding the
+    // about-to-be-deleted old ones.
+    if (toAdd.length) {
+      await OBR.scene.local.addItems(toAdd).catch((err) =>
         console.warn("[obr-suite/bubbles] addItems failed", err),
       );
     }
-    if (geomPatches.length) {
-      await patchGeometry(geomPatches);
+    if (toDelete.length) {
+      await OBR.scene.local.deleteItems(toDelete).catch((err) =>
+        console.warn("[obr-suite/bubbles] delete-for-rebuild failed", err),
+      );
     }
-    // After every successful sync, kick the animation timer if any
-    // shimmer effects are now alive — and let the timer self-stop
-    // the next tick if `entries` is empty.
+    // Shimmer animation timer — currently the shimmer Effect builder
+    // is commented out, so this is a no-op. Kept so flipping the
+    // shimmer back on doesn't require re-wiring the timer plumbing.
     let anyShimmer = false;
     for (const e of entries.values()) if (e.shimmerIds.length) { anyShimmer = true; break; }
     if (anyShimmer) ensureAnimationTimer();
     else stopAnimationTimer();
-
-    // (No bounds-poll path — SCALE inheritance handles live scaling
-    // during gestures, and items.onChange handles commit-time patch.)
   } finally {
     inSync = false;
     if (queuedSync) {
@@ -1501,6 +1611,27 @@ async function clearAll(): Promise<void> {
   if (ids.length) {
     await OBR.scene.local.deleteItems(ids).catch(() => {});
   }
+}
+
+
+/** Scan scene.local for ANY item carrying our `BUBBLE_OWNER_KEY` and
+ *  delete it. Called once at setup so stale items from a previous
+ *  session (potentially built with an older layout convention — e.g.
+ *  the pre-2026-05-09 absolute-world-coord scheme) get wiped before
+ *  we rebuild fresh under the current scheme.
+ *
+ *  Safe to call any time; matches by metadata key, not ID, so it
+ *  catches items the in-memory `entries` map doesn't know about. */
+async function sweepStaleBubbleItems(): Promise<void> {
+  try {
+    const all = await OBR.scene.local.getItems((it) => {
+      const meta = (it.metadata as any) ?? {};
+      return !!meta[BUBBLE_OWNER_KEY];
+    });
+    if (all.length > 0) {
+      await OBR.scene.local.deleteItems(all.map((i) => i.id));
+    }
+  } catch {}
 }
 
 // --- Module lifecycle --------------------------------------------------
@@ -1538,7 +1669,7 @@ export async function setupBubbles(): Promise<void> {
       e.key === LS_BUBBLES_ENABLED ||
       e.key === LS_BUBBLES_SCALE ||
       e.key === LS_BUBBLES_VERTICAL_OFFSET ||
-      e.key === LS_BUBBLES_PLAYER_THRESHOLD
+      e.key === LS_BUBBLES_OFFSET_BY_TEXT
     ) {
       void clearAll().then(() => syncBubbles().catch(() => {}));
     }
@@ -1546,45 +1677,91 @@ export async function setupBubbles(): Promise<void> {
   window.addEventListener("storage", onStorage);
   unsubs.push(() => window.removeEventListener("storage", onStorage));
 
-  // Combat state changes (initiative tracker writes to the
-  // `com.initiative-tracker/combat` scene metadata key when prep /
-  // combat starts or ends). Locked tokens are gated on this for
-  // their player-side visibility, so we re-sync whenever it flips.
+  try {
+    const meta = await OBR.scene.getMetadata();
+    cachedPlayerThreshold = readScenePlayerThreshold(meta as Record<string, unknown>);
+    cachedAutoScaleText = readSceneAutoScaleText(meta as Record<string, unknown>);
+  } catch {}
+
+  // Combat state and synced bubble settings changes.
   unsubs.push(
     OBR.scene.onMetadataChange((meta) => {
       const next = readCombatActive(meta);
-      if (next !== cachedCombatActive) {
+      const nextThreshold = readScenePlayerThreshold(meta as Record<string, unknown>);
+      const nextAutoScale = readSceneAutoScaleText(meta as Record<string, unknown>);
+      if (
+        next !== cachedCombatActive ||
+        nextThreshold !== cachedPlayerThreshold ||
+        nextAutoScale !== cachedAutoScaleText
+      ) {
+        const autoScaleChanged = nextAutoScale !== cachedAutoScaleText;
         cachedCombatActive = next;
+        cachedPlayerThreshold = nextThreshold;
+        cachedAutoScaleText = nextAutoScale;
+        // Auto-scale toggling changes both font sizes AND the
+        // verticalOffset rule — tokens need a full layout rebuild,
+        // not just patchGeometry. clearAll forces re-add on the
+        // next sync.
+        if (autoScaleChanged) {
+          void clearAll();
+        }
         scheduleSync();
       }
     }),
   );
 
-  // Scene-ready re-sync. Catches the "initial load race" the user
-  // reported where a scene's items arrive in `items.onChange` BEFORE
-  // their `image.scale` has finished propagating (default 1.0 at the
-  // moment of the first emit) — the bar would then be sized with
-  // tokenScale = 1 even on tokens that should render at 2× / 0.5×.
-  // We force a fresh `syncBubbles` shortly after scene-ready so the
-  // second pass picks up the now-stable scales. clearAll first so
-  // tokens that ended up with the wrong-sized bar from the early
-  // emit are rebuilt rather than `geomKey`-skipped.
+  // Scene-ready re-sync. Catches the "initial load race" where a
+  // scene's items arrive in `items.onChange` BEFORE their
+  // `image.scale` has finished propagating (default 1.0 at first emit).
+  // Under the new local-frame layout, scale doesn't affect the baked
+  // geometry — the renderer adds it at draw time — so this race is
+  // mostly cosmetic now. We still force a fresh sync so a scene swap
+  // gets a clean slate.
   unsubs.push(
     OBR.scene.onReadyChange(async (ready) => {
       if (!ready) return;
-      // 250 ms gives OBR's transform pipeline time to commit the
-      // scene's per-item scales after `isReady` flips true. Empirically
-      // 100 ms was sometimes still racy; 250 ms is well within the
-      // human-perceptible "scene just opened" window so the rebuild
-      // looks like part of the initial paint.
       setTimeout(() => {
-        void clearAll().then(() => { void syncBubbles(); });
+        void sweepStaleBubbleItems().then(() => {
+          void clearAll().then(() => { void syncBubbles(); });
+        });
       }, 250);
     }),
   );
 
+  // 2026-05-10: bubble-guard select-tool mode removed. The custom
+  // canvasDragMode under Select fundamentally can't beat OBR's native
+  // drag latency (the bus round-trip stacks up), so users were
+  // stuttering rather than getting smoother HP-bar gestures. The
+  // bestiary tool keeps the same util because the bestiary tool
+  // would otherwise have NO drag at all (OBR doesn't fall back to a
+  // canvas handler for plugin-owned tools). Native Select interaction
+  // is good enough for everyone outside the bestiary panel.
+  //
+  // Sweep any legacy guard mode left over from a previous install so
+  // its pointerdown handler doesn't keep half-intercepting Select.
+  try { await OBR.tool.removeMode(LEGACY_GUARD_MODE_ID); } catch {}
+
+  // First-run sweep: any local items left over from a previous session
+  // (different scheme, different layout) get wiped before we build
+  // fresh. The wipe is keyed off `BUBBLE_OWNER_KEY` metadata, not the
+  // in-memory `entries` map, so it catches orphans we never tracked.
+  await sweepStaleBubbleItems();
   void syncBubbles();
 }
+
+// 2026-05-10: removed `setupBubbleGuardMode` + the SELECT-tool
+// canvasDragMode wiring. Native Select drag is more responsive than
+// our reimplementation and the dev-build 2026-05-09 attempt was
+// stuttery. The bestiary tool keeps using canvasDragMode (see
+// modules/bestiary/index.ts) — that's a separate decision because
+// bestiary's own tool has no fallback drag path and "stuttery drag
+// > no drag" only there.
+
+// Try to remove any legacy guard mode left over from a previous
+// install — pointer-events otherwise stay weakly intercepted under
+// Select's mode-row even after the user upgrades. Best-effort, no
+// failure noise if it wasn't installed.
+const LEGACY_GUARD_MODE_ID = "com.obr-suite/bubbles/guard-mode";
 
 export async function teardownBubbles(): Promise<void> {
   for (const u of unsubs.splice(0)) u();
@@ -1592,6 +1769,7 @@ export async function teardownBubbles(): Promise<void> {
     clearTimeout(pendingTimer);
     pendingTimer = null;
   }
+  try { await OBR.tool.removeMode(LEGACY_GUARD_MODE_ID); } catch {}
   await clearAll();
 }
 
@@ -1603,7 +1781,9 @@ export async function writeBubbleStats(
   try {
     await OBR.scene.items.updateItems([tokenId], (drafts) => {
       for (const d of drafts) {
-        const cur = ((d.metadata as any)[BUBBLES_META] as Record<string, unknown> | undefined) ?? {};
+        const cur = ((d.metadata as any)[BUBBLES_META] as Record<string, unknown> | undefined)
+          ?? ((d.metadata as any)[EXTERNAL_BUBBLES_META] as Record<string, unknown> | undefined)
+          ?? {};
         const next: Record<string, unknown> = { ...cur };
         if (patch.hp != null) next["health"] = Math.max(0, Math.floor(patch.hp));
         if (patch.maxHp != null) next["max health"] = Math.max(0, Math.floor(patch.maxHp));
@@ -1619,6 +1799,9 @@ export async function writeBubbleStats(
           next["health"] = Math.max(0, Math.min(cur2, mx));
         }
         (d.metadata as any)[BUBBLES_META] = next;
+        if ((d.metadata as any)[EXTERNAL_BUBBLES_META] != null) {
+          (d.metadata as any)[EXTERNAL_BUBBLES_META] = next;
+        }
         if (patch.name != null) (d.metadata as any)[BUBBLES_NAME] = patch.name;
       }
     });
@@ -1629,4 +1812,50 @@ export async function writeBubbleStats(
 
 export function readBubbleStatsForToken(item: Item): BubbleData | null {
   return readBubbleData(item);
+}
+
+// One-shot DM repair: clears the legacy `hide:true` flag on every bubble
+// metadata blob in the current scene. We need this because the migration
+// from `com.owlbear-rodeo-bubbles-extension/metadata` to `com.obr-suite/
+// bubbles/data` carried the old flag forward, and `hide=true` makes
+// computeViewMode return "hidden" for non-GMs unconditionally — players
+// stop seeing the bar entirely. After the repair, visibility falls back
+// to the `locked` field: unlocked → full bar; locked + in-combat →
+// silhouette; locked + out-of-combat → hidden.
+export async function repairLegacyHiddenBubbles(): Promise<{ touched: number; total: number }> {
+  let items: Item[] = [];
+  try {
+    items = await OBR.scene.items.getItems();
+  } catch (e) {
+    console.warn("[obr-suite/bubbles] repair: getItems failed", e);
+    return { touched: 0, total: 0 };
+  }
+  const targetIds: string[] = [];
+  for (const it of items) {
+    const meta = (it.metadata as any) ?? {};
+    const a = meta[BUBBLES_META];
+    const b = meta[EXTERNAL_BUBBLES_META];
+    const aHide = a && typeof a === "object" && (a as any).hide === true;
+    const bHide = b && typeof b === "object" && (b as any).hide === true;
+    if (aHide || bHide) targetIds.push(it.id);
+  }
+  if (targetIds.length === 0) return { touched: 0, total: items.length };
+  try {
+    await OBR.scene.items.updateItems(targetIds, (drafts) => {
+      for (const d of drafts) {
+        const meta = d.metadata as any;
+        const a = meta[BUBBLES_META];
+        if (a && typeof a === "object" && (a as any).hide === true) {
+          (a as any).hide = false;
+        }
+        const b = meta[EXTERNAL_BUBBLES_META];
+        if (b && typeof b === "object" && (b as any).hide === true) {
+          (b as any).hide = false;
+        }
+      }
+    });
+  } catch (e) {
+    console.warn("[obr-suite/bubbles] repair: updateItems failed", e);
+  }
+  return { touched: targetIds.length, total: items.length };
 }

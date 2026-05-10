@@ -38,12 +38,54 @@ html,body{
 .drag-handle:hover{opacity:1;color:rgba(255,255,255,0.85)}
 .drag-handle.is-dragging{cursor:grabbing;opacity:1;color:#5dade2}
 .drag-handle svg{width:12px;height:18px;display:block;pointer-events:none}
+/* Pin button — toggles "panel doesn't auto-close on deselect". */
+.panel-pin-btn{
+  flex-shrink:0;
+  width:18px;height:18px;
+  display:flex;align-items:center;justify-content:center;
+  background:transparent;border:none;padding:0;margin:0;
+  cursor:pointer;
+  color:rgba(255,255,255,0.30);
+  opacity:0.55;
+  transition:opacity .12s, color .12s, transform .15s;
+  border-radius:3px;
+}
+.panel-pin-btn:hover{opacity:1;color:rgba(255,255,255,0.85)}
+.panel-pin-btn.pinned{
+  opacity:1;
+  color:#f5a623;
+  transform:rotate(-25deg);
+}
+.panel-pin-btn.pinned:hover{color:#ffc857}
+.panel-pin-btn svg{width:14px;height:14px;display:block;pointer-events:none}
 .root{padding:10px 12px;height:100%;overflow-y:auto}
 .root::-webkit-scrollbar{width:3px}
 .root::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}
 
-.hdr{display:flex;align-items:baseline;gap:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:7px}
+.hdr{display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:7px}
 .name{font-size:14px;font-weight:700;color:#f5a623;flex-shrink:0;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.name-wrap{display:flex;align-items:center;gap:5px;min-width:0;flex-shrink:0}
+/* When the card is bound to a scene token, the name renders as a
+   button so clicking it syncs/clears the token's plainText label.
+   Keeps the same visual size as the static .name div but adds a
+   subtle hover halo + cursor: pointer to advertise click affordance. */
+button.name.name-btn{
+  appearance:none;border:none;background:transparent;
+  font-family:inherit;text-align:left;padding:0;margin:0;
+  cursor:pointer;
+  border-radius:4px;
+  transition:background .12s, color .12s, text-shadow .12s;
+}
+button.name.name-btn:hover{
+  background:rgba(245,166,35,.14);
+  color:#ffd27a;
+  text-shadow:0 0 6px rgba(245,166,35,.45);
+}
+button.name.name-btn:active{transform:scale(0.97)}
+button.name.name-btn:focus-visible{
+  outline:1px dashed rgba(245,166,35,.65);outline-offset:2px;
+}
+button.name.name-btn:disabled{opacity:0.5;cursor:wait}
 .sub{font-size:10.5px;color:#aaa;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .raw-link{
   flex-shrink:0;font-size:10px;font-weight:600;letter-spacing:.3px;
@@ -145,8 +187,12 @@ html,body{
    typing the new one. */
 .stat-cell{
   position:relative;
-  display:inline-flex;align-items:center;justify-content:center;
+  display:flex;align-items:center;justify-content:center;
+  cursor:text;
 }
+.hp-pill .stat-cell{flex:1;align-self:stretch}
+.hp-pill .slash{pointer-events:none}
+.temp-pill,.ac-pill{cursor:text}
 .stat-cell .prev-hint{
   position:absolute;
   left:50%;bottom:calc(100% + 3px);
@@ -175,10 +221,14 @@ html,body{
   text-align:center;
   outline:none;
   padding:0;
-  /* Width auto so it hugs the digits — fixed-width digit font keeps
-     it visually stable even as the value changes. */
+  /* Inputs now fill their parent cell so a click ANYWHERE on the
+     pill focuses the editor — was previously a 1.5em-wide narrow
+     hit area centred on the digits, which was fiddly to land on
+     during combat. The cell's `cursor:text` keeps the affordance
+     legible. */
   font-variant-numeric:tabular-nums;
-  width:1.8em;
+  width:100%;height:100%;
+  cursor:text;
   caret-color:rgba(255,255,255,0.9);
 }
 .stat-input:focus{
@@ -189,8 +239,6 @@ html,body{
   text-decoration-thickness:1px;
   text-underline-offset:2px;
 }
-.hp-pill .stat-input{width:1.6em}
-.temp-pill .stat-input,.ac-pill .stat-input{width:1.5em}
 
 /* Lock button at right end of stat banner. DM-only — rendered
    conditionally by info-page.ts when role === GM. Closed lock
@@ -200,20 +248,22 @@ html,body{
   flex-shrink:0;
   width:28px;height:28px;
   display:flex;align-items:center;justify-content:center;
-  background:rgba(245,166,35,0.18);
-  border:1px solid rgba(245,166,35,0.55);
-  border-radius:8px;
+  background:rgba(190,24,24,0.38);
+  border:1px solid rgba(248,113,113,0.95);
+  border-radius:7px;
   cursor:pointer;
-  color:#f5a623;
+  color:#fecaca;
+  box-shadow:0 0 0 2px rgba(127,29,29,0.28),0 0 12px rgba(248,113,113,0.35);
   margin-left:auto;
   padding:0;
   transition:filter .12s, background .12s, border-color .12s, color .12s;
 }
 .stat-lock:hover{filter:brightness(1.18)}
 .stat-lock[data-locked="false"]{
-  background:rgba(93,173,226,0.18);
-  border-color:rgba(93,173,226,0.55);
-  color:#5dade2;
+  background:transparent;
+  border-color:transparent;
+  color:rgba(255,255,255,0.48);
+  box-shadow:none;
 }
 /* Open shackle look — drop the right vertical of the U so the icon
    visually opens. Pure CSS toggle on the path inside the SVG. */
@@ -478,6 +528,64 @@ html,body{
   0%   {background:rgba(93,173,226,0.55); transform:scale(1.10)}
   100% {background:rgba(255,255,255,0.06); transform:scale(1)}
 }
+
+/* Resource-tracker tab strip — same look as bestiary monster-info:
+   transparent background, hairlines top + bottom, sliding indicator
+   that translates between buttons on hover. Sits BELOW the
+   stat-banner so name + HP / AC stay always-visible above. */
+.rt-tabstrip{
+  position:relative;
+  display:flex; gap:0;
+  padding:0; margin:0;
+  background:transparent; border:none;
+  border-top:1px solid rgba(255,255,255,0.06);
+  border-bottom:1px solid rgba(255,255,255,0.06);
+}
+.rt-tabstrip .rt-tab{
+  flex:1; height:30px;
+  background:transparent; border:none;
+  color:#9aa0b3; font-size:11.5px; font-weight:600;
+  cursor:pointer;
+  font-family:inherit;
+  user-select:none;
+  position:relative; z-index:1;
+  transition:color .18s ease;
+}
+.rt-tabstrip .rt-tab:hover,
+.rt-tabstrip .rt-tab.on{ color:#e6e8ee }
+.rt-tab-indicator{
+  position:absolute;
+  bottom:0; left:0;
+  height:30px;
+  width:0;
+  background:rgba(93,173,226,0.14);
+  border-bottom:2px solid #5dade2;
+  border-radius:4px 4px 0 0;
+  transition:transform .22s cubic-bezier(.4,.0,.2,1), width .22s cubic-bezier(.4,.0,.2,1);
+  pointer-events:none;
+  z-index:0;
+}
+/* Sliding clip — same pattern as bestiary monster info: panes are
+   absolute-positioned, the active one translated to translateX(0).
+   JS keeps the clip's height in sync with the active pane via a
+   ResizeObserver so collapse-on-empty / grow-on-resource-add works
+   smoothly. */
+.rt-clip{
+  position:relative;
+  overflow:hidden;
+  width:100%;
+  transition:height .35s cubic-bezier(.4,0,.2,1);
+}
+.rt-pane{
+  position:absolute;
+  top:0; left:0;
+  width:100%;
+  transition:transform .35s cubic-bezier(.4,0,.2,1), opacity .35s ease;
+}
+.rt-clip[data-active="attr"] .rt-pane[data-pane="attr"]{ transform:translateX(0); opacity:1 }
+.rt-clip[data-active="attr"] .rt-pane[data-pane="res"]{  transform:translateX(100%); opacity:.4 }
+.rt-clip[data-active="res"]  .rt-pane[data-pane="attr"]{ transform:translateX(-100%); opacity:.4 }
+.rt-clip[data-active="res"]  .rt-pane[data-pane="res"]{  transform:translateX(0); opacity:1 }
 </style>
 </head>
 <body>

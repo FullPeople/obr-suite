@@ -5,7 +5,7 @@
 // Set STABLE_HIDES = false before building the dev channel
 // (`/suite-dev/`) so the full feature set shows up for ongoing
 // iteration / testing.
-export const STABLE_HIDES = false;
+export const STABLE_HIDES = true;
 
 // === Mobile detection (per-iframe) =====================================
 // Modules that run heavy WebGL / continuous rAF work (status tracker
@@ -13,17 +13,32 @@ export const STABLE_HIDES = false;
 // global search bar) are disabled on mobile clients to save the
 // limited memory + GPU budget. Other modules still work.
 //
-// Mobile is detected via userAgent regex — same simple check as the
-// rest of the suite (cluster-row.ts, background.ts already use this).
-// It runs once per iframe load, not per-call, since the userAgent
-// doesn't change between page loads.
+// Detection has been deliberately TIGHTENED (2026-05-08): the previous
+// `hasTouch && isCoarse` heuristic was a false-positive magnet —
+// Surface laptops, Lenovo Yoga, Chromebook touch laptops and any
+// Windows tablet-mode session all match `coarse pointer` as soon as
+// the OS reports the touchscreen as primary, even when the user has a
+// real keyboard + trackpad and is fully capable of running heavy
+// modules. Affected players reported the status tracker / metadata
+// inspector silently disappearing for them. We now restrict mobile
+// detection to:
+//   1. Phones / "real" mobile UAs (Mobi, Android with Mobile token,
+//      iPhone, iPod, IEMobile, Opera Mini).
+//   2. iPad iOS 13+ (which masquerades as Macintosh): Macintosh UA +
+//      multi-touch capability AND the absence of any fine pointer.
+//      A real Mac with a Magic Trackpad has `(any-pointer: fine)`,
+//      iPads do not.
+// Touch-only laptops are explicitly NOT mobile.
 export function isMobileDevice(): boolean {
   try {
     const ua = navigator.userAgent || "";
-    return /Mobi|Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(ua);
-  } catch {
-    return false;
-  }
+    if (/Mobi|Android.*Mobile|iPhone|iPod|IEMobile|Opera Mini/i.test(ua)) return true;
+    if (/Macintosh|iPad/i.test(ua) && (navigator.maxTouchPoints ?? 0) > 1) {
+      const hasFinePointer = window.matchMedia?.("(any-pointer: fine)").matches ?? false;
+      if (!hasFinePointer) return true;
+    }
+  } catch {}
+  return false;
 }
 export const IS_MOBILE = isMobileDevice();
 

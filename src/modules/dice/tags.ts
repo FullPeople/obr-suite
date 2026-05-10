@@ -19,8 +19,52 @@
 // inline (current 5etools convention is "first | piece is display").
 
 import OBR from "@owlbear-rodeo/sdk";
+import { getLocalLang } from "../../state";
 
 const BC_QUICK_ROLL = "com.obr-suite/dice-quick-roll";
+
+// 2026-05-10: tag-handler outputs (e.g. {@h}, {@atk}, {@actSave}) are
+// language-aware. Foreign players using the kiwee Chinese mirror were
+// seeing labels like "近战攻击" / "命中：" / "体" hardcoded in the
+// stat block; the actual entry prose is still data-source-driven (so
+// it stays Chinese on kiwee), but at least the FRAMING is now in the
+// player's language. Read at parse time so a mid-session lang flip
+// reflects on the next render. Returned values are unicode-safe.
+type Lang = "zh" | "en";
+function curLang(): Lang {
+  try {
+    const v = getLocalLang();
+    return v === "en" ? "en" : "zh";
+  } catch {
+    return "zh";
+  }
+}
+
+const ATK_LABELS_ZH: Record<string, string> = {
+  mw: "近战武器攻击",
+  rw: "远程武器攻击",
+  ms: "近战法术攻击",
+  rs: "远程法术攻击",
+  m: "近战攻击",
+  r: "远程攻击",
+};
+const ATK_LABELS_EN: Record<string, string> = {
+  mw: "Melee Weapon Attack",
+  rw: "Ranged Weapon Attack",
+  ms: "Melee Spell Attack",
+  rs: "Ranged Spell Attack",
+  m: "Melee Attack",
+  r: "Ranged Attack",
+};
+const ABILITY_FULL_ZH: Record<string, string> = {
+  str: "力量", dex: "敏捷", con: "体质", int: "智力", wis: "感知", cha: "魅力",
+};
+const ABILITY_FULL_EN: Record<string, string> = {
+  str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma",
+};
+const ABILITY_ABBR_EN: Record<string, string> = {
+  str: "Str", dex: "Dex", con: "Con", int: "Int", wis: "Wis", cha: "Cha",
+};
 
 export interface QuickRollRequest {
   expression: string;
@@ -32,6 +76,8 @@ export interface QuickRollRequest {
   // Right-click "优势 / 劣势" — every d20 in the parsed expression
   // rolls twice; loser is flagged. Other dice unaffected.
   advMode?: "adv" | "dis";
+  // Right-click "重击" — double every dice term's count.
+  critMode?: boolean;
 }
 
 export function fireQuickRoll(req: QuickRollRequest): void {
@@ -178,34 +224,33 @@ function parseTagPayload(tag: string, payload: string):
     // result reads naturally without a full 5etools renderer.
     case "atk": {
       const codes = arg.split(",").map((s) => s.trim().toLowerCase());
-      const labels: Record<string, string> = {
-        mw: "近战武器攻击",
-        rw: "远程武器攻击",
-        ms: "近战法术攻击",
-        rs: "远程法术攻击",
-        m: "近战攻击",
-        r: "远程攻击",
-      };
+      const labels = curLang() === "en" ? ATK_LABELS_EN : ATK_LABELS_ZH;
       const phrase = codes.map((c) => labels[c] ?? c).join("/");
-      return { kind: "text", display: `*${phrase}：*` };
+      const sep = curLang() === "en" ? ": " : "：";
+      return { kind: "text", display: `*${phrase}${sep}*` };
     }
     case "atkr": {
       // 2024 attack-roll variant. arg is "m"/"r"/"mw"/"rw" etc.
       const codes = arg.split(",").map((s) => s.trim().toLowerCase());
-      const labels: Record<string, string> = {
-        m: "近战攻击",
-        r: "远程攻击",
-        mw: "近战武器攻击",
-        rw: "远程武器攻击",
+      const labels = curLang() === "en" ? ATK_LABELS_EN : ATK_LABELS_ZH;
+      const sep = curLang() === "en" ? ": " : "：";
+      return {
+        kind: "text",
+        display: `*${codes.map((c) => labels[c] ?? c).join("/")}${sep}*`,
       };
-      return { kind: "text", display: `*${codes.map((c) => labels[c] ?? c).join("/")}：*` };
     }
     case "h":
-      return { kind: "text", display: "命中：" };
+      return { kind: "text", display: curLang() === "en" ? "Hit: " : "命中：" };
     case "hom":
-      return { kind: "text", display: "或命中：" };
+      return { kind: "text", display: curLang() === "en" ? "Or Hit: " : "或命中：" };
     case "m":
-      return { kind: "text", display: "落空：" };
+      return { kind: "text", display: curLang() === "en" ? "Miss: " : "落空：" };
+    // Cosmetic tags — fall through to a SHARED return at the end of
+    // this group that emits the cosmetic display. Was previously
+    // grouped with `actSave` (which I broke 2026-05-10 by giving
+    // actSave its own block; everything in this list fell through
+    // into that block and rendered as "*<name>豁免：*"). The fix
+    // separates them.
     case "creature":
     case "status":
     case "spell":
@@ -241,39 +286,87 @@ function parseTagPayload(tag: string, payload: string):
     case "adventure":
     case "homebrew":
     case "5etools":
-    case "5etoolsImg":
+    case "5etoolsimg":
     case "code":
     case "style":
     case "comic":
-    case "comicH1":
-    case "comicH2":
-    case "comicH3":
-    case "comicH4":
-    case "comicNote":
+    case "comich1":
+    case "comich2":
+    case "comich3":
+    case "comich4":
+    case "comicnote":
     case "deck":
     case "card":
     case "loader":
     case "footnote":
     case "link":
-    case "actSave":
-    case "actSaveSuccess":
-    case "actSaveFail":
-    case "actSaveFailBy":
-    case "actTrigger":
-    case "actResponse":
       return { kind: "text", display: cosmeticDisplay };
+    // NOTE: case labels are matched against `tag.toLowerCase()` (see
+    // formatTagsClickable: `m[1].toLowerCase()`), so ALL labels here
+    // MUST be lowercase. The original 5etools tags use camelCase
+    // (`actSave`, `actTrigger`, etc.) — bug 2026-05-10 was that those
+    // labels stayed camelCase and silently fell through to the
+    // `default` cosmetic-display branch, so `{@actSave con}` rendered
+    // as bare "con" instead of "*体质豁免：*".
+    case "actsave": {
+      // 2024 attack-save variant. arg is the ability code (con/dex/wis/...).
+      // Rendered as bold "Con Save:" / "体质豁免：" so foreign players
+      // don't see a bare "con" in the middle of prose.
+      const code = arg.trim().toLowerCase();
+      if (curLang() === "en") {
+        const label = ABILITY_ABBR_EN[code] ?? code.toUpperCase();
+        return { kind: "text", display: `*${label} Save: *` };
+      }
+      const label = ABILITY_FULL_ZH[code] ?? code;
+      return { kind: "text", display: `*${label}豁免：*` };
+    }
+    case "actsavesuccess":
+      return {
+        kind: "text",
+        display: curLang() === "en" ? "*Save Success: *" : "*豁免成功：*",
+      };
+    case "actsavefail":
+      return {
+        kind: "text",
+        display: curLang() === "en" ? "*Save Fail: *" : "*豁免失败：*",
+      };
+    case "actsavefailby":
+      return {
+        kind: "text",
+        display: curLang() === "en" ? "*Save Fail By: *" : "*豁免差距：*",
+      };
+    case "acttrigger":
+      return {
+        kind: "text",
+        display: curLang() === "en" ? "*Trigger: *" : "*触发：*",
+      };
+    case "actresponse":
+      return {
+        kind: "text",
+        display: curLang() === "en" ? "*Response: *" : "*响应：*",
+      };
+    case "dc":
+      // Difficulty class — render as "DC N" so the number doesn't
+      // float bare in prose (was a UX gap for both Chinese and
+      // English readers — "{@actSave con} {@dc 19}" used to show as
+      // "con 19" / "Con Save: 19" rather than "Con Save (DC 19):").
+      return {
+        kind: "text",
+        display: `DC ${arg.trim()}`,
+      };
     case "recharge": {
       // Recharge ability: at the start of each turn, roll 1d6. If the
       // roll is ≥ N, the ability recharges. Make it a clickable d6 so
       // the DM can roll it inline from the stat block.
       const n = parseInt(arg, 10);
       const threshold = Number.isFinite(n) ? Math.max(2, Math.min(6, n)) : 6;
+      const en = curLang() === "en";
       return {
         kind: "roll",
         spec: {
           expression: "1d6",
-          label: `充能 ${threshold}+`,
-          display: `（充能 ${threshold}-6）`,
+          label: en ? `Recharge ${threshold}+` : `充能 ${threshold}+`,
+          display: en ? `(Recharge ${threshold}-6)` : `（充能 ${threshold}-6）`,
         },
       };
     }
@@ -294,6 +387,11 @@ function escapeAttr(s: string): string {
 // tags become `<span class="rollable" data-expr="..." data-label="..."
 // title="...">...</span>` clickable spans. The caller binds delegated
 // click handlers via `bindRollableClicks(root)`.
+//
+// 2026-05-10: Markdown-style bold via asterisks is also recognised:
+// `*Melee Attack.*` / `*近战攻击。*` → `<b>...</b>`. Applied to plain
+// text segments only (between matched tag spans) so tag attributes
+// can't be re-interpreted as markdown.
 export function formatTagsClickable(s: string): string {
   if (typeof s !== "string") return "";
   // Process the string in two passes so tag arg / display content
@@ -305,7 +403,7 @@ export function formatTagsClickable(s: string): string {
   let m: RegExpExecArray | null;
   re.lastIndex = 0;
   while ((m = re.exec(s)) !== null) {
-    out += escapeHtml(s.slice(i, m.index));
+    out += renderInlineMarkup(s.slice(i, m.index));
     const tag = m[1].toLowerCase();
     const payload = m[2] ?? "";
     const parsed = parseTagPayload(tag, payload);
@@ -317,11 +415,40 @@ export function formatTagsClickable(s: string): string {
         : parsed.spec.expression;
       out += `<span class="rollable" data-expr="${exprAttr}" data-label="${labelAttr}" title="${escapeAttr(title)}">${escapeHtml(parsed.spec.display)}</span>`;
     } else {
-      out += escapeHtml(parsed.display);
+      // 2026-05-10: also pass tag-display through renderInlineMarkup
+      // because some tag handlers ({@atk}, {@atkr}) emit `*phrase：*`
+      // strings expecting markdown-bold treatment downstream. Without
+      // this hook those asterisks ended up literal in the output.
+      const display = parsed.kind === "text" ? parsed.display : parsed.spec.display;
+      out += renderInlineMarkup(display);
     }
     i = re.lastIndex;
   }
-  out += escapeHtml(s.slice(i));
+  out += renderInlineMarkup(s.slice(i));
+  return out;
+}
+
+// Lightweight markdown processor for plain-text spans inside monster
+// stat blocks. Currently supports:
+//   - `*bold*` → `<b>bold</b>` (greedy-shortest, not crossing `*` again)
+// Escapes HTML in non-bold portions before stitching. Single isolated
+// `*` (no closing partner) is left as a literal asterisk.
+function renderInlineMarkup(text: string): string {
+  if (!text) return "";
+  // Matches `*X*` where X is at least one char and contains no `*`.
+  // Reluctant `*?` so the SHORTEST closing match wins — `*a* and *b*`
+  // emits two bolds rather than one giant `<b>a* and *b</b>`.
+  const re = /\*([^*\n]+?)\*/g;
+  let out = "";
+  let cursor = 0;
+  let m: RegExpExecArray | null;
+  re.lastIndex = 0;
+  while ((m = re.exec(text)) !== null) {
+    out += escapeHtml(text.slice(cursor, m.index));
+    out += `<b>${escapeHtml(m[1])}</b>`;
+    cursor = re.lastIndex;
+  }
+  out += escapeHtml(text.slice(cursor));
   return out;
 }
 

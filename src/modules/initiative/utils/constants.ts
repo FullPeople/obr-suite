@@ -23,3 +23,17 @@ export const DICE_PLUS_ROLL_ERROR = `${PLUGIN_ID}/roll-error`;
 // eliminating the dual-writer race when both the DM presses "next" and the
 // active player presses "end turn" at the same time.
 export const BROADCAST_END_TURN_REQUEST = `${PLUGIN_ID}/end-turn-request`;
+
+// Stealth feature (2026-05-09).
+// Right-click context menu id — toggles `data.invisible` on the
+// initiative metadata. Independent from the existing add/remove menu so
+// the GM can flip stealth without clearing the rest of the data.
+export const CTX_INVISIBLE = `${METADATA_KEY}/invisibility`;
+// Sent INSTEAD of BROADCAST_FOCUS when the active turn lands on an
+// invisible token. Players (non-owner, non-GM) react by:
+//   1. opening the "有人在暗处" combat-effect overlay
+//   2. animating their camera to the bbox of the OTHER initiative
+//      tokens (so the invisible one's location isn't leaked)
+// Owner of the invisible token receives this too but only animates
+// normally (they're playing the stealthy character — no surprise).
+export const BROADCAST_STEALTH_TURN = `${PLUGIN_ID}/stealth-turn`;

@@ -51,39 +51,39 @@ const EFFECT_URL = assetUrl("dice-effect.html");
 // row + right-click "添加到骰盘" all broadcast BC_PANEL_TOGGLE.
 const BC_PANEL_TOGGLE = "com.obr-suite/dice-panel-toggle";
 
-// Dice history popover — anchored to the BOTTOM-RIGHT, above its
-// dedicated trigger button. Click the trigger to toggle. Per-player
-// rows show last roll; click a row to jump the dice panel to History
-// tab + filter. Background is transparent (the iframe HTML drops the
-// title bar + frame so it reads as floating cards).
+// Dice history modal — anchored to the BOTTOM-RIGHT. Auto-opens on
+// every dice roll. INTERACTIVE (clicks land on the modal): a row
+// click opens the dice action panel jumped to the History tab +
+// activates that roll's replay overlay. The X button in the bottom-
+// right corner dismisses the modal for the session; the next dice
+// roll auto-reopens it. Height is sized for ~4 entries + the X.
 const HISTORY_POPOVER_ID = "com.obr-suite/dice-history";
 const HISTORY_URL = assetUrl("dice-history.html");
 const HISTORY_W = 320;
-const HISTORY_H = 360;
-// Trigger button geometry — bottom-right, mirror of the cluster
-// trigger at bottom-left. Inset slightly so it doesn't overlap OBR's
-// own bottom-right button.
-const HISTORY_TRIGGER_POPOVER_ID = "com.obr-suite/dice-history-trigger";
-const HISTORY_TRIGGER_URL = assetUrl("dice-history-trigger.html");
-// Trigger iframe is 92×64 — wider than the 48×48 d20 button so the
-// drag-grip can sit inside the iframe rect (anything outside is
-// clipped by OBR). Mirrors the cluster-trigger sizing.
-const HISTORY_TRIGGER_W = 92;
-const HISTORY_TRIGGER_H = 64;
-// Trigger sits 75px from the right edge (15px further left than the
-// cluster trigger's mirror position). 5px bottom inset matches OBR's
-// internal popover margin so the drag-preview ghost lands on the
-// trigger's actual rendered position instead of the unclamped one.
-const HISTORY_TRIGGER_RIGHT_OFFSET = 75;
-const HISTORY_TRIGGER_BOTTOM_OFFSET = 5;
-// History popover sits 5px in from the RIGHT viewport edge (was flush
-// against the edge — OBR was nudging it inward at render time, which
-// caused drag-preview / final-position mismatch).
+// Was 168; bumped +30% to 218 (2026-05-08) so the chronological-flow
+// view (every roll gets its own row instead of one-per-player) has
+// more vertical room before older rows scroll off.
+const HISTORY_H = 218;
+// History panel sits 5px in from the RIGHT viewport edge and 12px up
+// from the BOTTOM edge (replacing the old trigger-button-relative
+// offset which was 5+64+4 px). The panel is inert via
+// disablePointerEvents so this is purely a visual anchor.
 const HISTORY_RIGHT_OFFSET = 5;
-const HISTORY_GAP = 4;
-// Trigger broadcasts its open-state so the trigger button can light
-// up while the history popover is visible.
+const HISTORY_BOTTOM_OFFSET = 12;
+// Broadcast that the history modal is open / closed. Internal-only —
+// no external consumers since the cluster's "投骰记录" toggle and the
+// dedicated trigger button were both removed.
 const BC_DICE_HISTORY_STATE = "com.obr-suite/dice-history-state";
+
+// DM-only crosshair shown while the dice action panel is open. It
+// marks the screen center as the auto-target reference point — when
+// the DM rolls without a selected token, the panel picks the
+// character/mount whose on-screen center is closest to THIS exact
+// point, then animates the camera to it. Fullscreen modal with
+// disablePointerEvents:true so it never blocks canvas interaction.
+const CROSSHAIR_MODAL_ID = "com.obr-suite/dice-crosshair";
+const CROSSHAIR_URL = assetUrl("dice-crosshair.html");
+let crosshairOpen = false;
 
 // Quick-roll channel — any iframe (search, bestiary, character cards,
 // 5etools-tag click handlers) can fire `BC_QUICK_ROLL` with a simple
@@ -99,10 +99,11 @@ const BC_DICE_HISTORY_DISMISS = "com.obr-suite/dice-history-dismiss";
 // sends BC_PANEL_TOGGLE { open: true, prefill } and the background
 // module then broadcasts BC_DICE_PANEL_FILL to the panel iframe.
 export const BC_DICE_PANEL_FILL = "com.obr-suite/dice-panel-fill";
-// History-popover toggle. Cluster's "投骰记录" toggle button broadcasts
-// this; the dice background opens / closes the bottom-left popover
-// accordingly. Per-client preference stored in localStorage.
-const BC_DICE_HISTORY_TOGGLE = "com.obr-suite/dice-history-toggle";
+// Legacy LS key retained ONLY so setupDice() can clear stale values
+// from the era when a "投骰记录" toggle / dedicated trigger button
+// could disable the history popover for the whole session. Always-on
+// is the new behaviour; this LS becomes inert after the one-time
+// removeItem on setup.
 const LS_AUTO_DICE_HISTORY = "com.obr-suite/dice-history-on";
 // Auto-close request from the iframe — fires when its transient row
 // list empties out (every recent entry has timed out). We close the
@@ -141,6 +142,10 @@ export interface QuickRollRequest {
   // expression rolls TWICE; the higher (adv) / lower (dis) is kept and
   // the other is flagged loser. Other dice (d4/d6/...) roll once.
   advMode?: "adv" | "dis";
+  // Right-click "重击" shortcut. When set, every dice TERM in the
+  // expression has its count doubled (1d8 → 2d8, 2d6 → 4d6) while the
+  // modifier stays unchanged. Mirrors D&D 5e crit damage rules.
+  critMode?: boolean;
 }
 
 // --- Broadcast payload schema (extended for multi-type dice) ---
@@ -195,6 +200,17 @@ interface LegacyDiceRollPayload {
 
 const unsubs: Array<() => void> = [];
 
+// Module-scoped roll dedupe (was previously inside setupDice, which
+// gave each setup() call its own Map — when something re-ran setup
+// the old listener stayed alive AND a new listener spun up with a
+// fresh Map, producing the "DM hears the dice play twice on a
+// player roll" bug). Module-scope keeps a single source of truth
+// regardless of how many times setupDice runs, and the registered
+// flag below ensures the listener itself only attaches once.
+const seenRollsModuleScope = new Map<string, number>();
+const ROLL_DEDUPE_MS = 30_000;
+let setupDiceRegistered = false;
+
 // The dice panel lives ONLY in the OBR action popover (top-left
 // d20 button, declared via manifest.json `action.popover`). Earlier
 // we also exposed it as an OBR.popover so cluster + 添加到骰盘 could
@@ -210,16 +226,41 @@ async function closeActionPanel(): Promise<void> {
   try { await OBR.action.close(); } catch {}
 }
 
+// DM-only crosshair modal. Stays mounted as long as the dice action
+// panel is open. Players never see it — they always pick a target by
+// selecting a token first, so a screen-center reference would just be
+// visual noise.
+async function openCrosshair(): Promise<void> {
+  if (crosshairOpen) return;
+  try {
+    try { await OBR.modal.close(CROSSHAIR_MODAL_ID); } catch {}
+    await OBR.modal.open({
+      id: CROSSHAIR_MODAL_ID,
+      url: CROSSHAIR_URL,
+      fullScreen: true,
+      hideBackdrop: true,
+      hidePaper: true,
+      disablePointerEvents: true,
+    });
+    crosshairOpen = true;
+  } catch (e) {
+    console.warn("[obr-suite/dice] open crosshair failed", e);
+  }
+}
+async function closeCrosshair(): Promise<void> {
+  if (!crosshairOpen) return;
+  try { await OBR.modal.close(CROSSHAIR_MODAL_ID); } catch {}
+  crosshairOpen = false;
+}
+
 let historyOpen = false;
-let historyTriggerOpen = false;
-// User dismissed the popover via its X button without flipping the
-// cluster toggle. Stays true until either (a) a new dice roll arrives
-// (auto-reopen) or (b) the cluster toggle is operated (explicit signal).
+// User dismissed the popover via its X button without flipping any
+// toggle. Stays true until a new dice roll arrives, which auto-reopens.
 let historyManuallyDismissed = false;
 
-// Dice-history bbox provider — hugs the RIGHT viewport edge, sits
-// above the trigger. Always returns expected bbox so the layout
-// editor can show a proxy even while the popover is closed.
+// Dice-history bbox provider — hugs the RIGHT/BOTTOM viewport corner.
+// Always returns expected bbox so the layout editor can show a proxy
+// even while the modal is closed.
 registerPanelBbox(PANEL_IDS.diceHistory, async () => {
   try {
     const [vw, vh] = await Promise.all([
@@ -231,8 +272,7 @@ registerPanelBbox(PANEL_IDS.diceHistory, async () => {
     const w = sizeOverride?.width ?? HISTORY_W;
     const h = sizeOverride?.height ?? HISTORY_H;
     const right = HISTORY_RIGHT_OFFSET - userOff.dx;
-    const bottom =
-      HISTORY_TRIGGER_BOTTOM_OFFSET + HISTORY_TRIGGER_H + HISTORY_GAP - userOff.dy;
+    const bottom = HISTORY_BOTTOM_OFFSET - userOff.dy;
     return {
       left: vw - right - w,
       top: vh - bottom - h,
@@ -262,40 +302,6 @@ async function emitSideHint(panelId: string): Promise<"left" | "right"> {
     );
   } catch {}
   return side;
-}
-
-async function openHistoryTrigger(): Promise<void> {
-  try {
-    const [vw, vh] = await Promise.all([
-      OBR.viewport.getWidth(),
-      OBR.viewport.getHeight(),
-    ]);
-    const userOff = getPanelOffset(PANEL_IDS.diceHistoryTrigger);
-    const side = await emitSideHint(PANEL_IDS.diceHistoryTrigger);
-    await OBR.popover.open({
-      id: HISTORY_TRIGGER_POPOVER_ID,
-      url: `${HISTORY_TRIGGER_URL}?side=${side}`,
-      width: HISTORY_TRIGGER_W,
-      height: HISTORY_TRIGGER_H,
-      anchorReference: "POSITION",
-      anchorPosition: {
-        left: vw - HISTORY_TRIGGER_RIGHT_OFFSET + userOff.dx,
-        top: vh - HISTORY_TRIGGER_BOTTOM_OFFSET + userOff.dy,
-      },
-      anchorOrigin: { horizontal: "RIGHT", vertical: "BOTTOM" },
-      transformOrigin: { horizontal: "RIGHT", vertical: "BOTTOM" },
-      hidePaper: true,
-      disableClickAway: true,
-    });
-    historyTriggerOpen = true;
-  } catch (e) {
-    console.error("[obr-suite/dice] open history trigger failed", e);
-  }
-}
-
-async function closeHistoryTrigger(): Promise<void> {
-  try { await OBR.popover.close(HISTORY_TRIGGER_POPOVER_ID); } catch {}
-  historyTriggerOpen = false;
 }
 
 function broadcastHistoryState(open: boolean): void {
@@ -334,9 +340,12 @@ async function openHistory(mode: "transient" | "all" = "transient"): Promise<voi
     // up and vice versa, eventually pinning it against the opposite
     // edge of the viewport.
     const anchorRight = vw - HISTORY_RIGHT_OFFSET + userOff.dx;
-    const triggerBottom = HISTORY_TRIGGER_BOTTOM_OFFSET - userOff.dy;
-    const anchorTop = vh - (triggerBottom + HISTORY_TRIGGER_H + HISTORY_GAP);
+    const anchorTop = vh - HISTORY_BOTTOM_OFFSET + userOff.dy;
     await emitSideHint(PANEL_IDS.diceHistory);
+    // OBR.popover (not modal) — only the bottom-right rectangle blocks
+    // pointer events. Switching back from modal because we need the
+    // panel to BE interactive (row click → jump to dice panel + replay)
+    // without taking over the whole screen the way a modal does.
     await OBR.popover.open({
       id: HISTORY_POPOVER_ID,
       url: `${HISTORY_URL}?mode=${mode}`,
@@ -360,16 +369,6 @@ async function closeHistory(): Promise<void> {
   historyOpen = false;
   broadcastHistoryState(false);
 }
-function isHistoryAutoOn(): boolean {
-  // Default ON. The toggle stores "1" / "0" in localStorage; missing
-  // value is treated as on so first-time users see the popover.
-  try {
-    return localStorage.getItem(LS_AUTO_DICE_HISTORY) !== "0";
-  } catch {
-    return true;
-  }
-}
-
 // --- Replay overlay state ---
 let activeReplayCid: string | null = null;
 async function openReplay(cid: string): Promise<void> {
@@ -517,15 +516,26 @@ async function showDiceEffect(p: DiceRollPayload): Promise<void> {
 // --- Setup / teardown ---
 
 export async function setupDice(): Promise<void> {
-  // Open the dedicated history-trigger button at the bottom-right.
-  // Stays open for the entire dice-module lifetime; clicking toggles
-  // the history popover above it.
-  await openHistoryTrigger();
+  // Re-entry guard: if some lifecycle path calls setupDice twice, the
+  // already-registered listeners stay live; spinning up a second set
+  // would make every dice roll fire showDiceEffect twice on this
+  // client (the symptom users reported as "DM 端有概率多次播放").
+  if (setupDiceRegistered) return;
+  setupDiceRegistered = true;
 
-  // Re-anchor trigger + history popover on viewport resize.
+  // Clear any stale `LS_AUTO_DICE_HISTORY="0"` from the era when the
+  // cluster's "投骰记录" toggle / dedicated trigger button could disable
+  // the history popover for the whole session. Without this clear,
+  // users who had ever toggled it off would never see the bottom-right
+  // 5-second history modal again — there's no UI left to flip the flag
+  // back on. Always-on is the new behaviour; LS becomes inert.
+  try { localStorage.removeItem(LS_AUTO_DICE_HISTORY); } catch {}
+
+  // Re-anchor history popover on viewport resize. The dedicated
+  // trigger button was removed — history auto-opens on every dice
+  // roll and auto-closes when the transient list empties.
   unsubs.push(
     onViewportResize(async () => {
-      if (historyTriggerOpen) await openHistoryTrigger();
       if (historyOpen) await openHistory();
     }),
   );
@@ -536,18 +546,13 @@ export async function setupDice(): Promise<void> {
   unsubs.push(
     OBR.broadcast.onMessage(BC_PANEL_DRAG_END, async (event) => {
       const payload = event.data as DragEndPayload | undefined;
-      if (
-        payload?.panelId === PANEL_IDS.diceHistory ||
-        payload?.panelId === PANEL_IDS.diceHistoryTrigger
-      ) {
-        if (historyTriggerOpen) await openHistoryTrigger();
+      if (payload?.panelId === PANEL_IDS.diceHistory) {
         if (historyOpen) await openHistory();
       }
     }),
   );
   unsubs.push(
     OBR.broadcast.onMessage(BC_PANEL_RESET, async () => {
-      if (historyTriggerOpen) await openHistoryTrigger();
       if (historyOpen) await openHistory();
     }),
   );
@@ -576,21 +581,19 @@ export async function setupDice(): Promise<void> {
     }),
   );
 
-  const seenRolls = new Map<string, number>();
-  const ROLL_DEDUPE_MS = 10_000;
   unsubs.push(
     OBR.broadcast.onMessage(BROADCAST_DICE_ROLL, (event) => {
       const data = normalizePayload(event.data);
       if (!data) return;
       const now = Date.now();
       // Sweep stale entries.
-      if (seenRolls.size > 200) {
-        for (const [k, t] of seenRolls) {
-          if (now - t > ROLL_DEDUPE_MS) seenRolls.delete(k);
+      if (seenRollsModuleScope.size > 400) {
+        for (const [k, t] of seenRollsModuleScope) {
+          if (now - t > ROLL_DEDUPE_MS) seenRollsModuleScope.delete(k);
         }
       }
-      if (data.rollId && seenRolls.has(data.rollId)) return;
-      if (data.rollId) seenRolls.set(data.rollId, now);
+      if (data.rollId && seenRollsModuleScope.has(data.rollId)) return;
+      if (data.rollId) seenRollsModuleScope.set(data.rollId, now);
 
       // Hidden (dark) roll on a non-DM, non-roller client: skip the
       // visual entirely and just play the SFX sequence so the table
@@ -621,13 +624,11 @@ export async function setupDice(): Promise<void> {
       }
 
       showDiceEffect(data).catch(() => {});
-      // Auto-open the dice-history popover on every new roll when
-      // (a) the LS flag is on AND (b) the popover isn't already
-      // visible. We always open in transient mode for the auto-open
-      // path so the user gets the 5-second progress bar UX. Manual
-      // clicks of the trigger button switch into "all" mode (see
-      // BC_DICE_HISTORY_TOGGLE handler).
-      if (isHistoryAutoOn() && !historyOpen) {
+      // Auto-open the bottom-right history modal on every new roll if
+      // it isn't already showing. The modal is non-interactive
+      // (disablePointerEvents:true) and self-closes 5s after the last
+      // visible row's transient timer runs out — see history-page.ts.
+      if (!historyOpen) {
         historyManuallyDismissed = false;
         openHistory("transient").catch(() => {});
       }
@@ -642,7 +643,11 @@ export async function setupDice(): Promise<void> {
   // toggle the panel closed.
   unsubs.push(
     OBR.broadcast.onMessage(BC_PANEL_TOGGLE, async (event) => {
-      const data = event.data as { open?: boolean; prefill?: string } | undefined;
+      const data = event.data as {
+        open?: boolean;
+        prefill?: string;
+        prefillLabel?: string;
+      } | undefined;
       const wantOpen = !!(data && (data.open === true || typeof data.prefill === "string"));
       let isOpen = false;
       try { isOpen = await OBR.action.isOpen(); } catch {}
@@ -655,18 +660,26 @@ export async function setupDice(): Promise<void> {
       if (data?.prefill) {
         // Two-phase prefill so it works on cold-start AND when the
         // action iframe is already loaded:
-        //   1. Stash in localStorage so the iframe can pick it up on
-        //      mount (covers the case where the broadcast races
-        //      ahead of listener registration).
-        //   2. Also re-broadcast after a beat so a hot iframe gets
-        //      the fill via its live listener even if it loaded
-        //      before the user clicked.
-        try { localStorage.setItem("obr-suite/dice-pending-prefill", data.prefill); } catch {}
+        //   1. Stash in localStorage as JSON {expression, label} so
+        //      the iframe can pick it up on mount.
+        //   2. Re-broadcast after a beat so a hot iframe gets the
+        //      fill via its live listener even if it loaded before
+        //      the user clicked.
+        try {
+          localStorage.setItem(
+            "obr-suite/dice-pending-prefill",
+            JSON.stringify({
+              expression: data.prefill,
+              label: data.prefillLabel ?? "",
+            }),
+          );
+        } catch {}
+        const labelToSend = data.prefillLabel ?? "";
         setTimeout(() => {
           OBR.broadcast
             .sendMessage(
               BC_DICE_PANEL_FILL,
-              { expression: data.prefill },
+              { expression: data.prefill, label: labelToSend },
               { destination: "LOCAL" },
             )
             .catch(() => {});
@@ -695,22 +708,6 @@ export async function setupDice(): Promise<void> {
       }
     }),
   );
-  unsubs.push(
-    OBR.broadcast.onMessage(BC_DICE_HISTORY_TOGGLE, async () => {
-      historyManuallyDismissed = false;
-      if (historyOpen) {
-        try { localStorage.setItem(LS_AUTO_DICE_HISTORY, "0"); } catch {}
-        await closeHistory();
-      } else {
-        try { localStorage.setItem(LS_AUTO_DICE_HISTORY, "1"); } catch {}
-        // Manual user click → open in "all" mode (full history,
-        // no progress bars, no auto-close). Auto-open from a new
-        // dice roll uses the default "transient" path below.
-        await openHistory("all");
-      }
-    }),
-  );
-
   // Iframe asked us to close because its transient list emptied —
   // close the popover but leave the LS flag alone so a fresh roll
   // re-auto-opens it.
@@ -751,6 +748,37 @@ export async function setupDice(): Promise<void> {
   );
   unsubs.push(
     OBR.action.onOpenChange(async (isOpen) => {
+      // DM crosshair: visible only while the panel is open AND the
+      // viewer is the GM. Closes immediately when the panel closes
+      // (or when a non-GM client receives the event, since we never
+      // open it for them in the first place).
+      if (isOpen && myRoleForDice === "GM") {
+        await openCrosshair();
+      } else if (!isOpen) {
+        await closeCrosshair();
+      }
+      // 2026-05-10: when the panel closes, also dismiss any active
+      // replay so the on-canvas bubble + the history popover's
+      // highlighted row both clear. Without this hook the user had
+      // to manually click the row again to drop the bubble. Cleanup
+      // order: broadcast LOCAL+REMOTE close so every client (panel,
+      // popover, bg's own closeReplay) converges to "no active",
+      // then wipe the localStorage handshake key so a future open
+      // doesn't restore the now-stale highlight on cold mount.
+      if (!isOpen) {
+        const cidToClose = activeReplayCid;
+        try { localStorage.removeItem("obr-suite/dice/active-replay-cid"); } catch {}
+        try { localStorage.removeItem("obr-suite/dice/pending-show-history"); } catch {}
+        if (cidToClose) {
+          try {
+            await Promise.all([
+              OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid: cidToClose, action: "close" }, { destination: "LOCAL" }),
+              OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid: cidToClose, action: "close" }, { destination: "REMOTE" }),
+            ]);
+          } catch {}
+          await closeReplay();
+        }
+      }
       if (!isOpen) return;
       // Only restore if the selection was emptied very recently —
       // i.e. it was the action click itself that cleared it. A
@@ -776,6 +804,15 @@ export async function setupDice(): Promise<void> {
         if (activeReplayCid === data.cid) await closeReplay();
         return;
       }
+      if (data.action === "open") {
+        // Explicit open — close any existing overlay (different cid)
+        // before opening the new one. openReplay() already chains
+        // close+open if there's an existing different cid.
+        if (activeReplayCid === data.cid) return;
+        await openReplay(data.cid);
+        return;
+      }
+      // Legacy "toggle" — preserved for older clients.
       if (activeReplayCid === data.cid) await closeReplay();
       else await openReplay(data.cid);
     }),
@@ -865,6 +902,24 @@ async function handleQuickRoll(req: QuickRollRequest): Promise<void> {
     dice = expanded;
   }
 
+  // 重击 — D&D 5e crit damage: roll every dice TERM twice, keep the
+  // modifier unchanged. We just append a freshly-rolled twin of every
+  // existing die. Subtraction-flagged dice (from "1d20-1d6") get the
+  // same flag on the twin so they continue to deduct from total.
+  // Loser dice (adv/dis) aren't doubled — only the kept d20 stays as-
+  // is; doubling a discarded roll has no effect on the result anyway.
+  if (req.critMode) {
+    const doubled: DieResult[] = [];
+    for (const d of dice) {
+      doubled.push(d);
+      if (d.loser) continue;
+      const twin: DieResult = { type: d.type, value: rollDie(d.type as DiceType) };
+      if (d.subtract) twin.subtract = true;
+      doubled.push(twin);
+    }
+    dice = doubled;
+  }
+
   if (!dice.length && modifier === 0) return;
 
   // Camera focus on the requested token (only if explicitly asked
@@ -907,8 +962,9 @@ export async function teardownDice(): Promise<void> {
   // Close the action panel if open. (OBR.action.close is idempotent.)
   await closeActionPanel();
   await closeHistory();
-  await closeHistoryTrigger();
+  await closeCrosshair();
   for (const u of unsubs.splice(0)) u();
+  setupDiceRegistered = false;
 }
 
 // --- Convenience exports for callers (initiative + the panel) ---

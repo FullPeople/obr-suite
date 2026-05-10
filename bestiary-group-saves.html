@@ -128,6 +128,16 @@ html,body{
   padding:0 10px 10px;
   flex-shrink:0;
 }
+.row-hp .hp-field{
+  flex:0 0 74px;
+  background:rgba(0,0,0,0.32);
+  border:1px solid var(--border);
+  border-radius:8px;
+  color:var(--text);
+  font-family:inherit;font-size:11px;font-weight:700;
+  outline:none;
+  padding:0 5px;
+}
 .row-hp .hp-input{
   flex:0 0 56px;
   background:rgba(0,0,0,0.32);
@@ -188,10 +198,15 @@ html,body{
        bestiary-bound monster's bubbles HP. Hidden in initiative
        mode (combat prep) since the GM is rolling, not editing. -->
   <div class="row-hp" id="rowHp">
+    <select class="hp-field" id="hpField">
+      <option value="health">HP</option>
+      <option value="max health">Max HP</option>
+      <option value="armor class">AC</option>
+    </select>
     <input class="hp-input" id="hpInput" type="number" min="0" max="9999" step="1" value="10" />
-    <button class="hp-btn dmg" data-hp="dmg" title="减 HP / Damage selected"><span data-l="hpDmg">−HP</span></button>
-    <button class="hp-btn heal" data-hp="heal" title="加 HP / Heal selected"><span data-l="hpHeal">+HP</span></button>
-    <button class="hp-btn set" data-hp="set" title="设 HP / Set selected"><span data-l="hpSet">=HP</span></button>
+    <button class="hp-btn dmg" data-hp="dmg" title="减少选中属性 / Decrease selected stat"><span data-l="hpDmg">−</span></button>
+    <button class="hp-btn heal" data-hp="heal" title="增加选中属性 / Increase selected stat"><span data-l="hpHeal">+</span></button>
+    <button class="hp-btn set" data-hp="set" title="设为选中属性 / Set selected stat"><span data-l="hpSet">=</span></button>
   </div>
 
   <!-- "initiative" mode: 3 variant buttons (hidden by default; the bg
@@ -243,24 +258,24 @@ function readLang(){
 }
 const T = {
   zh: {
-    title: "群体豁免 / HP",
+    title: "群体豁免 / 属性",
     titleInit: "群体先攻",
     hint: "左键投掷 · 右键更多",
     hintInit: "战斗准备阶段 · 1d20 + 各自敏捷调整值",
     countSel: (n) => `${n} 个目标`,
     abStr: "力量", abDex: "敏捷", abCon: "体质", abInt: "智力", abWis: "感知", abCha: "魅力",
     ivAdv: "优势", ivNormal: "普通", ivDis: "劣势",
-    hpDmg: "−HP", hpHeal: "+HP", hpSet: "=HP",
+    hpDmg: "−", hpHeal: "+", hpSet: "=",
   },
   en: {
-    title: "Group Save / HP",
+    title: "Group Save / Stats",
     titleInit: "Group Initiative",
     hint: "left-click roll · right-click more",
     hintInit: "Combat prep · 1d20 + each token's DEX modifier",
     countSel: (n) => `${n} targets`,
     abStr: "Str", abDex: "Dex", abCon: "Con", abInt: "Int", abWis: "Wis", abCha: "Cha",
     ivAdv: "Advantage", ivNormal: "Normal", ivDis: "Disadvantage",
-    hpDmg: "−HP", hpHeal: "+HP", hpSet: "=HP",
+    hpDmg: "−", hpHeal: "+", hpSet: "=",
   },
 };
 let currentMode = "save"; // "save" | "initiative"
@@ -368,6 +383,7 @@ OBR.onReady(() => {
   // the action mode and value; bg writes to every selected token's
   // bubbles HP metadata and the bars + popover stats refresh live.
   const hpInput = document.getElementById("hpInput");
+  const hpField = document.getElementById("hpField");
   document.querySelectorAll(".row-hp .hp-btn").forEach((b) => {
     b.addEventListener("click", () => {
       const mode = b.dataset.hp;       // "dmg" | "heal" | "set"
@@ -379,7 +395,7 @@ OBR.onReady(() => {
       setTimeout(() => b.classList.remove("flash"), 250);
       OBR.broadcast.sendMessage(
         BC_FIRE_HP,
-        { mode, value },
+        { mode, value, field: hpField?.value || "health" },
         { destination: "LOCAL" },
       ).catch(() => {});
     });

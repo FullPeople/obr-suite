@@ -28,6 +28,18 @@ interface Props {
    *  numberless progress strip so the user sees combat health at a
    *  glance without revealing exact HP for locked tokens. */
   hpRatio: number | null;
+  /** Owner's player color (DM uses their own DM color). Empty string
+   *  = no tint; rendered as a CSS variable so the slot can use it
+   *  for borders, backgrounds, and accent halos. */
+  ownerColor?: string;
+  /** Token's stealth flag — true when the DM has marked this token
+   *  invisible via the right-click menu. Drives the `is-invisible`
+   *  CSS class on the slot, which fades it semi-transparent so the
+   *  DM sees at a glance which entries are hidden from players.
+   *  (Player clients never receive invisible items in their list to
+   *  begin with — the panel filter strips them — so this prop only
+   *  ever affects the DM view.) */
+  invisible?: boolean;
   onFocus: (id: string) => void;
   onHover?: (id: string | null) => void;
   onUpdateCount: (id: string, count: number) => void;
@@ -44,7 +56,7 @@ interface Props {
 export function InitiativeItemRow({
   id, name, count, modifier, active, rolled, imageUrl,
   inCombat, preparing, isGM, canEdit, canShowDice, diceRolling,
-  displayMode, hpRatio,
+  displayMode, hpRatio, ownerColor, invisible,
   onFocus, onHover, onUpdateCount, onUpdateModifier, onRoll,
   onEndTurn, endTurnLabel,
 }: Props) {
@@ -95,10 +107,16 @@ export function InitiativeItemRow({
   const showEndTurn =
     !!onEndTurn && isActive && !isGM && canEdit;
 
+  // 2026-05-10: tint slot with owner's color via CSS custom property.
+  // Empty string → falls back to the default slot styling (gold).
+  const slotStyle = ownerColor
+    ? ({ "--owner-color": ownerColor } as Record<string, string>)
+    : undefined;
   return (
     <div
       ref={rowRef}
-      className={`initiative-item ${isActive ? "active" : ""} ${preparing ? "preparing" : ""}`}
+      className={`initiative-item ${isActive ? "active" : ""} ${preparing ? "preparing" : ""}${ownerColor ? " has-owner-color" : ""}${invisible ? " is-invisible" : ""}`}
+      style={slotStyle}
       onClick={() => onFocus(id)}
       onMouseEnter={() => onHover?.(id)}
       onMouseLeave={() => onHover?.(null)}

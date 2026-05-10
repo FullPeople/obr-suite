@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>捣蛋鬼在哪？</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#292d3c;--bg-strong:#1f2230;--bg-card:#323748;
+  --border:rgba(255,255,255,0.12);--border-strong:rgba(255,255,255,0.20);
+  --text:#e6e8ee;--text-dim:#9aa0b3;
+  --accent:#a06bd9;--accent-warm:#f5a623;--accent-red:#e74c3c;--accent-green:#2ecc71;
+}
+html,body{
+  height:100%;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:var(--text);background:transparent;
+  pointer-events:none;
+  font-size:13px;
+}
+.card{
+  position:absolute;inset:0;
+  background:var(--bg);
+  border:1px solid var(--border-strong);
+  border-radius:10px;
+  box-shadow:0 12px 36px rgba(0,0,0,0.55);
+  pointer-events:auto;
+  display:flex;flex-direction:column;
+  padding:14px 16px;
+  overflow:hidden;
+}
+.hdr{
+  display:flex;align-items:center;gap:8px;
+  padding-bottom:10px;
+  border-bottom:1px solid var(--border);
+  margin-bottom:12px;flex-shrink:0;
+}
+.hdr .ic{font-size:14px;color:var(--accent)}
+.hdr .ttl{font-size:14px;font-weight:700;flex:1;letter-spacing:0.2px}
+.hdr .fired-badge{
+  font-size:10.5px;color:var(--accent-red);
+  border:1px solid rgba(231,76,60,.5);
+  border-radius:4px;padding:1px 6px;
+  letter-spacing:.4px;text-transform:uppercase;
+}
+.hdr .x{
+  cursor:pointer;font-size:18px;color:var(--text-dim);line-height:1;padding:0 4px;
+  background:none;border:none;transition:color .12s;
+}
+.hdr .x:hover{color:var(--text)}
+
+.body{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;overflow-y:auto}
+.body::-webkit-scrollbar{width:6px}
+.body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
+
+.row{flex-shrink:0}
+.row .lbl{
+  font-size:10.5px;color:var(--text-dim);margin-bottom:4px;letter-spacing:.4px;
+  font-weight:700;text-transform:uppercase;
+}
+.row input[type=text],.row select{
+  width:100%;height:32px;
+  background:var(--bg-strong);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:0 10px;color:var(--text);font-size:13px;outline:none;
+  font-family:inherit;
+  transition:border-color .12s, box-shadow .12s;
+}
+.row input[type=text]:focus,.row select:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px rgba(160,107,217,0.30);
+}
+
+.toggle-row{
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--bg-strong);
+  border:1px solid var(--border);border-radius:6px;
+  padding:8px 12px;
+  flex-shrink:0;
+}
+.toggle-row .label{font-size:12px}
+.toggle-row .desc{font-size:10.5px;color:var(--text-dim);margin-top:2px}
+.toggle-row .switch{
+  position:relative;width:36px;height:20px;
+  background:var(--border);border-radius:10px;cursor:pointer;
+  flex-shrink:0;transition:background .15s;
+}
+.toggle-row .switch.on{background:var(--accent)}
+.toggle-row .switch::after{
+  content:"";position:absolute;top:2px;left:2px;
+  width:16px;height:16px;background:#fff;border-radius:50%;
+  transition:left .15s;
+}
+.toggle-row .switch.on::after{left:18px}
+
+.specific-block{
+  flex-shrink:0;
+  background:var(--bg-strong);
+  border:1px solid var(--border);border-radius:6px;
+  padding:10px 12px;
+  display:flex;flex-direction:column;gap:8px;
+}
+.specific-block.disabled{opacity:0.4;pointer-events:none}
+.specific-block .head{
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:10.5px;color:var(--text-dim);
+  font-weight:700;text-transform:uppercase;letter-spacing:.4px;
+}
+.specific-block .add-btn{
+  font-size:11px;color:var(--accent);cursor:pointer;
+  background:none;border:1px solid rgba(160,107,217,.4);
+  padding:3px 8px;border-radius:4px;
+  font-family:inherit;font-weight:700;
+  transition:background .12s, color .12s;
+}
+.specific-block .add-btn:hover{background:rgba(160,107,217,0.15);color:#c39be8}
+.specific-block .add-btn:disabled{opacity:.4;cursor:not-allowed}
+.chips{display:flex;flex-wrap:wrap;gap:5px;min-height:18px}
+.chip{
+  display:inline-flex;align-items:center;gap:3px;
+  padding:3px 6px 3px 9px;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:11px;
+  font-size:11px;color:#cdd1de;
+  user-select:none;
+}
+.chip .del{
+  font-size:11px;color:var(--text-dim);line-height:1;
+  margin-left:2px;
+  background:none;border:none;cursor:pointer;padding:1px 3px;
+  border-radius:4px;font-family:inherit;
+  transition:color .12s, background .12s;
+}
+.chip .del:hover{color:var(--accent-red);background:rgba(231,76,60,.18)}
+.empty-hint{font-size:11px;color:var(--text-dim);font-style:italic}
+
+.btn-row{
+  margin-top:auto;display:flex;gap:6px;justify-content:flex-end;
+  padding-top:12px;
+  border-top:1px solid var(--border);flex-shrink:0;
+}
+.btn{
+  height:30px;padding:0 14px;border-radius:6px;
+  background:var(--bg-card);color:var(--text);
+  border:1px solid var(--border);font-size:12px;cursor:pointer;
+  font-family:inherit;font-weight:600;
+  transition:background .12s, border-color .12s, color .12s;
+}
+.btn:hover{background:rgba(160,107,217,0.15);border-color:rgba(160,107,217,0.35);color:#c39be8}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:#8c54c8;border-color:#8c54c8;color:#fff}
+.btn.danger:hover{background:rgba(231,76,60,.18);border-color:rgba(231,76,60,.5);color:#ff7a6b}
+.btn.warm:hover{background:rgba(245,166,35,.18);border-color:rgba(245,166,35,.5);color:#ffba5d}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="hdr">
+    <span class="ic">❓</span>
+    <span class="ttl">捣蛋鬼在哪？</span>
+    <span class="fired-badge" id="firedBadge" style="display:none">已触发</span>
+    <button class="x" id="btnClose" type="button">×</button>
+  </div>
+  <div class="body">
+    <div class="row">
+      <div class="lbl">名称（仅 GM 自查看）</div>
+      <input type="text" id="name" maxlength="32" placeholder="如：哥布林伏击点" />
+    </div>
+
+    <div class="row">
+      <div class="lbl">触发对象</div>
+      <select id="targetMode">
+        <option value="all">所有角色 / 坐骑</option>
+        <option value="playerOnly">仅玩家单位</option>
+        <option value="npcOnly">仅 NPC（GM 控制）</option>
+      </select>
+    </div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="label">仅触发一次</div>
+        <div class="desc">触发后自动锁定，再进入也不会触发，可在此处重置</div>
+      </div>
+      <div class="switch" id="swOneShot"></div>
+    </div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="label">玩家可见</div>
+        <div class="desc">关闭后玩家看不到图标，GM 仍能看到半透明残影</div>
+      </div>
+      <div class="switch" id="swVisible"></div>
+    </div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="label">锁定</div>
+        <div class="desc">防止编辑时把触发区误拖动</div>
+      </div>
+      <div class="switch" id="swLocked"></div>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="btn danger" id="btnDelete" type="button">删除</button>
+    <button class="btn warm" id="btnReset" type="button" style="display:none">重置已触发</button>
+    <span style="flex:1"></span>
+    <button class="btn" id="btnCancel" type="button">取消</button>
+    <button class="btn primary" id="btnSave" type="button">保存</button>
+  </div>
+</div>
+<script type="module" src="/src/modules/trickster/edit-page.ts"></script>
+</body>
+</html>

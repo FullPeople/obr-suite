@@ -8,7 +8,8 @@ import {
   DataVersion,
   Language,
 } from "../../state";
-import { formatTagsClickable, fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
+import { formatTagsClickable, resolveClickRollTarget } from "../dice/tags";
+import { bindRollableClickPopup } from "../dice/context-menu";
 import { subscribeToSfx } from "../dice/sfx-broadcast";
 import { applyI18nDom } from "../../i18n";
 import {
@@ -48,22 +49,40 @@ function getEnabledLibraryBases(): string[] {
 
 /** Like getEnabledLibraryBases but also returns each library's
  *  configured `indexPath` (defaults to `search/index.json` when
- *  unset). Used by `loadIndex` so the partnered kiwee listing
- *  (`search/index-partnered.json`) gets fetched correctly. */
-function getEnabledLibrarySources(): Array<{ base: string; indexPath: string }> {
+ *  unset) AND its `disabledSources` blacklist. Used by `loadIndex`
+ *  so the partnered kiwee listing (`search/index-partnered.json`)
+ *  gets fetched correctly AND so per-library source-code blacklists
+ *  filter the merged entries. */
+function getEnabledLibrarySources(): Array<{
+  base: string;
+  indexPath: string;
+  disabledSources: Set<string>;
+}> {
   try {
     const libs = getState().libraries || [];
-    const out = libs
+    // 2026-05-10: empty result means EMPTY — we no longer fall back
+    // to the kiwee default base when every library is disabled. Users
+    // with only local-content imports want a clean canvas without the
+    // kiwee firehose merging in. The local-content branch in
+    // loadIndex still runs, so search results will reflect just
+    // imported JSON / MD files in that case.
+    return libs
       .filter((l) => l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim().length > 0)
       .map((l) => ({
         base: l.baseUrl.replace(/\/+$/, ""),
         indexPath: typeof l.indexPath === "string" && l.indexPath.length > 0
           ? l.indexPath.replace(/^\/+/, "")
           : "search/index.json",
+        // Normalise disabled list to lower-case so the per-entry check
+        // is case-insensitive against whatever 5etools emits.
+        disabledSources: new Set(
+          (Array.isArray(l.disabledSources) ? l.disabledSources : [])
+            .map((s) => String(s).toLowerCase())
+            .filter((s) => s.length > 0),
+        ),
       }));
-    return out.length > 0 ? out : [{ base: DEFAULT_BASE, indexPath: "search/index.json" }];
   } catch {
-    return [{ base: DEFAULT_BASE, indexPath: "search/index.json" }];
+    return [];
   }
 }
 
@@ -81,11 +100,13 @@ const BAR_W_OPEN = 720;
 const BAR_H_IDLE = 40;
 const BAR_H_OPEN = 440;
 
-// v2 (2026-05-04): bumped to force re-fetch after the partnered
-// kiwee library + cross-library dedup changes. Old v1 caches under
-// `obr-suite/search-index-v1*` are stale and ignored.
-const CACHE_KEY = "obr-suite/search-index-v2";
-const BOOKS_CACHE_KEY = "obr-suite/search-books-v2";
+// v3 (2026-05-09): bumped because merged entries now carry a STRING
+// source code in `e.s` (instead of the per-library numeric id) — see
+// the BookOfEbonTides:11 vs XPHB:11 collision fix in `loadIndex`.
+// Old v2 caches stored numeric `s`, which would render the wrong
+// source label after this update if loaded without invalidation.
+const CACHE_KEY = "obr-suite/search-index-v3";
+const BOOKS_CACHE_KEY = "obr-suite/search-books-v3";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_RESULTS = 50;
 
@@ -233,9 +254,13 @@ async function loadIndex(): Promise<IndexFile> {
     // signature so switching libraries OR adding/removing local
     // imports both invalidate the cached merged index.
     const sources = getEnabledLibrarySources();
-    // Cache key encodes both base AND indexPath so toggling between
-    // index.json and index-partnered.json invalidates the cache.
-    const cacheKey = `${CACHE_KEY}:${sources.map((s) => `${s.base}|${s.indexPath}`).join("||")}:${getLocalContentSignature()}`;
+    // Cache key encodes base + indexPath + disabledSources so toggling
+    // between index.json and index-partnered.json AND toggling any
+    // per-library source blacklist (e.g. disabling BOOKOFEBONTIDES)
+    // both invalidate the cache.
+    const cacheKey = `${CACHE_KEY}:${sources
+      .map((s) => `${s.base}|${s.indexPath}|${[...s.disabledSources].sort().join(",")}`)
+      .join("||")}:${getLocalContentSignature()}`;
     try {
       const raw = localStorage.getItem(cacheKey);
       if (raw) {
@@ -247,36 +272,52 @@ async function loadIndex(): Promise<IndexFile> {
         }
       }
     } catch {}
-    // Fetch all libraries in parallel; merge `x` (entries) by
-    // (cn / n / source) and the source map `m.s` by code.
+    // Fetch all libraries in parallel; carry the per-library config
+    // alongside each fetched index so the merge loop below can apply
+    // each lib's own `disabledSources` blacklist.
     const perLibrary = await Promise.all(
-      sources.map(async ({ base, indexPath }) => {
+      sources.map(async (cfg) => {
         try {
-          const res = await fetch(`${base}/${indexPath}`, { cache: "no-cache" });
+          const res = await fetch(`${cfg.base}/${cfg.indexPath}`, { cache: "no-cache" });
           if (!res.ok) return null;
-          return (await res.json()) as IndexFile;
+          return { idx: (await res.json()) as IndexFile, cfg };
         } catch (e) {
-          console.warn(`[obr-suite/search] index fetch failed for ${base}/${indexPath}`, e);
+          console.warn(`[obr-suite/search] index fetch failed for ${cfg.base}/${cfg.indexPath}`, e);
           return null;
         }
       })
     );
-    const valid = perLibrary.filter((x): x is IndexFile => !!x && Array.isArray(x.x));
+    const valid = perLibrary.filter(
+      (x): x is { idx: IndexFile; cfg: typeof sources[number] } =>
+        !!x && Array.isArray(x.idx.x),
+    );
     // Locally-imported homebrew gets synthesised into a virtual
     // index file so it merges into the same flow as URL libraries.
+    // Local content has no `disabledSources` blacklist (per-source
+    // toggling for local homebrew can be done by deleting the file).
     const localIdx = getLocalIndexFile();
-    const allValid = localIdx.x.length > 0 ? [...valid, localIdx as unknown as IndexFile] : valid;
+    const allValid: Array<{ idx: IndexFile; cfg: { disabledSources: Set<string> } }> =
+      localIdx.x.length > 0
+        ? [...valid, { idx: localIdx as unknown as IndexFile, cfg: { disabledSources: new Set<string>() } }]
+        : valid;
     if (allValid.length === 0) {
-      throw new Error("no library returned a valid search index");
+      // 2026-05-10: with all libraries disabled and no local content,
+      // return an empty index instead of throwing. Prevents the
+      // user-visible "loading…" spinner from sticking around when the
+      // user deliberately wants a clean canvas.
+      const empty: IndexFile = { x: [], m: { s: {} } };
+      indexCache = empty;
+      buildSourceMap(empty);
+      return empty;
     }
     // Naive merge — primary lib's source map wins, all entries pooled.
     // dedupeKey uses `${cn}|${n}|${s ?? ""}` so the same monster from
     // two libraries collapses to one row (custom lib wins because
     // it's typically listed first).
     const merged: IndexFile = { x: [], m: { s: {} } };
-    for (const lib of allValid) {
-      if (lib.m?.s) {
-        for (const [code, id] of Object.entries(lib.m.s)) {
+    for (const { idx } of allValid) {
+      if (idx.m?.s) {
+        for (const [code, id] of Object.entries(idx.m.s)) {
           if (!(code in merged.m.s)) merged.m.s[code] = id;
         }
       }
@@ -290,6 +331,32 @@ async function loadIndex(): Promise<IndexFile> {
     // case, and use that in the dedupe key. Result: identical
     // monsters from two libraries collapse to one row regardless
     // of how each lib chose to number its sources.
+    //
+    // 2026-05-09 ROOT-CAUSE FIX for the
+    // "BOOKOFEBONTIDES override hides PHB" bug:
+    //
+    //   The numeric `e.s` is a per-library id. Two libraries can
+    //   assign the SAME numeric id to DIFFERENT source codes —
+    //   exactly what kiwee does:
+    //     main  m.s  → "XPHB": 11
+    //     partnered m.s  → "BookOfEbonTides": 11
+    //
+    //   Earlier code merged `m.s` into a single `merged.m.s` with
+    //   "first-wins" on the CODE key (so both XPHB:11 and
+    //   BookOfEbonTides:11 ended up in merged.m.s). The display path
+    //   then built `sourceById: Map<number, string>` from
+    //   merged.m.s, where the LAST iterated code-for-id wins —
+    //   "BookOfEbonTides" overwrote "XPHB" at id 11. Result: every
+    //   XPHB entry in main's index displayed as "BOOKOFEBONTIDES",
+    //   the source data fetch went looking for the wrong filename
+    //   and 404'd.
+    //
+    //   The fix: at merge time, rewrite each entry's `e.s` from its
+    //   per-library numeric id into the resolved UPPERCASE source
+    //   CODE string. After this, every entry carries a globally-
+    //   unique source identity, and the display path's
+    //   `srcCode(e.s)` short-circuits on the string branch — the
+    //   stale `sourceById` numeric map is never consulted again.
     const resolveSourceCode = (e: Entry, lib: IndexFile): string => {
       if (e.s == null) return "";
       if (typeof e.s === "string") return e.s.toLowerCase();
@@ -300,15 +367,28 @@ async function loadIndex(): Promise<IndexFile> {
       return String(e.s).toLowerCase();
     };
     const seen = new Set<string>();
-    for (const lib of allValid) {
-      for (const e of lib.x) {
+    for (const { idx, cfg } of allValid) {
+      for (const e of idx.x) {
         const cn = (e.cn || "").trim().toLowerCase();
         const n = (e.n || "").trim().toLowerCase();
-        const src = resolveSourceCode(e, lib);
+        const src = resolveSourceCode(e, idx);
+        // Per-library source blacklist (e.g. user disabled
+        // BOOKOFEBONTIDES inside the partnered library). Apply BEFORE
+        // dedupe so an entry available in another library where the
+        // source is allowed still gets through under that library.
+        if (cfg.disabledSources.size > 0 && src && cfg.disabledSources.has(src)) continue;
         const key = `${cn}|${n}|${src}|${e.c ?? ""}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        merged.x.push(e);
+        // Clone the entry with `s` rewritten to the resolved code
+        // string (uppercased — display does .toUpperCase() anyway,
+        // and uppercase makes it easier to grep filenames). When
+        // src is empty (entry has no resolvable source), preserve
+        // the original `e.s` so we don't accidentally null it out.
+        const fixedEntry: Entry = src
+          ? { ...e, s: src.toUpperCase() }
+          : e;
+        merged.x.push(fixedEntry);
       }
     }
     // Synthesise weapon-property entries from items-base.json's
@@ -317,7 +397,7 @@ async function loadIndex(): Promise<IndexFile> {
     // chips need them to resolve. Best-effort — first library that
     // 200s wins.
     try {
-      for (const base of bases) {
+      for (const base of sources.map((s) => s.base)) {
         try {
           const r = await fetch(`${base}/data/items-base.json`, { cache: "no-cache" });
           if (!r.ok) continue;
@@ -462,6 +542,28 @@ function search(query: string, idx: IndexFile, opts: FilterOpts): Entry[] {
 // --- Per-source data file cache ---
 const dataCache = new Map<string, DataEntry[]>();
 const dataPending = new Map<string, Promise<DataEntry[]>>();
+// One-time-per-source warnings for sources whose data files 404
+// from every (base × case-variant) combination — keyed by
+// `${dataKey}|${sourceCode}`. See the warning at the all-404 branch
+// below for the workaround we surface to users.
+//
+// The same set is consulted by `isSourceDataKnownMissing` (used by
+// `renderPreviewFor`'s empty-state UI to surface a specific-and-
+// actionable workaround message instead of the generic "数据尚未同步").
+const loggedMissingSources = new Set<string>();
+
+/** True if a previous fetch attempt for (cat.data.key, sourceCode)
+ *  returned 404 from every (base × case-variant) combination. The
+ *  preview UI uses this to upgrade its empty-state message from
+ *  the generic "数据可能尚未同步" to a specific "kiwee.top 合作版
+ *  没收对应数据文件，建议关掉那个库" hint. */
+function isSourceDataKnownMissing(
+  dataKey: string | undefined,
+  sourceCode: string,
+): boolean {
+  if (!dataKey) return false;
+  return loggedMissingSources.has(`${dataKey}|${sourceCode}`);
+}
 function dataCacheKey(c: number, src: string): string {
   return `${c}:${src.toLowerCase()}`;
 }
@@ -505,9 +607,12 @@ async function loadCategoryData(
   // Try every case variant in parallel — case-sensitive servers like
   // GitHub Pages 404 on the wrong case, so we have to send all
   // candidates and merge whichever 200s.
-  const filePathsForSrc = (s: string) => "fileBySource" in cat.data!
-    ? [cat.data!.fileBySource(s)]
-    : [cat.data!.file];
+  const filePathsForSrc = (s: string) => {
+    const data = cat.data!;
+    if ("fileBySource" in data) return [data.fileBySource(s)];
+    if ("file" in data) return [data.file];
+    return [];
+  };
   const candidatePaths = new Set<string>([
     ...filePathsForSrc(src),                  // lowercase
     ...filePathsForSrc(srcOriginal),          // original case
@@ -530,12 +635,14 @@ async function loadCategoryData(
     // and merge. First non-empty result keyed (ENG_name|source)
     // survives. Built-in kiwee will typically have most entries;
     // custom hosts contribute their homebrew without overwriting.
+    let okCount = 0;
     const responses = await Promise.all(
       bases.flatMap((base) =>
         [...candidatePaths].map(async (path) => {
           try {
             const res = await fetch(`${base}/data/${path}`, { cache: "no-cache" });
             if (!res.ok) return null;
+            okCount++;
             const json = await res.json();
             return (json[cat.data!.key] ?? []) as DataEntry[];
           } catch {
@@ -544,6 +651,23 @@ async function loadCategoryData(
         }),
       ),
     );
+    // If EVERY (base × case-variant) combination returned 404 / network
+    // error, the data for this source is unreachable from any of the
+    // user's configured libraries. Log ONCE per source so the user can
+    // open DevTools and immediately see which library is the culprit
+    // (typically a third-party homebrew extension whose author renamed
+    // or removed files on the mirror). Suggest the workaround inline.
+    if (okCount === 0) {
+      const probeKey = `${cat.data!.key}|${srcOriginal}`;
+      if (!loggedMissingSources.has(probeKey)) {
+        loggedMissingSources.add(probeKey);
+        console.warn(
+          `[obr-suite/search] data file for ${cat.data!.key} source="${srcOriginal}" is missing from every enabled library. ` +
+          `Tried paths: ${[...candidatePaths].join(" / ")}. ` +
+          `Workaround: 设置 → 库设置 临时关掉对应的第三方扩展库。`,
+        );
+      }
+    }
     const merged: DataEntry[] = [];
     const seen = new Set<string>();
     for (const arr of responses) {
@@ -1516,7 +1640,27 @@ async function renderPreviewFor(entry: Entry) {
   if (!pinnedEntry && lastHoverEntry && lastHoverEntry.id !== entry.id) return;
 
   if (!data) {
-    bodyEl.innerHTML = `<div class="prev-empty">未找到详情数据<br><span class="prev-empty-sub">来源 ${escapeHtml(code)} 的数据可能尚未同步</span></div>`;
+    // If we've previously detected that this source's data files are
+    // entirely missing from every enabled library (the all-404 path
+    // in loadCategoryData also recorded a probeKey), show a more
+    // specific workaround pointing to the library settings — the
+    // generic "尚未同步" message wasn't actionable. Most common
+    // culprit: the kiwee.top "合作版" library whose index lists
+    // ~5300 stub entries with no backing JSON files.
+    const isMissing = isSourceDataKnownMissing(cat.data?.key, srcCode(entry.s));
+    if (isMissing) {
+      bodyEl.innerHTML = `
+        <div class="prev-empty">该来源的详情数据不在任何已启用库的镜像上
+          <br><span class="prev-empty-sub">
+            来源 <b>${escapeHtml(code)}</b> · 仅有搜索条目，没有对应的内容文件。
+            <br>建议在「<b>设置 → 库设置</b>」临时关掉
+            「<b>5etools (kiwee.top, 合作版)</b>」等收录该来源的库，
+            或等镜像维护者补齐数据文件。
+          </span>
+        </div>`;
+    } else {
+      bodyEl.innerHTML = `<div class="prev-empty">未找到详情数据<br><span class="prev-empty-sub">来源 ${escapeHtml(code)} 的数据可能尚未同步</span></div>`;
+    }
     return;
   }
 
@@ -1586,21 +1730,15 @@ function refilter() {
   runSearch(q);
 }
 
-// Delegated click for any 5etools rollable tag inside the search preview.
-previewEl.addEventListener("click", async (e) => {
-  const target = (e.target as HTMLElement | null)?.closest<HTMLElement>(".rollable");
-  if (!target) return;
-  e.preventDefault();
-  e.stopPropagation();
-  const expression = target.dataset.expr ?? "";
-  const label = target.dataset.label ?? "";
-  if (!expression) return;
-  const itemId = await resolveClickRollTarget();
-  fireQuickRoll({ expression, label, itemId, focus: !!itemId });
-  target.classList.remove("rollable-flash");
-  void target.offsetWidth;
-  target.classList.add("rollable-flash");
-});
+// 2026-05-10: rollable left-click in the search preview now opens
+// the dice quick-pick popup (劣势 / 普通 / 优势 + 重击) instead of
+// auto-rolling. Same UX as the bestiary / cc-info panels. The search
+// popover has a quadrant-dependent anchor (LEFT/RIGHT × TOP/BOTTOM)
+// that's hard to mirror without coordination from the bg module, so
+// the popup falls back to the viewport top-center fallback baked
+// into bindRollableClickPopup. Good-enough until the user asks for
+// pixel-perfect anchoring.
+bindRollableClickPopup(previewEl, () => resolveClickRollTarget());
 
 inputEl.addEventListener("input", () => {
   if (debounceTimer) clearTimeout(debounceTimer);
@@ -1737,9 +1875,21 @@ OBR.onReady(async () => {
   // cache when it actually changes (data-version / allowPlayerMonsters
   // toggles also fire state-change but don't affect the index itself
   // — only the filtered view).
-  let lastLibSig = JSON.stringify(getEnabledLibraryBases());
+  //
+  // 2026-05-09: signature also includes per-library disabledSources
+  // and indexPath. Toggling a source checkbox in the library
+  // settings doesn't change baseUrl, so the previous bases-only
+  // signature missed the change → search kept showing entries from
+  // disabled sources because the in-memory indexCache wasn't reset.
+  const libSig = () => {
+    const libs = (getState().libraries || []).filter((l) => l.enabled);
+    return JSON.stringify(
+      libs.map((l) => `${l.baseUrl}|${l.indexPath ?? ""}|${(l.disabledSources ?? []).slice().sort().join(",")}`),
+    );
+  };
+  let lastLibSig = libSig();
   onStateChange(() => {
-    const sig = JSON.stringify(getEnabledLibraryBases());
+    const sig = libSig();
     if (sig !== lastLibSig) {
       lastLibSig = sig;
       indexCache = null;

@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>圆形图片</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#292d3c;--bg-strong:#1f2230;--bg-card:#323748;
+  --border:rgba(255,255,255,0.12);--border-strong:rgba(255,255,255,0.20);
+  --text:#e6e8ee;--text-dim:#9aa0b3;
+  --accent:#5dade2;--accent-warm:#f5a623;--accent-red:#e74c3c;--accent-green:#2ecc71;
+}
+html,body{
+  height:100%;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:var(--text);background:transparent;
+  pointer-events:none;
+  font-size:13px;
+}
+.card{
+  position:absolute;inset:0;
+  background:var(--bg);
+  border:1px solid var(--border-strong);
+  border-radius:10px;
+  box-shadow:0 12px 36px rgba(0,0,0,0.55);
+  pointer-events:auto;
+  display:flex;flex-direction:column;
+  padding:14px 16px;
+  overflow:hidden;
+}
+.hdr{
+  display:flex;align-items:center;gap:8px;
+  padding-bottom:10px;
+  border-bottom:1px solid var(--border);
+  margin-bottom:12px;flex-shrink:0;
+}
+.hdr .ic{font-size:14px;color:var(--accent)}
+.hdr .ttl{font-size:14px;font-weight:700;flex:1;letter-spacing:0.2px}
+.hdr .x{
+  cursor:pointer;font-size:18px;color:var(--text-dim);line-height:1;padding:0 4px;
+  background:none;border:none;transition:color .12s;
+}
+.hdr .x:hover{color:var(--text)}
+
+.body{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+
+/* ---- drop zone (shown when no image loaded) ---- */
+#drop-zone{
+  flex:1;min-height:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;
+  background:var(--bg-strong);
+  border:2px dashed var(--border-strong);
+  border-radius:8px;
+  cursor:pointer;
+  transition:border-color .12s, background .12s;
+}
+#drop-zone:hover, #drop-zone.dragover{
+  border-color:var(--accent);
+  background:rgba(93,173,226,0.07);
+}
+#drop-zone .big{font-size:30px;color:var(--text-dim);line-height:1}
+#drop-zone .lbl{font-size:13px;color:var(--text)}
+#drop-zone .sub{font-size:11px;color:var(--text-dim)}
+#file-input{display:none}
+
+/* ---- editor (shown after an image is loaded) ---- */
+#editor{flex:1;min-height:0;display:none;flex-direction:column;gap:10px}
+#editor.active{display:flex}
+
+#canvas-wrap{
+  flex:1;min-height:0;
+  position:relative;
+  background:var(--bg-strong);
+  border:1px solid var(--border);
+  border-radius:6px;
+  overflow:hidden;
+}
+#canvas{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  display:block;
+  cursor:move;
+  touch-action:none;
+}
+
+.ctrl-row{
+  display:flex;align-items:center;gap:8px;flex-shrink:0;
+}
+.ctrl-row .lbl{
+  font-size:10.5px;color:var(--text-dim);
+  font-weight:700;text-transform:uppercase;letter-spacing:.4px;
+  flex-shrink:0;width:54px;
+}
+.ctrl-row input[type=range]{
+  flex:1;height:24px;
+  accent-color:var(--accent);
+}
+.ctrl-row input[type=color]{
+  width:38px;height:28px;
+  background:var(--bg-strong);
+  border:1px solid var(--border);
+  border-radius:4px;
+  cursor:pointer;padding:2px;
+}
+.ctrl-row .val{
+  font-size:11px;color:var(--text-dim);
+  min-width:34px;text-align:right;
+  font-variant-numeric:tabular-nums;
+}
+
+.btn-row{
+  margin-top:auto;display:flex;gap:6px;justify-content:flex-end;
+  padding-top:12px;
+  border-top:1px solid var(--border);flex-shrink:0;
+}
+.btn{
+  height:30px;padding:0 14px;border-radius:6px;
+  background:var(--bg-card);color:var(--text);
+  border:1px solid var(--border);font-size:12px;cursor:pointer;
+  font-family:inherit;font-weight:600;
+  transition:background .12s, border-color .12s, color .12s;
+  user-select:none;
+}
+.btn:hover{background:rgba(93,173,226,0.15);border-color:rgba(93,173,226,0.35);color:#7ec8f0}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:#4a99ce;border-color:#4a99ce}
+.btn.warm:hover{background:rgba(245,166,35,.18);border-color:rgba(245,166,35,.5);color:#ffba5d}
+.btn.danger:hover{background:rgba(231,76,60,.18);border-color:rgba(231,76,60,.5);color:#ff7a6b}
+
+/* "添加到资源库" call-to-action — green so users see it as the
+   "commit" action even though it's now a regular click button. */
+.btn.drag-handle{
+  background:rgba(46,204,113,0.18);
+  border:1px solid rgba(46,204,113,0.5);
+  color:#7eecaf;
+}
+.btn.drag-handle:hover{
+  background:rgba(46,204,113,0.28);
+  border-color:rgba(46,204,113,0.7);
+  color:#a4f5c8;
+}
+.btn.drag-handle.uploading{
+  background:rgba(255,255,255,0.06);
+  border-color:rgba(255,255,255,0.15);
+  color:var(--text-dim);
+  cursor:wait;
+}
+.btn.drag-handle.ok{
+  background:rgba(46,204,113,0.42);
+  border-color:rgba(46,204,113,0.8);
+  color:#fff;
+}
+
+/* ---- mode tabs ---- */
+.tab-strip{
+  display:flex;gap:4px;flex-shrink:0;
+  margin-bottom:8px;
+}
+.tab-strip .tab{
+  flex:1;height:30px;
+  background:var(--bg-strong);
+  border:1px solid var(--border);
+  border-radius:6px;
+  color:var(--text-dim);
+  font-family:inherit;font-size:12px;font-weight:600;
+  cursor:pointer;
+  transition:background .12s, border-color .12s, color .12s;
+  user-select:none;
+}
+.tab-strip .tab:hover{
+  color:var(--text);
+  background:var(--bg-card);
+}
+.tab-strip .tab.on{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#fff;
+}
+
+/* per-mode control panel — show only the panel matching the active mode */
+.ctrls{display:flex;flex-direction:column;gap:8px;flex-shrink:0}
+.ctrls[hidden]{display:none}
+
+/* checkered transparency background under the canvas — only useful
+   in bgremove mode where the user needs to see what's been made
+   transparent. Toggled via a body-level data-mode attribute below. */
+#canvas-wrap{
+  background-image:
+    linear-gradient(45deg, rgba(255,255,255,.06) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255,255,255,.06) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255,255,255,.06) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255,255,255,.06) 75%);
+  background-size:14px 14px;
+  background-position:0 0, 0 7px, 7px -7px, -7px 0;
+}
+
+/* bg-remove "white / black" segmented toggle */
+.bg-toggle{
+  height:26px;padding:0 12px;border-radius:5px;
+  background:var(--bg-strong);
+  border:1px solid var(--border);
+  color:var(--text-dim);font-size:12px;font-family:inherit;
+  cursor:pointer;flex:1;
+  transition:background .12s, color .12s, border-color .12s;
+  user-select:none;font-weight:600;
+}
+.bg-toggle.on{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#fff;
+}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="hdr">
+    <span class="ic">⊙</span>
+    <span class="ttl">图片处理</span>
+    <button class="x" id="btnClose" type="button">×</button>
+  </div>
+  <div class="body">
+    <!-- Mode tabs — switch between circle-crop and background-removal -->
+    <div class="tab-strip">
+      <button class="tab on" data-mode="circle" type="button">圆形裁剪</button>
+      <button class="tab" data-mode="bgremove" type="button">白底黑底剔除</button>
+    </div>
+
+    <!-- Drop zone (initial empty state — shown for both modes) -->
+    <div id="drop-zone" tabindex="0">
+      <div class="big">＋</div>
+      <div class="lbl">拖入图片 / 点击选择 / Ctrl+V 粘贴</div>
+      <div class="sub">支持 JPG / PNG / WebP / SVG，最大 10 MB</div>
+      <input type="file" id="file-input" accept="image/*" />
+    </div>
+
+    <!-- Editor (post-load) -->
+    <div id="editor">
+      <div id="canvas-wrap">
+        <canvas id="canvas"></canvas>
+      </div>
+
+      <!-- Circle-crop controls -->
+      <div class="ctrls" id="ctrls-circle">
+        <div class="ctrl-row">
+          <span class="lbl">大小</span>
+          <input type="range" id="size-slider" min="40" max="600" value="300" />
+          <span class="val" id="size-val">300</span>
+        </div>
+        <div class="ctrl-row">
+          <span class="lbl">缩放</span>
+          <input type="range" id="zoom-slider" min="20" max="400" value="100" />
+          <span class="val" id="zoom-val">100%</span>
+        </div>
+        <div class="ctrl-row">
+          <span class="lbl">环颜色</span>
+          <input type="color" id="ring-color" value="#f5a623" />
+          <input type="range" id="ring-width" min="0" max="40" value="0" style="flex:1" />
+          <span class="val" id="ring-val">0</span>
+        </div>
+      </div>
+
+      <!-- Background-removal controls -->
+      <div class="ctrls" id="ctrls-bgremove" hidden>
+        <div class="ctrl-row" style="gap:6px">
+          <span class="lbl">背景</span>
+          <button class="bg-toggle on" data-kind="white" type="button">剔除白底</button>
+          <button class="bg-toggle" data-kind="black" type="button">剔除黑底</button>
+        </div>
+        <div class="ctrl-row">
+          <span class="lbl">容差</span>
+          <input type="range" id="bg-tolerance" min="0" max="120" value="40" />
+          <span class="val" id="bg-tolerance-val">40</span>
+        </div>
+        <div class="ctrl-row">
+          <span class="lbl">羽化</span>
+          <input type="range" id="bg-feather" min="0" max="40" value="8" />
+          <span class="val" id="bg-feather-val">8</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="btn danger" id="btnReset" type="button">换图</button>
+    <span style="flex:1"></span>
+    <button class="btn drag-handle" id="btnDrag" type="button" title="把当前裁剪结果上传到 OBR 资源库；之后可从资源库拖到场景使用">⤴ 添加到资源库</button>
+  </div>
+</div>
+<script type="module" src="/src/modules/circleImage/popover-page.ts"></script>
+</body>
+</html>

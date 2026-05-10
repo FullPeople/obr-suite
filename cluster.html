@@ -92,9 +92,23 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
 .drag-grip:hover{filter:brightness(1.18);color:#fff}
 .drag-grip.is-dragging{cursor:grabbing;color:#5dade2}
 .drag-grip svg{width:8px;height:18px;display:block;pointer-events:none}
+
+/* Mobile: iframe is opened at half size (46×32). Keep the body laid
+   out at the original design size (92×64) and scale-down via CSS
+   transform so all the inner sizing rules above keep working as-is.
+   transform-origin top-left aligns the visible content with the
+   iframe's top-left corner. */
+body.mobile{width:92px;height:64px;transform:scale(0.5);transform-origin:top left}
 </style>
 </head>
 <body>
+<script>
+  // Read `?mobile=1` from URL and toggle a class so CSS can scale.
+  // Inline so the class is present before the wrap is parsed.
+  if (new URLSearchParams(location.search).get("mobile") === "1") {
+    document.body.classList.add("mobile");
+  }
+</script>
 <div class="wrap" id="wrap" data-side="right">
   <button class="main" id="main" type="button" title="枭熊菜单 / Suite Menu">
     <img src="/suite/exe_icon.png" alt="">

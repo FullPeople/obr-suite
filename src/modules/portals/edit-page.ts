@@ -3,7 +3,9 @@ import {
   PLUGIN_ID,
   PORTAL_KEY,
   PRESETS_KEY,
+  CREATE_PREFS_KEY,
   DEFAULT_PRESETS,
+  CreatePrefs,
   Presets,
   PortalMeta,
 } from "./types";
@@ -29,6 +31,20 @@ function readPresets(): Presets {
 }
 function writePresets(p: Presets) {
   try { localStorage.setItem(PRESETS_KEY, JSON.stringify(p)); } catch {}
+}
+
+function readCreatePrefs(): CreatePrefs {
+  try {
+    const raw = localStorage.getItem(CREATE_PREFS_KEY);
+    if (raw) return JSON.parse(raw) as CreatePrefs;
+  } catch {}
+  return {};
+}
+function writeCreatePrefs() {
+  if (!isNew) return;
+  try {
+    localStorage.setItem(CREATE_PREFS_KEY, JSON.stringify({ showName, visible: isVisible, locked: isLocked }));
+  } catch {}
 }
 
 const params = new URLSearchParams(location.search);
@@ -178,12 +194,17 @@ async function toggleLock() {
   const next = !isLocked;
   isLocked = next;
   applyLockButtonState();
+  writeCreatePrefs();
   try {
     // OBR's native item lock — once true, the token can't be moved /
     // deleted from the scene by normal user interaction. Same flag
     // the suite sets on freshly-spawned portal previews.
     await OBR.scene.items.updateItems([portalId], (drafts) => {
-      for (const d of drafts) d.locked = next;
+      for (const d of drafts) {
+        d.locked = next;
+        const meta = (d.metadata[PORTAL_KEY] as PortalMeta | undefined) ?? { name: "", tag: "", radius: 70 };
+        d.metadata[PORTAL_KEY] = { ...meta, locked: next };
+      }
     });
   } catch (e) {
     console.warn("[obr-suite/portals] toggle lock failed", e);
@@ -197,9 +218,14 @@ async function toggleVisible() {
   const next = !isVisible;
   isVisible = next;
   applyVisibleButtonState();
+  writeCreatePrefs();
   try {
     await OBR.scene.items.updateItems([portalId], (drafts) => {
-      for (const d of drafts) d.visible = next;
+      for (const d of drafts) {
+        d.visible = next;
+        const meta = (d.metadata[PORTAL_KEY] as PortalMeta | undefined) ?? { name: "", tag: "", radius: 70 };
+        d.metadata[PORTAL_KEY] = { ...meta, visible: next };
+      }
     });
   } catch (e) {
     console.warn("[obr-suite/portals] toggle visible failed", e);
@@ -213,6 +239,7 @@ async function toggleShowName() {
   const next = !showName;
   showName = next;
   applyTextButtonState();
+  writeCreatePrefs();
   // Apply the text label change immediately too — most users expect
   // a flip to show on the scene right away, not only after Save.
   try {
@@ -247,9 +274,18 @@ async function loadCurrent() {
       inpName.value = originalName;
       inpTag.value = originalTag;
       showName = meta.showName === true;
+      isVisible = meta.visible !== false;
+      isLocked = meta.locked === true;
     }
-    isLocked = !!it.locked;
-    isVisible = it.visible !== false;
+    if (isNew) {
+      const prefs = readCreatePrefs();
+      showName = prefs.showName === true;
+      isVisible = prefs.visible !== false;
+      isLocked = prefs.locked === true;
+    }
+    // Fallback to item properties if not in meta
+    isLocked = isLocked || !!it.locked;
+    isVisible = isVisible && (it.visible !== false);
     applyLockButtonState();
     applyVisibleButtonState();
     applyTextButtonState();
@@ -288,6 +324,8 @@ async function autoSave() {
           tag,
           radius: cur.radius,
           showName,
+          visible: isVisible,
+          locked: isLocked,
         };
         const txt = (d as any).text;
         if (txt) txt.plainText = showName ? name : "";

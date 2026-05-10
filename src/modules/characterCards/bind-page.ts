@@ -106,7 +106,8 @@ async function fetchCardBubblesSeed(cardId: string): Promise<BubblesSeed | null>
   }
 }
 
-const BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
+const BUBBLES_META = "com.obr-suite/bubbles/data";
+const EXTERNAL_BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
 
 async function bindTo(cardId: string | null) {
   if (!itemId) return;
@@ -144,7 +145,9 @@ async function bindTo(cardId: string | null) {
         // are visible to everyone by default; the new lock toggle
         // controls combat-gated visibility instead).
         if (bubblesSeed) {
-          const existing = (d.metadata[BUBBLES_META] as Record<string, unknown>) ?? {};
+          const existing = (d.metadata[BUBBLES_META] as Record<string, unknown>)
+            ?? (d.metadata[EXTERNAL_BUBBLES_META] as Record<string, unknown>)
+            ?? {};
           const seed: Record<string, unknown> = { ...existing };
           if (typeof bubblesSeed.health === "number") seed.health = bubblesSeed.health;
           if (typeof bubblesSeed.maxHealth === "number") seed["max health"] = bubblesSeed.maxHealth;
@@ -154,6 +157,7 @@ async function bindTo(cardId: string | null) {
           // the new lock toggle (default true) is the active gate.
           delete seed.hide;
           d.metadata[BUBBLES_META] = seed;
+          if (d.metadata[EXTERNAL_BUBBLES_META] != null) d.metadata[EXTERNAL_BUBBLES_META] = seed;
         }
       } else {
         delete d.metadata[BIND_META];

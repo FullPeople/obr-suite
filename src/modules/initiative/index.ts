@@ -6,6 +6,7 @@ import {
   BROADCAST_OPEN_PANEL,
   BROADCAST_CLOSE_PANEL,
   NEW_ITEM_DIALOG_ID,
+  CTX_INVISIBLE,
 } from "./utils/constants";
 import { Lang, t } from "./utils/i18n";
 import {
@@ -14,9 +15,11 @@ import {
   onLangChange,
 } from "../../state";
 import { assetUrl } from "../../asset-base";
-// `syncStealthOverlays` removed alongside the stealth context menu
-// (2026-05-04 — feature was unfinished). `clearStealthOverlays` is
-// kept so we can sweep legacy overlay items on scene ready.
+// `clearStealthOverlays` is still imported as a one-shot sweep for any
+// session that's upgrading from the shader-based flow (2026-05-09 morning).
+// `syncStealthOverlays` is no longer called — see the inline comment in
+// setupInitiative() about retiring the shader path in favour of native
+// `item.visible = false`.
 import { clearStealthOverlays } from "./utils/visualEffects";
 import { onViewportResize } from "../../utils/viewportAnchor";
 // STABLE_HIDES previously gated the stealth context menu — that
@@ -152,7 +155,9 @@ const TOP_OFFSET = 45;
 
 const CTX_TOGGLE = `${METADATA_KEY}/context-menu`;
 const CTX_GATHER = `${METADATA_KEY}/gather-empty`;
-// CTX_INVISIBLE removed 2026-05-04 — see registerContextMenus().
+// CTX_INVISIBLE id is the same string as the legacy 2026-05-04 menu —
+// kept identical so a session that already had a registration cleans up
+// to the same id we now create.
 
 const unsubs: Array<() => void> = [];
 let knownItemIds = new Set<string>();
@@ -227,9 +232,7 @@ async function initKnownItems() {
 async function registerContextMenus(lang: Lang) {
   try { await OBR.contextMenu.remove(CTX_TOGGLE); } catch {}
   try { await OBR.contextMenu.remove(CTX_GATHER); } catch {}
-  // Legacy CTX_INVISIBLE id — still removed on teardown so any
-  // session that already had it registered cleans up properly.
-  try { await OBR.contextMenu.remove(`${METADATA_KEY}/invisibility`); } catch {}
+  try { await OBR.contextMenu.remove(CTX_INVISIBLE); } catch {}
 
   await OBR.contextMenu.create({
     id: CTX_TOGGLE,
@@ -237,10 +240,17 @@ async function registerContextMenus(lang: Lang) {
       {
         icon: ICON_URL,
         label: t(lang, "addToInitiative"),
+        // 2026-05-10: limit initiative-tracker context entries to
+        // selections that include at least one CHARACTER-layer token.
+        // The handler further filters operations to character tokens
+        // so a mixed box-select still works — non-character props are
+        // simply skipped instead of being silently added to initiative.
         filter: {
           every: [
-            { key: "type", value: "IMAGE" },
             { key: ["metadata", METADATA_KEY], value: undefined },
+          ],
+          some: [
+            { key: "layer", value: "CHARACTER" },
           ],
         },
       },
@@ -248,18 +258,29 @@ async function registerContextMenus(lang: Lang) {
         icon: ICON_URL,
         label: t(lang, "removeFromInitiative"),
         filter: {
-          every: [{ key: "type", value: "IMAGE" }],
+          // At least one selected item must (a) already be in initiative
+          // AND (b) be a character. Non-character items in the selection
+          // are skipped by the handler.
           some: [
             { key: ["metadata", METADATA_KEY], value: undefined, operator: "!=" },
+            { key: "layer", value: "CHARACTER" },
           ],
         },
       },
     ],
     onClick: async (context) => {
-      const anyHasData = context.items.some(
+      // Only operate on CHARACTER-layer tokens. Non-character items
+      // that happened to be in the box-select get ignored; they never
+      // had an initiative entry to begin with (under the new guard) so
+      // there's nothing to remove either.
+      const charItems = context.items.filter(
+        (item) => item.layer === "CHARACTER"
+      );
+      if (charItems.length === 0) return;
+      const anyHasData = charItems.some(
         (item) => item.metadata[METADATA_KEY] !== undefined
       );
-      const ids = context.items.map((i) => i.id);
+      const ids = charItems.map((i) => i.id);
       if (anyHasData) {
         await OBR.scene.items.updateItems(ids, (drafts) => {
           for (const d of drafts) {
@@ -331,12 +352,94 @@ async function registerContextMenus(lang: Lang) {
     },
   });
 
-  // Stealth toggle (mark invisible / reveal) deleted 2026-05-04 —
-  // the underlying overlay shader was never finished, so exposing
-  // a context menu that flips a flag with no visible effect is
-  // user-hostile. The metadata key (`METADATA_KEY.invisible`) is
-  // still read elsewhere; if any old scenes have it set, it just
-  // sits there harmlessly until / unless we revive the feature.
+  // Stealth toggle (mark invisible / reveal). 2026-05-09 revival —
+  // GM-only. Operates only on items that ARE in initiative
+  // (`metadata[METADATA_KEY] !== undefined`); marking a token
+  // invisible without an initiative entry would have no observable
+  // effect since the panel filtering is the primary visual cue.
+  await OBR.contextMenu.create({
+    id: CTX_INVISIBLE,
+    icons: [
+      {
+        icon: ICON_URL,
+        label: t(lang, "makeInvisible"),
+        filter: {
+          roles: ["GM"],
+          every: [
+            { key: ["metadata", METADATA_KEY], value: undefined, operator: "!=" },
+            { key: ["metadata", METADATA_KEY, "invisible"], value: true, operator: "!=" },
+          ],
+          // 2026-05-10: invisible toggle only applies to character
+          // tokens (the rest of the initiative pipeline does too).
+          some: [
+            { key: "layer", value: "CHARACTER" },
+          ],
+        },
+      },
+      {
+        icon: ICON_URL,
+        label: t(lang, "revealInvisible"),
+        filter: {
+          roles: ["GM"],
+          every: [
+            { key: ["metadata", METADATA_KEY, "invisible"], value: true },
+          ],
+          some: [
+            { key: "layer", value: "CHARACTER" },
+          ],
+        },
+      },
+    ],
+    onClick: async (context) => {
+      // Use the FIRST selected item's current invisible state as the
+      // batch decision — mirrors the add/remove menu pattern. If any
+      // currently-marked-invisible token is in the selection, the
+      // click toggles them all OFF; otherwise it turns them all ON.
+      // Filter to characters only — non-character items in a mixed
+      // box-select are skipped (they aren't in initiative anyway).
+      const charItems = context.items.filter(
+        (item) => item.layer === "CHARACTER"
+      );
+      if (charItems.length === 0) return;
+      const anyInvisible = charItems.some((item) => {
+        const data = (item.metadata as any)[METADATA_KEY];
+        return data && typeof data === "object" && data.invisible === true;
+      });
+      const willBeInvisible = !anyInvisible;
+      const ids = charItems.map((i) => i.id);
+
+      // Two writes happen in one updateItems call:
+      //   1. data.invisible flag flip — drives panel filtering / gray
+      //      ring / "有人在暗处" overlay broadcasts.
+      //   2. item.visible flip — drives OBR's NATIVE per-client
+      //      visibility. OBR hides items with visible=false from every
+      //      client EXCEPT the GM and the token's createdUserId
+      //      (owner). That's exactly the "DM normal, owner normal,
+      //      everyone else can't see" matrix in the stealth spec, so
+      //      we lean on it instead of trying to do per-client shader
+      //      cover (which the user reported as ineffective on player
+      //      clients in the previous attempt).
+      //
+      // Companion: useInitiative's panel filter is amended to KEEP
+      // items where data.invisible === true even when item.visible
+      // === false, so an invisible token still shows up in the GM /
+      // owner panel.
+      await OBR.scene.items.updateItems(ids, (drafts) => {
+        for (const d of drafts) {
+          const existing = (d.metadata as any)[METADATA_KEY];
+          if (existing && typeof existing === "object") {
+            (d.metadata as any)[METADATA_KEY] = {
+              ...existing,
+              invisible: willBeInvisible,
+            };
+          }
+          // Toggle native visibility in lockstep. Reveal restores
+          // visible=true; mark-invisible flips it false.
+          d.visible = !willBeInvisible;
+        }
+      });
+    },
+  });
 }
 
 export async function setupInitiative(): Promise<void> {
@@ -419,13 +522,20 @@ export async function setupInitiative(): Promise<void> {
     }),
   );
 
-  // Stealth overlay sync removed 2026-05-04 along with the right-
-  // click context menu — see registerContextMenus() above. Any
-  // legacy `metadata.invisible: true` flags are now dormant; if
-  // we revive the feature the overlay sync should be the SECOND
-  // step (after the menu, since the menu is what flips the flag).
-  // Sweep any stale overlay items once per scene-ready in case the
-  // user is upgrading from a build that left them around.
+  // 2026-05-09 update: shader-overlay path retired. The player-side
+  // opaque cover never visually obscured the token in user testing —
+  // suspected reasons (Effect position relative to attached parent
+  // not snapping correctly, or zIndex collision with the
+  // CHARACTER-layer token sprite) were diagnosed but not solved
+  // before deciding the simpler fix is to ride OBR's NATIVE
+  // visibility model: the CTX_INVISIBLE handler now toggles
+  // `item.visible` alongside `data.invisible`, and OBR's renderer
+  // hides the token on every non-GM non-owner client for free.
+  //
+  // We still sweep any STALE overlay items left over from a previous
+  // session that did create them, so clients upgrading mid-session
+  // don't carry orphan local Effect items into the new flow. The
+  // sweep is a one-shot at scene-ready; no re-subscription needed.
   unsubs.push(
     OBR.scene.onReadyChange(async (ready) => {
       if (ready) {
@@ -499,10 +609,9 @@ export async function setupInitiative(): Promise<void> {
 export async function teardownInitiative(): Promise<void> {
   try { await OBR.contextMenu.remove(CTX_TOGGLE); } catch {}
   try { await OBR.contextMenu.remove(CTX_GATHER); } catch {}
-  // Legacy CTX_INVISIBLE id — still removed on teardown so any
-  // session that already had it registered cleans up properly.
-  try { await OBR.contextMenu.remove(`${METADATA_KEY}/invisibility`); } catch {}
+  try { await OBR.contextMenu.remove(CTX_INVISIBLE); } catch {}
   for (const u of unsubs.splice(0)) u();
   knownItemIds.clear();
+  try { await clearStealthOverlays(); } catch {}
   await closePanel();
 }

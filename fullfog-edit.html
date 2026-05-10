@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>编辑地图迷雾 · fullFog</title>
+    <style>
+      :root {
+        --bg: #14151a;
+        --bg-pane: #1c1f27;
+        --bg-row: #252934;
+        --bg-row-hover: #2e3340;
+        --border: #353a48;
+        --border-strong: #4a4f5e;
+        --text: #e6e8ee;
+        --text-dim: #9aa0ad;
+        --accent: #f5a623;
+        --accent-dim: rgba(245, 166, 35, 0.4);
+        --danger: #e74c3c;
+        --good: #4ec9b0;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; padding: 0; width: 100%; height: 100%;
+        background: var(--bg); color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                     "Microsoft YaHei", Roboto, sans-serif;
+        font-size: 13px; overflow: hidden;
+        user-select: none; -webkit-user-select: none;
+      }
+      #app {
+        display: grid;
+        grid-template-rows: 44px 1fr 28px;
+        grid-template-columns: 64px 1fr 320px;
+        grid-template-areas:
+          "head head head"
+          "tools canvas right"
+          "status status status";
+        height: 100vh;
+      }
+      header {
+        grid-area: head;
+        display: flex; align-items: center;
+        padding: 0 12px; gap: 10px;
+        background: var(--bg-pane);
+        border-bottom: 1px solid var(--border);
+      }
+      header .title { font-weight: 600; font-size: 14px; }
+      header .meta { color: var(--text-dim); font-size: 12px; }
+      header .spacer { flex: 1; }
+      header button {
+        background: var(--bg-row); color: var(--text);
+        border: 1px solid var(--border); border-radius: 5px;
+        padding: 5px 12px; cursor: pointer; font-size: 12.5px;
+        transition: background 0.12s;
+      }
+      header button:hover { background: var(--bg-row-hover); }
+      header button.primary {
+        background: var(--accent); color: #1a1a1a;
+        border-color: var(--accent);
+      }
+      header button.primary:hover { filter: brightness(1.08); }
+      header button.danger { color: var(--danger); border-color: rgba(231, 76, 60, 0.5); }
+      /* Header toggle (grid-snap) — accent fill when active. */
+      header button.on {
+        background: var(--accent-dim);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      #toolbox {
+        grid-area: tools;
+        background: var(--bg-pane);
+        border-right: 1px solid var(--border);
+        padding: 6px;
+        display: flex; flex-direction: column; gap: 4px;
+        overflow-y: auto;
+      }
+      .tool-btn {
+        width: 52px; height: 52px;
+        background: transparent; color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        font-size: 11px; gap: 2px;
+        transition: all 0.12s;
+        padding: 4px;
+      }
+      .tool-btn:hover { background: var(--bg-row-hover); border-color: var(--border-strong); }
+      .tool-btn.on {
+        background: var(--accent-dim);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .tool-btn .ico { font-size: 18px; line-height: 1; }
+      /* Mode badge — small "+" / "−" sticker in the top-right corner
+         of shape tool buttons indicating their CURRENT add/erase
+         state. Right-click the button to flip. */
+      .tool-btn[data-mode]::after {
+        content: attr(data-mode-label);
+        position: absolute;
+        top: 2px; right: 4px;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1;
+        padding: 1px 3px;
+        border-radius: 3px;
+        font-family: ui-monospace, monospace;
+      }
+      .tool-btn[data-mode="add"]::after {
+        content: "+";
+        color: #1a1a1a;
+        background: var(--good);
+      }
+      .tool-btn[data-mode="erase"]::after {
+        content: "−";
+        color: #fff;
+        background: var(--danger);
+      }
+      .tool-btn { position: relative; }
+      .tool-divider {
+        height: 1px; background: var(--border);
+        margin: 2px 4px;
+      }
+
+      #canvas-wrap {
+        grid-area: canvas;
+        position: relative;
+        background:
+          repeating-conic-gradient(#1a1c22 0% 25%, #16181d 0% 50%) 0 0 / 24px 24px;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        width: 100%; height: 100%;
+        cursor: crosshair;
+        touch-action: none;
+      }
+      canvas.pan-active { cursor: grabbing; }
+      canvas.pan { cursor: grab; }
+      /* When brush/eraser tool is active, hide the system cursor and
+         show the custom outline circle (#brush-cursor) instead. */
+      canvas.brush-active { cursor: none; }
+
+      /* Outline circle that follows the pointer to indicate the brush
+         radius. Sized in JS by `brushRadius * view.zoom`. */
+      #brush-cursor {
+        position: absolute;
+        pointer-events: none;
+        border: 1.5px solid rgba(255, 255, 255, 0.9);
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.55),
+          inset 0 0 0 1px rgba(0, 0, 0, 0.55);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        display: none;
+        z-index: 100;
+        will-change: transform, width, height, left, top;
+      }
+      /* Eraser cursor uses a dashed outline to differentiate. */
+      #brush-cursor[data-mode="eraser"] {
+        border-style: dashed;
+        border-color: rgba(231, 76, 60, 0.95);
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.55),
+          inset 0 0 0 1px rgba(0, 0, 0, 0.55);
+      }
+
+      #right-pane {
+        grid-area: right;
+        background: var(--bg-pane);
+        border-left: 1px solid var(--border);
+        overflow-y: auto;
+        padding: 10px 12px;
+      }
+      #right-pane h3 {
+        font-size: 12px; font-weight: 600;
+        color: var(--text-dim);
+        margin: 14px 0 6px; padding-bottom: 4px;
+        border-bottom: 1px solid var(--border);
+        text-transform: uppercase; letter-spacing: 0.5px;
+      }
+      #right-pane h3:first-child { margin-top: 0; }
+
+      .row { margin-bottom: 8px; }
+      .row label.lbl {
+        display: flex; justify-content: space-between; align-items: center;
+        font-size: 12px; margin-bottom: 4px;
+        color: var(--text);
+      }
+      .row label .val { color: var(--accent); font-variant-numeric: tabular-nums; }
+      .row input[type=range] {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+      .row select, .row input[type=number], .row input[type=text] {
+        width: 100%;
+        background: var(--bg-row); color: var(--text);
+        border: 1px solid var(--border); border-radius: 4px;
+        padding: 5px 8px; font-size: 12px;
+        font-family: inherit;
+      }
+      .row select:focus, .row input:focus {
+        outline: none; border-color: var(--accent);
+      }
+      .row.inline { display: flex; gap: 6px; align-items: center; }
+      .row.inline label.lbl { margin: 0; flex: 1; }
+
+      .checkbox {
+        display: flex; align-items: center; gap: 6px;
+        cursor: pointer; font-size: 12px;
+        padding: 4px 0;
+      }
+      .checkbox input { accent-color: var(--accent); cursor: pointer; }
+
+      button.action {
+        width: 100%;
+        background: var(--bg-row); color: var(--text);
+        border: 1px solid var(--border-strong); border-radius: 4px;
+        padding: 7px; cursor: pointer; font-size: 12px;
+        font-family: inherit;
+        margin-top: 4px;
+        transition: all 0.12s;
+      }
+      button.action:hover { background: var(--bg-row-hover); border-color: var(--accent); }
+      button.action.primary {
+        background: var(--accent-dim); border-color: var(--accent);
+        color: var(--accent);
+      }
+      button.action.primary:hover { background: rgba(245, 166, 35, 0.25); }
+      /* Preview-on state — same accent treatment as algorithm-apply
+         button so the user can see at a glance that the preview
+         overlay is showing. */
+      button.action.on {
+        background: rgba(78, 201, 176, 0.20);
+        border-color: var(--good);
+        color: var(--good);
+      }
+      button.action.on:hover { background: rgba(78, 201, 176, 0.30); }
+
+      .picker-row {
+        display: flex; align-items: center; gap: 8px;
+      }
+      .picker-row input[type=color] {
+        width: 36px; height: 28px; border: 1px solid var(--border);
+        border-radius: 4px; cursor: pointer; background: transparent;
+      }
+      .picker-row .swatch {
+        flex: 1;
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+      }
+
+      footer {
+        grid-area: status;
+        display: flex; align-items: center; gap: 18px;
+        padding: 0 12px;
+        background: var(--bg-pane);
+        border-top: 1px solid var(--border);
+        font-size: 11.5px; color: var(--text-dim);
+        font-family: ui-monospace, monospace;
+      }
+      footer .item { display: flex; gap: 4px; }
+      footer .item .k { color: var(--text-dim); }
+      footer .item .v { color: var(--text); }
+      footer .spacer { flex: 1; }
+      footer .info { color: var(--accent); }
+
+      .key-hint {
+        font-size: 10px; color: var(--text-dim);
+        font-family: ui-monospace, monospace;
+        background: var(--bg-row);
+        padding: 1px 4px; border-radius: 3px;
+        margin-left: 4px;
+      }
+
+      /* Tooltip-on-hover ? icon next to slider/select labels. Uses
+         the browser's native tooltip via `title=` for keyboard +
+         long-press support. The inline-block ? circle is just a
+         visual affordance. */
+      .help {
+        display: inline-flex;
+        align-items: center; justify-content: center;
+        width: 14px; height: 14px;
+        margin-left: 4px;
+        font-size: 10px; font-weight: 600;
+        color: var(--text-dim);
+        border: 1px solid var(--border-strong);
+        border-radius: 50%;
+        cursor: help;
+        line-height: 1;
+        background: rgba(0, 0, 0, 0.18);
+        flex-shrink: 0;
+      }
+      .help:hover { color: var(--accent); border-color: var(--accent); }
+
+      /* Point-count overage indicator — turns red when total points
+         crosses the soft budget so the user knows the save will
+         auto-simplify. */
+      #cc-points[data-over="1"] {
+        color: var(--danger) !important;
+        font-weight: 600;
+      }
+
+      /* Display-mode toggle (色彩 / 灰白预览) shown above the algorithm
+         section. Two segmented buttons. */
+      .display-mode {
+        display: flex; gap: 0;
+        margin: 6px 0 4px;
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        overflow: hidden;
+      }
+      .display-mode-btn {
+        flex: 1;
+        background: var(--bg-row); color: var(--text);
+        border: none;
+        padding: 5px 8px;
+        cursor: pointer; font-size: 11.5px;
+        font-family: inherit;
+        transition: all 0.12s;
+      }
+      .display-mode-btn:hover { background: var(--bg-row-hover); }
+      .display-mode-btn.on {
+        background: var(--accent-dim); color: var(--accent);
+      }
+      .display-mode-btn + .display-mode-btn { border-left: 1px solid var(--border-strong); }
+
+      /* Output-mode selector — same segmented look as display-mode. */
+      .output-mode {
+        display: flex; gap: 0;
+        margin: 6px 0 4px;
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        overflow: hidden;
+      }
+      .output-mode-btn {
+        flex: 1;
+        background: var(--bg-row); color: var(--text);
+        border: none;
+        padding: 5px 8px;
+        cursor: pointer; font-size: 11.5px;
+        font-family: inherit;
+        transition: all 0.12s;
+      }
+      .output-mode-btn:hover { background: var(--bg-row-hover); }
+      .output-mode-btn.on {
+        background: var(--accent-dim); color: var(--accent);
+      }
+      .output-mode-btn + .output-mode-btn { border-left: 1px solid var(--border-strong); }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <button id="btn-cancel">取消</button>
+        <span class="title">编辑地图迷雾</span>
+        <span class="meta" id="map-meta">加载中…</span>
+        <span class="spacer"></span>
+        <button id="btn-undo" title="撤销 (Ctrl+Z)">↶ 撤销</button>
+        <button id="btn-redo" title="重做 (Ctrl+Shift+Z)">↷ 重做</button>
+        <button id="btn-import" title="从 JSON 文件导入之前导出的 mask（含所有滑块设置）。当前 mask 会被覆盖（可撤销）。">📤 导入</button>
+        <button id="btn-export" title="把当前 mask + 所有参数导出为 JSON 文件下载到本地。RLE 压缩，4K 地图大概 30KB。重新部署 / 刷新 / 关闭 modal 都不会丢这份备份。">📥 导出</button>
+        <button id="btn-snap" title="网格吸附：开启后多边形/矩形/直线的端点会自动吸附到地图网格交点。按住 Ctrl 临时反转吸附状态。">⊞ 吸附</button>
+        <button id="btn-fit" title="缩放至适合 (F)">⊕ 适合</button>
+        <button id="btn-clear" class="danger">清空 mask</button>
+        <button id="btn-save" class="primary" id="btn-save" title="保存 (Ctrl+S)">✓ 保存</button>
+      </header>
+
+      <div id="toolbox">
+        <button class="tool-btn" data-tool="pan" title="拖动地图（按住空格也可以临时切换）">
+          <span class="ico">✋</span><span>拖动</span>
+        </button>
+        <div class="tool-divider"></div>
+        <button class="tool-btn on" data-tool="brush" title="画笔（快捷键 1）：在地图上手动添加墙体。光标会变成圆圈，圈大小就是画笔半径。">
+          <span class="ico">🖌</span><span>画笔</span>
+        </button>
+        <button class="tool-btn" data-tool="eraser" title="橡皮（2）：擦除已经标为墙的地方。光标圆圈带虚线。">
+          <span class="ico">🧽</span><span>橡皮</span>
+        </button>
+        <div class="tool-divider"></div>
+        <button class="tool-btn" data-tool="lasso" title="自由套索（3）：圈起来的区域按当前模式填/擦。右键此按钮切换填/擦。">
+          <span class="ico">⚪</span><span>套索</span>
+        </button>
+        <button class="tool-btn" data-tool="polygon" title="多边形（4）：依次点击加角点，双击闭合。右键此按钮切换填/擦。">
+          <span class="ico">⬡</span><span>多边</span>
+        </button>
+        <button class="tool-btn" data-tool="rectangle" title="矩形（5）：拖出矩形按当前模式填/擦其内部。右键此按钮切换填/擦。">
+          <span class="ico">▭</span><span>矩形</span>
+        </button>
+        <button class="tool-btn" data-tool="line" title="直线（6）：从起点拖到终点，按画笔半径粗细画一条直线。右键此按钮切换填/擦。">
+          <span class="ico">／</span><span>直线</span>
+        </button>
+        <div class="tool-divider"></div>
+        <button class="tool-btn" data-tool="magicWand" title="魔棒（7）：点一个像素，把所有跟它颜色相近的连成一片的像素一起加进 mask。">
+          <span class="ico">🪄</span><span>魔棒</span>
+        </button>
+        <button class="tool-btn" data-tool="paintBucket" title="油漆桶（8）：在 mask 上做 flood-fill；点空心轮廓内部把整个房间填实。">
+          <span class="ico">🪣</span><span>油漆</span>
+        </button>
+        <button class="tool-btn" data-tool="picker" title="取色器（9）：在地图上吸一个颜色，自动切到『颜色距离』算法以这个颜色为目标识别。">
+          <span class="ico">💧</span><span>取色</span>
+        </button>
+      </div>
+
+      <div id="canvas-wrap">
+        <canvas id="canvas"></canvas>
+        <div id="brush-cursor"></div>
+      </div>
+
+      <aside id="right-pane">
+        <h3>显示模式</h3>
+        <div class="display-mode">
+          <button class="display-mode-btn on" data-mode="color"
+                  title="显示原始彩色地图。mask 以橙色覆盖在上面，方便对照地图标墙。">原图</button>
+          <button class="display-mode-btn" data-mode="threshold"
+                  title="显示当前算法生成的纯黑白结果（黑=墙，白=空），所见即所得。算法滑块改变时实时更新。手动画笔依然在 mask 上工作。">灰白预览</button>
+        </div>
+
+        <h3>预处理</h3>
+        <div class="row">
+          <label class="lbl">
+            <span>降噪
+              <span class="help" title="给地图先做一次模糊去掉细小纹理（地砖纹路、网点等）再跑算法。高斯 3×3 轻度，5×5 较强；双边滤波保留边缘但目前没接入算法链。">?</span>
+            </span>
+            <span class="val" id="prefilter-val">关闭</span>
+          </label>
+          <select id="prefilter">
+            <option value="none">关闭</option>
+            <option value="gauss3">高斯 3×3</option>
+            <option value="gauss5">高斯 5×5</option>
+            <option value="bilateral">双边滤波</option>
+          </select>
+        </div>
+
+        <h3>主算法</h3>
+        <div class="row">
+          <label class="lbl">
+            <span>算法
+              <span class="help" title="选择把『哪些像素算成墙』的方法。Otsu 自动适合大多数室内地图；颜色排除适合外景手绘地图（自动跳过森林、土路）；颜色距离配合取色器最精准；自适应适合光照不均。">?</span>
+            </span>
+          </label>
+          <select id="algorithm">
+            <option value="otsu">Otsu 自动阈值</option>
+            <option value="threshold">灰度阈值</option>
+            <option value="adaptive">自适应 Gaussian</option>
+            <option value="colorDistance">颜色距离</option>
+            <option value="colorExclude">颜色排除（HSV）</option>
+            <option value="satAware">饱和度感知</option>
+          </select>
+        </div>
+
+        <div id="params-threshold" class="param-group" style="display:none">
+          <div class="row">
+            <label class="lbl">
+              <span>阈值 T
+                <span class="help" title="灰度低于这个值的像素算墙。0 = 全白，255 = 全黑。建议 80-130 之间。">?</span>
+              </span>
+              <span class="val" id="thr-T-val">110</span>
+            </label>
+            <input type="range" id="thr-T" min="0" max="255" value="110" />
+          </div>
+        </div>
+
+        <div id="params-otsu" class="param-group">
+          <div class="row">
+            <label class="lbl">
+              <span>偏移
+                <span class="help" title="在 Otsu 算法自动选出的阈值上加一个偏移。负数 = 更挑剔（只识深黑），正数 = 更宽松（识到中灰）。">?</span>
+              </span>
+              <span class="val" id="otsu-off-val">0</span>
+            </label>
+            <input type="range" id="otsu-off" min="-80" max="80" value="0" />
+          </div>
+        </div>
+
+        <div id="params-adaptive" class="param-group" style="display:none">
+          <div class="row">
+            <label class="lbl">
+              <span>窗口大小
+                <span class="help" title="每个像素跟周围 N×N 邻域的平均值比较，N 就是这个值。窗口太小 = 噪点多，太大 = 跟全局阈值差不多。建议 31-71，必须为奇数。">?</span>
+              </span>
+              <span class="val" id="adp-blk-val">51</span>
+            </label>
+            <input type="range" id="adp-blk" min="9" max="151" step="2" value="51" />
+          </div>
+          <div class="row">
+            <label class="lbl">
+              <span>偏移 C
+                <span class="help" title="从局部均值减去 C 才算暗。C 越大越挑剔（只标特别黑的），越小越宽松。">?</span>
+              </span>
+              <span class="val" id="adp-C-val">10</span>
+            </label>
+            <input type="range" id="adp-C" min="-20" max="40" value="10" />
+          </div>
+        </div>
+
+        <div id="params-colorDistance" class="param-group" style="display:none">
+          <div class="row">
+            <label class="lbl">
+              <span>目标色
+                <span class="help" title="把跟这个颜色接近的像素全部识别成墙。点取色器（💧 工具）可以从地图上直接吸取。">?</span>
+              </span>
+            </label>
+            <div class="picker-row">
+              <input type="color" id="cd-color" value="#000000" />
+              <span class="swatch" id="cd-color-hex">#000000</span>
+            </div>
+          </div>
+          <div class="row">
+            <label class="lbl">
+              <span>容差
+                <span class="help" title="离目标色多远还算同色。容差越大圈得越多。0 = 严格相同；80 = 默认；150+ = 很宽松。">?</span>
+              </span>
+              <span class="val" id="cd-tol-val">80</span>
+            </label>
+            <input type="range" id="cd-tol" min="0" max="200" value="80" />
+          </div>
+        </div>
+
+        <div id="params-colorExclude" class="param-group" style="display:none">
+          <div class="row">
+            <label class="lbl">
+              <span>暗度阈值 T
+                <span class="help" title="比这个亮度还要暗，且不属于绿色森林 / 棕色小路的像素被标墙。专为手绘外景地图设计。">?</span>
+              </span>
+              <span class="val" id="ce-T-val">120</span>
+            </label>
+            <input type="range" id="ce-T" min="40" max="200" value="120" />
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:4px 0 8px">
+            自动排除饱和绿（森林）和棕色（小路），保留暗低饱和（线稿）。
+          </div>
+        </div>
+
+        <div id="params-satAware" class="param-group" style="display:none">
+          <div class="row">
+            <label class="lbl">
+              <span>暗度 T
+                <span class="help" title="V（亮度）低于这个值才能算墙。">?</span>
+              </span>
+              <span class="val" id="sa-T-val">110</span>
+            </label>
+            <input type="range" id="sa-T" min="40" max="200" value="110" />
+          </div>
+          <div class="row">
+            <label class="lbl">
+              <span>最大饱和度
+                <span class="help" title="同时还要『不太鲜艳』才算墙——线稿一般是黑灰色低饱和，森林、水面这些颜色饱和的会被剔除。">?</span>
+              </span>
+              <span class="val" id="sa-S-val">80</span>
+            </label>
+            <input type="range" id="sa-S" min="20" max="200" value="80" />
+          </div>
+        </div>
+
+        <label class="checkbox" title="勾上后『应用算法』不会清空已有的 mask，而是把新结果加进去——可以先 Otsu 一遍，再切到颜色距离补一些家具。">
+          <input type="checkbox" id="merge-mode" />
+          <span>叠加到现有 mask（不覆盖）</span>
+        </label>
+        <button class="action primary" id="btn-apply-algo">应用算法</button>
+
+        <h3>清理 / 后处理</h3>
+        <div class="row">
+          <label class="lbl">
+            <span>细线剔除
+              <span class="help" title="去掉网格线、地砖缝这种 1-2px 宽的细线。值 = kernel 大小，比线宽大就行。0 = 关闭，2-3 = 网格线，4-5 = 较粗的线。原理：形态学开运算先腐蚀再膨胀。">?</span>
+            </span>
+            <span class="val" id="ref-thinline-val">0</span>
+          </label>
+          <input type="range" id="ref-thinline" min="0" max="10" value="0" />
+        </div>
+        <div class="row">
+          <label class="lbl">
+            <span>开运算 kernel
+              <span class="help" title="去毛刺、断细噪。值越大去得越狠，但墙体细节也会变粗糙。0 = 关闭。">?</span>
+            </span>
+            <span class="val" id="ref-open-val">0</span>
+          </label>
+          <input type="range" id="ref-open" min="0" max="15" value="0" />
+        </div>
+        <div class="row">
+          <label class="lbl">
+            <span>闭运算 kernel
+              <span class="help" title="把附近的墙线连起来填补断点。值越大连得越远，但可能误连不该连的（比如门洞）。0 = 关闭。">?</span>
+            </span>
+            <span class="val" id="ref-close-val">0</span>
+          </label>
+          <input type="range" id="ref-close" min="0" max="25" value="0" />
+        </div>
+        <div class="row">
+          <label class="lbl">
+            <span>面积过滤
+              <span class="help" title="把小于这个像素数的连通块全部删掉。把零散噪点扫干净，但建筑很小的细节也会丢。0 = 关闭。">?</span>
+            </span>
+            <span class="val" id="ref-area-val">200</span>
+          </label>
+          <input type="range" id="ref-area" min="0" max="2000" step="50" value="200" />
+        </div>
+        <div class="row">
+          <label class="lbl">
+            <span>选择性填洞
+              <span class="help" title="把面积小于这个值的封闭空腔自动填实——常用于把识别成空心轮廓的房间内部填成实心。0 = 关闭，5000-15000 适合大多数地图。注意：如果地图有外框装饰，背景可能也是巨型『洞』，所以建议小一点。">?</span>
+            </span>
+            <span class="val" id="ref-hole-val">0</span>
+          </label>
+          <input type="range" id="ref-hole" min="0" max="20000" step="500" value="0" />
+        </div>
+        <button class="action" id="btn-apply-refine">应用清理</button>
+
+        <h3>工具参数</h3>
+        <div class="row">
+          <label class="lbl">
+            <span>画笔半径
+              <span class="help" title="画笔/橡皮的圆形半径，单位是图像像素。光标会显示真实尺寸（按当前缩放级别）。">?</span>
+            </span>
+            <span class="val" id="brush-r-val">20</span>
+          </label>
+          <input type="range" id="brush-r" min="1" max="200" value="20" />
+        </div>
+        <div class="row">
+          <label class="lbl">
+            <span>魔棒容差
+              <span class="help" title="魔棒往外扩散时『颜色相近』的容忍度。值越大扩得越远。">?</span>
+            </span>
+            <span class="val" id="wand-tol-val">24</span>
+          </label>
+          <input type="range" id="wand-tol" min="0" max="120" value="24" />
+        </div>
+
+        <h3>输出</h3>
+
+        <!-- 毛边整理 kernel: hidden — rounds sharp corners away even
+             at low values (e.g. right-angle map edges become beveled).
+             Code still reads the input by id, so we keep it in the
+             DOM but force value="0" and display:none. -->
+        <div class="row" style="display:none">
+          <label class="lbl">
+            <span>毛边整理 kernel</span>
+            <span class="val" id="out-smooth-k-val">0</span>
+          </label>
+          <input type="range" id="out-smooth-k" min="0" max="10" value="0" />
+        </div>
+
+        <label class="lbl">
+          <span>输出类型
+            <span class="help" title="
+墙体（Wall）：OBR 原生线段 item，会被 OBR 自带的动态迷雾系统当作视野阻挡。看不见但起作用。
+路径（Path）：彩色描边的多边形/曲线，仅作视觉确认用，不影响视野。
+双输出：墙体（驱动迷雾）+ 路径（GM 看到橙色描边确认范围）。推荐。">?</span>
+          </span>
+        </label>
+        <div class="output-mode">
+          <button class="output-mode-btn" data-mode="wall" title="只保存为 OBR 原生 Wall items（视野阻挡）。">墙体</button>
+          <button class="output-mode-btn" data-mode="path" title="只保存为 Path（视觉描边，不阻挡视野）。">路径</button>
+          <button class="output-mode-btn" data-mode="both" title="同时输出 Path（视觉）+ Wall（视野）。推荐。">双输出</button>
+        </div>
+
+        <div class="row">
+          <label class="lbl">
+            <span>墙体外扩
+              <span class="help" title="负数 = 墙向墙体材质内部推（玩家视野穿入墙体一点点，看到墙的厚度）；正数 = 墙向地板侧外扩（玩家视野在到达视觉边界前就被挡，看不到墙的精确轮廓）；0 = 阻挡墙与视觉描边重合。GM 看到的橙色描边始终在视觉边界。开启『预览』后橙色描边外的紫红虚线就是实际派生的 Wall 位置，可以直接看出方向。">?</span>
+            </span>
+            <span class="val" id="wall-expand-val">0</span>
+          </label>
+          <input type="range" id="wall-expand" min="-40" max="40" value="0" />
+        </div>
+
+        <!-- 平滑张力 / 切角次数 / 路径简化: hidden — all three round
+             corners or shift vertices, which the user does NOT want
+             (right-angle map edges + sharp corners must be preserved
+             pixel-exact when saving). Inputs kept in DOM at value="0"
+             so existing code (bindSlider, $("simp").value reads) keeps
+             working without conditional checks. -->
+        <div class="row" style="display:none">
+          <label class="lbl">
+            <span>平滑张力</span>
+            <span class="val" id="smooth-tension-val">0.00</span>
+          </label>
+          <input type="range" id="smooth-tension" min="0" max="100" value="0" />
+        </div>
+        <div class="row" style="display:none">
+          <label class="lbl">
+            <span>切角次数</span>
+            <span class="val" id="chaikin-iters-val">0</span>
+          </label>
+          <input type="range" id="chaikin-iters" min="0" max="4" value="0" />
+        </div>
+        <div class="row" style="display:none">
+          <label class="lbl">
+            <span>路径简化</span>
+            <span class="val" id="simp-val">0.0</span>
+          </label>
+          <input type="range" id="simp" min="0" max="10" step="0.5" value="0" />
+        </div>
+
+        <button class="action" id="btn-preview"
+                title="把保存时会输出的曲线/线段直接画在画布上：青色 = Path（贝塞尔曲线），洋红虚线 = Wall 段（OBR 原生迷雾用的）。开启后调平滑/切角/简化滑块会自动刷新预览。">
+          📐 预览输出
+        </button>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="cc-hint">
+          将识别到 <span id="cc-count" style="color:var(--text)">0</span> 段独立墙体，共
+          <span id="cc-points" style="color:var(--text)">—</span> 个点。
+          <div style="margin-top:3px">
+            <span style="color:var(--text-dim)">建议总点数 &lt; 5000 一定能保存；6000 以上点数会被自动简化（状态栏会提示）。</span>
+          </div>
+        </div>
+      </aside>
+
+      <footer>
+        <span class="item"><span class="k">工具</span> <span class="v" id="st-tool">画笔</span></span>
+        <span class="item"><span class="k">缩放</span> <span class="v" id="st-zoom">1.00×</span></span>
+        <span class="item"><span class="k">坐标</span> <span class="v" id="st-pos">—</span></span>
+        <span class="item"><span class="k">mask</span> <span class="v" id="st-mask">0px</span></span>
+        <span class="spacer"></span>
+        <span class="info" id="st-info">就绪</span>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/modules/fullFog/editor-page.ts"></script>
+  </body>
+</html>

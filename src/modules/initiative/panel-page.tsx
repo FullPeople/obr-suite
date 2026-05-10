@@ -1,6 +1,7 @@
 import { render } from "preact";
 import { useEffect, useState, useRef, useCallback, createContext, useMemo } from "preact/compat";
 import OBR from "@owlbear-rodeo/sdk";
+import { installDebugOverlay } from "../../utils/debugOverlay";
 import { InitiativeList } from "./components/InitiativeList";
 import { CombatControls } from "./components/CombatControls";
 import { useInitiative, RollType } from "./hooks/useInitiative";
@@ -54,10 +55,17 @@ const HEIGHT_COMBAT = 159;
 // Backwards-compat default — the unused historical "154" baseline,
 // kept for the initial popover open before combatState is available.
 const EXPANDED_HEIGHT = HEIGHT_IDLE;
+const BUBBLES_SETTINGS_KEY = "com.obr-suite/bubbles/settings";
+const DEFAULT_PLAYER_THRESHOLD = 25;
 function heightFor(state: { inCombat: boolean; preparing: boolean }): number {
   if (state.inCombat) return HEIGHT_COMBAT;
   if (state.preparing) return HEIGHT_PREPARING;
   return HEIGHT_IDLE;
+}
+function readPlayerThresholdFromMeta(meta: Record<string, unknown>): number {
+  const settings = meta[BUBBLES_SETTINGS_KEY] as { playerThreshold?: unknown } | undefined;
+  const n = Number(settings?.playerThreshold);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : DEFAULT_PLAYER_THRESHOLD;
 }
 
 export const LangContext = createContext<Lang>("zh");
@@ -92,15 +100,16 @@ function App() {
     endCombat,
     requestEndTurn,
     dicePlusAvailable,
+    resolveOwnerColor,
   } = useInitiative();
 
-  // Per-client display-mode toggle: "raw" shows the d20 result alone;
-  // "final" shows count+modifier with a small `(count±mod)` formula
-  // beneath. Persisted to localStorage so each player's preference
-  // survives panel close.
-  const [displayMode, setDisplayMode] = useState<"raw" | "final">(() => {
-    try { return localStorage.getItem("it-display-mode") === "final" ? "final" : "raw"; } catch { return "raw"; }
-  });
+  // 2026-05-10: display-mode raw/final toggle removed per user
+  // request — always show "final" (count+modifier with a small
+  // `(count±mod)` formula line below). Constant value so the
+  // InitiativeList / InitiativeItem prop signature doesn't need
+  // a wider refactor, and a future toggle (or scene-wide settings
+  // flag) could re-introduce the variation cleanly.
+  const displayMode: "raw" | "final" = "final";
 
   // Capture this client's player id once so resolveHpRatio can do
   // ownership comparisons without an OBR round-trip per render.
@@ -109,26 +118,23 @@ function App() {
     OBR.player.getId().then((id) => { myIdRef.current = id; }).catch(() => {});
   }, []);
 
-  // Per-client phase threshold for locked tokens shown to non-owners
+  // Scene-synced phase threshold for locked tokens shown to non-owners
   // during combat (mirrors the bubbles silhouette quantisation key).
-  // Read once on mount + refresh on `storage` events so flipping the
-  // setting in another tab is picked up.
-  const PLAYER_THRESHOLD_KEY = "com.obr-suite/bubbles/player-threshold";
-  const [playerThreshold, setPlayerThreshold] = useState<number>(() => {
-    try {
-      const v = localStorage.getItem(PLAYER_THRESHOLD_KEY);
-      const n = v == null ? 25 : Number(v);
-      return Number.isFinite(n) && n >= 0 && n <= 100 ? n : 25;
-    } catch { return 25; }
-  });
+  const [playerThreshold, setPlayerThreshold] = useState<number>(DEFAULT_PLAYER_THRESHOLD);
   useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== PLAYER_THRESHOLD_KEY) return;
-      const n = e.newValue == null ? 25 : Number(e.newValue);
-      setPlayerThreshold(Number.isFinite(n) && n >= 0 && n <= 100 ? n : 25);
+    let alive = true;
+    OBR.scene.getMetadata()
+      .then((meta) => {
+        if (alive) setPlayerThreshold(readPlayerThresholdFromMeta(meta as Record<string, unknown>));
+      })
+      .catch(() => {});
+    const unsub = OBR.scene.onMetadataChange((meta) => {
+      setPlayerThreshold(readPlayerThresholdFromMeta(meta as Record<string, unknown>));
+    });
+    return () => {
+      alive = false;
+      unsub();
     };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   const resolveHpRatio = useCallback((item: InitiativeItem): number | null => {
@@ -171,13 +177,8 @@ function App() {
       return next;
     });
   }, []);
-  const toggleDisplayMode = useCallback(() => {
-    setDisplayMode((m) => {
-      const next = m === "raw" ? "final" : "raw";
-      try { localStorage.setItem("it-display-mode", next); } catch {}
-      return next;
-    });
-  }, []);
+  // toggleDisplayMode removed 2026-05-10 — the raw / final toggle UI
+  // was deleted; displayMode is constant "final" above.
 
   // React state is the authoritative source — not window.innerWidth. The old
   // resize listener flipped expanded→collapsed mid-way through OBR's iframe
@@ -278,21 +279,30 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ⑥ Visual effects — Active character ring (rotating, local)
+  // ⑥ Visual effects — Active character ring (rotating, local).
+  // For invisible tokens: GM (and the token's owner) gets a GRAY ring
+  // as the visual cue this turn is in stealth; non-owner players still
+  // get NO ring at all (their canvas hides the token entirely so the
+  // ring would just float in empty space and reveal the position).
   const activeId = items.find((i) => i.active)?.id;
   useEffect(() => {
-    if (combatState.inCombat && activeId) {
-      // Player side: never put a ring on an invisible token — that would
-      // immediately reveal the hidden character's canvas location even
-      // though the panel only shows them as "?".
-      const activeItem = items.find((i) => i.id === activeId);
-      if (!isGM && activeItem?.invisible) {
+    if (!combatState.inCombat || !activeId) {
+      setActiveRing(null);
+      return () => { if (!combatState.inCombat) clearAllRings(); };
+    }
+    const activeItem = items.find((i) => i.id === activeId);
+    const stealth = !!activeItem?.invisible;
+    if (stealth) {
+      // Non-owner non-GM: hide ring entirely. Owner & GM: gray ring.
+      const myId = myIdRef.current;
+      const owns = !!myId && activeItem?.ownerId === myId;
+      if (!isGM && !owns) {
         setActiveRing(null);
       } else {
-        setActiveRing(activeId);
+        setActiveRing(activeId, "stealth");
       }
     } else {
-      setActiveRing(null);
+      setActiveRing(activeId, "normal");
     }
     return () => { if (!combatState.inCombat) clearAllRings(); };
   }, [activeId, combatState.inCombat, items, isGM]);
@@ -607,21 +617,7 @@ function App() {
               </span>
             )}
 
-            {/* Display-mode toggle: raw d20 ↔ final count+modifier value. */}
-            <button
-              className={`display-mode-toggle ${displayMode === "final" ? "on" : ""}`}
-              onClick={toggleDisplayMode}
-              title={
-                displayMode === "raw"
-                  ? (lang === "zh" ? "切换为显示最终值（d20+加值）" : "Switch to final value (d20 + mod)")
-                  : (lang === "zh" ? "切换为显示骰值（d20 原值）" : "Switch to raw d20 value")
-              }
-              aria-label={lang === "zh" ? "切换显示模式" : "Toggle display mode"}
-            >
-              {displayMode === "final"
-                ? (lang === "zh" ? "最终值" : "Final")
-                : (lang === "zh" ? "骰值" : "Raw")}
-            </button>
+            {/* 2026-05-10: raw/final toggle button removed — always final. */}
 
             {isGM && (
               <CombatControls
@@ -663,6 +659,7 @@ function App() {
             canShowDice={canShowDice}
             displayMode={displayMode}
             resolveHpRatio={resolveHpRatio}
+            resolveOwnerColor={resolveOwnerColor}
             listRef={listElRef}
             onFocus={handleClick}
             onHover={setHoveredId}
@@ -685,6 +682,7 @@ function PluginGate() {
 
   useEffect(() => {
     OBR.onReady(() => {
+      installDebugOverlay();
       subscribeToSfx();
       setReady(true);
       OBR.scene.isReady().then(setSceneReady);

@@ -23,6 +23,7 @@ import { IS_MOBILE } from "../../feature-flags";
 import {
   PLUGIN_ID,
   STATUS_BUFFS_KEY,
+  STATUS_BUFF_ROUNDS_KEY,
   SCENE_BUFF_CATALOG_KEY,
   DEFAULT_BUFFS,
   BuffDef,
@@ -30,6 +31,7 @@ import {
 import {
   syncTokenBuffs,
   readTokenBuffIds,
+  readTokenBuffRounds,
   sweepAllOurItems,
 } from "./bubbles";
 // circles.ts is still imported by capture-page for getTokenCircleSpec
@@ -53,6 +55,7 @@ const TOOL_ACTION_ID = "com.obr-suite/status-tracker-toggle";
 const SELECT_TOOL = "rodeo.owlbear.tool/select";
 const MOVE_TOOL = "rodeo.owlbear.tool/move";
 const ICON_URL = assetUrl("status-icon.svg");
+const COMBAT_STATE_KEY = "com.initiative-tracker/combat";
 
 const BC_DRAG_START = `${PLUGIN_ID}/drag-start`;
 const BC_DRAG_END = `${PLUGIN_ID}/drag-end`;
@@ -272,16 +275,34 @@ const VALID_EFFECTS = new Set<string>([
   "default", "float", "drop", "flicker", "curve", "spread",
 ]);
 
+const LS_BUFF_CATALOG_KEY = "obr-suite/status/buff-catalog";
+
 async function getCatalog(): Promise<BuffDef[]> {
+  // Catalog is now per-client (localStorage). Reads in order:
+  //   1. localStorage entry (primary post-2026-05-09)
+  //   2. scene metadata (one-time migration source for upgrading users
+  //      whose customisation still lives in shared scene state)
+  // If neither yields a list, fall back to DEFAULT_BUFFS.
+  let arr: any[] | null = null;
   try {
-    const meta = await OBR.scene.getMetadata();
-    const v = meta[SCENE_BUFF_CATALOG_KEY] as unknown;
-    let arr: any[] | null = null;
-    if (Array.isArray(v)) {
-      arr = v;
-    } else if (v && typeof v === "object" && Array.isArray((v as any).buffs)) {
-      arr = (v as any).buffs;
+    const raw = localStorage.getItem(LS_BUFF_CATALOG_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) arr = parsed;
+      else if (parsed && Array.isArray(parsed.buffs)) arr = parsed.buffs;
     }
+  } catch {}
+  if (!arr) {
+    try {
+      const meta = await OBR.scene.getMetadata();
+      const v = meta[SCENE_BUFF_CATALOG_KEY] as unknown;
+      if (Array.isArray(v)) arr = v as any[];
+      else if (v && typeof v === "object" && Array.isArray((v as any).buffs)) {
+        arr = (v as any).buffs as any[];
+      }
+    } catch {}
+  }
+  try {
     if (arr) {
       const out: BuffDef[] = [];
       for (const e of arr) {
@@ -331,6 +352,8 @@ function tokenSyncKey(it: any, ids: string[]): string {
   const sy = (it.scale?.y ?? 1).toFixed(3);
   const w = it.image?.width ?? 0;
   const h = it.image?.height ?? 0;
+  const rounds = readTokenBuffRounds(it);
+  const roundsKey = ids.map((id) => `${id}:${rounds[id] ?? ""}`).join(",");
   // Neither visibility NOR position is in the key:
   //   - visibility: OBR's attachment system inherits the parent's
   //     visible flag automatically, so players see bubbles
@@ -341,7 +364,7 @@ function tokenSyncKey(it: any, ids: string[]): string {
   //     detached (palette open) where the user is the source of
   //     truth for position. In neither case do we need to re-sync
   //     on token movement.
-  return `${ids.join("|")}@${sx}x${sy}|${w}x${h}`;
+  return `${ids.join("|")}#${roundsKey}@${sx}x${sy}|${w}x${h}`;
 }
 
 // Cache of "is current player a GM?" — initialised in setup, kept
@@ -351,6 +374,14 @@ function tokenSyncKey(it: any, ids: string[]): string {
 // sees them, satisfying "hidden character effects only show to
 // DM").
 let isGM = false;
+
+function displayBuffsWithRounds(token: any, buffs: BuffDef[]): BuffDef[] {
+  const rounds = readTokenBuffRounds(token);
+  return buffs.map((b) => {
+    const n = rounds[b.id];
+    return n > 0 ? { ...b, name: `${b.name} ${n}` } : b;
+  });
+}
 
 async function syncAllVisibleTokensImpl(): Promise<void> {
   if (!isGM) return;
@@ -373,7 +404,7 @@ async function syncAllVisibleTokensImpl(): Promise<void> {
       const buffs = ids
         .map((id) => cat.find((b) => b.id === id))
         .filter((b): b is BuffDef => !!b);
-      await syncTokenBuffs(it as any, buffs);
+      await syncTokenBuffs(it as any, displayBuffsWithRounds(it, buffs));
     }
     lastBuffSnapshot = next;
   } catch (e) {
@@ -424,9 +455,61 @@ async function refreshTokenBuffs(tokenId: string): Promise<void> {
     const buffs = ids
       .map((id) => cat.find((b) => b.id === id))
       .filter((b): b is BuffDef => !!b);
-    await syncTokenBuffs(token as any, buffs);
+    await syncTokenBuffs(token as any, displayBuffsWithRounds(token, buffs));
   } catch (e) {
     console.warn("[status] refreshTokenBuffs failed", e);
+  }
+}
+
+function readCombatRound(meta: Record<string, unknown>): number | null {
+  const state = meta[COMBAT_STATE_KEY] as { inCombat?: unknown; round?: unknown } | undefined;
+  if (!state || state.inCombat !== true) return null;
+  const round = Number(state.round);
+  return Number.isFinite(round) && round > 0 ? Math.floor(round) : null;
+}
+
+let lastCombatRound: number | null = null;
+let tickingBuffRounds = false;
+
+async function decrementBuffRounds(): Promise<void> {
+  if (!isGM || tickingBuffRounds) return;
+  tickingBuffRounds = true;
+  try {
+    const tokens = await OBR.scene.items.getItems((item) => {
+      const ids = item.metadata?.[STATUS_BUFFS_KEY];
+      const rounds = item.metadata?.[STATUS_BUFF_ROUNDS_KEY];
+      return Array.isArray(ids) && !!rounds && typeof rounds === "object";
+    });
+    if (tokens.length === 0) return;
+    await OBR.scene.items.updateItems(tokens.map((t) => t.id), (drafts) => {
+      for (const d of drafts) {
+        const ids = readTokenBuffIds(d as any);
+        const cur = readTokenBuffRounds(d as any);
+        let changed = false;
+        const nextRounds: Record<string, number> = {};
+        const nextIds: string[] = [];
+        for (const id of ids) {
+          const n = cur[id];
+          if (n > 0) {
+            const left = n - 1;
+            changed = true;
+            if (left > 0) {
+              nextRounds[id] = left;
+              nextIds.push(id);
+            }
+          } else {
+            nextIds.push(id);
+          }
+        }
+        if (!changed) continue;
+        d.metadata[STATUS_BUFFS_KEY] = nextIds;
+        d.metadata[STATUS_BUFF_ROUNDS_KEY] = nextRounds;
+      }
+    });
+  } catch (e) {
+    console.warn("[status] decrementBuffRounds failed", e);
+  } finally {
+    tickingBuffRounds = false;
   }
 }
 
@@ -468,8 +551,10 @@ export async function setupStatusTracker(): Promise<void> {
         return false;
       },
     });
-    // Passthrough mode — required for the tool to be selectable, but
-    // we don't intercept any pointer events.
+  } catch (e) {
+    console.warn("[status] tool.create failed", e);
+  }
+  try {
     await OBR.tool.createMode({
       id: `${TOOL_ID}/mode`,
       icons: [
@@ -482,7 +567,7 @@ export async function setupStatusTracker(): Promise<void> {
       cursors: [{ cursor: "default" }],
     });
   } catch (e) {
-    console.warn("[status] tool.create failed", e);
+    console.warn("[status] createMode failed", e);
   }
 
   // Track which tool is active and open / close the palette in sync.
@@ -491,13 +576,17 @@ export async function setupStatusTracker(): Promise<void> {
   // picks any other tool, matching Bestiary's UX.
   unsubs.push(
     OBR.tool.onToolChange(async (activeId) => {
-      if (activeId === TOOL_ID) {
-        if (!active) await activate();
-      } else {
-        // Remember the tool the user switched to (so `]` can switch
-        // back to it next time).
-        previousTool = activeId;
-        if (active) await deactivate();
+      try {
+        if (activeId === TOOL_ID) {
+          if (!active) await activate();
+        } else {
+          // Remember the tool the user switched to (so `]` can switch
+          // back to it next time).
+          previousTool = activeId;
+          if (active) await deactivate();
+        }
+      } catch (e) {
+        console.warn("[status] tool.onToolChange failed", e);
       }
     }),
   );
@@ -642,33 +731,45 @@ export async function setupStatusTracker(): Promise<void> {
   unsubs.push(OBR.scene.items.onChange(() => {
     void syncAllVisibleTokens();
   }));
-  // Catalog edits live in scene metadata. When the user changes a
-  // buff's colour/effect via the palette ✎ popup, the metadata
-  // changes — we invalidate the per-token cache and re-sync.
-  //
-  // Bug fix: scene metadata is written by MANY modules (panel
-  // layouts, dice state, fog config, etc). The naive listener fired
-  // on EVERY metadata write, wiping our cache + triggering a full
-  // delete-then-add of every bubble. That was the "buff every once
-  // in a while flickers" symptom. Solution: snapshot the catalog
-  // sub-key as JSON; if the catalog itself didn't change, ignore
-  // the metadata event entirely.
-  let lastCatalogJson = "";
+  // Catalog edits live in localStorage now (per-client, not shared).
+  // When the user edits a buff's colour/effect via the palette ✎
+  // popup, status-tracker-page broadcasts BC_CATALOG_CHANGED so this
+  // background re-renders the bubbles with the new visual. The
+  // `storage` event covers cross-tab changes (palette + manage popover
+  // editing in parallel).
   try {
     const meta0 = await OBR.scene.getMetadata();
-    lastCatalogJson = JSON.stringify(meta0[SCENE_BUFF_CATALOG_KEY] ?? null);
+    lastCombatRound = readCombatRound(meta0 as Record<string, unknown>);
   } catch {}
-  unsubs.push(OBR.scene.onMetadataChange(async () => {
-    try {
-      const meta = await OBR.scene.getMetadata();
-      const catJson = JSON.stringify(meta[SCENE_BUFF_CATALOG_KEY] ?? null);
-      if (catJson === lastCatalogJson) return;
-      lastCatalogJson = catJson;
+  unsubs.push(OBR.scene.onMetadataChange((metaEvent) => {
+    const nextRound = readCombatRound(metaEvent as Record<string, unknown>);
+    if (isGM && nextRound !== null) {
+      if (lastCombatRound !== null && nextRound > lastCombatRound) {
+        void decrementBuffRounds();
+      }
+      lastCombatRound = nextRound;
+    } else if (nextRound === null) {
+      lastCombatRound = null;
+    }
+  }));
+  unsubs.push(
+    OBR.broadcast.onMessage("com.obr-suite/status/catalog-changed", () => {
       lastBuffSnapshot.clear();
       void syncAllVisibleTokens();
-    } catch {}
-  }));
+    }),
+  );
+  const onLSChange = (e: StorageEvent): void => {
+    if (e.key !== LS_BUFF_CATALOG_KEY) return;
+    lastBuffSnapshot.clear();
+    void syncAllVisibleTokens();
+  };
+  window.addEventListener("storage", onLSChange);
+  unsubs.push(() => window.removeEventListener("storage", onLSChange));
   const onSceneReady = async (): Promise<void> => {
+    if (!isGM) {
+      lastBuffSnapshot.clear();
+      return;
+    }
     // Sweep first — clears any items left by an older renderer
     // (e.g. legacy rectangle-style bubbles) before we start drawing
     // the new curved bands. Awaited so syncAllVisibleTokens can't
@@ -696,4 +797,5 @@ export async function teardownStatusTracker(): Promise<void> {
   try { await OBR.tool.removeMode(`${TOOL_ID}/mode`); } catch {}
   try { await OBR.tool.remove(TOOL_ID); } catch {}
   await deactivate();
+  await sweepAllOurItems();
 }

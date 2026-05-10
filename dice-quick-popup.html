@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Dice Quick Roll</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:rgba(31,34,48,0.97);
+  --bg-strong:#2c3044;
+  --bg-card:#262a3a;
+  --border:rgba(255,255,255,0.10);
+  --border-strong:rgba(255,255,255,0.18);
+  --text:#e6e8ee;
+  --text-dim:#8a8e9c;
+  --accent:#5dade2;
+  --good:#7be0a0;
+  --bad:#ff8b7a;
+  --crit:#ffb74d;
+  --dark:#bb87dd;
+}
+html,body{
+  height:100%;width:100%;overflow:hidden;background:transparent;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:var(--text);font-size:12px;
+}
+.popup{
+  position:absolute;inset:0;
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:10px;
+  box-shadow:0 8px 28px rgba(0,0,0,0.55);
+  user-select:none;-webkit-user-select:none;
+  display:flex;flex-direction:column;gap:8px;
+  overflow:hidden;
+}
+
+/* Dice grid — 4 columns. d4 d6 d8 d10 / d12 d20 d100 _ */
+.dice-row{
+  display:grid;grid-template-columns:repeat(4, 1fr);
+  gap:5px;
+}
+.dice-btn{
+  position:relative;min-width:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:4px 0 3px;
+  cursor:pointer;
+  transition:transform .1s, background .12s, border-color .12s;
+  font-family:inherit;color:var(--text);
+}
+.dice-btn:hover{background:var(--bg-strong);border-color:var(--border-strong);transform:translateY(-1px)}
+.dice-btn:active{transform:translateY(0) scale(0.96)}
+.dice-btn img{
+  display:block;width:26px;height:26px;
+  pointer-events:none;user-select:none;-webkit-user-drag:none;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,0.5));
+}
+.dice-btn .lbl{
+  font-size:9px;font-weight:700;color:var(--text-dim);
+  margin-top:1px;letter-spacing:0.3px;
+}
+.dice-btn:hover .lbl{color:var(--text)}
+.dice-btn .badge{
+  position:absolute;top:2px;right:2px;
+  min-width:14px;height:14px;padding:0 3px;
+  background:var(--bad);
+  border-radius:7px;
+  color:#fff;font-size:9px;font-weight:800;
+  display:none;align-items:center;justify-content:center;
+  line-height:1;
+  box-shadow:0 1px 2px rgba(0,0,0,0.5);
+  pointer-events:none;
+}
+.dice-btn[data-count]:not([data-count="0"]) .badge{display:flex}
+
+/* Expression row */
+.expr-row{display:flex;align-items:stretch;gap:5px}
+.expr-input{
+  flex:1;min-width:0;height:36px;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:0 10px;
+  color:var(--text);
+  font-family:ui-monospace,Consolas,monospace;
+  font-size:14px;font-weight:700;letter-spacing:0.3px;
+  outline:none;transition:border-color .12s;
+}
+.expr-input:focus{border-color:var(--accent)}
+.expr-mod{
+  display:flex;flex-direction:row;height:36px;
+  border:1px solid var(--border);border-radius:6px;
+  overflow:hidden;background:var(--bg-card);flex-shrink:0;
+}
+.expr-mod button{
+  width:30px;height:100%;
+  background:transparent;border:none;
+  color:var(--text);
+  font-family:inherit;font-size:16px;font-weight:700;line-height:1;
+  cursor:pointer;padding:0;
+  transition:background .12s, color .12s;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.expr-mod button:hover{background:rgba(93,173,226,0.20);color:#7ec8f0}
+.expr-mod button:active{background:rgba(93,173,226,0.30)}
+.expr-mod button + button{border-left:1px solid var(--border)}
+
+/* Label — center-aligned, auto-filled */
+.label-input{
+  height:28px;width:100%;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:0 10px;
+  font-size:12px;font-family:inherit;color:var(--text);
+  outline:none;text-align:center;
+}
+.label-input::placeholder{color:var(--text-dim)}
+.label-input:focus{border-color:var(--accent)}
+
+/* Action row — 劣势 | 普通 | 优势 | 重击 (last smallest) */
+.actions{display:flex;gap:5px;align-items:stretch}
+.btn-act{
+  flex:1;height:34px;
+  background:var(--bg-strong);
+  border:1px solid var(--border-strong);
+  color:var(--text);
+  border-radius:6px;
+  font-size:12px;font-weight:700;
+  font-family:inherit;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;gap:3px;
+  transition:background .12s, color .12s, border-color .12s;
+}
+.btn-act .ico{font-size:11px}
+.btn-act.dis{color:var(--bad);border-color:rgba(231,76,60,0.40)}
+.btn-act.dis:hover{background:rgba(231,76,60,0.16);border-color:rgba(231,76,60,0.6)}
+.btn-act.normal{color:var(--accent);border-color:rgba(93,173,226,0.40)}
+.btn-act.normal:hover{background:rgba(93,173,226,0.18);border-color:rgba(93,173,226,0.6)}
+.btn-act.adv{color:var(--good);border-color:rgba(46,204,113,0.40)}
+.btn-act.adv:hover{background:rgba(46,204,113,0.16);border-color:rgba(46,204,113,0.6)}
+.btn-act.crit{
+  flex:0 0 56px;
+  font-size:11px;color:var(--crit);
+  border-color:rgba(255,167,38,0.40);
+}
+.btn-act.crit:hover{background:rgba(255,167,38,0.16);border-color:rgba(255,167,38,0.6)}
+
+/* DM-only dark roll — long bar below */
+.btn-dark{
+  height:30px;width:100%;
+  background:rgba(187,135,221,0.10);
+  border:1px solid rgba(187,135,221,0.40);
+  color:var(--dark);
+  border-radius:6px;
+  font-size:11.5px;font-weight:700;
+  font-family:inherit;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;gap:4px;
+  transition:background .12s, border-color .12s;
+}
+.btn-dark:hover{background:rgba(187,135,221,0.20);border-color:rgba(187,135,221,0.6)}
+</style>
+</head>
+<body>
+<div class="popup">
+  <!-- 7-dice picker — left=+1, right=-1. -->
+  <div class="dice-row" id="diceRow">
+    <button class="dice-btn" data-type="d4"   type="button" title="左键 +1，右键 −1"><img src="/suite/d4.png"   alt="d4"   draggable="false"><span class="lbl">d4</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d6"   type="button" title="左键 +1，右键 −1"><img src="/suite/d6.png"   alt="d6"   draggable="false"><span class="lbl">d6</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d8"   type="button" title="左键 +1，右键 −1"><img src="/suite/d8.png"   alt="d8"   draggable="false"><span class="lbl">d8</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d10"  type="button" title="左键 +1，右键 −1"><img src="/suite/d10.png"  alt="d10"  draggable="false"><span class="lbl">d10</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d12"  type="button" title="左键 +1，右键 −1"><img src="/suite/d12.png"  alt="d12"  draggable="false"><span class="lbl">d12</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d20"  type="button" title="左键 +1，右键 −1"><img src="/suite/d20.png"  alt="d20"  draggable="false"><span class="lbl">d20</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d100" type="button" title="左键 +1，右键 −1"><img src="/suite/d100.png" alt="d100" draggable="false"><span class="lbl">d100</span><span class="badge">0</span></button>
+    <span></span><!-- empty cell -->
+  </div>
+
+  <div class="expr-row">
+    <input class="expr-input" id="exprInput" type="text" spellcheck="false" placeholder="例如 2d6 + 1d20 + 5">
+    <div class="expr-mod">
+      <button id="btnModDec" type="button" title="加值 -1">−</button>
+      <button id="btnModInc" type="button" title="加值 +1">＋</button>
+    </div>
+  </div>
+
+  <input class="label-input" id="labelInput" type="text" placeholder="备注（可选）">
+
+  <div class="actions">
+    <button class="btn-act dis"    data-act="dis"    type="button"><span class="ico">▼</span><span data-l="dis">劣势</span></button>
+    <button class="btn-act normal" data-act="roll"   type="button"><span class="ico">⚀</span><span data-l="roll">普通</span></button>
+    <button class="btn-act adv"    data-act="adv"    type="button"><span class="ico">▲</span><span data-l="adv">优势</span></button>
+    <button class="btn-act crit"   data-act="crit"   type="button" title="重击 = 表达式中所有骰子翻倍"><span class="ico">✦</span><span data-l="crit">重击</span></button>
+  </div>
+
+  <button class="btn-dark" id="btnDark" data-act="dark" type="button" style="display:none">
+    <span class="ico">●</span><span data-l="dark">暗骰（仅 DM 可见结果）</span>
+  </button>
+</div>
+
+<script type="module">
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
+
+const POPOVER_ID = "com.obr-suite/rollable-quick";
+const BC_QUICK_ROLL = "com.obr-suite/dice-quick-roll";
+
+// Per-client UI language (mirrors src/state.ts LS_LANG).
+const LANG = (() => {
+  try { const v = localStorage.getItem("obr-suite/lang"); if (v === "en" || v === "zh") return v; } catch {}
+  return "zh";
+})();
+const L = {
+  zh: { roll: "普通", adv: "优势", dis: "劣势", crit: "重击", dark: "暗骰（仅 DM 可见结果）" },
+  en: { roll: "Normal", adv: "Adv", dis: "Dis", crit: "Crit", dark: "Dark (DM-only result)" },
+}[LANG];
+document.querySelectorAll("[data-l]").forEach((el) => {
+  el.textContent = L[el.dataset.l] ?? el.textContent;
+});
+document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
+
+const params = new URLSearchParams(location.search);
+const initialExpr = params.get("expr") ?? "";
+const initialLabel = params.get("label") ?? "";
+const itemId = params.get("itemId") || null;
+
+const exprInput = document.getElementById("exprInput");
+const labelInput = document.getElementById("labelInput");
+exprInput.value = initialExpr;
+labelInput.value = initialLabel;
+
+// === Badge sync — show how many of each dice type are in the expression. ===
+function refreshBadges() {
+  const expr = exprInput.value;
+  const counts = { d4:0, d6:0, d8:0, d10:0, d12:0, d20:0, d100:0 };
+  // Match \d*d\d+ (e.g. "2d6", "d20", "-1d4"). Captures sign optionally.
+  const re = /(-?)\s*(\d*)d(\d+)/gi;
+  let m;
+  while ((m = re.exec(expr)) !== null) {
+    const sign = m[1] === "-" ? -1 : 1;
+    const count = (m[2] ? parseInt(m[2], 10) : 1) * sign;
+    const type = `d${m[3]}`;
+    if (counts[type] !== undefined) counts[type] += count;
+  }
+  for (const btn of document.querySelectorAll(".dice-btn")) {
+    const t = btn.dataset.type;
+    const c = counts[t] ?? 0;
+    btn.dataset.count = String(c);
+    const badge = btn.querySelector(".badge");
+    if (badge) badge.textContent = String(c);
+  }
+}
+refreshBadges();
+
+// === Dice click — left=+1, right=−1. Regex-based count adjuster.
+// Finds an existing `\d*d<sides>` term and bumps its count, OR appends
+// a new `+/-1d<sides>` if no existing term exists. Trims leading "+".
+function adjustDiceCount(dieType, delta) {
+  const sides = dieType.replace(/^d/, "");
+  const cur = exprInput.value;
+  const re = new RegExp(`(^|[+\\-]\\s*)?(\\d*)d${sides}\\b(?!\\d)`, "i");
+  const m = re.exec(cur);
+  if (m) {
+    const leadSign = m[1]?.trim() === "-" ? -1 : 1;
+    const curCount = leadSign * (m[2] ? parseInt(m[2], 10) : 1);
+    let next = curCount + delta;
+    let replaced;
+    if (next === 0) {
+      // Drop this term entirely + clean up any orphan operator left over.
+      replaced = cur.replace(re, "").replace(/^\s*\+\s*/, "").replace(/\+\s*\+/g, "+").replace(/\+\s*-/g, "-").trim();
+    } else {
+      const sign = next < 0 ? "-" : (m[1]?.trim() === "+" || m.index === 0 ? (m.index === 0 ? "" : "+") : "+");
+      const abs = Math.abs(next);
+      const replacement = `${sign}${abs}d${sides}`;
+      replaced = cur.slice(0, m.index) + replacement + cur.slice(m.index + m[0].length);
+      replaced = replaced.replace(/^\s*\+\s*/, "");
+    }
+    exprInput.value = replaced;
+  } else {
+    // No existing term — append +1dN or -1dN.
+    if (delta === 0) return;
+    const sign = delta < 0 ? "-" : "+";
+    const abs = Math.abs(delta);
+    const cur2 = exprInput.value.trim();
+    if (cur2 === "") {
+      exprInput.value = (delta < 0 ? "-" : "") + `${abs}d${sides}`;
+    } else {
+      exprInput.value = `${cur2}${sign}${abs}d${sides}`;
+    }
+  }
+  refreshBadges();
+}
+
+document.querySelectorAll(".dice-btn").forEach((btn) => {
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    adjustDiceCount(btn.dataset.type, +1);
+  });
+  btn.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    adjustDiceCount(btn.dataset.type, -1);
+  });
+});
+
+// === ± modifier buttons — bump trailing constant on the expression. ===
+function adjustModifier(delta) {
+  const cur = exprInput.value;
+  // Find a trailing `[+-] N` constant. If not present, append.
+  const re = /([+\-]\s*)(\d+)\s*$/;
+  const m = re.exec(cur);
+  if (m) {
+    const sign = m[1].trim() === "-" ? -1 : 1;
+    const next = sign * parseInt(m[2], 10) + delta;
+    if (next === 0) {
+      exprInput.value = cur.slice(0, m.index).trim();
+    } else {
+      const newSign = next < 0 ? "-" : "+";
+      exprInput.value = cur.slice(0, m.index).trim() + newSign + Math.abs(next);
+    }
+  } else {
+    if (delta === 0) return;
+    const newSign = delta < 0 ? "-" : "+";
+    const cur2 = cur.trim();
+    if (cur2 === "") {
+      exprInput.value = (delta < 0 ? "-" : "") + Math.abs(delta);
+    } else {
+      exprInput.value = `${cur2}${newSign}${Math.abs(delta)}`;
+    }
+  }
+  refreshBadges();
+}
+document.getElementById("btnModInc").addEventListener("click", () => adjustModifier(+1));
+document.getElementById("btnModDec").addEventListener("click", () => adjustModifier(-1));
+
+exprInput.addEventListener("input", refreshBadges);
+
+// === Action handlers ===
+async function close() {
+  try { await OBR.popover.close(POPOVER_ID); } catch {}
+}
+
+async function fireRoll(opts) {
+  const expression = exprInput.value.trim();
+  const label = labelInput.value.trim();
+  if (!expression) return;
+  try {
+    await OBR.broadcast.sendMessage(
+      BC_QUICK_ROLL,
+      {
+        expression,
+        label,
+        itemId,
+        focus: !!itemId,
+        hidden: !!opts.hidden,
+        ...(opts.advMode ? { advMode: opts.advMode } : {}),
+        ...(opts.critMode ? { critMode: true } : {}),
+      },
+      { destination: "LOCAL" },
+    );
+  } catch (e) { console.error("[rollable-quick]", e); }
+  await close();
+}
+
+OBR.onReady(async () => {
+  // Show the dark-roll button only for the GM client.
+  try {
+    const role = await OBR.player.getRole();
+    if (role === "GM") {
+      const dark = document.getElementById("btnDark");
+      if (dark) dark.style.display = "";
+    }
+  } catch {}
+
+  document.querySelectorAll("[data-act]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const act = el.dataset.act ?? "";
+      if (act === "roll")        void fireRoll({});
+      else if (act === "adv")    void fireRoll({ advMode: "adv" });
+      else if (act === "dis")    void fireRoll({ advMode: "dis" });
+      else if (act === "crit")   void fireRoll({ critMode: true });
+      else if (act === "dark")   void fireRoll({ hidden: true });
+    });
+  });
+
+  // Enter in the expression / label fires a normal roll.
+  exprInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); void fireRoll({}); }
+  });
+  labelInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); void fireRoll({}); }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); void close(); }
+  });
+});
+</script>
+</body>
+</html>

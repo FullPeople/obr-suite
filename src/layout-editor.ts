@@ -63,8 +63,8 @@ const btnDone = document.getElementById("btn-done") as HTMLButtonElement;
 const PANEL_LABELS: Record<string, string> = {
   [PANEL_IDS.cluster]: "快捷键按钮",
   [PANEL_IDS.clusterRow]: "快捷键栏",
-  [PANEL_IDS.diceHistoryTrigger]: "投骰记录按钮",
   [PANEL_IDS.diceHistory]: "投骰记录面板",
+  [PANEL_IDS.perfWindow]: "性能监视器",
   [PANEL_IDS.initiative]: "先攻条",
   [PANEL_IDS.bestiaryPanel]: "怪物图鉴",
   [PANEL_IDS.bestiaryInfo]: "怪物详情",
@@ -80,7 +80,6 @@ const PANEL_LABELS: Record<string, string> = {
 const NON_RESIZABLE = new Set<string>([
   PANEL_IDS.cluster,
   PANEL_IDS.clusterRow,
-  PANEL_IDS.diceHistoryTrigger,
   PANEL_IDS.initiative,
   PANEL_IDS.search,
 ]);
@@ -335,8 +334,8 @@ OBR.onReady(() => {
   const order = [
     PANEL_IDS.cluster,
     PANEL_IDS.clusterRow,
-    PANEL_IDS.diceHistoryTrigger,
     PANEL_IDS.diceHistory,
+    PANEL_IDS.perfWindow,
     PANEL_IDS.search,
     PANEL_IDS.initiative,
     PANEL_IDS.bestiaryPanel,

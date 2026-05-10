@@ -263,11 +263,9 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
 }
 .support-btn.kofi:hover{border-color:rgba(255,94,91,0.4)}
 .support-btn.kofi .ic{color:var(--kofi)}
-.support-btn.afdian:hover{border-color:rgba(255,107,157,0.4)}
-.support-btn.afdian .ic{color:#ff6b9d}
 .support-btn .ic{font-size:14px;line-height:1}
 
-/* WeChat / Alipay QR thumbnails sit next to the Ko-fi / Afdian
+/* WeChat / Alipay QR thumbnails sit next to the Ko-fi
    buttons in the support-row. Kept compact (54×54) so they don't
    tower over the buttons; hovering enlarges + dims the rest so the
    user can scan with their phone without opening a separate page. */
@@ -298,58 +296,55 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
 .contact-box code{font-family:ui-monospace,Consolas,monospace;color:var(--accent)}
 
 /* Backer-credit list (Support tab → 鸣谢 / Thanks block).
-   Each chip cycles through a non-red rainbow border + glow on a 6s
-   loop. Chips stagger by index via animation-delay so the colors
-   ripple along the row instead of pulsing in sync. */
+   Each name has a rainbow text-shadow that cycles through six hues
+   over a 6-second loop. text-shadow is rendered directly underneath
+   each glyph, so the halo conforms to the GLYPH SHAPE — not a
+   rectangle behind the chip. The earlier conic-gradient ::before
+   approach distorted into a rotating ellipse on long names; this
+   keeps the halo glyph-aligned at every name length. The text
+   itself paints on top of its own shadow by definition, so the
+   "name index above all halos" requirement is automatic. */
 .backers-box{
   background:var(--bg-card);border:1px solid var(--border);border-radius:6px;
   padding:7px 10px;margin-top:6px;font-size:11px;
 }
 .backers-box p{margin:0 0 5px;font-size:11px;color:#cdd1de}
-.backers{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0}
+.backers{display:flex;flex-wrap:wrap;gap:6px 12px;margin:4px 0;line-height:1.6}
 .backer{
-  display:inline-flex;align-items:center;
-  padding:2px 8px;border-radius:9px;
-  background:rgba(255,255,255,0.04);
-  border:1px solid rgba(167,139,250,0.45);
-  color:#e6e8ee;
-  font-size:10.5px;font-weight:600;
+  display:inline-block;
+  padding:0 1px;
+  color:#f4f6fa;
+  font-weight:600;
   letter-spacing:0.2px;
-  animation:backer-rainbow 6s linear infinite;
+  animation:backer-glow 6s linear infinite;
 }
-/* Stagger the rainbow phase per chip so neighbours show different
-   colors at the same time. Negative delays start the animation
-   already partway through. Phase step ≈ 6s / N for a smooth wave;
-   tuned for ~15 chips (0.4s steps). */
-.backer:nth-child(2){animation-delay:-0.4s}
-.backer:nth-child(3){animation-delay:-0.8s}
-.backer:nth-child(4){animation-delay:-1.2s}
-.backer:nth-child(5){animation-delay:-1.6s}
-.backer:nth-child(6){animation-delay:-2.0s}
-.backer:nth-child(7){animation-delay:-2.4s}
-.backer:nth-child(8){animation-delay:-2.8s}
-.backer:nth-child(9){animation-delay:-3.2s}
-.backer:nth-child(10){animation-delay:-3.6s}
-.backer:nth-child(11){animation-delay:-4.0s}
-.backer:nth-child(12){animation-delay:-4.4s}
-.backer:nth-child(13){animation-delay:-4.8s}
-.backer:nth-child(14){animation-delay:-5.2s}
-.backer:nth-child(15){animation-delay:-5.6s}
-.backer:nth-child(16){animation-delay:-0.2s}
-.backer:nth-child(17){animation-delay:-0.6s}
-.backer:nth-child(18){animation-delay:-1.0s}
-.backer:nth-child(19){animation-delay:-1.4s}
-.backer:nth-child(20){animation-delay:-1.8s}
-@keyframes backer-rainbow {
-  /* Skips the red zone — palette goes orange → yellow → green →
-     cyan → blue → violet → orange. */
-  0%   { border-color:rgba(245,166,35,0.55);  box-shadow:0 0 8px 1px rgba(245,166,35,0.45); }
-  16%  { border-color:rgba(245,215,110,0.55); box-shadow:0 0 8px 1px rgba(245,215,110,0.45); }
-  33%  { border-color:rgba(46,204,113,0.55);  box-shadow:0 0 8px 1px rgba(46,204,113,0.45); }
-  50%  { border-color:rgba(93,173,226,0.55);  box-shadow:0 0 8px 1px rgba(93,173,226,0.45); }
-  66%  { border-color:rgba(155,89,182,0.55);  box-shadow:0 0 8px 1px rgba(155,89,182,0.45); }
-  83%  { border-color:rgba(167,139,250,0.55); box-shadow:0 0 8px 1px rgba(167,139,250,0.45); }
-  100% { border-color:rgba(245,166,35,0.55);  box-shadow:0 0 8px 1px rgba(245,166,35,0.45); }
+.backer.tier3{font-weight:700}
+.backer.tier4{font-weight:800;animation-name:backer-glow-strong}
+.backer.tier5{font-weight:900;animation-name:backer-glow-strong}
+/* Stagger the hue-cycle phase per chip so neighbouring names show
+   different colours at the same moment — coprime nth-child divisors
+   yield a pseudo-random ripple. */
+.backer:nth-child(2n){animation-delay:-1s}
+.backer:nth-child(3n){animation-delay:-2s}
+.backer:nth-child(5n){animation-delay:-3s;animation-duration:7s}
+.backer:nth-child(7n){animation-delay:-4s}
+@keyframes backer-glow {
+  0%   { text-shadow: 0 0 3px rgba(255,107,107,0.95),  0 0 8px rgba(255,107,107,0.55) }
+  16%  { text-shadow: 0 0 3px rgba(245,166,35,0.95),  0 0 8px rgba(245,166,35,0.55) }
+  33%  { text-shadow: 0 0 3px rgba(245,215,110,0.95), 0 0 8px rgba(245,215,110,0.55) }
+  50%  { text-shadow: 0 0 3px rgba(46,204,113,0.95),  0 0 8px rgba(46,204,113,0.55) }
+  66%  { text-shadow: 0 0 3px rgba(93,173,226,0.95),  0 0 8px rgba(93,173,226,0.55) }
+  83%  { text-shadow: 0 0 3px rgba(155,89,182,0.95),  0 0 8px rgba(155,89,182,0.55) }
+  100% { text-shadow: 0 0 3px rgba(255,107,107,0.95),  0 0 8px rgba(255,107,107,0.55) }
+}
+@keyframes backer-glow-strong {
+  0%   { text-shadow: 0 0 4px rgba(255,107,107,1),    0 0 12px rgba(255,107,107,0.7), 0 0 20px rgba(255,107,107,0.35) }
+  16%  { text-shadow: 0 0 4px rgba(245,166,35,1),    0 0 12px rgba(245,166,35,0.7),  0 0 20px rgba(245,166,35,0.35) }
+  33%  { text-shadow: 0 0 4px rgba(245,215,110,1),   0 0 12px rgba(245,215,110,0.7), 0 0 20px rgba(245,215,110,0.35) }
+  50%  { text-shadow: 0 0 4px rgba(46,204,113,1),    0 0 12px rgba(46,204,113,0.7),  0 0 20px rgba(46,204,113,0.35) }
+  66%  { text-shadow: 0 0 4px rgba(93,173,226,1),    0 0 12px rgba(93,173,226,0.7),  0 0 20px rgba(93,173,226,0.35) }
+  83%  { text-shadow: 0 0 4px rgba(155,89,182,1),    0 0 12px rgba(155,89,182,0.7),  0 0 20px rgba(155,89,182,0.35) }
+  100% { text-shadow: 0 0 4px rgba(255,107,107,1),    0 0 12px rgba(255,107,107,0.7), 0 0 20px rgba(255,107,107,0.35) }
 }
 .backers-extra{
   font-size:10px;color:var(--text-dim);font-style:italic;
@@ -539,6 +534,64 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
 }
 .lib-preview-btn:hover:not(:disabled){background:rgba(155,89,182,0.30)}
 .lib-preview-btn:disabled{opacity:0.55;cursor:wait}
+/* Per-source picker (📚 来源) — same visual family as the preview
+   button but in a teal palette to distinguish "manage" from "probe". */
+.lib-sources-btn{
+  flex-shrink:0;
+  padding:5px 10px;
+  background:rgba(46,166,165,0.18);
+  border:1px solid rgba(46,166,165,0.40);
+  color:#9ed4d3;font-weight:700;
+  border-radius:4px;font-size:11px;
+  cursor:pointer;font-family:inherit;
+  white-space:nowrap;
+  transition:background .12s;
+}
+.lib-sources-btn:hover:not(:disabled){background:rgba(46,166,165,0.30)}
+.lib-sources-btn:disabled{opacity:0.55;cursor:not-allowed}
+.lib-sources{
+  margin-top:8px;
+  padding:10px 12px;
+  background:rgba(0,0,0,0.30);
+  border:1px solid rgba(255,255,255,0.10);
+  border-radius:5px;
+  font-size:11.5px;
+}
+.lib-sources-loading,.lib-sources-empty,.lib-sources-err{
+  color:#9aa3b0;font-style:italic;
+}
+.lib-sources-err{color:#ff8b7a;font-style:normal}
+.lib-sources-head{
+  color:#cdd9ec;font-size:11px;
+  margin-bottom:8px;line-height:1.45;
+}
+.lib-sources-list{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(165px, 1fr));
+  gap:4px 10px;
+}
+.lib-source-row{
+  display:flex;align-items:center;gap:6px;
+  padding:3px 4px;
+  border-radius:3px;
+  cursor:pointer;
+  transition:background .1s;
+}
+.lib-source-row:hover{background:rgba(255,255,255,0.05)}
+.lib-source-cb{margin:0;cursor:pointer;flex-shrink:0}
+.lib-source-cb:disabled{cursor:not-allowed}
+.lib-source-code{
+  flex:1;
+  font-family:'Menlo','Consolas',monospace;
+  font-size:10.5px;letter-spacing:0.2px;
+  color:#dde3ec;
+  overflow:hidden;text-overflow:ellipsis;
+}
+.lib-source-count{
+  color:#7a8392;font-size:10px;
+  font-variant-numeric:tabular-nums;
+  flex-shrink:0;
+}
 .lib-preview{
   margin-top:8px;
   padding:10px 12px;

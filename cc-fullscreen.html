@@ -411,6 +411,23 @@ body{
 .spell-tag.conc::before{content:"⊕ ";color:var(--teal)}
 .spell-tag.ritual::before{content:"⌘ ";color:var(--gold)}
 
+/* Click-to-search affordance: the spell-name and feat-name spans
+   each get a `.srch-name` inner wrapper. Clicking the inner wrapper
+   stops propagation and fires BC_SEARCH_QUERY (autoPin:true) so the
+   global-search popover opens with that name pre-filled and auto-
+   pinned. The outer .spell / .feat-h still expands on click. Blue
+   hover makes the inner click target visually distinct. */
+.srch-name{
+  cursor:pointer;
+  padding:0 3px;margin:0 -3px;
+  border-radius:3px;
+  transition:background .12s, color .12s;
+}
+.srch-name:hover{
+  background:rgba(93,173,226,0.18);
+  color:#7ec8f0;
+}
+
 .spell-detail{
   margin-top:5px;padding:8px 10px;
   background:var(--bg);
@@ -550,7 +567,7 @@ body{
 <div id="app">
   <div class="cc-loading">加载角色卡…</div>
 </div>
-<input type="file" class="cc-file-input" id="ccFileInput" accept=".json,application/json">
+<input type="file" class="cc-file-input" id="ccFileInput" accept=".json,application/json,.xlsx" multiple>
 <script type="module" src="/src/modules/characterCards/fullscreen-page.tsx"></script>
 </body>
 </html>

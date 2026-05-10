@@ -189,6 +189,11 @@ html, body, #root { height: 100%; background: transparent; }
   border-color: rgba(255, 255, 255, 0.25);
 }
 
+/* 2026-05-10: per-owner colour reverted per user request — colour
+   palette TBD. The CSS variable `--owner-color` is still set inline
+   by InitiativeItemRow (the resolveOwnerColor pipeline stays
+   plumbed for future iteration) but no styles consume it yet. */
+
 /* Active: bulges DOWN — only height grows. Flex-start row alignment makes
    the extra 20px poke below its neighbours. No translate (avoids pushing
    below-card buttons off the iframe and triggering scrollbars). */
@@ -202,6 +207,24 @@ html, body, #root { height: 100%; background: transparent; }
 .initiative-item.preparing.active {
   border-color: var(--gold);
   box-shadow: 0 3px 10px rgba(245, 166, 35, 0.4);
+}
+
+/* 2026-05-10: invisible / stealth marker for DM view. The slot is
+   rendered semi-transparent so the DM can tell at a glance which
+   tokens are currently hidden from players, without losing the
+   slot from the order. Player clients never see invisible items
+   in their list (the panel filters them out), so this rule only
+   ever applies on the GM client. The image gets an extra dim so
+   the portrait reads as "ghosted"; count + modifier stay legible. */
+.initiative-item.is-invisible {
+  opacity: 0.45;
+}
+.initiative-item.is-invisible .item-img img {
+  filter: grayscale(0.6) brightness(0.85);
+}
+.initiative-item.is-invisible.active {
+  opacity: 0.7; /* Active turn keeps a bit more presence so the
+                   "whose turn is it" cue still reads. */
 }
 
 /* ----- Image area: top ~80% of the card, portrait-cropped, top aligned ----- */

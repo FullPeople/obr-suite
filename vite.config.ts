@@ -25,10 +25,30 @@ function normaliseBase(raw: string): string {
   return s;
 }
 const SUITE_BASE = normaliseBase(process.env.SUITE_BASE || "/suite/");
+const SUITE_CHANNEL = (process.env.SUITE_CHANNEL || "stable").toLowerCase();
+
+function devNamespaceIsolation() {
+  const isDevChannel = SUITE_CHANNEL === "dev" || SUITE_BASE.includes("suite-dev");
+  return {
+    name: "obr-suite-dev-namespace-isolation",
+    enforce: "pre" as const,
+    transform(code: string, id: string) {
+      if (!isDevChannel) return null;
+      if (!/\.(ts|tsx|js|jsx|html)$/.test(id)) return null;
+      if (!code.includes("com.obr-suite/")) return null;
+      return {
+        code: code.replaceAll("com.obr-suite/", "com.obr-suite-dev/"),
+        map: null,
+      };
+    },
+  };
+}
 
 export default defineConfig(({ command }) => ({
   plugins:
-    command === "serve" ? [preact(), basicSsl()] : [preact()],
+    command === "serve"
+      ? [devNamespaceIsolation(), preact(), basicSsl()]
+      : [devNamespaceIsolation(), preact()],
   base: SUITE_BASE,
   server: {
     cors: { origin: "*" },
@@ -53,7 +73,6 @@ export default defineConfig(({ command }) => ({
         background: resolve(__dirname, "background.html"),
         cluster: resolve(__dirname, "cluster.html"),
         "cluster-row": resolve(__dirname, "cluster-row.html"),
-        "dice-history-trigger": resolve(__dirname, "dice-history-trigger.html"),
         settings: resolve(__dirname, "settings.html"),
         "timestop-overlay": resolve(__dirname, "timestop-overlay.html"),
         "search-bar": resolve(__dirname, "search-bar.html"),
@@ -83,10 +102,16 @@ export default defineConfig(({ command }) => ({
         "dice-panel": resolve(__dirname, "dice-panel.html"),
         "dice-history": resolve(__dirname, "dice-history.html"),
         "dice-replay": resolve(__dirname, "dice-replay.html"),
+        "dice-crosshair": resolve(__dirname, "dice-crosshair.html"),
         "dice-rollable-menu": resolve(__dirname, "dice-rollable-menu.html"),
+        "dice-quick-popup": resolve(__dirname, "dice-quick-popup.html"),
+        "perf-window": resolve(__dirname, "perf-window.html"),
         "portal-edit": resolve(__dirname, "portal-edit.html"),
         "portal-destination": resolve(__dirname, "portal-destination.html"),
         "portal-blink": resolve(__dirname, "portal-blink.html"),
+        "trickster-edit": resolve(__dirname, "trickster-edit.html"),
+        "circleimage": resolve(__dirname, "circleimage.html"),
+        "resource-edit": resolve(__dirname, "resource-edit.html"),
         "dm-announcement": resolve(__dirname, "dm-announcement.html"),
         "drag-preview": resolve(__dirname, "drag-preview.html"),
         "layout-editor": resolve(__dirname, "layout-editor.html"),
@@ -98,8 +123,8 @@ export default defineConfig(({ command }) => ({
         "status-tracker-capture": resolve(__dirname, "status-tracker-capture.html"),
         "status-tracker-manage": resolve(__dirname, "status-tracker-manage.html"),
         "metadata-inspector": resolve(__dirname, "metadata-inspector.html"),
-        "vision-light-edit": resolve(__dirname, "vision-light-edit.html"),
-        "vision-collision-edit": resolve(__dirname, "vision-collision-edit.html"),
+        "fullfog-edit": resolve(__dirname, "fullfog-edit.html"),
+        "fullfog-light-edit": resolve(__dirname, "fullfog-light-edit.html"),
         "hp-bar": resolve(__dirname, "hp-bar.html"),
       },
     },

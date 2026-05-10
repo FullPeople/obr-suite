@@ -56,6 +56,7 @@ function panelLabel(panelId: string): string {
   switch (panelId) {
     case "cluster": return "悬浮按钮";
     case "dice-history": return "投骰记录";
+    case "perf-window": return "性能监视器";
     case "initiative": return "先攻条";
     case "bestiary-panel": return "怪物图鉴";
     case "bestiary-info": return "怪物详情";

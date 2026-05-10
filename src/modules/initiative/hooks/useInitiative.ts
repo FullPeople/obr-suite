@@ -11,6 +11,7 @@ import {
   BROADCAST_OPEN_PANEL,
   BROADCAST_CLOSE_PANEL,
   BROADCAST_END_TURN_REQUEST,
+  BROADCAST_STEALTH_TURN,
   COMBAT_EFFECT_MODAL_ID,
   PLUGIN_ID,
   DICE_PLUS_ROLL_REQUEST,
@@ -86,24 +87,45 @@ export function useInitiative() {
   // requests would never get a response and the buttons just confuse them).
   const [dicePlusAvailable, setDicePlusAvailable] = useState<boolean | null>(null);
 
-  // Player view: invisibility flag hides items from the panel except on
-  // their own active turn, where the entry is rendered as a `?` placeholder
-  // (no real name / image leaked). GM view: pass everything through; the
-  // shader overlay on the canvas + a small badge in the panel will
-  // indicate the stealth state instead.
+  // Player view: invisibility flag hides items from the panel except
+  // on their own active turn (where the entry is rendered as a `?`
+  // placeholder so name / image aren't leaked). The TOKEN's OWNER is
+  // a special case — they always see their own entry unmasked, even
+  // when invisible to other players, since they're the one playing
+  // that character.
+  //
+  // GM view: pass everything through (gray active ring is the cue).
+  //
+  // 2026-05-09: invisible-flagged tokens have their `item.visible`
+  // forced to FALSE by the CTX menu (so OBR natively hides them on
+  // non-GM non-owner clients). The default panel filter is
+  // "exclude items with visible=false" — but that would also drop
+  // GM and owner panel rows for invisible tokens. We bypass the
+  // visible-false filter specifically when `i.invisible === true`
+  // is set, then layer the role/owner gating on top.
   const items = useMemo(
     () => {
-      const visible = allItems.filter((i) => i.visible);
+      const visible = allItems.filter((i) => i.visible || i.invisible);
       if (isGM) return visible;
       return visible
-        .filter((i) => !i.invisible || i.active)
-        .map((i) =>
-          i.invisible
-            ? { ...i, name: "?", imageUrl: "" }
-            : i
-        );
+        .filter((i) => {
+          if (!i.invisible) return true;
+          // Owner sees their own invisible entry always.
+          if (playerId && i.ownerId === playerId) return true;
+          // Otherwise only on the entry's own active turn.
+          return i.active;
+        })
+        .map((i) => {
+          if (!i.invisible) return i;
+          // Owner sees their real name + image.
+          if (playerId && i.ownerId === playerId) return i;
+          // Other players (active turn): masked AND HP suppressed.
+          // Setting maxHp = -1 makes resolveHpRatio() in the panel
+          // early-return null, so the entry's HP track disappears.
+          return { ...i, name: "?", imageUrl: "", hp: -1, maxHp: -1 };
+        });
     },
-    [allItems, isGM]
+    [allItems, isGM, playerId]
   );
 
   const prevActiveId = useRef<string | null>(null);
@@ -132,6 +154,16 @@ export function useInitiative() {
   // advanceTurn) can invoke the latest closure.
   const advanceTurnRef = useRef<(dir: 1 | -1) => void>(() => {});
 
+  // 2026-05-10: per-player color map for initiative slot tinting.
+  // Keyed by player id (matches `item.createdUserId`). Built from
+  // OBR.party (other players) + OBR.player (this client's own color).
+  // Updates live via party + player onChange.
+  const [playerColors, setPlayerColors] = useState<Map<string, string>>(new Map());
+  // Snapshot of this client's own color so the renderer can colour the
+  // viewer's own slot without depending on whether OBR.party has a
+  // self entry (it doesn't include the local player by spec).
+  const [myColor, setMyColor] = useState<string>("");
+
   // Cache player info
   useEffect(() => {
     OBR.player.getId().then((id) => { setPlayerId(id); playerIdRef.current = id; });
@@ -140,12 +172,32 @@ export function useInitiative() {
       setIsGM(gm);
       isGMRef.current = gm;
     });
+    OBR.player.getColor().then((c) => { if (typeof c === "string") setMyColor(c); }).catch(() => {});
     const unsub = OBR.player.onChange((p) => {
       const gm = p.role === "GM";
       setIsGM(gm);
       isGMRef.current = gm;
+      if (p.color && typeof p.color === "string") setMyColor(p.color);
     });
-    return unsub;
+    // Other players' colours come from OBR.party.
+    OBR.party.getPlayers().then((players) => {
+      const next = new Map<string, string>();
+      for (const pl of players) {
+        if (pl?.id && typeof pl.color === "string") next.set(pl.id, pl.color);
+      }
+      setPlayerColors(next);
+    }).catch(() => {});
+    const unsubParty = OBR.party.onChange((players) => {
+      const next = new Map<string, string>();
+      for (const pl of players) {
+        if (pl?.id && typeof pl.color === "string") next.set(pl.id, pl.color);
+      }
+      setPlayerColors(next);
+    });
+    return () => {
+      unsub();
+      unsubParty();
+    };
   }, []);
 
   // Keep allItemsRef synced with allItems so stable callbacks read latest.
@@ -224,7 +276,11 @@ export function useInitiative() {
       } catch {}
     }
 
-    const visible = mapped.filter((i) => i.visible);
+    // Invisible-flagged tokens have item.visible = false, but still
+    // belong in the rotation (the GM should land on their turn). Keep
+    // them in the "rotation" list everywhere we use to drive auto-
+    // activation / next / prev / round arithmetic.
+    const visible = mapped.filter((i) => i.visible || i.invisible);
     const activeItem = visible.find((i) => i.active);
 
     // Auto-activate: active item was removed during combat. GM-only; players
@@ -289,7 +345,9 @@ export function useInitiative() {
     refreshCombat();
 
     const unsubItems = OBR.scene.items.onChange(() => refreshItems());
-    const unsubMeta = OBR.scene.onMetadataChange(() => refreshCombat());
+    const unsubMeta = OBR.scene.onMetadataChange((meta) => {
+      if (COMBAT_STATE_KEY in meta) refreshCombat();
+    });
 
     // Receiver picks its own language. The DM's broadcast no longer carries
     // a `lang` field — each client (DM + every player) reads its local
@@ -352,6 +410,111 @@ export function useInitiative() {
           },
           scale: currentScale,
         });
+      }
+    );
+
+    // 2026-05-09: Stealth turn handler. When the GM rotates active to an
+    // invisible token, this branch fires for ALL non-GM clients in place
+    // of the regular focus broadcast.
+    //
+    // Behaviour matrix:
+    //   • Owner of the invisible token  → regular camera focus on
+    //     their token (they're playing it; no surprise needed)
+    //   • Any other player              → camera animates to the bbox
+    //     of every OTHER initiative token PLUS the "有人在暗处..." gray
+    //     overlay opens for ~1.6 s
+    //
+    // GM ignores this message — they already got `focusItem(itemId)`
+    // called locally inside `broadcastFocus`.
+    const unsubStealth = OBR.broadcast.onMessage(
+      BROADCAST_STEALTH_TURN,
+      async (event) => {
+        const itemId = (event.data as any)?.itemId;
+        if (!itemId) return;
+        if (isGMRef.current) return;
+
+        const target = allItemsRef.current.find((i) => i.id === itemId);
+        // Owner of this stealth token: animate to their own token; no
+        // overlay (they ARE the hidden character — already know).
+        const ownsTarget =
+          !!playerIdRef.current && target?.ownerId === playerIdRef.current;
+        if (ownsTarget) {
+          try {
+            const [targetItems, vw, vh, scale] = await Promise.all([
+              OBR.scene.items.getItems([itemId]),
+              OBR.viewport.getWidth(),
+              OBR.viewport.getHeight(),
+              OBR.viewport.getScale(),
+            ]);
+            if (targetItems.length > 0) {
+              const pos = targetItems[0].position;
+              OBR.viewport.animateTo({
+                position: {
+                  x: -pos.x * scale + vw / 2,
+                  y: -pos.y * scale + vh / 2,
+                },
+                scale,
+              });
+            }
+          } catch {}
+          return;
+        }
+
+        // Non-owner non-GM: open ambush-style overlay.
+        try {
+          const lang = getLocalLang();
+          OBR.modal.open({
+            id: COMBAT_EFFECT_MODAL_ID,
+            url: `${import.meta.env.BASE_URL}initiative-combat-effect.html?lang=${lang}&type=stealth`,
+            width: 600,
+            height: 400,
+            fullScreen: true,
+            hidePaper: true,
+            disablePointerEvents: true,
+          });
+        } catch {}
+
+        // Camera → bbox of all OTHER initiative tokens (excluding the
+        // stealth one). Compute locally from the items map; getItemBounds
+        // would also work but a local pass over positions avoids an extra
+        // SDK round-trip per non-owner player.
+        try {
+          const others = allItemsRef.current.filter((i) => i.id !== itemId);
+          if (others.length === 0) return;
+          const otherIds = others.map((i) => i.id);
+          const otherItems = await OBR.scene.items.getItems(otherIds);
+          if (otherItems.length === 0) return;
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (const it of otherItems) {
+            const p = it.position;
+            if (p.x < minX) minX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y > maxY) maxY = p.y;
+          }
+          if (!Number.isFinite(minX)) return;
+          const bboxW = Math.max(1, maxX - minX);
+          const bboxH = Math.max(1, maxY - minY);
+          const cx = (minX + maxX) / 2;
+          const cy = (minY + maxY) / 2;
+          const [vw, vh, scaleNow] = await Promise.all([
+            OBR.viewport.getWidth(),
+            OBR.viewport.getHeight(),
+            OBR.viewport.getScale(),
+          ]);
+          // Fit bbox with 1.4× padding; never zoom IN past the user's
+          // current zoom (avoids jarring close-ups when only one other
+          // token is left).
+          const fitScale = Math.min(vw / (bboxW * 1.4), vh / (bboxH * 1.4));
+          const targetScale = Math.min(fitScale, scaleNow);
+          OBR.viewport.animateTo({
+            position: {
+              x: -cx * targetScale + vw / 2,
+              y: -cy * targetScale + vh / 2,
+            },
+            scale: targetScale,
+          });
+        } catch {}
       }
     );
 
@@ -452,6 +615,7 @@ export function useInitiative() {
       unsubPrepare();
       unsubEnd();
       unsubFocus();
+      unsubStealth();
       unsubOpenPanel();
       unsubClosePanel();
       unsubDiceResult();
@@ -494,11 +658,16 @@ export function useInitiative() {
     } catch {}
     if (!focusEnabled) return;
     // Invisible target: DM still gets a local focus so they can manage the
-    // hidden character, but skip the broadcast so player cameras don't move
-    // (and therefore don't reveal a hidden token's location).
+    // hidden character. Players DON'T get the regular focus broadcast (it
+    // would reveal the hidden token's position) — instead they get a
+    // STEALTH_TURN signal that triggers (a) the "有人在暗处" overlay and
+    // (b) a camera move to the bbox of the OTHER initiative tokens.
     const target = allItemsRef.current.find((i) => i.id === itemId);
     if (target?.invisible) {
       focusItem(itemId);
+      OBR.broadcast
+        .sendMessage(BROADCAST_STEALTH_TURN, { itemId })
+        .catch(() => {});
       return;
     }
     OBR.broadcast.sendMessage(BROADCAST_FOCUS, { itemId });
@@ -643,6 +812,17 @@ export function useInitiative() {
     // (Dice+ result hasn't come back yet) so we don't fire concurrent rolls.
     if (!item || diceRollingRef.current) return;
 
+    // Stealth fall-back: Dice+ has no "dark roll" mode (it broadcasts
+    // results to every client unconditionally), which would leak the
+    // existence of an invisible token's initiative. Route invisible
+    // tokens through the local roll path instead — that one already
+    // honours `hidden: isInvisible` against the suite's own dice
+    // pipeline.
+    if (item.invisible) {
+      await rollInitiativeLocal(itemId, type);
+      return;
+    }
+
     const notation = diceNotation(type);
 
     setDiceRolling(true);
@@ -671,7 +851,7 @@ export function useInitiative() {
       showResults: true,
       timestamp: Date.now(),
     }, { destination: "LOCAL" });
-  }, []);
+  }, [rollInitiativeLocal]);
 
   // setActiveItemFromIds: explicit prev + next so rapid clicks chain correctly
   // without reading possibly-stale allItems to re-derive prev. Reads via ref
@@ -707,7 +887,10 @@ export function useInitiative() {
 
   const startPreparation = useCallback(async (effectType: EffectType = "prepare") => {
     const all = allItemsRef.current;
-    if (all.filter((i) => i.visible).length === 0) return;
+    // Include invisible-flagged tokens in the "anyone in rotation"
+    // check — otherwise a combat where every fighter is currently
+    // marked invisible would silently fail to start.
+    if (all.filter((i) => i.visible || i.invisible).length === 0) return;
     setDiceRolling(false);
     optimisticActiveIdRef.current = null;
     lastWrittenActiveIdRef.current = null;
@@ -767,7 +950,9 @@ export function useInitiative() {
 
   const startCombat = useCallback(async () => {
     const all = allItemsRef.current;
-    const visible = all.filter((i) => i.visible);
+    // Invisible-flagged tokens belong in the rotation even though
+    // their item.visible is false — same rationale as advanceTurn.
+    const visible = all.filter((i) => i.visible || i.invisible);
     if (visible.length === 0) return;
 
     const firstId = visible[0].id;
@@ -819,7 +1004,12 @@ export function useInitiative() {
   // flight, and `lastWrittenActiveIdRef` lets each write use a 2-item
   // updateItems instead of N.
   const advanceTurn = useCallback((dir: 1 | -1) => {
-    const visible = allItemsRef.current.filter((i) => i.visible);
+    // KEEP invisible-flagged tokens in the rotation — they have
+    // item.visible = false but a stealth turn still needs to fire
+    // (gray active ring on GM/owner clients, "有人在暗处" overlay
+    // for everyone else). Filtering them out here was the
+    // 2026-05-09 "auto-skip stealth turn" bug the user reported.
+    const visible = allItemsRef.current.filter((i) => i.visible || i.invisible);
     if (visible.length === 0) return;
     // "登" — short turn-advance confirmation tone. Plays only on the
     // client that triggers the advance (other clients receive a
@@ -909,6 +1099,18 @@ export function useInitiative() {
     fireBroadcast(BROADCAST_CLOSE_PANEL, {});
   }, [writeCombatState]);
 
+  // Resolve a per-token tint colour. Owner = `item.createdUserId`,
+  // looked up against the live party color map (other players) +
+  // this client's own color (myColor). DM-owned tokens get the local
+  // GM's color when this client IS the GM, or fall back to the
+  // remote party colour if available. Otherwise a neutral default.
+  const resolveOwnerColor = useCallback((item: InitiativeItem): string => {
+    const owner = item.ownerId;
+    if (!owner) return "";
+    if (owner === playerId) return myColor || "";
+    return playerColors.get(owner) ?? "";
+  }, [playerColors, myColor, playerId]);
+
   return {
     items,
     combatState,
@@ -929,5 +1131,6 @@ export function useInitiative() {
     prevTurn,
     endCombat,
     requestEndTurn,
+    resolveOwnerColor,
   };
 }

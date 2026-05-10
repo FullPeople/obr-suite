@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Stealth variant of ring-active.svg — same geometry, gray strokes.
+       Used when the active initiative token has its `invisible` flag set,
+       to signal "this turn belongs to a stealth character" without the
+       red urgency cue. -->
+  <circle cx="100" cy="100" r="92" fill="none" stroke="rgba(170,170,170,0.85)" stroke-width="5" stroke-dasharray="16 10"/>
+  <circle cx="100" cy="100" r="82" fill="none" stroke="rgba(170,170,170,0.4)" stroke-width="2"/>
+</svg>

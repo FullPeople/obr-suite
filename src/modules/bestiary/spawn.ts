@@ -28,7 +28,17 @@ async function readBestiaryAutoHide(): Promise<boolean> {
   return true;
 }
 
-const BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
+async function readBestiaryAutoName(): Promise<boolean> {
+  try {
+    const meta = await OBR.scene.getMetadata();
+    const s = meta[SUITE_STATE_KEY] as { bestiaryAutoName?: boolean } | undefined;
+    if (typeof s?.bestiaryAutoName === "boolean") return s.bestiaryAutoName;
+  } catch {}
+  // Default OFF — legacy behaviour. DM opts in via the panel toggle.
+  return false;
+}
+
+const BUBBLES_META = "com.obr-suite/bubbles/data";
 const BUBBLES_NAME = "com.owlbear-rodeo-bubbles-extension/name";
 const INITIATIVE_META = "com.initiative-tracker/data";
 const INITIATIVE_MODKEY = "com.initiative-tracker/dexMod";
@@ -167,29 +177,50 @@ export async function spawnMonster(
   const halfW = imgSize.w / 2;
   const halfH = imgSize.h / 2;
 
+  // 2026-05-10: D&D 5e creature-size → grid-cell footprint. Mapping
+  // matches the official "Squares" rule (PHB 191 / DMG 251 / DMG'24
+  // 28). Tiny is normalised to 1 cell visually since 0.5-cell tokens
+  // are awkward to manipulate; the small footprint is preserved
+  // narratively but not mechanically.
+  //
+  //   Tiny → 1 (was 0.5; bumped per UX preference for click-target size)
+  //   Small / Medium → 1
+  //   Large → 2
+  //   Huge → 3
+  //   Gargantuan → 4
+  //
+  // ParsedMonster.size is the Chinese / English label produced by
+  // parseMon's SIZE_MAP. We accept both the raw single-char code
+  // (T/S/M/L/H/G) and the localised label, falling back to 1 when
+  // unrecognised so homebrew sources with custom size strings still
+  // spawn at sensible default size.
+  const sizeFootprint = (() => {
+    const s = String(monster.size ?? "").trim();
+    if (!s) return 1;
+    const lower = s.toLowerCase();
+    if (s === "T" || s === "超小型" || lower === "tiny") return 1;
+    if (s === "S" || s === "小型" || lower === "small") return 1;
+    if (s === "M" || s === "中型" || lower === "medium") return 1;
+    if (s === "L" || s === "大型" || lower === "large") return 2;
+    if (s === "H" || s === "巨型" || lower === "huge") return 3;
+    if (s === "G" || s === "超巨型" || lower === "gargantuan") return 4;
+    return 1;
+  })();
+
   // Honor the suite's "auto-add to initiative" toggle (Settings →
   // 怪物图鉴 → 加入场景时自动加入先攻). When it's off, we leave the
   // initiative metadata off, and the DM has to right-click → Add to
   // initiative manually — useful when pre-staging tokens during prep.
   const autoInit = await readBestiaryAutoInit();
   const autoHide = await readBestiaryAutoHide();
+  const autoName = await readBestiaryAutoName();
   const meta: Record<string, unknown> = {
     [BUBBLES_META]: {
       "health": monster.hp,
       "max health": monster.hp,
       "temporary health": 0,
       "armor class": monster.ac,
-      // `hide:true` is the EXTERNAL "Stat Bubbles for D&D" extension's
-      // "Dungeon Master Only" toggle. Players don't see the bubble
-      // at all when set. We default it ON for newly-spawned bestiary
-      // monsters so DMs running the external plugin get correct
-      // out-of-the-box behaviour.
-      "hide": true,
-      // `locked:true` is the SUITE'S OWN bubbles module flag.
-      // Combined with "locked + in-combat → silhouette mode for
-      // players" it shows a quantised bar without exact numbers.
-      // Both fields share the same metadata key — external plugin
-      // reads hide, suite plugin reads locked.
+      "hide": false,
       "locked": true,
     },
     [BUBBLES_NAME]: monster.name,
@@ -206,7 +237,11 @@ export async function spawnMonster(
     };
   }
 
-  // DPI = image width → token occupies exactly 1 grid cell
+  // DPI = image width → 1 grid-cell footprint. For non-Medium
+  // creatures we scale up via item.scale so the token occupies its
+  // proper size (Large = 2x2, Huge = 3x3, Gargantuan = 4x4). Keeps
+  // dpi pinned to imgSize.w so OBR's grid-anchor still snaps cleanly
+  // — only the rendered bounding box grows.
   const item = buildImage(
     {
       width: imgSize.w,
@@ -217,11 +252,25 @@ export async function spawnMonster(
     { dpi: imgSize.w, offset: { x: halfW, y: halfH } }
   )
     .position({ x: worldX + offsetX, y: worldY + offsetY })
+    .scale({ x: sizeFootprint, y: sizeFootprint })
     .name(monster.name)
     .visible(!autoHide)
     .layer("CHARACTER")
     .metadata(meta)
     .build();
+
+  // When auto-name is on, prefill the OBR-native plainText label so
+  // players see the monster's display name under the token without
+  // the DM needing to click-sync per token. Mirrors the shape used by
+  // monster-info-page.ts → toggleTokenNameText.
+  if (autoName) {
+    const anyItem = item as any;
+    anyItem.text = {
+      ...(anyItem.text ?? {}),
+      type: anyItem.text?.type ?? "PLAIN",
+      plainText: monster.name,
+    };
+  }
 
   await OBR.scene.items.addItems([item]);
 

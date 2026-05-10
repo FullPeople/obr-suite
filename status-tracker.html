@@ -95,58 +95,169 @@ html,body{
 }
 .head .x:hover{color:var(--text);border-color:var(--border-strong)}
 
+/* 2026-05-10: jelly toolbar — buttons fill the whole row with NO
+   gaps and NO rounded corners, sit flush against the toolbar
+   background, and use a glassy highlight overlay (the "果冻" feel)
+   instead of crisp 1-px borders. Highlights are pseudo-elements so
+   they don't interfere with the SVG / text inside the button. */
 .toolbar{
-  display:flex;align-items:center;gap:6px;
-  padding:5px 10px;
+  display:flex;align-items:stretch;
+  padding:0;
   background:var(--bg-strong);
   border-bottom:1px solid var(--border);
   flex-shrink:0;
 }
+/* 2026-05-10 flat-modern revision — gradients + ::before specular
+   highlights removed. Buttons now use plain solid colour fills with a
+   simple hover/on state, matching contemporary flat-design toolbars. */
 .toolbar button{
-  background:transparent;border:1px solid var(--border);
+  flex:1 1 0;
+  background:transparent;
+  border:none;
   color:var(--text-dim);
   cursor:pointer;font-family:inherit;
-  height:26px;padding:0 9px;border-radius:4px;
+  height:30px;padding:0 8px;border-radius:0;
   font-size:11px;font-weight:600;
-  display:inline-flex;align-items:center;gap:5px;
+  display:inline-flex;align-items:center;justify-content:center;gap:5px;
+  position:relative;
+  transition:color .12s ease, background .12s ease;
 }
-.toolbar button:hover{color:var(--text);border-color:var(--border-strong)}
+.toolbar button:hover{
+  color:var(--text);
+  background:rgba(255,255,255,0.06);
+}
 .toolbar button.on{
-  background:var(--bg-card);
-  border-color:var(--accent);
   color:var(--accent-dim);
+  background:rgba(93,173,226,0.18);
+}
+/* Optional inner separator line between toolbar groups (legacy
+   .tb-sp behaviour preserved by spreading with margin-left auto). */
+.toolbar .tb-sp{
+  flex:0 0 1px;
+  background:rgba(255,255,255,0.06);
+  align-self:stretch;
+  margin:4px 0;
+}
+/* Edit-mode active state — make the toolbar's ✎ button visually
+   "alive" so the user always sees they're in editing context. The
+   button gets a breathing accent glow + a label suffix; the panel
+   border shifts to the warn-orange accent and pulses softly. */
+.toolbar #btnEdit.on{
+  animation: edit-btn-pulse 1.6s ease-in-out infinite;
+  background:rgba(93,173,226,0.16);
+}
+.toolbar #btnEdit.on::after{
+  content:"…";
+  margin-left:2px;
+  color:var(--warn);
+  animation: edit-btn-dots 1.2s steps(3, end) infinite;
+}
+@keyframes edit-btn-pulse{
+  0%,100%{
+    box-shadow:0 0 0 0 rgba(93,173,226,0.55), inset 0 0 0 0 rgba(93,173,226,0);
+  }
+  50%{
+    box-shadow:0 0 0 4px rgba(93,173,226,0), inset 0 0 8px 0 rgba(93,173,226,0.30);
+  }
+}
+@keyframes edit-btn-dots{
+  0%,33%   { content:"."; }
+  34%,66%  { content:".."; }
+  67%,100% { content:"..."; }
+}
+/* Panel border + header band cue while editing. The card itself
+   gets an animated warn-orange outline, and a thin progress-style
+   stripe paints across the top of the toolbar so the editing
+   context is unmistakable even when the ✎ button is scrolled out
+   of sight. */
+body.edit-mode .card{
+  border-color:var(--warn);
+  animation: edit-card-glow 2.4s ease-in-out infinite;
+}
+@keyframes edit-card-glow{
+  0%,100%{ box-shadow:0 8px 24px rgba(0,0,0,0.45), 0 0 0 0 rgba(200,146,81,0.55); }
+  50%   { box-shadow:0 8px 24px rgba(0,0,0,0.45), 0 0 18px 2px rgba(200,146,81,0.45); }
+}
+body.edit-mode .toolbar{
+  position:relative;
+  overflow:hidden;
+}
+body.edit-mode .toolbar::before{
+  content:"";
+  position:absolute;
+  left:-30%; right:-30%; top:0; height:2px;
+  background:linear-gradient(90deg,
+    transparent 0%,
+    rgba(200,146,81,0) 20%,
+    rgba(200,146,81,0.85) 50%,
+    rgba(200,146,81,0) 80%,
+    transparent 100%);
+  animation: edit-stripe 2.4s linear infinite;
+  pointer-events:none;
+}
+@keyframes edit-stripe{
+  0%   { transform:translateX(-30%); }
+  100% { transform:translateX(30%); }
+}
+body.edit-mode .head .ttl::after{
+  content:" · 编辑中";
+  color:var(--warn);
+  font-weight:700;
+  letter-spacing:0.4px;
+  animation: edit-title-fade 1.6s ease-in-out infinite;
+}
+@keyframes edit-title-fade{
+  0%,100%{ opacity:0.55; }
+  50%   { opacity:1; }
 }
 .toolbar button svg{
   width:13px;height:13px;flex-shrink:0;
   pointer-events:none;
 }
-.toolbar .tb-sp{flex:1}
+/* tb-sp width override — see .toolbar .tb-sp at the top for the jelly version. */
 
 /* ====================================================================
    FILTERS (apply-mode = category filter row; edit-mode = editable
    category buttons + a "+" affordance for adding a new category).
-   The same row morphs between modes via class toggles. */
+   The same row morphs between modes via class toggles.
+   2026-05-10: jelly UI — buttons fill the row with no gaps / no
+   borders, share the toolbar's specular highlight pattern. */
 .filters{
-  display:flex;flex-wrap:wrap;gap:4px;
-  padding:6px 10px;
+  display:flex;flex-wrap:wrap;
+  padding:0;
   border-bottom:1px solid var(--border);
   flex-shrink:0;
-  align-items:center;
+  align-items:stretch;
 }
+/* Flat tabs with a 2-px accent underline for the active state — much
+   cleaner than the prior glossy ::before highlight. */
 .cat-btn{
-  background:var(--bg-strong);
-  border:1px solid var(--border);
+  flex:1 1 0;
+  background:transparent;
+  border:none;
+  border-radius:0;
   color:var(--text-dim);
   font-family:inherit;font-size:10.5px;font-weight:600;
-  padding:3px 9px;border-radius:4px;cursor:pointer;
+  padding:6px 9px;
+  cursor:pointer;
   letter-spacing:0.2px;
+  position:relative;
+  transition:color .12s ease, background .12s ease;
+}
+.cat-btn:hover:not(.on){
+  color:var(--text);
+  background:rgba(255,255,255,0.04);
 }
 .cat-btn.on{
-  background:var(--bg-card);
-  border-color:var(--accent);
+  background:rgba(93,173,226,0.14);
   color:var(--accent-dim);
 }
-.cat-btn:hover:not(.on){color:var(--text)}
+.cat-btn.on::after{
+  content:"";
+  position:absolute;
+  left:0;right:0;bottom:0;height:2px;
+  background:var(--accent);
+}
 
 /* Edit-mode tweaks for category buttons */
 body.edit-mode .cat-btn[draggable="true"]{cursor:grab}
@@ -194,49 +305,64 @@ body.edit-mode .cat-btn.drop-target{
 }
 
 /* ====================================================================
-   BODY GRID — flat wrap of buff bubbles. Eraser pill + buff bubbles
-   in apply mode; bubbles + a "+ 新 buff" affordance in edit mode. */
+   BODY GRID — flat flex wrap of buff bubbles. 2026-05-10 jelly spec:
+   NO gaps anywhere (gap:0), NO rounded corners on bubbles, every
+   bubble is `flex: 1 1 <minWidth>` so the row's remaining empty
+   space is shared between bubbles to make each row stretch FULL
+   WIDTH with no trailing gap. Padding on .body is also 0 so the
+   first row touches the toolbar above and the last row sits flush
+   on the bottom edge. */
 .body{
   flex:1;overflow-y:auto;
-  padding:7px 9px;
-  display:flex;flex-wrap:wrap;gap:5px;
+  padding:0;
+  display:flex;flex-wrap:wrap;gap:0;
   align-content:flex-start;
 }
 .body::-webkit-scrollbar{width:5px}
 .body::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:3px}
 
+/* 2026-05-10 flat-modern bubble — every faux-3D effect (specular
+   highlight strip, inset highlight/shadow box-shadows) removed for a
+   contemporary minimalist look. Tile layout (no gaps, no rounded
+   corners, full-row stretch via `flex: 1 1 78px`) and the requested
+   80% colour transparency are preserved. */
 .bubble{
-  display:inline-flex;align-items:center;
-  height:23px;padding:0 8px;border-radius:5px;
+  flex:1 1 78px;
+  display:inline-flex;align-items:center;justify-content:center;
+  height:25px;padding:0 8px;
+  border:none;border-radius:0;
   font-size:11px;font-weight:700;
-  border:1px solid rgba(0,0,0,0.50);
   white-space:nowrap;
   cursor:grab;
-  box-shadow:0 1px 2px rgba(0,0,0,0.30);
   user-select:none;
+  position:relative;
+  overflow:hidden;
+  /* 80%-opaque flat tint — `color-mix` blends the buff colour with
+     transparent to keep the toolbar background showing through. */
+  background:color-mix(in srgb, var(--bubble-bg, #555) 80%, transparent) !important;
+  transition:background .12s ease, opacity .12s ease;
 }
-.bubble:hover{filter:brightness(1.10)}
-.bubble:active{cursor:grabbing}
+/* Hover affordance: dim slightly via opacity (no brightness/saturate
+   filters that mimic the old glossy roll-over). */
+.bubble:hover{opacity:0.86}
+.bubble:active{cursor:grabbing;opacity:0.74}
 
-/* Eraser pill — solid red, no gradient */
+/* Eraser pill — full-width row, flat red 80%. */
 .bubble.eraser{
-  background:var(--red)!important;
+  background:color-mix(in srgb, var(--red) 80%, transparent)!important;
   color:#fff!important;
-  border-color:rgba(0,0,0,0.55)!important;
   flex:0 0 100%;
   justify-content:center;
-  height:26px;font-size:11.5px;letter-spacing:0.3px;
+  height:28px;font-size:11.5px;letter-spacing:0.3px;
 }
 
-/* Manage pill — solid warm orange so it reads as a distinct "this
-   one opens a popup, the red one nukes everything" affordance. */
+/* Manage pill — full-width row, flat warm 80%. */
 .bubble.manage{
-  background:var(--warn)!important;
+  background:color-mix(in srgb, var(--warn) 80%, transparent)!important;
   color:#fff!important;
-  border-color:rgba(0,0,0,0.55)!important;
   flex:0 0 100%;
   justify-content:center;
-  height:26px;font-size:11.5px;letter-spacing:0.3px;
+  height:28px;font-size:11.5px;letter-spacing:0.3px;
 }
 
 /* Edit-mode bubble interactions */
@@ -288,6 +414,14 @@ body.edit-mode .bubble.drop-after{
 }
 .popup.open{display:flex}
 .pop-row{display:flex;align-items:center;gap:6px}
+.pop-row.rounds{align-items:center}
+.pop-rounds-label{
+  flex:0 0 auto;
+  color:var(--text-mute);
+  font-size:10.5px;
+  font-weight:700;
+  white-space:nowrap;
+}
 .pop-color{
   flex-shrink:0;width:30px;height:28px;
   padding:0;border:1px solid var(--border-strong);border-radius:4px;
@@ -295,7 +429,7 @@ body.edit-mode .bubble.drop-after{
 }
 .pop-color::-webkit-color-swatch-wrapper{padding:1px}
 .pop-color::-webkit-color-swatch{border:none;border-radius:3px}
-.pop-name{
+.pop-name,.pop-rounds{
   flex:1;
   background:var(--bg-strong);
   border:1px solid var(--accent);
@@ -303,8 +437,10 @@ body.edit-mode .bubble.drop-after{
   font-size:11.5px;font-weight:700;
   padding:0 8px;height:28px;border-radius:4px;
   outline:none;
+  min-width:0;
 }
-.pop-name:focus{
+.pop-rounds{width:72px;max-width:72px;box-sizing:border-box;text-align:center}
+.pop-name:focus,.pop-rounds:focus{
   border-color:var(--accent-dim);
   box-shadow:0 0 0 1px var(--accent);
 }

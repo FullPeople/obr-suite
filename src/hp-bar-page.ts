@@ -9,6 +9,7 @@
 // existing bubbles plugin.
 
 import OBR from "@owlbear-rodeo/sdk";
+import { installDebugOverlay } from "./utils/debugOverlay";
 import { bindPanelDrag } from "./utils/panelDrag";
 import { PANEL_IDS } from "./utils/panelLayout";
 import {
@@ -124,6 +125,7 @@ lockBtn?.addEventListener("click", async () => {
 });
 
 OBR.onReady(async () => {
+  installDebugOverlay();
   try {
     isGM = (await OBR.player.getRole()) === "GM";
   } catch {}

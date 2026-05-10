@@ -135,7 +135,7 @@ html,body{
 .d20-box .dice-btn{flex:1;min-width:0}
 .d20-box .advdis-stack{
   display:flex;flex-direction:column;
-  gap:3px;
+  gap:2px;
   flex:0 0 70px;
 }
 .d20-box .advdis-stack .ad-btn{
@@ -144,7 +144,7 @@ html,body{
   border:1px solid var(--border);
   border-radius:6px;
   color:var(--text-dim);
-  font-size:10.5px;font-weight:700;
+  font-size:10px;font-weight:700;
   font-family:inherit;cursor:pointer;
   letter-spacing:0.3px;
   padding:0 4px;
@@ -165,6 +165,19 @@ html,body{
 .d20-box .advdis-stack .ad-btn.dis:hover{
   background:rgba(231,76,60,0.14);
   border-color:rgba(231,76,60,0.55);
+}
+.d20-box .advdis-stack .ad-btn.crit{
+  color:#ffb74d;
+  border-color:rgba(255,167,38,0.35);
+}
+.d20-box .advdis-stack .ad-btn.crit:hover{
+  background:rgba(255,167,38,0.16);
+  border-color:rgba(255,167,38,0.55);
+}
+.d20-box .advdis-stack .ad-btn.crit.on{
+  background:rgba(255,167,38,0.28);
+  color:#ffd180;
+  border-color:rgba(255,167,38,0.7);
 }
 
 /* Section labels */
@@ -481,70 +494,214 @@ html,body{
   background:linear-gradient(180deg, rgba(95,50,140,0.6), rgba(60,30,95,0.7));
   color:#ddc0f0;
 }
+/* Per-card 重击 button — amber, same shape as 投掷 / 暗骰. Doubles
+   dice counts in the combo's saved expression at roll-time only;
+   stored expression isn't mutated. */
+.combo-actions .combo-crit{
+  flex:1;
+  background:linear-gradient(180deg, rgba(255,167,38,0.20), rgba(180,110,20,0.30));
+  border-color:rgba(255,167,38,0.45);
+  color:#ffb74d;font-weight:700;letter-spacing:0.3px;
+}
+.combo-actions .combo-crit:hover{
+  background:linear-gradient(180deg, rgba(255,167,38,0.32), rgba(180,110,20,0.42));
+  color:#ffd180;
+}
 
 .empty-state{text-align:center;color:var(--text-dim);font-size:12px;padding:24px 12px}
 
-/* === History === */
-.history-list{display:flex;flex-direction:column;gap:6px}
-.history-item{
+/* === History — visual vocabulary mirrors the bottom-right history
+   modal (dice-history.html) so a roll looks the same in both UIs.
+   Dice = PNG icons inside pill-shaped chips; collective rolls collapse
+   into a member-strip with one card per token; repeat rolls into a
+   flow-wrap repeat-strip; solo rolls show a single formula line.
+   Active replay tints the entry's left border + adds a glow. */
+.history-list{display:flex;flex-direction:column;gap:4px}
+
+.entry{
+  display:flex;align-items:center;gap:5px;
+  /* 2026-05-08 redo: bumped all internal fonts +30% for legibility,
+     compensated by tightening padding/line-heights so the row's
+     overall vertical footprint actually SHRINKS. Earlier draft
+     left visible whitespace above/below tiny text — that's the
+     "条目过高但字体过小" complaint we're answering here. */
+  padding:1px 6px;
   background:var(--bg-card);
   border:1px solid var(--border);
-  border-left:3px solid var(--accent);
-  border-radius:6px;
-  padding:6px 10px;
+  border-left:2px solid var(--accent);
+  border-radius:4px;
+  cursor:pointer;
+  transition:background .12s, border-color .12s, transform .08s;
 }
-.history-item.crit{border-left-color:#ffcc33}
-.history-item.fail{border-left-color:#ff6b6b}
-.history-head{
-  display:flex;justify-content:space-between;align-items:baseline;
-  font-size:11.5px;color:var(--text-dim);
+.entry:hover{
+  background:rgba(93,173,226,0.08);
+  border-color:rgba(93,173,226,0.32);
 }
-.history-player{color:var(--text);font-weight:700}
-.history-formula{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--text-dim);margin-top:2px}
-.history-rolls{
-  font-family:ui-monospace,monospace;font-size:12px;color:var(--text);
-  display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:2px;
+.entry:active{transform:scale(0.99)}
+.entry.crit{border-left-color:#ffcc33}
+.entry.fail{border-left-color:#ff6b6b}
+.entry.hidden-roll{
+  background:linear-gradient(180deg, rgba(110,55,160,0.30), rgba(60,30,95,0.45));
+  border-left-color:rgba(180,110,225,0.85);
 }
-.history-die{
-  display:inline-flex;align-items:center;justify-content:center;
-  min-width:22px;height:20px;padding:0 6px;
-  background:var(--bg-strong);border:1px solid var(--border);border-radius:4px;
-  font-size:11.5px;font-weight:700;
+/* Active replay → glow with the roller's color so the source of the
+   on-canvas overlay is unmistakable. Same row click toggles it off. */
+.entry.replay-on{
+  border-color:var(--player-color, #5dade2);
+  box-shadow:0 0 0 1px var(--player-color, #5dade2), 0 0 12px rgba(93,173,226,0.35);
+  background:linear-gradient(180deg, rgba(93,173,226,0.10), var(--bg-card));
 }
-.history-die.high{color:#ffcc33}
-.history-die.low{color:#ff6b6b}
-.history-die.loser{opacity:0.4;text-decoration:line-through}
-.history-total{font-size:14px;font-weight:800;color:var(--accent-on);margin-left:auto}
+.coll-entry{
+  border-left-color:rgba(46,204,113,0.55);
+}
 
-/* Repeat-roll pills — `repeat(N, …)` iterations laid out as inline
-   pills that flow left-to-right and wrap to a new line only when
-   they can't fit. Matches the user's "顺序排列除非排不下再换行
-   (flow)" call. Each pill = #N · dice chips · ±mod · row total. */
-.repeat-pill-flow{
-  display:flex;flex-wrap:wrap;
-  gap:4px;margin-top:3px;
+.entry .body{
+  flex:1;min-width:0;
+  display:flex;flex-direction:column;gap:0;
+  line-height:1.05;
 }
-.repeat-pill{
-  display:inline-flex;align-items:center;
-  gap:4px;padding:2px 6px;
-  background:var(--bg-strong);
-  border:1px solid var(--border);
-  border-radius:6px;
-  font-family:ui-monospace,monospace;
+.entry .line1{
+  display:flex;align-items:baseline;justify-content:space-between;gap:4px;
+  line-height:1.05;
+}
+.entry .player{
+  font-size:11.5px;font-weight:700;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  min-width:0;flex:1;
+  line-height:1.05;
+}
+.entry .ago{
+  font-size:9.5px;color:var(--text-dim);font-weight:600;
+  white-space:nowrap;flex-shrink:0;
+}
+.entry .dark-tag{
+  flex-shrink:0;display:inline-block;
+  padding:1px 5px;
+  background:rgba(120,60,180,0.7);
+  border-radius:3px;
+  font-size:9px;font-weight:800;
+  color:#fff;letter-spacing:0.4px;
+  text-transform:uppercase;
+  margin-right:4px;
+}
+.entry .coll-tag{
+  flex-shrink:0;display:inline-block;
+  padding:1px 5px;
+  background:rgba(46,204,113,0.55);
+  border-radius:3px;
+  font-size:9px;font-weight:800;
+  color:#fff;letter-spacing:0.4px;
+  margin-right:4px;
+}
+
+/* === Solo formula line === */
+.entry .formula{
+  display:flex;align-items:center;gap:4px;
   font-size:11px;
+  margin-top:0;
 }
-.repeat-pill .history-die{
-  min-width:18px;height:16px;padding:0 4px;font-size:10.5px;
-  background:transparent;border:none;
+.entry .dice-list{
+  flex:1 1 auto;
+  display:flex;flex-wrap:wrap;align-items:center;
+  gap:2px;min-width:0;
 }
-.repeat-pill .history-total{
-  font-size:11.5px;font-weight:800;color:var(--accent-on);margin-left:0;
+.die-chip{
+  display:inline-flex;align-items:center;gap:2px;
+  padding:0 4px 0 2px;
+  border-radius:6px;
+  background:rgba(255,255,255,0.06);
+  font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
+  font-weight:700;color:var(--text);
+  font-size:10.5px;
+  flex-shrink:0;height:14px;
 }
-.repeat-pill-idx{
-  font-size:9.5px;font-weight:700;color:var(--text-dim);
-  min-width:16px;text-align:right;
+.die-chip img{width:12px;height:12px;display:block;-webkit-user-drag:none}
+.die-chip.crit{color:#ffd34d;background:rgba(255,200,0,0.16);box-shadow:0 0 6px rgba(255,200,0,0.45)}
+.die-chip.fail{color:#ff8a7a;background:rgba(231,76,60,0.18)}
+.die-chip.loser{opacity:0.4;text-decoration:line-through}
+.die-chip.subtract{opacity:0.55}
+
+.entry .mod{
+  font-family:ui-monospace,monospace;font-size:10.5px;font-weight:700;
+  color:var(--text-dim);flex-shrink:0;
 }
-.repeat-pill-mod{font-size:10.5px;color:var(--text-dim)}
+.entry .eq{color:var(--text-dim);flex-shrink:0;font-weight:700;font-size:10.5px}
+.entry .total{
+  font-family:ui-monospace,monospace;font-size:12.5px;font-weight:900;
+  color:var(--accent);flex-shrink:0;
+}
+.entry .label-tag{
+  font-size:9.5px;color:var(--text-dim);font-style:italic;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  min-width:0;flex:0 1 auto;
+  margin-left:2px;
+}
+
+/* === Collective member-strip + repeat-strip ===
+   Each member of a collective (or each iteration of a repeat) renders
+   as its own pill-shaped card. The strip wraps when crowded so long
+   group rolls don't push the entry's height through the roof. */
+.entry .member-strip{
+  display:flex;flex-wrap:wrap;align-items:center;
+  gap:3px;margin-top:1px;
+}
+.member-card{
+  display:inline-flex;align-items:center;
+  gap:3px;
+  padding:1px 7px 1px 4px;
+  border-radius:8px;
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.10);
+  white-space:nowrap;flex-shrink:0;
+  font-size:13.5px;
+  transition:background .12s, border-color .12s;
+}
+.member-card:hover{
+  background:rgba(93,173,226,0.14);
+  border-color:rgba(93,173,226,0.32);
+}
+.member-card.crit{
+  background:rgba(255,200,0,0.14);
+  border-color:rgba(255,200,0,0.42);
+}
+.member-card.fail{
+  background:rgba(231,76,60,0.14);
+  border-color:rgba(231,76,60,0.40);
+}
+.member-card.hidden-roll{
+  background:rgba(155,89,182,0.18);
+  border-color:rgba(180,110,225,0.45);
+}
+.member-card .die-chip{
+  background:transparent;
+  border-radius:0;
+  padding:0;height:auto;
+  font-size:13px;
+}
+.member-card .die-chip img{width:17px;height:17px}
+.member-card .mod{font-size:13px}
+.member-card .eq{font-size:13px;color:var(--text-dim)}
+.member-card .total{
+  font-family:ui-monospace,monospace;
+  font-size:15px;font-weight:900;
+  color:var(--accent);
+  margin-left:2px;
+}
+.member-card.crit .total{color:#ffd34d}
+.member-card.fail .total{color:#ff8a7a}
+
+.entry .repeat-strip{
+  display:flex;align-items:center;
+  gap:3px;margin-top:1px;
+}
+.entry .repeat-strip.is-flow{
+  flex-direction:row;flex-wrap:wrap;
+}
+.entry .repeat-strip .member-card{padding-left:4px}
+.repeat-idx{
+  font-size:12.5px;color:var(--text-dim);font-weight:700;
+  min-width:22px;text-align:right;margin-right:2px;
+}
 
 .history-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
 .seg{
@@ -668,6 +825,7 @@ html,body{
             <div class="advdis-stack">
               <button class="ad-btn adv" id="btnAdv" type="button" data-i18n="diceBtnAdv" data-i18n-title="diceTitleAdv" title="优势 = 投两次 d20，取较高（不会自动投掷）">优势</button>
               <button class="ad-btn dis" id="btnDis" type="button" data-i18n="diceBtnDis" data-i18n-title="diceTitleDis" title="劣势 = 投两次 d20，取较低（不会自动投掷）">劣势</button>
+              <button class="ad-btn crit" id="btnCrit" type="button" data-i18n="diceBtnCrit" data-i18n-title="diceTitleCrit" title="重击 = 把表达式里所有骰子数量翻倍（加值不变）。点击应用，再次点击取消。">重击</button>
             </div>
           </div>
           <button class="dice-btn" data-type="d8" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">

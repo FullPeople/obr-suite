@@ -7,10 +7,44 @@ import { assetUrl } from "../../../asset-base";
 // round-trips per focus change, the root cause of the lag on hover / next-turn).
 
 const RING_SIZE = 200;
+// 2026-05-10: per-token sizing — at attach time we read the target
+// image's rendered footprint (image.width * dpiRatio * scale) and
+// scale the ring SVG so its diameter matches `max(w, h) + 2 *
+// RING_PADDING_PX`. Mirrors statusTracker/circles.ts's getTokenCircleSpec.
+const RING_PADDING_PX = 14;
+const RING_FALLBACK_DIAMETER = 180;
 const ACTIVE_URL = assetUrl("ring-active.svg?v=3");
+// Gray sibling of ring-active.svg, swapped in when the active token has
+// `data.invisible: true`. Stamped on a SEPARATE local item (kept alive
+// in parallel) so we can switch the active visual without delete + add.
+const ACTIVE_STEALTH_URL = assetUrl("ring-active-stealth.svg?v=3");
 const HOVER_URL = assetUrl("ring-hover.svg?v=3");
 
+// Compute the diameter (in scene-coord pixels) needed for a ring to
+// hug the given target token. Falls back to a sensible default when
+// the target isn't an Image or any data is missing.
+async function targetRingDiameter(targetId: string): Promise<number> {
+  try {
+    const items = await OBR.scene.items.getItems([targetId]);
+    const it = items[0] as Image | undefined;
+    if (!it || it.type !== "IMAGE") return RING_FALLBACK_DIAMETER;
+    const sceneDpi = await OBR.scene.grid.getDpi().catch(() => 150);
+    const imgDpi = it.grid?.dpi ?? sceneDpi;
+    const sx = Math.abs(it.scale?.x ?? 1);
+    const sy = Math.abs(it.scale?.y ?? 1);
+    const dpiRatio = sceneDpi / imgDpi;
+    const w = Math.abs((it.image?.width ?? 0) * dpiRatio * sx);
+    const h = Math.abs((it.image?.height ?? 0) * dpiRatio * sy);
+    const longest = Math.max(w, h);
+    if (!Number.isFinite(longest) || longest <= 0) return RING_FALLBACK_DIAMETER;
+    return longest + 2 * RING_PADDING_PX;
+  } catch {
+    return RING_FALLBACK_DIAMETER;
+  }
+}
+
 const TAG_ACTIVE = "com.initiative-tracker/ring-active";
+const TAG_ACTIVE_STEALTH = "com.initiative-tracker/ring-active-stealth";
 const TAG_HOVER = "com.initiative-tracker/ring-hover";
 // Stamped onto the hover ring every time it's (re-)shown so a
 // long-lived watchdog in the BG iframe can fade-park the ring even
@@ -24,7 +58,11 @@ const PARK = { x: -1000000, y: -1000000 };
 
 // --- Active ring ---
 let activeRingId: string | null = null;
+let activeStealthRingId: string | null = null;
 let activeTargetId: string | null = null;
+// Which variant is currently visible — drives which item the rotate
+// timer updates and which one we hide on a target swap.
+let activeMode: "normal" | "stealth" = "normal";
 let rotateTimer: ReturnType<typeof setInterval> | null = null;
 let rotateAngle = 0;
 // Skip a rotation tick if the previous SDK call hasn't returned yet. Keeps
@@ -72,7 +110,11 @@ async function ensureRing(url: string, tag: string): Promise<string | null> {
         .disableHit(true)
         .visible(false)
         .metadata({ [tag]: true })
-        .disableAttachmentBehavior(["VISIBLE", "LOCKED", "COPY"])
+        // 2026-05-10: also disable SCALE inheritance — we set the ring's
+        // own `scale` to (target_diameter / RING_SIZE) at attach time
+        // and don't want OBR to multiply the parent's scale on top
+        // (would re-introduce the "Large token = giant ring" issue).
+        .disableAttachmentBehavior(["VISIBLE", "LOCKED", "COPY", "SCALE"])
         .build();
       await OBR.scene.local.addItems([item]);
       return item.id;
@@ -87,21 +129,42 @@ async function ensureRing(url: string, tag: string): Promise<string | null> {
 }
 
 // --- Active ring: swap target via a single updateItems, keep rotating. ---
+//
+// Two parallel rings (red + gray) live as separate scene.local items so
+// switching between "normal" and "stealth" mode just toggles which one
+// is visible — no delete + re-add flicker. Both lazy-init on first use;
+// only the currently-visible variant is updated by the rotation timer.
 
-export async function setActiveRing(targetId: string | null) {
-  if (activeTargetId === targetId && activeRingId) return;
-  activeTargetId = targetId;
+export async function setActiveRing(
+  targetId: string | null,
+  mode: "normal" | "stealth" = "normal",
+) {
+  if (
+    activeTargetId === targetId &&
+    activeMode === mode &&
+    ((mode === "normal" && activeRingId) || (mode === "stealth" && activeStealthRingId))
+  ) {
+    return;
+  }
 
-  if (!activeRingId) {
+  // Lazy-create the variant we need.
+  if (mode === "normal" && !activeRingId) {
     activeRingId = await ensureRing(ACTIVE_URL, TAG_ACTIVE);
     if (!activeRingId) { activeTargetId = null; return; }
   }
+  if (mode === "stealth" && !activeStealthRingId) {
+    activeStealthRingId = await ensureRing(ACTIVE_STEALTH_URL, TAG_ACTIVE_STEALTH);
+    if (!activeStealthRingId) { activeTargetId = null; return; }
+  }
 
-  if (targetId === null) {
-    // Park + hide + detach. Also stop the rotation timer.
-    if (rotateTimer) { clearInterval(rotateTimer); rotateTimer = null; }
+  const prevMode = activeMode;
+  activeTargetId = targetId;
+  activeMode = mode;
+
+  // Park (hide + detach + move off-map) a ring by id.
+  const parkRing = async (ringId: string) => {
     try {
-      await OBR.scene.local.updateItems([activeRingId], (drafts) => {
+      await OBR.scene.local.updateItems([ringId], (drafts) => {
         for (const d of drafts) {
           d.visible = false;
           d.attachedTo = undefined;
@@ -109,25 +172,47 @@ export async function setActiveRing(targetId: string | null) {
         }
       });
     } catch {}
+  };
+
+  if (targetId === null) {
+    if (rotateTimer) { clearInterval(rotateTimer); rotateTimer = null; }
+    if (activeRingId) await parkRing(activeRingId);
+    if (activeStealthRingId) await parkRing(activeStealthRingId);
     return;
+  }
+
+  // Mode flip: park the previous variant before showing the new one.
+  if (prevMode !== mode) {
+    if (prevMode === "normal" && activeRingId) await parkRing(activeRingId);
+    if (prevMode === "stealth" && activeStealthRingId) await parkRing(activeStealthRingId);
   }
 
   // OBR does NOT snap an attached item to its target on attachment change —
   // we still need to read the target's position and set it explicitly.
+  // 2026-05-10: also fetch the target's rendered diameter so the ring
+  // resizes to fit Large / Huge / Gargantuan creatures.
   let targetPos = { x: 0, y: 0 };
   try {
     const targets = await OBR.scene.items.getItems([targetId]);
-    if (targets.length === 0 || activeTargetId !== targetId) return;
+    if (
+      targets.length === 0 ||
+      activeTargetId !== targetId ||
+      activeMode !== mode
+    ) return;
     targetPos = targets[0].position;
   } catch { return; }
+  const ringScale = (await targetRingDiameter(targetId)) / RING_SIZE;
+  if (activeTargetId !== targetId || activeMode !== mode) return;
 
-  const ringId = activeRingId;
+  const ringId = mode === "normal" ? activeRingId : activeStealthRingId;
+  if (!ringId) return;
   try {
     await OBR.scene.local.updateItems([ringId], (drafts) => {
       for (const d of drafts) {
         d.visible = true;
         d.attachedTo = targetId;
         d.position = targetPos;
+        d.scale = { x: ringScale, y: ringScale };
         d.rotation = 0;
       }
     });
@@ -135,18 +220,18 @@ export async function setActiveRing(targetId: string | null) {
   rotateAngle = 0;
 
   // Reuse the rotation timer across target swaps — no teardown/restart.
-  // 5 FPS × 10°/tick = 7.2s per full turn, close to the original 8s look.
-  // 1/3 the SDK traffic of the old 15 FPS × 3° loop. The in-flight guard
-  // further prevents back-pressure when OBR is slow to apply updates, so
-  // hover-ring updates aren't queued behind a rotation backlog.
+  // 5 FPS × 10°/tick = 7.2s per full turn. The in-flight guard prevents
+  // back-pressure when OBR is slow to apply updates.
   if (!rotateTimer) {
     rotateTimer = setInterval(() => {
       if (rotateInFlight) return;
-      if (!activeRingId || !activeTargetId) return;
+      if (!activeTargetId) return;
+      const cur = activeMode === "normal" ? activeRingId : activeStealthRingId;
+      if (!cur) return;
       rotateAngle = (rotateAngle + 10) % 360;
       rotateInFlight = true;
       OBR.scene.local
-        .updateItems([activeRingId], (drafts) => {
+        .updateItems([cur], (drafts) => {
           for (const d of drafts) d.rotation = rotateAngle;
         })
         .catch(() => {})
@@ -214,6 +299,9 @@ export async function setHoverRing(targetId: string | null) {
     if (targets.length === 0 || hoverTargetId !== targetId) return;
     targetPos = targets[0].position;
   } catch { return; }
+  // 2026-05-10: per-target diameter for the hover ring too.
+  const hoverScale = (await targetRingDiameter(targetId)) / RING_SIZE;
+  if (hoverTargetId !== targetId) return;
 
   try {
     await OBR.scene.local.updateItems([ringId], (drafts) => {
@@ -221,6 +309,7 @@ export async function setHoverRing(targetId: string | null) {
         d.visible = true;
         d.attachedTo = targetId;
         d.position = targetPos;
+        d.scale = { x: hoverScale, y: hoverScale };
         // Stamp the show timestamp — bg poll uses this as the
         // "freshness" marker. While the panel is open and re-firing
         // hover events, the ts stays fresh and the bg watchdog skips
@@ -239,8 +328,11 @@ export async function clearAllRings() {
   if (hoverAutoClear) { clearTimeout(hoverAutoClear); hoverAutoClear = null; }
   activeTargetId = null;
   hoverTargetId = null;
-  // Park both rings (kept alive for next use — no delete).
-  const ids = [activeRingId, hoverRingId].filter((x): x is string => !!x);
+  // Park ALL rings — including the stealth variant, so a scene change
+  // mid-stealth-turn doesn't leave a gray ring rotating somewhere.
+  const ids = [activeRingId, activeStealthRingId, hoverRingId].filter(
+    (x): x is string => !!x,
+  );
   if (ids.length === 0) return;
   try {
     await OBR.scene.local.updateItems(ids, (drafts) => {

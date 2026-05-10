@@ -32,8 +32,9 @@ const xBtn = document.getElementById("x") as HTMLButtonElement;
 const tabsEl = document.getElementById("tabs") as HTMLDivElement;
 const tabSceneBtn = document.getElementById("tab-scene") as HTMLButtonElement;
 const tabRoomBtn = document.getElementById("tab-room") as HTMLButtonElement;
+const tabPerformanceBtn = document.getElementById("tab-performance") as HTMLButtonElement;
 
-type Mode = "item" | "scene" | "room";
+type Mode = "item" | "scene" | "room" | "performance";
 let currentMode: Mode = "item";
 let currentItemId: string | null = null;
 
@@ -41,7 +42,7 @@ const params = new URLSearchParams(location.search);
 const initialItemId = params.get("id") ?? null;
 const initialMode: Mode = (() => {
   const m = params.get("mode");
-  return m === "scene" || m === "room" ? m : "item";
+  return m === "scene" || m === "room" || m === "performance" ? m : "item";
 })();
 currentMode = initialMode;
 
@@ -54,6 +55,24 @@ const myPopoverId = initialMode === "item" ? POPOVER_ITEM_ID : POPOVER_META_ID;
 // clicks a top action-bar button while the meta popover is already
 // open, jumping to the requested tab without reopening the iframe.
 const BC_INSPECTOR_SET_MODE = "com.obr-suite/metadata-inspector/set-mode";
+
+// FPS measurement
+let fpsCounter = 0;
+let lastTime = performance.now();
+let frameCount = 0;
+
+function measureFPS() {
+  const now = performance.now();
+  frameCount++;
+  
+  if (now - lastTime >= 1000) { // Update every second
+    fpsCounter = Math.round((frameCount * 1000) / (now - lastTime));
+    frameCount = 0;
+    lastTime = now;
+  }
+  
+  requestAnimationFrame(measureFPS);
+}
 
 interface PluginInfo {
   prefix: string;
@@ -261,10 +280,10 @@ async function loadItemMode(): Promise<void> {
 
 async function loadSceneMode(): Promise<void> {
   try {
-    const meta = await OBR.scene.getMetadata();
+    const meta = (await OBR.scene.getMetadata()) ?? {};
     const keyCount = Object.keys(meta).length;
     const subline = `<b style="color:#7ec8f0">OBR.scene.getMetadata()</b> · ${keyCount} 个 key`;
-    renderRawMetadata("场景元数据", subline, meta as Record<string, unknown>);
+    renderRawMetadata("场景元数据", subline, meta);
   } catch (e) {
     bodyEl.innerHTML = `<div class="empty">加载场景元数据失败：${escapeHtml(String((e as Error).message ?? e))}</div>`;
   }
@@ -272,12 +291,30 @@ async function loadSceneMode(): Promise<void> {
 
 async function loadRoomMode(): Promise<void> {
   try {
-    const meta = await OBR.room.getMetadata();
+    const meta = (await OBR.room.getMetadata()) ?? {};
     const keyCount = Object.keys(meta).length;
     const subline = `<b style="color:#7ec8f0">OBR.room.getMetadata()</b> · ${keyCount} 个 key · <span style="color:#9aa0b3">跨 scene 的房间级数据</span>`;
-    renderRawMetadata("房间元数据", subline, meta as Record<string, unknown>);
+    renderRawMetadata("房间元数据", subline, meta);
   } catch (e) {
     bodyEl.innerHTML = `<div class="empty">加载房间元数据失败：${escapeHtml(String((e as Error).message ?? e))}</div>`;
+  }
+}
+
+async function loadPerformanceMode(): Promise<void> {
+  try {
+    const memoryInfo = (performance as any).memory;
+    const perfData: Record<string, unknown> = {
+      fps: fpsCounter,
+      memoryUsed: memoryInfo ? Math.round(memoryInfo.usedJSHeapSize / 1024 / 1024) + ' MB' : 'N/A',
+      memoryTotal: memoryInfo ? Math.round(memoryInfo.totalJSHeapSize / 1024 / 1024) + ' MB' : 'N/A',
+      memoryLimit: memoryInfo ? Math.round(memoryInfo.jsHeapSizeLimit / 1024 / 1024) + ' MB' : 'N/A',
+      timestamp: new Date().toISOString(),
+      note: 'Drawcall count is not accessible from web APIs'
+    };
+    const subline = `<b style="color:#7ec8f0">performance.memory</b> · <span style="color:#9aa0b3">浏览器性能指标 (Chrome only)</span>`;
+    renderRawMetadata("性能指标", subline, perfData);
+  } catch (e) {
+    bodyEl.innerHTML = `<div class="empty">加载性能数据失败：${escapeHtml(String((e as Error).message ?? e))}</div>`;
   }
 }
 
@@ -285,6 +322,7 @@ async function refresh(): Promise<void> {
   if (currentMode === "item") await loadItemMode();
   else if (currentMode === "scene") await loadSceneMode();
   else if (currentMode === "room") await loadRoomMode();
+  else if (currentMode === "performance") await loadPerformanceMode();
 }
 
 function setMode(next: Mode): void {
@@ -295,6 +333,7 @@ function setMode(next: Mode): void {
   currentMode = next;
   tabSceneBtn.classList.toggle("on", next === "scene");
   tabRoomBtn.classList.toggle("on", next === "room");
+  tabPerformanceBtn.classList.toggle("on", next === "performance");
   void refresh();
 }
 
@@ -333,6 +372,9 @@ function watchContentSize(): void {
 // --- Wire-up --------------------------------------------------------
 
 OBR.onReady(async () => {
+  // Start FPS measurement
+  requestAnimationFrame(measureFPS);
+
   // Seed selected item: prefer URL param (when background opened us
   // for a specific item) else read the live selection.
   if (initialItemId) {
@@ -352,19 +394,21 @@ OBR.onReady(async () => {
     if (tabsEl) tabsEl.style.display = "";
     tabSceneBtn.classList.toggle("on", currentMode === "scene");
     tabRoomBtn.classList.toggle("on", currentMode === "room");
+    tabPerformanceBtn.classList.toggle("on", currentMode === "performance");
   }
 
   void refresh().then(() => watchContentSize());
 
-  // Tab clicks switch between scene / room only.
+  // Tab clicks switch between scene / room / performance.
   tabSceneBtn.addEventListener("click", () => setMode("scene"));
   tabRoomBtn.addEventListener("click", () => setMode("room"));
+  tabPerformanceBtn.addEventListener("click", () => setMode("performance"));
 
   // Background broadcasts SET_MODE when the user clicks a top
   // action-bar button while we're already open.
   const unsubSetMode = OBR.broadcast.onMessage(BC_INSPECTOR_SET_MODE, (msg) => {
     const data = msg.data as { mode?: Mode } | undefined;
-    if (data?.mode === "item" || data?.mode === "scene" || data?.mode === "room") {
+    if (data?.mode === "item" || data?.mode === "scene" || data?.mode === "room" || data?.mode === "performance") {
       setMode(data.mode);
     }
   });

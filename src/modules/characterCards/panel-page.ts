@@ -181,6 +181,10 @@ async function setMaximized(next: boolean) {
 
 function showError(msg: string) {
   errEl.textContent = msg;
+  // pre-line so the multi-line upload-failure hint (新行分隔) renders
+  // with line breaks. textContent with default white-space:normal
+  // collapses \n into spaces.
+  errEl.style.whiteSpace = "pre-line";
   errEl.style.display = msg ? "block" : "none";
 }
 
@@ -270,7 +274,9 @@ async function uploadFile(file: File) {
     showStatus(`${ICONS.check} ${tt("ccPanelUploaded")}: ${escapeHtml(entry.name)}`);
     render();
   } catch (e: any) {
-    showError(`${tt("ccPanelUploadFailed")}: ${e?.message || e}`);
+    showError(
+      `${tt("ccPanelUploadFailed")}: ${e?.message || e}\n${tt("ccPanelUploadHint")}`,
+    );
   } finally {
     sideEl?.classList.remove("busy");
   }
@@ -296,15 +302,51 @@ function pickXlsxFile(): Promise<File | null> {
   });
 }
 
+// 2026-05-10: multi-file picker for bulk upload. Same SecurityError
+// caveat as above (no FSA in iframes), so it's just a plain
+// `<input type=file multiple>`.
+function pickXlsxFiles(): Promise<File[]> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".xlsx";
+    input.multiple = true;
+    input.onchange = () => {
+      const out = input.files ? Array.from(input.files) : [];
+      resolve(out);
+    };
+    input.addEventListener("cancel", () => resolve([]));
+    input.click();
+  });
+}
+
 // "Link a local xlsx" entry point. With FSA blocked, this just opens
 // a regular file picker; the resulting card behaves identically to a
 // drag-drop upload. The refresh button on each row uses the same
 // picker on subsequent clicks so the user can re-pick the freshly
 // edited xlsx without deleting + re-uploading the card.
+//
+// 2026-05-10: now multi-select capable — picking N files uploads each
+// one sequentially, creating N new cards. UI stays responsive because
+// each uploadFile() is awaited (the side-panel busy spinner stays up
+// for the whole batch).
 async function linkLocalFile(): Promise<void> {
-  const f = await pickXlsxFile();
-  if (!f) return;
-  await uploadFile(f);
+  const files = await pickXlsxFiles();
+  if (files.length === 0) return;
+  await uploadFilesBatch(files);
+}
+
+// Upload an array of xlsx files in series. Stops on the first failure
+// so the user can see WHICH file broke and why (the side-panel error
+// banner already surfaces messages from uploadFile).
+async function uploadFilesBatch(files: File[]): Promise<void> {
+  for (const f of files) {
+    if (!f.name.toLowerCase().endsWith(".xlsx")) {
+      showError(`${tt("ccPanelOnlyXlsx")} (跳过 ${f.name})`);
+      continue;
+    }
+    await uploadFile(f);
+  }
 }
 
 // Refresh a card by re-picking the xlsx from disk. Cross-origin
@@ -446,8 +488,11 @@ function render() {
   // If the currently-active card was hidden by the DM and we're a
   // player, drop the view back to empty so the iframe doesn't keep
   // a stale reference visible.
-  if (current.type === "card" && !visibleCards.find((c) => c.id === current.id)) {
-    current = { type: "empty" };
+  if (current.type === "card") {
+    const currentId = current.id;
+    if (!visibleCards.find((c) => c.id === currentId)) {
+      current = { type: "empty" };
+    }
   }
   listEl.innerHTML = "";
   if (visibleCards.length === 0) {
@@ -654,13 +699,12 @@ OBR.onReady(async () => {
   sideEl.addEventListener("drop", async (e) => {
     e.preventDefault();
     sideEl.classList.remove("drag-over");
-    const f = e.dataTransfer?.files?.[0] ?? null;
-    if (!f) return;
-    if (!f.name.toLowerCase().endsWith(".xlsx")) {
-      showError(tt("ccPanelOnlyXlsx"));
-      return;
-    }
-    await uploadFile(f);
+    // 2026-05-10: drop accepts multiple xlsx files; uploadFilesBatch
+    // sequences them and surfaces per-file errors without aborting
+    // the whole batch on one bad file.
+    const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
+    if (files.length === 0) return;
+    await uploadFilesBatch(files);
   });
 
   document.addEventListener("dragover", (e) => { e.preventDefault(); });
@@ -734,7 +778,9 @@ OBR.onReady(async () => {
 
   // Initial load + react to scene metadata changes
   await refreshFromScene();
-  OBR.scene.onMetadataChange(() => { refreshFromScene(); });
+  OBR.scene.onMetadataChange((meta) => {
+    if (SCENE_META_KEY in meta) refreshFromScene();
+  });
 
   // Validate restored activeCardId still exists; otherwise clear
   if (current.type === "card") {

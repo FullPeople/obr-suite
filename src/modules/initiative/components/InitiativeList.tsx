@@ -22,6 +22,11 @@ interface Props {
    *  level because the rules depend on the viewer's role + ownership
    *  + combat-active state, which the row itself doesn't know. */
   resolveHpRatio: (item: InitiativeItem) => number | null;
+  /** Per-token tint color from the owner's player color (DM uses
+   *  their own DM color). Empty string = no tint, fall back to
+   *  default slot styling. Resolved in useInitiative against the
+   *  live OBR.party players + own OBR.player.color. */
+  resolveOwnerColor?: (item: InitiativeItem) => string;
   /** Forwarded to the .initiative-list root so panel-page can attach
    *  wheel + pointer drag handlers directly via ref instead of via
    *  a fragile querySelector lookup. */
@@ -38,7 +43,7 @@ interface Props {
 
 export function InitiativeList({
   items, inCombat, preparing, isGM, diceRolling, canEdit, canShowDice,
-  displayMode, resolveHpRatio, listRef,
+  displayMode, resolveHpRatio, resolveOwnerColor, listRef,
   onFocus, onHover, onUpdateCount, onUpdateModifier, onRoll,
   onEndTurn, endTurnLabel, lang,
 }: Props) {
@@ -76,6 +81,8 @@ export function InitiativeList({
           diceRolling={diceRolling}
           displayMode={displayMode}
           hpRatio={resolveHpRatio(item)}
+          ownerColor={resolveOwnerColor?.(item) ?? ""}
+          invisible={item.invisible}
           onFocus={onFocus}
           onHover={onHover}
           onUpdateCount={onUpdateCount}

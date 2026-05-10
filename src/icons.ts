@@ -40,8 +40,8 @@ export const ICONS = {
     `<line x1="6.5" y1="18.5" x2="9.5" y2="22"/>`,
     { sw: 1.6 }
   ),
-  // 👁️ — eye + light rings, vision plugin glyph. Mirrors
-  // public/vision-icon.svg.
+  // 👁️ — eye + light rings, fullFog plugin glyph. Mirrors
+  // public/fullfog-icon.svg.
   eye: svg(
     `<path d="M2 12 c2.5 -4.5 5.7 -6.5 10 -6.5 s7.5 2 10 6.5 c-2.5 4.5 -5.7 6.5 -10 6.5 s-7.5 -2 -10 -6.5 z"/>` +
     `<circle cx="12" cy="12" r="3.2"/>` +
@@ -216,6 +216,28 @@ export const ICONS = {
   portal: svg(
     `<circle cx="12" cy="12" r="9"/>` +
     `<path d="M12 3 a9 9 0 0 1 0 18 a5 5 0 0 1 0 -10 a2 2 0 0 1 0 4" stroke-width="1.6"/>`
+  ),
+  // 👀 — two heads peeking from behind a wall, "where's the trickster?"
+  trickster: svg(
+    `<path d="M2 14 h20 v8 h-20 z"/>` +
+    `<path d="M5 14 c0 -3.4 1.7 -5.4 4 -5.4 c2.3 0 4 2 4 5.4" stroke-width="1.6"/>` +
+    `<path d="M14 14 c0 -2.6 1.4 -4.2 3 -4.2 c1.6 0 3 1.6 3 4.2" stroke-width="1.6"/>` +
+    `<circle cx="9" cy="11.6" r="0.9" fill="currentColor" stroke="none"/>` +
+    `<circle cx="17" cy="12" r="0.8" fill="currentColor" stroke="none"/>`
+  ),
+  // ⊙ — circular crop frame: outer ring + inner content boundary
+  circleImage: svg(
+    `<circle cx="12" cy="12" r="9.5"/>` +
+    `<circle cx="12" cy="12" r="6" stroke-width="1.6"/>` +
+    `<path d="M9.2 13.5 l1.6 -1.9 l1.1 1.3 l1.4 -1.7 l2.1 2.3" stroke-width="1.4"/>`
+  ),
+  // 🔗 — two circles connected by a dashed arrow, "follow"
+  follow: svg(
+    `<circle cx="6.5" cy="12" r="2.4"/>` +
+    `<circle cx="17.5" cy="12" r="2.4"/>` +
+    `<path d="M9 12 L15 12" stroke-dasharray="2 2"/>` +
+    `<path d="M13 9 L15 12 L13 15"/>`,
+    { sw: 1.8 }
   ),
 };
 

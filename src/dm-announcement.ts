@@ -8,11 +8,16 @@
 //   ## 标题 [kind]         → opens a section. The `[kind]` suffix
 //                            picks the visual style. Recognised kinds:
 //
-//       [warn]      → red alert rows
-//       [info]      → blue alert rows
-//       [todo]      → numbered todo list (per item: `desc | tag | size`)
-//       [changelog] → version log (per item: `version · description`)
-//       [footer]    → credit line above the close button
+//       [warn]       → red alert rows
+//       [info]       → blue alert rows
+//       [issues]     → "Issues / Requests" table — bug/feature/wip/done
+//                      rows with severity tag (A-block "bug 需求表格高亮")
+//       [highlights] → image+text feature-spotlight cards
+//                      (B-block "新亮点图文")
+//       [todo]       → bulleted todo list (per item: `desc | tag | size`)
+//       [changelog]  → version log (per item: `version · description`)
+//                      C-block "简单更新日志"
+//       [footer]     → credit line above the close button
 //
 //     If no `[kind]` suffix is present the section renders as a plain
 //     paragraph block.
@@ -20,6 +25,9 @@
 //   - text                 → list item inside the current section
 //   - desc | tag | size    → todo-section format. `size`=`large` → big tag.
 //   - 1.0.57 · changes     → changelog-section format.
+//   - bug | high | desc    → issues-section format.
+//                            type ∈ bug/feature/wip/done, level optional.
+//   - imageUrl | title | desc → highlights-section. imageUrl can be empty.
 //   > comment              → author note, skipped.
 //
 // Inline:
@@ -35,7 +43,7 @@ import { assetUrl } from "./asset-base";
 
 const MODAL_ID = "com.obr-suite/dm-announcement";
 
-type SectionKind = "warn" | "info" | "todo" | "changelog" | "footer" | "raw";
+type SectionKind = "warn" | "info" | "issues" | "highlights" | "todo" | "changelog" | "footer" | "raw";
 type SectionLang = "zh" | "en" | undefined; // undefined = visible in both
 
 interface Section {
@@ -55,8 +63,26 @@ interface Section {
 }
 
 const KNOWN_KINDS: ReadonlySet<SectionKind> = new Set([
-  "warn", "info", "todo", "changelog", "footer", "raw",
+  "warn", "info", "issues", "highlights", "todo", "changelog", "footer", "raw",
 ]);
+
+// Issues section: type → chip class. Anything not in this map renders
+// as the default `t-other` chip so unknown types don't break layout.
+const ISSUE_TYPE_LABELS: Record<string, { label: string; cls: string }> = {
+  bug:     { label: "BUG",     cls: "t-bug" },
+  feature: { label: "需求",    cls: "t-feature" },
+  feat:    { label: "需求",    cls: "t-feature" },
+  wip:     { label: "进行中",  cls: "t-wip" },
+  done:    { label: "已修复",  cls: "t-done" },
+  fixed:   { label: "已修复",  cls: "t-done" },
+};
+const ISSUE_LEVEL_LABELS: Record<string, { label: string; cls: string }> = {
+  critical: { label: "紧急", cls: "l-critical" },
+  high:     { label: "高",   cls: "l-high" },
+  medium:   { label: "中",   cls: "l-medium" },
+  med:      { label: "中",   cls: "l-medium" },
+  low:      { label: "低",   cls: "l-low" },
+};
 
 function parseAnnouncement(md: string): Section[] {
   const sections: Section[] = [];
@@ -145,6 +171,11 @@ function renderInlineNoSpan(text: string): string {
     /([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g,
     '<a href="mailto:$1">$1</a>'
   );
+  // bare URL -> clickable link
+  out = out.replace(
+    /(https?:\/\/[^\s<]+)/g,
+    '<a href="$1" target="_blank" rel="noopener">$1</a>'
+  );
   return out;
 }
 
@@ -152,10 +183,94 @@ function renderSection(s: Section): string {
   if (s.kind === "warn" || s.kind === "info") {
     const cls = s.kind === "warn" ? "warn" : "info";
     return s.items
-      .map((it) => {
-        return `<div class="alert-row ${cls}"><span class="dot"></span><span class="text">${renderInline(it)}</span></div>`;
+      .map((it, idx) => {
+        const primary = idx === 0 ? " primary" : "";
+        return `<div class="alert-row ${cls}${primary}"><span class="dot"></span><span class="text">${renderInline(it)}</span></div>`;
       })
       .join("");
+  }
+  if (s.kind === "issues") {
+    // Per row: "type | level | desc"  OR  "type | desc" (level skipped).
+    // type ∈ bug / feature / wip / done. level optional.
+    const rows = s.items
+      .map((it) => {
+        const parts = it.split("|").map((p) => p.trim());
+        let typeKey = (parts[0] || "").toLowerCase();
+        let levelKey = "";
+        let desc = "";
+        if (parts.length >= 3) {
+          levelKey = (parts[1] || "").toLowerCase();
+          desc = parts.slice(2).join(" | ").trim();
+        } else if (parts.length === 2) {
+          desc = parts[1] || "";
+        } else {
+          desc = parts[0] || "";
+          typeKey = "";
+        }
+        const t = ISSUE_TYPE_LABELS[typeKey];
+        const typeChip = t
+          ? `<span class="iss-type ${t.cls}">${escapeHtml(t.label)}</span>`
+          : (typeKey
+            ? `<span class="iss-type t-other">${escapeHtml(typeKey.toUpperCase())}</span>`
+            : "");
+        const lvl = ISSUE_LEVEL_LABELS[levelKey];
+        const levelChip = lvl
+          ? `<span class="iss-level ${lvl.cls}">${escapeHtml(lvl.label)}</span>`
+          : "";
+        return `<div class="iss-row">${typeChip}${levelChip}<span class="iss-desc">${renderInline(desc)}</span></div>`;
+      })
+      .join("");
+    const heading = s.heading
+      ? `<div class="section-title">${escapeHtml(s.heading)}</div>`
+      : "";
+    return `${heading}<div class="iss-list">${rows}</div>`;
+  }
+  if (s.kind === "highlights") {
+    // Per row: "imageUrl | title | desc"  OR  "title | desc" (no image).
+    // imageUrl can be a relative path (resolved via assetUrl), an
+    // absolute URL, or empty (renders text-only card).
+    const rows = s.items
+      .map((it) => {
+        const parts = it.split("|").map((p) => p.trim());
+        let imageUrl = "";
+        let title = "";
+        let desc = "";
+        if (parts.length >= 3) {
+          imageUrl = parts[0] || "";
+          title = parts[1] || "";
+          desc = parts.slice(2).join(" | ").trim();
+        } else if (parts.length === 2) {
+          // No leading slash + no `http` → first part is title.
+          // Otherwise first part is imageUrl, second is title.
+          if (/^(https?:|\/)/i.test(parts[0])) {
+            imageUrl = parts[0];
+            title = parts[1] || "";
+          } else {
+            title = parts[0] || "";
+            desc = parts[1] || "";
+          }
+        } else {
+          title = parts[0] || "";
+        }
+        const resolvedSrc = imageUrl
+          ? (/^https?:/i.test(imageUrl) ? imageUrl : assetUrl(imageUrl.replace(/^\//, "")))
+          : "";
+        const imgHtml = resolvedSrc
+          ? `<img class="hl-img" src="${escapeHtml(resolvedSrc)}" alt="" loading="lazy">`
+          : `<div class="hl-img hl-img-empty"></div>`;
+        const titleHtml = title
+          ? `<div class="hl-title">${renderInline(title)}</div>`
+          : "";
+        const descHtml = desc
+          ? `<div class="hl-desc">${renderInline(desc)}</div>`
+          : "";
+        return `<div class="hl-card${resolvedSrc ? "" : " no-img"}">${imgHtml}<div class="hl-body">${titleHtml}${descHtml}</div></div>`;
+      })
+      .join("");
+    const heading = s.heading
+      ? `<div class="section-title">${escapeHtml(s.heading)}</div>`
+      : "";
+    return `${heading}<div class="hl-list">${rows}</div>`;
   }
   if (s.kind === "todo") {
     const rows = s.items
@@ -273,6 +388,30 @@ async function loadAndRender(): Promise<void> {
 
 OBR.onReady(() => {
   void loadAndRender();
+  const params = new URLSearchParams(location.search);
+  const isAuto = params.get("auto") === "1";
+  let autoTimer: number | null = null;
+  let autoCancelled = false;
+  const progress = document.getElementById("auto-progress");
+  const cancelAutoClose = () => {
+    if (!isAuto || autoCancelled) return;
+    autoCancelled = true;
+    if (autoTimer !== null) {
+      window.clearTimeout(autoTimer);
+      autoTimer = null;
+    }
+    progress?.classList.add("paused");
+  };
+  if (isAuto) {
+    progress?.classList.add("on");
+    autoTimer = window.setTimeout(async () => {
+      if (autoCancelled) return;
+      try { await OBR.modal.close(MODAL_ID); } catch {}
+    }, 5000);
+    for (const ev of ["pointerdown", "wheel", "keydown", "touchstart", "scroll"]) {
+      window.addEventListener(ev, cancelAutoClose, { passive: true, capture: true });
+    }
+  }
   document.getElementById("btn-close")?.addEventListener("click", async () => {
     try { await OBR.modal.close(MODAL_ID); } catch {}
   });

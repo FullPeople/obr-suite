@@ -714,7 +714,7 @@ async function readPosOnce(): Promise<void> {
     document.documentElement.style.setProperty("--tx", `${sxScreen}px`);
     document.documentElement.style.setProperty("--ty", `${syScreen}px`);
     document.documentElement.style.setProperty("--vp-scale", String(scale));
-    const winSlot = flashSlot >= 0 && slots[flashSlot] ? slots[flashSlot] : { ox: 0, oy: 0, size: BASE_SIZE };
+    const winSlot = (flashSlot >= 0 && slots[flashSlot] ? slots[flashSlot] : { ox: 0, oy: 0, size: BASE_SIZE }) as { ox: number; oy: number; size: number };
     document.documentElement.style.setProperty("--flash-x", `${sxScreen + winSlot.ox * scale}px`);
     document.documentElement.style.setProperty("--flash-y", `${syScreen + winSlot.oy * scale}px`);
   } catch {}
@@ -1731,20 +1731,19 @@ const ANTICIPATE_MS = 180;
 const FLY_MS = 560;
 const FLY_END_SCALE = 0.16;
 
-// Trigger position constants — must stay in sync with
-// HISTORY_TRIGGER_RIGHT_OFFSET / HISTORY_TRIGGER_BOTTOM_OFFSET /
-// HISTORY_TRIGGER_W / _H in index.ts. Fly target is the CENTER of the
-// trigger button on the bottom-right (was the bottom-LEFT history
-// popover; user re-targeted to the trigger so the dice visually
-// "land into" the d20 button that lights up to indicate new history).
-const TRIGGER_RIGHT = 75;
-const TRIGGER_BOTTOM = 5;
-const TRIGGER_W_ = 92;
-const TRIGGER_H_ = 64;
+// Fly target — roughly the bottom-right corner of the dice-history
+// modal (which is anchored at HISTORY_RIGHT_OFFSET=5 / HISTORY_BOTTOM_
+// OFFSET=12 in index.ts and sized 320×360). We aim ~50px in from each
+// edge so the dice visually plunge INTO the modal's lower-right area
+// (where the freshest row will land). The dedicated d20 trigger
+// button this used to target was removed — there's no longer a
+// dedicated landing button, so we point at the modal itself.
+const HISTORY_TARGET_RIGHT = 5 + 50;
+const HISTORY_TARGET_BOTTOM = 12 + 30;
 
 function flyTargetScreen(): { x: number; y: number } {
-  const x = window.innerWidth - TRIGGER_RIGHT - TRIGGER_W_ / 2;
-  const y = window.innerHeight - TRIGGER_BOTTOM - TRIGGER_H_ / 2;
+  const x = window.innerWidth - HISTORY_TARGET_RIGHT;
+  const y = window.innerHeight - HISTORY_TARGET_BOTTOM;
   return { x, y };
 }
 

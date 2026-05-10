@@ -1,7 +1,8 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { installDebugOverlay } from "../../utils/debugOverlay";
 import { ICONS } from "../../icons";
-import { fireQuickRoll, resolveClickRollTarget } from "../dice/tags";
-import { bindRollableContextMenu } from "../dice/context-menu";
+import { resolveClickRollTarget } from "../dice/tags";
+import { bindRollableContextMenu, bindRollableClickPopup } from "../dice/context-menu";
 import { subscribeToSfx } from "../dice/sfx-broadcast";
 import { bindPanelDrag } from "../../utils/panelDrag";
 import { PANEL_IDS } from "../../utils/panelLayout";
@@ -12,6 +13,133 @@ import {
   clampStat,
   type BubblesData,
 } from "../../utils/statEdit";
+import { mountResourcePanel } from "../resourceTracker/panel";
+import { STABLE_HIDES } from "../../feature-flags";
+
+// Dev-channel-only flag for the resource-tracker tab strip. Mirrors
+// the gate in monster-info-page.ts; ZH stable + EN ship without the
+// tab until cc-fullscreen + hp-bar integration + a left-side
+// notification overlay are all done.
+const STABLE_HIDES_CC = STABLE_HIDES;
+
+// 2026-05-10: pin-panel feature. When ON, the cc-info popover stays
+// open even after the user clears / changes selection — bg module
+// reads the same localStorage key + listens for the broadcast below.
+const LS_CC_INFO_PINNED = "obr-suite/cc-info-pinned";
+const BC_CC_INFO_PIN_CHANGED = "com.obr-suite/cc-info-pin-changed";
+
+function readPanelPinned(): boolean {
+  try { return localStorage.getItem(LS_CC_INFO_PINNED) === "1"; } catch { return false; }
+}
+
+function togglePanelPinned(): void {
+  const next = !readPanelPinned();
+  try { localStorage.setItem(LS_CC_INFO_PINNED, next ? "1" : "0"); } catch {}
+  // Broadcast both LOCAL (so the bg module on this client picks it
+  // up) and let the iframe re-render its button on next render call.
+  try {
+    OBR.broadcast.sendMessage(
+      BC_CC_INFO_PIN_CHANGED,
+      { pinned: next },
+      { destination: "LOCAL" },
+    );
+  } catch {}
+  // Update the DOM live without a full re-render — the pin state is
+  // purely visual at this layer.
+  const btn = document.querySelector<HTMLButtonElement>("#panel-pin-btn");
+  if (btn) {
+    btn.classList.toggle("pinned", next);
+    btn.setAttribute("aria-pressed", String(next));
+    btn.title = next ? "已置顶（取消则恢复随选择关闭）" : "置顶面板（取消选中也保持显示）";
+  }
+}
+
+// === Resource-tracker tab strip =============================================
+// Same pattern as bestiary monster-info-page: name + statBanner stay
+// pinned at the top, the tab strip slides an indicator between attr
+// (existing chips / abilities / weapons / features) and res (resource
+// tracker). Hover or click switches; mouse-leave returns the indicator
+// to the active tab.
+
+type RtTabId = "attr" | "res";
+let activeRtTab: RtTabId = "attr";
+
+function renderRtTabStrip(): string {
+  return `
+    <div class="rt-tabstrip">
+      <div class="rt-tab-indicator" data-rt-indicator></div>
+      <button class="rt-tab ${activeRtTab === "attr" ? "on" : ""}" data-rt-tab="attr" type="button">属性</button>
+      <button class="rt-tab ${activeRtTab === "res" ? "on" : ""}" data-rt-tab="res" type="button">资源</button>
+    </div>
+  `;
+}
+
+function setupRtTabSwitching(): void {
+  const strip = root.querySelector<HTMLElement>(".rt-tabstrip");
+  const clip = root.querySelector<HTMLElement>(".rt-clip");
+  if (!strip) return;
+  const buttons = strip.querySelectorAll<HTMLButtonElement>(".rt-tab");
+  const indicator = strip.querySelector<HTMLElement>("[data-rt-indicator]");
+  const moveIndicatorTo = (target: HTMLElement | null) => {
+    if (!indicator || !target) return;
+    indicator.style.transform = `translateX(${target.offsetLeft}px)`;
+    indicator.style.width = `${target.offsetWidth}px`;
+  };
+  const findActiveButton = (): HTMLElement | null =>
+    strip.querySelector<HTMLElement>(`.rt-tab[data-rt-tab="${activeRtTab}"]`);
+
+  // Slide-clip height tracking (panes are absolutely positioned, so
+  // the clip would collapse to 0 without explicit height).
+  const updateClipHeight = () => {
+    if (!clip) return;
+    const active = clip.querySelector<HTMLElement>(`.rt-pane[data-pane="${activeRtTab}"]`);
+    if (active) clip.style.height = `${active.offsetHeight}px`;
+  };
+  if (clip) {
+    requestAnimationFrame(updateClipHeight);
+    const ro = new ResizeObserver(() => updateClipHeight());
+    clip.querySelectorAll<HTMLElement>(".rt-pane").forEach((p) => ro.observe(p));
+  }
+
+  requestAnimationFrame(() => moveIndicatorTo(findActiveButton()));
+
+  const switchTo = (next: RtTabId) => {
+    if (next === activeRtTab) return;
+    activeRtTab = next;
+    buttons.forEach((b) => b.classList.toggle("on", b.dataset.rtTab === next));
+    moveIndicatorTo(findActiveButton());
+    if (clip) clip.setAttribute("data-active", next);
+    updateClipHeight();
+    if (next === "res") void ensureRtResourceMount();
+  };
+
+  let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+  buttons.forEach((b) => {
+    const target = (b.dataset.rtTab as RtTabId) ?? "attr";
+    b.addEventListener("click", () => switchTo(target));
+    b.addEventListener("mouseenter", () => {
+      moveIndicatorTo(b);
+      if (hoverTimer) clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => switchTo(target), 200);
+    });
+    b.addEventListener("mouseleave", () => {
+      if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    });
+  });
+  strip.addEventListener("mouseleave", () => moveIndicatorTo(findActiveButton()));
+}
+
+let rtMountHandle: { refresh: () => Promise<void>; unmount: () => void } | null = null;
+async function ensureRtResourceMount(): Promise<void> {
+  const container = root.querySelector<HTMLElement>("#rt-mount");
+  if (!container) return;
+  rtMountHandle?.unmount();
+  rtMountHandle = mountResourcePanel({
+    container,
+    getItemId: () => boundItemId,
+  });
+  await rtMountHandle.refresh();
+}
 
 const SHOW_MSG = "com.character-cards/info-show";
 
@@ -37,6 +165,39 @@ function escapeHtml(s: unknown) {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!)
   );
+}
+
+function renderNameButton(name: string, clickable: boolean): string {
+  if (!clickable) {
+    return `<div class="name">${escapeHtml(name)}</div>`;
+  }
+  const title = `点击 → 同步 / 清除 token 名字：${name}`;
+  return `<button class="name name-btn" type="button" data-name-text="${escapeHtml(name)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(name)}</button>`;
+}
+
+async function toggleTokenNameText(itemId: string, name: string, btn: HTMLButtonElement): Promise<void> {
+  const cleanName = name.trim();
+  if (!cleanName) return;
+  btn.disabled = true;
+  try {
+    const items = await OBR.scene.items.getItems([itemId]);
+    const current = String((items[0] as any)?.text?.plainText ?? "").trim();
+    const next = current === cleanName ? "" : cleanName;
+    await OBR.scene.items.updateItems([itemId], (drafts) => {
+      for (const d of drafts) {
+        const anyDraft = d as any;
+        anyDraft.text = {
+          ...(anyDraft.text ?? {}),
+          type: anyDraft.text?.type ?? "PLAIN",
+          plainText: next,
+        };
+      }
+    });
+  } catch (e) {
+    console.warn("[character-cards/info] toggle token name text failed", e);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function fmtMod(n: unknown): string {
@@ -119,7 +280,13 @@ function classesStr(d: any): string {
 }
 
 let currentCardId: string | null = null;
+let currentRoomId: string | null = null;
 const cardCache = new Map<string, any>();
+
+// Broadcast id mirrored from panel-page.ts. Receiving this with a
+// matching cardId means another client uploaded / refreshed / imported
+// the same card, so we should drop our cache and re-fetch.
+const BC_CARD_UPDATED = "com.obr-suite/cc-card-updated";
 
 // Cached role lookup. The DM-only lock button at the right end of the
 // stat banner reads this. OBR.onReady below populates it before any
@@ -128,6 +295,7 @@ let cachedIsGM = false;
 
 async function showCard(cardId: string, roomId: string) {
   currentCardId = cardId;
+  currentRoomId = roomId;
 
   // Cache hit: render instantly, 0 network wait, 0 intermediate frame.
   const cached = cardCache.get(cardId);
@@ -383,6 +551,35 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
   // the player look up a feature definition without leaving OBR.
   const featuresHtml = renderSearchChips(d);
 
+  // Combined attribute pane content (chips / abilities / weapons /
+  // features). On stable: render flat (no tabs, no slide). On dev:
+  // wrap in a sliding rt-clip alongside the resource pane.
+  const attrInner = `
+    <div class="row">${chips}</div>
+    <div class="abil">${abl}</div>
+    <div class="sect">${ICONS.swords} 武器 / 攻击</div>
+    ${weps}
+    ${featuresHtml}
+  `;
+  const stickyTop = STABLE_HIDES_CC
+    ? statBanner
+    : `${statBanner}${renderRtTabStrip()}`;
+  const contentBlock = STABLE_HIDES_CC
+    ? attrInner
+    : `
+      <div class="rt-clip" data-active="${activeRtTab}">
+        <div class="rt-pane" data-pane="attr">${attrInner}</div>
+        <div class="rt-pane" data-pane="res">
+          <div id="rt-mount" style="position:relative; min-height:80px"></div>
+        </div>
+      </div>
+    `;
+  // 2026-05-10: pin button — when toggled ON, the panel doesn't
+  // auto-close on selection clear / mismatch. Data still updates
+  // when a different bound token is selected. Per-client state in
+  // localStorage; bg module reads the same key + listens for the
+  // broadcast.
+  const pinned = readPanelPinned();
   root.innerHTML = `
     <div class="hdr">
       <div class="drag-handle" id="drag-handle" title="拖动 / Drag" aria-label="拖动面板">
@@ -395,17 +592,26 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
           <circle cx="9" cy="15" r="1.2" fill="currentColor"/>
         </svg>
       </div>
-      <div class="name">${escapeHtml(name)}</div>
+      <button class="panel-pin-btn ${pinned ? "pinned" : ""}" id="panel-pin-btn" type="button"
+        aria-pressed="${pinned}"
+        title="${pinned ? "已置顶（取消则恢复随选择关闭）" : "置顶面板（取消选中也保持显示）"}">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .707c-.48.48-1.072.588-1.503.588-.177 0-.339-.016-.484-.041L7.176 13.04a.5.5 0 0 1-.708 0L3.633 10.207 1.4 12.439a.5.5 0 0 1-.707-.707L2.926 9.5.74 7.314a.5.5 0 0 1 0-.708l1.51-1.51c.41-.41.945-.625 1.482-.711.534-.085 1.139-.097 1.683-.024.546.073 1.169.114 1.643-.04.305-.099.62-.281.94-.602.193-.193.282-.467.348-.749.066-.281.117-.572.196-.793a1.51 1.51 0 0 1 .31-.508c.094-.092.215-.174.357-.232a.5.5 0 0 1 .19-.04Z" fill="currentColor"/>
+        </svg>
+      </button>
+      <div class="name-wrap">
+        ${renderNameButton(name, !!boundItemId)}
+      </div>
       <div class="sub">${escapeHtml(sub)}</div>
       <a class="raw-link" href="${rawUrl}" target="_blank" rel="noopener">原始数据</a>
     </div>
-    ${statBanner}
-    <div class="row">${chips}</div>
-    <div class="abil">${abl}</div>
-    <div class="sect">${ICONS.swords} 武器 / 攻击</div>
-    ${weps}
-    ${featuresHtml}
+    ${stickyTop}
+    ${contentBlock}
   `;
+  if (!STABLE_HIDES_CC) {
+    setupRtTabSwitching();
+    void ensureRtResourceMount();
+  }
   bindStatRowInputs();
   // The drag handle DOM element is recreated on every render() (we
   // assigned root.innerHTML), so the existing pointer-event bindings
@@ -414,6 +620,20 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
   if (handle) {
     if (currentDragUnbind) currentDragUnbind();
     currentDragUnbind = bindPanelDrag(handle, PANEL_IDS.ccInfo);
+  }
+  const pinBtn = root.querySelector<HTMLButtonElement>("#panel-pin-btn");
+  if (pinBtn) {
+    pinBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      togglePanelPinned();
+    });
+  }
+  const nameBtn = root.querySelector<HTMLButtonElement>(".name-btn[data-name-text]");
+  if (nameBtn && boundItemId) {
+    nameBtn.addEventListener("click", () => {
+      void toggleTokenNameText(boundItemId!, nameBtn.dataset.nameText || name, nameBtn);
+    });
   }
 }
 
@@ -492,13 +712,9 @@ function bindStatRowInputs(): void {
         ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
         : "已解锁：所有玩家可见完整 HP / AC 数值";
       try {
-        // Sync `locked` (suite bubbles) + `hide` (external Stat
-        // Bubbles plugin) on the same metadata key so the lock
-        // button works regardless of which bubbles plugin (or both)
-        // is active.
         await patchBubbles(
           lockTokenId,
-          { locked: next, hide: next } as Partial<BubblesData>,
+          { locked: next } as Partial<BubblesData>,
         );
       } catch (e) {
         console.warn("[cc-info] toggle lock failed", e);
@@ -700,23 +916,10 @@ root.addEventListener("click", async (e) => {
     return;
   }
 
-  const target = (e.target as HTMLElement | null)?.closest<HTMLElement>(".rollable");
-  if (!target) return;
-  e.preventDefault();
-  e.stopPropagation();
-  const expression = target.dataset.expr ?? "";
-  const label = target.dataset.label ?? "";
-  if (!expression) return;
-  const itemId = await resolveBoundToken();
-  fireQuickRoll({
-    expression,
-    label,
-    itemId,
-    focus: !!itemId,
-  });
-  target.classList.remove("rollable-flash");
-  void target.offsetWidth;
-  target.classList.add("rollable-flash");
+  // 2026-05-10: rollable left-click is handled by the
+  // bindRollableClickPopup binding installed below — opens a quick
+  // pick popup (劣势 / 普通 / 优势 + 重击) at the click point.
+  // Don't fire any dice-tray prefill here.
 });
 
 // Right-click → context menu (投掷 / 优势 / 劣势 / 添加到骰盘).
@@ -733,24 +936,32 @@ const CC_RIGHT_OFFSET = 12;
 const CC_BOTTOM_OFFSET = 160;
 const CC_INFO_GAP = 8;
 const CC_BUTTON_HEIGHT = 48 + 8;
+const ccIframeOriginGetter = async () => {
+  const [vw, vh] = await Promise.all([
+    OBR.viewport.getWidth().catch(() => 1280),
+    OBR.viewport.getHeight().catch(() => 720),
+  ]);
+  const anchorTop = vh - CC_BOTTOM_OFFSET - CC_BUTTON_HEIGHT - CC_INFO_GAP;
+  return {
+    left: Math.round(vw - CC_RIGHT_OFFSET - window.innerWidth),
+    top: Math.round(anchorTop - window.innerHeight),
+  };
+};
 bindRollableContextMenu(
   root,
   () => "open",
   () => resolveBoundToken(),
-  async () => {
-    const [vw, vh] = await Promise.all([
-      OBR.viewport.getWidth().catch(() => 1280),
-      OBR.viewport.getHeight().catch(() => 720),
-    ]);
-    const anchorTop = vh - CC_BOTTOM_OFFSET - CC_BUTTON_HEIGHT - CC_INFO_GAP;
-    return {
-      left: Math.round(vw - CC_RIGHT_OFFSET - window.innerWidth),
-      top: Math.round(anchorTop - window.innerHeight),
-    };
-  },
+  ccIframeOriginGetter,
+);
+// LEFT-click → quick-pick popup (劣势 / 普通 / 优势 + 重击).
+bindRollableClickPopup(
+  root,
+  () => resolveBoundToken(),
+  ccIframeOriginGetter,
 );
 
 OBR.onReady(async () => {
+  installDebugOverlay();
   subscribeToSfx();
   // Cache the player's role BEFORE first render so the DM-only lock
   // button appears on first paint instead of waiting for a re-render.
@@ -778,5 +989,18 @@ OBR.onReady(async () => {
     if (typeof p.itemId === "string") boundItemId = p.itemId;
     else if (p.itemId === null) boundItemId = null;
     if (p.cardId && p.roomId) showCard(String(p.cardId), String(p.roomId));
+  });
+
+  // Multi-client sync — when another client refreshes / imports the
+  // currently-shown card, drop our cache entry and re-fetch so the
+  // small popover preview reflects the new data.json without the user
+  // needing to re-open the panel.
+  OBR.broadcast.onMessage(BC_CARD_UPDATED, (ev: any) => {
+    const payload = ev?.data as { cardId?: string } | undefined;
+    if (!payload?.cardId) return;
+    cardCache.delete(payload.cardId);
+    if (currentCardId === payload.cardId && currentRoomId) {
+      void showCard(payload.cardId, currentRoomId);
+    }
   });
 });

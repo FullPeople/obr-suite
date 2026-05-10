@@ -107,6 +107,17 @@ async function turnOn() {
   notifyClusterState(true);
 }
 
+/** Programmatic entry point for other modules (e.g. trickster) to
+ *  force-on time stop without going through the user toggle. Only the
+ *  GM client should call this — players don't have scene-write
+ *  permission for the time-stop scene metadata key. Idempotent: if
+ *  time stop is already active, returns without re-firing. */
+export async function turnOnTimeStop(): Promise<void> {
+  if (!isGM) return;
+  if (await isTimeStopActive()) return;
+  await turnOn();
+}
+
 async function turnOff() {
   await OBR.scene.setMetadata({ [META_KEY]: { active: false } });
   await OBR.broadcast.sendMessage(BROADCAST_OFF, {});

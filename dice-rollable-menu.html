@@ -46,6 +46,7 @@ html,body{
 .item.dis .ico{color:var(--red)}
 .item.tray .ico{color:var(--yellow)}
 .item.dark .ico{color:var(--purple)}
+.item.crit .ico{color:#ffb74d}
 .sep{height:1px;background:rgba(255,255,255,0.10);margin:3px 4px}
 </style>
 </head>
@@ -55,6 +56,7 @@ html,body{
   <button class="item dark" data-act="dark"><span class="ico">●</span><span data-l="dark">暗骰</span></button>
   <button class="item adv" data-act="adv"><span class="ico">▲</span><span data-l="adv">优势</span></button>
   <button class="item dis" data-act="dis"><span class="ico">▼</span><span data-l="dis">劣势</span></button>
+  <button class="item crit" data-act="crit"><span class="ico">✦</span><span data-l="crit">重击</span></button>
   <div class="sep"></div>
   <button class="item tray" data-act="tray"><span class="ico">＋</span><span data-l="tray">添加到骰盘</span></button>
 </div>
@@ -77,8 +79,8 @@ const LANG = (() => {
   return "zh";
 })();
 const L = {
-  zh: { roll: "投掷", dark: "暗骰", adv: "优势", dis: "劣势", tray: "添加到骰盘" },
-  en: { roll: "Roll", dark: "Dark Roll", adv: "Advantage", dis: "Disadvantage", tray: "Add to Tray" },
+  zh: { roll: "投掷", dark: "暗骰", adv: "优势", dis: "劣势", crit: "重击", tray: "添加到骰盘" },
+  en: { roll: "Roll", dark: "Dark Roll", adv: "Advantage", dis: "Disadvantage", crit: "Critical", tray: "Add to Tray" },
 }[LANG];
 document.querySelectorAll("[data-l]").forEach((el) => { el.textContent = L[el.dataset.l] ?? el.textContent; });
 document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
@@ -131,11 +133,20 @@ OBR.onReady(() => {
               { ability: groupAbility, advMode: act },
               { destination: "LOCAL" },
             );
+          } else if (act === "crit") {
+            await OBR.broadcast.sendMessage(
+              BC_GROUP_SAVE_FIRE,
+              { ability: groupAbility, critMode: true },
+              { destination: "LOCAL" },
+            );
           }
         } else if (act === "tray") {
+          // Forward the rollable's label too — the dice panel will
+          // pre-fill the 备注 field with the skill / save name so a
+          // subsequent roll's history line shows context.
           await OBR.broadcast.sendMessage(
             BC_PANEL_TOGGLE,
-            { open: true, prefill: expression },
+            { open: true, prefill: expression, prefillLabel: label },
             { destination: "LOCAL" },
           );
         } else if (act === "roll") {
@@ -154,6 +165,15 @@ OBR.onReady(() => {
           await OBR.broadcast.sendMessage(
             BC_QUICK_ROLL,
             { expression, label, itemId, focus: !!itemId, hidden: false, advMode: act },
+            { destination: "LOCAL" },
+          );
+        } else if (act === "crit") {
+          // 重击 — double every NdM term in the expression while
+          // leaving the modifier unchanged. Handled BG-side (see
+          // QuickRollRequest.critMode in src/modules/dice/index.ts).
+          await OBR.broadcast.sendMessage(
+            BC_QUICK_ROLL,
+            { expression, label, itemId, focus: !!itemId, hidden: false, critMode: true },
             { destination: "LOCAL" },
           );
         }
