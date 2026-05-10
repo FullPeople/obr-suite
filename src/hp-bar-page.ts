@@ -26,9 +26,61 @@ const itemId = params.get("itemId") ?? "";
 const dragHandle = document.getElementById("dragHandle") as HTMLDivElement;
 const hpPillEl = document.getElementById("hpPill") as HTMLDivElement;
 const lockBtn = document.getElementById("lockBtn") as HTMLButtonElement | null;
+const pinBtn = document.getElementById("panelPinBtn") as HTMLButtonElement | null;
+const nameRowEl = document.getElementById("nameRow") as HTMLDivElement | null;
 const inputs = Array.from(
   document.querySelectorAll<HTMLInputElement>(".stat-input"),
 );
+
+// Metadata keys we read for name resolution. Mirrors the constants in
+// modules/hpBar/index.ts and modules/characterCards/* — duplicated here
+// so this iframe page doesn't take a build-time dependency on the bg
+// module's exports.
+const CC_BIND_KEY = "com.character-cards/boundCardId";
+const CC_LIST_KEY = "com.character-cards/list";
+const BUBBLES_NAME_KEY = "com.owlbear-rodeo-bubbles-extension/name";
+
+// 2026-05-10: pin-panel feature — mirror of bestiary monster-info /
+// cc-info. When ON, the popover stays open across deselect / different-
+// token selection (data still updates if a different valid token is
+// selected). Per-client localStorage; LOCAL broadcast picked up by
+// modules/hpBar/index.ts to gate handleSelection's auto-close.
+const LS_HP_BAR_PINNED = "obr-suite/hp-bar-pinned";
+const BC_HP_BAR_PIN_CHANGED = "com.obr-suite/hp-bar-pin-changed";
+
+function readHpBarPinned(): boolean {
+  try { return localStorage.getItem(LS_HP_BAR_PINNED) === "1"; } catch { return false; }
+}
+
+function paintPinBtn(): void {
+  if (!pinBtn) return;
+  const v = readHpBarPinned();
+  pinBtn.classList.toggle("pinned", v);
+  pinBtn.setAttribute("aria-pressed", String(v));
+  pinBtn.title = v
+    ? "已置顶（取消则恢复随选择关闭）"
+    : "置顶面板（取消选中也保持显示）";
+}
+
+function toggleHpBarPinned(): void {
+  const next = !readHpBarPinned();
+  try { localStorage.setItem(LS_HP_BAR_PINNED, next ? "1" : "0"); } catch {}
+  paintPinBtn();
+  try {
+    OBR.broadcast.sendMessage(
+      BC_HP_BAR_PIN_CHANGED,
+      { pinned: next },
+      { destination: "LOCAL" },
+    );
+  } catch {}
+}
+
+paintPinBtn();
+pinBtn?.addEventListener("click", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  toggleHpBarPinned();
+});
 
 let live: BubblesData = {};
 let isGM = false;
@@ -63,6 +115,51 @@ function paint(): void {
   }
 }
 
+// 2026-05-10c — resolve the name to display above the bar, with the
+// priority CC name (from the room's character-cards list) → bestiary
+// monster name (BUBBLES_NAME meta) → OBR item.name (image filename
+// the user chose). Reads scene metadata + the item's own metadata.
+async function resolveDisplayName(id: string): Promise<string> {
+  if (!id) return "";
+  let item: any = null;
+  try {
+    const list = await OBR.scene.items.getItems([id]);
+    item = list[0] ?? null;
+  } catch {}
+  if (!item) return "";
+  const meta = (item.metadata ?? {}) as Record<string, unknown>;
+  // 1. Character card binding takes precedence.
+  const cardId = meta[CC_BIND_KEY];
+  if (typeof cardId === "string" && cardId) {
+    try {
+      const sceneMeta = await OBR.scene.getMetadata();
+      const list = sceneMeta[CC_LIST_KEY];
+      if (Array.isArray(list)) {
+        const card = (list as any[]).find((c) => c && c.id === cardId);
+        if (card && typeof card.name === "string" && card.name.trim()) {
+          return String(card.name).trim();
+        }
+      }
+    } catch {}
+  }
+  // 2. Bubbles name (set by bestiary bind / writeBubbleStats).
+  const bubblesName = meta[BUBBLES_NAME_KEY];
+  if (typeof bubblesName === "string" && bubblesName.trim()) {
+    return String(bubblesName).trim();
+  }
+  // 3. OBR item name (the user's image / token name).
+  if (typeof item.name === "string" && item.name.trim()) {
+    return String(item.name).trim();
+  }
+  return "";
+}
+
+function paintName(name: string): void {
+  if (!nameRowEl) return;
+  nameRowEl.textContent = name || "—";
+  nameRowEl.title = name || "";
+}
+
 async function refresh(): Promise<void> {
   if (!itemId) return;
   try {
@@ -71,6 +168,12 @@ async function refresh(): Promise<void> {
     live = {};
   }
   paint();
+  // Refresh the name in parallel so a CC rename / bestiary rebind
+  // propagates here without a popover reload.
+  try {
+    const name = await resolveDisplayName(itemId);
+    paintName(name);
+  } catch {}
 }
 
 // Commit the user's edit on blur or Enter. Parses the input via

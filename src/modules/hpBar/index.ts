@@ -54,9 +54,13 @@ const EXTERNAL_BUBBLES_META_KEY = "com.owlbear-rodeo-bubbles-extension/metadata"
 const CTX_ADD = "com.obr-suite/hp-bar-add";
 const CTX_REMOVE = "com.obr-suite/hp-bar-remove";
 
-// Popover dimensions. Small — just the stat banner row.
-const POPOVER_W = 250;
-const POPOVER_H = 56;
+// Popover dimensions. 2026-05-10c — bumped width 250→320 to fit
+// 3-digit/3-digit HP (e.g. "150/250") in the pill without truncation,
+// and bumped height 56→78 to make room for the new name row above
+// the stat banner. Both sizes are eyeballed on the dev font stack;
+// the panel-layout offset persistence still applies on top.
+const POPOVER_W = 320;
+const POPOVER_H = 78;
 // Default anchor: top-right with a 20px right inset and a 100px
 // top inset, so it doesn't collide with the bestiary list panel
 // (which sits at vw - 60).
@@ -157,9 +161,28 @@ function isBubblesHidden(item: any): boolean {
   return !!(m as Record<string, unknown>)["hide"];
 }
 
+// 2026-05-10: pin-panel state — when the user toggles the pin in the
+// hp-bar.html popover, that script broadcasts BC_HP_BAR_PIN_CHANGED
+// LOCAL with `{ pinned: boolean }`, and writes the same flag to
+// localStorage. We mirror it here so handleSelection knows whether
+// to keep the popover open after a deselect / disqualifying selection.
+const LS_HP_BAR_PINNED = "obr-suite/hp-bar-pinned";
+const BC_HP_BAR_PIN_CHANGED = "com.obr-suite/hp-bar-pin-changed";
+function readHpBarPinned(): boolean {
+  try { return localStorage.getItem(LS_HP_BAR_PINNED) === "1"; } catch { return false; }
+}
+
 async function handleSelection(selection: string[] | undefined): Promise<void> {
+  // Pin-aware close helper: when pinned, keep the popover up even if
+  // the new selection doesn't qualify (no token / wrong type / no
+  // bubbles meta). When unpinned, fall through to normal close.
+  const pinned = readHpBarPinned();
+  const closeIfNotPinned = async (): Promise<void> => {
+    if (popoverOpen && !pinned) await closePopover();
+  };
+
   if (!selection || selection.length !== 1) {
-    if (popoverOpen) await closePopover();
+    await closeIfNotPinned();
     return;
   }
   const id = selection[0];
@@ -169,53 +192,51 @@ async function handleSelection(selection: string[] | undefined): Promise<void> {
     item = items[0];
   } catch {}
   if (!item) {
-    if (popoverOpen) await closePopover();
+    await closeIfNotPinned();
     return;
   }
   // Image tokens only — abilities/areas don't need an HP bar.
   if (item.type !== "IMAGE") {
-    if (popoverOpen) await closePopover();
+    await closeIfNotPinned();
     return;
   }
   const meta = (item.metadata || {}) as Record<string, unknown>;
   const ownsItem = !!hpBarPlayerId && (item as any).createdUserId === hpBarPlayerId;
   if (!hpBarIsGM && (!ownsItem || isBubblesHidden(item))) {
-    if (popoverOpen) await closePopover();
+    await closeIfNotPinned();
     return;
   }
   if (hpBarIsGM && isBubblesHidden(item)) {
-    if (popoverOpen) await closePopover();
+    await closeIfNotPinned();
     return;
   }
-  // Defer to bestiary / character-card popovers ONLY when their
-  // own auto-popup is enabled — those modules will show their
-  // own HP editor in that case, so the standalone HP bar would
-  // be redundant clutter. When the user has disabled either auto-
-  // popup (Settings → 怪物图鉴 / 角色卡 → 自动弹出) the standalone
-  // HP bar takes over so the user still gets a quick HP/AC editor.
-  if (meta[BESTIARY_SLUG_KEY] != null) {
-    if (popoverOpen) await closePopover();
-    return;
-  }
-  if (meta[CC_BIND_KEY] != null) {
-    if (popoverOpen) await closePopover();
-    return;
-  }
-  // Auto-add: when the token already has bubbles displayed (HP/AC
-  // metadata) but no HP_BAR_FLAG_KEY, set the flag now so the
-  // popover opens for it. This lifts the explicit right-click
-  // "add HP bar component" for the common case — a player or DM
-  // can just select the token and the bar appears. The right-
-  // click menu is still useful for tokens that DON'T yet have
-  // bubbles, but selecting plain decoration tokens won't pop the
-  // bar (`hasBubblesMetadata` is the gate).
-  if (!meta[HP_BAR_FLAG_KEY]) {
+  // 2026-05-10c — was unconditional skip on CC / bestiary binding,
+  // which made the popover never follow CC- or bestiary-bound
+  // characters even when the user wanted exactly that. Per user's
+  // 2026-05-10 spec ("血条组件的数据需要和当前聚焦角色同步和修改"),
+  // the bar now follows ALL valid character selections and lives
+  // alongside whatever popover the bestiary / cc-info module also
+  // opens. Users who want it OFF on a CC-bound or bestiary-bound
+  // token can right-click → 移除血条组件 once; the flag becomes
+  // `false` and the auto-add gate respects it.
+  void BESTIARY_SLUG_KEY; void CC_BIND_KEY;
+  // Auto-add: when the token has NEVER had the flag (undefined) AND
+  // already has bubbles metadata, opt the token into the standalone
+  // HP bar by setting the flag. This is the "select a vanilla token
+  // with HP and the bar appears" affordance.
+  //
+  // 2026-05-10 fix: the previous gate was `if (!meta[HP_BAR_FLAG_KEY])`
+  // which also matched `false` (the value the right-click "remove
+  // 血条组件" handler now writes), so removing the bar instantly
+  // re-added it on the next items.onChange. Using `=== undefined`
+  // restricts auto-add to first-touch only — explicit removal sets
+  // the flag to `false` and that wins.
+  const flagState = meta[HP_BAR_FLAG_KEY];
+  if (flagState === undefined) {
     if (!hasBubblesMetadata(item)) {
-      if (popoverOpen) await closePopover();
+      await closeIfNotPinned();
       return;
     }
-    // Set the flag, but don't await the resulting onChange before
-    // opening the popover — we already know the conditions match.
     try {
       await OBR.scene.items.updateItems([id], (drafts) => {
         for (const d of drafts) {
@@ -224,11 +245,11 @@ async function handleSelection(selection: string[] | undefined): Promise<void> {
       });
     } catch (e) {
       console.warn("[hp-bar] auto-add flag failed", e);
-      // Even if the write fails (player without permission on
-      // this token), still open the popover — the popover only
-      // reads/writes the bubbles metadata, which the player may
-      // still be able to edit.
     }
+  } else if (flagState === false || !flagState) {
+    // Explicitly removed — respect the user's choice and don't open.
+    await closeIfNotPinned();
+    return;
   }
   await openPopoverFor(id);
 }
@@ -274,31 +295,40 @@ export async function setupHpBar(): Promise<void> {
           icon: assetUrl("status-icon.svg"),
           label: "添加血条组件",
           filter: {
-            // Every token must be eligible (image, no other binding).
+            // 2026-05-10c — dropped the BESTIARY_SLUG / CC_BIND
+            // exclusions in `every`. Now that the hp-bar popover
+            // follows CC / bestiary bound characters too, users on
+            // those tokens need a way to re-add the bar after an
+            // explicit "移除" (flag = false). The menu now shows on
+            // every IMAGE.
             every: [
               { key: "type", value: "IMAGE" },
-              { key: ["metadata", BESTIARY_SLUG_KEY], value: undefined },
-              { key: ["metadata", CC_BIND_KEY], value: undefined },
             ],
-            // 2026-05-10: at least one CHARACTER-layer item that
-            // doesn't yet have the flag — handler skips non-character
-            // items in mixed selections.
+            // 2026-05-10b — at least one CHARACTER-layer item whose
+            // flag is NOT explicitly true. Originally `value: undefined`,
+            // but after the "remove sticks" fix the flag becomes `false`
+            // on explicit removal; that meant `undefined` no longer
+            // matched and the user couldn't re-add. Operator `!=` with
+            // `value: true` covers both "never set (undefined)" AND
+            // "explicitly removed (false)" while still hiding the menu
+            // when the bar is already enabled (true).
             some: [
               { key: "layer", value: "CHARACTER" },
-              { key: ["metadata", HP_BAR_FLAG_KEY], value: undefined },
+              { key: ["metadata", HP_BAR_FLAG_KEY], operator: "!=", value: true },
             ],
           },
         },
       ],
       onClick: async (ctx) => {
-        // Filter to CHARACTER-layer tokens that DON'T already have the
-        // flag — adding is idempotent so writing again is harmless,
-        // but skipping saves a metadata write per redundant token.
+        // Filter to CHARACTER-layer tokens whose flag is NOT true —
+        // matches the menu filter (covers undefined + false). Adding
+        // is idempotent so a stray re-add wouldn't break, but we still
+        // skip the obvious tokens to save a write each.
         const ids = ctx.items
           .filter(
             (it) =>
               it.layer === "CHARACTER" &&
-              !(it.metadata as any)?.[HP_BAR_FLAG_KEY],
+              (it.metadata as any)?.[HP_BAR_FLAG_KEY] !== true,
           )
           .map((i) => i.id);
         if (ids.length === 0) return;
@@ -332,34 +362,40 @@ export async function setupHpBar(): Promise<void> {
             every: [
               { key: "type", value: "IMAGE" },
             ],
-            // 2026-05-10: at least one CHARACTER token that has the
-            // flag — handler skips non-character items in mixed
-            // selections, so a box-select with both can still hit the
-            // menu and clear the character bubbles only.
+            // 2026-05-10: at least one CHARACTER token whose flag is
+            // currently truthy. Filter targets `=== true` because
+            // explicit-disabled tokens (flag === false, see "remove
+            // sticks" fix below) shouldn't surface the remove menu —
+            // they're already removed.
             some: [
               { key: "layer", value: "CHARACTER" },
-              { key: ["metadata", HP_BAR_FLAG_KEY], operator: "!=", value: undefined },
+              { key: ["metadata", HP_BAR_FLAG_KEY], value: true },
             ],
           },
         },
       ],
       onClick: async (ctx) => {
-        // Only touch CHARACTER-layer tokens that actually have the
-        // flag; leave untouched the ones that don't (they were caught
-        // up in the multi-select but aren't HP-bar-flagged or aren't
-        // characters).
+        // Only touch CHARACTER-layer tokens whose flag is currently
+        // truthy. Tokens with no flag or flag=false are left alone.
         const ids = ctx.items
           .filter(
             (it) =>
               it.layer === "CHARACTER" &&
-              (it.metadata as any)?.[HP_BAR_FLAG_KEY] != null,
+              (it.metadata as any)?.[HP_BAR_FLAG_KEY] === true,
           )
           .map((i) => i.id);
         if (ids.length === 0) return;
         try {
           await OBR.scene.items.updateItems(ids, (drafts) => {
             for (const d of drafts) {
-              delete (d.metadata as any)[HP_BAR_FLAG_KEY];
+              // 2026-05-10 — write FALSE instead of `delete`. The
+              // handleSelection auto-add path uses `=== undefined`
+              // to detect "first encounter" tokens, so explicit
+              // removal must persist a non-undefined value (false)
+              // to suppress the next auto-add. Earlier rounds used
+              // `delete`, which made the bar instantly re-pop on
+              // the next items.onChange.
+              (d.metadata as any)[HP_BAR_FLAG_KEY] = false;
             }
           });
           // If the popover is showing one of the just-removed tokens,
@@ -395,6 +431,26 @@ export async function setupHpBar(): Promise<void> {
   // (we should close in that case to avoid duplicate UI).
   unsubs.push(
     OBR.scene.items.onChange(async () => {
+      try {
+        const sel = await OBR.player.getSelection();
+        await handleSelection(sel);
+      } catch {}
+    }),
+  );
+
+  // 2026-05-10: pin-state broadcast listener. The hp-bar popover
+  // (hp-bar-page.ts) toggles localStorage + LOCAL-broadcasts when the
+  // user clicks the pin button. We don't have to act on the message
+  // itself (handleSelection re-reads localStorage on every call), but
+  // we DO want to re-evaluate the current selection if pin was just
+  // toggled OFF while showing on a deselected token — otherwise the
+  // popover lingers until the next selection change.
+  unsubs.push(
+    OBR.broadcast.onMessage(BC_HP_BAR_PIN_CHANGED, async (event) => {
+      const data = event.data as { pinned?: boolean } | undefined;
+      // Only re-check on PIN-OFF; turning pin ON shouldn't disturb
+      // the open popover.
+      if (data?.pinned !== false) return;
       try {
         const sel = await OBR.player.getSelection();
         await handleSelection(sel);

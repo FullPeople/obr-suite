@@ -19,8 +19,24 @@ html,body{
   border-radius:10px;
   box-shadow:0 6px 20px rgba(0,0,0,0.50);
   backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
-  padding:8px 10px;
-  display:flex;align-items:center;gap:6px;
+  padding:6px 10px;
+  display:flex;flex-direction:column;gap:2px;
+}
+.card .row{display:flex;align-items:center;gap:6px}
+
+/* 2026-05-10c — name row above the stat banner. Resolves to
+   CC name → bestiary monster name → OBR item name (in that order
+   of priority). Center-aligned; truncates with ellipsis when the
+   name is too long for the popover width. */
+.name-row{
+  height:14px;
+  font-size:11.5px;font-weight:700;
+  color:rgba(255,255,255,0.92);
+  text-align:center;
+  letter-spacing:0.3px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  padding:0 4px;
+  text-shadow:0 1px 2px rgba(0,0,0,0.5);
 }
 
 /* Drag grip — same affordance as bestiary info / cc-info popovers. */
@@ -46,17 +62,22 @@ html,body{
 }
 .hp-pill{
   flex:1;
+  /* 2026-05-10c — guarantee the pill fits "999/999" (≈7 chars at
+     15px tabular-nums = ~63px text + slash + 2×12px padding = 95px
+     safe). Bumping the floor prevents truncation in the worst case
+     and lets the temp/AC pills steal extra space when HP is small. */
+  min-width:96px;
   position:relative;
   isolation:isolate;
   overflow:hidden;
   display:flex;align-items:center;justify-content:center;gap:2px;
-  min-height:34px;
-  padding:0 12px;
+  min-height:32px;
+  padding:0 10px;
   background:linear-gradient(135deg,#3a1a18,#4a221d);
   border:1px solid rgba(231,76,60,0.7);
-  border-radius:18px;
+  border-radius:16px;
   color:#fff;
-  font-weight:800;font-size:15px;
+  font-weight:800;font-size:14px;
   box-shadow:0 2px 6px rgba(231,76,60,0.32),0 0 0 1px rgba(0,0,0,0.18) inset;
   letter-spacing:0.3px;
 }
@@ -121,6 +142,35 @@ html,body{
 .hp-pill .slash{pointer-events:none}
 .temp-pill,.ac-pill{cursor:text}
 
+/* 2026-05-10 — pin button. Mirrors the cc-info / monster-info pin:
+   when pressed, the popover stays open across deselect / different-
+   token selection (data still refreshes when a valid different
+   token is selected). Per-client localStorage key +
+   `com.obr-suite/hp-bar-pin-changed` LOCAL broadcast. */
+.panel-pin-btn{
+  flex-shrink:0;
+  width:24px;height:24px;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:transparent;
+  border:1px solid rgba(255,255,255,0.20);
+  border-radius:5px;
+  color:rgba(255,255,255,0.55);
+  cursor:pointer;
+  padding:0;
+  transition:color .12s, border-color .12s, background .12s, transform .12s;
+}
+.panel-pin-btn:hover{
+  color:rgba(255,255,255,0.95);
+  border-color:rgba(93,173,226,0.55);
+}
+.panel-pin-btn.pinned{
+  color:#5dade2;
+  border-color:rgba(93,173,226,0.80);
+  background:rgba(93,173,226,0.18);
+  transform:rotate(35deg);
+}
+.panel-pin-btn svg{width:12px;height:12px;display:block;pointer-events:none}
+
 /* DM-only lock button — same affordance as bestiary monster-info /
    cc-info popovers. Toggles `metadata.locked` on the bubbles meta
    key, which gates whether players see HP details / AC. Hidden
@@ -152,31 +202,40 @@ body.is-player .stat-lock{display:none}
 </head>
 <body>
 <div class="card">
-  <div class="drag-handle" id="dragHandle" title="拖动重新定位">
-    <svg viewBox="0 0 6 16" fill="currentColor"><circle cx="2" cy="2" r="1"/><circle cx="2" cy="8" r="1"/><circle cx="2" cy="14" r="1"/><circle cx="5" cy="2" r="1"/><circle cx="5" cy="8" r="1"/><circle cx="5" cy="14" r="1"/></svg>
-  </div>
-  <div class="stat-banner">
-    <div class="hp-pill" id="hpPill" style="--hp-ratio: 1">
-      <span class="stat-cell">
-        <input class="stat-input" data-field="health" type="text" value="0"/>
-      </span>
-      <span class="slash">/</span>
-      <span class="stat-cell">
-        <input class="stat-input" data-field="max health" type="text" value="0"/>
-      </span>
+  <div class="name-row" id="nameRow" title="">—</div>
+  <div class="row">
+    <div class="drag-handle" id="dragHandle" title="拖动重新定位">
+      <svg viewBox="0 0 6 16" fill="currentColor"><circle cx="2" cy="2" r="1"/><circle cx="2" cy="8" r="1"/><circle cx="2" cy="14" r="1"/><circle cx="5" cy="2" r="1"/><circle cx="5" cy="8" r="1"/><circle cx="5" cy="14" r="1"/></svg>
     </div>
-    <div class="temp-pill" title="临时生命">
-      <input class="stat-input" data-field="temporary health" type="text" value="0"/>
-    </div>
-    <div class="ac-pill" title="护甲等级">
-      <input class="stat-input" data-field="armor class" type="text" value="0"/>
-    </div>
-    <button class="stat-lock" id="lockBtn" type="button" data-locked="true" title="锁定 = 战斗外向玩家隐藏血条详情；解锁 = 全员可见">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
-        <rect x="3" y="7" width="10" height="7" rx="1.5"/>
-        <path class="lock-shackle" d="M5 7 V5 a3 3 0 0 1 6 0 v2"/>
+    <button class="panel-pin-btn" id="panelPinBtn" type="button"
+            aria-pressed="false" title="置顶面板（取消选中也保持显示）">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .707c-.48.48-1.072.588-1.503.588-.177 0-.339-.016-.484-.041L7.176 13.04a.5.5 0 0 1-.708 0L3.633 10.207 1.4 12.439a.5.5 0 0 1-.707-.707L2.926 9.5.74 7.314a.5.5 0 0 1 0-.708l1.51-1.51c.41-.41.945-.625 1.482-.711.534-.085 1.139-.097 1.683-.024.546.073 1.169.114 1.643-.04.305-.099.62-.281.94-.602.193-.193.282-.467.348-.749.066-.281.117-.572.196-.793a1.51 1.51 0 0 1 .31-.508c.094-.092.215-.174.357-.232a.5.5 0 0 1 .19-.04Z" fill="currentColor"/>
       </svg>
     </button>
+    <div class="stat-banner">
+      <div class="hp-pill" id="hpPill" style="--hp-ratio: 1">
+        <span class="stat-cell">
+          <input class="stat-input" data-field="health" type="text" value="0"/>
+        </span>
+        <span class="slash">/</span>
+        <span class="stat-cell">
+          <input class="stat-input" data-field="max health" type="text" value="0"/>
+        </span>
+      </div>
+      <div class="temp-pill" title="临时生命">
+        <input class="stat-input" data-field="temporary health" type="text" value="0"/>
+      </div>
+      <div class="ac-pill" title="护甲等级">
+        <input class="stat-input" data-field="armor class" type="text" value="0"/>
+      </div>
+      <button class="stat-lock" id="lockBtn" type="button" data-locked="true" title="锁定 = 战斗外向玩家隐藏血条详情；解锁 = 全员可见">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+          <rect x="3" y="7" width="10" height="7" rx="1.5"/>
+          <path class="lock-shackle" d="M5 7 V5 a3 3 0 0 1 6 0 v2"/>
+        </svg>
+      </button>
+    </div>
   </div>
 </div>
 <script type="module" src="/src/hp-bar-page.ts"></script>

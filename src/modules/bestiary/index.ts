@@ -12,7 +12,7 @@ import {
   type DragEndPayload,
 } from "../../utils/panelLayout";
 import { BC_LOCAL_CONTENT_CHANGED } from "../../utils/localContent";
-import { clearMonsterCache } from "./data";
+import { clearMonsterCache, loadAllMonsters, getRawMonster } from "./data";
 import { onStateChange, getState } from "../../state";
 import { createCanvasDragMode } from "../../utils/canvasDragMode";
 
@@ -78,7 +78,58 @@ const INFO_URL = assetUrl("bestiary-monster-info.html");
 const ICON_URL = assetUrl("bestiary-icon.svg");
 
 const BESTIARY_SLUG_KEY = `${PLUGIN_ID}/slug`;
+const BESTIARY_DATA_KEY = "com.bestiary/monsters";
 const INFO_SHOW_MSG = `${PLUGIN_ID}/info-show`;
+
+// 2026-05-10 — refresh-pass for the scene-meta `monsters` table.
+// Triggered after BC_LOCAL_CONTENT_CHANGED. Walks every bound token
+// and overwrites its scene-meta entry with the freshest data from
+// rawBySlug (rehydrated by the loadAllMonsters call). Without this,
+// a re-uploaded local JSON only updates the bestiary panel listing —
+// the monster-info popover and group-saves both read from scene
+// metadata and would keep showing the stale stat block.
+async function refreshSharedMonsterTableFromLocal(): Promise<void> {
+  // Force a fresh load of rawBySlug — the cache was just cleared.
+  try { await loadAllMonsters(); } catch (e) {
+    console.warn("[bestiary] refresh-from-local: loadAllMonsters failed", e);
+    return;
+  }
+  let items: any[] = [];
+  let table: Record<string, any> = {};
+  try {
+    const [meta, all] = await Promise.all([
+      OBR.scene.getMetadata(),
+      OBR.scene.items.getItems(),
+    ]);
+    items = all;
+    table = (meta[BESTIARY_DATA_KEY] as Record<string, any>) || {};
+  } catch (e) {
+    console.warn("[bestiary] refresh-from-local: read failed", e);
+    return;
+  }
+  const boundSlugs = new Set<string>();
+  for (const it of items) {
+    const slug = (it.metadata as any)?.[BESTIARY_SLUG_KEY];
+    if (typeof slug !== "string" || !slug) continue;
+    boundSlugs.add(slug);
+  }
+  if (boundSlugs.size === 0) return;
+  const next: Record<string, any> = { ...table };
+  let touched = 0;
+  for (const slug of boundSlugs) {
+    const raw = getRawMonster(slug);
+    if (!raw) continue; // not in any enabled library — skip silently
+    next[slug] = raw;
+    touched++;
+  }
+  if (touched === 0) return;
+  try {
+    await OBR.scene.setMetadata({ [BESTIARY_DATA_KEY]: next });
+    console.info(`[bestiary] refresh-from-local: refreshed ${touched} bound monster(s)`);
+  } catch (e) {
+    console.warn("[bestiary] refresh-from-local: setMetadata failed", e);
+  }
+}
 const AUTO_POPUP_KEY = `${PLUGIN_ID}/auto-popup`;
 const AUTO_POPUP_TOGGLE_MSG = `${PLUGIN_ID}/auto-popup-toggled`;
 const CLOSE_MSG = `${PLUGIN_ID}/close`;
@@ -314,10 +365,16 @@ export async function setupBestiary(): Promise<void> {
   } catch {}
   // Local-content invalidation: when the user imports / removes a
   // homebrew JSON or MD file, drop our merged-monster cache so the
-  // bestiary panel re-renders with the new entries.
+  // bestiary panel re-renders with the new entries. Also refresh
+  // every bound token's scene-meta entry — the monster-info popover
+  // + group-saves both read from `com.bestiary/monsters` scene
+  // metadata, so without an overwrite-pass a modified local file
+  // wouldn't propagate to currently-bound tokens (the user reported
+  // "删除重新上传也没用 / re-upload doesn't update" 2026-05-10).
   unsubs.push(
     OBR.broadcast.onMessage(BC_LOCAL_CONTENT_CHANGED, () => {
       clearMonsterCache();
+      void refreshSharedMonsterTableFromLocal();
     }),
   );
 

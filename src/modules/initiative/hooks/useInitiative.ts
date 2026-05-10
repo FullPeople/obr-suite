@@ -474,23 +474,59 @@ export function useInitiative() {
           });
         } catch {}
 
-        // Camera → bbox of all OTHER initiative tokens (excluding the
-        // stealth one). Compute locally from the items map; getItemBounds
-        // would also work but a local pass over positions avoids an extra
-        // SDK round-trip per non-owner player.
+        // Camera → bbox of all OTHER initiative tokens that are
+        // VISIBLE to this player (excluding the stealth-active one
+        // AND every other invisible entry, since players can't see
+        // those at all). 2026-05-10 fix: previously the filter only
+        // excluded the active stealth token, so a hidden ally still
+        // pulled the bbox toward its position — players saw the
+        // camera tracking an "empty" spot in the room. Also using
+        // getItemBounds for true visual extents instead of just the
+        // anchor (image.position is at one corner for multi-cell
+        // tokens, which made the fit math drift on big creatures).
         try {
-          const others = allItemsRef.current.filter((i) => i.id !== itemId);
-          if (others.length === 0) return;
-          const otherIds = others.map((i) => i.id);
-          const otherItems = await OBR.scene.items.getItems(otherIds);
-          if (otherItems.length === 0) return;
+          const visibleOthers = allItemsRef.current.filter(
+            (i) => i.id !== itemId && !i.invisible,
+          );
+          if (visibleOthers.length === 0) return;
+          const otherIds = visibleOthers.map((i) => i.id);
           let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          for (const it of otherItems) {
-            const p = it.position;
-            if (p.x < minX) minX = p.x;
-            if (p.y < minY) minY = p.y;
-            if (p.x > maxX) maxX = p.x;
-            if (p.y > maxY) maxY = p.y;
+          // Try the SDK's bbox helper first — it accounts for token
+          // size + scale + rotation. Falls back to position-only if
+          // the SDK rejects (e.g. an id was deleted between the
+          // initiative snapshot and this call).
+          let useFallback = false;
+          try {
+            const bounds = await (OBR.scene.items as any).getItemBounds(otherIds);
+            if (bounds && typeof bounds === "object") {
+              const min = (bounds as any).min;
+              const max = (bounds as any).max;
+              if (min && max) {
+                if (typeof min.x === "number" && typeof min.y === "number"
+                    && typeof max.x === "number" && typeof max.y === "number") {
+                  minX = min.x; minY = min.y; maxX = max.x; maxY = max.y;
+                } else {
+                  useFallback = true;
+                }
+              } else {
+                useFallback = true;
+              }
+            } else {
+              useFallback = true;
+            }
+          } catch {
+            useFallback = true;
+          }
+          if (useFallback) {
+            const otherItems = await OBR.scene.items.getItems(otherIds);
+            if (otherItems.length === 0) return;
+            for (const it of otherItems) {
+              const p = it.position;
+              if (p.x < minX) minX = p.x;
+              if (p.y < minY) minY = p.y;
+              if (p.x > maxX) maxX = p.x;
+              if (p.y > maxY) maxY = p.y;
+            }
           }
           if (!Number.isFinite(minX)) return;
           const bboxW = Math.max(1, maxX - minX);

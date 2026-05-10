@@ -998,7 +998,13 @@ function renderLockButton(locked: boolean): string {
 // After a successful patch, refresh all four stat inputs so the user
 // sees the actual cross-field-clamped values (typed HP=999 with
 // maxHp=20 → input snaps to 20).
-function refreshStatInputs(live: BubblesData): void {
+//
+// `skipFocused` (default true) prevents clobbering the input the user
+// is currently editing — relevant when this is called from the
+// external-sync items.onChange path. The local-commit path runs after
+// the user's blur so no input is focused, but passing true everywhere
+// is harmless.
+function refreshStatInputs(live: BubblesData, skipFocused = true): void {
   const fields: Array<keyof BubblesData> = [
     "health", "max health", "temporary health", "armor class",
   ];
@@ -1007,7 +1013,9 @@ function refreshStatInputs(live: BubblesData): void {
     if (v == null) continue;
     const sel = `.stat-input[data-field="${f}"]`;
     const el = root.querySelector<HTMLInputElement>(sel);
-    if (el) el.value = String(v);
+    if (!el) continue;
+    if (skipFocused && document.activeElement === el) continue;
+    el.value = String(v);
   }
   // Re-paint the HP pill's fill ratio so the masked overlay tracks
   // edits live (without this the pill text updates but the colored
@@ -1019,6 +1027,33 @@ function refreshStatInputs(live: BubblesData): void {
     : 1;
   const pill = root.querySelector<HTMLElement>(".hp-pill");
   if (pill) pill.style.setProperty("--hp-ratio", ratio.toFixed(3));
+  // Lock button state — kept in sync so an external `locked` flip
+  // (e.g. from the standalone hp-bar's lock button on the same token)
+  // updates this panel's icon too.
+  const lockBtn = root.querySelector<HTMLButtonElement>(".stat-lock");
+  if (lockBtn) {
+    const locked = live.locked === undefined ? true : !!live.locked;
+    lockBtn.dataset.locked = locked ? "true" : "false";
+    lockBtn.title = locked
+      ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
+      : "已解锁：所有玩家可见完整 HP / AC 数值";
+  }
+}
+
+// 2026-05-10d — external sync. The standalone hp-bar component (and
+// any other writer to the bubbles metadata) writes the same scene-meta
+// key this panel reads from, so a items.onChange handler is enough to
+// keep them in sync. Re-reads the live snapshot for currentItemId
+// and repaints the inputs (skipping any input the user is currently
+// editing). Cost: one getItems call per onChange firing — acceptable
+// since the listener early-returns when no token is shown and OBR
+// itself coalesces rapid metadata changes.
+async function syncFromExternal(): Promise<void> {
+  if (!currentItemId) return;
+  let live: BubblesData = {};
+  try { live = await readBubbles(currentItemId); } catch {}
+  liveBubbles = { ...liveBubbles, ...live };
+  refreshStatInputs(live, /* skipFocused */ true);
 }
 
 // Stat-row input wiring — mirrors cc-info's binder but writes to
@@ -1263,4 +1298,14 @@ OBR.onReady(async () => {
       showMonster(String(p.slug), itemId);
     }
   });
+
+  // 2026-05-10d — items.onChange sync. Keeps the HP / AC / lock
+  // inputs in step with external writers (the standalone hp-bar
+  // component, the bubbles plugin's own field updates, anything that
+  // writes the same `com.obr-suite/bubbles/data` key). Was missing
+  // before — user reported "改独立血条组件时怪物面板没有变化" /
+  // "edits to the standalone bar didn't propagate back here".
+  // Local commits go through patchBubbles and call refreshStatInputs
+  // synchronously already, so they're not double-painted by this.
+  OBR.scene.items.onChange(() => { void syncFromExternal(); });
 });

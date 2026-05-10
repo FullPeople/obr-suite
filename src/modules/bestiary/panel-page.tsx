@@ -55,7 +55,14 @@ async function ensureSharedMonsterData(slug: string, raw: any): Promise<void> {
   try {
     const meta = await OBR.scene.getMetadata();
     const table = (meta[BESTIARY_DATA_KEY] as Record<string, any>) || {};
-    if (table[slug]) return; // already populated
+    // 2026-05-10 — was `if (table[slug]) return; // already populated`,
+    // which meant a re-uploaded local JSON could never refresh the
+    // scene-meta copy of a previously-bound monster. Now we ALWAYS
+    // overwrite when called. The cost is one extra setMetadata per
+    // bind, which is rare and harmless. Pair fix in
+    // refreshSharedMonsterTableFromLocal() — that walks every bound
+    // token after BC_LOCAL_CONTENT_CHANGED so the user doesn't have
+    // to re-bind manually for the popover to pick up new data.
     table[slug] = raw;
     await OBR.scene.setMetadata({ [BESTIARY_DATA_KEY]: table });
   } catch (e) {
@@ -68,6 +75,18 @@ async function ensureSharedMonsterData(slug: string, raw: any): Promise<void> {
 // the new slug, bubbles, name, and dex mod in a single broadcast,
 // avoiding a flicker where some tokens have updated and others
 // haven't.
+//
+// 2026-05-10 — when the token already carries a character-card
+// binding (`com.character-cards/boundCardId`), skip the init-mod
+// override. The CC-bound character has its own initiative modifier
+// derived from the player's sheet (CC DEX + proficiency), and the
+// user reported that bestiary-binding a CC-attached token (e.g. to
+// surface the monster info popover for a humanoid that's also a
+// player character) was clobbering that with the monster's dexMod.
+// HP / AC / name still apply because those are the data the user
+// is opting into when they pick the bestiary entry; only the
+// init mod is left alone.
+const CC_BIND_KEY = "com.character-cards/boundCardId";
 async function bindMonsterToTokens(mon: ParsedMonster, itemIds: string[]): Promise<void> {
   if (itemIds.length === 0) return;
   const slug = makeSlug(mon.source, mon.engName);
@@ -75,6 +94,9 @@ async function bindMonsterToTokens(mon: ParsedMonster, itemIds: string[]): Promi
   try {
     await OBR.scene.items.updateItems(itemIds, (drafts) => {
       for (const d of drafts) {
+        const hasCcBinding =
+          typeof (d.metadata as any)[CC_BIND_KEY] === "string"
+          && !!(d.metadata as any)[CC_BIND_KEY];
         d.metadata[BESTIARY_SLUG_KEY] = slug;
         d.metadata[BUBBLES_META] = {
           health: mon.hp,
@@ -85,7 +107,9 @@ async function bindMonsterToTokens(mon: ParsedMonster, itemIds: string[]): Promi
           locked: true,
         };
         d.metadata[BUBBLES_NAME] = mon.name;
-        d.metadata[INITIATIVE_MODKEY] = mon.dexMod;
+        if (!hasCcBinding) {
+          d.metadata[INITIATIVE_MODKEY] = mon.dexMod;
+        }
         d.name = mon.name;
       }
     });
@@ -155,6 +179,7 @@ async function healSceneMonsterTable(): Promise<void> {
     console.warn("[bestiary] heal: setMetadata failed", e);
   }
 }
+
 
 // Persisted UI state (keys are shared across panel opens / reloads).
 const LS_PREFIX = "bestiary/";

@@ -76,7 +76,16 @@ export async function readBubbles(itemId: string): Promise<BubblesData> {
  *  merge so HP never exceeds max HP — covers BOTH "HP edited above
  *  max" (clamp HP down) and "max edited below current HP" (drag HP
  *  down with it). Returns the final committed state so callers can
- *  refresh their UI to reflect the clamped values. */
+ *  refresh their UI to reflect the clamped values.
+ *
+ *  2026-05-10 — preserves the upstream "Stat Bubbles for D&D"
+ *  extension's extra keys (e.g. `name`, `dm only`, `name plate`,
+ *  any future fields) when a token has both metadata namespaces.
+ *  Previously the EXTERNAL key was overwritten with our own merged
+ *  object, dropping fields we don't track and silently flipping
+ *  visibility flags on tokens managed by the upstream extension.
+ *  The fix shallow-merges the patch INTO each namespace separately
+ *  using that namespace's own current value as the base. */
 export async function patchBubbles(
   itemId: string,
   patch: Partial<BubblesData>,
@@ -85,25 +94,58 @@ export async function patchBubbles(
   try {
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       for (const d of drafts) {
-        const existing = readDataFromMetadata(d.metadata as Record<string, unknown>);
-        const merged: BubblesData = { ...existing, ...patch };
+        // Read each namespace independently — they may carry
+        // different sets of fields (esp. when the upstream extension
+        // owns the token).
+        const meta = (d.metadata as Record<string, unknown>) ?? {};
+        const ownPrev = (meta[BUBBLES_META_KEY] as Record<string, unknown> | undefined) ?? null;
+        const extPrev = (meta[EXTERNAL_BUBBLES_META_KEY] as Record<string, unknown> | undefined) ?? null;
+
+        // Determine the "current" stat snapshot for clamp math: prefer
+        // own, fall back to external. Same precedence as readBubbles.
+        const baseForClamp: BubblesData = (ownPrev && typeof ownPrev === "object")
+          ? { ...(ownPrev as BubblesData) }
+          : (extPrev && typeof extPrev === "object")
+            ? { ...(extPrev as BubblesData) }
+            : {};
+        const merged: BubblesData = { ...baseForClamp, ...patch };
         if (
           typeof merged.health === "number" &&
           typeof merged["max health"] === "number"
         ) {
           merged.health = Math.min(merged.health, merged["max health"]);
         }
-        // Re-clamp temp HP to non-negative just in case.
         if (
           typeof merged["temporary health"] === "number" &&
           merged["temporary health"] < 0
         ) {
           merged["temporary health"] = 0;
         }
-        d.metadata[BUBBLES_META_KEY] = merged;
-        if (d.metadata[EXTERNAL_BUBBLES_META_KEY] != null) {
-          d.metadata[EXTERNAL_BUBBLES_META_KEY] = merged;
+        // The clamped values that should overwrite both namespaces.
+        // Only the keys we touched are forwarded; cross-field clamp
+        // results (e.g. health pulled down by max edit) are also
+        // included so the bar matches reality.
+        const clampedPatch: Record<string, unknown> = { ...patch };
+        if ("max health" in patch && typeof merged.health === "number") {
+          clampedPatch.health = merged.health;
         }
+        if ("temporary health" in patch) {
+          clampedPatch["temporary health"] = merged["temporary health"];
+        }
+
+        // Suite namespace — replace with the full merged state
+        // (we own this key entirely, no foreign fields to preserve).
+        d.metadata[BUBBLES_META_KEY] = merged;
+
+        // Upstream extension namespace — only touch if it already
+        // exists. Shallow-merge the clamped patch INTO the existing
+        // object so we don't drop fields the upstream extension owns
+        // (e.g. `dm only`, `name`, `name plate`, anything else its
+        // own UI writes there).
+        if (extPrev != null) {
+          d.metadata[EXTERNAL_BUBBLES_META_KEY] = { ...extPrev, ...clampedPatch };
+        }
+
         finalState = merged;
       }
     });

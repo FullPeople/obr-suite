@@ -1781,27 +1781,64 @@ export async function writeBubbleStats(
   try {
     await OBR.scene.items.updateItems([tokenId], (drafts) => {
       for (const d of drafts) {
-        const cur = ((d.metadata as any)[BUBBLES_META] as Record<string, unknown> | undefined)
-          ?? ((d.metadata as any)[EXTERNAL_BUBBLES_META] as Record<string, unknown> | undefined)
-          ?? {};
-        const next: Record<string, unknown> = { ...cur };
-        if (patch.hp != null) next["health"] = Math.max(0, Math.floor(patch.hp));
-        if (patch.maxHp != null) next["max health"] = Math.max(0, Math.floor(patch.maxHp));
-        if (patch.tempHp != null) next["temporary health"] = Math.max(0, Math.floor(patch.tempHp));
-        if (patch.ac !== undefined) {
-          if (patch.ac == null) delete next["armor class"];
-          else next["armor class"] = Math.floor(patch.ac);
+        // 2026-05-10: read each namespace independently so the upstream
+        // extension's extra fields (e.g. `dm only`, `name plate`) survive
+        // a round-trip when we patch HP / AC. Mirrors the fix in
+        // utils/statEdit.ts patchBubbles.
+        const ownPrev = ((d.metadata as any)[BUBBLES_META] as Record<string, unknown> | undefined) ?? null;
+        const extPrev = ((d.metadata as any)[EXTERNAL_BUBBLES_META] as Record<string, unknown> | undefined) ?? null;
+        const baseForClamp: Record<string, unknown> = ownPrev != null
+          ? { ...ownPrev }
+          : extPrev != null ? { ...extPrev } : {};
+        const next: Record<string, unknown> = { ...baseForClamp };
+        const writtenKeys = new Set<string>();
+        if (patch.hp != null) {
+          next["health"] = Math.max(0, Math.floor(patch.hp));
+          writtenKeys.add("health");
         }
-        if (patch.hide != null) next["hide"] = !!patch.hide;
+        if (patch.maxHp != null) {
+          next["max health"] = Math.max(0, Math.floor(patch.maxHp));
+          writtenKeys.add("max health");
+        }
+        if (patch.tempHp != null) {
+          next["temporary health"] = Math.max(0, Math.floor(patch.tempHp));
+          writtenKeys.add("temporary health");
+        }
+        if (patch.ac !== undefined) {
+          if (patch.ac == null) {
+            delete next["armor class"];
+            writtenKeys.add("armor class");
+          } else {
+            next["armor class"] = Math.floor(patch.ac);
+            writtenKeys.add("armor class");
+          }
+        }
+        if (patch.hide != null) {
+          next["hide"] = !!patch.hide;
+          writtenKeys.add("hide");
+        }
         const mx = Number(next["max health"]);
         const cur2 = Number(next["health"]);
         if (Number.isFinite(mx) && mx > 0 && Number.isFinite(cur2)) {
           next["health"] = Math.max(0, Math.min(cur2, mx));
+          writtenKeys.add("health");
         }
+
+        // Suite namespace — full overwrite (we own it).
         (d.metadata as any)[BUBBLES_META] = next;
-        if ((d.metadata as any)[EXTERNAL_BUBBLES_META] != null) {
-          (d.metadata as any)[EXTERNAL_BUBBLES_META] = next;
+
+        // External namespace — shallow merge so upstream-extension
+        // fields we don't track (visibility flags, name plate
+        // settings, etc.) survive intact.
+        if (extPrev != null) {
+          const extPatch: Record<string, unknown> = {};
+          for (const k of writtenKeys) {
+            if (k in next) extPatch[k] = next[k];
+            else delete (extPrev as any)[k];
+          }
+          (d.metadata as any)[EXTERNAL_BUBBLES_META] = { ...extPrev, ...extPatch };
         }
+
         if (patch.name != null) (d.metadata as any)[BUBBLES_NAME] = patch.name;
       }
     });

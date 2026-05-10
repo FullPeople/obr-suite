@@ -669,7 +669,11 @@ function renderLockButton(locked: boolean): string {
 // After every successful patch, push the cross-field-clamped values
 // back into all four stat inputs so the user sees what actually got
 // committed (e.g. typed HP=999 with max=66 → input snaps to 66).
-function refreshStatInputs(live: BubblesData): void {
+//
+// `skipFocused` (default true) prevents clobbering the input the user
+// is currently editing — relevant for the items.onChange external
+// sync path. Local commits run after blur so no input is focused.
+function refreshStatInputs(live: BubblesData, skipFocused = true): void {
   const fields: Array<keyof BubblesData> = [
     "health", "max health", "temporary health", "armor class",
   ];
@@ -678,7 +682,9 @@ function refreshStatInputs(live: BubblesData): void {
     if (v == null) continue;
     const sel = `.stat-input[data-field="${f}"]`;
     const el = root.querySelector<HTMLInputElement>(sel);
-    if (el) el.value = String(v);
+    if (!el) continue;
+    if (skipFocused && document.activeElement === el) continue;
+    el.value = String(v);
   }
   // Re-paint the HP pill's fill ratio so the masked overlay tracks
   // edits live (otherwise the pill text updates but the colored fill
@@ -690,6 +696,29 @@ function refreshStatInputs(live: BubblesData): void {
     : 1;
   const pill = root.querySelector<HTMLElement>(".hp-pill");
   if (pill) pill.style.setProperty("--hp-ratio", ratio.toFixed(3));
+  // Lock button state — keeps icon in step with external `locked` flips.
+  const lockBtn = root.querySelector<HTMLButtonElement>(".stat-lock");
+  if (lockBtn) {
+    const locked = live.locked === undefined ? true : !!live.locked;
+    lockBtn.dataset.locked = locked ? "true" : "false";
+    lockBtn.title = locked
+      ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
+      : "已解锁：所有玩家可见完整 HP / AC 数值";
+  }
+}
+
+// 2026-05-10d — items.onChange external sync. Mirror of the same hook
+// in monster-info-page.ts. Keeps cc-info's HP / AC / lock inputs in
+// step with whatever else writes the bound token's bubbles metadata
+// (standalone hp-bar component, fullscreen card edits, dice damage
+// scripts, etc.). Earlier rounds had only the local-commit refresh
+// path, so an edit made in the standalone hp-bar didn't propagate
+// here even though both wrote the same scene-meta key.
+async function syncFromExternal(): Promise<void> {
+  if (!boundItemId) return;
+  let live: BubblesData = {};
+  try { live = await readBubbles(boundItemId); } catch {}
+  refreshStatInputs(live, /* skipFocused */ true);
 }
 
 // Wire pointer-events for the HP / max-HP / temp / AC inputs that
@@ -1003,4 +1032,10 @@ OBR.onReady(async () => {
       void showCard(payload.cardId, currentRoomId);
     }
   });
+
+  // 2026-05-10d — items.onChange sync. Picks up bubbles metadata
+  // edits made elsewhere (standalone hp-bar component, fullscreen
+  // card stats, dice scripts) and repaints HP / AC / lock without a
+  // full card refetch.
+  OBR.scene.items.onChange(() => { void syncFromExternal(); });
 });
