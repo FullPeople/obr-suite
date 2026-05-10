@@ -36,6 +36,11 @@ const POPOVER_URL = assetUrl("hp-bar.html");
 // right-click menu shows "remove HP bar" instead of "add", and
 // selecting the token auto-pops the bar.
 export const HP_BAR_FLAG_KEY = `${PLUGIN_ID}/enabled`;
+// Per-token opt-out key — set only by the explicit "remove HP bar"
+// action. Auto-add must respect this or removing the component while
+// the token stays selected will immediately re-enable it on the next
+// items.onChange pass.
+const HP_BAR_MANUAL_DISABLED_KEY = `${PLUGIN_ID}/manual-disabled`;
 
 // Bindings we mutually exclude with — both have their own info
 // popover that already includes an HP editor, so showing the
@@ -142,6 +147,10 @@ function hasBubblesMetadata(item: any): boolean {
     || r["armor class"] != null;
 }
 
+function isHpBarManuallyDisabled(item: any): boolean {
+  return !!item?.metadata?.[HP_BAR_MANUAL_DISABLED_KEY];
+}
+
 function isBubblesLocked(item: any): boolean {
   const meta = item?.metadata || {};
   const m = meta[BUBBLES_META_KEY] ?? meta[EXTERNAL_BUBBLES_META_KEY];
@@ -198,6 +207,10 @@ async function handleSelection(selection: string[] | undefined): Promise<void> {
     return;
   }
   if (meta[CC_BIND_KEY] != null) {
+    if (popoverOpen) await closePopover();
+    return;
+  }
+  if (isHpBarManuallyDisabled(item)) {
     if (popoverOpen) await closePopover();
     return;
   }
@@ -306,6 +319,7 @@ export async function setupHpBar(): Promise<void> {
           await OBR.scene.items.updateItems(ids, (drafts) => {
             for (const d of drafts) {
               (d.metadata as any)[HP_BAR_FLAG_KEY] = true;
+              delete (d.metadata as any)[HP_BAR_MANUAL_DISABLED_KEY];
             }
           });
           // If the user had ONE of the affected tokens selected when
@@ -360,6 +374,7 @@ export async function setupHpBar(): Promise<void> {
           await OBR.scene.items.updateItems(ids, (drafts) => {
             for (const d of drafts) {
               delete (d.metadata as any)[HP_BAR_FLAG_KEY];
+              (d.metadata as any)[HP_BAR_MANUAL_DISABLED_KEY] = true;
             }
           });
           // If the popover is showing one of the just-removed tokens,
