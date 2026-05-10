@@ -14,13 +14,10 @@ import {
   type BubblesData,
 } from "../../utils/statEdit";
 import { mountResourcePanel } from "../resourceTracker/panel";
-import { STABLE_HIDES } from "../../feature-flags";
 
-// Dev-channel-only flag for the resource-tracker tab strip. Mirrors
-// the gate in monster-info-page.ts; ZH stable + EN ship without the
-// tab until cc-fullscreen + hp-bar integration + a left-side
-// notification overlay are all done.
-const STABLE_HIDES_CC = STABLE_HIDES;
+// 2026-05-13 — Was previously dev-only (gated through STABLE_HIDES /
+// STABLE_HIDES_CC) until cc-fullscreen + hp-bar integration matured.
+// Now ships in both stable and dev channels; flags removed.
 
 // 2026-05-10: pin-panel feature. When ON, the cc-info popover stays
 // open even after the user clears / changes selection — bg module
@@ -544,19 +541,17 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
     ${weps}
     ${featuresHtml}
   `;
-  const stickyTop = STABLE_HIDES_CC
-    ? statBanner
-    : `${statBanner}${renderRtTabStrip()}`;
-  const contentBlock = STABLE_HIDES_CC
-    ? attrInner
-    : `
-      <div class="rt-clip" data-active="${activeRtTab}">
-        <div class="rt-pane" data-pane="attr">${attrInner}</div>
-        <div class="rt-pane" data-pane="res">
-          <div id="rt-mount" style="position:relative; min-height:80px"></div>
-        </div>
+  // 2026-05-13 — resource-tracker graduated from dev to stable;
+  // tab strip + rt-clip render unconditionally now.
+  const stickyTop = `${statBanner}${renderRtTabStrip()}`;
+  const contentBlock = `
+    <div class="rt-clip" data-active="${activeRtTab}">
+      <div class="rt-pane" data-pane="attr">${attrInner}</div>
+      <div class="rt-pane" data-pane="res">
+        <div id="rt-mount" style="position:relative; min-height:80px"></div>
       </div>
-    `;
+    </div>
+  `;
   // 2026-05-10: pin button — when toggled ON, the panel doesn't
   // auto-close on selection clear / mismatch. Data still updates
   // when a different bound token is selected. Per-client state in
@@ -598,10 +593,9 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
     ${stickyTop}
     ${contentBlock}
   `;
-  if (!STABLE_HIDES_CC) {
-    setupRtTabSwitching();
-    void ensureRtResourceMount();
-  }
+  // 2026-05-13 — resource-tracker graduated to stable; always set up.
+  setupRtTabSwitching();
+  void ensureRtResourceMount();
   bindStatRowInputs();
   // The drag handle DOM element is recreated on every render() (we
   // assigned root.innerHTML), so the existing pointer-event bindings

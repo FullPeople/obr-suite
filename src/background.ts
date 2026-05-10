@@ -660,9 +660,10 @@ OBR.onReady(async () => {
   // pops out of the bestiary / character-card panels. Setup just
   // wires four broadcast listeners; nothing happens until the
   // resource-tracker UI inside a popover broadcasts an open
-  // request, so it's safe to always run. The panel-side mount
-  // (monster-info-page.ts) is gated by STABLE_HIDES so the tab
-  // strip only appears in dev for now.
+  // request, so it's safe to always run.
+  // 2026-05-13 — Resource tracker graduated from dev-only to stable;
+  // the panel-side mount in monster-info-page.ts + cc info-page.ts
+  // no longer gates on STABLE_HIDES.
   void setupResourceTracker();
 
   // (metadataInspector is now wired through the module registry —

@@ -14,7 +14,6 @@ import {
   type BubblesData,
 } from "../../utils/statEdit";
 import { mountResourcePanel } from "../resourceTracker/panel";
-import { STABLE_HIDES } from "../../feature-flags";
 import { getLocalLang, onLangChange } from "../../state";
 
 // 2026-05-10: language-aware section titles, ability labels, save /
@@ -694,11 +693,10 @@ function render(m: any) {
   const metaBlock = meta ? `<div class="meta">${meta}</div>` : "";
 
   // statBanner stays ABOVE the tab strip — name + HP / AC must remain
-  // visible regardless of which tab is active. Tab strip + sliding
-  // pane are dev-only for now (gated on STABLE_HIDES).
-  const stickyTop = STABLE_HIDES
-    ? statBanner
-    : `${statBanner}${renderTabStrip()}`;
+  // visible regardless of which tab is active.
+  // 2026-05-13 — resource-tracker tabs graduated from dev to stable;
+  // no longer gated on STABLE_HIDES.
+  const stickyTop = `${statBanner}${renderTabStrip()}`;
 
   const saves = m.save || {};
   const monsterName = stripTags(m.name ?? m.ENG_name ?? (en ? "Monster" : "怪物"));
@@ -771,9 +769,10 @@ function render(m: any) {
   const legendary = renderLegendary(m, name);
 
   // Combined attribute pane content — chips / abilities / meta /
-  // actions etc all in one block. On stable this renders flat; on
-  // dev it gets wrapped in a sliding rt-clip alongside the resource
-  // pane so switching tabs translates the whole content horizontally.
+  // actions etc all in one block. It gets wrapped in a sliding rt-clip
+  // alongside the resource pane so switching tabs translates the
+  // whole content horizontally. 2026-05-13 — was previously gated on
+  // STABLE_HIDES (dev-only); now always on per user request.
   const attrInner = `
     <div class="top">
       <div class="chips">${chips}</div>
@@ -787,16 +786,14 @@ function render(m: any) {
     ${reactions}
     ${legendary}
   `;
-  const contentBlock = STABLE_HIDES
-    ? attrInner
-    : `
-      <div class="rt-clip" data-active="${activeRtTab}">
-        <div class="rt-pane" data-pane="attr">${attrInner}</div>
-        <div class="rt-pane" data-pane="res">
-          <div id="rt-mount" style="position:relative; min-height:80px"></div>
-        </div>
+  const contentBlock = `
+    <div class="rt-clip" data-active="${activeRtTab}">
+      <div class="rt-pane" data-pane="attr">${attrInner}</div>
+      <div class="rt-pane" data-pane="res">
+        <div id="rt-mount" style="position:relative; min-height:80px"></div>
       </div>
-    `;
+    </div>
+  `;
 
   // 2026-05-10: pin button — same UX as cc-info. When ON, the
   // monster-info popover stays open after deselect / different-token
@@ -838,10 +835,9 @@ function render(m: any) {
     ${stickyTop}
     ${contentBlock}
   `;
-  if (!STABLE_HIDES) {
-    setupTabSwitching();
-    void ensureResourceMount();
-  }
+  // 2026-05-13 — resource-tracker graduated to stable; always set up.
+  setupTabSwitching();
+  void ensureResourceMount();
   // Re-bind the drag listener — innerHTML reassignment GC's the
   // previous handle node along with its event handlers.
   const handle = root.querySelector<HTMLElement>("#drag-handle");
