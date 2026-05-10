@@ -969,15 +969,20 @@ function setupTabSwitching(): void {
     if (next === "res") void ensureResourceMount();
   };
 
-  // Hover on a tab button: indicator follows the cursor instantly
-  // (just slides the indicator); a 200 ms debounce gates the actual
-  // pane switch so quick mouse pass-throughs don't whiplash.
+  // 2026-05-11 — was: hover slid the indicator instantly + a 200 ms
+  // debounce delayed the pane switch. Result: indicator finished its
+  // slide BEFORE the pane started, which the user reported as
+  // "选项卡平滑移动完再轮到内容平滑移动" (sequential, not
+  // simultaneous). Removed the eager hover-indicator move so both
+  // animations now kick off together inside `switchTo()` (which
+  // calls moveIndicatorTo + flips data-active back-to-back). Hover
+  // still triggers a debounced switch as a hover-to-select
+  // affordance, but no more pre-animation on indicator alone.
   let hoverTimer: ReturnType<typeof setTimeout> | null = null;
   buttons.forEach((b) => {
     const target = (b.dataset.rtTab as RtTabId) ?? "attr";
     b.addEventListener("click", () => switchTo(target));
     b.addEventListener("mouseenter", () => {
-      moveIndicatorTo(b);
       if (hoverTimer) clearTimeout(hoverTimer);
       hoverTimer = setTimeout(() => switchTo(target), 200);
     });
@@ -985,7 +990,6 @@ function setupTabSwitching(): void {
       if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
     });
   });
-  strip.addEventListener("mouseleave", () => moveIndicatorTo(findActiveButton()));
 }
 
 let resourceMountHandle: { refresh: () => Promise<void>; unmount: () => void } | null = null;

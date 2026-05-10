@@ -113,12 +113,14 @@ function setupRtTabSwitching(): void {
     if (next === "res") void ensureRtResourceMount();
   };
 
+  // 2026-05-11 — see monster-info-page.ts for the rationale. Drop
+  // the eager indicator-move on hover so indicator + pane animate
+  // together when switchTo() fires (click or 200 ms hover).
   let hoverTimer: ReturnType<typeof setTimeout> | null = null;
   buttons.forEach((b) => {
     const target = (b.dataset.rtTab as RtTabId) ?? "attr";
     b.addEventListener("click", () => switchTo(target));
     b.addEventListener("mouseenter", () => {
-      moveIndicatorTo(b);
       if (hoverTimer) clearTimeout(hoverTimer);
       hoverTimer = setTimeout(() => switchTo(target), 200);
     });
@@ -126,7 +128,6 @@ function setupRtTabSwitching(): void {
       if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
     });
   });
-  strip.addEventListener("mouseleave", () => moveIndicatorTo(findActiveButton()));
 }
 
 let rtMountHandle: { refresh: () => Promise<void>; unmount: () => void } | null = null;
