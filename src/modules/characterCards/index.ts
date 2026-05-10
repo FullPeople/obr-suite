@@ -248,10 +248,11 @@ async function handleSelection(selection: string[] | undefined) {
   let ownsItem = false;
   let hasAnyPlayerOwner = false;
   let locked = true; // default locked
+  let item: any = null;
   const itemId = selection[0];
   try {
     const items = await OBR.scene.items.getItems(selection);
-    const item = items[0];
+    item = items[0] ?? null;
     const m = item?.metadata?.[BIND_META];
     if (typeof m === "string") boundId = m;
     const createdUserId = (item as any)?.createdUserId;
@@ -263,6 +264,16 @@ async function handleSelection(selection: string[] | undefined) {
       locked = !!bubblesMeta.locked;
     }
   } catch {}
+  // 2026-05-12 — transient-read guard (mirror of bestiary/index.ts).
+  // OBR can fire items.onChange mid-write with a transient empty
+  // read OR a partial-metadata read missing the bound card id; without
+  // this guard we'd hideInfo → reopen on the next onChange →
+  // user-visible popover flicker on every resource-tracker click.
+  // The outer items.onChange already debounces 30 ms so most multi-
+  // firings collapse, but this is a belt-and-suspenders backstop.
+  if (currentInfoCard && currentInfoItemId === itemId && (!item || !boundId)) {
+    return;
+  }
   if (!boundId) {
     if (currentInfoCard) await hideInfo();
     return;
@@ -420,13 +431,24 @@ export async function setupCharacterCards(): Promise<void> {
       if (!known.has(currentInfoCard)) await hideInfo();
     })
   );
+  // 2026-05-13 — debounced items.onChange. Mirror of bestiary/index.ts
+  // (see comment there). OBR fires onChange multiple times per
+  // updateItems with mid-draft empty / partial reads; debouncing
+  // 30 ms collapses them so handleSelection only sees the final
+  // committed state. Prevents the resource-panel flicker on every
+  // resource-tracker click.
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   unsubs.push(
-    OBR.scene.items.onChange(async () => {
+    OBR.scene.items.onChange(() => {
       if (!currentInfoCard) return;
-      try {
-        const sel = await OBR.player.getSelection();
-        await handleSelection(sel);
-      } catch {}
+      if (pendingTimer) clearTimeout(pendingTimer);
+      pendingTimer = setTimeout(async () => {
+        pendingTimer = null;
+        try {
+          const sel = await OBR.player.getSelection();
+          await handleSelection(sel);
+        } catch {}
+      }, 30);
     })
   );
 

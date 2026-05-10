@@ -2122,6 +2122,16 @@ const TABS: TabDef[] = [
           return localStorage.getItem("com.obr-suite/bubbles/offset-by-text") === "1";
         } catch { return false; }
       })();
+      // 2026-05-13 — overhead mode (头顶模式) per-client toggle. When
+      // ON: bar above token's head, no rounded corners + visible
+      // border, AC shield inline at the bar's right end on the same
+      // plane. The "offset by font size" toggle is force-disabled
+      // when this is on (overhead owns the vertical placement).
+      const overheadMode = (() => {
+        try {
+          return localStorage.getItem("com.obr-suite/bubbles/overhead-mode") === "1";
+        } catch { return false; }
+      })();
       // Player visibility threshold — see LS_BUBBLES_PLAYER_THRESHOLD
       // in modules/bubbles/index.ts. 0..100. Locked tokens shown to
       // players quantise their HP ratio to multiples of this percent.
@@ -2180,8 +2190,15 @@ const TABS: TabDef[] = [
         : "Per-client preference. Negative shifts up (away from token), positive shifts down. Default -20 keeps bubbles clear of the OBR name label. Greyed out when 'offset by font size' is on.";
       const offsetByTextLbl = lang === "zh" ? "按字号上偏移" : "Offset by font size";
       const offsetByTextDesc = lang === "zh"
-        ? "开启后气泡向上偏移文字字号的像素数（即「字号随 token 自动缩放」中的字号，默认 20 px），自动随 token 缩放。开启时上方「上下偏移」灰掉。"
-        : "When ON, bubbles offset upward by the font-size px (same number as 'auto-scale text with token', default 20). Scales naturally with token. The manual 'vertical offset' above is greyed out while this is on.";
+        ? "开启后气泡向上偏移文字字号的像素数（即「字号随 token 自动缩放」中的字号，默认 20 px），自动随 token 缩放。开启时上方「上下偏移」灰掉。头顶模式下该开关强制关闭。"
+        : "When ON, bubbles offset upward by the font-size px (same number as 'auto-scale text with token', default 20). Scales naturally with token. The manual 'vertical offset' above is greyed out while this is on. Force-disabled when overhead mode is on.";
+      // 2026-05-13 — overhead mode toggle. CN|EN-style two-position
+      // switch instead of an ON/OFF toggle so the user reads it as a
+      // pair of named modes rather than a boolean.
+      const overheadLbl = lang === "zh" ? "血条显示模式" : "HP bar mode";
+      const overheadDesc = lang === "zh"
+        ? "标准模式：血条贴在 token 底部，气泡浮在上方。头顶模式：血条悬浮在 token 头顶一小段距离上方，取消圆角并加上边框，护盾和临时血在血条尽头（最右侧）与血条同平面显示。头顶模式下「按字号上偏移」自动失效。"
+        : "Standard: HP bar sits below the token with stat bubbles floating above it. Overhead: bar hovers a short gap above the token's head, sharp corners + border, AC shield (+ Temp HP) appear inline at the bar's right end on the same plane. The 'Offset by font size' toggle is force-disabled in Overhead mode.";
       const thresholdLbl = lang === "zh" ? "玩家进度阈值" : "Player threshold";
       const thresholdDesc = lang === "zh"
         ? "上锁角色对玩家显示的血条进度按这个百分比量化。默认 25：玩家只在血量降至 75% / 50% / 25% / 0% 时看到血条变化。设为 0 则连续显示真实比例，100 则始终显示满血（玩家看不到任何进度）。"
@@ -2223,9 +2240,31 @@ const TABS: TabDef[] = [
             <div class="desc"><em>${offsetByTextDesc}</em></div>
           </div>
           <button type="button"
-                  class="tog ${offsetByText ? "on" : ""}"
+                  class="tog ${offsetByText && !overheadMode ? "on" : ""}"
                   data-key="bubblesOffsetByText"
-                  aria-pressed="${offsetByText ? "true" : "false"}"></button>
+                  ${overheadMode ? "disabled" : ""}
+                  style="${overheadMode ? "opacity:0.45;cursor:not-allowed;" : ""}"
+                  aria-pressed="${offsetByText && !overheadMode ? "true" : "false"}"
+                  title="${overheadMode ? (lang === "zh" ? "头顶模式下不可用" : "Not available in Overhead mode") : ""}"></button>
+        </div>
+        <div class="row">
+          <div class="lbl">
+            ${overheadLbl}
+            <div class="desc"><em>${overheadDesc}</em></div>
+          </div>
+          <div class="mode-switch" data-key="bubblesOverheadMode"
+               role="radiogroup"
+               aria-label="${overheadLbl}"
+               style="display:inline-flex;border:1px solid rgba(255,255,255,0.18);border-radius:6px;overflow:hidden;font-size:11px;font-weight:600;user-select:none;align-self:center">
+            <button type="button" data-mode="standard"
+                    class="${overheadMode ? "" : "on"}"
+                    aria-pressed="${overheadMode ? "false" : "true"}"
+                    style="background:${overheadMode ? "transparent" : "rgba(93,173,226,0.20)"};color:${overheadMode ? "#9aa0b3" : "#7ec8f0"};border:none;padding:5px 12px;cursor:pointer;font:inherit;font-weight:600;">${lang === "zh" ? "标准模式" : "Standard"}</button>
+            <button type="button" data-mode="overhead"
+                    class="${overheadMode ? "on" : ""}"
+                    aria-pressed="${overheadMode ? "true" : "false"}"
+                    style="background:${overheadMode ? "rgba(93,173,226,0.20)" : "transparent"};color:${overheadMode ? "#7ec8f0" : "#9aa0b3"};border:none;padding:5px 12px;cursor:pointer;font:inherit;font-weight:600;border-left:1px solid rgba(255,255,255,0.12);">${lang === "zh" ? "头顶模式" : "Overhead"}</button>
+          </div>
         </div>
         <div class="row">
           <div class="lbl">
@@ -2353,6 +2392,7 @@ const TABS: TabDef[] = [
       const offsetByTextBtn = root.querySelector<HTMLButtonElement>('button[data-key="bubblesOffsetByText"]');
       if (offsetByTextBtn) {
         offsetByTextBtn.addEventListener("click", () => {
+          if (offsetByTextBtn.disabled) return;
           // Re-read inside the handler so the toggle reflects current
           // LS even if the user navigated away & back without
           // re-rendering.
@@ -2364,6 +2404,33 @@ const TABS: TabDef[] = [
             localStorage.setItem("com.obr-suite/bubbles/offset-by-text", cur ? "0" : "1");
           } catch {}
           if (activeTab === "bubbles") renderContent();
+        });
+      }
+      // 2026-05-13 — overhead-mode mode-switch (标准 / 头顶). Two
+      // buttons inside a single .mode-switch container; clicking
+      // either toggles ON the corresponding mode. Persists to
+      // localStorage; the bubbles module's storage listener picks up
+      // the change and re-syncs. Also re-renders the settings panel
+      // so the offsetByText toggle's disabled state updates.
+      const modeSwitch = root.querySelector<HTMLElement>('.mode-switch[data-key="bubblesOverheadMode"]');
+      if (modeSwitch) {
+        modeSwitch.querySelectorAll<HTMLButtonElement>("button[data-mode]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const mode = btn.dataset.mode === "overhead" ? "1" : "0";
+            try {
+              localStorage.setItem("com.obr-suite/bubbles/overhead-mode", mode);
+            } catch {}
+            // Re-fire storage event manually for same-tab listeners
+            // (StorageEvent only fires for OTHER tabs; we're the
+            // writer + reader in this case).
+            try {
+              window.dispatchEvent(new StorageEvent("storage", {
+                key: "com.obr-suite/bubbles/overhead-mode",
+                newValue: mode,
+              }));
+            } catch {}
+            if (activeTab === "bubbles") renderContent();
+          });
         });
       }
       // DM-only one-shot repair: clears legacy `hide=true` from every

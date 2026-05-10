@@ -1297,10 +1297,20 @@ OBR.onReady(async () => {
 
   OBR.broadcast.onMessage(SHOW_MSG, (ev: any) => {
     const p = ev?.data || {};
-    if (p.slug) {
-      const itemId = typeof p.itemId === "string" ? p.itemId : null;
-      showMonster(String(p.slug), itemId);
+    if (!p.slug) return;
+    const slug = String(p.slug);
+    const itemId = typeof p.itemId === "string" ? p.itemId : null;
+    // 2026-05-12 — iframe-side dedupe. If the bg's selection
+    // handler races itself (e.g. fires twice during one updateItems
+    // transaction) it broadcasts SHOW_MSG twice with identical
+    // payloads. Without this guard the second one rebuilds the
+    // whole popover innerHTML (visible flicker, tab indicator
+    // animation replay). Lang changes go through a separate
+    // onLangChange path, so dedupe by slug+itemId here is safe.
+    if (slug === currentSlug && itemId === currentItemId && root.childElementCount > 0) {
+      return;
     }
+    showMonster(slug, itemId);
   });
 
   // 2026-05-10d — items.onChange sync. Keeps the HP / AC / lock

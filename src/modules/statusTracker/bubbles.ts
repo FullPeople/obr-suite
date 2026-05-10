@@ -359,6 +359,8 @@ interface PillBgDescriptor {
   rInner: number; rOuter: number;
   fillColor: string; fillOpacity: number;
   stroke: string; strokeOpacity: number; borderW: number;
+  /** 2026-05-13 — token-z-locked zIndex. See computeStackBase. */
+  zIndex: number;
 }
 // Each glyph is its own TEXT item, positioned tangent to the band's
 // arc and rotated to match. Splitting per-glyph fixes the
@@ -373,6 +375,36 @@ interface GlyphDescriptor {
   fontSize: number;
   fg: string;
   glyph: string;
+  /** 2026-05-13 — token-z-locked zIndex. See computeStackBase. */
+  zIndex: number;
+}
+
+// 2026-05-13 — per-token zIndex base. Status items live on the
+// DRAWING layer; tokens live on CHARACTER. Items within a layer
+// sort by zIndex. Mapping `token.zIndex * STACK_MULT + slotOffset`
+// guarantees:
+//   • All items belonging to token A end up above all items of token
+//     B whenever A.zIndex > B.zIndex (matches the user spec: "if the
+//     current token is above another token, its status should also
+//     be above").
+//   • Within a single token, slot offsets order the layers:
+//        bg main      = base + 0
+//        bg highlight = base + 1
+//        glyphs       = base + GLYPH_OFFSET (well above all bg paths)
+// STACK_MULT = 1000 leaves room for 999 inner-slot items per token
+// before colliding with the next token's stack — generous, given
+// the typical max is ~20 (bg main + bg highlight + ~18 glyphs per
+// short buff name × few buffs).
+const STACK_MULT = 1000;
+const SLOT_BG_MAIN = 0;
+const SLOT_BG_HIGHLIGHT = 1;
+const SLOT_GLYPH = 100;
+function computeStackBase(token: Image): number {
+  // token.zIndex CAN be negative on tokens the user manually sent to
+  // back; Math.floor preserves sign while quantising. Falling back to
+  // 0 if undefined (very old items).
+  const z = typeof token.zIndex === "number" ? token.zIndex : 0;
+  return Math.floor(z) * STACK_MULT;
 }
 interface TokenDescriptors {
   bgs: PillBgDescriptor[];
@@ -428,6 +460,9 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
 
   const bgs: PillBgDescriptor[] = [];
   const glyphs: GlyphDescriptor[] = [];
+  // 2026-05-13 — base zIndex derived from token.zIndex so the
+  // bubbles sort with the token in the global stack.
+  const stackBase = computeStackBase(token);
 
   for (let i = 0; i < defaultBuffs.length; i++) {
     const { buff, pillW } = defaultBuffs[i];
@@ -483,6 +518,7 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
       stroke: darken(buff.color, 0.32),
       strokeOpacity: 0.85,
       borderW: Math.max(0.5, pillH * 0.07),
+      zIndex: stackBase + SLOT_BG_MAIN,
     });
 
     // Path 2 — the highlight overlay (pushed second → higher zIndex).
@@ -499,6 +535,7 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
       stroke: "#000000",
       strokeOpacity: 0,
       borderW: 0,
+      zIndex: stackBase + SLOT_BG_HIGHLIGHT,
     });
 
     // Per-glyph text along the arc.
@@ -551,6 +588,7 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
         fontSize,
         fg,
         glyph,
+        zIndex: stackBase + SLOT_GLYPH,
       });
     }
   }
@@ -579,6 +617,8 @@ function buildBgItem(token: Image, d: PillBgDescriptor): Item {
     .strokeOpacity(d.strokeOpacity)
     .strokeWidth(d.borderW)
     .layer("DRAWING")
+    .zIndex(d.zIndex)
+    .disableAutoZIndex(true)
     .attachedTo(token.id)
     .locked(true)
     .disableHit(true)
@@ -589,6 +629,12 @@ function buildBgItem(token: Image, d: PillBgDescriptor): Item {
 }
 
 function buildGlyphItem(token: Image, d: GlyphDescriptor): Item {
+  // 2026-05-13 — zIndex is now token-z-locked (was hardcoded
+  // `Date.now() + 1_000_000_000`). Glyphs sit at stackBase + SLOT_GLYPH
+  // so they're above both bg paths of the same token, while still
+  // sorting consistently with other tokens' status items per the
+  // user spec "保证当前 token 如果在别的 token 的上方，那么该 token
+  // 的状态应该也在上方".
   return buildText()
     .textType("PLAIN")            // CRITICAL — see TextBuilder.js line 27
     .plainText(d.glyph)
@@ -607,7 +653,7 @@ function buildGlyphItem(token: Image, d: GlyphDescriptor): Item {
     .strokeWidth(0)
     .padding(Math.max(2, d.fontSize * 0.10))
     .layer("DRAWING")
-    .zIndex(Date.now() + 1_000_000_000)
+    .zIndex(d.zIndex)
     .disableAutoZIndex(true)
     .attachedTo(token.id)
     .locked(true)

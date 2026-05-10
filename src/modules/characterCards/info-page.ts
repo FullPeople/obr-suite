@@ -1027,6 +1027,15 @@ OBR.onReady(async () => {
     // different character should make rolls anchor on the new token).
     if (typeof p.itemId === "string") boundItemId = p.itemId;
     else if (p.itemId === null) boundItemId = null;
+    // 2026-05-12 — dedupe duplicate SHOW_MSG with same card+room
+    // (selection-handler-race protection; see monster-info-page.ts).
+    if (
+      p.cardId === currentCardId &&
+      p.roomId === currentRoomId &&
+      root.childElementCount > 0
+    ) {
+      return;
+    }
     if (p.cardId && p.roomId) showCard(String(p.cardId), String(p.roomId));
   });
 

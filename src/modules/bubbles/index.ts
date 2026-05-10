@@ -65,6 +65,16 @@ const DEFAULT_VERTICAL_OFFSET = -20;
 // offset matches the auto-scaling font label height. When ON, the
 // `vertical-offset` slider is ignored.
 export const LS_BUBBLES_OFFSET_BY_TEXT = `${PLUGIN_ID}/offset-by-text`;
+// 2026-05-13 — overhead mode (头顶模式). Per-client toggle. When ON:
+//   • HP bar sits above the token's top with a small gap (was below)
+//   • Bar has 0 corner radius + a visible border (was capsule, no border)
+//   • AC shield (and Temp HP) render INLINE at the right end of the
+//     bar on the SAME PLANE (was stacked above the bar as separate
+//     circles).
+//   • The "offset by font size" toggle is force-disabled (UI-grayed
+//     + ignored at compute-time) — overhead mode owns the vertical
+//     placement.
+export const LS_BUBBLES_OVERHEAD_MODE = `${PLUGIN_ID}/overhead-mode`;
 
 // Per-DM-room player visibility threshold (in percent, 0-100). For
 // LOCKED tokens, the player-side displayed HP ratio is quantised to
@@ -262,6 +272,14 @@ function readVerticalOffset(): number {
 function readOffsetByText(): boolean {
   try {
     const v = localStorage.getItem(LS_BUBBLES_OFFSET_BY_TEXT);
+    if (v === "1") return true;
+  } catch {}
+  return false;
+}
+
+function readOverheadMode(): boolean {
+  try {
+    const v = localStorage.getItem(LS_BUBBLES_OVERHEAD_MODE);
     if (v === "1") return true;
   } catch {}
   return false;
@@ -809,6 +827,25 @@ interface BarLayout {
   /** parent token's image-scale-equivalent (= rendered_w / sceneDpi).
    *  Kept for diagnostic logging and the geometryKey hash. */
   tokenScale: number;
+  /** 2026-05-13 — overhead mode active flag (头顶模式). When true:
+   *  - barCornerRadius is 0 (sharp corners)
+   *  - barStrokeOpacity / barStrokeWidth produce a visible border
+   *  - acCenter / tempCenter sit INLINE on the bar's right end at the
+   *    bar's center y, with diameter = barHeight
+   *  - text width is `barTextBoxWidth` (excludes inline icons) instead
+   *    of barWidth (the bar's own width is already shrunk to make
+   *    room, but the text bbox uses barTextBoxWidth so it stays
+   *    centered inside the BAR portion, not the bar+icons span).
+   */
+  overheadMode: boolean;
+  /** bar bg's stroke width / opacity (0 in standard mode, > 0 in
+   *  overhead mode so the rectangular bar has a visible border). */
+  barStrokeWidth: number;
+  barStrokeOpacity: number;
+  /** Text bbox width — equal to `barWidth` in both modes; the bar's
+   *  width is already shrunk in overhead mode to leave room for the
+   *  inline icons, so the text centers correctly within the bar. */
+  barTextBoxWidth: number;
 }
 
 // Layout computation — MIXED frames:
@@ -845,6 +882,7 @@ function computeLayoutFromMetrics(
   autoScaleText: boolean,
   flipX: number,
   flipY: number,
+  overheadMode: boolean = false,
 ): BarLayout {
   // 2026-05-10 REVERT — see DISABLE_INHERIT comment. Every dimension
   // returned here is RENDERED (i.e. token's parent.scale magnitude
@@ -862,61 +900,98 @@ function computeLayoutFromMetrics(
   // so the visual size matches the token's actual rendered footprint.
   const barHeight = BAR_HEIGHT * s;
   const barPadding = BAR_PADDING * s;
-  const barCornerRadius = barHeight / 2;
+  // 2026-05-13 — overhead mode: sharp corners + visible border.
+  // Standard mode keeps the capsule shape with no border.
+  const barCornerRadius = overheadMode ? 0 : barHeight / 2;
+  const barStrokeWidth = overheadMode ? Math.max(0.6, barHeight * 0.08) : 0;
+  const barStrokeOpacity = overheadMode ? 0.7 : 0;
   const barFontSize = BAR_FONT_SIZE * s;
   const barTextOffset = TEXT_VERTICAL_OFFSET * s;
-  const diameter = DIAMETER * s;
-  const bubbleFontSize = BUBBLE_FONT_SIZE * s;
-  const bubbleFontSizeTight = BUBBLE_FONT_SIZE_TIGHT * s;
+  // 2026-05-13 — overhead mode forces the inline icons (AC + Temp HP)
+  // to match the bar's height so they read as a single unit. Standard
+  // mode keeps the larger 30-base diameter for the above-bar circles.
+  const diameter = overheadMode ? barHeight : DIAMETER * s;
+  const bubbleFontSize = overheadMode ? barFontSize : BUBBLE_FONT_SIZE * s;
+  const bubbleFontSizeTight = overheadMode ? barFontSize * 0.7 : BUBBLE_FONT_SIZE_TIGHT * s;
   const bubbleTextOffset = TEXT_VERTICAL_OFFSET * s;
-  const barWidth = Math.max(barHeight, renderedWidth - barPadding * 2);
+  const totalSpan = Math.max(barHeight, renderedWidth - barPadding * 2);
 
-  // Vertical-offset semantics:
-  //   - "offset by text" ON  → offset matches the OBR auto-scaling
-  //     token name label, which scales with the token. Multiply by
-  //     `t` so the visual gap shrinks/grows with the token.
-  //   - manual slider value → user-relative scene units. Don't scale,
-  //     so a user-set "+5" stays at +5 regardless of token size.
-  void autoScaleText;
-  const effectiveVerticalOffset = offsetByText
-    ? -TOKEN_TEXT_FONT_BASE * t
-    : verticalOffset;
-  const origin: Vector2 = { x: centerX, y: centerY + renderedHeight / 2 + effectiveVerticalOffset };
-
-  // Canonical bar position — TOP-LEFT in scene coords. Bar visually
-  // spans [origin.x - barWidth/2, origin.x + barWidth/2] horizontally,
-  // and sits a small gap (`2 * s`) above origin.y (the token's bottom
-  // edge + vertical offset). flipX / flipY are no longer needed for
-  // the curve points → they're kept on BarLayout as informational
-  // metadata only (some downstream code uses them as a hint).
-  void flipX; void flipY;
-  const barOrigin: Vector2 = {
-    x: origin.x - barWidth / 2,
-    y: origin.y - barHeight - 2 * s,
-  };
-
-  // Stat bubble centres — world coords. With SCALE inheritance OFF
-  // the visual diameter == `diameter` (already RENDERED), so layout
-  // math and visual span match exactly.
+  // === Inline icon footprint (overhead mode only) ====================
+  // In overhead mode, AC + Temp HP take up part of the totalSpan to the
+  // right of the bar. Bar width shrinks to fit. In standard mode, AC +
+  // Temp HP float in a separate row above the bar, so bar takes the
+  // whole totalSpan.
   const showHp = data.maxHp > 0;
-  const bubbleGap = 4 * s;
-  const bubbleSpacing = 8 * s;
-  const edgeInset = 2 * s;
-  const bubbleBottomY = barOrigin.y - bubbleGap;
-  const bubbleCenterY = bubbleBottomY - diameter / 2;
+  const inlineGap = 2 * s;
+  const acSlotW = overheadMode && data.ac != null ? diameter : 0;
+  const tempSlotW = overheadMode && data.tempHp > 0 && showHp ? diameter : 0;
+  const inlineSlotsTotal = acSlotW + tempSlotW
+    + (acSlotW > 0 && tempSlotW > 0 ? inlineGap : 0);
+  const inlineFootprint = inlineSlotsTotal > 0 ? inlineSlotsTotal + inlineGap : 0;
+  const barWidth = overheadMode
+    ? Math.max(barHeight * 2, totalSpan - inlineFootprint)
+    : totalSpan;
 
+  // === Vertical positioning ==========================================
+  // Standard:  bar sits below the token (legacy layout).
+  // Overhead:  bar sits a small gap above the token, with the user's
+  //            verticalOffset still honored (negative pushes higher).
+  //            offsetByText is force-disabled in overhead mode — the
+  //            settings UI greys out the toggle to match.
+  void autoScaleText;
+  let origin: Vector2;
+  let barOrigin: Vector2;
+  if (overheadMode) {
+    const overheadGap = 6 * s;
+    // origin anchors at the bar's center (x) and top edge (y).
+    const topOfToken = centerY - renderedHeight / 2;
+    const barTopY = topOfToken - overheadGap - barHeight + verticalOffset;
+    origin = { x: centerX, y: topOfToken };
+    barOrigin = { x: centerX - totalSpan / 2, y: barTopY };
+  } else {
+    const effectiveVerticalOffset = offsetByText
+      ? -TOKEN_TEXT_FONT_BASE * t
+      : verticalOffset;
+    origin = { x: centerX, y: centerY + renderedHeight / 2 + effectiveVerticalOffset };
+    void flipX; void flipY;
+    barOrigin = {
+      x: origin.x - barWidth / 2,
+      y: origin.y - barHeight - 2 * s,
+    };
+  }
+
+  // === AC / Temp HP placement ========================================
   let acCenter: Vector2 | null = null;
   let tempCenter: Vector2 | null = null;
-  let nextRightEdge = origin.x + renderedWidth / 2 - edgeInset;
-  if (data.ac != null) {
-    acCenter = { x: nextRightEdge - diameter / 2, y: bubbleCenterY };
-    nextRightEdge -= diameter + bubbleSpacing;
-  }
-  if (data.tempHp > 0 && showHp) {
-    tempCenter = { x: nextRightEdge - diameter / 2, y: bubbleCenterY };
+  if (overheadMode) {
+    // Inline at the right end of the bar, vertically centered.
+    // Order left-to-right: [BAR] [TEMP] [AC] (AC rightmost per spec).
+    const inlineY = barOrigin.y + barHeight / 2;
+    let cursorX = barOrigin.x + barWidth + inlineGap;
+    if (data.tempHp > 0 && showHp) {
+      tempCenter = { x: cursorX + diameter / 2, y: inlineY };
+      cursorX += diameter + inlineGap;
+    }
+    if (data.ac != null) {
+      acCenter = { x: cursorX + diameter / 2, y: inlineY };
+    }
+  } else {
+    // Standard layout — float above the bar.
+    const bubbleGap = 4 * s;
+    const bubbleSpacing = 8 * s;
+    const edgeInset = 2 * s;
+    const bubbleBottomY = barOrigin.y - bubbleGap;
+    const bubbleCenterY = bubbleBottomY - diameter / 2;
+    let nextRightEdge = origin.x + renderedWidth / 2 - edgeInset;
+    if (data.ac != null) {
+      acCenter = { x: nextRightEdge - diameter / 2, y: bubbleCenterY };
+      nextRightEdge -= diameter + bubbleSpacing;
+    }
+    if (data.tempHp > 0 && showHp) {
+      tempCenter = { x: nextRightEdge - diameter / 2, y: bubbleCenterY };
+    }
   }
 
-  void showHp;
   return {
     flipX: 1, flipY: 1,
     origin, barOrigin, barWidth,
@@ -924,6 +999,9 @@ function computeLayoutFromMetrics(
     diameter, bubbleFontSize, bubbleFontSizeTight, bubbleTextOffset,
     acCenter, tempCenter,
     tokenScale: t,
+    overheadMode,
+    barStrokeWidth, barStrokeOpacity,
+    barTextBoxWidth: barWidth,
   };
 }
 
@@ -935,6 +1013,7 @@ function computeLayout(
   verticalOffset: number,
   offsetByText: boolean,
   autoScaleText: boolean,
+  overheadMode: boolean = false,
 ): BarLayout {
   // World centre + rendered size. Sign of parent.scale (signed,
   // not |scale|) feeds into every position-offset computation so
@@ -947,7 +1026,7 @@ function computeLayout(
   return computeLayoutFromMetrics(
     center.x, center.y, size.width, size.height,
     sceneDpi, data, userScale, verticalOffset, offsetByText, autoScaleText,
-    flipX, flipY,
+    flipX, flipY, overheadMode,
   );
 }
 
@@ -976,8 +1055,12 @@ function buildBarBg(ctx: BuildContext, L: BarLayout, statsVisible: boolean): any
   return buildCurve()
     .fillColor(color)
     .fillOpacity(BG_OPACITY)
-    .strokeOpacity(0)
-    .strokeWidth(0)
+    // 2026-05-13 — overhead mode draws a visible border (standard mode
+    // keeps strokeOpacity 0). Stroke colour matches the dark
+    // hp-bg-hidden palette so it reads as a frame regardless of fill.
+    .strokeColor("#000000")
+    .strokeOpacity(L.barStrokeOpacity)
+    .strokeWidth(L.barStrokeWidth)
     .tension(0)
     .closed(true)
     .points(roundedRectanglePoints(L.barWidth, L.barHeight, L.barCornerRadius))
@@ -1089,6 +1172,10 @@ function buildBarText(ctx: BuildContext, L: BarLayout, data: BubbleData): any {
 }
 
 function buildStatBubbleBg(ctx: BuildContext, L: BarLayout, center: Vector2, color: string): any {
+  // 2026-05-13 — overhead mode overlaps the bar so this needs to sit
+  // ABOVE hp-fill (zIndex 20000) and hp-shimmer (25000). Standard
+  // mode the icons are physically separate from the bar so any
+  // zIndex works; using 26000 unconditionally keeps the math simple.
   // Shape CIRCLE position is the bubble's CENTER (verified empirically
   // against the upstream's positioning math).
   return buildShape()
@@ -1107,7 +1194,7 @@ function buildStatBubbleBg(ctx: BuildContext, L: BarLayout, center: Vector2, col
     .disableHit(true)
     .visible(ctx.visible)
     .disableAutoZIndex(true)
-    .zIndex(15000)
+    .zIndex(L.overheadMode ? 26000 : 15000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
     .metadata(bubbleMeta(ctx.token.id, "temp-bg"))
     .build();
@@ -1149,7 +1236,8 @@ function buildAcShield(ctx: BuildContext, L: BarLayout, center: Vector2, color: 
     .disableHit(true)
     .visible(ctx.visible)
     .disableAutoZIndex(true)
-    .zIndex(15000)
+    // 2026-05-13 — overhead mode overlaps the bar; see buildStatBubbleBg.
+    .zIndex(L.overheadMode ? 26000 : 15000)
     .disableAttachmentBehavior(DISABLE_INHERIT)
     .metadata(bubbleMeta(ctx.token.id, "ac-shield"))
     .build();
@@ -1402,7 +1490,11 @@ async function syncBubbles(): Promise<void> {
 
     const userScale = readUserScale();
     const verticalOffset = readVerticalOffset();
-    const offsetByTextFlag = readOffsetByText();
+    // 2026-05-13 — overhead mode forces offsetByText OFF (UI greys
+    // the toggle to match). Computing it once here so the rest of
+    // the sync loop sees the canonical resolved value.
+    const overheadModeFlag = readOverheadMode();
+    const offsetByTextFlag = overheadModeFlag ? false : readOffsetByText();
     const playerThreshold = readPlayerThreshold();
     const autoScaleText = cachedAutoScaleText;
     // Refresh the cached combat-active flag at sync time so a player
@@ -1462,7 +1554,7 @@ async function syncBubbles(): Promise<void> {
       }
 
       const statsVisible = !d.hide;
-      const layout = computeLayout(it, sceneDpi, effectiveData, userScale, verticalOffset, offsetByTextFlag, autoScaleText);
+      const layout = computeLayout(it, sceneDpi, effectiveData, userScale, verticalOffset, offsetByTextFlag, autoScaleText, overheadModeFlag);
       // Silhouette suppresses AC and the temp bubble entry. The
       // geometryKey reflects what items will exist so a viewMode
       // flip drives a structure-rebuild instead of slipping
@@ -1494,6 +1586,10 @@ async function syncBubbles(): Promise<void> {
         // until a separate data edit triggers the rebuild.
         offsetByTextFlag ? "T" : "F",
         verticalOffset.toFixed(2),
+        // 2026-05-13 — overhead mode flips the whole layout (above/below,
+        // corner radius, border, inline-vs-stacked icons); must invalidate
+        // the cache when toggled.
+        overheadModeFlag ? "O" : "S",
         // parent.scale sign — flips position-offset signs in builders.
         // Need a rebuild on flip so the new bake takes effect.
         layout.flipX, layout.flipY,
@@ -1700,7 +1796,8 @@ export async function setupBubbles(): Promise<void> {
       e.key === LS_BUBBLES_ENABLED ||
       e.key === LS_BUBBLES_SCALE ||
       e.key === LS_BUBBLES_VERTICAL_OFFSET ||
-      e.key === LS_BUBBLES_OFFSET_BY_TEXT
+      e.key === LS_BUBBLES_OFFSET_BY_TEXT ||
+      e.key === LS_BUBBLES_OVERHEAD_MODE
     ) {
       void clearAll().then(() => syncBubbles().catch(() => {}));
     }

@@ -26,13 +26,16 @@ const EDGE_MARGIN = 8;
 // panel. Lets the user pick a roll mode AND tweak the expression /
 // dice counts inline without committing to "always normal" or having
 // to right-click + dispatch through the action panel.
-const QUICK_POPOVER_ID = "com.obr-suite/rollable-quick";
+//
+// 2026-05-13 — switched from OBR.popover.open → OBR.modal.open.
+// User feedback: OBR's popover has an uncancellable fade-in/out
+// transition that felt sluggish ("我不需要 Obr 原生的 pop 没办法
+// 取消的 fadein fadeout 效果"). Modal renders the iframe directly
+// (no fade). fullScreen + hidePaper + hideBackdrop means we
+// completely own the layout — the iframe's body flex-centers a
+// 340 × ~282 px card with an X-to-close button.
+const QUICK_MODAL_ID = "com.obr-suite/rollable-quick";
 const QUICK_URL = assetUrl("dice-quick-popup.html");
-const QUICK_POPOVER_W = 320;
-// 2026-05-10b — was 296 (one 30 px 暗骰 long bar). Replaced by a
-// 4-cell mini-row at 18 px flush under the main action row. Net
-// height saving ≈14 px.
-const QUICK_POPOVER_H = 282;
 
 // Returns the iframe's TOP-LEFT corner in OBR viewport pixels, used to
 // translate iframe-local clientX/clientY into viewport coords for
@@ -96,38 +99,28 @@ async function openQuickPopupAt(
     label: string;
     itemId: string | null;
   },
-  viewportPos: { x: number; y: number },
+  _viewportPos: { x: number; y: number },
 ): Promise<void> {
   const params = new URLSearchParams();
   params.set("expr", args.expression);
   params.set("label", args.label);
   if (args.itemId) params.set("itemId", args.itemId);
 
-  const [vw, vh] = await Promise.all([
-    OBR.viewport.getWidth().catch(() => 1280),
-    OBR.viewport.getHeight().catch(() => 720),
-  ]);
-  const left = Math.max(
-    EDGE_MARGIN,
-    Math.min(viewportPos.x, vw - QUICK_POPOVER_W - EDGE_MARGIN),
-  );
-  const top = Math.max(
-    EDGE_MARGIN,
-    Math.min(viewportPos.y, vh - QUICK_POPOVER_H - EDGE_MARGIN),
-  );
-
-  try { await OBR.popover.close(QUICK_POPOVER_ID); } catch {}
-  await OBR.popover.open({
-    id: QUICK_POPOVER_ID,
+  // 2026-05-13 — was a viewport-anchored popover; now a fullscreen
+  // modal that renders the iframe in the center of the screen via
+  // its own CSS (body flex-centers .popup). viewportPos is no longer
+  // used — left in the signature so callers don't need to change.
+  // Modal does NOT apply OBR's fade transition, which is the
+  // explicit user requirement.
+  try { await OBR.modal.close(QUICK_MODAL_ID); } catch {}
+  await OBR.modal.open({
+    id: QUICK_MODAL_ID,
     url: `${QUICK_URL}?${params.toString()}`,
-    width: QUICK_POPOVER_W,
-    height: QUICK_POPOVER_H,
-    anchorReference: "POSITION",
-    anchorPosition: { left: Math.round(left), top: Math.round(top) },
-    anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
-    transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
+    fullScreen: true,
     hidePaper: true,
-    disableClickAway: false,
+    hideBackdrop: true,
+    // Pointer events are NOT disabled — the modal blocks clicks on
+    // the canvas while open (per user OK: "可以阻止鼠标事件无妨").
   });
 }
 
@@ -160,14 +153,13 @@ export function bindRollableClickPopup(
       ? await itemIdResolver()
       : await resolveClickRollTarget();
 
-    let viewportPos: { x: number; y: number };
-    if (iframeOrigin) {
-      const origin = await iframeOrigin();
-      viewportPos = { x: origin.left + e.clientX, y: origin.top + e.clientY };
-    } else {
-      const vw = await OBR.viewport.getWidth().catch(() => 1280);
-      viewportPos = { x: vw / 2 - QUICK_POPOVER_W / 2, y: 80 };
-    }
+    // 2026-05-13 — viewport position is no longer needed (modal
+    // centers itself via CSS), but iframeOrigin / e.clientX are
+    // left in scope in case future code wants them for non-modal
+    // fallback. Compute a token-anchored viewportPos anyway so the
+    // call signature stays unchanged.
+    void iframeOrigin;
+    const viewportPos = { x: 0, y: 0 };
 
     // Brief flash so the user sees which span they hit before the
     // popup masks the click point.

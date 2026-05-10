@@ -352,6 +352,11 @@ function tokenSyncKey(it: any, ids: string[]): string {
   const sy = (it.scale?.y ?? 1).toFixed(3);
   const w = it.image?.width ?? 0;
   const h = it.image?.height ?? 0;
+  // 2026-05-13 — token.zIndex is part of the key so that when the
+  // user re-orders tokens (send to back / bring to front), the
+  // status items get rebuilt with the new zIndex base. bubbles.ts
+  // computes the items' zIndex from `token.zIndex * STACK_MULT`.
+  const z = typeof it.zIndex === "number" ? it.zIndex : 0;
   const rounds = readTokenBuffRounds(it);
   const roundsKey = ids.map((id) => `${id}:${rounds[id] ?? ""}`).join(",");
   // Neither visibility NOR position is in the key:
@@ -364,7 +369,7 @@ function tokenSyncKey(it: any, ids: string[]): string {
   //     detached (palette open) where the user is the source of
   //     truth for position. In neither case do we need to re-sync
   //     on token movement.
-  return `${ids.join("|")}#${roundsKey}@${sx}x${sy}|${w}x${h}`;
+  return `${ids.join("|")}#${roundsKey}@${sx}x${sy}|${w}x${h}|z${z}`;
 }
 
 // Cache of "is current player a GM?" — initialised in setup, kept

@@ -308,10 +308,11 @@ async function handleSelection(selection: string[] | undefined) {
   let slug: string | null = null;
   let ownsItem = false;
   let locked = true;
+  let item: any = null;
   const itemId = selection[0];
   try {
     const items = await OBR.scene.items.getItems(selection);
-    const item = items[0] as any;
+    item = items[0] ?? null;
     const m = item?.metadata?.[BESTIARY_SLUG_KEY];
     if (typeof m === "string") slug = m;
     const createdUserId = item?.createdUserId;
@@ -323,6 +324,21 @@ async function handleSelection(selection: string[] | undefined) {
     }
   } catch (e) {
     console.warn("[obr-suite/bestiary] handleSelection getItems failed", e);
+  }
+  // 2026-05-12 — transient-read guard. OBR.scene.items.onChange can
+  // fire MULTIPLE times per updateItems write (once during the draft
+  // build, once on commit). The intra-draft read sometimes returns
+  // an empty array OR a partially-applied metadata object missing
+  // BESTIARY_SLUG_KEY. Without this guard the spurious "no slug" or
+  // "no item" read would look like "the token was unbound /
+  // disappeared" → hideInfo → closeInfoPopover → currentInfoSlug =
+  // null → next firing reopens → user sees the popover flicker on
+  // every resource-tracker click. The outer items.onChange already
+  // debounces 30 ms so most multi-firings collapse, but if any
+  // single empty/partial read still slips through and we're already
+  // showing this exact itemId, treat as transient and bail.
+  if (currentInfoSlug && currentInfoItemId === itemId && (!item || !slug)) {
+    return;
   }
   if (!slug) {
     if (currentInfoSlug) await hideInfo();
@@ -573,15 +589,38 @@ export async function setupBestiary(): Promise<void> {
     })
   );
 
+  // 2026-05-13 — debounced items.onChange. OBR fires the listener
+  // MULTIPLE times per single updateItems write (verified via diag
+  // logs): once or twice during the draft-build phase + once on
+  // commit. The mid-draft reads sometimes return transient empty
+  // arrays or items with partially-applied metadata, which made
+  // handleSelection see "slug missing" → hideInfo → closeInfoPopover
+  // → next firing reopens the popover → user-visible flicker (whole
+  // popover rebuilds, tab indicator slide replays, resource panel
+  // gets unmounted + remounted).
+  //
+  // HP/AC/lock edits flickered too in principle, but their visible
+  // surface (input elements + an icon) doesn't have animated state
+  // changes during the rebuild, so the user only noticed the
+  // resource panel's flicker (transitions on .rt-pane / .rt-pill-icon
+  // / .rt-tab-indicator).
+  //
+  // Collapsing all firings within 30 ms into ONE handleSelection call
+  // means we only ever read the FINAL committed state. The remaining
+  // empty-read guards inside handleSelection are kept as defence-in-
+  // depth (the resource panel's own items.onChange listener is left
+  // un-debounced because its refresh() does incremental DOM diff).
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   unsubs.push(
-    OBR.scene.items.onChange(async () => {
-      // Re-handle even if currentInfoSlug is null — `createdUserId`
-      // can change (DM transferring ownership mid-game), and we want
-      // to react to that.
-      try {
-        const sel = await OBR.player.getSelection();
-        await handleSelection(sel);
-      } catch {}
+    OBR.scene.items.onChange(() => {
+      if (pendingTimer) clearTimeout(pendingTimer);
+      pendingTimer = setTimeout(async () => {
+        pendingTimer = null;
+        try {
+          const sel = await OBR.player.getSelection();
+          await handleSelection(sel);
+        } catch {}
+      }, 30);
     })
   );
 
