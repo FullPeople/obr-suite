@@ -907,16 +907,15 @@ function computeLayoutFromMetrics(
   const barStrokeOpacity = overheadMode ? 0.7 : 0;
   const barFontSize = BAR_FONT_SIZE * s;
   const barTextOffset = TEXT_VERTICAL_OFFSET * s;
-  // 2026-05-13b — overhead mode revisions per user spec:
-  //   • Shield is 10% LARGER than bar height (was equal). Visually
-  //     reads as "the shield slightly overflows the bar's vertical
-  //     edges", same vibe as a real shield clipped to a banner.
-  //   • Shield OVERLAPS the right end of the bar (covers part of it)
-  //     instead of being appended to the right. So the BAR itself
-  //     can take the full available width and stay centred on the
-  //     token. inlineFootprint is no longer added to the bar's
-  //     horizontal allocation.
-  const diameter = overheadMode ? barHeight * 1.1 : DIAMETER * s;
+  // 2026-05-13b/c/d — overhead mode shield:
+  //   • Now 21% larger than bar height (1.0.106 = 1.1×, 1.0.108 added
+  //     another +10% → 1.1 × 1.1 = 1.21×). User wanted a chunkier
+  //     shield that clearly reads as the AC indicator.
+  //   • Centred AT the bar's right endpoint (was right-edge-flush).
+  //     Shield's centre line sits on the bar's terminal x; the
+  //     shield extends `diameter/2` to either side of that line,
+  //     so half overlaps the bar and half sticks out to the right.
+  const diameter = overheadMode ? barHeight * 1.21 : DIAMETER * s;
   const bubbleFontSize = overheadMode ? barFontSize : BUBBLE_FONT_SIZE * s;
   const bubbleFontSizeTight = overheadMode ? barFontSize * 0.7 : BUBBLE_FONT_SIZE_TIGHT * s;
   const bubbleTextOffset = TEXT_VERTICAL_OFFSET * s;
@@ -980,23 +979,22 @@ function computeLayoutFromMetrics(
   let acCenter: Vector2 | null = null;
   let tempCenter: Vector2 | null = null;
   if (overheadMode) {
-    // 2026-05-13b — OVERLAP layout. Icons sit ON TOP of the bar's
-    // right end, vertically centred with the bar. AC rightmost, the
-    // shield's right edge flush with the bar's right edge. Temp HP
-    // (if any) sits just to the left of AC, also overlapping the bar.
+    // 2026-05-13d — AC shield CENTRE sits ON the bar's terminal x
+    // (was: right-edge-flush). Half of the shield overlaps the
+    // bar's right end, the other half hangs off to the right of
+    // the bar's endpoint. Temp HP (if any) sits a full diameter +
+    // gap to the LEFT of AC, still vertically aligned with the
+    // bar's centre line.
     const inlineY = barOrigin.y + barHeight / 2;
     const barRightX = barOrigin.x + barWidth;
-    // AC: its visual right edge aligns with bar's right edge.
-    //     Since shield is 10% larger than barHeight, it sticks out
-    //     vertically a touch (intended — reads as "shield slightly
-    //     larger than the banner").
-    let nextRightEdge = barRightX;
     if (data.ac != null) {
-      acCenter = { x: nextRightEdge - diameter / 2, y: inlineY };
-      nextRightEdge -= diameter + inlineGap;
+      acCenter = { x: barRightX, y: inlineY };
     }
     if (data.tempHp > 0 && showHp) {
-      tempCenter = { x: nextRightEdge - diameter / 2, y: inlineY };
+      const tempCenterX = data.ac != null
+        ? barRightX - diameter - inlineGap
+        : barRightX;
+      tempCenter = { x: tempCenterX, y: inlineY };
     }
   } else {
     // Standard layout — float above the bar.
