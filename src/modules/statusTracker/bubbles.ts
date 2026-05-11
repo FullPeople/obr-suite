@@ -53,6 +53,7 @@
 // to wipe leftovers from a previous session.
 
 import OBR, {
+  buildImage,
   buildPath,
   buildText,
   Command,
@@ -60,6 +61,7 @@ import OBR, {
   Item,
   PathCommand,
 } from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../../asset-base";
 
 import {
   PLUGIN_ID,
@@ -399,6 +401,11 @@ const STACK_MULT = 1000;
 const SLOT_BG_MAIN = 0;
 const SLOT_BG_HIGHLIGHT = 1;
 const SLOT_GLYPH = 100;
+// WebM effect items sit ABOVE the curved-band glyphs of the same token
+// but BELOW any other token whose zIndex is higher. Slot 200 leaves
+// room for additional in-stack roles between glyphs and webm if
+// needed later.
+const SLOT_WEBM = 200;
 function computeStackBase(token: Image): number {
   // token.zIndex CAN be negative on tokens the user manually sent to
   // back; Math.floor preserves sign while quantising. Falling back to
@@ -406,17 +413,46 @@ function computeStackBase(token: Image): number {
   const z = typeof token.zIndex === "number" ? token.zIndex : 0;
   return Math.floor(z) * STACK_MULT;
 }
+/** A buff whose visual is a pre-rendered WebM video (rendered as a
+ *  single OBR Image item with mime:video/webm). The browser plays
+ *  the video natively — no per-frame JS work, GPU-decoded animation.
+ *  See tools/buff-fx-gen/buff_fx.py for the WebM generator. */
+interface WebmDescriptor {
+  buffId: string;
+  /** Absolute URL of the WebM (resolved via assetUrl() at describe time). */
+  url: string;
+  /** Top-left position in scene coords (so the WebM bbox is centred
+   *  on the token). */
+  position: { x: number; y: number };
+  /** Scale.x = scale.y applied to the 192-intrinsic WebM so it renders
+   *  at the token's natural footprint. */
+  scale: number;
+  /** Intrinsic WebM resolution (assumed square 192×192 — matches the
+   *  generator's defaults). Used as ImageContent.width/height. */
+  intrinsicSize: number;
+  /** zIndex slot — token.zIndex * STACK_MULT + SLOT_WEBM. */
+  zIndex: number;
+}
+
 interface TokenDescriptors {
   bgs: PillBgDescriptor[];
   glyphs: GlyphDescriptor[];
   /** Buffs whose `effect` is non-default — these are passed verbatim
    *  to particles.syncForToken which manages its own item set. */
   effectBuffs: BuffDef[];
+  /** 2026-05-14 — buffs with a `webmAsset` resolve to one Image item
+   *  each, bypassing the curved-band pipeline entirely. */
+  webms: WebmDescriptor[];
   // Geom snapshot needed by particles.syncForToken.
   cx: number; cy: number;
   tokenW: number; tokenH: number;
   ringRadius: number;
 }
+
+// Assumed intrinsic resolution of every WebM produced by buff_fx.py.
+// If a future WebM is rendered at a different canvas size, store it
+// per-asset on the BuffDef instead (intrinsicWebmSize field).
+const DEFAULT_WEBM_INTRINSIC_SIZE = 192;
 
 function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescriptors {
   const { cx, cy, radius: ringRadius } = getTokenCircleSpec(token, sceneDpi);
@@ -424,9 +460,10 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
   const ratio = sceneDpi / Math.max(1, imgDpi);
   const tokenH = (token.image?.height ?? imgDpi) * ratio * (token.scale?.y ?? 1);
   const tokenW = (token.image?.width ?? imgDpi) * ratio * (token.scale?.x ?? 1);
+  const stackBase = computeStackBase(token);
 
   if (buffs.length === 0) {
-    return { bgs: [], glyphs: [], effectBuffs: [], cx, cy, tokenW, tokenH, ringRadius };
+    return { bgs: [], glyphs: [], effectBuffs: [], webms: [], cx, cy, tokenW, tokenH, ringRadius };
   }
 
   const halfH = tokenH / 2;
@@ -434,14 +471,48 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
   const padX = pillH * PILL_PAD_X_FACTOR;
   const fontSize = pillH * FONT_FACTOR;
 
-  // Split buffs by effect kind. "default" = static curved bubble.
-  // When STATUS_EFFECTS_ENABLED is false (current state — effects
-  // feature deferred), force EVERY buff into the default branch
-  // regardless of its `effect` field. The catalog still carries the
-  // field so re-enabling later is just a flag flip.
+  // 2026-05-14 — Three-way buff routing:
+  //   1. webms        — buff has `webmAsset` → ONE Image-with-video item
+  //                     per buff. Best perf path (1 item vs ~20), used
+  //                     for paralyzed / stunned / poisoned. Stacks
+  //                     multiple WebMs centred on the same token; they
+  //                     blend via alpha.
+  //   2. effectBuffs  — non-default `effect` AND particles enabled →
+  //                     particle system (currently disabled by feature
+  //                     flag).
+  //   3. defaultBuffs — fallback to the static curved-band + glyph
+  //                     pipeline.
+  const webms: WebmDescriptor[] = [];
   const defaultBuffs: Array<{ buff: BuffDef; pillW: number }> = [];
   const effectBuffs: BuffDef[] = [];
+
+  // For WebM placement: centre the WebM bbox on the token. Bbox size
+  // matches the token's natural rendered footprint so the generator's
+  // canvas-relative motion (% of canvas) maps directly to token-cell-
+  // relative motion (% of cell). Use min(tokenW, tokenH) so non-square
+  // tokens still get a sensible square overlay rather than a stretched
+  // one.
+  const webmFootprint = Math.min(tokenW, tokenH);
+  const webmScale = webmFootprint / DEFAULT_WEBM_INTRINSIC_SIZE;
+  const webmTopLeft = {
+    x: cx - webmFootprint / 2,
+    y: cy - webmFootprint / 2,
+  };
+
   for (const b of buffs) {
+    if (b.webmAsset) {
+      webms.push({
+        buffId: b.id,
+        url: assetUrl(b.webmAsset),
+        position: { ...webmTopLeft },
+        scale: webmScale,
+        intrinsicSize: DEFAULT_WEBM_INTRINSIC_SIZE,
+        // SLOT_WEBM (200) is above SLOT_GLYPH (100) so WebMs draw over
+        // any sibling curved-band glyphs on the same token.
+        zIndex: stackBase + SLOT_WEBM,
+      });
+      continue;
+    }
     const useEffect = STATUS_EFFECTS_ENABLED && (b.effect ?? "default") !== "default";
     if (useEffect) {
       effectBuffs.push(b);
@@ -460,9 +531,8 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
 
   const bgs: PillBgDescriptor[] = [];
   const glyphs: GlyphDescriptor[] = [];
-  // 2026-05-13 — base zIndex derived from token.zIndex so the
-  // bubbles sort with the token in the global stack.
-  const stackBase = computeStackBase(token);
+  // (stackBase computed at the top of describe() — used by WebMs above
+  // and by glyph descriptors below.)
 
   for (let i = 0; i < defaultBuffs.length; i++) {
     const { buff, pillW } = defaultBuffs[i];
@@ -596,7 +666,7 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
   // Effect-mode buffs are handed off to particles.syncForToken
   // verbatim. Geom snapshot lets the particle module compute
   // absolute scene-coord positions per tick.
-  return { bgs, glyphs, effectBuffs, cx, cy, tokenW, tokenH, ringRadius };
+  return { bgs, glyphs, effectBuffs, webms, cx, cy, tokenW, tokenH, ringRadius };
 }
 
 // === Item factories ========================================================
@@ -625,6 +695,43 @@ function buildBgItem(token: Image, d: PillBgDescriptor): Item {
     .visible(true)
     .disableAttachmentBehavior(["SCALE", "ROTATION"])
     .metadata(meta(token.id, "bg", d.buffId, d.effect))
+    .build();
+}
+
+/** Build an Image item rendering a pre-baked WebM video effect. The
+ *  browser plays the video natively via OBR's `<video>` element path
+ *  (selected by mime: "video/webm"). Each item is ONE buff effect —
+ *  way cheaper than the per-glyph item explosion of the curved-band
+ *  pipeline (~1 item vs ~20).
+ *
+ *  Attachment / inheritance:
+ *    - attachedTo(token.id) so the WebM follows token drags / scale
+ *    - SCALE inheritance DISABLED — the WebM is pre-scaled via
+ *      `scale()` so OBR's auto-scaling doesn't double-up the size
+ *      when the token has a non-1 scale
+ *    - ROTATION DISABLED — the effect always stays upright relative
+ *      to the camera, regardless of how the token is rotated
+ *    - layer ATTACHMENT — above CHARACTER (the token sprite), below
+ *      NOTE / TEXT; effects visibly overlay the token */
+function buildWebmItem(token: Image, d: WebmDescriptor): Item {
+  return buildImage(
+    { width: d.intrinsicSize, height: d.intrinsicSize, mime: "video/webm", url: d.url },
+    // ImageGrid: dpi describes the image's "natural" grid size, offset
+    // is the local origin within the image. For our square WebM we
+    // treat the centre as origin; OBR's scale handles the rest.
+    { dpi: d.intrinsicSize, offset: { x: 0, y: 0 } },
+  )
+    .position(d.position)
+    .scale({ x: d.scale, y: d.scale })
+    .layer("ATTACHMENT")
+    .attachedTo(token.id)
+    .locked(true)
+    .disableHit(true)
+    .visible(true)
+    .disableAutoZIndex(true)
+    .zIndex(d.zIndex)
+    .disableAttachmentBehavior(["SCALE", "ROTATION"])
+    .metadata(meta(token.id, "bg", d.buffId, "default"))
     .build();
 }
 
@@ -721,6 +828,7 @@ export async function syncTokenBuffs(token: Image, buffs: BuffDef[]): Promise<vo
   const labels: Item[] = [];
   for (const d of desc.bgs)    labels.push(buildBgItem(token, d));
   for (const d of desc.glyphs) labels.push(buildGlyphItem(token, d));
+  for (const d of desc.webms)  labels.push(buildWebmItem(token, d));
 
   if (existingIds.length > 0) {
     try { await OBR.scene.items.deleteItems(existingIds); }

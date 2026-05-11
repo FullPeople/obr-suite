@@ -76,6 +76,14 @@ export interface BuffDef {
   /** Effect tunables (emoji, speed, count). Only relevant when
    *  `effect` is non-default. */
   effectParams?: EffectParams;
+  /** 2026-05-14 — relative URL to a pre-rendered WebM effect file
+   *  (e.g. "buff-fx/paralysis.webm"). When set, the renderer creates
+   *  ONE Image-with-video item for the buff (instead of the legacy
+   *  ~2 path items + N per-glyph text items), cutting item count
+   *  ~10× and offloading animation to GPU video decode. The path is
+   *  resolved via `assetUrl()` so it works on both stable and dev
+   *  channels. See tools/buff-fx-gen/buff_fx.py for the generator. */
+  webmAsset?: string;
 }
 
 export interface ResourceItem { id: string; name: string; current: number; max: number; }
@@ -113,7 +121,7 @@ export function hexToRgb01(hex: string): [number, number, number] {
 // custom PNG/SVG per buff via the palette ✎ popup.
 
 export const DEFAULT_BUFFS: BuffDef[] = [
-  { id: "paralyzed",    name: "麻痹 ⚡",       color: "#ffff00", group: "异常", effect: "flicker" },
+  { id: "paralyzed",    name: "麻痹 ⚡",       color: "#ffff00", group: "异常", webmAsset: "buff-fx/paralysis.webm" },
   { id: "charmed",      name: "魅惑 💘",       color: "#ff00d0", group: "异常", effect: "spread" },
   { id: "invisible",    name: "隐形 👻",       color: "#cccccc", group: "Buffs", effect: "flicker" },
   { id: "bardic",       name: "诗人激励 🎵",   color: "#7300ff", group: "Buffs", effect: "curve" },
@@ -123,7 +131,7 @@ export const DEFAULT_BUFFS: BuffDef[] = [
   { id: "guidance",     name: "神导术 👍",     color: "#ffff00", group: "Buffs", effect: "curve" },
   { id: "blessing",     name: "祝福术 🧧",     color: "#ffff00", group: "Buffs", effect: "curve" },
   { id: "petrified",    name: "石化 🗿",       color: "#8b7d6b", group: "异常" },
-  { id: "stunned",      name: "眩晕 💫",       color: "#f5deb3", group: "异常", effect: "curve" },
+  { id: "stunned",      name: "眩晕 💫",       color: "#f5deb3", group: "异常", webmAsset: "buff-fx/dizzy.webm" },
   { id: "blinded",      name: "目盲 🕶️",      color: "#4a4a4a", group: "异常" },
   { id: "hunters_mark", name: "猎人印记 🎯",   color: "#00ff26", group: "Extra", effect: "flicker" },
   { id: "raging",       name: "狂暴 😠",       color: "#f20808", group: "Extra", effect: "flicker" },
@@ -139,7 +147,7 @@ export const DEFAULT_BUFFS: BuffDef[] = [
   { id: "frozen",       name: "冰冻 ❄️",      color: "#0000ff", group: "异常", effect: "spread" },
   { id: "innate_spell", name: "先天术法 ⚡️",  color: "#08fdfd", group: "Extra", effect: "spread" },
   { id: "prone",        name: "倒地 🦦",       color: "#cd853f", group: "异常" },
-  { id: "poisoned",     name: "中毒 🤢",       color: "#008000", group: "异常", effect: "spread" },
+  { id: "poisoned",     name: "中毒 🤢",       color: "#008000", group: "异常", webmAsset: "buff-fx/poison.webm" },
   { id: "focused",      name: "专注 🧠",       color: "#4682b4", group: "Extra", effect: "spread" },
   { id: "haste",        name: "急速术 💨",     color: "#04a3ff", group: "Buffs", effect: "float" },
   { id: "flying",       name: "飞行术 🕊️",    color: "#d5d5d5", group: "Buffs", effect: "float" },
