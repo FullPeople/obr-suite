@@ -296,11 +296,20 @@ function stopLoop() {
 
 // === Visibility coordination ======================================
 
+// 2026-05-12c — setVisible is now IDEMPOTENT. The previous version
+// wiped all 100 slots every call, which combined with the 500 ms
+// heartbeat made the names restart their fade-in cycle twice per
+// second — visible as rapid flicker. Now if visibility hasn't
+// changed, we just update the heartbeat timestamp via noteHeartbeat
+// elsewhere and return immediately.
+let _currentVisible = false;
 function setVisible(visible: boolean): void {
+  if (visible === _currentVisible) return;
+  _currentVisible = visible;
   if (visible) {
     sceneEl.classList.add("visible");
     // Stagger initial slot spawns over the first ~3.5 seconds so all
-    // 32 names don't pop in on the same frame. Putting each slot in
+    // names don't pop in on the same frame. Putting each slot in
     // "out" state with a random stateUntil makes the rAF loop trigger
     // spawn (void state) at a randomised time.
     const now = performance.now();
