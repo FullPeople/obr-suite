@@ -115,6 +115,19 @@ EMOJI_CODEPOINTS: dict[str, str] = {
 
     # === Body / mind ===
     "brain":           "1f9e0",         # 🧠
+
+    # === 2026-05-14b additions for custom buffs ===
+    "box":             "1f4e6",         # 📦 — invisible (cardboard box on head)
+    "ear":             "1f442",         # 👂 — deafened
+    "cross_mark":      "274c",          # ❌ — generic X
+    "check_mark":      "2705",          # ✅ — for buffs / approval
+    "music_score":     "1f3b6",         # 🎶 — multiple notes / sheet music
+    "ice_cube":        "1f9ca",         # 🧊 — frozen
+    "feather":         "1fab6",         # 🪶 — flying (wing fallback)
+    "down_triangle":   "1f53b",         # 🔻 — disadvantage / down arrow
+    "down_arrow":      "2b07",          # ⬇ — disadvantage alt
+    "bow":             "1f3f9",         # 🏹 — hunter's mark alt
+    "rainbow":         "1f308",         # 🌈 — guidance / blessing alt
 }
 
 
@@ -145,6 +158,39 @@ def fetch_emoji(name: str) -> Image.Image:
 # ----- frame composition helpers -------------------------------------------
 
 
+def _hex_to_rgb(hex_str: str) -> tuple[int, int, int]:
+    """Parse #RRGGBB or RRGGBB to (r, g, b). Defaults to white on parse failure."""
+    s = hex_str.lstrip("#")
+    if len(s) != 6:
+        return (255, 255, 255)
+    try:
+        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+    except ValueError:
+        return (255, 255, 255)
+
+
+def tint_image(img: Image.Image, color_hex: str | None) -> Image.Image:
+    """Multiply the image's RGB channels by `color_hex` (#RRGGBB),
+    preserving the alpha channel. Use for "give this emoji a blue
+    shade" without breaking the silhouette. If color_hex is None /
+    "" / "#ffffff", returns img unchanged.
+
+    Algorithm: for each pixel, out_rgb = src_rgb * color / 255.
+    Effectively a colour multiply blend; works best on light /
+    neutral source emoji (a deeply red emoji multiplied by green
+    stays mostly black, so consider a brightness boost via the
+    `lighten` flag below for darker sources)."""
+    if not color_hex or color_hex.lower() in ("#ffffff", "#fff", "ffffff", "fff"):
+        return img
+    r_mul, g_mul, b_mul = _hex_to_rgb(color_hex)
+    src = img.convert("RGBA")
+    r, g, b, a = src.split()
+    r = r.point(lambda px: int(px * r_mul / 255))
+    g = g.point(lambda px: int(px * g_mul / 255))
+    b = b.point(lambda px: int(px * b_mul / 255))
+    return Image.merge("RGBA", (r, g, b, a))
+
+
 def paste_emoji(
     canvas: Image.Image,
     emoji: Image.Image,
@@ -153,16 +199,31 @@ def paste_emoji(
     scale: float,
     rotation_deg: float = 0.0,
     opacity: float = 1.0,
+    *,
+    tint: str | None = None,
+    mirror_x: bool = False,
+    mirror_y: bool = False,
 ) -> None:
     """Composite an emoji onto `canvas` at (cx, cy) with the given
-    scale (0..1, fraction of canvas width) and rotation/opacity."""
+    scale (0..1, fraction of canvas width) and rotation/opacity.
+
+    Optional:
+      tint:     "#rrggbb" colour multiply (for "green X" type recolours)
+      mirror_x: horizontal flip before paste (e.g. mirrored wing)
+      mirror_y: vertical flip before paste (e.g. upside-down box)
+    """
     target_w = max(1, int(scale * canvas.width))
     target_h = max(1, int(target_w * emoji.height / emoji.width))
     sized = emoji.resize((target_w, target_h), Image.Resampling.LANCZOS)
+    if mirror_x:
+        sized = sized.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    if mirror_y:
+        sized = sized.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+    if tint:
+        sized = tint_image(sized, tint)
     if rotation_deg != 0:
         sized = sized.rotate(rotation_deg, resample=Image.Resampling.BICUBIC, expand=True)
     if opacity < 1.0:
-        # multiply alpha channel
         r, g, b, a = sized.split()
         a = a.point(lambda px: int(px * opacity))
         sized = Image.merge("RGBA", (r, g, b, a))
@@ -243,6 +304,180 @@ class Particle:
     scale_max: float = 0.4  # peak scale
     rotation_speed: float = 0.0   # deg / sec
     rotation_offset: float = 0.0  # deg
+
+
+def render_ripple(args: argparse.Namespace) -> List[Image.Image]:
+    """Concentric translucent rings expanding outward from a centre
+    point. Used for 魅惑 (charmed) — pink ripples emanating away.
+
+    Each ring is one "actor" with phase offset; ring radius animates
+    from 0 → max_radius over one cycle, opacity fades 1 → 0. Multiple
+    rings staggered in phase produce a sonar-pulse look.
+
+    Seamless: integer cycles per loop (default 1) → state(u=0) ≡
+    state(u=1) because radius / alpha both wrap modulo 1.
+    """
+    from PIL import ImageDraw
+    W, H = args.width, args.height
+    total_frames = int(args.fps * args.duration)
+    cx = args.center_x if args.center_x >= 0 else W / 2
+    cy = args.center_y if args.center_y >= 0 else H / 2
+    r_max = args.radius_max if args.radius_max > 0 else min(W, H) * 0.50
+    color = _hex_to_rgb(args.color)
+    n_rings = max(1, args.count)
+    cycles = max(1, args.cycles)
+    line_w = max(1, args.line_width)
+
+    phases = [i / n_rings for i in range(n_rings)]
+
+    frames: List[Image.Image] = []
+    for f in range(total_frames):
+        u = f / total_frames
+        frame = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(frame)
+        for phase in phases:
+            prog = (u * cycles + phase) % 1.0
+            r = r_max * prog
+            if r < 1:
+                continue
+            # Fade in over first 10%, hold to 20%, fade out over rest.
+            if prog < 0.10:
+                alpha_norm = prog / 0.10
+            elif prog > 0.20:
+                alpha_norm = max(0.0, 1.0 - (prog - 0.20) / 0.80)
+            else:
+                alpha_norm = 1.0
+            alpha = int(255 * args.alpha_peak * alpha_norm)
+            if alpha <= 2: continue
+            # Outline-only circle, no fill.
+            bbox = (int(cx - r), int(cy - r), int(cx + r), int(cy + r))
+            draw.ellipse(
+                bbox,
+                outline=(color[0], color[1], color[2], alpha),
+                width=line_w,
+            )
+        frames.append(frame)
+    return frames
+
+
+def render_place(args: argparse.Namespace) -> List[Image.Image]:
+    """Single emoji/image placed at a custom (x, y) anchor with
+    custom scale + optional animation. The "Swiss Army knife"
+    template for buffs that just want one image at a specific spot.
+
+    Position is in CANVAS FRACTIONS (0..1) so the same config scales
+    to different canvas sizes.
+
+    Animations (all seamless via integer cycles per loop):
+      - rotation_speed: degrees per loop; rotates continuously
+      - pulse_pulses:   integer breaths per loop; scale oscillates
+      - fade_pulses:    integer pulses; opacity oscillates
+
+    Mirror + tint options carry through to paste_emoji."""
+    W, H = args.width, args.height
+    total_frames = int(args.fps * args.duration)
+    emoji_img = fetch_emoji(args.emoji)
+
+    cx = args.x_frac * W
+    cy = args.y_frac * H
+
+    # Snap continuous animations to integer cycles per loop so they wrap.
+    rot_per_loop = round(args.rotation_speed)        # already deg/loop
+    pulse_n = max(0, args.pulse_pulses)
+    fade_n  = max(0, args.fade_pulses)
+
+    frames: List[Image.Image] = []
+    for f in range(total_frames):
+        u = f / total_frames
+        # Animated scale: scale ± scale_pulse_amp at pulse_n beats per loop
+        scale = args.scale
+        if pulse_n > 0:
+            env = 0.5 - 0.5 * math.cos(2 * math.pi * u * pulse_n)
+            scale = args.scale * (1.0 + args.pulse_amp * (env - 0.5) * 2)
+        # Animated opacity
+        opacity = args.opacity
+        if fade_n > 0:
+            env = 0.5 - 0.5 * math.cos(2 * math.pi * u * fade_n)
+            opacity = args.fade_min + (args.fade_max - args.fade_min) * env
+        # Animated rotation
+        rotation = args.rotation + rot_per_loop * u
+
+        frame = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        paste_emoji(frame, emoji_img, cx, cy, scale, rotation, opacity,
+                    tint=args.tint, mirror_x=args.mirror_x, mirror_y=args.mirror_y)
+        frames.append(frame)
+    return frames
+
+
+def render_drift(args: argparse.Namespace) -> List[Image.Image]:
+    """Particles travel in a straight line at angle θ (degrees,
+    clockwise from north = upward). Generalisation of `rain` (θ=180,
+    downward) and `float` (θ=0, upward) to any direction.
+
+    Use case: 诗人激励 (bardic) drifts to upper-right at θ ≈ 45°.
+    Disadvantage drifts down at θ ≈ 180° with a tint.
+
+    Each particle traverses the full travel distance over `cycles`
+    full passes per loop (integer for seamless wrap)."""
+    W, H = args.width, args.height
+    total_frames = int(args.fps * args.duration)
+    rng = random.Random(args.seed)
+    emoji_img = fetch_emoji(args.emoji)
+
+    # θ in radians, with 0 = upward (–Y), CW positive.
+    theta = (args.angle - 90) * math.pi / 180  # convert "0=up" to math angle
+    dx = math.cos(theta)
+    dy = math.sin(theta)
+
+    # Travel distance: enough to cover the canvas diagonal twice so
+    # particles enter from one side and exit the other regardless of
+    # angle. Spawn point is offset BACK along the angle by half the
+    # travel, end point is forward half.
+    diag = (W * W + H * H) ** 0.5
+    travel = diag * 1.4
+    spawn_cx = W / 2 - dx * travel / 2
+    spawn_cy = H / 2 - dy * travel / 2
+
+    # Per-particle: position perpendicular to drift direction (so
+    # particles spread across the lane), cycles (integer), phase,
+    # scale, rotation seeded.
+    perp_x = -dy
+    perp_y = dx
+    spread = max(W, H) * args.spread
+
+    particles = []
+    for _ in range(args.count):
+        offset = rng.uniform(-spread / 2, spread / 2)
+        cycles = rng.randint(args.cycles_min, args.cycles_max)
+        particles.append({
+            "px": spawn_cx + perp_x * offset,
+            "py": spawn_cy + perp_y * offset,
+            "cycles": cycles,
+            "phase":  rng.uniform(0, 1),
+            "scale":  rng.uniform(args.scale_min, args.scale_max),
+            "rot_base": rng.uniform(0, 360),
+            "rot_per_cycle": rng.choice([-1, 0, 0, 1]) * 90,  # quarter spin
+        })
+
+    frames: List[Image.Image] = []
+    for f in range(total_frames):
+        u = f / total_frames
+        frame = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        for d in particles:
+            prog = (u * d["cycles"] + d["phase"]) % 1.0
+            x = d["px"] + dx * travel * prog
+            y = d["py"] + dy * travel * prog
+            # Fade in/out at the spawn / despawn endpoints
+            if prog < 0.10:
+                opacity = prog / 0.10
+            elif prog > 0.88:
+                opacity = (1 - prog) / 0.12
+            else:
+                opacity = 1.0
+            rot = d["rot_base"] + d["rot_per_cycle"] * prog
+            paste_emoji(frame, emoji_img, x, y, d["scale"], rot, opacity, tint=args.tint)
+        frames.append(frame)
+    return frames
 
 
 def render_flash(args: argparse.Namespace) -> List[Image.Image]:
@@ -757,6 +992,53 @@ EFFECTS: dict[str, dict] = {
             "scale_pulse": False,
         },
     },
+    "ripple": {
+        "renderer": render_ripple,
+        "defaults": {
+            "count":       3,
+            "cycles":      1,
+            "color":       "#ff66cc",
+            "alpha_peak":  0.85,
+            "line_width":  3,
+            "center_x":    -1,    # auto (W/2)
+            "center_y":    -1,    # auto (H/2)
+            "radius_max":  0,     # auto (min(W,H) * 0.5)
+        },
+    },
+    "place": {
+        "renderer": render_place,
+        "defaults": {
+            "emoji":          "lightning",
+            "x_frac":         0.5,
+            "y_frac":         0.5,
+            "scale":          0.6,
+            "rotation":       0,
+            "opacity":        1.0,
+            "rotation_speed": 0,        # deg per loop
+            "pulse_pulses":   0,        # 0 = no pulse animation
+            "pulse_amp":      0.10,     # ±10% scale at peak
+            "fade_pulses":    0,
+            "fade_min":       0.3,
+            "fade_max":       1.0,
+            "tint":           "",       # "" or "#rrggbb"
+            "mirror_x":       False,
+            "mirror_y":       False,
+        },
+    },
+    "drift": {
+        "renderer": render_drift,
+        "defaults": {
+            "emoji":      "musical_note",
+            "count":      5,
+            "angle":      45,           # degrees, 0=up, 90=right, 180=down
+            "cycles_min": 1,
+            "cycles_max": 2,
+            "scale_min":  0.14,
+            "scale_max":  0.22,
+            "spread":     0.5,          # fraction of max(W,H), perp to drift
+            "tint":       "",
+        },
+    },
 }
 
 
@@ -862,6 +1144,65 @@ def build_parser() -> argparse.ArgumentParser:
     p_fade.add_argument("--scale-pulse", dest="scale_pulse", action="store_true",
                         help="also breathe scale ±10%% along with opacity")
 
+    # 2026-05-14b — three new templates for the custom buff lineup.
+    p_ripple = sub.add_parser("ripple", help="Concentric expanding rings (魅惑)")
+    add_common_args(p_ripple)
+    p_ripple.add_argument("--count", type=int, help="number of rings (phase-staggered)")
+    p_ripple.add_argument("--cycles", type=int, help="ring expansions per loop (integer)")
+    p_ripple.add_argument("--color", type=str, help="hex like #ff66cc")
+    p_ripple.add_argument("--alpha-peak", dest="alpha_peak", type=float, help="0..1 peak alpha")
+    p_ripple.add_argument("--line-width", dest="line_width", type=int, help="ring stroke width in px")
+    p_ripple.add_argument("--center-x", dest="center_x", type=float, help="X centre in px (-1=auto W/2)")
+    p_ripple.add_argument("--center-y", dest="center_y", type=float, help="Y centre in px (-1=auto H/2)")
+    p_ripple.add_argument("--radius-max", dest="radius_max", type=float, help="max ring radius in px (0=auto)")
+
+    p_place = sub.add_parser("place", help="Single emoji at custom position with optional animation")
+    add_common_args(p_place)
+    p_place.add_argument("--x-frac",   dest="x_frac",   type=float, help="X centre, 0..1 fraction of W")
+    p_place.add_argument("--y-frac",   dest="y_frac",   type=float, help="Y centre, 0..1 fraction of H")
+    p_place.add_argument("--scale",    type=float, help="size as fraction of W")
+    p_place.add_argument("--rotation", type=float, help="initial rotation in degrees")
+    p_place.add_argument("--opacity",  type=float, help="static opacity 0..1")
+    p_place.add_argument("--rotation-speed", dest="rotation_speed", type=float,
+                         help="continuous rotation in degrees per loop (snapped to integer)")
+    p_place.add_argument("--pulse-pulses", dest="pulse_pulses", type=int,
+                         help="integer scale-breath count per loop (0=no pulse)")
+    p_place.add_argument("--pulse-amp",    dest="pulse_amp",    type=float,
+                         help="scale-breath amplitude 0..1 (0.10 = ±10%%)")
+    p_place.add_argument("--fade-pulses",  dest="fade_pulses",  type=int)
+    p_place.add_argument("--fade-min",     dest="fade_min",     type=float)
+    p_place.add_argument("--fade-max",     dest="fade_max",     type=float)
+    p_place.add_argument("--tint",         type=str, help="colour multiply, hex (e.g. #00ff00)")
+    p_place.add_argument("--mirror-x",     dest="mirror_x",     action="store_true",
+                         help="horizontal flip (mirrored wing etc.)")
+    p_place.add_argument("--mirror-y",     dest="mirror_y",     action="store_true",
+                         help="vertical flip (upside-down box etc.)")
+
+    p_drift = sub.add_parser("drift", help="Particles drifting in a chosen direction (诗人激励, 劣势)")
+    add_common_args(p_drift)
+    p_drift.add_argument("--count",     type=int)
+    p_drift.add_argument("--angle",     type=float, help="direction in degrees (0=up, 90=right, 180=down)")
+    p_drift.add_argument("--cycles-min", dest="cycles_min", type=int)
+    p_drift.add_argument("--cycles-max", dest="cycles_max", type=int)
+    p_drift.add_argument("--scale-min",  dest="scale_min",  type=float)
+    p_drift.add_argument("--scale-max",  dest="scale_max",  type=float)
+    p_drift.add_argument("--spread",     type=float, help="perpendicular spread 0..1 (frac of max(W,H))")
+    p_drift.add_argument("--tint",       type=str, help="colour multiply hex")
+
+    # `compose` is a multi-layer mode — takes a JSON spec via --layers
+    # and renders each layer onto the same canvas. Used for buffs that
+    # need 2+ images (e.g. deafened = ear + X, flying = both wings).
+    p_compose = sub.add_parser("compose", help="Multi-layer composition from a JSON spec")
+    p_compose.add_argument("--out",      required=True)
+    p_compose.add_argument("--width",    type=int,   default=192)
+    p_compose.add_argument("--height",   type=int,   default=192)
+    p_compose.add_argument("--duration", type=float, default=1.5)
+    p_compose.add_argument("--fps",      type=int,   default=30)
+    p_compose.add_argument("--seed",     type=int,   default=42)
+    p_compose.add_argument("--codec",    choices=["vp9", "vp8"], default="vp9")
+    p_compose.add_argument("--layers",   required=True,
+                           help='JSON array of layer specs, each "{template,...params}"')
+
     return parser
 
 
@@ -873,14 +1214,74 @@ def apply_defaults(args: argparse.Namespace, effect: str) -> argparse.Namespace:
     return args
 
 
+def _render_compose(args: argparse.Namespace) -> List[Image.Image]:
+    """Render multiple layers on the same canvas via the JSON --layers
+    spec. Each layer entry is `{template: 'place', ...params}` where
+    `params` mirrors the CLI flags for that template. Layers are
+    composited in order (first = bottom).
+    """
+    import json
+    try:
+        spec = json.loads(args.layers)
+    except Exception as e:
+        raise SystemExit(f"--layers must be valid JSON array: {e}")
+    if not isinstance(spec, list):
+        raise SystemExit("--layers must be a JSON array of {template,...} objects")
+
+    total_frames = int(args.fps * args.duration)
+    # Pre-render each layer's frame list, then overlay frame-by-frame.
+    layer_frames: List[List[Image.Image]] = []
+    for layer in spec:
+        if not isinstance(layer, dict) or "template" not in layer:
+            raise SystemExit(f"layer entry malformed: {layer}")
+        tmpl = layer["template"]
+        if tmpl not in EFFECTS:
+            raise SystemExit(f"unknown template '{tmpl}' in layer")
+        # Build a Namespace mirroring this layer's params + global canvas.
+        ns = argparse.Namespace(
+            effect=tmpl,
+            out=args.out,
+            width=args.width,
+            height=args.height,
+            duration=args.duration,
+            fps=args.fps,
+            seed=args.seed,
+            codec=args.codec,
+            emoji=None,
+        )
+        for k, v in layer.items():
+            if k == "template": continue
+            setattr(ns, k, v)
+        apply_defaults(ns, tmpl)
+        renderer = EFFECTS[tmpl]["renderer"]
+        layer_frames.append(renderer(ns))
+
+    # Composite. All layers MUST have the same frame count (= total_frames).
+    out_frames: List[Image.Image] = []
+    for i in range(total_frames):
+        canvas = Image.new("RGBA", (args.width, args.height), (0, 0, 0, 0))
+        for lf in layer_frames:
+            # static layers have only 6 frames — repeat via modulo so
+            # they survive without bloating to total_frames-each.
+            f = lf[i % len(lf)]
+            canvas.alpha_composite(f)
+        out_frames.append(canvas)
+    return out_frames
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    args = apply_defaults(args, args.effect)
-    renderer: Callable[[argparse.Namespace], List[Image.Image]] = EFFECTS[args.effect]["renderer"]
     print(f"[buff-fx] generating '{args.effect}' -> {args.out}", file=sys.stderr)
-    print(f"          params: {vars(args)}", file=sys.stderr)
-    frames = renderer(args)
+    if args.effect == "compose":
+        # compose has its own renderer path that walks per-layer specs
+        print(f"          (compose mode; layers JSON below)", file=sys.stderr)
+        frames = _render_compose(args)
+    else:
+        args = apply_defaults(args, args.effect)
+        renderer: Callable[[argparse.Namespace], List[Image.Image]] = EFFECTS[args.effect]["renderer"]
+        print(f"          params: {vars(args)}", file=sys.stderr)
+        frames = renderer(args)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     write_webm(frames, out, args.fps, args.codec)

@@ -1524,6 +1524,7 @@ function renderEntrySolo(h: DiceRollPayload): string {
   const titleText = escapeHtml(h.label || h.rollerName);
   return `
     <div class="${cls.join(" ")}" data-cid="${escapeHtml(cid)}" style="--player-color:${h.rollerColor}" title="${tt("diceHistoryReplayTooltip")}">
+      <button class="entry-del" data-cid="${escapeHtml(cid)}" title="删除这条记录" aria-label="删除">×</button>
       <div class="body">
         <div class="line1">
           <span class="player">${darkTag}${titleText}</span>
@@ -1554,6 +1555,7 @@ function renderEntryCollective(cid: string, members: DiceRollPayload[]): string 
   const labelOrName = escapeHtml(head.label || head.rollerName);
   return `
     <div class="${cls.join(" ")}" data-cid="${escapeHtml(cid)}" style="--player-color:${head.rollerColor}" title="${tt("diceHistoryReplayTooltip")}">
+      <button class="entry-del" data-cid="${escapeHtml(cid)}" title="删除这条记录（含 ${members.length} 个掷骰）" aria-label="删除">×</button>
       <div class="body">
         <div class="line1">
           <span class="player">${darkTag}${collTag}${labelOrName}</span>
@@ -2518,8 +2520,40 @@ OBR.onReady(async () => {
 // Click a history row → toggle the replay overlay for that roll's
 // collective. The bottom-right history modal does the same; this lets
 // the user replay a roll without leaving the dice panel.
+//
+// 2026-05-14b — per-row delete (small × in top-right of each entry).
+// Clicks on the × intercept the row's replay-click via .entry-del
+// detection and remove every history entry sharing that cid (a
+// collective roll = one logical entry).
 historyList.addEventListener("click", (e) => {
-  const item = (e.target as HTMLElement | null)?.closest<HTMLElement>(".entry");
+  const target = e.target as HTMLElement | null;
+  // Delete-button path runs FIRST so its presence inside .entry doesn't
+  // double-fire as a row click + replay open.
+  const delBtn = target?.closest<HTMLElement>(".entry-del");
+  if (delBtn) {
+    e.stopPropagation();
+    e.preventDefault();
+    const cid = delBtn.dataset.cid;
+    if (!cid) return;
+    // If this row's replay is currently open, close it before removing
+    // the entry so the floating bubbles don't reference a deleted cid.
+    if (activeReplayCid === cid) {
+      setActiveReplayCid(null);
+      try {
+        OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action: "close" }, { destination: "LOCAL" });
+        OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action: "close" }, { destination: "REMOTE" });
+      } catch {}
+    }
+    // A collective roll has multiple entries with the same cid; remove
+    // them all so the visual row disappears in one click.
+    history = history.filter((h) => (h.collectiveId ?? h.rollId) !== cid);
+    saveHistory();
+    renderHistorySeg();
+    renderHistoryList();
+    return;
+  }
+
+  const item = target?.closest<HTMLElement>(".entry");
   if (!item) return;
   const cid = item.dataset.cid;
   if (!cid) return;

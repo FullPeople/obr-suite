@@ -236,10 +236,14 @@ function parseBuffArray(arr: any[]): BuffDef[] {
     }
     // 2026-05-14 — preserve webmAsset across the parse↔save roundtrip
     // (editor used to drop it; that would silently revert customised
-    // WebM effect choices on every save).
+    // WebM effect choices on every save). Same for webmScale.
     const wa = (e as any).webmAsset;
     if (typeof wa === "string" && wa.length > 0) {
       (def as any).webmAsset = wa;
+    }
+    const ws = (e as any).webmScale;
+    if (typeof ws === "number" && Number.isFinite(ws) && ws > 0) {
+      (def as any).webmScale = ws;
     }
     out.push(def);
   }

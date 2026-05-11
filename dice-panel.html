@@ -519,6 +519,7 @@ html,body{
 .history-list{display:flex;flex-direction:column;gap:4px}
 
 .entry{
+  position:relative;
   display:flex;align-items:center;gap:5px;
   /* 2026-05-08 redo: bumped all internal fonts +30% for legibility,
      compensated by tightening padding/line-heights so the row's
@@ -533,6 +534,26 @@ html,body{
   cursor:pointer;
   transition:background .12s, border-color .12s, transform .08s;
 }
+/* 2026-05-14b — per-row delete (×). Hidden by default, fades in
+   on hover. Top-right corner; clicking it removes the row's cid
+   from history without triggering the row's replay-toggle (the
+   click handler in panel-page.ts intercepts via stopPropagation). */
+.entry .entry-del{
+  position:absolute; top:2px; right:4px;
+  width:16px; height:16px;
+  padding:0; line-height:1;
+  background:transparent; border:none;
+  color:var(--text-dim, #9aa0b3);
+  font-size:14px; font-weight:700;
+  cursor:pointer; border-radius:3px;
+  opacity:0;
+  display:flex; align-items:center; justify-content:center;
+  transition:opacity .12s, color .12s, background .12s;
+  z-index:2;
+}
+.entry:hover .entry-del{ opacity:0.55 }
+.entry .entry-del:hover{ opacity:1; color:#ff6b6b; background:rgba(255,107,107,0.10) }
+.entry .entry-del:active{ transform:scale(0.92) }
 .entry:hover{
   background:rgba(93,173,226,0.08);
   border-color:rgba(93,173,226,0.32);

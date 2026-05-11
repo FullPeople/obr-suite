@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Buff FX Studio · WebM Generator</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<!-- Cross-origin isolation headers (set via meta) so ffmpeg.wasm
+     can use SharedArrayBuffer for multi-threaded encoding when
+     available. The server-side nginx also sets these as HTTP
+     headers; meta is a belt-and-suspenders fallback. -->
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">⚙</span>
+    <span class="brand-name">Buff FX Studio</span>
+    <span class="brand-sub">WebM 特效生成器</span>
+  </div>
+  <div class="topbar-actions">
+    <a href="https://obr.dnd.center/suite/manifest.json" target="_blank" class="pill-link">OBR Suite ↗</a>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- LEFT COLUMN: source + template + parameters -->
+  <section class="col col-controls">
+
+    <!-- 1. Source (emoji or uploaded image) -->
+    <fieldset class="card">
+      <legend>① 素材 / Source</legend>
+      <div class="seg seg-3" id="sourceModeSeg">
+        <button class="seg-opt on" data-mode="emoji">Emoji 库</button>
+        <button class="seg-opt"    data-mode="upload">本地图片</button>
+        <button class="seg-opt"    data-mode="url">远程 URL</button>
+      </div>
+      <div class="src-pane" data-pane="emoji">
+        <input type="text" id="emojiSearch" class="src-search" placeholder="搜索 emoji（中英文 / codepoint）…"/>
+        <div class="emoji-grid" id="emojiGrid"></div>
+      </div>
+      <div class="src-pane hidden" data-pane="upload">
+        <div class="dropzone" id="dropzone">
+          <p>拖拽图片到这里，或</p>
+          <label class="btn-primary">
+            <input type="file" id="fileUpload" accept="image/*" hidden>
+            选择文件
+          </label>
+          <p class="dz-hint">支持 PNG / JPG / WebP / SVG · 推荐带透明背景的方形 PNG</p>
+        </div>
+        <div class="upload-preview hidden" id="uploadPreview">
+          <img id="uploadPreviewImg" alt="预览">
+          <button class="btn-secondary" id="uploadClear">移除</button>
+        </div>
+      </div>
+      <div class="src-pane hidden" data-pane="url">
+        <input type="text" id="urlInput" class="src-search" placeholder="https://…/image.png"/>
+        <button class="btn-primary" id="urlLoad" style="margin-top:8px">加载</button>
+        <p class="dz-hint" style="margin-top:8px">注意 CORS：URL 必须允许跨域读取（开发者控制台 F12 检查）</p>
+      </div>
+    </fieldset>
+
+    <!-- 2. Template -->
+    <fieldset class="card">
+      <legend>② 模板 / Template</legend>
+      <div class="template-grid" id="templateGrid"></div>
+    </fieldset>
+
+    <!-- 3. Parameters (dynamic, built per-template) -->
+    <fieldset class="card">
+      <legend>③ 参数 / Parameters</legend>
+      <div class="param-list" id="paramList"></div>
+      <details class="adv">
+        <summary>高级 · canvas 大小 / 时长 / fps / 随机种子</summary>
+        <div class="param-list">
+          <label class="param">
+            <span>画布大小</span>
+            <input type="number" id="paramWidth"  min="64" max="512" step="32" value="192"> ×
+            <input type="number" id="paramHeight" min="64" max="512" step="32" value="192"> px
+          </label>
+          <label class="param">
+            <span>时长 (秒)</span>
+            <input type="number" id="paramDuration" min="0.3" max="6.0" step="0.1" value="1.5">
+          </label>
+          <label class="param">
+            <span>FPS</span>
+            <input type="number" id="paramFps" min="10" max="60" step="1" value="30">
+          </label>
+          <label class="param">
+            <span>随机种子</span>
+            <input type="number" id="paramSeed" min="0" max="999999" step="1" value="42">
+            <button class="btn-secondary btn-tiny" id="paramSeedRandom" type="button">🎲 随机</button>
+          </label>
+        </div>
+      </details>
+    </fieldset>
+  </section>
+
+  <!-- RIGHT COLUMN: preview + generate -->
+  <section class="col col-preview">
+    <div class="card preview-card">
+      <legend>④ 实时预览</legend>
+      <div class="preview-stage">
+        <!-- Checkerboard background to make alpha obvious. A faked "token"
+             circle underneath simulates how the effect would look layered
+             over a real OBR token. -->
+        <div class="preview-stage-bg" id="previewBg">
+          <div class="fake-token"></div>
+          <canvas id="previewCanvas" width="192" height="192"></canvas>
+        </div>
+      </div>
+      <div class="preview-meta">
+        <span id="previewInfo">192 × 192 · 30fps · 1.5s · 45 帧</span>
+      </div>
+    </div>
+
+    <div class="card generate-card">
+      <legend>⑤ 生成 / Generate</legend>
+      <button class="btn-primary btn-big" id="generateBtn">🎬 生成 WebM</button>
+      <div class="generate-status hidden" id="generateStatus">
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-text" id="progressText">准备中…</div>
+      </div>
+      <div class="result hidden" id="resultBox">
+        <video id="resultVideo" autoplay loop muted playsinline></video>
+        <div class="result-meta">
+          <span id="resultInfo">—</span>
+          <a id="resultDownload" download class="btn-primary btn-tiny">⬇ 下载 .webm</a>
+        </div>
+        <details>
+          <summary>当前配置（保存这段 JSON 可还原相同效果）</summary>
+          <pre id="resultConfig">{}</pre>
+          <button class="btn-secondary btn-tiny" id="copyConfigBtn">📋 复制</button>
+        </details>
+      </div>
+    </div>
+
+    <div class="card help-card">
+      <details>
+        <summary>使用说明 / How to use</summary>
+        <ol>
+          <li><b>① 选素材</b>：emoji 库里挑一个，或上传自定义 PNG/SVG（推荐透明背景方形）</li>
+          <li><b>② 选模板</b>：9 种动画模式，移上去看简介</li>
+          <li><b>③ 调参数</b>：右边实时预览同步</li>
+          <li><b>④ 看预览</b>：网格背景验证透明度，下方深色块模拟 token 位置</li>
+          <li><b>⑤ 点生成</b>：首次会下载 ffmpeg.wasm（~30 MB，缓存一次后不再下）</li>
+        </ol>
+        <p>生成的 .webm 可以放进 OBR Suite 插件 <code>public/buff-fx/</code>，或者作为 OBR Image item 的 <code>url</code> 字段使用。</p>
+      </details>
+    </div>
+  </section>
+</main>
+
+<!-- Load ffmpeg.wasm lazily on Generate click; not on page load. -->
+<script type="module" src="./app.js"></script>
+
+</body>
+</html>

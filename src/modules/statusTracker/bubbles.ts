@@ -486,26 +486,29 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
   const defaultBuffs: Array<{ buff: BuffDef; pillW: number }> = [];
   const effectBuffs: BuffDef[] = [];
 
-  // For WebM placement: centre the WebM bbox on the token. Bbox size
-  // matches the token's natural rendered footprint so the generator's
-  // canvas-relative motion (% of canvas) maps directly to token-cell-
-  // relative motion (% of cell). Use min(tokenW, tokenH) so non-square
-  // tokens still get a sensible square overlay rather than a stretched
-  // one.
-  const webmFootprint = Math.min(tokenW, tokenH);
-  const webmScale = webmFootprint / DEFAULT_WEBM_INTRINSIC_SIZE;
-  const webmTopLeft = {
-    x: cx - webmFootprint / 2,
-    y: cy - webmFootprint / 2,
-  };
+  // For WebM placement: centre the WebM bbox on the token. Base bbox
+  // size matches the token's natural rendered footprint so the
+  // generator's canvas-relative motion (% of canvas) maps directly
+  // to token-cell-relative motion (% of cell). 2026-05-14b — each
+  // buff may override its visible size via `webmScale` so effects
+  // that need to leak past the cell (bardic music drifting up-and-
+  // away, flying wings extending sideways, charmed ripples reaching
+  // beyond the token) can; while compact effects (deafened ear,
+  // slowed hourglass-in-corner) stay tight at 1.0×.
+  // Use min(tokenW, tokenH) so non-square tokens still get a sensible
+  // square overlay rather than a stretched one.
+  const baseFootprint = Math.min(tokenW, tokenH);
 
   for (const b of buffs) {
     if (b.webmAsset) {
+      const buffScale = typeof b.webmScale === "number" && b.webmScale > 0 ? b.webmScale : 1.0;
+      const footprint = baseFootprint * buffScale;
+      const scale = footprint / DEFAULT_WEBM_INTRINSIC_SIZE;
       webms.push({
         buffId: b.id,
         url: assetUrl(b.webmAsset),
-        position: { ...webmTopLeft },
-        scale: webmScale,
+        position: { x: cx - footprint / 2, y: cy - footprint / 2 },
+        scale,
         intrinsicSize: DEFAULT_WEBM_INTRINSIC_SIZE,
         // SLOT_WEBM (200) is above SLOT_GLYPH (100) so WebMs draw over
         // any sibling curved-band glyphs on the same token.

@@ -338,6 +338,11 @@ async function getCatalog(): Promise<BuffDef[]> {
         if (typeof wa === "string" && wa.length > 0) {
           def.webmAsset = wa;
         }
+        // 2026-05-14b — same for webmScale (per-buff size multiplier).
+        const ws = (e as any).webmScale;
+        if (typeof ws === "number" && Number.isFinite(ws) && ws > 0) {
+          def.webmScale = ws;
+        }
         // 2026-05-14 — back-compat migration. Users on the pre-WebM
         // build have a localStorage catalog without webmAsset on any
         // entry. For ids that ALSO appear in DEFAULT_BUFFS WITH a
@@ -346,10 +351,20 @@ async function getCatalog(): Promise<BuffDef[]> {
         // first load of the new build. Won't clobber a user who has
         // already chosen a different webmAsset themselves (only fills
         // in `undefined`).
-        if (!def.webmAsset) {
+        // 2026-05-14b — extended: also inherit webmScale from the
+        // fallback when the loaded entry has none. Without this,
+        // users on old catalogs would see new custom WebMs (which
+        // depend on webmScale to look right) at 1.0× scale and the
+        // visual would clip / overlap.
+        if (!def.webmAsset || !def.webmScale) {
           const fallback = DEFAULT_BUFFS.find((b) => b.id === def.id);
-          if (fallback?.webmAsset) {
-            def.webmAsset = fallback.webmAsset;
+          if (fallback) {
+            if (!def.webmAsset && fallback.webmAsset) {
+              def.webmAsset = fallback.webmAsset;
+            }
+            if (!def.webmScale && fallback.webmScale) {
+              def.webmScale = fallback.webmScale;
+            }
           }
         }
         out.push(def);
