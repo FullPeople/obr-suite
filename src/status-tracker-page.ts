@@ -200,6 +200,13 @@ function parseBuffArray(arr: any[]): BuffDef[] {
       if (typeof ep.count === "number" && isFinite(ep.count)) params.count = ep.count;
       if (Object.keys(params).length > 0) (def as any).effectParams = params;
     }
+    // 2026-05-14 — preserve webmAsset across the parse↔save roundtrip
+    // (editor used to drop it; that would silently revert customised
+    // WebM effect choices on every save).
+    const wa = (e as any).webmAsset;
+    if (typeof wa === "string" && wa.length > 0) {
+      (def as any).webmAsset = wa;
+    }
     out.push(def);
   }
   return out;

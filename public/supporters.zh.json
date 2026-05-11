@@ -40,7 +40,7 @@
   { "name": "鱼喵", "amount": 100 },
   { "name": "52Hertz", "amount": 6 },
   { "name": "咩", "amount": 20 },
-  { "name": "饭盒是阿玛利斯靴子", "amount": 20 },
+  { "name": "饭盒是阿玛利斯靴子", "amount": 35 },
   { "name": "白烏鴉", "amount": 10 },
   { "name": "不周", "amount": 5 },
   { "name": "喵呜嗷", "amount": 30 },
@@ -77,5 +77,6 @@
   { "name": "黑卡蒂的恩惠", "amount":20 },
   { "name": "克雷锰特", "amount":100 },
   { "name": "鼠鼠感谢你", "amount":50 },
-  { "name": "PAN", "amount":30 }
+  { "name": "PAN", "amount":30 },
+  { "name": "喜欢梦游爱睡觉", "amount":5 }
 ]

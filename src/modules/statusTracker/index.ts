@@ -330,6 +330,28 @@ async function getCatalog(): Promise<BuffDef[]> {
           if (typeof ep.count === "number" && isFinite(ep.count)) params.count = ep.count;
           if (Object.keys(params).length > 0) def.effectParams = params;
         }
+        // 2026-05-14 — parse `webmAsset` so users who customised the
+        // catalog manually keep their chosen WebM. Without this the
+        // field round-trips as undefined and the parser silently
+        // strips it on every load.
+        const wa = (e as any).webmAsset;
+        if (typeof wa === "string" && wa.length > 0) {
+          def.webmAsset = wa;
+        }
+        // 2026-05-14 — back-compat migration. Users on the pre-WebM
+        // build have a localStorage catalog without webmAsset on any
+        // entry. For ids that ALSO appear in DEFAULT_BUFFS WITH a
+        // webmAsset (paralyzed / stunned / poisoned), inherit it so
+        // those buffs auto-upgrade to the animated WebM rendering on
+        // first load of the new build. Won't clobber a user who has
+        // already chosen a different webmAsset themselves (only fills
+        // in `undefined`).
+        if (!def.webmAsset) {
+          const fallback = DEFAULT_BUFFS.find((b) => b.id === def.id);
+          if (fallback?.webmAsset) {
+            def.webmAsset = fallback.webmAsset;
+          }
+        }
         out.push(def);
       }
       if (out.length > 0) return out;
