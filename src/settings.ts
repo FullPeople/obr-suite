@@ -252,9 +252,12 @@ const SUPPORT: BilingualHtml = {
     <p style="font-size:11px;color:#9aa0b3;margin-top:-2px">微信 / 支付宝扫码也可以，备注里留个昵称就能上鸣谢墙。</p>
     <h3>${ICONS.heart} 鸣谢</h3>
     <div class="thanks-call-to-action">
-      <p><b>支持过我的朋友们 ❤</b> 你们的名字正在窗外飘动 —— 想让自己的<b>头像 / 角色立绘 / 方头立绘</b>挂在名字前面吗？请把图片发到我邮箱：</p>
+     <p><b>朋友们！感谢支持。</b> 该项目已经快接近尾声了，枭熊原生的功能已经很难再有精彩的发挥了，等bug修复后会接近封盘状态。</p>
+      <p>项目代码全部开源，封盘后更会更新到最新版本。</p>
+      <p>感谢大家的支持和陪伴，虽然作为免费分享的插件，主要是用来满足我自己的需求的同时，完美主义和对"这个功能明明可以做的更好"的不甘在驱使我前进——但每次看到各位的无偿捐赠都会让我觉得：<b>我做的事情是有意义的，大家和我是一样困扰的，没有人应该因为将就能用勉强能用就屈服于不方便的功能，而大家和我是共鸣的。</b></p>
+      <p>你们的名字正在窗外飘动 —— 想让自己的<b>头像 / 角色立绘 / 方头立绘</b>挂在名字前面吗？请把图片发到我邮箱：</p>
       <p style="margin-top:6px"><a href="mailto:${EMAIL}"><code>${EMAIL}</code></a></p>
-      <p style="font-size:11px;color:#9aa0b3;margin-top:6px">下周我会统一收集并合入名字前。无所谓尺寸，PNG / JPG / SVG 都可以，建议透明背景方形或竖向立绘。</p>
+      <p style="font-size:11px;color:#9aa0b3;margin-top:6px">下周我会统一收集并合入名字前。无所谓尺寸，PNG / JPG / SVG 都可以，请使用透明背景方形或圆形立绘。</p>
     </div>
     <h3>${ICONS.mail} 反馈</h3>
     <div class="contact-box">
@@ -3007,8 +3010,29 @@ OBR.onReady(async () => {
   // on the user's tab selection. On pagehide (popover closing), broadcast
   // a final HIDE so the overlay fades out cleanly before cluster-row.ts
   // closes the modal entirely.
-  broadcastOverlayVisibility(activeTab === "support");
-  const handleUnload = () => broadcastOverlayVisibility(false);
+  setTimeout(() => broadcastOverlayVisibility(activeTab === "support"), 200);
+  const handleUnload = () => {
+    broadcastOverlayVisibility(false);
+    try {
+      OBR.broadcast.sendMessage("com.obr-suite/settings-closed", {}, { destination: "LOCAL" });
+    } catch {}
+  };
+  const handleVisibilityChange = () => {
+    if (document.hidden) broadcastOverlayVisibility(false);
+  };
   window.addEventListener("pagehide", handleUnload);
   window.addEventListener("beforeunload", handleUnload);
+  window.addEventListener("visibilitychange", handleVisibilityChange);
+
+  // 2026-05-12b — heartbeat. pagehide / beforeunload in OBR popover
+  // iframes are unreliable (OBR can tear down the iframe before
+  // an async broadcast flushes through the message channel). The
+  // overlay iframe runs a watchdog that closes its own modal if it
+  // stops hearing from us for >2 seconds, so the only reliable
+  // thing this side has to do is keep sending pings while alive.
+  // No clearInterval needed — when this iframe unloads, the timer
+  // is GC'd with it; that absence of pings IS the close signal.
+  window.setInterval(() => {
+    broadcastOverlayVisibility(activeTab === "support");
+  }, 500);
 });

@@ -95,33 +95,58 @@ function getHoleRect(): { x: number; y: number; w: number; h: number } {
 // rectangle AND keeps the entire name on-screen (using an estimate
 // of the name's rendered width).
 
-function pickPosition(estimatedW: number, estimatedH: number): { x: number; y: number } | null {
+function pickPosition(
+  estimatedW: number,
+  estimatedH: number,
+  existingRects: Array<{ x: number; y: number; w: number; h: number }> = [],
+): { x: number; y: number } | null {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const hole = getHoleRect();
-  // Try up to N times to find a non-overlapping spot.
-  for (let attempt = 0; attempt < 30; attempt++) {
-    const x = Math.random() * (vw - estimatedW);
-    const y = Math.random() * (vh - estimatedH);
-    // Check if the name's bbox overlaps the popup hole.
+  const maxX = Math.max(0, vw - estimatedW);
+  const maxY = Math.max(0, vh - estimatedH);
+
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const x = Math.random() * maxX;
+    const y = Math.random() * maxY;
+    const candidate = { x, y, w: estimatedW, h: estimatedH };
     if (
-      x + estimatedW < hole.x ||
-      x > hole.x + hole.w ||
-      y + estimatedH < hole.y ||
-      y > hole.y + hole.h
+      candidate.x + candidate.w < hole.x ||
+      candidate.x > hole.x + hole.w ||
+      candidate.y + candidate.h < hole.y ||
+      candidate.y > hole.y + hole.h
     ) {
-      return { x, y };
+      if (!existingRects.some((rect) => rectsIntersect(candidate, rect))) {
+        return { x, y };
+      }
     }
   }
-  // Failsafe: place far from centre.
-  const corner = Math.floor(Math.random() * 4);
+
   const padding = 12;
-  switch (corner) {
-    case 0: return { x: padding,                          y: padding };
-    case 1: return { x: vw - estimatedW - padding,        y: padding };
-    case 2: return { x: padding,                          y: vh - estimatedH - padding };
-    default:return { x: vw - estimatedW - padding,        y: vh - estimatedH - padding };
+  const fallbacks = [
+    { x: padding, y: padding },
+    { x: maxX - padding, y: padding },
+    { x: padding, y: maxY - padding },
+    { x: maxX - padding, y: maxY - padding },
+    { x: padding, y: hole.y - estimatedH - padding },
+    { x: hole.x - estimatedW - padding, y: padding },
+  ];
+
+  for (const pos of fallbacks) {
+    const candidate = { x: Math.max(0, Math.min(maxX, pos.x)), y: Math.max(0, Math.min(maxY, pos.y)), w: estimatedW, h: estimatedH };
+    if (
+      candidate.x + candidate.w < hole.x ||
+      candidate.x > hole.x + hole.w ||
+      candidate.y + candidate.h < hole.y ||
+      candidate.y > hole.y + hole.h
+    ) {
+      if (!existingRects.some((rect) => rectsIntersect(candidate, rect))) {
+        return { x: candidate.x, y: candidate.y };
+      }
+    }
   }
+
+  return { x: Math.min(maxX, padding), y: Math.min(maxY, padding) };
 }
 
 // Rough estimate of a name's bounding box — used by pickPosition
@@ -150,6 +175,7 @@ interface Slot {
   state: "void" | "in" | "hold" | "out";
   stateUntil: number;       // ms timestamp
   current: Supporter | null;
+  rect: { x: number; y: number; w: number; h: number } | null;
 }
 
 const slots: Slot[] = [];
@@ -158,36 +184,61 @@ function makeSlot(): Slot {
   const el = document.createElement("div");
   el.className = "name";
   sceneEl.appendChild(el);
-  return { el, state: "void", stateUntil: 0, current: null };
+  return { el, state: "void", stateUntil: 0, current: null, rect: null };
+}
+
+function rectsIntersect(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function activeRects(excludeSlot?: Slot): Array<{ x: number; y: number; w: number; h: number }> {
+  return slots
+    .filter((slot) => slot !== excludeSlot && slot.rect && slot.state !== "void")
+    .map((slot) => slot.rect!);
 }
 
 function pickSupporter(): Supporter | null {
   if (supporters.length === 0) return null;
-  // Weight by sqrt(amount) so higher tiers appear MORE OFTEN (but
-  // not totally dominate). Bump everyone with a base weight so even
-  // ¥0 / ¥1 names cycle in.
+  const activeNames = new Set(
+    slots
+      .filter((slot) => slot.current && slot.state !== "void")
+      .map((slot) => slot.current!.name),
+  );
+  const pool = supporters.filter((s) => !activeNames.has(s.name));
+  const candidates = pool.length > 0 ? pool : supporters;
+
   let total = 0;
-  for (const s of supporters) total += 1 + Math.sqrt(s.amount);
+  for (const s of candidates) total += 1 + Math.sqrt(s.amount);
   let pick = Math.random() * total;
-  for (const s of supporters) {
+  for (const s of candidates) {
     const w = 1 + Math.sqrt(s.amount);
     if (pick < w) return s;
     pick -= w;
   }
-  return supporters[supporters.length - 1];
+  return candidates[candidates.length - 1];
 }
 
 function placeSlot(slot: Slot, s: Supporter): void {
   const tier = supporterTier(s.amount);
   const fs = supporterFontSize(s.amount);
-  const box = estimateBox(s);
-  const pos = pickPosition(box.w, box.h) ?? { x: 20, y: 20 };
   slot.el.className = `name ${tier}`;
   slot.el.style.fontSize = `${fs}px`;
+  slot.el.style.opacity = "0";
+  slot.el.textContent = s.name;
+  slot.el.style.left = "0px";
+  slot.el.style.top = "0px";
+
+  const measured = slot.el.getBoundingClientRect();
+  const box = {
+    w: Math.max(60, Math.ceil(measured.width) + 8),
+    h: Math.max(Math.ceil(measured.height), 24),
+  };
+  const pos = pickPosition(box.w, box.h, activeRects(slot)) ?? { x: 20, y: 20 };
+
   slot.el.style.left = `${pos.x}px`;
   slot.el.style.top = `${pos.y}px`;
-  slot.el.textContent = s.name;
   slot.current = s;
+  slot.rect = { x: pos.x, y: pos.y, w: box.w, h: box.h };
 }
 
 function tickSlot(slot: Slot, now: number): void {
@@ -218,6 +269,8 @@ function tickSlot(slot: Slot, now: number): void {
   if (slot.state === "out" && now >= slot.stateUntil) {
     slot.state = "void";
     slot.stateUntil = now + Math.random() * 800;  // brief pause before respawn
+    slot.rect = null;
+    slot.current = null;
   }
 }
 
@@ -266,6 +319,8 @@ function setVisible(visible: boolean): void {
           s.el.style.opacity = "0";
           s.state = "void";
           s.stateUntil = 0;
+          s.current = null;
+          s.rect = null;
         }
       }
     }, 700);
@@ -279,9 +334,51 @@ function setVisible(visible: boolean): void {
 // for a few seconds — they'll cycle out and respawn in valid spots.)
 window.addEventListener("resize", () => { /* getHoleRect reads live */ });
 
+// === Heartbeat watchdog ===========================================
+//
+// pagehide / beforeunload in OBR popover iframes are unreliable —
+// OBR can tear down the iframe before any broadcast actually
+// flushes through the message channel. So we can't rely on a "I'm
+// closing" broadcast from settings.ts to trigger our cleanup.
+//
+// Instead settings.ts sends a "still alive" heartbeat every 500 ms.
+// We track the timestamp of the most recent one; if more than 2 s
+// elapse without a heartbeat AND we've ever received one (so we
+// don't fire on page load before settings has booted), this iframe
+// calls OBR.modal.close on itself.
+//
+// (cluster-row.ts has a parallel close-on-broadcast path that still
+// triggers when broadcasts DO flush properly. The watchdog is the
+// belt-and-suspenders for when they don't.)
+
+const MODAL_ID = "com.obr-suite/supporter-overlay";
+const HEARTBEAT_TIMEOUT_MS = 2000;
+let _lastHeartbeatAt = 0;
+let _watchdogClosed = false;
+
+function noteHeartbeat(): void {
+  _lastHeartbeatAt = performance.now();
+}
+
+function startHeartbeatWatchdog(): void {
+  setInterval(() => {
+    if (_watchdogClosed) return;
+    if (_lastHeartbeatAt === 0) return;   // never received one — settings not loaded yet
+    if (performance.now() - _lastHeartbeatAt > HEARTBEAT_TIMEOUT_MS) {
+      _watchdogClosed = true;
+      // Hide names BEFORE closing the modal so there's no flash.
+      setVisible(false);
+      // Small delay so the scene fade-out plays before iframe tears down.
+      setTimeout(() => {
+        OBR.modal.close(MODAL_ID).catch(() => {});
+      }, 650);
+    }
+  }, 500);
+}
+
 // === Boot =========================================================
 
-const SLOT_COUNT = 32;   // 32 names visible+cycling simultaneously
+const SLOT_COUNT = 100;   // 100 names visible+cycling simultaneously
 
 OBR.onReady(async () => {
   // Default to ZH; broadcast carries the actual choice from settings.
@@ -293,6 +390,7 @@ OBR.onReady(async () => {
   OBR.broadcast.onMessage(BC_VISIBILITY, async (event) => {
     const data = event.data as { visible?: boolean; lang?: string } | undefined;
     if (!data) return;
+    noteHeartbeat();
     // Reload supporters list only if lang actually changed. Compare
     // BEFORE updating `_lastLoadedLang` so the equality check works.
     if ((data.lang === "zh" || data.lang === "en") && data.lang !== _lastLoadedLang) {
@@ -301,6 +399,8 @@ OBR.onReady(async () => {
     }
     setVisible(!!data.visible);
   });
+
+  startHeartbeatWatchdog();
 });
 
 let _lastLoadedLang: "zh" | "en" = "zh";

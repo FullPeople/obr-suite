@@ -374,30 +374,36 @@ async function onGear() {
   }
 }
 
-// 2026-05-12 — when the settings popover closes (user click-away or
-// pressing Esc), close the supporter overlay too. The settings iframe
-// fires a final HIDE broadcast on pagehide which fades names; the
-// listener below tears down the modal a moment later so it doesn't
-// linger. State held at module scope; listener installed inside
-// OBR.onReady (see installSupporterOverlayCloseListener()).
-let _overlayCloseTimer: number | null = null;
+// 2026-05-12 — supporter overlay teardown coordination. Two paths:
+//
+//   1. `settings-closed` broadcast (fast path): the settings iframe
+//      fires this from its pagehide / beforeunload / visibilitychange
+//      handlers when it KNOWS it's about to die. If the broadcast
+//      makes it through OBR's message channel before the iframe is
+//      torn down, the modal closes immediately (after a 700 ms grace
+//      for the overlay's own fade-out).
+//
+//   2. Heartbeat watchdog (slow path, inside supporter-overlay-page.ts):
+//      settings.ts pings every 500 ms while alive. The overlay tracks
+//      heartbeats and closes its own modal if it stops hearing them
+//      for >2 s. This is the reliable fallback — pagehide /
+//      beforeunload don't reliably fire inside OBR popover iframes
+//      because OBR can tear the iframe down before async broadcasts
+//      flush.
+//
+// The `visibility` broadcast (used for tab switching) does NOT trigger
+// close any more — it would close the modal whenever the user clicks
+// a non-Support tab. visible/false on tab switch is just an intent for
+// the overlay to fade names out, not to actually close.
 function installSupporterOverlayCloseListener(): void {
   try {
-    OBR.broadcast.onMessage("com.obr-suite/supporter-overlay/visibility", (event) => {
-      const data = event.data as { visible?: boolean } | undefined;
-      if (!data) return;
-      if (data.visible) {
-        if (_overlayCloseTimer !== null) {
-          window.clearTimeout(_overlayCloseTimer);
-          _overlayCloseTimer = null;
-        }
-      } else {
-        if (_overlayCloseTimer !== null) window.clearTimeout(_overlayCloseTimer);
-        _overlayCloseTimer = window.setTimeout(() => {
-          _overlayCloseTimer = null;
-          OBR.modal.close(SUPPORTER_OVERLAY_MODAL_ID).catch(() => {});
-        }, 800);
-      }
+    OBR.broadcast.onMessage("com.obr-suite/settings-closed", () => {
+      // 700 ms = matches the overlay's scene-fade-out duration so we
+      // don't yank the modal mid-animation.
+      window.setTimeout(
+        () => OBR.modal.close(SUPPORTER_OVERLAY_MODAL_ID).catch(() => {}),
+        700,
+      );
     });
   } catch (e) {
     console.warn("[obr-suite/cluster-row] supporter overlay listener install failed", e);
