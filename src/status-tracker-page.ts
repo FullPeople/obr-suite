@@ -40,6 +40,40 @@ import {
 } from "./modules/statusTracker/types";
 import { bindPanelDrag } from "./utils/panelDrag";
 import { PANEL_IDS } from "./utils/panelLayout";
+import { assetUrl } from "./asset-base";
+
+// 2026-05-14 — variant manifest cached after first fetch. Lists every
+// pre-baked WebM the editor can offer (id / template / emoji / path).
+// File at `public/buff-fx/manifest.json` is rebuilt by
+// tools/buff-fx-gen/build_all.sh.
+interface BuffFxVariant {
+  id: string;
+  template: string;
+  emoji: string;
+  asset: string;
+  size_kb?: number;
+}
+let variantManifestCache: BuffFxVariant[] | null = null;
+async function getVariantManifest(): Promise<BuffFxVariant[]> {
+  if (variantManifestCache) return variantManifestCache;
+  try {
+    const url = assetUrl("buff-fx/manifest.json");
+    const r = await fetch(url, { cache: "force-cache" });
+    if (!r.ok) return [];
+    const j = await r.json();
+    if (Array.isArray(j?.variants)) {
+      variantManifestCache = j.variants as BuffFxVariant[];
+      return variantManifestCache;
+    }
+  } catch (e) {
+    console.warn("[status/palette] buff-fx manifest fetch failed", e);
+  }
+  return [];
+}
+function shortNameForAsset(asset: string | undefined): string {
+  if (!asset) return "无";
+  return asset.replace(/^buff-fx\//, "").replace(/\.webm$/, "");
+}
 
 const BC_DRAG_START = `${PLUGIN_ID}/drag-start`;
 const BC_DRAG_END = `${PLUGIN_ID}/drag-end`;
@@ -619,6 +653,92 @@ const EFFECT_LABELS: Array<{ id: BuffEffect; label: string; hint: string }> = [
   { id: "spread",  label: "扩散", hint: "同心圆扩散（渲染于角色下方）" },
 ];
 
+/**
+ * Variant browser modal — fullscreen overlay listing every WebM in
+ * the manifest, filterable by template. Resolves to the picked
+ * variant's `asset` path, or null if dismissed. Called from
+ * openEditPopup's "更换…" button.
+ */
+async function openVariantPicker(currentAsset: string | undefined): Promise<string | null> {
+  const variants = await getVariantManifest();
+  if (variants.length === 0) {
+    return null;   // manifest unavailable → silently no-op
+  }
+  // Group by template for filter buttons.
+  const templates = Array.from(new Set(variants.map((v) => v.template)));
+
+  return new Promise<string | null>((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "buff-fx-picker-overlay";
+    overlay.innerHTML = `
+      <div class="bfp-card">
+        <div class="bfp-hdr">
+          <span class="bfp-title">选择特效（${variants.length} 个变体）</span>
+          <button class="bfp-x" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="bfp-filters">
+          <button class="bfp-tmpl on" data-tmpl="" type="button">全部</button>
+          ${templates.map((t) => `<button class="bfp-tmpl" data-tmpl="${escapeHtml(t)}" type="button">${escapeHtml(t)}</button>`).join("")}
+        </div>
+        <div class="bfp-grid">
+          <div class="bfp-cell bfp-cell-none ${currentAsset ? "" : "bfp-current"}" data-asset="" data-tmpl="">
+            <div class="bfp-none-icon">∅</div>
+            <div class="bfp-cell-label">无特效<br><em>回退弧形带</em></div>
+          </div>
+          ${variants.map((v) => `
+            <div class="bfp-cell ${currentAsset === v.asset ? "bfp-current" : ""}"
+                 data-asset="${escapeHtml(v.asset)}"
+                 data-tmpl="${escapeHtml(v.template)}">
+              <video class="bfp-thumb" src="${escapeHtml(assetUrl(v.asset))}"
+                     autoplay loop muted playsinline preload="metadata"></video>
+              <div class="bfp-cell-label">${escapeHtml(v.template)}<br><em>${escapeHtml(v.emoji)}</em></div>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    // Force-trigger autoplay on grid videos (some browsers throttle
+    // many simultaneous <video>s; muted + autoplay should still work).
+    overlay.querySelectorAll<HTMLVideoElement>(".bfp-thumb").forEach((v) => {
+      v.play().catch(() => { /* user-gesture not yet given; loop start on first interaction */ });
+    });
+
+    const cleanup = (result: string | null): void => {
+      overlay.remove();
+      resolve(result);
+    };
+
+    overlay.querySelector<HTMLButtonElement>(".bfp-x")?.addEventListener("click", () => cleanup(null));
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) cleanup(null); });
+    document.addEventListener("keydown", function onEsc(e) {
+      if (e.key === "Escape") {
+        document.removeEventListener("keydown", onEsc);
+        cleanup(null);
+      }
+    });
+
+    overlay.querySelectorAll<HTMLButtonElement>(".bfp-tmpl").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sel = btn.dataset.tmpl ?? "";
+        overlay.querySelectorAll<HTMLButtonElement>(".bfp-tmpl").forEach((b) => b.classList.toggle("on", b === btn));
+        overlay.querySelectorAll<HTMLElement>(".bfp-cell").forEach((c) => {
+          // Always show the "无特效" cell regardless of filter.
+          if (c.classList.contains("bfp-cell-none")) return;
+          (c as HTMLElement).style.display = (sel === "" || c.dataset.tmpl === sel) ? "" : "none";
+        });
+      });
+    });
+
+    overlay.querySelectorAll<HTMLElement>(".bfp-cell").forEach((cell) => {
+      cell.addEventListener("click", () => {
+        const a = cell.dataset.asset ?? "";
+        cleanup(a === "" ? "" : a);   // "" sentinel → clear (caller treats as undefined)
+      });
+    });
+  });
+}
+
 function openEditPopup(id: string, anchor: HTMLElement): void {
   const buff = buffs.find((b) => b.id === id);
   if (!buff) return;
@@ -628,6 +748,9 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
   let pendingImageUrl: string = buff.effectParams?.imageUrl ?? "";
   let pendingImageW: number | undefined = buff.effectParams?.imageWidth;
   let pendingImageH: number | undefined = buff.effectParams?.imageHeight;
+  // 2026-05-14 — WebM-backed buff effect. Pre-baked catalog lives in
+  // public/buff-fx/; the picker (openVariantPicker) sets this.
+  let pendingWebmAsset: string | undefined = buff.webmAsset;
   const fxButtons = EFFECT_LABELS.map((e) => `
     <button class="pop-fx-seg ${pendingEffect === e.id ? "on" : ""}"
             data-fx="${e.id}"
@@ -652,6 +775,24 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
       <button class="pop-img-pick" type="button" title="从 OBR 资源库选择">📁</button>
     </div>`
     : "";
+  // 2026-05-14 — WebM effect picker. Renders ALWAYS (the legacy
+  // particle system above is feature-gated; WebMs are stable).
+  const webmBlock = `
+    <div class="pop-fx-label">特效</div>
+    <div class="pop-webm-row">
+      <div class="pop-webm-preview" data-pop-webm-preview>
+        ${pendingWebmAsset
+          ? `<video src="${escapeHtml(assetUrl(pendingWebmAsset))}" autoplay loop muted playsinline></video>`
+          : `<div class="pop-webm-none">无</div>`}
+      </div>
+      <div class="pop-webm-info">
+        <div class="pop-webm-name" data-pop-webm-name>${escapeHtml(shortNameForAsset(pendingWebmAsset))}</div>
+        <div class="pop-webm-buttons">
+          <button class="pop-webm-change" type="button">更换…</button>
+          <button class="pop-webm-clear" type="button" ${pendingWebmAsset ? "" : "disabled"}>清除</button>
+        </div>
+      </div>
+    </div>`;
   popupEl.innerHTML = `
     <div class="pop-row">
       <input class="pop-color" type="color" value="${escapeHtml(buff.color)}"/>
@@ -664,6 +805,7 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
       <span class="pop-rounds-label">0=不限</span>
     </div>
     ${effectsBlock}
+    ${webmBlock}
     <div class="pop-row pop-actions">
       <button class="pop-del" type="button">删除</button>
       <span style="flex:1"></span>
@@ -719,6 +861,40 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
       pendingImageH = undefined;
     });
   }
+  // 2026-05-14 — WebM picker buttons.
+  const webmPreview = popupEl.querySelector<HTMLElement>('[data-pop-webm-preview]');
+  const webmName    = popupEl.querySelector<HTMLElement>('[data-pop-webm-name]');
+  const webmChange  = popupEl.querySelector<HTMLButtonElement>('.pop-webm-change');
+  const webmClear   = popupEl.querySelector<HTMLButtonElement>('.pop-webm-clear');
+  const updateWebmUI = (): void => {
+    if (webmPreview) {
+      webmPreview.innerHTML = pendingWebmAsset
+        ? `<video src="${escapeHtml(assetUrl(pendingWebmAsset))}" autoplay loop muted playsinline></video>`
+        : `<div class="pop-webm-none">无</div>`;
+    }
+    if (webmName) webmName.textContent = shortNameForAsset(pendingWebmAsset);
+    if (webmClear) {
+      if (pendingWebmAsset) webmClear.removeAttribute("disabled");
+      else webmClear.setAttribute("disabled", "true");
+    }
+  };
+  if (webmChange) {
+    webmChange.addEventListener("click", async () => {
+      const picked = await openVariantPicker(pendingWebmAsset);
+      // null = dismissed (no change); "" = explicit "无特效" cell;
+      // non-empty string = picked asset path.
+      if (picked === null) return;
+      pendingWebmAsset = picked === "" ? undefined : picked;
+      updateWebmUI();
+    });
+  }
+  if (webmClear) {
+    webmClear.addEventListener("click", () => {
+      pendingWebmAsset = undefined;
+      updateWebmUI();
+    });
+  }
+
   if (imgPick) {
     imgPick.addEventListener("click", async () => {
       // OBR.assets.downloadImages opens OBR's library picker.
@@ -773,6 +949,10 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
       if (Number.isFinite(rounds) && rounds > 0) target.rounds = rounds;
       else delete target.rounds;
       target.effect = pendingEffect === "default" ? undefined : pendingEffect;
+      // 2026-05-14 — persist webmAsset. Empty = no webm effect
+      // (renderer falls back to legacy curved band / particle).
+      if (pendingWebmAsset) target.webmAsset = pendingWebmAsset;
+      else delete (target as any).webmAsset;
       // effectParams: persist imageUrl + cached dims when user has
       // configured a particle image. Empty URL → no effectParams,
       // particles fall back to the bundled default sparkle.

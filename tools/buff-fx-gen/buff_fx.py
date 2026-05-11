@@ -51,21 +51,70 @@ TWEMOJI_URL = "https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/{
 # hex without the U+ prefix; Twemoji's path uses that form (multi-codepoint
 # emojis joined by "-").
 EMOJI_CODEPOINTS: dict[str, str] = {
-    # Combat / status emoji set
-    "lightning":  "26a1",   # ⚡  — paralysis
-    "dizzy":      "1f4ab",  # 💫  — dizzy/stun
-    "swirl":      "1f300",  # 🌀  — alt for dizzy
-    "skull":      "1f480",  # 💀  — death / poison
-    "test_tube":  "1f9ea",  # 🧪  — poison
-    "nauseated":  "1f922",  # 🤢  — poison alt
-    "snake":      "1f40d",  # 🐍  — poison alt
-    "drop":       "1f4a7",  # 💧  — generic drop
-    "fire":       "1f525",  # 🔥
-    "snowflake":  "2744",   # ❄
-    "star":       "2b50",   # ⭐
-    "boom":       "1f4a5",  # 💥
-    "zap":        "26a1",   # ⚡  alias
-    "sparkles":   "2728",   # ✨
+    # === Combat / magic ===
+    "lightning":       "26a1",          # ⚡
+    "dizzy":           "1f4ab",         # 💫
+    "swirl":           "1f300",         # 🌀
+    "boom":            "1f4a5",         # 💥
+    "sparkles":        "2728",          # ✨
+    "fire":            "1f525",         # 🔥
+    "snowflake":       "2744",          # ❄
+    "star":            "2b50",          # ⭐
+    "crystal_ball":    "1f52e",         # 🔮
+    "moon":            "1f319",         # 🌙
+    "sun":             "2600",          # ☀
+    "zap":             "26a1",          # ⚡ alias
+
+    # === Liquid / status ===
+    "test_tube":       "1f9ea",         # 🧪
+    "drop":            "1f4a7",         # 💧
+    "snake":           "1f40d",         # 🐍
+    "nauseated":       "1f922",         # 🤢
+    "skull":           "1f480",         # 💀
+
+    # === Hearts / love ===
+    "sparkling_heart": "1f496",         # 💖
+    "heart_pink":      "1f495",         # 💕
+    "broken_heart":    "1f494",         # 💔
+    "red_envelope":    "1f9e7",         # 🧧
+
+    # === Faces ===
+    "clown":           "1f921",         # 🤡
+    "ghost":           "1f47b",         # 👻
+    "angry":           "1f620",         # 😠
+    "rage":            "1f621",         # 😡
+    "screaming":       "1f631",         # 😱
+    "cold_face":       "1f976",         # 🥶
+    "sleepy":          "1f634",         # 😴
+
+    # === Sound / music ===
+    "musical_note":    "1f3b5",         # 🎵
+    "headphones":      "1f3a7",         # 🎧
+
+    # === Objects / icons ===
+    "target":          "1f3af",         # 🎯
+    "moai":            "1f5ff",         # 🗿
+    "chains":          "1f517",         # 🔗
+    "hourglass":       "231b",          # ⌛
+    "zzz":             "1f4a4",         # 💤
+    "thumbs_up":       "1f44d",         # 👍
+    "sunglasses":      "1f576",         # 🕶  (no variation selector — works with Twemoji 72×72)
+
+    # === Movement / nature ===
+    "wind":            "1f4a8",         # 💨
+    "dove":            "1f54a",         # 🕊
+    "leaves":          "1f343",         # 🍃
+    "cherry_blossom":  "1f338",         # 🌸
+    "tulip":           "1f337",         # 🌷
+
+    # === Animals ===
+    "snail":           "1f40c",         # 🐌
+    "sloth":           "1f9a5",         # 🦥
+    "otter":           "1f9a6",         # 🦦
+    "people_hugging":  "1fac2",         # 🫂
+
+    # === Body / mind ===
+    "brain":           "1f9e0",         # 🧠
 }
 
 
@@ -196,7 +245,7 @@ class Particle:
     rotation_offset: float = 0.0  # deg
 
 
-def render_paralysis(args: argparse.Namespace) -> List[Image.Image]:
+def render_flash(args: argparse.Namespace) -> List[Image.Image]:
     """Lightning sparks flash on / off at random positions, popping in
     quickly and fading.
 
@@ -245,7 +294,7 @@ def render_paralysis(args: argparse.Namespace) -> List[Image.Image]:
     return frames
 
 
-def render_dizzy(args: argparse.Namespace) -> List[Image.Image]:
+def render_orbit(args: argparse.Namespace) -> List[Image.Image]:
     """Dizzy stars orbit an ellipse centred at the TOP of the canvas.
 
     Designed to attach above a token (token's head ≈ canvas top). The
@@ -314,7 +363,205 @@ def render_dizzy(args: argparse.Namespace) -> List[Image.Image]:
     return frames
 
 
-def render_poison(args: argparse.Namespace) -> List[Image.Image]:
+def render_float(args: argparse.Namespace) -> List[Image.Image]:
+    """Emojis drift UPWARD from the bottom of the canvas (opposite of
+    rain). Use case: charm hearts, music notes, sleep Z's, dust trails.
+
+    Seamless: integer rises per loop. Each particle has a fixed
+    `phase` ∈ [0, 1) and `rises` (integer) — its vertical progress
+    `prog = (u * rises + phase) % 1.0` wraps cleanly at u=1."""
+    W, H = args.width, args.height
+    total_frames = int(args.fps * args.duration)
+    rng = random.Random(args.seed)
+    emoji_img = fetch_emoji(args.emoji)
+
+    spawn_y_max = H + H * 0.15           # start below canvas
+    travel = H + H * 0.30                 # rise top → past top
+
+    particles = []
+    for _ in range(args.count):
+        rises = rng.randint(args.cycles_min, args.cycles_max)
+        particles.append({
+            "x_base":            rng.uniform(args.margin, W - args.margin),
+            "x_amp":             rng.uniform(0, args.x_jitter),
+            "x_wobbles":         rng.choice([0, 1, 2]),
+            "rises":             rises,
+            "phase":             rng.uniform(0, 1),
+            "scale":             rng.uniform(args.scale_min, args.scale_max),
+            "rot_base":          rng.uniform(-15, 15),
+            "rot_amp":           rng.uniform(0, 12),   # gentle sway
+        })
+
+    frames: List[Image.Image] = []
+    for f in range(total_frames):
+        u = f / total_frames
+        frame = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        for p in particles:
+            prog = (u * p["rises"] + p["phase"]) % 1.0
+            # y goes from spawn_y_max DOWNWARD (i.e. up the screen) by
+            # `travel` over one prog cycle: y = spawn_y_max - travel * prog
+            y = spawn_y_max - travel * prog
+            x = p["x_base"] + p["x_amp"] * math.sin(prog * p["x_wobbles"] * 2 * math.pi)
+            # gentle wobble rotation tied to prog so it loops
+            rot = p["rot_base"] + p["rot_amp"] * math.sin(prog * 2 * math.pi)
+            # fade-in over first 12%, fade-out at last 12% of the rise
+            if prog < 0.12:
+                opacity = prog / 0.12
+            elif prog > 0.88:
+                opacity = (1.0 - prog) / 0.12
+            else:
+                opacity = 1.0
+            paste_emoji(frame, emoji_img, x, y, p["scale"], rot, opacity)
+        frames.append(frame)
+    return frames
+
+
+def render_pulse(args: argparse.Namespace) -> List[Image.Image]:
+    """A single emoji at the canvas centre, scaling rhythmically (sin
+    envelope). Used for "fixed indicator" effects — focused, hunters_
+    mark, exhaustion. `--pulses` = integer beats per loop (default 2)."""
+    W, H = args.width, args.height
+    total_frames = int(args.fps * args.duration)
+    emoji_img = fetch_emoji(args.emoji)
+
+    pulses = max(1, args.pulses)
+    cx, cy = W / 2, H / 2
+    s_lo, s_hi = args.scale_min, args.scale_max
+
+    frames: List[Image.Image] = []
+    for f in range(total_frames):
+        u = f / total_frames
+        # `0.5 - 0.5*cos(2π * u * pulses)` swings 0..1 smoothly with
+        # integer pulses per loop → seamless. cos so the cycle BOTTOMS
+        # at u=0 and u=1, peaks in the middle.
+        envelope = 0.5 - 0.5 * math.cos(2 * math.pi * u * pulses)
+        scale = s_lo + (s_hi - s_lo) * envelope
+        frame = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        paste_emoji(frame, emoji_img, cx, cy, scale, 0, 1.0)
+        frames.append(frame)
+    return frames
+
+
+def render_radial(args: argparse.Namespace) -> List[Image.Image]:
+    """Emojis radiate outward from the canvas centre in random
+    directions, fading as they go. Ring-like emanation effect — used
+    for blessing, frozen (ripple), innate spell, guidance.
+
+    Seamless: each emoji travels from centre to its `max_radius` in
+    integer cycles per loop."""
+    W, H = args.width, args.height
+    total_frames = int(args.fps * args.duration)
+    rng = random.Random(args.seed)
+    emoji_img = fetch_emoji(args.emoji)
+
+    cx, cy = W / 2, H / 2
+    max_radius = min(W, H) * 0.45
+
+    particles = []
+    for i in range(args.count):
+        # Evenly spaced angles + small jitter so the ring doesn't look
+        # mechanical. Each particle picks its own integer cycles count.
+        base_angle = (i / args.count) * 360 + rng.uniform(-10, 10)
+        cycles = rng.randint(args.cycles_min, args.cycles_max)
+        particles.append({
+            "angle":     base_angle,
+            "cycles":    cycles,
+            "phase":     rng.uniform(0, 1),
+            "scale":     rng.uniform(args.scale_min, args.scale_max),
+        })
+
+    frames: List[Image.Image] = []
+    for f in range(total_frames):
+        u = f / total_frames
+        frame = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        for p in particles:
+            prog = (u * p["cycles"] + p["phase"]) % 1.0
+            r = max_radius * prog
+            θ = p["angle"] * math.pi / 180
+            x = cx + math.cos(θ) * r
+            y = cy + math.sin(θ) * r
+            # Fade out as it travels — peak alpha at 30% of journey,
+            # zero at 100%. Slight grow during travel (1.0 → 1.3 scale).
+            opacity = max(0.0, 1.0 - prog) ** 1.2
+            scale = p["scale"] * (1.0 + prog * 0.3)
+            paste_emoji(frame, emoji_img, x, y, scale, 0, opacity)
+        frames.append(frame)
+    return frames
+
+
+def render_shake(args: argparse.Namespace) -> List[Image.Image]:
+    """Single emoji at the canvas centre, shaking left-right rapidly.
+    Use case: anger trembling, fear, shivering from cold.
+
+    Seamless: x position oscillates as sin(2π · u · shakes), where
+    `shakes` is an integer — wraps cleanly at u=1."""
+    W, H = args.width, args.height
+    total_frames = int(args.fps * args.duration)
+    emoji_img = fetch_emoji(args.emoji)
+
+    cx, cy = W / 2, H / 2
+    shakes = max(1, args.shakes)         # integer shakes per loop
+    amp = args.amplitude * W              # horizontal amplitude in px
+
+    frames: List[Image.Image] = []
+    for f in range(total_frames):
+        u = f / total_frames
+        x_offset = amp * math.sin(2 * math.pi * u * shakes)
+        # Counter-tilt the emoji slightly so the shake "feels" mechanical
+        rot = math.sin(2 * math.pi * u * shakes) * args.tilt
+        frame = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        paste_emoji(frame, emoji_img, cx + x_offset, cy, args.scale, rot, 1.0)
+        frames.append(frame)
+    return frames
+
+
+def render_static(args: argparse.Namespace) -> List[Image.Image]:
+    """A single emoji at the canvas centre. No animation, but encoded
+    as a short WebM so the renderer pipeline stays uniform. 6 identical
+    frames = ~2 KB encoded.
+
+    Used for "low-energy" / "static state" effects where motion would
+    feel wrong — petrified, dead, prone, restrained, deafened."""
+    W, H = args.width, args.height
+    emoji_img = fetch_emoji(args.emoji)
+    frame = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    paste_emoji(frame, emoji_img, W / 2, H / 2, args.scale, 0, 1.0)
+    # 6 frames so the encoder always has enough for a clean GOP. All
+    # identical → VP9 inter-frame coder compresses them to nearly
+    # nothing.
+    return [frame] * 6
+
+
+def render_fade(args: argparse.Namespace) -> List[Image.Image]:
+    """Emoji at the canvas centre with opacity oscillating in/out
+    smoothly. Used for "now-you-see-me" effects — invisible, ghost-
+    like states.
+
+    Seamless: opacity = (1 - cos(2π · u · pulses)) / 2, integer pulses
+    per loop. Optional `--scale-pulse` to additionally breathe the
+    scale by ±10% for an organic feel."""
+    W, H = args.width, args.height
+    total_frames = int(args.fps * args.duration)
+    emoji_img = fetch_emoji(args.emoji)
+
+    pulses = max(1, args.pulses)
+    cx, cy = W / 2, H / 2
+
+    frames: List[Image.Image] = []
+    for f in range(total_frames):
+        u = f / total_frames
+        env = 0.5 - 0.5 * math.cos(2 * math.pi * u * pulses)
+        # min..max alpha range so it never fully disappears (still
+        # readable as "this is the buff icon").
+        opacity = args.alpha_min + (args.alpha_max - args.alpha_min) * env
+        scale = args.scale * (1.0 + (env - 0.5) * 0.10 if args.scale_pulse else 1.0)
+        frame = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        paste_emoji(frame, emoji_img, cx, cy, scale, 0, opacity)
+        frames.append(frame)
+    return frames
+
+
+def render_rain(args: argparse.Namespace) -> List[Image.Image]:
     """Emojis fall top-to-bottom at random sizes, like rain.
 
     Seamless loop: each drop completes an INTEGER number of full
@@ -404,8 +651,8 @@ def render_poison(args: argparse.Namespace) -> List[Image.Image]:
 # ----- CLI -----------------------------------------------------------------
 
 EFFECTS: dict[str, dict] = {
-    "paralysis": {
-        "renderer": render_paralysis,
+    "flash": {
+        "renderer": render_flash,
         "defaults": {
             "emoji": "lightning",
             "count": 6,
@@ -416,8 +663,8 @@ EFFECTS: dict[str, dict] = {
             "margin": 18,
         },
     },
-    "dizzy": {
-        "renderer": render_dizzy,
+    "orbit": {
+        "renderer": render_orbit,
         "defaults": {
             "emoji": "dizzy",
             "count": 3,
@@ -430,8 +677,8 @@ EFFECTS: dict[str, dict] = {
             "radius_y": 0,     # default = 16% H
         },
     },
-    "poison": {
-        "renderer": render_poison,
+    "rain": {
+        "renderer": render_rain,
         "defaults": {
             "emoji": "test_tube",
             "count": 8,
@@ -447,6 +694,67 @@ EFFECTS: dict[str, dict] = {
             "scale_max": 0.22,
             "x_jitter": 6,
             "margin": 12,
+        },
+    },
+    "float": {
+        "renderer": render_float,
+        "defaults": {
+            "emoji":      "sparkling_heart",
+            "count":      6,
+            "cycles_min": 1,
+            "cycles_max": 2,
+            "scale_min":  0.16,
+            "scale_max":  0.26,
+            "x_jitter":   8,
+            "margin":     14,
+        },
+    },
+    "pulse": {
+        "renderer": render_pulse,
+        "defaults": {
+            "emoji":     "target",
+            "pulses":    2,           # integer beats per loop
+            "scale_min": 0.35,
+            "scale_max": 0.55,
+        },
+    },
+    "radial": {
+        "renderer": render_radial,
+        "defaults": {
+            "emoji":      "sparkles",
+            "count":      8,
+            "cycles_min": 1,
+            "cycles_max": 1,
+            "scale_min":  0.18,
+            "scale_max":  0.28,
+        },
+    },
+    "shake": {
+        "renderer": render_shake,
+        "defaults": {
+            "emoji":      "angry",
+            "shakes":     6,           # integer shakes per loop
+            "amplitude":  0.08,        # fraction of width
+            "tilt":       8,           # degrees of counter-tilt per shake
+            "scale":      0.50,
+        },
+    },
+    "static": {
+        "renderer": render_static,
+        "defaults": {
+            "emoji": "skull",
+            "scale": 0.55,
+        },
+    },
+    "fade": {
+        "renderer": render_fade,
+        "defaults": {
+            "emoji":       "ghost",
+            "pulses":      1,
+            "alpha_min":   0.20,
+            "alpha_max":   1.00,
+            "scale":       0.55,
+            "scale_pulse": False,
         },
     },
 }
@@ -469,7 +777,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="effect", required=True)
 
-    p_para = sub.add_parser("paralysis", help="Random lightning flashes (麻痹)")
+    p_para = sub.add_parser("flash", help="Random emoji flashes at random positions (麻痹类)")
     add_common_args(p_para)
     p_para.add_argument("--count", type=int)
     p_para.add_argument("--life-min", dest="life_min", type=float, help="min flash duration (s)")
@@ -478,9 +786,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_para.add_argument("--scale-max", dest="scale_max", type=float)
     p_para.add_argument("--margin", type=int, help="px padding from canvas edge")
 
-    p_dizzy = sub.add_parser("dizzy", help="Stars orbiting above token (眩晕)")
+    p_dizzy = sub.add_parser("orbit", help="Emoji orbits ellipse above token (眩晕类)")
     add_common_args(p_dizzy)
-    p_dizzy.add_argument("--count", type=int, help="number of orbiting stars")
+    p_dizzy.add_argument("--count", type=int, help="number of orbiting emojis")
     p_dizzy.add_argument("--period", type=float, help="seconds per full revolution")
     p_dizzy.add_argument("--spin-rate", dest="spin_rate", type=float, help="self-spin deg/sec")
     p_dizzy.add_argument("--scale-min", dest="scale_min", type=float)
@@ -492,7 +800,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_dizzy.add_argument("--radius-y", dest="radius_y", type=float,
                          help="ellipse semi-axis Y in px (default: 16%% of canvas H)")
 
-    p_poison = sub.add_parser("poison", help="Emojis raining down (中毒)")
+    p_poison = sub.add_parser("rain", help="Emojis raining down top-to-bottom (中毒类)")
     add_common_args(p_poison)
     p_poison.add_argument("--count", type=int)
     # Preferred (seamless-loop-friendly) API:
@@ -509,6 +817,50 @@ def build_parser() -> argparse.ArgumentParser:
     p_poison.add_argument("--scale-max", dest="scale_max", type=float)
     p_poison.add_argument("--x-jitter", dest="x_jitter", type=float, help="horizontal wobble amplitude px")
     p_poison.add_argument("--margin", type=int, help="px padding from canvas L/R edges")
+
+    p_float = sub.add_parser("float", help="Emojis drifting upward (上升气泡)")
+    add_common_args(p_float)
+    p_float.add_argument("--count", type=int)
+    p_float.add_argument("--cycles-min", dest="cycles_min", type=int)
+    p_float.add_argument("--cycles-max", dest="cycles_max", type=int)
+    p_float.add_argument("--scale-min", dest="scale_min", type=float)
+    p_float.add_argument("--scale-max", dest="scale_max", type=float)
+    p_float.add_argument("--x-jitter", dest="x_jitter", type=float)
+    p_float.add_argument("--margin", type=int)
+
+    p_pulse = sub.add_parser("pulse", help="Centre emoji scale pulse (呼吸)")
+    add_common_args(p_pulse)
+    p_pulse.add_argument("--pulses", type=int, help="integer beats per loop")
+    p_pulse.add_argument("--scale-min", dest="scale_min", type=float)
+    p_pulse.add_argument("--scale-max", dest="scale_max", type=float)
+
+    p_radial = sub.add_parser("radial", help="Emojis radiate outward (向外扩散)")
+    add_common_args(p_radial)
+    p_radial.add_argument("--count", type=int)
+    p_radial.add_argument("--cycles-min", dest="cycles_min", type=int)
+    p_radial.add_argument("--cycles-max", dest="cycles_max", type=int)
+    p_radial.add_argument("--scale-min", dest="scale_min", type=float)
+    p_radial.add_argument("--scale-max", dest="scale_max", type=float)
+
+    p_shake = sub.add_parser("shake", help="Centre emoji shake left-right (震颤)")
+    add_common_args(p_shake)
+    p_shake.add_argument("--shakes", type=int, help="integer shakes per loop")
+    p_shake.add_argument("--amplitude", type=float, help="horizontal amplitude as fraction of W (default 0.08)")
+    p_shake.add_argument("--tilt", type=float, help="degrees of counter-tilt per shake")
+    p_shake.add_argument("--scale", type=float)
+
+    p_static = sub.add_parser("static", help="Single static emoji (静止)")
+    add_common_args(p_static)
+    p_static.add_argument("--scale", type=float)
+
+    p_fade = sub.add_parser("fade", help="Centre emoji opacity pulse (透明度呼吸)")
+    add_common_args(p_fade)
+    p_fade.add_argument("--pulses", type=int)
+    p_fade.add_argument("--alpha-min", dest="alpha_min", type=float)
+    p_fade.add_argument("--alpha-max", dest="alpha_max", type=float)
+    p_fade.add_argument("--scale", type=float)
+    p_fade.add_argument("--scale-pulse", dest="scale_pulse", action="store_true",
+                        help="also breathe scale ±10%% along with opacity")
 
     return parser
 

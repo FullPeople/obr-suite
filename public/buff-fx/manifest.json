@@ -1,0 +1,391 @@
+{
+  "schema_version": 1,
+  "generated_at_note": "regenerate via tools/buff-fx-gen/build_all.sh",
+  "variants": [
+    {
+      "id": "fade-broken_heart",
+      "template": "fade",
+      "emoji": "broken_heart",
+      "asset": "buff-fx/fade-broken_heart.webm",
+      "size_kb": 19.8
+    },
+    {
+      "id": "fade-ghost",
+      "template": "fade",
+      "emoji": "ghost",
+      "asset": "buff-fx/fade-ghost.webm",
+      "size_kb": 16.7
+    },
+    {
+      "id": "fade-sparkles",
+      "template": "fade",
+      "emoji": "sparkles",
+      "asset": "buff-fx/fade-sparkles.webm",
+      "size_kb": 19.4
+    },
+    {
+      "id": "flash-boom",
+      "template": "flash",
+      "emoji": "boom",
+      "asset": "buff-fx/flash-boom.webm",
+      "size_kb": 37.7
+    },
+    {
+      "id": "flash-clown",
+      "template": "flash",
+      "emoji": "clown",
+      "asset": "buff-fx/flash-clown.webm",
+      "size_kb": 24.9
+    },
+    {
+      "id": "flash-fire",
+      "template": "flash",
+      "emoji": "fire",
+      "asset": "buff-fx/flash-fire.webm",
+      "size_kb": 41.0
+    },
+    {
+      "id": "flash-lightning",
+      "template": "flash",
+      "emoji": "lightning",
+      "asset": "buff-fx/flash-lightning.webm",
+      "size_kb": 32.7
+    },
+    {
+      "id": "flash-sparkles",
+      "template": "flash",
+      "emoji": "sparkles",
+      "asset": "buff-fx/flash-sparkles.webm",
+      "size_kb": 50.6
+    },
+    {
+      "id": "flash-star",
+      "template": "flash",
+      "emoji": "star",
+      "asset": "buff-fx/flash-star.webm",
+      "size_kb": 38.0
+    },
+    {
+      "id": "float-dove",
+      "template": "float",
+      "emoji": "dove",
+      "asset": "buff-fx/float-dove.webm",
+      "size_kb": 60.1
+    },
+    {
+      "id": "float-musical_note",
+      "template": "float",
+      "emoji": "musical_note",
+      "asset": "buff-fx/float-musical_note.webm",
+      "size_kb": 59.4
+    },
+    {
+      "id": "float-sparkles",
+      "template": "float",
+      "emoji": "sparkles",
+      "asset": "buff-fx/float-sparkles.webm",
+      "size_kb": 132.7
+    },
+    {
+      "id": "float-sparkling_heart",
+      "template": "float",
+      "emoji": "sparkling_heart",
+      "asset": "buff-fx/float-sparkling_heart.webm",
+      "size_kb": 62.4
+    },
+    {
+      "id": "float-tulip",
+      "template": "float",
+      "emoji": "tulip",
+      "asset": "buff-fx/float-tulip.webm",
+      "size_kb": 59.5
+    },
+    {
+      "id": "float-wind",
+      "template": "float",
+      "emoji": "wind",
+      "asset": "buff-fx/float-wind.webm",
+      "size_kb": 65.9
+    },
+    {
+      "id": "float-zzz",
+      "template": "float",
+      "emoji": "zzz",
+      "asset": "buff-fx/float-zzz.webm",
+      "size_kb": 51.0
+    },
+    {
+      "id": "orbit-dizzy",
+      "template": "orbit",
+      "emoji": "dizzy",
+      "asset": "buff-fx/orbit-dizzy.webm",
+      "size_kb": 130.2
+    },
+    {
+      "id": "orbit-snowflake",
+      "template": "orbit",
+      "emoji": "snowflake",
+      "asset": "buff-fx/orbit-snowflake.webm",
+      "size_kb": 131.5
+    },
+    {
+      "id": "orbit-sparkles",
+      "template": "orbit",
+      "emoji": "sparkles",
+      "asset": "buff-fx/orbit-sparkles.webm",
+      "size_kb": 192.4
+    },
+    {
+      "id": "orbit-star",
+      "template": "orbit",
+      "emoji": "star",
+      "asset": "buff-fx/orbit-star.webm",
+      "size_kb": 125.6
+    },
+    {
+      "id": "pulse-brain",
+      "template": "pulse",
+      "emoji": "brain",
+      "asset": "buff-fx/pulse-brain.webm",
+      "size_kb": 43.2
+    },
+    {
+      "id": "pulse-crystal_ball",
+      "template": "pulse",
+      "emoji": "crystal_ball",
+      "asset": "buff-fx/pulse-crystal_ball.webm",
+      "size_kb": 37.4
+    },
+    {
+      "id": "pulse-sloth",
+      "template": "pulse",
+      "emoji": "sloth",
+      "asset": "buff-fx/pulse-sloth.webm",
+      "size_kb": 44.3
+    },
+    {
+      "id": "pulse-sparkling_heart",
+      "template": "pulse",
+      "emoji": "sparkling_heart",
+      "asset": "buff-fx/pulse-sparkling_heart.webm",
+      "size_kb": 41.0
+    },
+    {
+      "id": "pulse-sun",
+      "template": "pulse",
+      "emoji": "sun",
+      "asset": "buff-fx/pulse-sun.webm",
+      "size_kb": 72.3
+    },
+    {
+      "id": "pulse-target",
+      "template": "pulse",
+      "emoji": "target",
+      "asset": "buff-fx/pulse-target.webm",
+      "size_kb": 39.6
+    },
+    {
+      "id": "pulse-thumbs_up",
+      "template": "pulse",
+      "emoji": "thumbs_up",
+      "asset": "buff-fx/pulse-thumbs_up.webm",
+      "size_kb": 37.3
+    },
+    {
+      "id": "radial-fire",
+      "template": "radial",
+      "emoji": "fire",
+      "asset": "buff-fx/radial-fire.webm",
+      "size_kb": 95.2
+    },
+    {
+      "id": "radial-moon",
+      "template": "radial",
+      "emoji": "moon",
+      "asset": "buff-fx/radial-moon.webm",
+      "size_kb": 43.5
+    },
+    {
+      "id": "radial-snowflake",
+      "template": "radial",
+      "emoji": "snowflake",
+      "asset": "buff-fx/radial-snowflake.webm",
+      "size_kb": 195.7
+    },
+    {
+      "id": "radial-sparkles",
+      "template": "radial",
+      "emoji": "sparkles",
+      "asset": "buff-fx/radial-sparkles.webm",
+      "size_kb": 116.3
+    },
+    {
+      "id": "radial-star",
+      "template": "radial",
+      "emoji": "star",
+      "asset": "buff-fx/radial-star.webm",
+      "size_kb": 59.7
+    },
+    {
+      "id": "radial-sun",
+      "template": "radial",
+      "emoji": "sun",
+      "asset": "buff-fx/radial-sun.webm",
+      "size_kb": 84.9
+    },
+    {
+      "id": "rain-cherry_blossom",
+      "template": "rain",
+      "emoji": "cherry_blossom",
+      "asset": "buff-fx/rain-cherry_blossom.webm",
+      "size_kb": 99.5
+    },
+    {
+      "id": "rain-drop",
+      "template": "rain",
+      "emoji": "drop",
+      "asset": "buff-fx/rain-drop.webm",
+      "size_kb": 76.7
+    },
+    {
+      "id": "rain-hourglass",
+      "template": "rain",
+      "emoji": "hourglass",
+      "asset": "buff-fx/rain-hourglass.webm",
+      "size_kb": 34.7
+    },
+    {
+      "id": "rain-leaves",
+      "template": "rain",
+      "emoji": "leaves",
+      "asset": "buff-fx/rain-leaves.webm",
+      "size_kb": 76.6
+    },
+    {
+      "id": "rain-snake",
+      "template": "rain",
+      "emoji": "snake",
+      "asset": "buff-fx/rain-snake.webm",
+      "size_kb": 48.1
+    },
+    {
+      "id": "rain-snowflake",
+      "template": "rain",
+      "emoji": "snowflake",
+      "asset": "buff-fx/rain-snowflake.webm",
+      "size_kb": 151.8
+    },
+    {
+      "id": "rain-test_tube",
+      "template": "rain",
+      "emoji": "test_tube",
+      "asset": "buff-fx/rain-test_tube.webm",
+      "size_kb": 57.7
+    },
+    {
+      "id": "shake-angry",
+      "template": "shake",
+      "emoji": "angry",
+      "asset": "buff-fx/shake-angry.webm",
+      "size_kb": 56.6
+    },
+    {
+      "id": "shake-cold_face",
+      "template": "shake",
+      "emoji": "cold_face",
+      "asset": "buff-fx/shake-cold_face.webm",
+      "size_kb": 58.6
+    },
+    {
+      "id": "shake-rage",
+      "template": "shake",
+      "emoji": "rage",
+      "asset": "buff-fx/shake-rage.webm",
+      "size_kb": 45.3
+    },
+    {
+      "id": "shake-screaming",
+      "template": "shake",
+      "emoji": "screaming",
+      "asset": "buff-fx/shake-screaming.webm",
+      "size_kb": 76.1
+    },
+    {
+      "id": "static-broken_heart",
+      "template": "static",
+      "emoji": "broken_heart",
+      "asset": "buff-fx/static-broken_heart.webm",
+      "size_kb": 5.6
+    },
+    {
+      "id": "static-chains",
+      "template": "static",
+      "emoji": "chains",
+      "asset": "buff-fx/static-chains.webm",
+      "size_kb": 6.5
+    },
+    {
+      "id": "static-crystal_ball",
+      "template": "static",
+      "emoji": "crystal_ball",
+      "asset": "buff-fx/static-crystal_ball.webm",
+      "size_kb": 4.1
+    },
+    {
+      "id": "static-headphones",
+      "template": "static",
+      "emoji": "headphones",
+      "asset": "buff-fx/static-headphones.webm",
+      "size_kb": 5.8
+    },
+    {
+      "id": "static-moai",
+      "template": "static",
+      "emoji": "moai",
+      "asset": "buff-fx/static-moai.webm",
+      "size_kb": 3.9
+    },
+    {
+      "id": "static-otter",
+      "template": "static",
+      "emoji": "otter",
+      "asset": "buff-fx/static-otter.webm",
+      "size_kb": 5.1
+    },
+    {
+      "id": "static-people_hugging",
+      "template": "static",
+      "emoji": "people_hugging",
+      "asset": "buff-fx/static-people_hugging.webm",
+      "size_kb": 4.1
+    },
+    {
+      "id": "static-red_envelope",
+      "template": "static",
+      "emoji": "red_envelope",
+      "asset": "buff-fx/static-red_envelope.webm",
+      "size_kb": 4.6
+    },
+    {
+      "id": "static-skull",
+      "template": "static",
+      "emoji": "skull",
+      "asset": "buff-fx/static-skull.webm",
+      "size_kb": 4.3
+    },
+    {
+      "id": "static-sunglasses",
+      "template": "static",
+      "emoji": "sunglasses",
+      "asset": "buff-fx/static-sunglasses.webm",
+      "size_kb": 2.4
+    },
+    {
+      "id": "static-thumbs_up",
+      "template": "static",
+      "emoji": "thumbs_up",
+      "asset": "buff-fx/static-thumbs_up.webm",
+      "size_kb": 4.1
+    }
+  ]
+}
