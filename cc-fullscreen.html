@@ -231,6 +231,28 @@ body{
 }
 .cc-tab:hover{color:var(--ink)}
 .cc-tab.is-on{color:var(--gold);border-bottom-color:var(--gold);font-weight:600}
+/* 2026-05-15 — split-mode secondary-tab indicator. When the user has
+   opened a second pane side-by-side, the OTHER tab gets a softer
+   accent (cyan dashed underline) so both active tabs are visible in
+   the strip without competing for the primary gold. */
+.cc-tab.is-on-2{color:#7fc7ff;border-bottom:2px dashed #7fc7ff;font-weight:600}
+.cc-tab.is-on.is-on-2{color:var(--gold);border-bottom:2px solid var(--gold)}
+/* "⇆ 并排" toggle — pushed to the far right of the strip via auto
+   left-margin. Hidden on narrow screens (cc-body falls back to single
+   pane) by the @media block further down. */
+.cc-tab-split-toggle{
+  flex-shrink:0;
+  margin-left:auto;
+  padding:8px 14px;
+  background:transparent;border:1px solid var(--border-strong);
+  color:var(--ink-dim);
+  font-family:inherit;font-size:13px;font-weight:500;
+  border-radius:14px;
+  cursor:pointer;align-self:center;
+  transition:color .12s, border-color .12s, background .12s;
+}
+.cc-tab-split-toggle:hover{color:var(--ink);border-color:var(--ink-dim)}
+.cc-tab-split-toggle.is-on{color:#0b1626;background:#7fc7ff;border-color:#7fc7ff;font-weight:600}
 
 /* === Content area === */
 .cc-body{
@@ -242,6 +264,64 @@ body{
 .cc-body::-webkit-scrollbar{width:8px;height:8px}
 .cc-body::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px}
 .cc-body::-webkit-scrollbar-track{background:transparent}
+
+/* 2026-05-15 — split-pane wide-screen layout. When the user toggles
+   "⇆ 并排" on a wide viewport, two tabs render side-by-side, each in
+   its own independently-scrolling column. Below 1400 px the toggle
+   button is hidden + the body falls back to single pane (the App
+   force-clears tab2 on the resize event so we don't have to handle
+   stale state here). */
+.cc-body.is-split{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:0;
+  overflow:hidden; /* the two panes scroll independently */
+  padding:0;
+}
+.cc-body.is-split .cc-pane{
+  min-width:0;
+  overflow-y:auto;
+  padding:18px 20px 30px;
+}
+.cc-body.is-split .cc-pane::-webkit-scrollbar{width:8px;height:8px}
+.cc-body.is-split .cc-pane::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px}
+.cc-body.is-split .cc-pane::-webkit-scrollbar-track{background:transparent}
+.cc-body.is-split .cc-pane-2{
+  border-left:1px solid var(--border);
+  position:relative;
+}
+.cc-pane-label{
+  display:flex;align-items:center;gap:8px;
+  font-size:12px;font-weight:600;color:var(--ink-dim);
+  text-transform:uppercase;letter-spacing:1px;
+  padding-bottom:10px;margin-bottom:14px;
+  border-bottom:1px dashed var(--border);
+}
+.cc-pane-label .cc-pane-dot{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--gold);flex-shrink:0;
+}
+.cc-pane-2 .cc-pane-label .cc-pane-dot{background:#7fc7ff}
+.cc-pane-close{
+  margin-left:auto;
+  width:24px;height:24px;
+  background:transparent;border:1px solid var(--border-strong);
+  color:var(--ink-dim);cursor:pointer;border-radius:50%;
+  font-size:14px;line-height:1;
+  display:flex;align-items:center;justify-content:center;
+  transition:color .12s, border-color .12s;
+}
+.cc-pane-close:hover{color:#f5a623;border-color:#f5a623}
+@media (max-width:1399px){
+  .cc-tab-split-toggle{display:none}
+  .cc-body.is-split{
+    display:block;
+    overflow-y:auto;
+    padding:18px 20px 30px;
+  }
+  .cc-body.is-split .cc-pane{padding:0}
+  .cc-body.is-split .cc-pane-2{display:none}
+}
 
 .cc-grid{
   display:grid;

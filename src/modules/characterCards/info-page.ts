@@ -93,14 +93,19 @@ function setupRtTabSwitching(): void {
     moveIndicatorTo(findActiveButton());
     if (clip) clip.setAttribute("data-active", next);
     if (next === "res") void ensureRtResourceMount();
+    // 2026-05-15 — pane swap changes content height (the inactive pane
+    // collapses to 0). Re-fit the popover so e.g. a short attribute
+    // tab → tall resource tab grows back, or vice-versa shrinks.
+    queueAdjustHeight();
   };
 
-  // 2026-05-11b — instant hover switch (was 200 ms debounced). See
-  // monster-info-page.ts for rationale.
+  // 2026-05-15 — click-only switching. Hover-to-switch (added in
+  // 2026-05-11b for "instant" feedback) made the panel jumpy: any
+  // accidental mouse-over while reading the resource list would flip
+  // back to attributes. User explicitly asked to revert to click.
   buttons.forEach((b) => {
     const target = (b.dataset.rtTab as RtTabId) ?? "attr";
     b.addEventListener("click", () => switchTo(target));
-    b.addEventListener("mouseenter", () => switchTo(target));
   });
 }
 
@@ -119,11 +124,56 @@ async function ensureRtResourceMount(): Promise<void> {
     getItemId: () => boundItemId,
   });
   await rtMountHandle.refresh();
+  // The resource panel can grow / shrink as items are added/removed.
+  // Re-fit the popover so the active="res" pane drives popover height.
+  queueAdjustHeight();
 }
 
 const SHOW_MSG = "com.character-cards/info-show";
 
 const root = document.getElementById("root") as HTMLDivElement;
+
+// 2026-05-15 — popover-height auto-shrink. The popover opens at
+// INFO_HEIGHT (360px in index.ts) so it has room for the tallest
+// likely card, but on most cards the actual content is ~220-280px and
+// the leftover whitespace makes the panel feel oversized + blocks
+// canvas underneath. After every render / pane-switch we measure
+// `root.scrollHeight` and ask OBR to shrink the popover. We never
+// grow past INFO_MAX_HEIGHT (captured at OBR.onReady from the actual
+// opened popover height — respects user resize via the layout editor),
+// so long content keeps an inner scrollbar instead of escaping the
+// popover. Mirrors the bestiary monster-info-page adjustHeight pattern.
+const INFO_POPOVER_ID = "com.obr-suite/cc-info";
+const INFO_MIN_HEIGHT = 140;
+let INFO_MAX_HEIGHT = 360;
+
+let _adjustQueued = false;
+function queueAdjustHeight(): void {
+  if (_adjustQueued) return;
+  _adjustQueued = true;
+  // Two RAFs so the browser has time to lay out + the slide-pane
+  // transitions stop animating (transform isn't part of scrollHeight,
+  // but the inactive pane's height:0 collapse only takes effect after
+  // the data-active attribute flip is committed).
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      _adjustQueued = false;
+      void adjustHeight();
+    });
+  });
+}
+
+async function adjustHeight(): Promise<void> {
+  const contentH = root.scrollHeight;
+  if (!contentH) return;
+  // +6 for a tiny breathing margin so the bottom border doesn't kiss
+  // the popover edge. Clamp to [MIN, MAX] — never exceed the popover's
+  // opened height (so user-resized larger popovers stay larger).
+  const target = Math.max(INFO_MIN_HEIGHT, Math.min(contentH + 6, INFO_MAX_HEIGHT));
+  try {
+    await OBR.popover.setHeight(INFO_POPOVER_ID, target);
+  } catch { /* popover may have closed mid-flight */ }
+}
 
 // The token id this card is currently bound to. Updated whenever the
 // info popover is shown for a different character. Quick-rolls fire
@@ -633,6 +683,9 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
       void toggleTokenNameText(boundItemId!, nameBtn.dataset.nameText || name, nameBtn);
     });
   }
+  // 2026-05-15 — fit the popover to the freshly-rendered content. Runs
+  // after every card switch / re-render. See queueAdjustHeight comment.
+  queueAdjustHeight();
 }
 
 // Tracks the drag-handle's current bindPanelDrag unbind function so we
@@ -800,6 +853,13 @@ bindRollableClickPopup(
 OBR.onReady(async () => {
   installDebugOverlay();
   subscribeToSfx();
+  // 2026-05-15 — popover-height ceiling. window.innerHeight inside an
+  // OBR popover iframe equals the popover's currently-rendered height
+  // (the layout-editor user-resize is already baked in by the time
+  // onReady fires). adjustHeight() never grows past this — content
+  // longer than the ceiling keeps the inner scrollbar instead of
+  // forcing the popover to balloon.
+  if (window.innerHeight > 0) INFO_MAX_HEIGHT = window.innerHeight;
   // Cache the player's role BEFORE first render so the DM-only lock
   // button appears on first paint instead of waiting for a re-render.
   try {

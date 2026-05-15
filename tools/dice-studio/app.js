@@ -141,6 +141,34 @@ downloadBtn.addEventListener("click", () => {
   toast("已下载 PNG", "ok");
 });
 
+// 2026-05-15 — template-PNG download. Renders the current die's
+// reference outline onto a fresh transparent canvas (no user paint
+// strokes mixed in) and saves it. Lets users open the template in
+// Photoshop / Procreate / etc. as a layer to trace.
+const downloadTemplateBtn = document.getElementById("downloadTemplateBtn");
+if (downloadTemplateBtn) {
+  downloadTemplateBtn.addEventListener("click", () => {
+    const size = parseInt(sizeSelect.value, 10) || 512;
+    const off = document.createElement("canvas");
+    off.width = size;
+    off.height = size;
+    const ctx = off.getContext("2d");
+    // Draw ONLY the guide — the user's strokes live on a separate
+    // paint canvas we don't touch here. Mirrors the in-page guide
+    // renderer (drawGuide) so the downloaded PNG matches what's
+    // visible on the studio canvas.
+    drawGuide(ctx, size, size);
+    const url = off.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${currentDie.id}-template-${size}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast(`已下载 ${currentDie.label} 模板图（${size}×${size}）`, "ok");
+  });
+}
+
 // --- saved-dice gallery (localStorage) -------------------------------------
 function loadSaved() {
   try {

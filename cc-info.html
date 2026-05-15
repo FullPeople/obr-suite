@@ -464,9 +464,23 @@ button.name.name-btn:disabled{opacity:0.5;cursor:wait}
   width:100%;
   transition:transform .1s ease-out, opacity .1s ease-out !important;
 }
+/* 2026-05-15 — INACTIVE pane shrinks to height:0 instead of staying
+   full-height. CSS grid was sizing the row to max(attr-content,
+   res-content) which made the resource tab inherit the attribute
+   tab's (taller) height — user reported "资源选项卡高度应该是
+   max(资源内容, 窗口高度)，而不是算上属性 tab 高度". `overflow:hidden`
+   keeps the slide animation visually contained; `pointer-events:none`
+   stops clicks landing on the off-screen pane. The active pane stays
+   at natural height so the clip + scroll area size to its content. */
 .rt-clip[data-active="attr"] .rt-pane[data-pane="attr"]{ transform:translateX(0); opacity:1 }
-.rt-clip[data-active="attr"] .rt-pane[data-pane="res"]{  transform:translateX(100%); opacity:.4 }
-.rt-clip[data-active="res"]  .rt-pane[data-pane="attr"]{ transform:translateX(-100%); opacity:.4 }
+.rt-clip[data-active="attr"] .rt-pane[data-pane="res"]{
+  transform:translateX(100%); opacity:.4;
+  height:0; overflow:hidden; pointer-events:none;
+}
+.rt-clip[data-active="res"]  .rt-pane[data-pane="attr"]{
+  transform:translateX(-100%); opacity:.4;
+  height:0; overflow:hidden; pointer-events:none;
+}
 .rt-clip[data-active="res"]  .rt-pane[data-pane="res"]{  transform:translateX(0); opacity:1 }
 </style>
 </head>

@@ -44,6 +44,14 @@ const PANEL_OPEN_KEY = "com.obr-suite/resources/panel-open";
 const BUBBLES_KEY = "com.obr-suite/bubbles/data";
 const EXTERNAL_BUBBLES_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
 
+// 2026-05-15 (#11) — initiative-tracker metadata. GM-owned tokens
+// (typically bestiary monsters) join the resource tracker the moment
+// they get added to initiative, and drop out the moment their
+// initiative entry is removed. Mirrors the constant in
+// modules/initiative/utils/constants.ts so the tracker doesn't have
+// to import from a TSX module at the page-script entry point.
+const INITIATIVE_METADATA_KEY = "com.initiative-tracker/data";
+
 const bodyEl = document.getElementById("rtBody") as HTMLDivElement;
 const subEl = document.getElementById("rtSub") as HTMLSpanElement;
 const closeBtn = document.getElementById("rtClose") as HTMLButtonElement;
@@ -78,19 +86,36 @@ async function gather(): Promise<CharEntry[]> {
     if (!isImage(it)) continue;
     if (it.layer !== "CHARACTER") continue;
     const owner = it.createdUserId;
-    // "Player-owned" = created by someone other than this GM. An empty
-    // createdUserId (very old items) is treated as not player-owned.
-    if (!owner || owner === myId) continue;
+    // 2026-05-15 (#11) — inclusion rules:
+    //   1. Player-owned tokens (different createdUserId than this GM)
+    //      — always shown (the legacy behavior).
+    //   2. GM-owned tokens (including bestiary monsters) that are
+    //      CURRENTLY in the initiative tracker — also shown, so the
+    //      DM can edit their HP / resources in one place during
+    //      combat. When the GM removes the token from initiative
+    //      (the metadata key disappears) the next gather() call will
+    //      drop it; render() then unmounts the card.
+    // An empty createdUserId (very old items) counts as "not player-
+    // owned" — falls through to the initiative gate.
+    const isPlayerOwned = !!owner && owner !== myId;
+    const inInitiative = it.metadata[INITIATIVE_METADATA_KEY] != null;
+    if (!isPlayerOwned && !inInitiative) continue;
     const live = ((it.metadata[BUBBLES_KEY] ?? it.metadata[EXTERNAL_BUBBLES_KEY]) as
       BubblesData | undefined) ?? {};
     // Name follows the same priority as the character panel —
     // 角色卡名 > 怪物图鉴绑定名 > 图片名 — by reusing panel.ts's own
     // resolver, so the standalone tracker and cc-info never disagree.
     const name = (await resolveTokenDisplayName(it.id)) || it.name || "(未命名)";
+    // Owner badge — "怪物" for GM-tokens-in-initiative, the player
+    // display name otherwise. Lets the DM spot which row is a monster
+    // at a glance.
+    const ownerLabel = isPlayerOwned
+      ? (nameById.get(owner!) || "玩家")
+      : "怪物";
     out.push({
       id: it.id,
       name,
-      owner: nameById.get(owner) || "玩家",
+      owner: ownerLabel,
       live,
     });
   }

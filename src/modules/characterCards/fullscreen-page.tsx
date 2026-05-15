@@ -295,9 +295,20 @@ function downloadJson(filename: string, data: any) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// 2026-05-15 (#12) — embedded-mode flag. When the page is opened from
+// a DOWNLOADED standalone HTML (built by onDownloadStandalone below),
+// it carries the character data in `window.__CC_BUNDLED__` and runs
+// outside of OBR. We hide the server-writing buttons (编辑 / 保存 /
+// 刷新 / 导入 / 粘贴) since they'd all fail without a server, and we
+// skip the loadData / broadcast subscriptions that need OBR.
+function isEmbeddedMode(): boolean {
+  return typeof window !== "undefined" && !!(window as any).__CC_BUNDLED__;
+}
+
 // ===== Subcomponents =========================================
 function Header({
-  data, onExport, onCopyJson, onImport, onPasteJson, onRefresh, editing, onToggleEditing, onSaveEdits, savingEdits,
+  data, onExport, onCopyJson, onImport, onPasteJson, onRefresh,
+  editing, onToggleEditing, onSaveEdits, savingEdits, onDownloadStandalone,
 }: {
   data: CharacterData;
   onExport: () => void;
@@ -309,7 +320,9 @@ function Header({
   onToggleEditing: () => void;
   onSaveEdits: () => void;
   savingEdits: boolean;
+  onDownloadStandalone: () => void;
 }) {
+  const embedded = isEmbeddedMode();
   const id = data.identity || {};
   const cs = data.core_stats || {};
   const name = id.display_name || id.character_name || "未命名";
@@ -345,20 +358,23 @@ function Header({
             below renders its editable variant: stat cells become inputs,
             list sections sprout + / × buttons, text blocks become
             textareas. Saved live through the same onPatch pipeline
-            that already handles inline HP/AC edits. */}
-        <button
-          class={`cc-btn ${editing ? "primary" : ""}`}
-          onClick={onToggleEditing}
-          title={editing
-            ? "退出编辑模式（再次切换回只读视图）"
-            : "进入编辑模式：自由修改属性、添加词条、法术、特性、装备、背景"}>
-          <span class="ic">{editing ? "✎" : "🔧"}</span>{editing ? "编辑中" : "编辑"}
-        </button>
+            that already handles inline HP/AC edits.
+            Hidden in embedded mode — there's no server to save to. */}
+        {!embedded && (
+          <button
+            class={`cc-btn ${editing ? "primary" : ""}`}
+            onClick={onToggleEditing}
+            title={editing
+              ? "退出编辑模式（再次切换回只读视图）"
+              : "进入编辑模式：自由修改属性、添加词条、法术、特性、装备、背景"}>
+            <span class="ic">{editing ? "✎" : "🔧"}</span>{editing ? "编辑中" : "编辑"}
+          </button>
+        )}
         {/* Save button — only visible in edit mode. Persists the
             current local data to the server via the same PUT endpoint
             JSON import uses, then broadcasts BC_CARD_UPDATED so bound
             tokens + other clients refresh. */}
-        {editing && (
+        {!embedded && editing && (
           <button
             class="cc-btn primary"
             onClick={onSaveEdits}
@@ -367,13 +383,18 @@ function Header({
             <span class="ic">💾</span>{savingEdits ? "保存中…" : "保存"}
           </button>
         )}
-        <button class="cc-btn" onClick={onRefresh} title="重新拉取服务器上的最新数据">
-          刷新
-        </button>
+        {!embedded && (
+          <button class="cc-btn" onClick={onRefresh} title="重新拉取服务器上的最新数据">
+            刷新
+          </button>
+        )}
         {/* 2026-05-14 (#14 f2) — 导出 JSON + 仅复制 fused into one
             button group. 复制 is now a borderless icon-only sub-button
             seamlessly joined to the right edge of 导出 JSON (shared
-            border, no gap). SVG icon, no emoji / text. */}
+            border, no gap). SVG icon, no emoji / text.
+            2026-05-15 (#12) — followed by a "下载页面" button that
+            bundles the current data into a standalone HTML snapshot
+            (works both online and embedded). */}
         <div class="cc-btn-group">
           <button class="cc-btn" onClick={onExport} title="把当前角色卡数据导出为 JSON 文件">
             导出 JSON
@@ -382,15 +403,24 @@ function Header({
             <span class="ic" dangerouslySetInnerHTML={{ __html: ICON_COPY }} />
           </button>
         </div>
-        {/* 导入 JSON + 仅粘贴 fused the same way. */}
-        <div class="cc-btn-group">
-          <button class="cc-btn" onClick={onImport} title="从 JSON 文件加载角色卡">
-            导入 JSON
-          </button>
-          <button class="cc-btn cc-btn-sub" onClick={onPasteJson} title="仅粘贴：弹窗输入 JSON 文本，识别后应用为当前角色卡数据">
-            <span class="ic" dangerouslySetInnerHTML={{ __html: ICON_PASTE }} />
-          </button>
-        </div>
+        <button
+          class="cc-btn"
+          onClick={onDownloadStandalone}
+          title="下载当前角色卡的独立 HTML 文件（已植入数据，可离线分享 / 打印）">
+          <span class="ic">⬇</span>下载页面
+        </button>
+        {/* 导入 JSON + 仅粘贴 fused the same way. Hidden in embedded
+            mode — both writes back to the server. */}
+        {!embedded && (
+          <div class="cc-btn-group">
+            <button class="cc-btn" onClick={onImport} title="从 JSON 文件加载角色卡">
+              导入 JSON
+            </button>
+            <button class="cc-btn cc-btn-sub" onClick={onPasteJson} title="仅粘贴：弹窗输入 JSON 文本，识别后应用为当前角色卡数据">
+              <span class="ic" dangerouslySetInnerHTML={{ __html: ICON_PASTE }} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1366,15 +1396,18 @@ function SpellsSection({ data }: { data: CharacterData }) {
       <>
         <div class="spell"
           onClick={() => setOpenSpell(isOpen ? null : key)}
-          title="点击展开法术详情 · 点击名字直接搜索">
+          title="点击展开法术详情">
           <span class={`spell-lv ${(s.level ?? 0) === 0 ? "cantrip" : ""}`}>
             {(s.level ?? 0) === 0 ? "戏" : `${s.level}环`}
           </span>
-          <span
-            class="spell-name srch-name"
-            title={`搜索 ${s.name}`}
-            onClick={(e: MouseEvent) => { e.stopPropagation(); fireNameSearch(s.name); }}
-          >{s.name}</span>
+          {/* 2026-05-15 — the spell-name used to be its own clickable
+              search trigger (`onClick → fireNameSearch + stopPropagation`).
+              User reported the name was blocking the row's detail toggle
+              and the search alone wasn't useful enough to justify it.
+              Removed the inner onClick so clicks anywhere on the row
+              (including the name) open the detail panel. Players who
+              still want to search can use the global search bar. */}
+          <span class="spell-name">{s.name}</span>
           {s.meta?.concentration && <span class="spell-tag conc">专注</span>}
           {s.meta?.ritual && <span class="spell-tag ritual">仪式</span>}
         </div>
@@ -1450,19 +1483,9 @@ function SpellsSection({ data }: { data: CharacterData }) {
           })}
         </div>
 
-        {sp.sorcery_points && (
-          <div style={{
-            marginBottom: "10px", padding: "6px 10px",
-            background: "var(--bg-soft)", border: "1px solid var(--gold-soft)",
-            borderRadius: "5px", fontSize: "11.5px",
-            display: "flex", justifyContent: "space-between", alignItems: "center",
-          }}>
-            <span style={{ color: "var(--ink-dim)", fontWeight: 600 }}>术法点</span>
-            <span style={{ fontFamily: "Georgia,serif", color: "var(--gold)", fontWeight: 700, fontSize: "14px" }}>
-              {sp.sorcery_points.current ?? 0} / {sp.sorcery_points.max ?? 0}
-            </span>
-          </div>
-        )}
+        {/* 2026-05-15 — Sorcery points block removed per user spec
+            ("术法点 not used in our table"). Field stays parsed on
+            the server side in case anyone wants it back later. */}
 
         {/* Cantrips */}
         {(editing || !!cantrips.length) && (
@@ -1551,7 +1574,12 @@ function FeatureBlock({
   onPatchItem?: (slot: string, idx: number, patch: Record<string, any>) => void;
 }) {
   const { editing } = useEdit();
-  const [openIdx, setOpenIdx] = useState<number | null>(null);
+  // 2026-05-15 — feature details default-expanded. User reported having
+  // to click each feature row to read its description was tedious;
+  // they almost always want to see them all at once. `closedIdx` flips
+  // the previous "openIdx" semantic: items are open by default, click
+  // the row to collapse a specific one.
+  const [closedIdx, setClosedIdx] = useState<Set<number>>(new Set());
   if (!editing && !items?.length) return null;
   return (
     <div style={{ marginBottom: "10px" }}>
@@ -1562,7 +1590,7 @@ function FeatureBlock({
         )}
       </div>
       {items.map((f, i) => {
-        const isOpen = editing || openIdx === i;
+        const isOpen = editing || !closedIdx.has(i);
         if (editing && slot) {
           return (
             <div class="feat is-open" style={{ marginBottom: "6px" }}>
@@ -1595,15 +1623,22 @@ function FeatureBlock({
           <div class={`feat ${isOpen ? "is-open" : ""}`}>
             <div
               class="feat-h"
-              onClick={() => setOpenIdx(isOpen ? null : i)}
-              title="点击展开 · 点击名字直接搜索"
+              onClick={() => {
+                // Toggle: open by default, click to collapse, click
+                // again to re-open.
+                setClosedIdx((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(i)) next.delete(i); else next.add(i);
+                  return next;
+                });
+              }}
+              title="点击折叠 / 展开"
             >
               <span class="feat-name">
-                <span
-                  class="srch-name"
-                  title={`搜索 ${f.name}`}
-                  onClick={(e: MouseEvent) => { e.stopPropagation(); fireNameSearch(f.name); }}
-                >{f.name}</span>
+                {/* 2026-05-15 — dropped the inner "search by name"
+                    onClick (same change as the spell rows). Clicking
+                    anywhere on the header now collapses/expands. */}
+                <span class="srch-name">{f.name}</span>
                 {f.level != null && <span class="lv">Lv{f.level}</span>}
                 {f.category && <span class="lv" style={{ borderColor: "var(--teal-soft)", color: "var(--teal)" }}>{f.category}</span>}
               </span>
@@ -1920,9 +1955,31 @@ function InventorySection({ data }: { data: CharacterData }) {
 
 // ===== Main app ==============================================
 function App() {
-  const [data, setData] = useState<CharacterData | null>(null);
+  // 2026-05-15 (#12) — embedded-mode bootstrap. When the page is
+  // opened from a downloaded standalone HTML, the bundled data is
+  // present on `window.__CC_BUNDLED__` and we hydrate state from it
+  // synchronously (initialiser form of useState). The matching effect
+  // below skips loadData / OBR.broadcast subscriptions when this is
+  // the case so the page renders cleanly outside of OBR.
+  const [data, setData] = useState<CharacterData | null>(() => {
+    const embedded = (window as any).__CC_BUNDLED__;
+    if (embedded && embedded.data) {
+      try { return normalizeCombatGearFlags(embedded.data); } catch { return embedded.data; }
+    }
+    return null;
+  });
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
+  // 2026-05-15 — split-pane secondary tab. Null = single-pane mode.
+  // On wide viewports (>= 1400 px), the "⇆ 并排" toggle in the tab
+  // strip opens a second pane next to the primary, each showing a
+  // different tab and scrolling independently. Below 1400 px the
+  // resize listener forces this back to null + CSS hides the toggle,
+  // so narrow screens always see a single pane.
+  const [tab2, setTab2] = useState<TabKey | null>(null);
+  const [isWide, setIsWide] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(min-width: 1400px)").matches,
+  );
   // 2026-05-14 (#14) — edit-mode flag, toggled from the header.
   const [editing, setEditing] = useState(false);
   const [savingEdits, setSavingEdits] = useState(false);
@@ -1948,7 +2005,29 @@ function App() {
     }
   }, [roomId, cardId]);
 
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => {
+    // 2026-05-15 (#12) — embedded mode (downloaded snapshot): data is
+    // already hydrated from window.__CC_BUNDLED__ in the useState
+    // initialiser, and there's no server to refetch from. Bail.
+    if ((window as any).__CC_BUNDLED__) return;
+    void loadData();
+  }, [loadData]);
+
+  // 2026-05-15 — wide-screen tracker for split-pane mode. Below the
+  // 1400 px breakpoint the secondary pane is forcibly closed so the
+  // narrow CSS path (single column, full-width tab strip) stays clean
+  // even if the user happened to have tab2 set on a previously-wider
+  // window. Removed on unmount so the listener doesn't leak across
+  // hot-module-replacement reloads in dev.
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 1400px)");
+    const handler = (e: MediaQueryListEvent) => {
+      setIsWide(e.matches);
+      if (!e.matches) setTab2(null);
+    };
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
 
   // Multi-client sync — when another client imports / refreshes this
   // same card, BC_CARD_UPDATED arrives on REMOTE; we re-fetch
@@ -2011,6 +2090,78 @@ function App() {
     const name = id.display_name || id.character_name || "character";
     downloadJson(`${name}-${cardId.slice(0,6)}.json`, data);
   }, [data, cardId]);
+
+  // 2026-05-15 (#12) — download a single self-contained HTML snapshot
+  // of the current character card. Fetches THIS page's source from
+  // the same origin, rewrites relative `href` / `src` URLs to absolute
+  // (so the JS bundle + CSS still load from obr.dnd.center when the
+  // user opens the file standalone), then injects an inline
+  // `window.__CC_BUNDLED__` script BEFORE the module script so the
+  // App's useState initialiser sees the data on first paint. The
+  // result is a shareable HTML the user can mail / print / archive —
+  // online-only for assets, offline for data.
+  const onDownloadStandalone = useCallback(async () => {
+    if (!data) return;
+    try {
+      // Same-origin fetch of the current HTML page (cc-fullscreen.html).
+      const htmlRes = await fetch(window.location.pathname, { cache: "no-store" });
+      if (!htmlRes.ok) throw new Error(`HTTP ${htmlRes.status}`);
+      let html = await htmlRes.text();
+      // Rewrite relative asset paths to absolute URLs. Captures `src`
+      // and `href` values that aren't already absolute (http(s):, //,
+      // data:, blob:). The cc-fullscreen.html references
+      // ./assets/cc-fullscreen-XXX.js and similar — these need to
+      // become https://obr.dnd.center/<path>/assets/... so the
+      // downloaded file resolves them correctly when opened.
+      const origin = window.location.origin;
+      const pathname = window.location.pathname;
+      const baseDir = origin + pathname.substring(0, pathname.lastIndexOf("/") + 1);
+      html = html.replace(
+        /(\s(?:href|src)=)(["'])(?!https?:|\/\/|data:|blob:|#)([^"']+)\2/gi,
+        (_m, prefix, q, path) => {
+          // Strip a single leading "./" for cleanliness; otherwise the
+          // path joins as-is to the base dir.
+          const cleaned = path.replace(/^\.\//, "");
+          return `${prefix}${q}${baseDir}${cleaned}${q}`;
+        },
+      );
+      // Build the embedded payload. We bundle the data + a tiny meta
+      // block with the original room/card ids and a timestamp so the
+      // standalone file can self-identify when shared.
+      const payload = JSON.stringify({
+        data,
+        meta: {
+          room: roomId,
+          card: cardId,
+          savedAt: new Date().toISOString(),
+          source: baseDir,
+        },
+      });
+      // Inject right after the opening <head> tag so the global is
+      // set before the module script (which is at end of <body>) runs.
+      // The replacement is regex-based but bounded — there's exactly
+      // one <head> in the page.
+      const injection = `<script>window.__CC_BUNDLED__=${payload};</script>`;
+      html = html.replace(/<head([^>]*)>/i, `<head$1>${injection}`);
+      // Filename: display name + short card id, both URL-safe.
+      const idObj = data.identity || {};
+      const rawName = idObj.display_name || idObj.character_name || "character";
+      const safeName = String(rawName).replace(/[\\/:*?"<>|]+/g, "_").trim() || "character";
+      const fname = `${safeName}-${(cardId || "snapshot").slice(0, 6)}.html`;
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e: any) {
+      console.warn("[cc-fullscreen] standalone download failed", e);
+      window.alert(`下载页面失败：${e?.message || String(e)}`);
+    }
+  }, [data, cardId, roomId]);
 
   // 2026-05-14 — copy-to-clipboard variant of export. Same JSON shape
   // as the file download, just lands in the clipboard so the user can
@@ -2270,6 +2421,7 @@ function App() {
         onImport={onImport}
         onPasteJson={onPasteJson}
         onRefresh={loadData}
+        onDownloadStandalone={onDownloadStandalone}
         editing={editing}
         onToggleEditing={() => setEditing((v) => !v)}
         savingEdits={savingEdits}
@@ -2312,44 +2464,94 @@ function App() {
       <StatsBanner data={data} onPatch={onPatch} />
       <div class="cc-tabs">
         {TABS.map((t) => (
-          <button class={`cc-tab ${tab === t.key ? "is-on" : ""}`}
-            onClick={() => setTab(t.key)}>
+          <button
+            class={`cc-tab ${tab === t.key ? "is-on" : ""} ${tab2 === t.key ? "is-on-2" : ""}`}
+            onClick={(e: any) => {
+              // 2026-05-15 — split-pane interaction model:
+              //   Shift+click on wide screen → open as secondary (or
+              //   if it IS the secondary, close it).
+              //   Plain click → always becomes primary; if it was
+              //   the secondary, also clear the secondary so the
+              //   two panes don't end up showing the same tab.
+              if (isWide && e.shiftKey) {
+                setTab2((cur) => (cur === t.key ? null : t.key));
+                return;
+              }
+              setTab(t.key);
+              if (tab2 === t.key) setTab2(null);
+            }}
+            title={isWide ? `${t.label}（Shift+点击 = 并排打开为第二面板）` : t.label}>
             {t.label}
           </button>
         ))}
+        {isWide && (
+          <button
+            class={`cc-tab-split-toggle ${tab2 ? "is-on" : ""}`}
+            onClick={() => {
+              if (tab2) { setTab2(null); return; }
+              // Open the NEXT tab in the strip as the secondary — a
+              // sensible default for one-click "show me two tabs".
+              const idx = TABS.findIndex((t) => t.key === tab);
+              const next = TABS[(idx + 1) % TABS.length].key;
+              setTab2(next);
+            }}
+            title={tab2 ? "关闭并排显示" : "并排显示两个标签 — 也可 Shift+点击任意标签"}>
+            ⇆ 并排
+          </button>
+        )}
       </div>
-      <div class="cc-body">
-        {tab === "overview" && (
-          <>
-            {/* 2026-05-14 (#14 f3) — overview layout per user spec:
-                  left column  : 属性·豁免·技能 (tall)
-                  right column : 防御·语言·工具  +  战斗·武器·护甲 (stacked)
-                  full width   : 装备·货币·负重
-                The 2-col grid handles the top pair; CombatSection is
-                nested in the right column under Defenses; Inventory
-                spans full width below the grid. */}
-            <div class="cc-grid">
-              <AbilitiesAndSkills data={data} />
-              <div>
-                <Defenses data={data} />
-                <CombatSection data={data} />
-              </div>
+      <div class={`cc-body ${tab2 ? "is-split" : ""}`}>
+        <div class="cc-pane">
+          {tab2 && (
+            <div class="cc-pane-label">
+              <span class="cc-pane-dot"></span>
+              {TABS.find((t) => t.key === tab)?.label}
             </div>
-            <InventorySection data={data} />
-          </>
-        )}
-        {tab === "spells" && (
-          <SpellsSection data={data} />
-        )}
-        {tab === "features" && (
-          <FeaturesSection data={data} />
-        )}
-        {tab === "background" && (
-          <BackgroundSection data={data} />
+          )}
+          {renderTabSection(tab, data)}
+        </div>
+        {tab2 && (
+          <div class="cc-pane cc-pane-2">
+            <div class="cc-pane-label">
+              <span class="cc-pane-dot"></span>
+              {TABS.find((t) => t.key === tab2)?.label}
+              <button class="cc-pane-close" onClick={() => setTab2(null)}
+                title="关闭第二面板">×</button>
+            </div>
+            {renderTabSection(tab2, data)}
+          </div>
         )}
       </div>
     </EditCtx.Provider>
   );
+}
+
+// 2026-05-15 — section dispatch helper. Extracted so both the primary
+// and secondary panes can share the same switch without duplicating
+// JSX between them.
+function renderTabSection(key: TabKey, data: CharacterData) {
+  switch (key) {
+    case "overview":
+      // 2026-05-14 (#14 f3) — overview layout per user spec:
+      //   left column  : 属性·豁免·技能 (tall)
+      //   right column : 防御·语言·工具 + 战斗·武器·护甲 (stacked)
+      //   full width   : 装备·货币·负重
+      return (
+        <>
+          <div class="cc-grid">
+            <AbilitiesAndSkills data={data} />
+            <div>
+              <Defenses data={data} />
+              <CombatSection data={data} />
+            </div>
+          </div>
+          <InventorySection data={data} />
+        </>
+      );
+    case "spells":     return <SpellsSection data={data} />;
+    case "features":   return <FeaturesSection data={data} />;
+    case "background": return <BackgroundSection data={data} />;
+  }
 }
 
 const appEl = document.getElementById("app");

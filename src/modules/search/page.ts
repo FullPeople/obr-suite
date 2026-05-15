@@ -1405,7 +1405,26 @@ function componentsStr(c: any): string {
   const parts: string[] = [];
   if (c.v) parts.push("V");
   if (c.s) parts.push("S");
-  if (c.m) parts.push(typeof c.m === "string" ? `M（${stripTags(c.m)}）` : "M");
+  // 2026-05-15 — M material can be:
+  //   • a plain string: "pinch of mistletoe"
+  //   • a {text, cost?, consume?} object (5etools shape) — show the
+  //     text and append cost / consumed markers when present.
+  // User asked for the actual material spelled out, not just "M".
+  if (c.m) {
+    let mText = "";
+    if (typeof c.m === "string") mText = stripTags(c.m);
+    else if (typeof c.m === "object" && c.m) {
+      const t = (c.m as any).text;
+      if (typeof t === "string") mText = stripTags(t);
+      const cost = (c.m as any).cost;
+      if (typeof cost === "number" && cost > 0) {
+        // 5etools "cost" is in copper pieces; show as gp for spell-component readability.
+        mText = mText ? `${mText}（价值 ${(cost / 100).toFixed(0)} 金币）` : `（${(cost / 100).toFixed(0)} 金币材料）`;
+      }
+      if ((c.m as any).consume) mText = mText ? `${mText} · 消耗` : "消耗";
+    }
+    parts.push(mText ? `M（${mText}）` : "M");
+  }
   return parts.join(", ");
 }
 function durationStr(d: any): string {
