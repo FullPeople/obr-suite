@@ -1696,7 +1696,9 @@ function extractWebmPoster(url: string): Promise<string | null> {
     const v = document.createElement("video");
     v.muted = true;
     v.crossOrigin = "anonymous";
-    v.preload = "auto";
+    // `preload="metadata"` is enough — we only need the FIRST frame.
+    // `auto` would download more bytes than we ever use.
+    v.preload = "metadata";
     v.playsInline = true;
     let done = false;
     const finish = (result: string | null) => {
@@ -1712,16 +1714,30 @@ function extractWebmPoster(url: string): Promise<string | null> {
     };
     v.onseeked = () => {
       try {
-        const w = v.videoWidth || 64;
-        const h = v.videoHeight || 64;
+        // Cap poster size at 64×64 — chips render at 32px so this is
+        // already 2× retina headroom. Keeping the canvas small makes
+        // both `drawImage` and `toBlob` an order of magnitude cheaper
+        // than the native frame size (typical webm = 256×256+).
+        const srcW = v.videoWidth || 64;
+        const srcH = v.videoHeight || 64;
+        const MAX = 64;
+        const sc = Math.min(1, MAX / Math.max(srcW, srcH));
+        const w = Math.max(1, Math.round(srcW * sc));
+        const h = Math.max(1, Math.round(srcH * sc));
         const c = document.createElement("canvas");
         c.width = w; c.height = h;
         const ctx = c.getContext("2d");
         if (!ctx) { finish(null); return; }
         ctx.drawImage(v, 0, 0, w, h);
-        // toDataURL throws SecurityError if the canvas is tainted by
-        // a CORS-deficient video — fall through to the catch.
-        finish(c.toDataURL("image/png"));
+        // `toBlob` is async + uses the optimised image-encoder path
+        // (worker thread, no base64 inflation) — vastly faster than
+        // `toDataURL` on the main thread for many chips. Tainted
+        // canvases reject inside the callback (`null` blob).
+        c.toBlob((blob) => {
+          if (!blob) { finish(null); return; }
+          try { finish(URL.createObjectURL(blob)); }
+          catch { finish(null); }
+        }, "image/png");
       } catch { finish(null); }
     };
     v.onerror = () => finish(null);
@@ -1732,6 +1748,35 @@ function extractWebmPoster(url: string): Promise<string | null> {
   }));
   webmExtractChain = next.catch(() => null);
   return next;
+}
+
+// Pre-warm the poster cache for every webm URL the user already has
+// in their library / sets. Runs on idle so the actual page-load cost
+// is zero; by the time the user clicks the 皮肤 tab the chips render
+// from cache hits with no extraction wait. Called once from boot.
+function prewarmWebmPosters(library: { libs: Partial<Record<DiceType, DiceSkin[]>>; sets: Array<{ skins: Partial<Record<DiceType, DiceSkin>> }> }): void {
+  const urls = new Set<string>();
+  for (const t of ALL_TYPES) {
+    for (const s of library.libs[t] ?? []) {
+      if (isVideoSkin(s)) urls.add(s.url);
+    }
+  }
+  for (const set of library.sets ?? []) {
+    for (const s of Object.values(set.skins ?? {})) {
+      if (s && isVideoSkin(s)) urls.add(s.url);
+    }
+  }
+  if (urls.size === 0) return;
+  const queueIdle = (cb: () => void) => {
+    if (typeof (window as any).requestIdleCallback === "function") {
+      (window as any).requestIdleCallback(cb, { timeout: 2000 });
+    } else {
+      setTimeout(cb, 50);
+    }
+  };
+  queueIdle(() => {
+    for (const url of urls) void extractWebmPoster(url);
+  });
 }
 
 function thumbHtml(skin: DiceSkin | null, type: DiceType, animate = false): string {
@@ -2768,6 +2813,16 @@ OBR.onReady(async () => {
   // AudioContext warms up immediately and is the most reliable path
   // for SFX broadcast playback.
   subscribeToSfx();
+
+  // 2026-05-15 — pre-warm the webm-poster cache on idle so that by
+  // the time the user clicks the 皮肤 tab, every library chip is a
+  // cache hit (no extraction wait, no flicker, no main-thread
+  // stall). Sequential extraction in the background; bounded at
+  // O(unique webm count) total work spread across idle frames.
+  try {
+    const lib = await readMyLibrary();
+    prewarmWebmPosters(lib);
+  } catch { /* no library, no prewarm */ }
 
   // Resolve role + this client's player id. Both feed into the
   // dark-roll redact gate in the BROADCAST_DICE_ROLL listener below.
