@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Monster Studio · 怪物编辑器</title>
+<link rel="stylesheet" href="./style.css?v=2026-05-15c">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 13 L9 7"/><path d="M8 4 L12 8 L13 6 L11 4 z"/><path d="M3 13 L5 11 L11 5"/>
+    </svg>
+    <span class="brand-name">OBR Suite Studio</span>
+  </div>
+  <nav class="studio-tabs">
+    <a class="studio-tab active" href="../monster-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 6 L4 4 L6 6"/><path d="M10 6 L12 4 L14 6"/>
+        <path d="M4 8 Q8 12 12 8"/><circle cx="5.5" cy="9" r="0.7" fill="currentColor"/><circle cx="10.5" cy="9" r="0.7" fill="currentColor"/>
+      </svg>
+      <span>怪物编辑</span>
+    </a>
+    <a class="studio-tab" href="../buff-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 2 L8 14 M2 8 L14 8 M3.5 3.5 L12.5 12.5 M3.5 12.5 L12.5 3.5"/>
+      </svg>
+      <span>Buff 合成</span>
+    </a>
+    <a class="studio-tab" href="../dice-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="10" height="10" rx="1.6"/>
+        <circle cx="6" cy="6" r="0.8" fill="currentColor"/><circle cx="10" cy="10" r="0.8" fill="currentColor"/><circle cx="8" cy="8" r="0.8" fill="currentColor"/>
+      </svg>
+      <span>骰子工坊</span>
+    </a>
+  </nav>
+  <div class="topbar-actions">
+    <a href="https://obr.dnd.center/suite/manifest.json" target="_blank" class="pill-link">OBR Suite ↗</a>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- LEFT COLUMN: editor -->
+  <section class="col col-editor">
+
+    <!-- Raw JSON escape hatch (source of truth). 2026-05-15: hoisted
+         to the TOP and shown ALWAYS so a fresh visitor with no monster
+         loaded yet has an obvious "paste your JSON here" target. The
+         <details> starts COLLAPSED — pasting expands the form below
+         automatically as the textarea input handler reparses. -->
+    <div class="card" id="rawCard">
+      <details class="raw-json" id="rawDetails">
+        <summary>① 粘贴 / 原始 JSON（直接编辑会覆盖下方表单）</summary>
+        <textarea id="jsonArea" spellcheck="false" placeholder='粘贴怪物 JSON：{"monster":[ … ]} 或 [ … ] 或单个 { … }'></textarea>
+      </details>
+    </div>
+
+    <!-- Toolbar: import / export / monster picker -->
+    <div class="card">
+      <span class="card-title">② 数据 / Data</span>
+      <div class="toolbar">
+        <input type="file" id="fileInput" accept=".json,application/json" class="file-hidden">
+        <button class="btn-primary btn-tiny" id="importBtn">📂 导入 JSON</button>
+        <button class="btn-secondary btn-tiny" id="exportBtn">💾 导出 JSON</button>
+        <button class="btn-ghost btn-tiny" id="newBtn">✦ 新建空白怪物</button>
+        <button class="btn-ghost btn-tiny" id="sampleBtn">范例</button>
+        <div class="spacer"></div>
+        <div class="monster-picker" id="monsterPicker" hidden>
+          <span>怪物</span>
+          <select id="monsterSelect"></select>
+        </div>
+        <div class="toolbar-status" id="status">粘贴或导入怪物 JSON（自定义怪物格式 / 5etools shape）开始编辑。</div>
+      </div>
+    </div>
+
+    <!-- Quick-edit form -->
+    <div class="card" id="formCard" hidden>
+      <span class="card-title">③ 快速编辑 / Quick Edit</span>
+
+      <div class="subhead">基本</div>
+      <div class="form-grid">
+        <div class="field col-2"><label>名称 name</label><input type="text" data-field="name"></div>
+        <div class="field col-2"><label>英文名 ENG_name</label><input type="text" data-field="ENG_name"></div>
+        <div class="field"><label>来源 source</label><input type="text" data-field="source"></div>
+        <div class="field col-2">
+          <label>体型 size</label>
+          <div class="chip-row" id="sizeChips">
+            <button type="button" class="chip" data-size-chip="">—</button>
+            <button type="button" class="chip" data-size-chip="T">微型</button>
+            <button type="button" class="chip" data-size-chip="S">小型</button>
+            <button type="button" class="chip" data-size-chip="M">中型</button>
+            <button type="button" class="chip" data-size-chip="L">大型</button>
+            <button type="button" class="chip" data-size-chip="H">巨型</button>
+            <button type="button" class="chip" data-size-chip="G">超巨型</button>
+          </div>
+        </div>
+        <div class="field col-2"><label>类型 type</label><input type="text" data-field="type" placeholder="例：humanoid / 不死生物"></div>
+        <div class="field"><label>阵营 alignment</label><input type="text" data-field="alignment"></div>
+        <div class="field"><label>挑战等级 CR</label><input type="text" data-field="cr" placeholder="例：5 / 1/2"></div>
+      </div>
+
+      <div class="subhead">防御</div>
+      <div class="form-grid">
+        <div class="field"><label>护甲等级 AC</label><input type="text" data-field="ac"></div>
+        <div class="field col-2"><label>生命值 HP（数值或 公式）</label><input type="text" data-field="hp" placeholder="例：45 或 45,6d10+12"></div>
+        <div class="field"><label>步行速度 walk</label><input type="number" data-field="speed.walk"></div>
+        <div class="field"><label>飞行 fly</label><input type="number" data-field="speed.fly"></div>
+        <div class="field"><label>游泳 swim</label><input type="number" data-field="speed.swim"></div>
+        <div class="field"><label>攀爬 climb</label><input type="number" data-field="speed.climb"></div>
+        <div class="field"><label>挖掘 burrow</label><input type="number" data-field="speed.burrow"></div>
+      </div>
+
+      <div class="subhead">属性 · 豁免</div>
+      <div class="abil-grid" id="abilGrid"></div>
+
+      <div class="subhead">技能 · 感知 · 抗性</div>
+      <div class="form-grid">
+        <div class="field col-full">
+          <label>技能 skill</label>
+          <input type="text" data-field="skill" placeholder="perception:+7, stealth:+5（英文键，逗号分隔）">
+        </div>
+        <div class="field"><label>被动察觉 passive</label><input type="number" data-field="passive"></div>
+        <div class="field col-2"><label>感官 senses</label><input type="text" data-field="senses" placeholder="逗号分隔"></div>
+        <div class="field col-2"><label>语言 languages</label><input type="text" data-field="languages" placeholder="逗号分隔"></div>
+        <div class="field col-2"><label>抗性 resist</label><input type="text" data-field="resist" placeholder="逗号分隔"></div>
+        <div class="field col-2"><label>免疫 immune</label><input type="text" data-field="immune" placeholder="逗号分隔"></div>
+        <div class="field col-2"><label>易伤 vulnerable</label><input type="text" data-field="vulnerable" placeholder="逗号分隔"></div>
+        <div class="field col-2"><label>状态免疫 conditionImmune</label><input type="text" data-field="conditionImmune" placeholder="逗号分隔"></div>
+      </div>
+    </div>
+
+    <!-- Section editor: trait / action / bonus / reaction / legendary -->
+    <div class="card" id="sectionsCard" hidden>
+      <span class="card-title">④ 特性 · 动作 / Sections</span>
+      <div id="sectionsHost"></div>
+    </div>
+
+  </section>
+
+  <!-- RIGHT COLUMN: live preview -->
+  <section class="col col-preview">
+    <div class="card">
+      <span class="card-title">⑤ 实时预览 / Preview（复刻 OBR 弹窗 — 粘贴上方 JSON 即可在此实时渲染）</span>
+      <div class="preview-stage">
+        <div id="previewMount">
+          <div class="sb"><div class="sb-empty">导入或粘贴怪物 JSON 后<br>这里会实时渲染怪物面板。</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script type="module" src="./app.js"></script>
+
+</body>
+</html>

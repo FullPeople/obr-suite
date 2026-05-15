@@ -2,6 +2,31 @@ import OBR, { Item, Image } from "@owlbear-rodeo/sdk";
 import { InitiativeData, InitiativeItem, CombatState } from "../types";
 import { METADATA_KEY, COMBAT_STATE_KEY } from "./constants";
 
+// 2026-05-14 (#5 sortfix) — modifier-biased tiebreak generator.
+//
+// The initiative sort is 2-level now: total (count+modifier) DESC,
+// then `tiebreak` ASC. The old 3-level sort had a "modifier DESC"
+// middle tier so a higher initiative modifier won same-total ties —
+// but that tier made manual reorder unable to slot a card between
+// two equal-total cards with different modifiers. We dropped the
+// tier and instead BAKE the modifier priority into the tiebreak
+// VALUE here:
+//
+//   tiebreak = 0.5 − modifier × 0.01 + jitter
+//
+// Higher modifier → smaller tiebreak → sorts earlier (ASC), so the
+// D&D "higher Dex wins the tie" convention is preserved as the
+// DEFAULT. The jitter (< one modifier step) breaks ties between
+// equal-modifier cards randomly but stably. Manual reorder writes an
+// explicit tiebreak that simply overrides whatever this produced.
+//
+// Clamped to (0,1) so even absurd modifiers stay in range.
+export function genTiebreak(modifier: number = 0): number {
+  const m = Number.isFinite(modifier) ? modifier : 0;
+  const base = 0.5 - m * 0.01 + Math.random() * 0.008;
+  return Math.max(0.001, Math.min(0.999, base));
+}
+
 export function getInitiativeData(item: Item): InitiativeData | undefined {
   const data = item.metadata[METADATA_KEY];
   if (data && typeof data === "object") {

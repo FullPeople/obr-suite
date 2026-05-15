@@ -89,6 +89,7 @@ function App() {
     canEdit,
     focusItem,
     updateCount,
+    setSortKey,
     updateModifier,
     rollInitiativeLocal,
     rollInitiativeDicePlus,
@@ -179,6 +180,88 @@ function App() {
   }, []);
   // toggleDisplayMode removed 2026-05-10 — the raw / final toggle UI
   // was deleted; displayMode is constant "final" above.
+
+  // 2026-05-14 (#5) — manual reorder mode. `reorderMode` flips the
+  // initiative strip into click-to-pick / click-to-place. `pickedId`
+  // is the card currently "in hand". Both are transient UI state (not
+  // persisted) — exiting reorder mode or closing the panel clears them.
+  const [reorderMode, setReorderMode] = useState(false);
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const toggleReorder = useCallback(() => {
+    setReorderMode((prev) => {
+      // Leaving reorder mode always drops whatever was picked.
+      if (prev) setPickedId(null);
+      return !prev;
+    });
+  }, []);
+  const handlePickItem = useCallback((id: string) => {
+    setPickedId((cur) => (cur === id ? null : id));
+  }, []);
+  // Place the picked card at slot `slotIndex`. Slots sit in the FULL
+  // sorted list (slot s = between items[s-1] and items[s]); the
+  // InitiativeList disables the two slots touching the picked card so
+  // neither neighbour here is ever the picked card.
+  //
+  // 2026-05-14 (#5 fix) — the sort key is (total DESC, tiebreak ASC).
+  // To land a card EXACTLY where it's dropped — including inside a
+  // tied group — we control BOTH:
+  //   • distinct-total neighbours → newTotal = midpoint of the two
+  //     totals (a unique value strictly between them, since adjacent
+  //     rows have no card between them). tiebreak is irrelevant, keep
+  //     the picked card's own.
+  //   • equal-total neighbours    → newTotal = that shared total, and
+  //     newTiebreak = midpoint of the two neighbours' tiebreaks (the
+  //     above card has the smaller tiebreak — ASC sort — so the
+  //     midpoint slots the card exactly between them).
+  //   • at the ends               → step ±1 past the edge total.
+  // count = newTotal − modifier, so the modifier is never touched.
+  const handlePlaceAtSlot = useCallback((slotIndex: number) => {
+    setPickedId((curPicked) => {
+      if (!curPicked) return null;
+      const picked = items.find((i) => i.id === curPicked);
+      if (!picked) return null;
+      const above = items[slotIndex - 1];
+      const below = items[slotIndex];
+      const aboveTotal = above ? above.count + above.modifier : null;
+      const belowTotal = below ? below.count + below.modifier : null;
+      let targetTotal: number;
+      let targetTiebreak: number = picked.tiebreak;
+      if (aboveTotal != null && belowTotal != null) {
+        if (aboveTotal === belowTotal) {
+          // Inside a tied group — keep the total, slot via tiebreak.
+          targetTotal = aboveTotal;
+          targetTiebreak = (above!.tiebreak + below!.tiebreak) / 2;
+        } else {
+          targetTotal = (aboveTotal + belowTotal) / 2;
+        }
+      } else if (aboveTotal != null) {
+        targetTotal = aboveTotal - 1;       // dropped at the very bottom
+      } else if (belowTotal != null) {
+        targetTotal = belowTotal + 1;       // dropped at the very top
+      } else {
+        return null;                        // list had only the picked card
+      }
+      void setSortKey(curPicked, targetTotal - picked.modifier, targetTiebreak);
+      return null;                          // clear the pick after placing
+    });
+  }, [items, setSortKey]);
+  // Swap the picked card with `targetId` — each takes the other's
+  // FULL sort key (total + tiebreak), so even cards inside a tied
+  // group swap exactly. Modifiers untouched. Used when the 2nd click
+  // lands on a card instead of a gap.
+  const handleSwapWith = useCallback((targetId: string) => {
+    setPickedId((curPicked) => {
+      if (!curPicked || curPicked === targetId) return curPicked;
+      const picked = items.find((i) => i.id === curPicked);
+      const target = items.find((i) => i.id === targetId);
+      if (!picked || !target) return null;
+      const pickedTotal = picked.count + picked.modifier;
+      const targetTotal = target.count + target.modifier;
+      void setSortKey(curPicked, targetTotal - picked.modifier, target.tiebreak);
+      void setSortKey(targetId, pickedTotal - target.modifier, picked.tiebreak);
+      return null;                          // clear the pick after swap
+    });
+  }, [items, setSortKey]);
 
   // React state is the authoritative source — not window.innerWidth. The old
   // resize listener flipped expanded→collapsed mid-way through OBR's iframe
@@ -632,6 +715,8 @@ function App() {
                 onNextTurn={nextTurn}
                 onEndCombat={endCombat}
                 lang={lang}
+                reorderMode={reorderMode}
+                onToggleReorder={toggleReorder}
               />
             )}
 
@@ -669,6 +754,11 @@ function App() {
             onEndTurn={requestEndTurn}
             endTurnLabel={t(lang, "endTurn") || "结束回合"}
             lang={lang}
+            reorderMode={isGM && reorderMode}
+            pickedId={pickedId}
+            onPickItem={handlePickItem}
+            onPlaceAtSlot={handlePlaceAtSlot}
+            onSwapWith={handleSwapWith}
           />
         </div>
       </div>

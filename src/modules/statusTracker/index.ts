@@ -50,6 +50,13 @@ import {
 const POPOVER_PALETTE = `${PLUGIN_ID}/palette`;
 const POPOVER_MANAGE = `${PLUGIN_ID}/manage`;
 const MODAL_CAPTURE = `${PLUGIN_ID}/capture`;
+// 2026-05-14 (#2) — "以此创建状态" right-click context menu. Only
+// registered WHILE the status palette is open (activate() registers
+// it, deactivate() removes it) so it doesn't clutter the menu when
+// the user isn't in status-tracker mode. Lets the user turn any
+// non-MAP image on the canvas into a new buff entry (the item's
+// image becomes the buff icon).
+const CTX_CREATE_STATUS = `${PLUGIN_ID}/ctx-create-status`;
 const TOOL_ID = "com.obr-suite/status-tracker-tool";
 const TOOL_ACTION_ID = "com.obr-suite/status-tracker-toggle";
 const SELECT_TOOL = "rodeo.owlbear.tool/select";
@@ -136,8 +143,9 @@ async function openCapture(payload: {
   /** "buff"            — palette pill drag → applies buff on drop
    *  "clear"           — palette eraser drag → clears all on drop / paint
    *  "manage"          — palette manage pill drag → opens manage popover
-   *  "manage-transfer" — manage-popover bubble drag → transfer or remove */
-  kind: "buff" | "clear" | "manage" | "manage-transfer";
+   *  "manage-transfer" — manage-popover bubble drag → transfer or remove
+   *  "preset"          — preset chip drag → applies preset's buffs on drop */
+  kind: "buff" | "clear" | "manage" | "manage-transfer" | "preset";
   buff?: BuffDef;
   /** "drop" = apply to single token on pointerup (left click).
    *  "paint-toggle" = drag-paint, toggling per-token (right click). */
@@ -147,6 +155,13 @@ async function openCapture(payload: {
    *  the buff from this source and add it to the target; on drop on
    *  empty space we just remove from this source. */
   sourceTokenId?: string;
+  /** Only set for kind="preset". The id of the preset being dragged
+   *  + a small display blob for the cursor pill. The capture page
+   *  doesn't apply the buffs itself — it broadcasts the {presetId,
+   *  tokenId} back to the palette page which holds the preset data. */
+  presetId?: string;
+  presetName?: string;
+  presetCount?: number;
 }): Promise<void> {
   if (captureOpen) return;
   const params = new URLSearchParams();
@@ -154,6 +169,9 @@ async function openCapture(payload: {
   params.set("mode", payload.mode);
   if (payload.buff) params.set("buff", encodeURIComponent(JSON.stringify(payload.buff)));
   if (payload.sourceTokenId) params.set("source", payload.sourceTokenId);
+  if (payload.presetId) params.set("preset", payload.presetId);
+  if (payload.presetName) params.set("presetName", encodeURIComponent(payload.presetName));
+  if (payload.presetCount != null) params.set("presetCount", String(payload.presetCount));
   const url = `${assetUrl("status-tracker-capture.html")}?${params.toString()}`;
   try {
     await OBR.modal.open({
@@ -238,10 +256,111 @@ async function closeManagePopover(): Promise<void> {
   managePopoverOpen = false;
 }
 
+// 2026-05-14 (#2) — append a buff built from a canvas item into the
+// per-client localStorage catalog. The item's image becomes the
+// buff's icon (effectParams.imageUrl + dims). We write the same v2
+// shape status-tracker-page.ts writes, so the palette + manage
+// popover parse it identically. Writing to localStorage fires a
+// `storage` event in the palette iframe → it re-renders; we also
+// broadcast catalog-changed so the background bubble sync refreshes.
+function appendCatalogBuff(buff: BuffDef): void {
+  let buffs: any[] = [];
+  let groupOrder: string[] | undefined;
+  try {
+    const raw = localStorage.getItem(LS_BUFF_CATALOG_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) buffs = parsed;
+      else if (parsed && Array.isArray(parsed.buffs)) {
+        buffs = parsed.buffs;
+        if (Array.isArray(parsed.groupOrder)) groupOrder = parsed.groupOrder;
+      }
+    }
+  } catch {}
+  // If the catalog is still empty (user never customised), seed it
+  // from DEFAULT_BUFFS so we don't wipe the built-ins by writing a
+  // one-entry catalog.
+  if (buffs.length === 0) buffs = DEFAULT_BUFFS.map((b) => ({ ...b }));
+  buffs.push(buff);
+  try {
+    localStorage.setItem(
+      LS_BUFF_CATALOG_KEY,
+      JSON.stringify({ version: 2, buffs, ...(groupOrder ? { groupOrder } : {}) }),
+    );
+  } catch (e) {
+    console.warn("[status] appendCatalogBuff write failed", e);
+    return;
+  }
+  // Same-iframe write doesn't fire `storage` for ourselves, but the
+  // palette iframe IS a different iframe so it gets the event. Also
+  // broadcast so the background sync + any other listener refresh.
+  try {
+    OBR.broadcast.sendMessage("com.obr-suite/status/catalog-changed", {}, { destination: "LOCAL" });
+  } catch {}
+}
+
+async function registerCreateStatusMenu(): Promise<void> {
+  try {
+    await OBR.contextMenu.create({
+      id: CTX_CREATE_STATUS,
+      icons: [
+        {
+          icon: ICON_URL,
+          label: "以此创建状态",
+          // Non-MAP image items only — turning a map/backdrop into a
+          // buff icon makes no sense. No role filter: players can
+          // build their own catalog (it's per-client localStorage).
+          filter: {
+            every: [
+              { key: "type", value: "IMAGE" },
+              { key: "layer", value: "MAP", operator: "!=" },
+            ],
+            max: 1,
+          },
+        },
+      ],
+      onClick: (ctx) => {
+        const item = ctx.items[0] as any;
+        if (!item || !item.image?.url) return;
+        // 2026-05-14 (#2 fix) — write the image into `iconAsset` (a
+        // STATIC-image buff) rather than `effectParams.imageUrl`. The
+        // old effectParams path belongs to the DISABLED particle
+        // system (STATUS_EFFECTS_ENABLED = false), so the renderer
+        // ignored it and fell back to the text pill — that's the
+        // "still text form" bug. iconAsset renders the image itself.
+        const buff: BuffDef = {
+          id: `custom-${Date.now()}-${Math.floor(Math.random() * 1e4)}`,
+          name: (item.name as string) || "新状态",
+          color: "#ffffff",
+          iconAsset: item.image.url as string,
+          ...(typeof item.image.mime === "string" && item.image.mime
+            ? { iconMime: item.image.mime as string }
+            : {}),
+          ...(typeof item.image.width === "number" && item.image.width > 0
+            ? { iconWidth: item.image.width as number }
+            : {}),
+          ...(typeof item.image.height === "number" && item.image.height > 0
+            ? { iconHeight: item.image.height as number }
+            : {}),
+        };
+        appendCatalogBuff(buff);
+      },
+    });
+  } catch (e) {
+    console.warn("[status] registerCreateStatusMenu failed", e);
+  }
+}
+
+async function removeCreateStatusMenu(): Promise<void> {
+  try { await OBR.contextMenu.remove(CTX_CREATE_STATUS); } catch {}
+}
+
 async function activate(): Promise<void> {
   if (active) return;
   active = true;
   await openPalette();
+  // The "以此创建状态" menu only exists while the palette is open.
+  await registerCreateStatusMenu();
 }
 
 async function deactivate(): Promise<void> {
@@ -250,6 +369,7 @@ async function deactivate(): Promise<void> {
   await closeCapture();
   await closeManagePopover();
   await closePalette();
+  await removeCreateStatusMenu();
 }
 
 async function toggle(): Promise<void> {
@@ -343,6 +463,25 @@ async function getCatalog(): Promise<BuffDef[]> {
         if (typeof ws === "number" && Number.isFinite(ws) && ws > 0) {
           def.webmScale = ws;
         }
+        // 2026-05 — `webmOff`: explicit "this built-in buff's effect is
+        // turned OFF" marker, set by the catalog editor's 无 / 默认特效
+        // toggle. MUST be parsed BEFORE the re-seed below — otherwise
+        // the re-seed resurrects the default WebM on every load (the
+        // "切到无、保存后还是有特效" bug).
+        if ((e as any).webmOff === true) def.webmOff = true;
+        // 2026-05-14 (#2) — static-image icon fields ("以此创建状态").
+        // Round-trip iconAsset / iconMime / iconWidth / iconHeight so a
+        // catalog with image-based buffs survives parse↔save.
+        const ia = (e as any).iconAsset;
+        if (typeof ia === "string" && ia.length > 0) {
+          def.iconAsset = ia;
+          const im = (e as any).iconMime;
+          if (typeof im === "string" && im.length > 0) def.iconMime = im;
+          const iw = (e as any).iconWidth;
+          if (typeof iw === "number" && Number.isFinite(iw) && iw > 0) def.iconWidth = iw;
+          const ih = (e as any).iconHeight;
+          if (typeof ih === "number" && Number.isFinite(ih) && ih > 0) def.iconHeight = ih;
+        }
         // 2026-05-14 — back-compat migration. Users on the pre-WebM
         // build have a localStorage catalog without webmAsset on any
         // entry. For ids that ALSO appear in DEFAULT_BUFFS WITH a
@@ -356,7 +495,9 @@ async function getCatalog(): Promise<BuffDef[]> {
         // users on old catalogs would see new custom WebMs (which
         // depend on webmScale to look right) at 1.0× scale and the
         // visual would clip / overlap.
-        if (!def.webmAsset || !def.webmScale) {
+        // …UNLESS the user explicitly turned the effect off (webmOff):
+        // then we must NOT resurrect webmAsset / webmScale.
+        if (!def.webmOff && (!def.webmAsset || !def.webmScale)) {
           const fallback = DEFAULT_BUFFS.find((b) => b.id === def.id);
           if (fallback) {
             if (!def.webmAsset && fallback.webmAsset) {
@@ -675,10 +816,13 @@ export async function setupStatusTracker(): Promise<void> {
   unsubs.push(
     OBR.broadcast.onMessage(BC_DRAG_START, (event) => {
       const data = event.data as {
-        kind: "buff" | "clear" | "manage" | "manage-transfer";
+        kind: "buff" | "clear" | "manage" | "manage-transfer" | "preset";
         buff?: BuffDef;
         mode?: "drop" | "paint-toggle";
         sourceTokenId?: string;
+        presetId?: string;
+        presetName?: string;
+        count?: number;
       } | undefined;
       if (!data) return;
       void openCapture({
@@ -686,6 +830,9 @@ export async function setupStatusTracker(): Promise<void> {
         buff: data.buff,
         mode: data.mode === "paint-toggle" ? "paint-toggle" : "drop",
         sourceTokenId: data.sourceTokenId,
+        presetId: data.presetId,
+        presetName: data.presetName,
+        presetCount: data.count,
       });
     }),
   );
@@ -838,6 +985,7 @@ export async function teardownStatusTracker(): Promise<void> {
   try { await OBR.tool.removeAction(TOOL_ACTION_ID); } catch {}
   try { await OBR.tool.removeMode(`${TOOL_ID}/mode`); } catch {}
   try { await OBR.tool.remove(TOOL_ID); } catch {}
+  await removeCreateStatusMenu();
   await deactivate();
   await sweepAllOurItems();
 }

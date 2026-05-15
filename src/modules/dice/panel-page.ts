@@ -4,6 +4,12 @@ import { subscribeToSfx } from "./sfx-broadcast";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
 import { assetUrl } from "../../asset-base";
+import {
+  writeSkin, isVideoSkin, type DiceSkins, type DiceSkin,
+  readActiveSkins, readMyLibrary,
+  addToLibrary, removeFromLibrary, setActiveSkin, setRandomMode,
+  saveCurrentAsSet, applySet, deleteSet,
+} from "./dice-skins";
 
 let lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -40,6 +46,20 @@ function safeRoomKey(rid: string): string {
 let LS_HISTORY = `${LS_HISTORY_BASE}:default`;
 const LS_LAST_EXPR = "obr-suite/dice/last-expr";
 const HISTORY_CAP = 80;
+
+// 2026-05-14 — DM "全局暗骰" toggle. When ON, every regular roll
+// (main 投掷 button + each combo's 投掷 button) is treated as if the
+// DM clicked 暗骰 instead. Per-DM-client localStorage so each DM can
+// flip the toggle without affecting others. Default OFF.
+const LS_GLOBAL_DARK_ROLL = "obr-suite/dice/global-dark-roll";
+function getGlobalDarkRoll(): boolean {
+  try {
+    return localStorage.getItem(LS_GLOBAL_DARK_ROLL) === "1";
+  } catch { return false; }
+}
+function setGlobalDarkRoll(v: boolean): void {
+  try { localStorage.setItem(LS_GLOBAL_DARK_ROLL, v ? "1" : "0"); } catch {}
+}
 
 interface DiceRollPayload {
   itemId: string | null;
@@ -106,7 +126,7 @@ let categoryOrder: string[] = [];
 }
 let history: DiceRollPayload[] = loadHistory();
 let lastRolledExpression: string = loadLastExpr();
-let activeTab: "roll" | "combos" | "history" = "roll";
+let activeTab: "roll" | "combos" | "history" | "skins" = "roll";
 let historyFilter = "";
 // Currently-active replay's collective-id (LOCAL state). Set when this
 // client clicks a history row, cleared when the replay closes — so the
@@ -161,6 +181,7 @@ const historySeg   = document.getElementById("historySeg")   as HTMLDivElement;
 const btnClearHist = document.getElementById("btnClearHistory") as HTMLButtonElement;
 const tabBtns      = document.querySelectorAll<HTMLButtonElement>(".tab");
 const tabPanes     = document.querySelectorAll<HTMLDivElement>(".tabPane");
+const skinList     = document.getElementById("skinList")     as HTMLDivElement | null;
 
 // --- localStorage helpers ---
 function loadCombos(): { combos: SavedCombo[]; categoryOrder: string[] } {
@@ -1203,15 +1224,17 @@ function wireCardActions() {
       if (!c) return;
       const act = b.dataset.act;
       if (act === "roll") {
-        rollFromCombo(c.expr, c.name, { hidden: false }, b);
+        // Honour DM's 全局暗骰 toggle on the normal-roll path. The
+        // explicit 暗骰 button below always rolls hidden regardless.
+        rollFromCombo(c.expr, c.name, { hidden: getGlobalDarkRoll() }, b);
       } else if (act === "roll-dark") {
         rollFromCombo(c.expr, c.name, { hidden: true }, b);
       } else if (act === "roll-crit") {
         // 重击 — double dice counts in the combo's saved expression
         // before rolling. Pure pre-roll text transform; the combo's
-        // stored expression isn't mutated.
+        // stored expression isn't mutated. Also honours 全局暗骰.
         const critExpr = doubleDiceCounts(c.expr);
-        rollFromCombo(critExpr, c.name, { hidden: false }, b);
+        rollFromCombo(critExpr, c.name, { hidden: getGlobalDarkRoll() }, b);
       } else if (act === "load") {
         setExpression(c.expr);
         labelText = c.name;
@@ -1621,6 +1644,240 @@ function switchTab(t: typeof activeTab) {
     renderHistoryList();
   }
   if (t === "combos") renderCombos();
+  if (t === "skins") void renderSkinsTab();
+}
+
+// --- Skins tab (per-die custom art) ---
+//
+// The right-click ATTACHMENT picker is the primary way to set a skin;
+// this tab reviews / resets / sets-by-URL. Reads + writes go through
+// OBR player metadata (see dice-skins.ts) so a skin set here is synced
+// room-wide and shows on everyone's screen when this player rolls.
+
+function guessMime(url: string): string {
+  const u = url.toLowerCase().split(/[?#]/)[0];
+  if (u.endsWith(".webm")) return "video/webm";
+  if (u.endsWith(".gif")) return "image/gif";
+  if (u.endsWith(".png")) return "image/png";
+  if (u.endsWith(".jpg") || u.endsWith(".jpeg")) return "image/jpeg";
+  if (u.endsWith(".svg")) return "image/svg+xml";
+  if (u.endsWith(".webp")) return "image/webp";
+  return "";
+}
+
+function thumbHtml(skin: DiceSkin | null, type: DiceType): string {
+  if (skin) {
+    return isVideoSkin(skin)
+      ? `<video src="${escapeHtml(skin.url)}" autoplay loop muted playsinline></video>`
+      : `<img src="${escapeHtml(skin.url)}" alt="">`;
+  }
+  return `<img src="${escapeHtml(assetUrl(`${type}.png`))}" alt="${type}" class="is-default">`;
+}
+
+async function renderSkinsTab(): Promise<void> {
+  if (!skinList) return;
+  // Two reads: (1) the active map (what each die is currently rendering
+  // with), (2) the library + sets + random flags blob (the new model).
+  let active: DiceSkins = {};
+  let lib = { v: 2 as const, libs: {} as Partial<Record<DiceType, DiceSkin[]>>,
+              random: {} as Partial<Record<DiceType, boolean>>,
+              sets: [] as Array<{ id: string; name: string; skins: DiceSkins }> };
+  try { active = await readActiveSkins(); } catch { /* default empty */ }
+  try { lib = await readMyLibrary(); } catch { /* default empty */ }
+
+  // ===== upload hint banner =====
+  // Static — local-file imports don't survive a different iframe in the
+  // effect modal, so the URL HAS to point at an OBR-hosted asset.
+  const hintHtml =
+    `<div class="skin-hint">` +
+      `⚠ <b>本地电脑文件不能直接用</b> — 必须先把图片 / webm <b>上传到枭熊</b>：` +
+      `把它拖进场景作为「附件」，再右键附件选 <b>「设为我的骰子皮肤」</b>，` +
+      `或在下方粘贴该附件的 URL（须为 https:// 开头的绝对地址）。` +
+    `</div>`;
+
+  // ===== skin sets row =====
+  const setsHtml =
+    `<div class="skin-sets">` +
+      `<div class="skin-sets-head">` +
+        `<span class="skin-sets-title">皮肤套组</span>` +
+        `<button class="btn small skin-set-save" type="button" title="把当前 7 个骰子的活动皮肤存为一个套组">+ 保存当前为套组</button>` +
+      `</div>` +
+      (lib.sets.length === 0
+        ? `<div class="skin-sets-empty">还没有套组。配好你想要的 7 个骰子皮肤后，点上面「+ 保存当前为套组」。</div>`
+        : `<div class="skin-sets-list">` +
+            lib.sets.map((s) => {
+              const covered = ALL_TYPES.filter((t) => !!s.skins[t]).length;
+              return `<span class="skin-set-chip" data-set-id="${escapeHtml(s.id)}" title="一键载入「${escapeHtml(s.name)}」（覆盖 ${covered}/7 个骰子）">` +
+                `<span class="skin-set-name">${escapeHtml(s.name)}</span>` +
+                `<span class="skin-set-count">${covered}/7</span>` +
+                `<button class="skin-set-del" type="button" data-set-id="${escapeHtml(s.id)}" title="删除该套组">×</button>` +
+              `</span>`;
+            }).join("") +
+          `</div>`
+      ) +
+    `</div>`;
+
+  // ===== per-die rows =====
+  const rowsHtml = ALL_TYPES.map((type) => {
+    const activeSkin = active[type] ?? null;
+    const library = lib.libs[type] ?? [];
+    const isRandom = !!lib.random[type];
+    const libStripHtml = library.length === 0
+      ? `<span class="skin-lib-empty">皮肤库空 — 右键场景里的附件「设为我的骰子皮肤」，或下方粘贴 URL，加入这里</span>`
+      : library.map((s) => {
+          const isActive = !isRandom && !!activeSkin && activeSkin.url === s.url;
+          return `<span class="skin-lib-chip${isActive ? " on" : ""}" data-type="${type}" data-url="${escapeHtml(s.url)}" title="${isActive ? "当前活动皮肤" : "点击设为当前皮肤"}">` +
+            `<span class="skin-lib-thumb">${thumbHtml(s, type)}</span>` +
+            `<button class="skin-lib-del" type="button" data-type="${type}" data-url="${escapeHtml(s.url)}" title="从皮肤库移除">×</button>` +
+          `</span>`;
+        }).join("");
+    const statusLabel = isRandom
+      ? `随机 (${library.length})`
+      : (activeSkin ? "自定义" : "默认");
+    return (
+      `<div class="skin-row" data-type="${type}">` +
+        `<span class="skin-thumb">${thumbHtml(activeSkin, type)}</span>` +
+        `<div class="skin-body">` +
+          `<div class="skin-head">` +
+            `<span class="skin-name">${type}</span>` +
+            `<span class="skin-status${(activeSkin || isRandom) ? " custom" : ""}">${statusLabel}</span>` +
+            `<label class="skin-random" title="开启后，每次掷出该骰子都会从皮肤库里随机抽一张。皮肤库为空时回退到当前皮肤 / 默认。">` +
+              `<input type="checkbox" data-rand="${type}"${isRandom ? " checked" : ""}> 随机池` +
+            `</label>` +
+            (activeSkin && !isRandom ? `<button class="skin-reset" data-type="${type}" type="button" title="清掉当前活动皮肤（皮肤库保留）">重置</button>` : "") +
+          `</div>` +
+          `<div class="skin-lib-strip">${libStripHtml}</div>` +
+          `<div class="skin-url-row">` +
+            `<input class="skin-url-input" data-type="${type}" type="text" spellcheck="false" placeholder="https:// 开头的图片 / webm 绝对地址">` +
+            `<button class="skin-url-set" data-type="${type}" type="button">加入皮肤库</button>` +
+            `<button class="skin-url-set primary" data-type="${type}" data-also-active="1" type="button" title="加入皮肤库 + 设为当前">加入并应用</button>` +
+          `</div>` +
+        `</div>` +
+      `</div>`
+    );
+  }).join("");
+
+  skinList.innerHTML = hintHtml + setsHtml + rowsHtml;
+}
+
+if (skinList) {
+  skinList.addEventListener("click", async (e) => {
+    const target = e.target as HTMLElement;
+
+    // ----- skin set actions -----
+    const setDelBtn = target.closest<HTMLButtonElement>(".skin-set-del");
+    if (setDelBtn) {
+      e.stopPropagation();
+      const id = setDelBtn.dataset.setId;
+      if (id) {
+        try { await deleteSet(id); }
+        catch (err) { console.error("[obr-suite/dice] delete set failed", err); }
+        await renderSkinsTab();
+      }
+      return;
+    }
+    const setChip = target.closest<HTMLElement>(".skin-set-chip");
+    if (setChip) {
+      const id = setChip.dataset.setId;
+      if (id) {
+        try { await applySet(id); }
+        catch (err) { console.error("[obr-suite/dice] apply set failed", err); }
+        await renderSkinsTab();
+      }
+      return;
+    }
+    const setSaveBtn = target.closest<HTMLButtonElement>(".skin-set-save");
+    if (setSaveBtn) {
+      const name = window.prompt("给这套骰子皮肤起个名字：", "我的套组");
+      if (name && name.trim()) {
+        try { await saveCurrentAsSet(name.trim()); }
+        catch (err) { console.error("[obr-suite/dice] save set failed", err); }
+        await renderSkinsTab();
+      }
+      return;
+    }
+
+    // ----- library chip actions -----
+    const libDelBtn = target.closest<HTMLButtonElement>(".skin-lib-del");
+    if (libDelBtn) {
+      e.stopPropagation();
+      const type = libDelBtn.dataset.type as DiceType | undefined;
+      const url = libDelBtn.dataset.url;
+      if (type && url) {
+        try { await removeFromLibrary(type, url); }
+        catch (err) { console.error("[obr-suite/dice] remove from library failed", err); }
+        await renderSkinsTab();
+      }
+      return;
+    }
+    const libChip = target.closest<HTMLElement>(".skin-lib-chip");
+    if (libChip) {
+      const type = libChip.dataset.type as DiceType | undefined;
+      const url = libChip.dataset.url;
+      if (type && url) {
+        try {
+          // Setting active also turns OFF random mode for that die so
+          // the explicit pick actually shows up on the next roll.
+          await setRandomMode(type, false);
+          await setActiveSkin(type, { url, mime: guessMime(url) });
+        } catch (err) {
+          console.error("[obr-suite/dice] set active from library failed", err);
+        }
+        await renderSkinsTab();
+      }
+      return;
+    }
+
+    // ----- per-row reset / set-by-url -----
+    const resetBtn = target.closest<HTMLButtonElement>(".skin-reset");
+    if (resetBtn) {
+      const type = resetBtn.dataset.type as DiceType;
+      try { await setActiveSkin(type, null); }
+      catch (err) { console.error("[obr-suite/dice] reset skin failed", err); }
+      await renderSkinsTab();
+      return;
+    }
+    const setBtn = target.closest<HTMLButtonElement>(".skin-url-set");
+    if (setBtn) {
+      const type = setBtn.dataset.type as DiceType;
+      const input = skinList.querySelector<HTMLInputElement>(
+        `.skin-url-input[data-type="${type}"]`,
+      );
+      const url = (input?.value ?? "").trim();
+      if (!url) return;
+      // The effect modal renders this URL from a different iframe, so
+      // it must be an absolute http(s) URL — reject relative paths.
+      if (!/^https?:\/\//i.test(url)) {
+        input?.classList.add("invalid");
+        setTimeout(() => input?.classList.remove("invalid"), 1200);
+        return;
+      }
+      const mime = guessMime(url);
+      try {
+        if (setBtn.dataset.alsoActive === "1") {
+          await writeSkin(type, { url, mime }); // adds to library AND sets active
+        } else {
+          await addToLibrary(type, { url, mime });
+        }
+      } catch (err) {
+        console.error("[obr-suite/dice] set skin url failed", err);
+      }
+      if (input) input.value = "";
+      await renderSkinsTab();
+      return;
+    }
+  });
+
+  // Random-pool toggle (checkbox change isn't a click on the input
+  // itself — bind separately).
+  skinList.addEventListener("change", async (e) => {
+    const cb = (e.target as HTMLElement).closest<HTMLInputElement>("input[data-rand]");
+    if (!cb) return;
+    const type = cb.dataset.rand as DiceType;
+    try { await setRandomMode(type, cb.checked); }
+    catch (err) { console.error("[obr-suite/dice] toggle random failed", err); }
+    await renderSkinsTab();
+  });
 }
 
 // --- Roll dispatch ---
@@ -2263,7 +2520,9 @@ exprInput.addEventListener("input", () => {
 exprInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
-    performRoll({ hidden: false });
+    // Honour 全局暗骰 — same gate as the btnRoll click handler so
+    // pressing Enter inside the expression input has identical semantics.
+    performRoll({ hidden: getGlobalDarkRoll() });
     return;
   }
   if (e.key === "(" || e.key === "（") {
@@ -2294,9 +2553,11 @@ labelInput.addEventListener("input", () => {
   labelText = labelInput.value;
 });
 
-// Roll button.
+// Roll button. When the DM has the 全局暗骰 toggle on, the regular
+// 投掷 click also routes through dark-roll. Saves the DM from
+// remembering to click 暗骰 every time during a long stealth section.
 btnRoll.addEventListener("click", () => {
-  performRoll({ hidden: false });
+  performRoll({ hidden: getGlobalDarkRoll() });
 });
 
 // Dark-roll button (DM-only — visibility wired up in OBR.onReady).
@@ -2304,6 +2565,27 @@ const btnDarkRoll = document.getElementById("btnDarkRoll") as HTMLButtonElement 
 btnDarkRoll?.addEventListener("click", () => {
   performRoll({ hidden: true });
 });
+
+// 2026-05-14 — DM-only "全局暗骰" toggle. Persists to LS_GLOBAL_DARK_ROLL
+// and visually reflects via the .on class so the DM sees current state
+// at a glance. Affects: btnRoll above + each combo card's 投掷 action
+// (data-act="roll") + the combo card's 重击 (also a non-dark roll).
+const btnDarkRollGlobal = document.getElementById("btnDarkRollGlobal") as HTMLButtonElement | null;
+function refreshDarkRollGlobalBtn(): void {
+  if (!btnDarkRollGlobal) return;
+  const on = getGlobalDarkRoll();
+  btnDarkRollGlobal.classList.toggle("on", on);
+  // The text changes between "全局暗骰: 关 / 开" so the toggle state
+  // is obvious without relying on subtle colour changes.
+  btnDarkRollGlobal.textContent = on
+    ? tt("diceBtnDarkRollGlobalOn")
+    : tt("diceBtnDarkRollGlobalOff");
+}
+btnDarkRollGlobal?.addEventListener("click", () => {
+  setGlobalDarkRoll(!getGlobalDarkRoll());
+  refreshDarkRollGlobalBtn();
+});
+refreshDarkRollGlobalBtn();
 
 // 上一次: refill expression with the last successfully-rolled expr.
 // Does NOT auto-roll — user must click 投掷.
@@ -2383,6 +2665,15 @@ OBR.onReady(async () => {
   } catch {}
   const btnDark = document.getElementById("btnDarkRoll") as HTMLButtonElement | null;
   if (btnDark) btnDark.style.display = isDM ? "" : "none";
+  // 2026-05-14 — 全局暗骰 toggle visibility mirrors btnDarkRoll. Both
+  // are DM-only; we also refresh the label in case localStorage flipped
+  // out-of-band (e.g., another panel page in the same client) between
+  // initial paint and OBR onReady.
+  const btnDarkGlobal = document.getElementById("btnDarkRollGlobal") as HTMLButtonElement | null;
+  if (btnDarkGlobal) {
+    btnDarkGlobal.style.display = isDM ? "" : "none";
+    refreshDarkRollGlobalBtn();
+  }
   // 清空历史 hidden for non-GM (user request 2026-05-08). The wipe is
   // local-only (history is in localStorage), but exposing the button
   // to players invites accidental clears of their own scrollback.
@@ -2390,6 +2681,13 @@ OBR.onReady(async () => {
   // Re-render combos so the per-card 暗骰 button shows up for DM
   // (initial paint ran before isDM was resolved).
   renderCombos();
+
+  // Keep the skins tab fresh while it's the one on screen — a skin set
+  // via the right-click ATTACHMENT picker writes this player's
+  // metadata, which fires onChange here.
+  OBR.player.onChange(() => {
+    if (activeTab === "skins") void renderSkinsTab();
+  });
 
   OBR.broadcast.onMessage(BROADCAST_DICE_ROLL, (event) => {
     const data = event.data as DiceRollPayload | undefined;
@@ -2602,6 +2900,10 @@ function reapplyAllI18n() {
   renderCombos();
   renderHistorySeg();
   renderHistoryList();
+  // Refresh the 全局暗骰 toggle text — applyI18nDom only handles
+  // elements with data-i18n attrs; this button's label is state-driven
+  // (on / off), so we update it explicitly.
+  refreshDarkRollGlobalBtn();
 }
 
 onLangChange((next) => {
@@ -2617,6 +2919,7 @@ renderCombos();
 renderHistorySeg();
 renderHistoryList();
 refreshBadges();
+void renderSkinsTab();
 
 // 2026-05-10: cold-start "show history" handshake. The bottom-right
 // history popover sets this flag in localStorage right before it

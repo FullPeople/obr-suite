@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Buff Studio · 多图层特效合成</title>
+<link rel="stylesheet" href="./style.css?v=2026-05-15c">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 13 L9 7"/><path d="M8 4 L12 8 L13 6 L11 4 z"/><path d="M3 13 L5 11 L11 5"/>
+    </svg>
+    <span class="brand-name">OBR Suite Studio</span>
+  </div>
+  <nav class="studio-tabs">
+    <a class="studio-tab" href="../monster-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 6 L4 4 L6 6"/><path d="M10 6 L12 4 L14 6"/>
+        <path d="M4 8 Q8 12 12 8"/><circle cx="5.5" cy="9" r="0.7" fill="currentColor"/><circle cx="10.5" cy="9" r="0.7" fill="currentColor"/>
+      </svg>
+      <span>怪物编辑</span>
+    </a>
+    <a class="studio-tab active" href="../buff-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 2 L8 14 M2 8 L14 8 M3.5 3.5 L12.5 12.5 M3.5 12.5 L12.5 3.5"/>
+      </svg>
+      <span>Buff 合成</span>
+    </a>
+    <a class="studio-tab" href="../dice-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="10" height="10" rx="1.6"/>
+        <circle cx="6" cy="6" r="0.8" fill="currentColor"/><circle cx="10" cy="10" r="0.8" fill="currentColor"/><circle cx="8" cy="8" r="0.8" fill="currentColor"/>
+      </svg>
+      <span>骰子工坊</span>
+    </a>
+  </nav>
+  <div class="topbar-actions">
+    <a href="https://obr.dnd.center/suite/manifest.json" target="_blank" class="pill-link">OBR Suite ↗</a>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- LEFT: layer stack + add-source -->
+  <section class="col col-layers">
+    <div class="card">
+      <span class="card-title">① 图层 / Layers</span>
+      <div class="layer-list" id="layerList">
+        <div class="layer-empty">还没有图层。<br>用下方的素材添加第一层。</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="card-title">② 添加素材 / Add Source</span>
+      <div class="seg seg-3" id="sourceModeSeg">
+        <button class="seg-opt on" data-mode="emoji">Emoji</button>
+        <button class="seg-opt"    data-mode="image">本地图片</button>
+        <button class="seg-opt"    data-mode="anim">GIF / 视频</button>
+      </div>
+
+      <div class="src-pane" data-pane="emoji">
+        <input type="text" id="emojiSearch" class="src-search" placeholder="搜索 emoji（中英文 / codepoint）…">
+        <div class="emoji-grid" id="emojiGrid"></div>
+        <p class="src-hint">点一个 emoji = 新建一个图层。</p>
+      </div>
+
+      <div class="src-pane hidden" data-pane="image">
+        <div class="dropzone" id="imageDrop">
+          <p>拖拽图片到这里，或</p>
+          <label class="btn-primary btn-tiny">
+            <input type="file" id="imageFile" accept="image/*" multiple hidden>
+            选择图片
+          </label>
+          <p class="dz-hint">PNG / JPG / WebP / SVG · 可多选，每张一层</p>
+        </div>
+        <div class="gallery-head">本地画作（保存于此浏览器）</div>
+        <div class="saved-gallery" id="savedGallery"></div>
+      </div>
+
+      <div class="src-pane hidden" data-pane="anim">
+        <div class="dropzone" id="animDrop">
+          <p>拖拽 GIF / MP4 / WebM 到这里，或</p>
+          <label class="btn-primary btn-tiny">
+            <input type="file" id="animFile" accept="image/gif,image/webp,image/apng,video/*" multiple hidden>
+            选择动图 / 视频
+          </label>
+          <p class="dz-hint">GIF · 动态 WebP · MP4 · WebM · MOV · 可多选</p>
+        </div>
+        <button class="btn-secondary btn-tiny btn-wide" id="convertBtn">⇄ GIF / MP4 → WebM 直转</button>
+        <p class="src-hint">直转：导入一个动图并自动铺满画布，调好下方参数后点「生成」。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CENTER: canvas stage + paint board -->
+  <section class="col col-stage">
+    <div class="card stage-card">
+      <span class="card-title">③ 合成台 / Stage <span class="stage-hint">— 拖动图层移动 · 顶部把手旋转 · 右下把手缩放</span></span>
+      <div class="stage-wrap">
+        <div class="stage-bg" id="stageBg">
+          <div class="fake-token" id="fakeToken"></div>
+          <canvas id="stageCanvas" width="256" height="256"></canvas>
+          <div class="stage-overlay" id="stageOverlay"></div>
+        </div>
+      </div>
+      <div class="stage-foot">
+        <label class="chk"><input type="checkbox" id="showToken" checked> 显示参考 token</label>
+        <label class="chk"><input type="checkbox" id="loopPlay" checked> 循环播放预览</label>
+        <span class="stage-meta" id="stageMeta">256 × 256 · 30fps · 1.5s</span>
+      </div>
+      <!-- Preview-only backdrop. Blend modes (滤色 / 正片叠底 / 相加发光)
+           need pixels below the layer to actually show an effect. The
+           exported WebM is ALWAYS transparent regardless of this pick —
+           OBR plays the WebM over the real token at runtime. -->
+      <div class="stage-foot stage-bg-row">
+        <span class="stage-bg-lbl">预览底色</span>
+        <div class="seg seg-bg" id="previewBgSeg">
+          <button class="seg-opt on" data-bg="transparent" title="透明（导出实际样子）">透明</button>
+          <button class="seg-opt"    data-bg="checker"     title="棋盘格（看清透明区）">棋盘</button>
+          <button class="seg-opt"    data-bg="dark"        title="深灰底（最常见的 token 底）">暗</button>
+          <button class="seg-opt"    data-bg="light"       title="浅灰底">浅</button>
+          <button class="seg-opt"    data-bg="black"       title="纯黑">黑</button>
+          <button class="seg-opt"    data-bg="white"       title="纯白">白</button>
+        </div>
+        <span class="stage-bg-hint">仅预览生效，导出仍是透明</span>
+      </div>
+    </div>
+
+    <div class="card paint-card">
+      <span class="card-title">④ 画板 / Paint <span class="stage-hint">— 画好后「保存到素材」，会出现在左侧「本地图片」里</span></span>
+      <div id="paintMount"></div>
+    </div>
+  </section>
+
+  <!-- RIGHT: layer props + canvas settings + generate -->
+  <section class="col col-props">
+    <div class="card" id="layerPropsCard">
+      <span class="card-title">⑤ 图层属性 / Layer</span>
+      <div id="layerProps">
+        <div class="props-empty">选择一个图层来编辑它的位置、大小和动画。</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="card-title">⑥ 画布 / Canvas</span>
+      <div class="param-list">
+        <label class="param">
+          <span>画布大小</span>
+          <input type="number" id="canvasW" min="32" max="1024" step="16" value="256"> ×
+          <input type="number" id="canvasH" min="32" max="1024" step="16" value="256"> px
+        </label>
+        <label class="param">
+          <span>时长 (秒)</span>
+          <input type="number" id="canvasDur" min="0.2" max="10" step="0.1" value="1.5">
+        </label>
+        <label class="param">
+          <span>FPS</span>
+          <input type="number" id="canvasFps" min="8" max="60" step="1" value="30">
+        </label>
+      </div>
+    </div>
+
+    <div class="card generate-card">
+      <span class="card-title">⑦ 生成 / Generate</span>
+      <button class="btn-primary btn-big" id="generateBtn">🎬 生成 WebM</button>
+      <div class="generate-status hidden" id="generateStatus">
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-text" id="progressText">准备中…</div>
+      </div>
+      <div class="result hidden" id="resultBox">
+        <video id="resultVideo" autoplay loop muted playsinline></video>
+        <div class="result-meta">
+          <span id="resultInfo">—</span>
+          <a id="resultDownload" download class="btn-primary btn-tiny">⬇ 下载 .webm</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card help-card">
+      <details>
+        <summary>使用说明 / How to use</summary>
+        <ol>
+          <li><b>① 加图层</b>：emoji / 本地图片 / 拖入 GIF·视频，每个素材一层，可叠多层做拼贴</li>
+          <li><b>③ 摆位置</b>：合成台上拖动移动；顶部把手旋转、右下把手缩放；右侧还能调透明度 / 混合模式</li>
+          <li><b>④ 画板</b>：随手画一个图标，「保存到素材」后在左侧「本地图片」中作为图层使用</li>
+          <li><b>⑤ 加动画</b>：50 种循环无缝动画（脉冲 / 抖动 / 粒子迸发 / 悠扬乐符 / 落叶 / 萤火虫…），参数可调</li>
+          <li><b>⑦ 点生成</b>：烘焙所有帧 → ffmpeg.wasm 编码带 alpha 的 WebM（首次下载 ~30MB，之后缓存）</li>
+        </ol>
+        <p>生成的 .webm 可放进 OBR Suite 状态追踪的 <code>public/buff-fx/</code>，或作为 OBR Image item 的 url。</p>
+      </details>
+    </div>
+  </section>
+
+</main>
+
+<script type="module" src="./app.js?v=2026-05-15b"></script>
+
+</body>
+</html>

@@ -54,8 +54,12 @@ export function getTokenCircleSpec(
 ): { cx: number; cy: number; radius: number } {
   const imgDpi = token.grid?.dpi ?? sceneDpi;
   const ratio = sceneDpi / Math.max(1, imgDpi);
-  const w = (token.image?.width ?? imgDpi) * ratio * (token.scale?.x ?? 1);
-  const h = (token.image?.height ?? imgDpi) * ratio * (token.scale?.y ?? 1);
+  // Math.abs on the scale — a flipped token has scale.x / scale.y = -1.
+  // w/h are a footprint MAGNITUDE feeding `radius` (Math.max(w,h)/2);
+  // without abs(), a flip yielded a negative dimension and the ring /
+  // pill radius collapsed. Flip is orientation, not size.
+  const w = (token.image?.width ?? imgDpi) * ratio * Math.abs(token.scale?.x ?? 1);
+  const h = (token.image?.height ?? imgDpi) * ratio * Math.abs(token.scale?.y ?? 1);
   const cx = token.position.x;
   const cy = token.position.y;
   const radius = Math.max(w, h) / 2 + RING_PAD;

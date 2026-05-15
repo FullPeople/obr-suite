@@ -1,5 +1,5 @@
-import { render } from "preact";
-import { useEffect, useState, useMemo, useCallback } from "preact/hooks";
+import { render, createContext } from "preact";
+import { useEffect, useState, useMemo, useCallback, useContext } from "preact/hooks";
 import OBR from "@owlbear-rodeo/sdk";
 import { fireQuickRoll } from "../dice/tags";
 import { subscribeToSfx } from "../dice/sfx-broadcast";
@@ -12,6 +12,22 @@ import { reconcileUploadedCardShieldState } from "./xlsx-shield-state";
 // currently-open card. Used by the StatsBanner edit handlers to push
 // HP / AC changes through to the bubbles plugin.
 const BIND_META_KEY = "com.character-cards/boundCardId";
+
+// 2026-05-14 (#14 f2) — inline SVG glyphs for the 复制 / 粘贴 micro
+// sub-buttons. `currentColor` so they inherit the button text colour
+// (white/ink in the modernized palette). 13×13 viewport, 2px stroke
+// — reads cleanly at the button's small size without an emoji's
+// platform-dependent rendering.
+const ICON_COPY =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<rect x="9" y="9" width="13" height="13" rx="2"/>' +
+  '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>' +
+  '</svg>';
+const ICON_PASTE =
+  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>' +
+  '<rect x="8" y="2" width="8" height="4" rx="1"/>' +
+  '</svg>';
 
 // Click a spell / feature / feat name → fire BC_SEARCH_QUERY so the
 // global-search popover opens with that name pre-filled and auto-pins
@@ -92,14 +108,17 @@ const ABL_ABBR: Record<string, string> = {
   str: "力", dex: "敏", con: "体", int: "智", wis: "感", cha: "魅",
 };
 
-type TabKey = "overview" | "combat" | "spells" | "features" | "inventory" | "background";
+// 2026-05-14 (#14 follow-up) — tab structure reduced to 4 per user
+// request. 战斗 (CombatSection) and 装备 (InventorySection) now live
+// inside the 概览 tab below 防御 — overview becomes the
+// "everything-at-a-glance" home, and only the long-form sections
+// (法术 / 特性 / 背景) get their own dedicated tabs.
+type TabKey = "overview" | "spells" | "features" | "background";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "overview",   label: "概览" },
-  { key: "combat",     label: "战斗" },
   { key: "spells",     label: "法术" },
   { key: "features",   label: "特性" },
-  { key: "inventory",  label: "装备" },
   { key: "background", label: "背景" },
 ];
 
@@ -111,6 +130,162 @@ function fmtMod(n: unknown): string {
 function getQS(name: string): string | null {
   return new URLSearchParams(window.location.search).get(name);
 }
+// ============================================================
+// 2026-05-14 — Edit-mode infrastructure (#14)
+// ============================================================
+//
+// When the user toggles 编辑 in the header, every section component
+// switches to its "editable" variant: numeric fields become inputs,
+// text blocks become textareas, and list-shaped sections (features,
+// weapons, spells, inventory, defense tags) sprout + / × buttons.
+//
+// Approach: a single context exposes { editing, data, onPatch } so
+// section components don't have to thread edit state through 4 prop
+// layers. onPatch accepts a deep partial; mergePatch recurses into
+// nested objects so callers can write e.g. { core_stats: { ac: 16 } }
+// without clobbering the rest of core_stats.
+
+interface EditState {
+  editing: boolean;
+  data: CharacterData;
+  onPatch: (patch: Partial<CharacterData>) => void;
+}
+const EditCtx = createContext<EditState | null>(null);
+function useEdit(): EditState {
+  const ctx = useContext(EditCtx);
+  if (!ctx) {
+    // Defensive default — when a section is used outside the provider
+    // (currently never, but cheap insurance) it falls through to
+    // "read-only" mode with a no-op patcher.
+    return { editing: false, data: {} as CharacterData, onPatch: () => {} };
+  }
+  return ctx;
+}
+
+// Helper: small numeric input bound to a path on data. The caller
+// builds the patch for the path themselves — this just renders an
+// input or a static span depending on editing.
+function EditNum({
+  value, onSet, fallback = "?", className = "", suffix = "",
+}: {
+  value: number | null | undefined;
+  onSet: (n: number) => void;
+  fallback?: string;
+  className?: string;
+  suffix?: string;
+}) {
+  const { editing } = useEdit();
+  if (editing) {
+    return (
+      <input
+        class={`cc-edit-num ${className}`}
+        type="number"
+        value={value ?? ""}
+        onInput={(e: any) => {
+          const v = e.target.value;
+          if (v === "") return;
+          const n = parseFloat(v);
+          if (Number.isFinite(n)) onSet(n);
+        }}
+      />
+    );
+  }
+  return <span class={className}>{value ?? fallback}{suffix}</span>;
+}
+
+// 2026-05-14 (#14 f2) — smooth-scroll a freshly-added row into view.
+// Called from "+ add" handlers: after Preact commits the new DOM
+// node (we wait two rAFs), the LAST matching row inside the add
+// button's enclosing `.sec` is scrolled to centre. Lets the user
+// keep their place when they add an entry far below the fold.
+function smoothScrollToNewRow(ev: Event | undefined, rowSelector: string): void {
+  const host = (ev?.currentTarget as HTMLElement | null)?.closest(".sec") as HTMLElement | null;
+  if (!host) return;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      const rows = host.querySelectorAll(rowSelector);
+      const last = rows[rows.length - 1] as HTMLElement | undefined;
+      last?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }),
+  );
+}
+
+// 2026-05-14 (#14 f3) — spell-name lookup for the SpellPickModal.
+// Pulls the suite's library search index(es) and extracts every
+// category-2 (spell) entry. The kiwee index stores BOTH names:
+//   n  = English name   ("Fireball")
+//   cn = Chinese name    ("火球术")
+// We keep both: `label` (cn preferred, en fallback) is what the
+// modal shows + what gets written onto the card; `en` is kept so
+// search can match English typing too. Cached module-wide after the
+// first successful load. Falls back to the kiwee base when no
+// library is configured.
+interface SpellEntry { label: string; en: string }
+let _spellNamesCache: SpellEntry[] | null = null;
+async function loadSpellNames(): Promise<SpellEntry[]> {
+  if (_spellNamesCache) return _spellNamesCache;
+  let bases: string[] = [];
+  try {
+    const { getState } = await import("../../state");
+    const libs = ((getState() as any).libraries || []) as any[];
+    bases = libs
+      .filter((l) => l && l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim())
+      .map((l) => String(l.baseUrl).replace(/\/+$/, ""));
+  } catch {}
+  if (bases.length === 0) bases = ["https://5e.kiwee.top"];
+  // label -> en. Map de-dups across libraries by display label.
+  const byLabel = new Map<string, string>();
+  await Promise.all(
+    bases.map(async (base) => {
+      try {
+        const res = await fetch(`${base}/search/index.json`, { cache: "force-cache" });
+        if (!res.ok) return;
+        const idx = await res.json();
+        const arr = Array.isArray(idx?.x) ? idx.x : [];
+        for (const e of arr) {
+          // c === 2 is the spell category in the suite search index.
+          if (!e || e.c !== 2) continue;
+          const en = typeof e.n === "string" ? e.n.trim() : "";
+          const cn = typeof e.cn === "string" ? e.cn.trim() : "";
+          const label = cn || en;
+          if (label && !byLabel.has(label)) byLabel.set(label, en);
+        }
+      } catch {
+        /* one library failing is non-fatal — others may still load */
+      }
+    }),
+  );
+  _spellNamesCache = [...byLabel.entries()]
+    .map(([label, en]) => ({ label, en }))
+    .sort((a, b) => a.label.localeCompare(b.label, "zh"));
+  return _spellNamesCache;
+}
+
+// Helper: text input bound to a path on data. Static span when !editing.
+function EditText({
+  value, onSet, fallback = "—", placeholder = "", className = "",
+}: {
+  value: string | null | undefined;
+  onSet: (s: string) => void;
+  fallback?: string;
+  placeholder?: string;
+  className?: string;
+}) {
+  const { editing } = useEdit();
+  if (editing) {
+    return (
+      <input
+        class={`cc-edit-text ${className}`}
+        type="text"
+        value={value ?? ""}
+        placeholder={placeholder}
+        onInput={(e: any) => onSet(e.target.value)}
+      />
+    );
+  }
+  return <span class={className}>{value || fallback}</span>;
+}
+
 function downloadJson(filename: string, data: any) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -121,11 +296,19 @@ function downloadJson(filename: string, data: any) {
 }
 
 // ===== Subcomponents =========================================
-function Header({ data, onExport, onImport, onRefresh }: {
+function Header({
+  data, onExport, onCopyJson, onImport, onPasteJson, onRefresh, editing, onToggleEditing, onSaveEdits, savingEdits,
+}: {
   data: CharacterData;
   onExport: () => void;
+  onCopyJson: () => void;
   onImport: () => void;
+  onPasteJson: () => void;
   onRefresh: () => void;
+  editing: boolean;
+  onToggleEditing: () => void;
+  onSaveEdits: () => void;
+  savingEdits: boolean;
 }) {
   const id = data.identity || {};
   const cs = data.core_stats || {};
@@ -158,15 +341,287 @@ function Header({ data, onExport, onImport, onRefresh }: {
         </div>
       </div>
       <div class="cc-head-right">
+        {/* 2026-05-14 (#14) — edit-mode toggle. When ON, every section
+            below renders its editable variant: stat cells become inputs,
+            list sections sprout + / × buttons, text blocks become
+            textareas. Saved live through the same onPatch pipeline
+            that already handles inline HP/AC edits. */}
+        <button
+          class={`cc-btn ${editing ? "primary" : ""}`}
+          onClick={onToggleEditing}
+          title={editing
+            ? "退出编辑模式（再次切换回只读视图）"
+            : "进入编辑模式：自由修改属性、添加词条、法术、特性、装备、背景"}>
+          <span class="ic">{editing ? "✎" : "🔧"}</span>{editing ? "编辑中" : "编辑"}
+        </button>
+        {/* Save button — only visible in edit mode. Persists the
+            current local data to the server via the same PUT endpoint
+            JSON import uses, then broadcasts BC_CARD_UPDATED so bound
+            tokens + other clients refresh. */}
+        {editing && (
+          <button
+            class="cc-btn primary"
+            onClick={onSaveEdits}
+            disabled={savingEdits}
+            title="把当前所有改动保存到服务器（不退出编辑模式）">
+            <span class="ic">💾</span>{savingEdits ? "保存中…" : "保存"}
+          </button>
+        )}
         <button class="cc-btn" onClick={onRefresh} title="重新拉取服务器上的最新数据">
-          <span class="ic">↻</span>刷新
+          刷新
         </button>
-        <button class="cc-btn primary" onClick={onExport} title="把当前角色卡数据导出为 JSON 文件">
-          <span class="ic">⬇</span>导出 JSON
-        </button>
-        <button class="cc-btn" onClick={onImport} title="从 JSON 文件加载角色卡（仅本地预览，未保存到服务器）">
-          <span class="ic">⬆</span>导入 JSON
-        </button>
+        {/* 2026-05-14 (#14 f2) — 导出 JSON + 仅复制 fused into one
+            button group. 复制 is now a borderless icon-only sub-button
+            seamlessly joined to the right edge of 导出 JSON (shared
+            border, no gap). SVG icon, no emoji / text. */}
+        <div class="cc-btn-group">
+          <button class="cc-btn" onClick={onExport} title="把当前角色卡数据导出为 JSON 文件">
+            导出 JSON
+          </button>
+          <button class="cc-btn cc-btn-sub" onClick={onCopyJson} title="仅复制：把当前角色卡 JSON 复制到剪贴板（不下载文件）">
+            <span class="ic" dangerouslySetInnerHTML={{ __html: ICON_COPY }} />
+          </button>
+        </div>
+        {/* 导入 JSON + 仅粘贴 fused the same way. */}
+        <div class="cc-btn-group">
+          <button class="cc-btn" onClick={onImport} title="从 JSON 文件加载角色卡">
+            导入 JSON
+          </button>
+          <button class="cc-btn cc-btn-sub" onClick={onPasteJson} title="仅粘贴：弹窗输入 JSON 文本，识别后应用为当前角色卡数据">
+            <span class="ic" dangerouslySetInnerHTML={{ __html: ICON_PASTE }} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 2026-05-14 — paste-JSON modal. Opened from the header's 「仅粘贴」
+// button. Textarea + Apply / Cancel buttons. The Apply callback
+// returns a status string (null = success, close the modal; non-null
+// = error/warning, keep modal open and show inline). Designed to live
+// inside the fullscreen panel (which is itself an OBR.modal full-
+// screen iframe) — we render an absolute-positioned overlay rather
+// than nest another OBR.modal which would compete with the parent.
+function PasteJsonModal({
+  onCancel,
+  onApply,
+}: {
+  onCancel: () => void;
+  onApply: (text: string) => Promise<string | null>;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const submit = useCallback(async () => {
+    if (busy) return;
+    if (!text.trim()) {
+      setStatus("✕ 文本框为空，请粘贴角色卡 JSON");
+      return;
+    }
+    setBusy(true);
+    setStatus(null);
+    try {
+      const result = await onApply(text);
+      if (result) setStatus(result);
+    } finally {
+      setBusy(false);
+    }
+  }, [text, busy, onApply]);
+
+  // Esc to cancel, Ctrl+Enter to apply — keyboard shortcuts that match
+  // common "paste then confirm" muscle memory.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        void submit();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onCancel, submit]);
+
+  // Inline styles keep this modal self-contained (we don't want to
+  // wire CSS into the global cc-fullscreen.html for a transient
+  // dialog). The backdrop click cancels; clicks inside the dialog
+  // stop propagation so the user can drag-select text without
+  // dismissing.
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: "0",
+        background: "rgba(0,0,0,0.55)",
+        zIndex: 99999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+      onClick={onCancel}
+    >
+      <div
+        style={{
+          background: "var(--surface-2, #1e1d1a)",
+          border: "1px solid var(--border-strong, #4a4640)",
+          borderRadius: "8px",
+          padding: "16px 18px",
+          width: "min(720px, 92vw)",
+          maxHeight: "85vh",
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+          boxShadow: "0 12px 32px rgba(0,0,0,0.5)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", gap: "10px", justifyContent: "space-between" }}>
+          <h3 style={{ margin: 0, fontSize: "15px", color: "var(--gold, #d4a056)" }}>粘贴角色卡 JSON</h3>
+          <span style={{ fontSize: "11px", color: "var(--ink-dim, #8a8479)" }}>Ctrl+Enter 应用 · Esc 取消</span>
+        </div>
+        <textarea
+          autofocus
+          value={text}
+          onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
+          placeholder='直接粘贴 JSON 文本，例如 {"identity": {...}, "abilities": {...}, "core_stats": {...}}'
+          spellcheck={false}
+          style={{
+            flex: "1 1 auto",
+            minHeight: "260px",
+            maxHeight: "60vh",
+            resize: "vertical",
+            background: "var(--bg, #161513)",
+            color: "var(--ink, #e8e3d8)",
+            border: "1px solid var(--border, #3a352f)",
+            borderRadius: "4px",
+            padding: "8px 10px",
+            fontFamily: "'Cascadia Code', 'Consolas', monospace",
+            fontSize: "12px",
+            lineHeight: "1.45",
+            outline: "none",
+          }}
+        />
+        {status && (
+          <div style={{
+            fontSize: "12px",
+            padding: "8px 10px",
+            background: status.startsWith("✓") ? "rgba(80,180,80,0.12)" : "rgba(220,90,80,0.12)",
+            border: `1px solid ${status.startsWith("✓") ? "rgba(80,180,80,0.4)" : "rgba(220,90,80,0.4)"}`,
+            borderRadius: "4px",
+            whiteSpace: "pre-wrap",
+            color: "var(--ink, #e8e3d8)",
+          }}>
+            {status}
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+          <button class="cc-btn" onClick={onCancel} disabled={busy}>
+            取消
+          </button>
+          <button class="cc-btn primary" onClick={submit} disabled={busy || !text.trim()}>
+            {busy ? "应用中…" : "应用"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 2026-05-14 (#14 f2) — spell pick modal. Replaces the old
+// window.prompt() with a proper in-panel dialog: a name input that
+// live-filters the suite library's spell list, plus a "直接添加" row
+// for arbitrary names not in any enabled library. Per user spec,
+// spell DETAIL (description / components / range / etc.) is NOT
+// stored on the card any more — the cc card just records the spell's
+// name + level and leaves the lookup to the library. Picking a spell
+// returns its name; SpellsSection assigns the level.
+function SpellPickModal({
+  title, onCancel, onPick,
+}: {
+  title: string;
+  onCancel: () => void;
+  onPick: (name: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [spells, setSpells] = useState<SpellEntry[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await loadSpellNames();
+        if (!cancelled) { setSpells(list); setLoading(false); }
+      } catch {
+        if (!cancelled) { setLoadError(true); setLoading(false); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+    };
+    document.addEventListener("keydown", h);
+    return () => document.removeEventListener("keydown", h);
+  }, [onCancel]);
+
+  // Match against BOTH the Chinese label and the English name so the
+  // user can type either. Display is always the label (cn preferred).
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return spells.slice(0, 60);
+    return spells
+      .filter((s) => s.label.toLowerCase().includes(q) || s.en.toLowerCase().includes(q))
+      .slice(0, 60);
+  }, [query, spells]);
+
+  return (
+    <div class="cc-modal-backdrop" onClick={onCancel}>
+      <div class="cc-modal" onClick={(e) => e.stopPropagation()}>
+        <div class="cc-modal-h">
+          <h3>{title}</h3>
+          <span class="cc-modal-hint">输入中文 / 英文名筛选 · Esc 取消</span>
+        </div>
+        <input
+          class="cc-edit-text"
+          autofocus
+          style={{ width: "100%", marginBottom: "8px", padding: "7px 10px", fontSize: "13px" }}
+          placeholder="法术名（中 / 英，留空浏览全部）"
+          value={query}
+          onInput={(e: any) => setQuery(e.target.value)}
+        />
+        <div class="cc-modal-list">
+          {query.trim() && (
+            <button
+              class="cc-modal-row cc-modal-row-free"
+              onClick={() => onPick(query.trim())}>
+              ＋ 直接添加「{query.trim()}」
+            </button>
+          )}
+          {loading && <div class="cc-modal-msg">加载法术库…</div>}
+          {loadError && (
+            <div class="cc-modal-msg">法术库加载失败 — 上方"直接添加"仍可用</div>
+          )}
+          {!loading && matches.map((s) => (
+            <button class="cc-modal-row" onClick={() => onPick(s.label)}>
+              <span>{s.label}</span>
+              {s.en && s.en !== s.label && (
+                <span class="cc-modal-row-en">{s.en}</span>
+              )}
+            </button>
+          ))}
+          {!loading && !loadError && matches.length === 0 && query.trim() && (
+            <div class="cc-modal-msg">库内没有匹配项 — 可用上方"直接添加"</div>
+          )}
+        </div>
+        <div class="cc-modal-foot">
+          <button class="cc-btn" onClick={onCancel}>取消</button>
+        </div>
       </div>
     </div>
   );
@@ -178,6 +633,7 @@ function StatsBanner({
   data: CharacterData;
   onPatch: (patch: Partial<CharacterData>) => void;
 }) {
+  const { editing } = useEdit();
   const cs = data.core_stats || {};
   const hp = cs.hp || {};
   const hd = cs.hit_dice || {};
@@ -198,6 +654,11 @@ function StatsBanner({
     if (!Number.isFinite(n)) return;
     onPatch({ core_stats: { ...cs, hit_dice: { ...hd, current: n } } });
   };
+  // 2026-05-14 (#14) — edit-mode helpers for the remaining stat cells
+  // (initiative / speed / passive perception / proficiency / hit-dice
+  // max + die-size). All single-field patches on core_stats.
+  const setCs = (patch: Record<string, any>) => onPatch({ core_stats: { ...cs, ...patch } });
+  const setHd = (patch: Record<string, any>) => onPatch({ core_stats: { ...cs, hit_dice: { ...hd, ...patch } } });
 
   return (
     <div class="cc-stats">
@@ -232,26 +693,62 @@ function StatsBanner({
       <div class="stat-cell init">
         <div class="stat-cell-label">先攻</div>
         <div class="stat-cell-val">
-          <span class="big">{fmtMod(cs.initiative)}</span>
+          {editing ? (
+            <input class="stat-input big" type="number"
+              value={cs.initiative ?? 0}
+              onInput={(e: any) => {
+                const n = parseInt(e.target.value, 10);
+                if (Number.isFinite(n)) setCs({ initiative: n });
+              }} />
+          ) : (
+            <span class="big">{fmtMod(cs.initiative)}</span>
+          )}
         </div>
       </div>
       <div class="stat-cell">
         <div class="stat-cell-label">速度</div>
         <div class="stat-cell-val">
-          <span class="big">{cs.speed ?? "?"}</span>
+          {editing ? (
+            <input class="stat-input big" type="number"
+              value={cs.speed ?? 0}
+              onInput={(e: any) => {
+                const n = parseInt(e.target.value, 10);
+                if (Number.isFinite(n)) setCs({ speed: n });
+              }} />
+          ) : (
+            <span class="big">{cs.speed ?? "?"}</span>
+          )}
           <span class="unit">尺</span>
         </div>
       </div>
       <div class="stat-cell">
         <div class="stat-cell-label">被察</div>
         <div class="stat-cell-val">
-          <span class="big">{cs.passive_perception ?? "?"}</span>
+          {editing ? (
+            <input class="stat-input big" type="number"
+              value={cs.passive_perception ?? 0}
+              onInput={(e: any) => {
+                const n = parseInt(e.target.value, 10);
+                if (Number.isFinite(n)) setCs({ passive_perception: n });
+              }} />
+          ) : (
+            <span class="big">{cs.passive_perception ?? "?"}</span>
+          )}
         </div>
       </div>
       <div class="stat-cell">
         <div class="stat-cell-label">熟练</div>
         <div class="stat-cell-val">
-          <span class="big">{fmtMod(cs.proficiency_bonus)}</span>
+          {editing ? (
+            <input class="stat-input big" type="number"
+              value={cs.proficiency_bonus ?? 0}
+              onInput={(e: any) => {
+                const n = parseInt(e.target.value, 10);
+                if (Number.isFinite(n)) setCs({ proficiency_bonus: n });
+              }} />
+          ) : (
+            <span class="big">{fmtMod(cs.proficiency_bonus)}</span>
+          )}
         </div>
       </div>
       <div class="stat-cell">
@@ -260,7 +757,23 @@ function StatsBanner({
           <input class="stat-input big" value={hd.current ?? 0}
             onChange={(e: any) => setHdCur(e.target.value)} />
           <span class="slash">/</span>
-          <span class="small">{hd.max ?? "?"}{hd.die_size ?? ""}</span>
+          {editing ? (
+            <>
+              <input class="stat-input small" type="number"
+                value={hd.max ?? 0}
+                onInput={(e: any) => {
+                  const n = parseInt(e.target.value, 10);
+                  if (Number.isFinite(n)) setHd({ max: n });
+                }} />
+              <input class="stat-input small" type="text"
+                style={{ width: "44px" }}
+                placeholder="d8"
+                value={hd.die_size ?? ""}
+                onInput={(e: any) => setHd({ die_size: e.target.value })} />
+            </>
+          ) : (
+            <span class="small">{hd.max ?? "?"}{hd.die_size ?? ""}</span>
+          )}
         </div>
       </div>
     </div>
@@ -273,16 +786,101 @@ function rollExpr(label: string, expr: string, advMode?: "adv" | "dis") {
 }
 
 function AbilitiesAndSkills({ data }: { data: CharacterData }) {
+  const { editing, onPatch } = useEdit();
   const ab = data.abilities || {};
   const cs = data.core_stats || {};
   const skills = Array.isArray(data.skills) ? data.skills : [];
   const skBy: Record<string, any[]> = {};
   for (const s of skills) (skBy[s.ability] ??= []).push(s);
 
+  // 2026-05-14 (#14 / f3) — edit helpers. We mutate the ability or
+  // skill in place via spread + index replacement, then push the
+  // whole abilities / skills slice back through onPatch.
+  //
+  // Proficiency math (#14 f3 fix): toggling a save / skill proficiency
+  // dot now RECOMPUTES the bonus / total, not just flips the flag:
+  //   save bonus  = ability_mod + (proficient ? prof_bonus : 0)
+  //   skill total = ability_mod + prof_bonus × {none:0, prof:1, exp:2}
+  //                 (+ any misc_bonus the parser captured)
+  // The user can still hand-override the number afterwards via the
+  // input — the toggle just sets a correct baseline.
+  const profBonus = cs.proficiency_bonus ?? 0;
+
+  const setAbilityScore = (k: string, score: number) => {
+    const cur = ab[k] || {};
+    const newMod = Math.floor((score - 10) / 2);
+    // Re-derive the save bonus too — it's modifier-relative, so a
+    // score change should ripple into the save unless the user has
+    // hand-set it. We recompute from proficiency state to keep things
+    // coherent (matches the toggle behaviour below).
+    const save = cur.save || {};
+    const newSaveBonus = newMod + (save.proficient ? profBonus : 0);
+    onPatch({
+      abilities: {
+        ...ab,
+        [k]: {
+          ...cur,
+          total: score,
+          modifier: newMod,
+          save: { ...save, bonus: newSaveBonus },
+        },
+      },
+    });
+  };
+  const toggleSaveProf = (k: string) => {
+    const cur = ab[k] || {};
+    const save = cur.save || {};
+    const willBeProf = !save.proficient;
+    const mod = typeof cur.modifier === "number" ? cur.modifier : 0;
+    onPatch({
+      abilities: {
+        ...ab,
+        [k]: {
+          ...cur,
+          save: {
+            ...save,
+            proficient: willBeProf,
+            bonus: mod + (willBeProf ? profBonus : 0),
+          },
+        },
+      },
+    });
+  };
+  const setSaveBonus = (k: string, bonus: number) => {
+    const cur = ab[k] || {};
+    const save = cur.save || {};
+    onPatch({
+      abilities: { ...ab, [k]: { ...cur, save: { ...save, bonus } } },
+    });
+  };
+  const setSkillTotal = (idx: number, total: number) => {
+    const next = [...skills];
+    next[idx] = { ...next[idx], total };
+    onPatch({ skills: next });
+  };
+  const cycleSkillProf = (idx: number) => {
+    // none → proficient → expertise → none
+    const order = ["none", "proficient", "expertise"];
+    const sk = skills[idx];
+    if (!sk) return;
+    const cur = sk.proficiency || "none";
+    const nextProf = order[(order.indexOf(cur) + 1) % order.length];
+    // Recompute total from the skill's ability modifier + proficiency
+    // multiplier. mult: none=0, proficient=1, expertise=2.
+    const abil = ab[sk.ability] || {};
+    const abilMod = typeof abil.modifier === "number" ? abil.modifier : 0;
+    const mult = nextProf === "expertise" ? 2 : nextProf === "proficient" ? 1 : 0;
+    const misc = typeof sk.misc_bonus === "number" ? sk.misc_bonus : 0;
+    const total = abilMod + profBonus * mult + misc;
+    const next = [...skills];
+    next[idx] = { ...next[idx], proficiency: nextProf, total };
+    onPatch({ skills: next });
+  };
+
   return (
     <div class="sec">
       <div class="sec-h">
-        <span class="sec-h-title">属性 · 豁免 · 技能</span>
+        <span class="sec-h-title">属性 · 豁免 · 技能{editing ? "（编辑中 — 点击 ●/○/★ 切换熟练）" : ""}</span>
       </div>
       <div class="sec-body">
         <div class="abl-grid">
@@ -295,6 +893,40 @@ function AbilitiesAndSkills({ data }: { data: CharacterData }) {
               : (a.save?.proficient ? mod + profBonus : mod);
             const aExpr = `1d20${mod >= 0 ? "+" : ""}${mod}`;
             const sExpr = `1d20${saveBonus >= 0 ? "+" : ""}${saveBonus}`;
+            if (editing) {
+              return (
+                <div class="abl">
+                  <div class="abl-name">{ABL_LABEL[k]}</div>
+                  <input class="abl-total cc-edit-num" type="number"
+                    value={a.total ?? 10}
+                    onInput={(e: any) => {
+                      const n = parseInt(e.target.value, 10);
+                      if (Number.isFinite(n)) setAbilityScore(k, n);
+                    }} />
+                  <div class="abl-mod" title="自动从属性值推算">{fmtMod(a.modifier)}</div>
+                  {/* 2026-05-14 (#14 f2) — `abl-save-edit` is a DISTINCT
+                      class from `abl-save`, so the CSS ::before that
+                      auto-draws a ●/○ on `.abl-save` never fires here.
+                      The explicit clickable span below is the ONLY
+                      proficiency dot in edit mode — earlier the :has()
+                      override didn't take in OBR's iframe runtime, so
+                      both the pseudo AND the span rendered (two
+                      circles). A separate class is bulletproof. */}
+                  <div class={`abl-save-edit ${a.save?.proficient ? "is-prof" : ""}`}>
+                    <span class="abl-save-dot"
+                          onClick={() => toggleSaveProf(k)}
+                          title="点击切换豁免熟练">{a.save?.proficient ? "●" : "○"}</span>
+                    <input class="cc-edit-num" type="number"
+                      style={{ width: "44px" }}
+                      value={a.save?.bonus ?? saveBonus}
+                      onInput={(e: any) => {
+                        const n = parseInt(e.target.value, 10);
+                        if (Number.isFinite(n)) setSaveBonus(k, n);
+                      }} />
+                  </div>
+                </div>
+              );
+            }
             return (
               <div class="abl">
                 <div class="abl-name">{ABL_LABEL[k]}</div>
@@ -317,11 +949,34 @@ function AbilitiesAndSkills({ data }: { data: CharacterData }) {
 
         <div style={{ marginTop: "12px" }}>
           <div class="sk-list">
-            {ABL_ORDER.flatMap((k) =>
-              (skBy[k] || []).map((s) => {
+            {ABL_ORDER.flatMap((k) => {
+              const list = skBy[k] || [];
+              return list.map((s) => {
+                const idx = skills.indexOf(s);
                 const total = typeof s.total === "number" ? s.total : 0;
                 const expr = `1d20${total >= 0 ? "+" : ""}${total}`;
                 const cls = s.proficiency === "expertise" ? "exp" : s.proficiency === "proficient" ? "prof" : "";
+                if (editing) {
+                  return (
+                    <div class={`sk ${cls}`} style={{ cursor: "default" }}>
+                      <span class="sk-prof"
+                            style={{ cursor: "pointer" }}
+                            onClick={() => cycleSkillProf(idx)}
+                            title="点击循环切换：无 → 熟练 → 专精 → 无">
+                        {cls === "exp" ? "★" : cls === "prof" ? "●" : "○"}
+                      </span>
+                      <span class="sk-name">{s.name}</span>
+                      <span class="sk-abil">{ABL_ABBR[s.ability] || ""}</span>
+                      <input class="cc-edit-num sk-val" type="number"
+                        style={{ width: "48px" }}
+                        value={s.total ?? 0}
+                        onInput={(e: any) => {
+                          const n = parseInt(e.target.value, 10);
+                          if (Number.isFinite(n)) setSkillTotal(idx, n);
+                        }} />
+                    </div>
+                  );
+                }
                 return (
                   <div class={`sk ${cls}`}
                     onClick={() => rollExpr(`${s.name}检定`, expr)}
@@ -333,8 +988,8 @@ function AbilitiesAndSkills({ data }: { data: CharacterData }) {
                     <span class="sk-val">{fmtMod(s.total)}</span>
                   </div>
                 );
-              })
-            )}
+              });
+            })}
           </div>
         </div>
       </div>
@@ -343,52 +998,110 @@ function AbilitiesAndSkills({ data }: { data: CharacterData }) {
 }
 
 function Defenses({ data }: { data: CharacterData }) {
+  const { editing, onPatch } = useEdit();
   const d = data.defenses || {};
   const id = data.identity || {};
   const langs: string[] = Array.isArray(id.languages) ? id.languages : [];
   const tools: string[] = Array.isArray(id.tool_proficiencies) ? id.tool_proficiencies : [];
 
   const empty = !d.resistances?.length && !d.immunities?.length && !d.advantages?.length && !d.disadvantages?.length;
-  if (empty && !langs.length && !tools.length) return null;
+  // In edit mode we always render the section (so the user can ADD
+  // first entries to empty categories); in view mode we hide it
+  // entirely when there's nothing to show.
+  if (!editing && empty && !langs.length && !tools.length) return null;
+
+  // 2026-05-14 (#14) — small add/remove helpers per tag category.
+  const addTag = (cat: "resistances" | "immunities" | "advantages" | "disadvantages") => {
+    const v = (window.prompt(`添加${labelOf(cat)}（用逗号分隔可一次添加多条）`, "") || "").trim();
+    if (!v) return;
+    const items = v.split(/[,，;；]/).map((s) => s.trim()).filter(Boolean);
+    if (items.length === 0) return;
+    const cur = Array.isArray((d as any)[cat]) ? (d as any)[cat] : [];
+    onPatch({ defenses: { ...d, [cat]: [...cur, ...items] } });
+  };
+  const removeTag = (cat: "resistances" | "immunities" | "advantages" | "disadvantages", value: string) => {
+    const cur = Array.isArray((d as any)[cat]) ? (d as any)[cat] : [];
+    onPatch({ defenses: { ...d, [cat]: cur.filter((x: string) => x !== value) } });
+  };
+  const addLangTool = (which: "languages" | "tool_proficiencies") => {
+    const v = (window.prompt(`添加${which === "languages" ? "语言" : "工具"}`, "") || "").trim();
+    if (!v) return;
+    const items = v.split(/[,，;；]/).map((s) => s.trim()).filter(Boolean);
+    if (items.length === 0) return;
+    const cur = Array.isArray((id as any)[which]) ? (id as any)[which] : [];
+    onPatch({ identity: { ...id, [which]: [...cur, ...items] } });
+  };
+  const removeLangTool = (which: "languages" | "tool_proficiencies", value: string) => {
+    const cur = Array.isArray((id as any)[which]) ? (id as any)[which] : [];
+    onPatch({ identity: { ...id, [which]: cur.filter((x: string) => x !== value) } });
+  };
+  function labelOf(cat: string): string {
+    return { resistances: "抗性", immunities: "免疫", advantages: "优势", disadvantages: "劣势" }[cat] || cat;
+  }
+
+  const renderRow = (
+    label: string,
+    cat: "resistances" | "immunities" | "advantages" | "disadvantages",
+    css: string,
+  ) => {
+    const list = Array.isArray((d as any)[cat]) ? (d as any)[cat] : [];
+    if (!editing && list.length === 0) return null;
+    return (
+      <div class="def-row">
+        <span class="def-label">{label}</span>
+        {list.map((x: string) => (
+          <span class={`def-tag ${css}`}>
+            {x}
+            {editing && (
+              <button class="cc-tag-x" onClick={() => removeTag(cat, x)} title="移除">×</button>
+            )}
+          </span>
+        ))}
+        {editing && (
+          <button class="cc-add-tag" onClick={() => addTag(cat)} title={`添加${label}`}>+</button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div class="sec">
       <div class="sec-h"><span class="sec-h-title">防御 · 语言 · 工具</span></div>
       <div class="sec-body">
-        {!!d.resistances?.length && (
-          <div class="def-row">
-            <span class="def-label">抗性</span>
-            {d.resistances.map((x: string) => <span class="def-tag res">{x}</span>)}
-          </div>
-        )}
-        {!!d.immunities?.length && (
-          <div class="def-row">
-            <span class="def-label">免疫</span>
-            {d.immunities.map((x: string) => <span class="def-tag imm">{x}</span>)}
-          </div>
-        )}
-        {!!d.advantages?.length && (
-          <div class="def-row">
-            <span class="def-label">优势</span>
-            {d.advantages.map((x: string) => <span class="def-tag adv">{x}</span>)}
-          </div>
-        )}
-        {!!d.disadvantages?.length && (
-          <div class="def-row">
-            <span class="def-label">劣势</span>
-            {d.disadvantages.map((x: string) => <span class="def-tag dis">{x}</span>)}
-          </div>
-        )}
-        {!!langs.length && (
+        {renderRow("抗性", "resistances", "res")}
+        {renderRow("免疫", "immunities", "imm")}
+        {renderRow("优势", "advantages", "adv")}
+        {renderRow("劣势", "disadvantages", "dis")}
+        {(editing || langs.length > 0) && (
           <div class="def-row">
             <span class="def-label">语言</span>
-            {langs.map((x) => <span class="def-tag">{x}</span>)}
+            {langs.map((x) => (
+              <span class="def-tag">
+                {x}
+                {editing && (
+                  <button class="cc-tag-x" onClick={() => removeLangTool("languages", x)} title="移除">×</button>
+                )}
+              </span>
+            ))}
+            {editing && (
+              <button class="cc-add-tag" onClick={() => addLangTool("languages")} title="添加语言">+</button>
+            )}
           </div>
         )}
-        {!!tools.length && (
+        {(editing || tools.length > 0) && (
           <div class="def-row">
             <span class="def-label">工具</span>
-            {tools.map((x) => <span class="def-tag">{x}</span>)}
+            {tools.map((x) => (
+              <span class="def-tag">
+                {x}
+                {editing && (
+                  <button class="cc-tag-x" onClick={() => removeLangTool("tool_proficiencies", x)} title="移除">×</button>
+                )}
+              </span>
+            ))}
+            {editing && (
+              <button class="cc-add-tag" onClick={() => addLangTool("tool_proficiencies")} title="添加工具">+</button>
+            )}
           </div>
         )}
       </div>
@@ -397,6 +1110,7 @@ function Defenses({ data }: { data: CharacterData }) {
 }
 
 function CombatSection({ data }: { data: CharacterData }) {
+  const { editing, onPatch } = useEdit();
   const cb = data.combat || {};
   const armor = cb.armor || {};
   const shield = cb.shield || {};
@@ -406,10 +1120,37 @@ function CombatSection({ data }: { data: CharacterData }) {
   const shieldEquipped = readBooleanFlag(shield.equipped);
   const shieldAttuned = readBooleanFlag(shield.attuned);
 
+  // 2026-05-14 (#14) — weapon edit helpers. Each weapon is a plain
+  // object with name / attack_bonus / damage / damage_type / properties
+  // fields. We mutate the array via spread + index replacement.
+  const updateWeapon = (idx: number, patch: Record<string, any>) => {
+    const next = [...weapons];
+    next[idx] = { ...next[idx], ...patch };
+    onPatch({ combat: { ...cb, weapons: next } });
+  };
+  const removeWeapon = (idx: number) => {
+    if (!window.confirm(`删除武器「${weapons[idx]?.name || "未命名"}」？`)) return;
+    const next = weapons.filter((_, i) => i !== idx);
+    onPatch({ combat: { ...cb, weapons: next } });
+  };
+  const addWeapon = (ev?: Event) => {
+    const next = [...weapons, { name: "新武器", attack_bonus: "+0", damage: "1d6", damage_type: "" }];
+    onPatch({ combat: { ...cb, weapons: next } });
+    smoothScrollToNewRow(ev, ".weap");
+  };
+  // 2026-05-14 (#14) — armor/shield edit affordances are NOT exposed
+  // in this pass. The schema (ac_base / dex_bonus_cap / weight /
+  // equipped / attuned / damage_resistances...) is dense and rarely
+  // changes mid-session compared to weapons. For now the user edits
+  // these via the paste-JSON modal or the source xlsx.
+
   return (
     <div class="sec">
       <div class="sec-h">
         <span class="sec-h-title">战斗 · 武器 · 护甲</span>
+        {editing && (
+          <button class="cc-add-tag" style={{ marginLeft: "auto" }} onClick={(e: any) => addWeapon(e)} title="新增武器">+ 武器</button>
+        )}
       </div>
       <div class="sec-body dense">
         {(armor.name || armor.ac_base != null) && (
@@ -444,13 +1185,36 @@ function CombatSection({ data }: { data: CharacterData }) {
             暂未配置武器或护甲
           </div>
         )}
-        {weapons.map((w) => {
+        {weapons.map((w, idx) => {
           const atkMatch = /([+-]?\d+)/.exec(String(w.attack_bonus ?? ""));
           const atkBn = atkMatch ? parseInt(atkMatch[1], 10) : 0;
           const atkExpr = `1d20${atkBn >= 0 ? "+" : ""}${atkBn}`;
           const dmgRaw = String(w.damage ?? "").replace(/\s+/g, "");
           const dmgMatch = /\d*d\d+([+-]\d+)?/.exec(dmgRaw);
           const dmgExpr = dmgMatch ? dmgMatch[0] : dmgRaw;
+          if (editing) {
+            return (
+              <div class="weap" style={{ display: "grid", gridTemplateColumns: "1.4fr 0.7fr 1fr 1fr auto", gap: "6px", alignItems: "center" }}>
+                <input class="cc-edit-text" type="text"
+                  value={w.name ?? ""}
+                  placeholder="武器名"
+                  onInput={(e: any) => updateWeapon(idx, { name: e.target.value })} />
+                <input class="cc-edit-text" type="text"
+                  value={w.attack_bonus ?? ""}
+                  placeholder="+5"
+                  onInput={(e: any) => updateWeapon(idx, { attack_bonus: e.target.value })} />
+                <input class="cc-edit-text" type="text"
+                  value={w.damage ?? ""}
+                  placeholder="1d8+3"
+                  onInput={(e: any) => updateWeapon(idx, { damage: e.target.value })} />
+                <input class="cc-edit-text" type="text"
+                  value={w.damage_type ?? ""}
+                  placeholder="挥砍 / 穿刺 / …"
+                  onInput={(e: any) => updateWeapon(idx, { damage_type: e.target.value })} />
+                <button class="cc-tag-x" onClick={() => removeWeapon(idx)} title="删除武器">×</button>
+              </div>
+            );
+          }
           return (
             <div class="weap">
               <div class="weap-name">
@@ -499,6 +1263,7 @@ function CombatSection({ data }: { data: CharacterData }) {
 }
 
 function SpellsSection({ data }: { data: CharacterData }) {
+  const { editing, onPatch } = useEdit();
   const sp = data.spellcasting || {};
   const cs = data.core_stats || {};
   const slots = sp.spell_slots || {};
@@ -507,8 +1272,52 @@ function SpellsSection({ data }: { data: CharacterData }) {
   const prepared: any[] = Array.isArray(sp.prepared) ? sp.prepared : [];
 
   const [openSpell, setOpenSpell] = useState<string | null>(null);
+  // 2026-05-14 (#14 f2) — which list + level the SpellPickModal is
+  // currently adding into. null = modal closed.
+  const [pickFor, setPickFor] = useState<
+    { slot: "cantrips_known" | "always_known" | "prepared"; level: number; ev?: Event } | null
+  >(null);
 
-  if (!cantrips.length && !always.length && !prepared.length && !sp.attack_bonus && !sp.save_dc) {
+  // 2026-05-14 (#14 follow-up / f2) — edit helpers. SpellsSection has
+  // three parallel lists (cantrips_known / always_known / prepared);
+  // each uses the same add/remove/patch shape so we factor them via a
+  // slot key. The "+" buttons open the SpellPickModal (replaces the
+  // old window.prompt). Per user spec, spells store only { name,
+  // level } now — detailed text lives in the library, not on the card.
+  const openSpellPicker = (
+    slot: "cantrips_known" | "always_known" | "prepared",
+    level: number,
+    ev?: Event,
+  ) => {
+    setPickFor({ slot, level, ev });
+  };
+  const commitSpellPick = (name: string) => {
+    if (!pickFor) return;
+    const { slot, level, ev } = pickFor;
+    const cur = Array.isArray((sp as any)[slot]) ? (sp as any)[slot] : [];
+    onPatch({ spellcasting: { ...sp, [slot]: [...cur, { name, level }] } });
+    setPickFor(null);
+    smoothScrollToNewRow(ev, ".spell");
+  };
+  const removeSpell = (slot: "cantrips_known" | "always_known" | "prepared", idx: number) => {
+    const cur = Array.isArray((sp as any)[slot]) ? (sp as any)[slot] : [];
+    if (!window.confirm(`删除「${cur[idx]?.name || "未命名"}」？`)) return;
+    onPatch({ spellcasting: { ...sp, [slot]: cur.filter((_: any, i: number) => i !== idx) } });
+  };
+  const patchSpell = (slot: "cantrips_known" | "always_known" | "prepared", idx: number, patch: Record<string, any>) => {
+    const cur = Array.isArray((sp as any)[slot]) ? (sp as any)[slot] : [];
+    const next = [...cur];
+    next[idx] = { ...next[idx], ...patch };
+    onPatch({ spellcasting: { ...sp, [slot]: next } });
+  };
+  const setSlot = (lv: number, which: "current" | "max", v: number) => {
+    const cur = (slots as any)[String(lv)] || {};
+    onPatch({
+      spellcasting: { ...sp, spell_slots: { ...(slots || {}), [String(lv)]: { ...cur, [which]: v } } },
+    });
+  };
+
+  if (!editing && !cantrips.length && !always.length && !prepared.length && !sp.attack_bonus && !sp.save_dc) {
     return null;
   }
 
@@ -520,9 +1329,39 @@ function SpellsSection({ data }: { data: CharacterData }) {
     (groups[g] ??= []).push(s);
   }
 
-  const renderSpell = (s: any, idx: number, prefix: string) => {
+  const renderSpell = (s: any, idx: number, prefix: string, slot?: "cantrips_known" | "always_known" | "prepared") => {
     const key = `${prefix}-${idx}`;
     const isOpen = openSpell === key;
+    // 2026-05-14 (#14 f3) — edit-mode spell row. Per user spec spells
+    // store ONLY { name, level } now — no description (the library is
+    // the source of truth for spell text). Row has: level input ·
+    // name input · × delete. The per-row 🔍 button was removed — it
+    // broadcast to the global search popover, but the cc panel is a
+    // fullScreen modal that covers it, so the user never saw the
+    // result. Spell lookup happens at ADD time via SpellPickModal,
+    // which searches the library inline.
+    if (editing && slot) {
+      return (
+        <div class="spell" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+          <input class="cc-edit-num" type="number"
+            style={{ width: "48px", textAlign: "center" }}
+            value={s.level ?? 0}
+            onInput={(e: any) => {
+              const n = parseInt(e.target.value, 10);
+              if (Number.isFinite(n)) patchSpell(slot, idx, { level: n });
+            }}
+            title="环阶（0 = 戏法）" />
+          <input class="cc-edit-text" type="text"
+            style={{ flex: "1" }}
+            value={s.name ?? ""}
+            placeholder="法术名"
+            onInput={(e: any) => patchSpell(slot, idx, { name: e.target.value })} />
+          <button class="cc-tag-x"
+            onClick={() => removeSpell(slot, idx)}
+            title="删除">×</button>
+        </div>
+      );
+    }
     return (
       <>
         <div class="spell"
@@ -577,6 +1416,30 @@ function SpellsSection({ data }: { data: CharacterData }) {
           {[1,2,3,4,5,6,7,8,9].map((lv) => {
             const s = slots[String(lv)];
             const has = s && (s.max ?? 0) > 0;
+            if (editing) {
+              // 2026-05-14 (#14 follow-up) — slot edit. Two tiny inputs
+              // (current / max). Setting max=0 effectively retires the
+              // level so the panel hides it in view mode again.
+              return (
+                <div class={`slot ${has ? "has-slots" : ""}`}>
+                  <div class="slot-lv">{lv}环</div>
+                  <input class="cc-edit-num" type="number"
+                    style={{ width: "100%", textAlign: "center", fontSize: "13px" }}
+                    value={s?.current ?? 0}
+                    onInput={(e: any) => {
+                      const n = parseInt(e.target.value, 10);
+                      if (Number.isFinite(n)) setSlot(lv, "current", n);
+                    }} />
+                  <input class="cc-edit-num" type="number"
+                    style={{ width: "100%", textAlign: "center", fontSize: "11px", opacity: 0.8 }}
+                    value={s?.max ?? 0}
+                    onInput={(e: any) => {
+                      const n = parseInt(e.target.value, 10);
+                      if (Number.isFinite(n)) setSlot(lv, "max", n);
+                    }} />
+                </div>
+              );
+            }
             return (
               <div class={`slot ${has ? "has-slots" : ""}`}>
                 <div class="slot-lv">{lv}环</div>
@@ -602,41 +1465,132 @@ function SpellsSection({ data }: { data: CharacterData }) {
         )}
 
         {/* Cantrips */}
-        {!!cantrips.length && (
+        {(editing || !!cantrips.length) && (
           <div class="spell-group">
-            <div class="spell-group-h">戏法</div>
-            {cantrips.map((s, i) => renderSpell(s, i, "cantrip"))}
+            <div class="spell-group-h" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span>戏法</span>
+              {editing && (
+                <button class="cc-add-tag"
+                  onClick={(e: any) => openSpellPicker("cantrips_known", 0, e)}
+                  title="从法术库挑选戏法加入">+</button>
+              )}
+            </div>
+            {cantrips.map((s, i) => renderSpell(s, i, "cantrip", editing ? "cantrips_known" : undefined))}
           </div>
         )}
 
         {/* Always known */}
-        {!!always.length && (
+        {(editing || !!always.length) && (
           <div class="spell-group">
-            <div class="spell-group-h">始终准备</div>
-            {always.map((s, i) => renderSpell(s, i, "always"))}
+            <div class="spell-group-h" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span>始终准备</span>
+              {editing && (
+                <button class="cc-add-tag"
+                  onClick={(e: any) => openSpellPicker("always_known", 1, e)}
+                  title="从法术库挑选始终准备法术加入">+</button>
+              )}
+            </div>
+            {always.map((s, i) => renderSpell(s, i, "always", editing ? "always_known" : undefined))}
           </div>
         )}
 
-        {/* Prepared groups */}
-        {Object.entries(groups).map(([g, list]) => (
-          <div class="spell-group">
-            <div class="spell-group-h">准备法术 · 组 {g}</div>
-            {list.map((s, i) => renderSpell(s, i, `g${g}`))}
-          </div>
-        ))}
+        {/* Prepared — single "准备" header. Original grouping by `group`
+            field is preserved for read-only view (multi-group decks);
+            in edit mode we flatten into one list to keep the add/remove
+            UX simple. The group field can still be set manually via the
+            paste-JSON path. */}
+        {(editing || Object.keys(groups).length > 0) && (
+          editing ? (
+            <div class="spell-group">
+              <div class="spell-group-h" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span>准备法术</span>
+                <button class="cc-add-tag"
+                  onClick={(e: any) => openSpellPicker("prepared", 1, e)}
+                  title="从法术库挑选准备法术加入">+</button>
+              </div>
+              {prepared.map((s, i) => renderSpell(s, i, "p", "prepared"))}
+            </div>
+          ) : (
+            Object.entries(groups).map(([g, list]) => (
+              <div class="spell-group">
+                <div class="spell-group-h">准备法术 · 组 {g}</div>
+                {list.map((s, i) => renderSpell(s, i, `g${g}`))}
+              </div>
+            ))
+          )
+        )}
       </div>
+      {pickFor && (
+        <SpellPickModal
+          title={
+            pickFor.slot === "cantrips_known" ? "添加戏法"
+              : pickFor.slot === "always_known" ? "添加始终准备法术"
+              : "添加准备法术"
+          }
+          onCancel={() => setPickFor(null)}
+          onPick={commitSpellPick}
+        />
+      )}
     </div>
   );
 }
 
-function FeatureBlock({ title, items }: { title: string; items: any[] }) {
+function FeatureBlock({
+  title, items, slot, onAdd, onRemove, onPatchItem,
+}: {
+  title: string;
+  items: any[];
+  // 2026-05-14 (#14) — when slot is provided, edit-mode actions
+  // (+ append / × remove / inline name+description edit) become
+  // available. The slot key is the data.features field name (e.g.
+  // "class_features"); FeaturesSection plumbs each block's slot
+  // separately so the patches target the right list.
+  slot?: string;
+  onAdd?: (slot: string, ev?: Event) => void;
+  onRemove?: (slot: string, idx: number) => void;
+  onPatchItem?: (slot: string, idx: number, patch: Record<string, any>) => void;
+}) {
+  const { editing } = useEdit();
   const [openIdx, setOpenIdx] = useState<number | null>(null);
-  if (!items?.length) return null;
+  if (!editing && !items?.length) return null;
   return (
     <div style={{ marginBottom: "10px" }}>
-      <div class="spell-group-h" style={{ marginBottom: "6px" }}>{title}</div>
+      <div class="spell-group-h" style={{ marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
+        <span>{title}</span>
+        {editing && slot && (
+          <button class="cc-add-tag" onClick={(e: any) => onAdd?.(slot, e)} title={`新增${title}`}>+</button>
+        )}
+      </div>
       {items.map((f, i) => {
-        const isOpen = openIdx === i;
+        const isOpen = editing || openIdx === i;
+        if (editing && slot) {
+          return (
+            <div class="feat is-open" style={{ marginBottom: "6px" }}>
+              <div class="feat-h" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <input class="cc-edit-text" type="text"
+                  style={{ flex: "1" }}
+                  value={f.name ?? ""}
+                  placeholder="名称"
+                  onInput={(e: any) => onPatchItem?.(slot, i, { name: e.target.value })} />
+                <input class="cc-edit-num" type="number"
+                  style={{ width: "54px" }}
+                  value={f.level ?? ""}
+                  placeholder="Lv"
+                  onInput={(e: any) => {
+                    const v = e.target.value;
+                    const n = v === "" ? null : parseInt(v, 10);
+                    onPatchItem?.(slot, i, { level: n });
+                  }} />
+                <button class="cc-tag-x" onClick={() => onRemove?.(slot, i)} title="删除">×</button>
+              </div>
+              <textarea class="cc-edit-text"
+                style={{ width: "100%", minHeight: "60px", marginTop: "4px", fontFamily: "inherit", fontSize: "12px" }}
+                value={f.description ?? ""}
+                placeholder="描述（点击展开 · 此处编辑全文）"
+                onInput={(e: any) => onPatchItem?.(slot, i, { description: e.target.value })} />
+            </div>
+          );
+        }
         return (
           <div class={`feat ${isOpen ? "is-open" : ""}`}>
             <div
@@ -664,6 +1618,7 @@ function FeatureBlock({ title, items }: { title: string; items: any[] }) {
 }
 
 function FeaturesSection({ data }: { data: CharacterData }) {
+  const { editing, onPatch } = useEdit();
   const f = data.features || {};
   const cls: any[] = Array.isArray(f.class_features) ? f.class_features : [];
   const race: any[] = Array.isArray(f.race_features) ? f.race_features : [];
@@ -672,62 +1627,134 @@ function FeaturesSection({ data }: { data: CharacterData }) {
   const fightingStyle: any[] = Array.isArray(f.fighting_style_feats) ? f.fighting_style_feats : [];
   const special: any[] = Array.isArray(f.special_abilities) ? f.special_abilities : [];
 
-  if (!cls.length && !race.length && !feats.length && !fightingStyle.length && !special.length) return null;
+  // 2026-05-14 (#14) — edit hooks. Each block targets a different
+  // slot in data.features. We expose a single add / remove / patch
+  // triad that the FeatureBlock components call with their slot key.
+  const addItem = (slot: string, ev?: Event) => {
+    const cur = Array.isArray((f as any)[slot]) ? (f as any)[slot] : [];
+    onPatch({ features: { ...f, [slot]: [...cur, { name: "新条目", description: "" }] } });
+    smoothScrollToNewRow(ev, ".feat");
+  };
+  const removeItem = (slot: string, idx: number) => {
+    const cur = Array.isArray((f as any)[slot]) ? (f as any)[slot] : [];
+    const name = cur[idx]?.name || "未命名";
+    if (!window.confirm(`删除「${name}」？`)) return;
+    onPatch({ features: { ...f, [slot]: cur.filter((_: any, i: number) => i !== idx) } });
+  };
+  const patchItem = (slot: string, idx: number, patch: Record<string, any>) => {
+    const cur = Array.isArray((f as any)[slot]) ? (f as any)[slot] : [];
+    const next = [...cur];
+    next[idx] = { ...next[idx], ...patch };
+    onPatch({ features: { ...f, [slot]: next } });
+  };
+
+  if (!editing && !cls.length && !race.length && !feats.length && !fightingStyle.length && !special.length) {
+    return null;
+  }
 
   return (
     <div class="sec">
       <div class="sec-h"><span class="sec-h-title">特性 · 专长</span></div>
       <div class="sec-body">
-        <FeatureBlock title="职业特性" items={cls} />
-        <FeatureBlock title="种族特性" items={race} />
-        <FeatureBlock title="战斗风格" items={fightingStyle} />
-        <FeatureBlock title="特殊能力" items={special} />
-        <FeatureBlock title="专长" items={feats} />
+        <FeatureBlock title="职业特性" items={cls}
+          slot="class_features" onAdd={addItem} onRemove={removeItem} onPatchItem={patchItem} />
+        <FeatureBlock title="种族特性" items={race}
+          slot="race_features" onAdd={addItem} onRemove={removeItem} onPatchItem={patchItem} />
+        <FeatureBlock title="战斗风格" items={fightingStyle}
+          slot="fighting_style_feats" onAdd={addItem} onRemove={removeItem} onPatchItem={patchItem} />
+        <FeatureBlock title="特殊能力" items={special}
+          slot="special_abilities" onAdd={addItem} onRemove={removeItem} onPatchItem={patchItem} />
+        <FeatureBlock title="专长" items={feats}
+          slot="feats" onAdd={addItem} onRemove={removeItem} onPatchItem={patchItem} />
       </div>
     </div>
   );
 }
 
 function BackgroundSection({ data }: { data: CharacterData }) {
+  const { editing, onPatch } = useEdit();
   const bg = data.background || {};
   const id = data.identity || {};
-  const blocks = [
-    { label: "外貌", body: bg.appearance },
-    { label: "性格", body: bg.personality },
-    { label: "特质", body: bg.traits },
-    { label: "理念", body: bg.ideals },
-    { label: "羁绊", body: bg.bonds },
-    { label: "缺陷", body: bg.flaws },
-    { label: "故事", body: bg.story },
-    { label: "其他", body: bg.description },
-  ].filter((b) => b.body);
+  // 2026-05-14 (#14) — block keys (`appearance` / `personality` /
+  // ...) live on data.background. Identity-level fields (玩家 / 性别
+  // / 年龄 / ...) live on data.identity. We expose both with inline
+  // edits in edit mode.
+  type Block = { label: string; key: string; body: any };
+  const blocks: Block[] = [
+    { label: "外貌", key: "appearance", body: bg.appearance },
+    { label: "性格", key: "personality", body: bg.personality },
+    { label: "特质", key: "traits", body: bg.traits },
+    { label: "理念", key: "ideals", body: bg.ideals },
+    { label: "羁绊", key: "bonds", body: bg.bonds },
+    { label: "缺陷", key: "flaws", body: bg.flaws },
+    { label: "故事", key: "story", body: bg.story },
+    { label: "其他", key: "description", body: bg.description },
+  ];
+  const setBg = (k: string, v: any) => onPatch({ background: { ...bg, [k]: v } });
+  const setId = (k: string, v: any) => onPatch({ identity: { ...id, [k]: v } });
+
+  const visibleBlocks = editing ? blocks : blocks.filter((b) => b.body);
 
   return (
     <div class="sec">
       <div class="sec-h">
         <span class="sec-h-title">背景 · 个人</span>
-        {bg.background_name && <span class="sec-h-meta">背景：{bg.background_name}</span>}
+        {!editing && bg.background_name && <span class="sec-h-meta">背景：{bg.background_name}</span>}
       </div>
       <div class="sec-body">
+        {editing && (
+          <div class="def-row" style={{ marginBottom: "10px" }}>
+            <span class="def-label">背景名</span>
+            <input class="cc-edit-text" type="text" style={{ flex: "1" }}
+              value={bg.background_name ?? ""}
+              placeholder="如：哲人 / 罪犯 / 海上水手 ..."
+              onInput={(e: any) => setBg("background_name", e.target.value)} />
+          </div>
+        )}
         <dl class="kv" style={{ marginBottom: "12px" }}>
-          {id.player && (<><dt>玩家</dt><dd>{id.player}</dd></>)}
-          {id.gender && (<><dt>性别</dt><dd>{id.gender}</dd></>)}
-          {id.age != null && (<><dt>年龄</dt><dd>{id.age}</dd></>)}
-          {id.height && (<><dt>身高</dt><dd>{id.height}</dd></>)}
-          {id.weight && (<><dt>体重</dt><dd>{id.weight}</dd></>)}
-          {id.hometown && (<><dt>家乡</dt><dd>{id.hometown}</dd></>)}
+          {(editing || id.player) && (<><dt>玩家</dt><dd>{editing
+            ? <input class="cc-edit-text" type="text" value={id.player ?? ""} onInput={(e: any) => setId("player", e.target.value)} />
+            : id.player}</dd></>)}
+          {(editing || id.gender) && (<><dt>性别</dt><dd>{editing
+            ? <input class="cc-edit-text" type="text" value={id.gender ?? ""} onInput={(e: any) => setId("gender", e.target.value)} />
+            : id.gender}</dd></>)}
+          {(editing || id.age != null) && (<><dt>年龄</dt><dd>{editing
+            ? <input class="cc-edit-num" type="number" value={id.age ?? ""} onInput={(e: any) => {
+                const v = e.target.value;
+                setId("age", v === "" ? null : parseInt(v, 10));
+              }} />
+            : id.age}</dd></>)}
+          {(editing || id.height) && (<><dt>身高</dt><dd>{editing
+            ? <input class="cc-edit-text" type="text" value={id.height ?? ""} onInput={(e: any) => setId("height", e.target.value)} />
+            : id.height}</dd></>)}
+          {(editing || id.weight) && (<><dt>体重</dt><dd>{editing
+            ? <input class="cc-edit-text" type="text" value={id.weight ?? ""} onInput={(e: any) => setId("weight", e.target.value)} />
+            : id.weight}</dd></>)}
+          {(editing || id.hometown) && (<><dt>家乡</dt><dd>{editing
+            ? <input class="cc-edit-text" type="text" value={id.hometown ?? ""} onInput={(e: any) => setId("hometown", e.target.value)} />
+            : id.hometown}</dd></>)}
         </dl>
-        {!!blocks.length && (
+        {!!visibleBlocks.length && (
           <div class="bio-grid">
-            {blocks.map((b) => (
+            {visibleBlocks.map((b) => (
               <div class="bio-block">
                 <div class="bio-block-h">{b.label}</div>
-                <div class="bio-block-body">{b.body}</div>
+                <div class="bio-block-body">
+                  {editing ? (
+                    <textarea class="cc-edit-text"
+                      style={{ width: "100%", minHeight: "72px", fontFamily: "inherit", fontSize: "12px" }}
+                      value={b.body ?? ""}
+                      placeholder={`${b.label}…`}
+                      onInput={(e: any) => setBg(b.key, e.target.value)} />
+                  ) : (
+                    b.body
+                  )}
+                </div>
               </div>
             ))}
           </div>
         )}
-        {!blocks.length && (
+        {!editing && !visibleBlocks.length && (
           <div style={{ color: "var(--ink-mute)", fontStyle: "italic" }}>暂无背景信息</div>
         )}
       </div>
@@ -736,6 +1763,7 @@ function BackgroundSection({ data }: { data: CharacterData }) {
 }
 
 function InventorySection({ data }: { data: CharacterData }) {
+  const { editing, onPatch } = useEdit();
   const inv = data.inventory || {};
   const w = inv.currency?.wallet || {};
   const enc = inv.encumbrance || {};
@@ -743,19 +1771,80 @@ function InventorySection({ data }: { data: CharacterData }) {
   // Wondrous items (奇物) — new schema field, ships when present.
   const wondrous: any[] = Array.isArray(inv.wondrous_items) ? inv.wondrous_items : [];
 
+  // 2026-05-14 (#14) — inventory edit helpers.
+  const setWallet = (k: "pp" | "gp" | "ep" | "sp" | "cp", v: number) => {
+    const currency = inv.currency || {};
+    const wallet = { ...(currency.wallet || {}), [k]: v };
+    onPatch({ inventory: { ...inv, currency: { ...currency, wallet } } });
+  };
+  const updateItem = (idx: number, patch: Record<string, any>) => {
+    const next = [...items];
+    next[idx] = { ...next[idx], ...patch };
+    onPatch({ inventory: { ...inv, items: next } });
+  };
+  const removeItem = (idx: number) => {
+    if (!window.confirm(`删除「${items[idx]?.name || "未命名"}」？`)) return;
+    const next = items.filter((_, i) => i !== idx);
+    onPatch({ inventory: { ...inv, items: next } });
+  };
+  const addItem = (ev?: Event) => {
+    const next = [...items, { name: "新物品", weight: null, location: "", description: "" }];
+    onPatch({ inventory: { ...inv, items: next } });
+    smoothScrollToNewRow(ev, ".weap");
+  };
+  // Wondrous items reuse the FeatureBlock add/remove pattern via the
+  // same data shape (name + description). Slot is on inv directly.
+  const addWondrous = (_slot?: string, ev?: Event) => {
+    const next = [...wondrous, { name: "新奇物", description: "" }];
+    onPatch({ inventory: { ...inv, wondrous_items: next } });
+    smoothScrollToNewRow(ev, ".feat");
+  };
+  const removeWondrous = (_slot: string, idx: number) => {
+    if (!window.confirm(`删除「${wondrous[idx]?.name || "未命名"}」？`)) return;
+    const next = wondrous.filter((_, i) => i !== idx);
+    onPatch({ inventory: { ...inv, wondrous_items: next } });
+  };
+  const patchWondrous = (_slot: string, idx: number, patch: Record<string, any>) => {
+    const next = [...wondrous];
+    next[idx] = { ...next[idx], ...patch };
+    onPatch({ inventory: { ...inv, wondrous_items: next } });
+  };
+
+  const editNum = (label: string, key: "pp" | "gp" | "ep" | "sp" | "cp", cls: string) => (
+    <div class={`coin ${cls}`}>
+      <div class="coin-name">{label}</div>
+      <div class="coin-val">
+        {editing ? (
+          <input class="cc-edit-num" type="number"
+            style={{ width: "60px", textAlign: "center" }}
+            value={(w as any)[key] ?? 0}
+            onInput={(e: any) => {
+              const n = parseInt(e.target.value, 10);
+              if (Number.isFinite(n)) setWallet(key, n);
+            }} />
+        ) : (
+          (w as any)[key] ?? 0
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div class="sec">
       <div class="sec-h">
         <span class="sec-h-title">装备 · 货币 · 负重</span>
-        {inv.currency?.total_gp_raw && <span class="sec-h-meta">总值 {inv.currency.total_gp_raw}</span>}
+        {!editing && inv.currency?.total_gp_raw && <span class="sec-h-meta">总值 {inv.currency.total_gp_raw}</span>}
+        {editing && (
+          <button class="cc-add-tag" style={{ marginLeft: "auto" }} onClick={(e: any) => addItem(e)} title="新增物品">+ 物品</button>
+        )}
       </div>
       <div class="sec-body">
         <div class="coin-row">
-          <div class="coin pp"><div class="coin-name">铂PP</div><div class="coin-val">{w.pp ?? 0}</div></div>
-          <div class="coin gp"><div class="coin-name">金GP</div><div class="coin-val">{w.gp ?? 0}</div></div>
-          <div class="coin ep"><div class="coin-name">银EP</div><div class="coin-val">{w.ep ?? 0}</div></div>
-          <div class="coin sp"><div class="coin-name">铜SP</div><div class="coin-val">{w.sp ?? 0}</div></div>
-          <div class="coin cp"><div class="coin-name">铜CP</div><div class="coin-val">{w.cp ?? 0}</div></div>
+          {editNum("铂PP", "pp", "pp")}
+          {editNum("金GP", "gp", "gp")}
+          {editNum("银EP", "ep", "ep")}
+          {editNum("铜SP", "sp", "sp")}
+          {editNum("铜CP", "cp", "cp")}
         </div>
 
         {(enc.equipment_weight != null || enc.total_weight != null) && (
@@ -770,28 +1859,58 @@ function InventorySection({ data }: { data: CharacterData }) {
           </div>
         )}
 
-        {!!wondrous.length && (
-          <FeatureBlock title="奇物 / 魔法物品" items={wondrous} />
+        {(editing || !!wondrous.length) && (
+          <FeatureBlock
+            title="奇物 / 魔法物品"
+            items={wondrous}
+            slot={editing ? "wondrous_items" : undefined}
+            onAdd={editing ? addWondrous : undefined}
+            onRemove={editing ? removeWondrous : undefined}
+            onPatchItem={editing ? patchWondrous : undefined} />
         )}
 
-        {items.length === 0 && !wondrous.length && (
+        {!editing && items.length === 0 && !wondrous.length && (
           <div style={{ color: "var(--ink-mute)", fontStyle: "italic", padding: "6px 0" }}>
             （暂无背包细目，可在 xlsx 角色卡 "背包1/2" 表更新）
           </div>
         )}
-        {!!items.length && (
+        {(editing || !!items.length) && (
           <div style={{ marginTop: "8px" }}>
             <div class="bio-block-h" style={{ marginBottom: "5px" }}>背包</div>
-            {items.map((it: any) => (
-              <div class="weap">
-                <div class="weap-name">{it.name || "?"}</div>
-                <div class="weap-atk" style={{ visibility: "hidden" }}>—</div>
-                <div class="weap-dmg" style={{ background: "transparent", border: "0", color: "var(--ink-dim)" }}>
-                  {it.weight != null ? `${it.weight} 磅` : ""} {it.location ? `· ${it.location}` : ""}
+            {items.map((it: any, idx: number) => {
+              if (editing) {
+                return (
+                  <div class="weap" style={{ display: "grid", gridTemplateColumns: "1.4fr 0.6fr 0.8fr auto", gap: "6px", alignItems: "center" }}>
+                    <input class="cc-edit-text" type="text"
+                      value={it.name ?? ""}
+                      placeholder="物品名"
+                      onInput={(e: any) => updateItem(idx, { name: e.target.value })} />
+                    <input class="cc-edit-text" type="text"
+                      value={it.weight ?? ""}
+                      placeholder="重量"
+                      onInput={(e: any) => {
+                        const v = e.target.value;
+                        updateItem(idx, { weight: v === "" ? null : parseFloat(v) });
+                      }} />
+                    <input class="cc-edit-text" type="text"
+                      value={it.location ?? ""}
+                      placeholder="位置"
+                      onInput={(e: any) => updateItem(idx, { location: e.target.value })} />
+                    <button class="cc-tag-x" onClick={() => removeItem(idx)} title="删除">×</button>
+                  </div>
+                );
+              }
+              return (
+                <div class="weap">
+                  <div class="weap-name">{it.name || "?"}</div>
+                  <div class="weap-atk" style={{ visibility: "hidden" }}>—</div>
+                  <div class="weap-dmg" style={{ background: "transparent", border: "0", color: "var(--ink-dim)" }}>
+                    {it.weight != null ? `${it.weight} 磅` : ""} {it.location ? `· ${it.location}` : ""}
+                  </div>
+                  {it.description && <div class="weap-props">{it.description}</div>}
                 </div>
-                {it.description && <div class="weap-props">{it.description}</div>}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -804,6 +1923,9 @@ function App() {
   const [data, setData] = useState<CharacterData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
+  // 2026-05-14 (#14) — edit-mode flag, toggled from the header.
+  const [editing, setEditing] = useState(false);
+  const [savingEdits, setSavingEdits] = useState(false);
   const roomId = getQS("room") || "";
   const cardId = getQS("card") || "";
 
@@ -890,6 +2012,43 @@ function App() {
     downloadJson(`${name}-${cardId.slice(0,6)}.json`, data);
   }, [data, cardId]);
 
+  // 2026-05-14 — copy-to-clipboard variant of export. Same JSON shape
+  // as the file download, just lands in the clipboard so the user can
+  // paste it directly into the paste-import modal on another card /
+  // session / xlsx 主要!AV1 formula etc. Falls back to a
+  // hidden-textarea + document.execCommand path on browsers that
+  // don't expose navigator.clipboard inside an iframe.
+  const onCopyJson = useCallback(async () => {
+    if (!data) return;
+    const text = JSON.stringify(data, null, 2);
+    let ok = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      }
+    } catch {}
+    if (!ok) {
+      // Fallback: legacy execCommand. Requires a focused element so we
+      // attach a textarea to the DOM briefly.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      try { ok = document.execCommand("copy"); } catch {}
+      document.body.removeChild(ta);
+    }
+    // Lightweight toast — reuses the existing alert pattern from
+    // processImportFiles. Could be upgraded to an inline banner.
+    if (ok) {
+      window.alert(`已复制角色卡 JSON 到剪贴板（${text.length} 字符）。可粘贴到另一张卡的「粘贴 JSON」或 xlsx 主要!AV1 公式里。`);
+    } else {
+      window.alert("复制到剪贴板失败 — 请用「导出 JSON」下载文件后手动打开复制。");
+    }
+  }, [data]);
+
   const onImport = useCallback(() => {
     const inp = document.getElementById("ccFileInput") as HTMLInputElement | null;
     if (!inp) return;
@@ -900,6 +2059,50 @@ function App() {
       await processImportFiles(files);
     };
     inp.click();
+  }, [roomId, cardId]);
+
+  // 2026-05-14 — paste-import dialog state. The header's 粘贴 JSON
+  // button toggles `pasteOpen`; the modal contains a textarea and an
+  // Apply button. Apply parses the text, validates the shape, and
+  // routes through the SAME server PUT / broadcast pipeline that
+  // file-import uses (so bound tokens get the new stats propagated
+  // automatically via BC_CARD_UPDATED).
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const onPasteJson = useCallback(() => { setPasteOpen(true); }, []);
+
+  // Shared apply path — called by both the file import and the
+  // paste-text modal. `source` is for the result alert message.
+  const applyJsonObject = useCallback(async (parsed: any, source: string): Promise<string> => {
+    if (!parsed || typeof parsed !== "object" || !("abilities" in parsed || "identity" in parsed)) {
+      return `✕ ${source} (不像角色卡 JSON，缺少 identity / abilities 字段)`;
+    }
+    setData(normalizeCombatGearFlags(parsed));
+    try {
+      const url = `${SERVER_ORIGIN}/api/character/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data`;
+      const res = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        return `⚠ ${source} (本地预览，服务器保存失败 HTTP ${res.status}: ${body.slice(0, 120)})`;
+      }
+      const result = await res.json();
+      try {
+        const updatedPayload = {
+          cardId,
+          url: `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/`,
+        };
+        OBR.broadcast.sendMessage(BC_CARD_UPDATED, updatedPayload, { destination: "LOCAL" });
+        OBR.broadcast.sendMessage(BC_CARD_UPDATED, updatedPayload, { destination: "REMOTE" });
+      } catch {}
+      let msg = `✓ ${source} → ${result.name || "current card"}`;
+      if (result.render_warning) msg += `\n  (旧版 HTML 渲染告警：${result.render_warning})`;
+      return msg;
+    } catch (e: any) {
+      return `⚠ ${source} (服务器保存失败: ${e?.message || String(e)})`;
+    }
   }, [roomId, cardId]);
 
   // 2026-05-10: multi-file import. Each file is dispatched by
@@ -944,11 +2147,17 @@ function App() {
             } else {
               const result = await res.json();
               try {
-                OBR.broadcast.sendMessage(
-                  BC_CARD_UPDATED,
-                  { cardId, url: `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/` },
-                  { destination: "REMOTE" },
-                );
+                // 2026-05-14 — also broadcast LOCAL so the SAME client's
+                // background module catches this and propagates to bound
+                // tokens (max HP / AC / dex-mod). Without LOCAL, only
+                // remote clients see the stat propagation; the importing
+                // user would still need to re-bind to apply.
+                const updatedPayload = {
+                  cardId,
+                  url: `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/`,
+                };
+                OBR.broadcast.sendMessage(BC_CARD_UPDATED, updatedPayload, { destination: "LOCAL" });
+                OBR.broadcast.sendMessage(BC_CARD_UPDATED, updatedPayload, { destination: "REMOTE" });
               } catch {}
               summary.push(`✓ ${f.name} → ${result.name || "current card"}`);
               if (result.render_warning) {
@@ -989,11 +2198,12 @@ function App() {
               });
               if (corrected) {
                 try {
-                  OBR.broadcast.sendMessage(
-                    BC_CARD_UPDATED,
-                    { cardId: entry.id, url: `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(entry.id)}/` },
-                    { destination: "REMOTE" },
-                  );
+                  const reconcilePayload = {
+                    cardId: entry.id,
+                    url: `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(entry.id)}/`,
+                  };
+                  OBR.broadcast.sendMessage(BC_CARD_UPDATED, reconcilePayload, { destination: "LOCAL" });
+                  OBR.broadcast.sendMessage(BC_CARD_UPDATED, reconcilePayload, { destination: "REMOTE" });
                 } catch {}
               }
             } catch (e: any) {
@@ -1038,16 +2248,67 @@ function App() {
     };
   }, [processImportFiles]);
 
+  // 2026-05-14 (#14 f2) — the no-card states (error / loading) render
+  // a translucent navy panel instead of the solid one, so the OBR
+  // canvas reads through behind it. `cc-translucent` on the surface
+  // div + the body staying transparent (see CSS) achieves the
+  // "same blue, more see-through" look the user asked for. The
+  // loaded panel keeps its solid background for sheet legibility.
   if (error) {
-    return <div class="cc-error">{error}</div>;
+    return <div class="cc-error cc-translucent">{error}</div>;
   }
   if (!data) {
-    return <div class="cc-loading">加载角色卡…</div>;
+    return <div class="cc-loading cc-translucent">加载角色卡…</div>;
   }
 
   return (
-    <>
-      <Header data={data} onExport={onExport} onImport={onImport} onRefresh={loadData} />
+    <EditCtx.Provider value={{ editing, data, onPatch }}>
+      <Header
+        data={data}
+        onExport={onExport}
+        onCopyJson={onCopyJson}
+        onImport={onImport}
+        onPasteJson={onPasteJson}
+        onRefresh={loadData}
+        editing={editing}
+        onToggleEditing={() => setEditing((v) => !v)}
+        savingEdits={savingEdits}
+        onSaveEdits={async () => {
+          if (savingEdits || !data) return;
+          setSavingEdits(true);
+          try {
+            const result = await applyJsonObject(data, "已保存的编辑");
+            if (!result.startsWith("✓")) {
+              window.alert(result);
+            }
+          } finally {
+            setSavingEdits(false);
+          }
+        }}
+      />
+      {pasteOpen && (
+        <PasteJsonModal
+          onCancel={() => setPasteOpen(false)}
+          onApply={async (text) => {
+            // Try parse first; abort the modal close on parse failure so
+            // the user can fix without retyping.
+            let parsed: any;
+            try {
+              parsed = JSON.parse(text);
+            } catch (e: any) {
+              return `✕ JSON 解析失败：${e?.message || String(e)}`;
+            }
+            const result = await applyJsonObject(parsed, "粘贴文本");
+            // Close on success, keep open on warning/error so user sees msg.
+            if (result.startsWith("✓")) {
+              setPasteOpen(false);
+              window.alert(result);
+              return null;
+            }
+            return result;
+          }}
+        />
+      )}
       <StatsBanner data={data} onPatch={onPatch} />
       <div class="cc-tabs">
         {TABS.map((t) => (
@@ -1059,15 +2320,23 @@ function App() {
       </div>
       <div class="cc-body">
         {tab === "overview" && (
-          <div class="cc-grid">
-            <AbilitiesAndSkills data={data} />
-            <div>
-              <Defenses data={data} />
+          <>
+            {/* 2026-05-14 (#14 f3) — overview layout per user spec:
+                  left column  : 属性·豁免·技能 (tall)
+                  right column : 防御·语言·工具  +  战斗·武器·护甲 (stacked)
+                  full width   : 装备·货币·负重
+                The 2-col grid handles the top pair; CombatSection is
+                nested in the right column under Defenses; Inventory
+                spans full width below the grid. */}
+            <div class="cc-grid">
+              <AbilitiesAndSkills data={data} />
+              <div>
+                <Defenses data={data} />
+                <CombatSection data={data} />
+              </div>
             </div>
-          </div>
-        )}
-        {tab === "combat" && (
-          <CombatSection data={data} />
+            <InventorySection data={data} />
+          </>
         )}
         {tab === "spells" && (
           <SpellsSection data={data} />
@@ -1075,14 +2344,11 @@ function App() {
         {tab === "features" && (
           <FeaturesSection data={data} />
         )}
-        {tab === "inventory" && (
-          <InventorySection data={data} />
-        )}
         {tab === "background" && (
           <BackgroundSection data={data} />
         )}
       </div>
-    </>
+    </EditCtx.Provider>
   );
 }
 

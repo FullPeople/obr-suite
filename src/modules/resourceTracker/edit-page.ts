@@ -11,6 +11,17 @@
 // which mutates OBR scene metadata and refreshes its list. We
 // don't write metadata directly here — keeps the source-of-truth
 // flow simple (panel-side reads, panel-side writes).
+//
+// 2026-05-15 — UX rev:
+//   • Click on the dimmed area outside the card → cancel-close.
+//   • All boxes use square corners (border-radius:0) for a modern look.
+//   • Icon grid: gap:0, square highlights that fully fill the cell.
+//   • Default name on "create" = "自定义"; focus selects the whole
+//     name input so the user can type-replace immediately.
+//   • Per-client presets (name + type + max + icon, persisted to
+//     localStorage). Pattern mirrors portal-edit's name-presets:
+//     "+ 保存当前为预设" pushes the current form state in; clicking
+//     a chip restores it; the × deletes that preset.
 
 import OBR from "@owlbear-rodeo/sdk";
 import {
@@ -26,9 +37,17 @@ interface HashPayload {
   resource?: Resource;
 }
 
+interface ResourcePreset {
+  name: string;
+  type: ResourceType;
+  max: number;
+  icon: IconId;
+}
+
 const BC_RESOURCE_SAVE = `${PLUGIN_ID}/edit-save`;
 const BC_RESOURCE_DELETE = `${PLUGIN_ID}/edit-delete`;
 const BC_RESOURCE_CANCEL = `${PLUGIN_ID}/edit-cancel`;
+const PRESETS_KEY = `${PLUGIN_ID}/edit-presets`;
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 const $i = (id: string) => document.getElementById(id) as HTMLInputElement;
@@ -45,17 +64,122 @@ const btnX = $("btnX");
 const btnCancel = $("btnCancel");
 const btnSave = $("btnSave");
 const btnDelete = $("btnDelete");
+const btnAddPreset = $("btnAddPreset");
+const chipsPresets = $("chipsPresets");
+const cardEl = document.querySelector<HTMLElement>(".card");
 
 let selectedIcon: IconId = "gem";
 let editingResourceId: string | null = null;
 let itemId = "";
 
-// 2026-05-11 — type toggle state. Replaces the old <select id="type">
-// dropdown with three buttons (个数 / 进度 / 数字). State lives here
-// instead of on the DOM so payload (re-)apply doesn't fight with the
-// .on class.
+// Type toggle state. Lives outside the DOM so payload (re-)apply
+// doesn't fight with the .on class.
 let selectedType: ResourceType = "count";
 
+// ---------- presets ---------------------------------------------------------
+function readPresets(): ResourcePreset[] {
+  try {
+    const raw = localStorage.getItem(PRESETS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Filter to entries that match the expected shape — defensive against
+    // schema drift from older versions of this same key.
+    return parsed.filter((p) =>
+      p && typeof p.name === "string"
+      && (p.type === "count" || p.type === "bar" || p.type === "number")
+      && typeof p.max === "number"
+      && typeof p.icon === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+function writePresets(arr: ResourcePreset[]): void {
+  try { localStorage.setItem(PRESETS_KEY, JSON.stringify(arr)); } catch {}
+}
+
+function escHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string)
+  );
+}
+
+function renderPresets(): void {
+  const arr = readPresets();
+  if (!arr.length) {
+    chipsPresets.innerHTML = `<span class="empty">没有预设。改完后点右上角「+ 保存当前为预设」即可加进来。</span>`;
+    return;
+  }
+  // Each chip carries the icon SVG + name, plus a × delete button.
+  // Click chip body → load this preset into the form. Click × → drop it.
+  chipsPresets.innerHTML = arr.map((p, idx) => {
+    const iconSvg = ICON_LIBRARY[p.icon] ?? ICON_LIBRARY.gem;
+    return `<span class="chip" data-idx="${idx}" title="${escHtml(p.name)} · ${p.type} · 上限 ${p.max}">
+      <span class="ico">${iconSvg}</span>
+      <span class="lab">${escHtml(p.name)}</span>
+      <button class="del" type="button" data-del="${idx}" title="删除该预设">×</button>
+    </span>`;
+  }).join("");
+}
+
+function applyPresetIntoForm(p: ResourcePreset): void {
+  inpName.value = p.name;
+  selectedType = p.type;
+  selectedIcon = p.icon;
+  inpMax.value = String(p.max);
+  // For "count" type the new resource starts FULL by convention; for
+  // bar/number we mirror max into current too — the user can tweak after.
+  inpCurrent.value = String(p.max);
+  applyTypeToggleClasses();
+  renderIconGrid();
+  updatePreview();
+}
+
+chipsPresets.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement;
+  const delBtn = target.closest<HTMLButtonElement>("button[data-del]");
+  if (delBtn) {
+    e.stopPropagation();
+    const idx = Number(delBtn.dataset.del);
+    const arr = readPresets();
+    if (idx >= 0 && idx < arr.length) {
+      arr.splice(idx, 1);
+      writePresets(arr);
+      renderPresets();
+    }
+    return;
+  }
+  const chip = target.closest<HTMLElement>(".chip");
+  if (!chip) return;
+  const idx = Number(chip.dataset.idx);
+  const arr = readPresets();
+  if (idx >= 0 && idx < arr.length) {
+    applyPresetIntoForm(arr[idx]);
+  }
+});
+
+btnAddPreset.addEventListener("click", () => {
+  const name = inpName.value.trim() || "自定义";
+  const max = Number(inpMax.value);
+  if (!Number.isFinite(max)) return;
+  const next: ResourcePreset = {
+    name,
+    type: selectedType,
+    max,
+    icon: selectedIcon,
+  };
+  const arr = readPresets();
+  // Replace any existing preset with the same name + type combo so users
+  // can iterate on a preset without piling up duplicates.
+  const dupeIdx = arr.findIndex((p) => p.name === next.name && p.type === next.type);
+  if (dupeIdx >= 0) arr[dupeIdx] = next;
+  else arr.push(next);
+  writePresets(arr);
+  renderPresets();
+});
+
+// ---------- type toggle -----------------------------------------------------
 function applyTypeToggleClasses(): void {
   if (!typeToggle) return;
   for (const b of typeToggle.querySelectorAll<HTMLButtonElement>("button[data-type]")) {
@@ -84,6 +208,7 @@ async function close(): Promise<void> {
   broadcast(BC_RESOURCE_CANCEL, {});
 }
 
+// ---------- icon grid -------------------------------------------------------
 function renderIconGrid(): void {
   iconGrid.innerHTML = ICON_IDS.map((id) => `
     <div class="icon-pick ${id === selectedIcon ? "on" : ""}"
@@ -112,6 +237,7 @@ function updatePreview(): void {
   previewLabelEl.textContent = `${name} · ${cur} / ${max}`;
 }
 
+// ---------- payload (initial paint) -----------------------------------------
 function applyPayload(p: HashPayload): void {
   itemId = p.itemId;
   if (p.resource) {
@@ -127,7 +253,9 @@ function applyPayload(p: HashPayload): void {
     editingResourceId = null;
     titleEl.textContent = "新建资源";
     btnDelete.style.display = "none";
-    inpName.value = "";
+    // Default name "自定义" + auto-select on first focus → user can
+    // start typing the real name without manually clearing the field.
+    inpName.value = "自定义";
     selectedType = "count";
     inpCurrent.value = "2";
     inpMax.value = "2";
@@ -135,9 +263,11 @@ function applyPayload(p: HashPayload): void {
   }
   applyTypeToggleClasses();
   renderIconGrid();
+  renderPresets();
   updatePreview();
-  // Auto-focus name input on first paint — saves a click for the
-  // common "+ 新建资源" flow.
+  // Auto-focus name on first paint — saves a click for the common
+  // "+ 新建资源" flow. The focus handler below selects all text, so
+  // typing immediately replaces "自定义".
   setTimeout(() => inpName.focus(), 100);
 }
 
@@ -145,20 +275,32 @@ function applyPayload(p: HashPayload): void {
   el.addEventListener("input", updatePreview);
 });
 
-// 2026-05-12 — user request #15: clicking "当前 / 最大" should select
-// all the current text so you can type a new number directly. Same
-// behaviour as the OBR HP-bar number editor.
-[inpCurrent, inpMax].forEach((el) => {
+// Click-to-replace: focus on any of the three text/number inputs selects
+// the whole value so a single keystroke replaces it. Mirrors OBR's HP-bar
+// editor and the user's #4 spec for the name field.
+[inpName, inpCurrent, inpMax].forEach((el) => {
   el.addEventListener("focus", () => {
-    // requestAnimationFrame so the focus-set / blur-restore cycles
-    // settle before the selection paints — without this, Chrome
-    // sometimes deselects right after focus.
+    // requestAnimationFrame so focus-set / blur-restore cycles settle
+    // before the selection paints — without this, Chrome sometimes
+    // deselects right after focus.
     requestAnimationFrame(() => el.select());
   });
 });
 
+// ---------- close paths -----------------------------------------------------
 btnX.addEventListener("click", () => { void close(); });
 btnCancel.addEventListener("click", () => { void close(); });
+
+// Click on the dimmed area outside the card → cancel-close. We listen on
+// the body and bail out if the click landed inside the card. This matches
+// the portal-edit "click backdrop to dismiss" pattern.
+document.body.addEventListener("mousedown", (e) => {
+  if (!cardEl) return;
+  const target = e.target as Node | null;
+  if (target && cardEl.contains(target)) return;
+  e.preventDefault();
+  void close();
+});
 
 btnDelete.addEventListener("click", () => {
   if (!editingResourceId) return;

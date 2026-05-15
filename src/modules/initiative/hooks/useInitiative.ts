@@ -18,9 +18,9 @@ import {
   DICE_PLUS_ROLL_RESULT,
   DICE_PLUS_ROLL_ERROR,
 } from "../utils/constants";
-import { itemToInitiativeItem, getCombatState } from "../utils/metadata";
+import { itemToInitiativeItem, getCombatState, genTiebreak } from "../utils/metadata";
 import { getLocalLang } from "../../../state";
-import { broadcastDiceRoll } from "../../dice";
+import { broadcastDiceRoll, isGlobalDarkRollEnabled } from "../../dice";
 
 export type RollType = "disadvantage" | "normal" | "advantage";
 export type EffectType = "prepare" | "ambush" | "combat";
@@ -54,19 +54,28 @@ function localRoll(type: RollType): LocalRoll {
   return { rolls: [r1, r2], winnerIdx, finalValue: Math.min(r1, r2) };
 }
 
-// Stable tiebreak: 1% precision random, stored as decimal
-function genTiebreak(): number {
-  // Random in [0, 0.9999)
-  return Math.random();
-}
+// `genTiebreak` moved to utils/metadata.ts (2026-05-14 #5 sortfix) so
+// the background module (initiative/index.ts) can share it without
+// importing this whole React-hook file. It's now modifier-biased —
+// see the comment there.
 
-// Sort: count+modifier DESC, then modifier DESC, then tiebreak ASC (stable)
+// Sort: total (count+modifier) DESC, then tiebreak ASC.
+//
+// 2026-05-14 (#5 fix) — the old 3-level sort had a `modifier DESC`
+// middle tier ("higher dex wins ties"). That tier made manual
+// reorder UNABLE to drop a card between two equal-total cards with
+// different modifiers — there's no count you can give the dropped
+// card that lands it between them once the modifier tier kicks in.
+// Dropping the modifier tier makes `tiebreak` the SOLE sub-key, and
+// reorder mode now writes a *controlled* tiebreak (a midpoint of the
+// two neighbours' tiebreaks) so a card lands exactly where it's
+// dropped — even inside a tied group. `count` may carry a fraction
+// to express "between two distinct totals"; the panel rounds it for
+// display (the underlying precise value is what sorts).
 function sortInitiative(a: InitiativeItem, b: InitiativeItem): number {
   const totalA = a.count + a.modifier;
   const totalB = b.count + b.modifier;
   if (totalA !== totalB) return totalB - totalA;
-  if (a.modifier !== b.modifier) return b.modifier - a.modifier;
-  // ascending tiebreak — doesn't matter, just stable
   return a.tiebreak - b.tiebreak;
 }
 
@@ -256,17 +265,25 @@ export function useInitiative() {
       .filter((x): x is InitiativeItem => x !== null)
       .sort(sortInitiative);
 
-    // Ensure every item has a stable tiebreak (assign on first sight)
+    // Ensure every item has a stable tiebreak (assign on first sight).
+    // 2026-05-14 (#5 sortfix) — the assigned tiebreak is modifier-
+    // biased: higher initiative modifier → smaller tiebreak → sorts
+    // first among same-total cards. `modById` maps each item to its
+    // modifier so the draft loop can pass it to genTiebreak.
     const missingTb = mapped.filter((i) => i.tiebreak === 0);
     if (missingTb.length > 0) {
       try {
+        const modById = new Map(mapped.map((i) => [i.id, i.modifier]));
         await OBR.scene.items.updateItems(
           missingTb.map((i) => i.id),
           (drafts) => {
             for (const d of drafts) {
               const ex = d.metadata[METADATA_KEY] as any;
               if (ex && (!ex.tiebreak || ex.tiebreak === 0)) {
-                d.metadata[METADATA_KEY] = { ...ex, tiebreak: genTiebreak() };
+                d.metadata[METADATA_KEY] = {
+                  ...ex,
+                  tiebreak: genTiebreak(modById.get(d.id) ?? 0),
+                };
               }
             }
           }
@@ -282,6 +299,18 @@ export function useInitiative() {
     // activation / next / prev / round arithmetic.
     const visible = mapped.filter((i) => i.visible || i.invisible);
     const activeItem = visible.find((i) => i.active);
+    // 2026-05-14 — count active=true across ALL initiative items, not
+    // just the `visible` subset. A token can be in initiative AND
+    // still have active=true while being hidden (e.g., GM toggled
+    // item.visible=false without setting the suite's invisible flag;
+    // OR portal teleport briefly flips visible=false during the
+    // strip-meta + hide-tokens phase of moveTokensWithFogBypass).
+    // Without this guard, auto-activate below treats `activeItem ===
+    // undefined` as "nobody is active" and picks a new token — but
+    // the OLD active stays active=true on its hidden token, so two
+    // items end up with active=true at once (user bug #2: "当前聚焦
+    // 的角色会出现一个以上, 特别是visible=false或传送门后").
+    const hiddenActive = mapped.some((i) => i.active && !i.visible && !i.invisible);
 
     // Auto-activate: active item was removed during combat. GM-only; players
     // shouldn't mutate item metadata from a passive refresh — it'd also
@@ -289,7 +318,12 @@ export function useInitiative() {
     if (isGMRef.current && !autoActivateLocked.current) {
       const inCombat = combatStateRef.current.inCombat;
 
-      if (inCombat && visible.length > 0 && !activeItem) {
+      // Skip auto-activate if the active token is just temporarily
+      // hidden (visible=false but still in initiative). It'll come
+      // back when the GM restores visibility or the portal sequence
+      // finishes. Auto-activate is for the "active token was REMOVED
+      // from initiative entirely" case.
+      if (inCombat && visible.length > 0 && !activeItem && !hiddenActive) {
         const prev = prevActiveId.current;
         if (prev) {
           autoActivateLocked.current = true;
@@ -300,9 +334,14 @@ export function useInitiative() {
             visible.length - 1
           );
           const nextId = visible[targetIdx].id;
-          const visibleIds = visible.map((i) => i.id);
+          // 2026-05-14 — write to ALL initiative items, not just the
+          // visible subset. If for any reason a hidden token still
+          // carries active=true (e.g., race with a previous turn-flip
+          // that missed it), this write clears it too — guaranteeing
+          // exactly one active=true after the write completes.
+          const allIds = mapped.map((i) => i.id);
           try {
-            await OBR.scene.items.updateItems(visibleIds, (drafts) => {
+            await OBR.scene.items.updateItems(allIds, (drafts) => {
               for (const d of drafts) {
                 const ex = d.metadata[METADATA_KEY] as any;
                 if (ex) d.metadata[METADATA_KEY] = { ...ex, active: d.id === nextId };
@@ -698,8 +737,19 @@ export function useInitiative() {
     // would reveal the hidden token's position) — instead they get a
     // STEALTH_TURN signal that triggers (a) the "有人在暗处" overlay and
     // (b) a camera move to the bbox of the OTHER initiative tokens.
-    const target = allItemsRef.current.find((i) => i.id === itemId);
-    if (target?.invisible) {
+    // CRITICAL: read the LIVE scene item, NOT allItemsRef. The ref lags
+    // one OBR round-trip behind a visibility change — if the GM marks a
+    // token invisible and immediately advances onto its turn, a stale
+    // ref still says invisible=false, so we'd broadcast BROADCAST_FOCUS
+    // and reveal the hidden token's position to every player (user bug:
+    // 隐形单位下聚焦错误 / 隐形角色被暴露).
+    let targetInvisible = false;
+    try {
+      const [liveItem] = await OBR.scene.items.getItems([itemId]);
+      const fresh = liveItem ? itemToInitiativeItem(liveItem) : null;
+      targetInvisible = !!fresh?.invisible;
+    } catch {}
+    if (targetInvisible) {
       focusItem(itemId);
       OBR.broadcast
         .sendMessage(BROADCAST_STEALTH_TURN, { itemId })
@@ -731,6 +781,25 @@ export function useInitiative() {
       }
     });
   }, []);
+
+  // 2026-05-14 (#5 fix) — write BOTH count and tiebreak in one scene
+  // update. Reorder mode needs this: positioning a card precisely
+  // (especially inside a tied group) requires controlling the
+  // tiebreak as well as the total. GM-only — manual reorder is a
+  // GM tool. `count` may be fractional; that's intentional (see
+  // sortInitiative's comment) and the panel rounds it for display.
+  const setSortKey = useCallback(
+    async (itemId: string, count: number, tiebreak: number) => {
+      if (!isGMRef.current) return;
+      await OBR.scene.items.updateItems([itemId], (drafts) => {
+        for (const d of drafts) {
+          const existing = d.metadata[METADATA_KEY] as any;
+          d.metadata[METADATA_KEY] = { ...existing, count, tiebreak };
+        }
+      });
+    },
+    [],
+  );
 
   const updateModifier = useCallback(async (itemId: string, mod: number) => {
     await OBR.scene.items.updateItems([itemId], (drafts) => {
@@ -834,7 +903,10 @@ export function useInitiative() {
         // Stealth tokens roll dark — only the DM's own client receives
         // the dice broadcast (LOCAL only inside broadcastDiceRoll), so
         // players never see the dice animation above the hidden token.
-        hidden: isInvisible,
+        // 2026-05-14: 全局暗骰 toggle ORs in here too so DM's per-token
+        // 投掷 from the initiative panel also goes dark when the global
+        // toggle is on.
+        hidden: isInvisible || isGlobalDarkRollEnabled(),
       });
     } catch {}
   }, []);
@@ -894,12 +966,24 @@ export function useInitiative() {
   // as a fallback when prev isn't known.
   const setActiveItemFromIds = useCallback(
     async (activeId: string, prevId: string | null) => {
-      const ids: string[] = [activeId];
-      const actualPrev = prevId
-        ?? allItemsRef.current.find((i) => i.active)?.id
-        ?? null;
-      if (actualPrev && actualPrev !== activeId) ids.push(actualPrev);
-      await OBR.scene.items.updateItems(ids, (drafts) => {
+      // 2026-05-14 — write to EVERY initiative item, not just the
+      // [next, prev] pair. Earlier code only flipped active on those
+      // two — but if a third token had a stale active=true (from a
+      // missed turn-flip, an auto-activate race, or a refreshItems
+      // that ran during a visibility blip), it would stay active and
+      // produce the "more than one focused" bug #2. Iterating all
+      // items costs one updateItems write proportional to initiative
+      // size — typically <20 items, so the overhead is negligible.
+      const allIds = allItemsRef.current.map((i) => i.id);
+      // If activeId points to an item NOT in allItemsRef (e.g., just
+      // joined initiative and the ref hasn't synced yet), still
+      // include it so the new active gets written.
+      if (allIds.indexOf(activeId) < 0) allIds.push(activeId);
+      // Suppress the unused-var warning — kept for backward-compat
+      // signature; the per-id semantics now derive from `activeId`
+      // alone since we touch every item.
+      void prevId;
+      await OBR.scene.items.updateItems(allIds, (drafts) => {
         for (const d of drafts) {
           const existing = d.metadata[METADATA_KEY] as any;
           if (existing) {
@@ -982,7 +1066,30 @@ export function useInitiative() {
     await writeCombatState({ preparing: true, inCombat: false, round: 0 });
     fireBroadcast(BROADCAST_COMBAT_PREPARE, { effectType });
     fireBroadcast(BROADCAST_OPEN_PANEL, {});
-  }, [writeCombatState]);
+
+    // 2026-05-14 — auto-focus the first PLAYER-owned character when
+    // prep starts, so every client's camera lands on a real PC
+    // instead of wherever it happened to be. "Player-owned" = the
+    // item's ownerId matches a connected PLAYER-role party member
+    // (GM-owned NPCs are skipped). Routes through broadcastFocus so
+    // it honours the suite's "focus on turn change" toggle and the
+    // invisible-token stealth path. If no player owns any initiative
+    // entry, nothing is focused.
+    try {
+      const party = await OBR.party.getPlayers();
+      const playerIds = new Set(
+        party.filter((p) => p.role === "PLAYER").map((p) => p.id),
+      );
+      const firstPlayerOwned = allItemsRef.current.find(
+        (i) => i.ownerId && playerIds.has(i.ownerId),
+      );
+      if (firstPlayerOwned) {
+        await broadcastFocus(firstPlayerOwned.id);
+      }
+    } catch (e) {
+      console.warn("[obr-suite/initiative] prep auto-focus failed", e);
+    }
+  }, [writeCombatState, broadcastFocus]);
 
   const startCombat = useCallback(async () => {
     const all = allItemsRef.current;
@@ -1157,6 +1264,7 @@ export function useInitiative() {
     dicePlusAvailable,
     focusItem,
     updateCount,
+    setSortKey,
     updateModifier,
     rollInitiativeLocal,
     rollInitiativeDicePlus,

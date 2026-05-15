@@ -480,6 +480,32 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
   padding:1px 5px;border-radius:3px;
   font-size:10.5px;
 }
+/* Monster Studio promo row — visual editor alternative to hand-writing
+   library JSON. Links out to the standalone studio web tool. */
+.lib-studio{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  background:rgba(52,152,219,0.10);
+  border:1px solid rgba(52,152,219,0.32);
+  border-radius:6px;
+  padding:8px 12px;
+  font-size:11.5px;color:#aebfcf;
+  line-height:1.55;
+  margin-bottom:12px;
+}
+.lib-studio-txt{flex:1;min-width:180px}
+.lib-studio-txt b{color:#7ec8f0}
+.lib-studio-btn{
+  flex-shrink:0;
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 12px;
+  background:rgba(52,152,219,0.20);
+  border:1px solid rgba(52,152,219,0.45);
+  color:#7ec8f0;font-weight:700;
+  border-radius:6px;font-size:11.5px;
+  text-decoration:none;
+  transition:background .12s;
+}
+.lib-studio-btn:hover{background:rgba(52,152,219,0.34)}
 .lib-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
 .lib-row{
   display:flex;flex-direction:column;gap:6px;

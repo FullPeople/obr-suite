@@ -43,6 +43,34 @@ function supporterFontSize(amount: number): number {
   return Math.max(13, Math.min(46, Math.round(raw * 10) / 10));
 }
 
+// 2026-05-14 — per-name colour palette. The user wanted the
+// supporter wall to be colourful rather than an all-amber gradient.
+// `tier` still drives font weight / size / glow (so donation amount
+// still reads at a glance), but the HUE is now picked per name from
+// this diverse palette — deterministically, so a given supporter
+// always shows the same colour. All ten are tuned for legibility on
+// the overlay's near-black backdrop.
+const SUPPORTER_PALETTE = [
+  "#f5d76e", // gold
+  "#ff8c6b", // coral
+  "#5fd6c4", // teal
+  "#6cb6ff", // sky
+  "#c89bff", // lavender
+  "#a8e063", // lime
+  "#ff8fb3", // rose
+  "#ffb347", // amber
+  "#7fe0a8", // mint
+  "#8c9eff", // periwinkle
+];
+function supporterColor(name: string): string {
+  // Tiny stable string hash → palette index.
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = (h * 31 + name.charCodeAt(i)) | 0;
+  }
+  return SUPPORTER_PALETTE[Math.abs(h) % SUPPORTER_PALETTE.length];
+}
+
 // === Load supporter list ===========================================
 
 let supporters: Supporter[] = [];
@@ -223,6 +251,9 @@ function placeSlot(slot: Slot, s: Supporter): void {
   const fs = supporterFontSize(s.amount);
   slot.el.className = `name ${tier}`;
   slot.el.style.fontSize = `${fs}px`;
+  // 2026-05-14 — per-name colour (overrides the tier class's colour).
+  // tier still controls weight / size / glow via the class.
+  slot.el.style.color = supporterColor(s.name);
   slot.el.style.opacity = "0";
   slot.el.textContent = s.name;
   slot.el.style.left = "0px";

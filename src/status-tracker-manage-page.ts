@@ -45,6 +45,18 @@ let myBuffIds: string[] = [];
 let myBuffRounds: Record<string, number> = {};
 let tokenName = "角色";
 
+// 2026-05-15 — strip pictographic emoji from buff names so the manage
+// popover stays text-only (matches the palette + capture sweep). The
+// underlying buff data is left intact: legacy "麻痹 ⚡" / etc. saves
+// still load, only the rendered label drops the emoji decoration.
+function stripEmoji(s: string): string {
+  return s.replace(/\p{Extended_Pictographic}/gu, "")
+          .replace(/[\u{FE0E}\u{FE0F}\u{200D}]/gu, "")
+          .replace(/[\u{1F3FB}-\u{1F3FF}]/gu, "")
+          .replace(/\s+/g, " ")
+          .trim();
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!),
@@ -129,7 +141,8 @@ function render(): void {
   gridEl.innerHTML = myBuffs.map((b) => {
     const fg = textColorFor(b.color);
     const rounds = myBuffRounds[b.id];
-    const label = rounds > 0 ? `${b.name} ${rounds}` : b.name;
+    const cleanName = stripEmoji(b.name);
+    const label = rounds > 0 ? `${cleanName} ${rounds}` : cleanName;
     return `<div class="bubble" data-id="${escapeHtml(b.id)}"
                  style="background:${escapeHtml(b.color)};color:${escapeHtml(fg)}">${escapeHtml(label)}</div>`;
   }).join("");

@@ -1,6 +1,7 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { DiceType, DIE_SIDES, DIE_SIZE_FACTOR, sidesOf } from "./types";
 import * as sfx from "./sfx-broadcast";
+import { isVideoSkin, normalizeSkins, type DiceSkins } from "./dice-skins";
 
 // Dice-effect modal page. Multi-die + multi-type capable.
 //
@@ -96,6 +97,17 @@ function parseDice(): ParsedDie[] {
 }
 
 const dice = parseDice();
+
+// The roller's custom dice skins, passed inline by index.ts's
+// showDiceEffect() (read from OBR player metadata). Empty when the
+// roller has no skins — every die then falls back to the default art.
+function parseSkins(): DiceSkins {
+  const raw = params.get("skins");
+  if (!raw) return {};
+  try { return normalizeSkins(JSON.parse(raw)); } catch { return {}; }
+}
+const skins = parseSkins();
+
 const winnerIdx = (() => {
   const v = parseInt(params.get("winner") ?? "0", 10);
   if (!Number.isFinite(v)) return 0;
@@ -496,27 +508,53 @@ for (let i = 0; i < N_DICE; i++) {
     el.style.top = `${-size / 2}px`;
   }
 
-  // Each die uses its TYPE's PNG as the alpha mask. Custom-side dice
-  // (d7, d13, etc.) fall back to d100 art via imgTypeFor(). Build via
-  // createElement (NOT innerHTML with `style="..."`) — embedding url("...")
-  // inside a double-quoted HTML attribute terminates the attribute
-  // prematurely and the mask never applies.
-  const url = `/suite/${imgTypeFor(dice[i].type)}.png`;
-  const artBase = document.createElement("div");
-  artBase.className = "art-base";
-  artBase.style.setProperty("-webkit-mask", `url("${url}") center/contain no-repeat`);
-  artBase.style.setProperty("mask", `url("${url}") center/contain no-repeat`);
+  // Art layer. Two modes:
+  //   - Custom skin: the rolling player set their own art for this die
+  //     type (synced via player metadata). It's finished art — shown
+  //     as-is, no player-color tint / mask. webm skins animate via a
+  //     looping <video>; static skins via a background <div>.
+  //   - Default: the built-in grayscale silhouette PNG, masked + tinted
+  //     with the player color. Custom-side dice (d7, d13, …) fall back
+  //     to d100 art via imgTypeFor().
+  // Build via createElement (NOT innerHTML with style="…") — embedding
+  // url("…") inside a double-quoted HTML attribute terminates the
+  // attribute prematurely and the mask/background never applies.
+  const skin = skins[imgTypeFor(dice[i].type)];
+  if (skin) {
+    if (isVideoSkin(skin)) {
+      const vid = document.createElement("video");
+      vid.className = "art-custom";
+      vid.src = skin.url;
+      vid.autoplay = true;
+      vid.loop = true;
+      vid.muted = true;
+      vid.playsInline = true;
+      el.appendChild(vid);
+    } else {
+      const artCustom = document.createElement("div");
+      artCustom.className = "art-custom";
+      artCustom.style.background = `url("${skin.url}") center/contain no-repeat`;
+      el.appendChild(artCustom);
+    }
+  } else {
+    const url = `/suite/${imgTypeFor(dice[i].type)}.png`;
+    const artBase = document.createElement("div");
+    artBase.className = "art-base";
+    artBase.style.setProperty("-webkit-mask", `url("${url}") center/contain no-repeat`);
+    artBase.style.setProperty("mask", `url("${url}") center/contain no-repeat`);
 
-  const artFg = document.createElement("div");
-  artFg.className = "art-fg";
-  artFg.style.background = `url("${url}") center/contain no-repeat`;
+    const artFg = document.createElement("div");
+    artFg.className = "art-fg";
+    artFg.style.background = `url("${url}") center/contain no-repeat`;
+
+    el.appendChild(artBase);
+    el.appendChild(artFg);
+  }
 
   const num = document.createElement("span");
   num.className = "num";
   num.textContent = "?";
 
-  el.appendChild(artBase);
-  el.appendChild(artFg);
   el.appendChild(num);
 
   // Original-value annotation — shown only if the die was modified by

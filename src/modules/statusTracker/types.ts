@@ -92,6 +92,32 @@ export interface BuffDef {
    *  effect so multiple stacked buffs don't visually fight each
    *  other. */
   webmScale?: number;
+  /** 2026-05 — explicit "effect turned OFF" marker for a BUILT-IN buff
+   *  (one whose id is in DEFAULT_BUFFS). Built-in buffs ship with a
+   *  default `webmAsset`; the catalog editor offers a 2-way 无 / 默认
+   *  特效 toggle. Picking 无 sets `webmOff: true` + clears `webmAsset`.
+   *  Needed so the catalog loader can tell "user disabled the effect"
+   *  apart from "an old catalog simply never stored the asset" — only
+   *  the latter gets re-seeded from DEFAULT_BUFFS. Irrelevant for
+   *  custom buffs (they have no built-in default to fall back to). */
+  webmOff?: boolean;
+  /** 2026-05-14 (#2) — STATIC image icon. Set by the "以此创建状态"
+   *  right-click flow, which turns any canvas image into a buff: the
+   *  item's image becomes the buff's on-token visual. Rendered the
+   *  same way `webmAsset` is (one Image item, centre-anchored,
+   *  scale/rotation-inheritance off) but with the image's real mime
+   *  instead of "video/webm" — so a PNG/JPG/SVG/WebP renders as a
+   *  still picture rather than a (broken) video. `webmScale` also
+   *  applies to icons. When BOTH webmAsset and iconAsset are set,
+   *  webmAsset wins (it's the richer visual). */
+  iconAsset?: string;
+  /** Mime of `iconAsset` (e.g. "image/png"). Falls back to
+   *  "image/png" when unknown. */
+  iconMime?: string;
+  /** Intrinsic pixel size of `iconAsset`. Non-square images keep
+   *  their aspect ratio; missing → assumed 256×256 square. */
+  iconWidth?: number;
+  iconHeight?: number;
 }
 
 export interface ResourceItem { id: string; name: string; current: number; max: number; }

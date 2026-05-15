@@ -182,7 +182,11 @@ export function InitiativeItemRow({
         onClick={(e) => {
           e.stopPropagation();
           if (!canEdit) return;
-          setCountVal(String(count));
+          // Round here too — the manual-edit input shouldn't surface a
+          // reorder-produced fraction. Typing a whole number overrides
+          // the precise value, which is the expected manual-edit
+          // behaviour.
+          setCountVal(String(Math.round(count)));
           setEditingCount(true);
           setTimeout(() => countRef.current?.select(), 0);
         }}
@@ -199,11 +203,16 @@ export function InitiativeItemRow({
           />
         ) : displayMode === "final" ? (
           <>
-            <span className="count-display">{count + modifier}</span>
-            <span className="count-formula">({count}{modifier >= 0 ? "+" : ""}{modifier})</span>
+            {/* 2026-05-14 (#5 fix) — `count` may carry a fraction
+                (reorder mode uses fractional totals to slot a card
+                between two distinct-total neighbours). The sort uses
+                the precise value; the display rounds so the user
+                never sees "14.5". */}
+            <span className="count-display">{Math.round(count + modifier)}</span>
+            <span className="count-formula">({Math.round(count)}{modifier >= 0 ? "+" : ""}{modifier})</span>
           </>
         ) : (
-          <span className="count-display">{count}</span>
+          <span className="count-display">{Math.round(count)}</span>
         )}
       </div>
 

@@ -29,6 +29,10 @@ export const BROADCAST_END_TURN_REQUEST = `${PLUGIN_ID}/end-turn-request`;
 // initiative metadata. Independent from the existing add/remove menu so
 // the GM can flip stealth without clearing the rest of the data.
 export const CTX_INVISIBLE = `${METADATA_KEY}/invisibility`;
+// 2026-05-14 — "隐形加入先攻" GM context menu — for tokens NOT yet
+// in initiative, add them AND mark them invisible in a single click.
+// Filter mirrors CTX_TOGGLE's add path (no METADATA_KEY) restricted to GM.
+export const CTX_INVISIBLE_ADD = `${METADATA_KEY}/invisible-add`;
 // Sent INSTEAD of BROADCAST_FOCUS when the active turn lands on an
 // invisible token. Players (non-owner, non-GM) react by:
 //   1. opening the "有人在暗处" combat-effect overlay

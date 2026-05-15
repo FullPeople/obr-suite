@@ -775,6 +775,109 @@ html, body, #root { height: 100%; background: transparent; }
   border-color: rgba(255, 255, 255, 0.4);
 }
 
+/* 2026-05-14 (#5) — 更改排序 toggle. Same chrome as btn-drag-in-auto.
+   ON: solid amber so it's obvious the strip is in reorder mode.
+   OFF: quiet gray outline. */
+.btn-reorder {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  border-radius: 13px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  color: #fff;
+  transition: filter 0.12s, border-color 0.12s, background 0.12s;
+}
+.btn-reorder.off {
+  background: rgba(90, 95, 110, 0.95);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: rgba(255, 255, 255, 0.8);
+}
+.btn-reorder.off:hover {
+  background: rgba(110, 115, 130, 1);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.btn-reorder.on {
+  background: linear-gradient(135deg, #e0a52a, #c27d12);
+  border-color: rgba(245, 215, 110, 0.85);
+}
+.btn-reorder.on:hover {
+  filter: brightness(1.12);
+}
+
+/* ===================== REORDER MODE ===================== */
+/* The strip switches to click-to-pick / click-to-place. Each row is
+   wrapped with a transparent catch layer so the row's own buttons
+   don't fire — the whole card is one big pick target. Slots are thin
+   amber bars between cards (only interactive once a card is picked). */
+.initiative-list.reorder-mode {
+  cursor: default;
+}
+.reorder-wrap {
+  position: relative;
+  display: flex;
+}
+.reorder-catch {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  cursor: pointer;
+  /* faint hover wash so the pick target is discoverable */
+  background: transparent;
+  transition: background 0.12s;
+}
+.reorder-catch:hover {
+  background: rgba(245, 215, 110, 0.10);
+}
+.reorder-wrap.picked .reorder-catch,
+.reorder-wrap.picked {
+  /* picked card: amber dashed ring + slight lift */
+  outline: 2px dashed var(--accent, #f5d76e);
+  outline-offset: -2px;
+}
+.reorder-wrap.picked {
+  filter: brightness(1.06);
+}
+/* Kart-slot gap — a thin vertical bar the picked card drops into.
+   Inert (transparent, no cursor) until a card is picked AND this slot
+   isn't immediately adjacent to it. */
+.reorder-slot {
+  flex: 0 0 5px;
+  align-self: stretch;
+  min-height: 88px;
+  border-radius: 3px;
+  background: transparent;
+  transition: background 0.12s, flex-basis 0.12s;
+}
+.reorder-slot.active {
+  background: rgba(245, 215, 110, 0.28);
+  cursor: pointer;
+}
+.reorder-slot.active:hover {
+  flex-basis: 18px;
+  background: rgba(245, 215, 110, 0.7);
+}
+/* Floating arrow that tracks the cursor while a card is "in hand".
+   Anchored at the cursor tip (translate up-left a touch so the arrow
+   head sits where the user is pointing). */
+.reorder-arrow {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  color: var(--accent, #f5d76e);
+  transform: translate(-4px, -4px);
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+  animation: reorder-arrow-bob 0.9s ease-in-out infinite;
+}
+@keyframes reorder-arrow-bob {
+  0%, 100% { transform: translate(-4px, -4px); }
+  50%      { transform: translate(-4px, 1px); }
+}
+
 /* ===================== EMPTY STATE ===================== */
 .empty-state {
   flex: 1;

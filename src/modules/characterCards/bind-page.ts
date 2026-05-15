@@ -106,6 +106,39 @@ async function fetchCardBubblesSeed(cardId: string): Promise<BubblesSeed | null>
   }
 }
 
+// 2026-05-15 — auto-resource bundle from the parsed card data. The
+// server builds this in `_build_auto_resources` (one entry per non-
+// zero spell-slot level, sorcery points, special-resource tracker).
+// Each entry has the SAME shape as an OBR Resource saved on the
+// token's metadata, so we can merge it directly.
+interface AutoResource {
+  id?: string;
+  name: string;
+  type?: "count" | "bar" | "number";
+  current?: number;
+  max: number;
+  icon?: string;
+}
+async function fetchCardAutoResources(cardId: string): Promise<AutoResource[] | null> {
+  try {
+    const roomId = (OBR.room?.id || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const url = `https://obr.dnd.center/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data.json`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const d = await res.json();
+    const arr = d?.auto_resources;
+    if (!Array.isArray(arr)) return null;
+    return arr.filter((r: any): r is AutoResource =>
+      r && typeof r === "object" && typeof r.name === "string"
+      && typeof r.max === "number"
+    );
+  } catch {
+    return null;
+  }
+}
+
+const RESOURCES_KEY = "com.obr-suite/resources/data";
+
 const BUBBLES_META = "com.obr-suite/bubbles/data";
 const EXTERNAL_BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
 
@@ -117,10 +150,12 @@ async function bindTo(cardId: string | null) {
   // both fields land atomically.
   let initBonus: number | null = null;
   let bubblesSeed: BubblesSeed | null = null;
+  let autoResources: AutoResource[] | null = null;
   if (cardId) {
-    [initBonus, bubblesSeed] = await Promise.all([
+    [initBonus, bubblesSeed, autoResources] = await Promise.all([
       fetchCardInitiative(cardId),
       fetchCardBubblesSeed(cardId),
+      fetchCardAutoResources(cardId),
     ]);
   }
   try {
@@ -158,6 +193,40 @@ async function bindTo(cardId: string | null) {
           delete seed.hide;
           d.metadata[BUBBLES_META] = seed;
           if (d.metadata[EXTERNAL_BUBBLES_META] != null) d.metadata[EXTERNAL_BUBBLES_META] = seed;
+        }
+        // 2026-05-15 — auto-resource merge. Spec: only NAME + MAX is
+        // applied; if a resource with the same name already exists
+        // we update ITS MAX only (preserve current). New names get a
+        // full insert with current=max and the parser's icon hint.
+        // This way a player who's used 2/4 spell slots keeps the
+        // "2 left" state when the DM re-binds / re-parses the card.
+        if (autoResources && autoResources.length > 0) {
+          const cur = Array.isArray(d.metadata[RESOURCES_KEY])
+            ? (d.metadata[RESOURCES_KEY] as any[]).slice()
+            : [];
+          const byName = new Map<string, any>(cur.map((r) => [r?.name, r]));
+          for (const ar of autoResources) {
+            const existing = byName.get(ar.name);
+            if (existing) {
+              // Only update max. Clamp `current` down if it now
+              // exceeds the new max (e.g. multi-class re-level dropped
+              // the slot count). Leave the rest of the entry alone.
+              existing.max = ar.max;
+              if (typeof existing.current === "number" && existing.current > ar.max) {
+                existing.current = ar.max;
+              }
+            } else {
+              byName.set(ar.name, {
+                id: ar.id || `auto-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+                name: ar.name,
+                type: ar.type || "count",
+                current: typeof ar.current === "number" ? ar.current : ar.max,
+                max: ar.max,
+                icon: ar.icon || "gem",
+              });
+            }
+          }
+          d.metadata[RESOURCES_KEY] = [...byName.values()];
         }
       } else {
         delete d.metadata[BIND_META];

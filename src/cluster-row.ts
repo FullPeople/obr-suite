@@ -41,7 +41,6 @@ const BC_TIMESTOP_TOGGLE = "com.obr-suite/timestop-toggle";
 const BC_FOCUS_TRIGGER = "com.obr-suite/focus-trigger";
 const BC_BESTIARY_AUTOPOPUP = "com.bestiary/auto-popup-toggled";
 const BC_CHARCARD_AUTOPOPUP = "com.character-cards/auto-info-toggled";
-const BC_TOGGLE_CC_PANEL = "com.obr-suite/cc-panel-toggle";
 
 const LS_AUTO_BESTIARY = "com.bestiary/auto-popup";
 const LS_AUTO_CHARCARD = "character-cards/auto-info";
@@ -188,15 +187,9 @@ function renderRow() {
     );
   }
 
-  if (s.enabled.characterCards && !IS_MOBILE) {
-    parts.push(
-      btnHTML({
-        id: "btnCharCardPanel",
-        labelHtml: t(lang, "btnCharCardPanel"),
-        title: t(lang, "btnCharCardPanel"),
-      })
-    );
-  }
+  // 角色卡界面 is no longer a cluster button — it's registered as a
+  // tool-bar action (see characterCards/index.ts createAction), so it
+  // stays reachable even while a big panel covers most of the screen.
 
   parts.push(
     btnHTML({
@@ -240,9 +233,6 @@ function renderRow() {
   document
     .getElementById("btnCharCardPopup")
     ?.addEventListener("click", onCharCardPopup);
-  document
-    .getElementById("btnCharCardPanel")
-    ?.addEventListener("click", onCharCardPanel);
   document.getElementById("btnAnnounce")?.addEventListener("click", onAnnounce);
   document.getElementById("btnGear")?.addEventListener("click", onGear);
   applyAnnounceBlink();
@@ -277,15 +267,6 @@ function onCharCardPopup() {
   const next = !isAutoPopupOn(LS_AUTO_CHARCARD);
   setAutoPopupOn(LS_AUTO_CHARCARD, next, BC_CHARCARD_AUTOPOPUP);
   renderRow();
-}
-function onCharCardPanel() {
-  try {
-    OBR.broadcast.sendMessage(
-      BC_TOGGLE_CC_PANEL,
-      {},
-      { destination: "LOCAL" }
-    );
-  } catch {}
 }
 
 async function fetchAnnouncementVersion(): Promise<string | null> {

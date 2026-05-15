@@ -119,19 +119,17 @@ button.name.name-btn:disabled{opacity:0.5;cursor:wait}
 }
 .raw-link:hover{background:rgba(52,152,219,.25);color:#fff}
 
-/* === HP / Temp / AC stat banner ============================
-   One horizontal row, three shapes:
-     • HP red rounded pill — current/max with a slash separator
-     • Temp HP pink circle — small, sits next to the pill
-     • AC shield (heater shape via clip-path) — gold/blue tinted
-   All three are editable in place. Inputs inherit the parent's
-   font/color so they look like static numbers; only the focus
-   underline + the "previous-value hint" floating above on focus
-   distinguishes them from read-only display.
-   Writes patch the bound token's bubbles metadata; bubbles module
-   re-reads to redraw the HP bar + heater shield above the token. */
-.stat-banner{
-  display:flex;align-items:center;gap:8px;
+/* === HP / Temp / AC stat banner host ========================
+   The banner itself (.stat-banner + its hp-pill / temp-pill /
+   ac-pill / stat-input / stat-lock children) is the shared
+   `mountStatBanner` component — the SAME one the standalone DM
+   resource tracker mounts. It injects ALL of its own CSS at
+   runtime (src/utils/statBanner.ts), so cc-info no longer carries
+   a copy — this used to be ~175 lines of byte-identical duplicate.
+   This host element only carries the cc-info-specific chrome:
+   sticky-to-scroll-top + the opaque wash that keeps scrolling
+   content from showing through the translucent card backdrop. */
+.cc-stat-mount{
   /* Sticky to the top of the scrollable .root container. The card
      has a translucent backdrop, so we paint our own opaque-enough
      background here to keep scrolling content from showing through
@@ -142,157 +140,8 @@ button.name.name-btn:disabled{opacity:0.5;cursor:wait}
                          viewport edge while the user scrolls */
   z-index:20;
   margin:0 0 8px;
-  padding:6px 2px 4px;
   background:rgba(22,33,62,0.94);
   backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
-}
-/* Two-layer pill: dark "track" base + red "fill" pseudo-element
-   masked to current/max HP via --hp-ratio. Mirrors monster-info
-   so both panels read as HP bars + numeric editors at once. */
-.hp-pill{
-  flex:1;
-  position:relative;
-  isolation:isolate;
-  overflow:hidden;
-  display:flex;align-items:center;justify-content:center;gap:2px;
-  min-height:34px;
-  padding:0 12px;
-  background:linear-gradient(135deg,#3a1a18,#4a221d);
-  border:1px solid rgba(231,76,60,0.7);
-  border-radius:18px;
-  color:#fff;
-  font-weight:800;font-size:17px;
-  box-shadow:0 2px 6px rgba(231,76,60,0.32),0 0 0 1px rgba(0,0,0,0.18) inset;
-  letter-spacing:0.3px;
-}
-.hp-pill::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  background:linear-gradient(135deg,#c0392b,#e94560);
-  width:calc(var(--hp-ratio, 1) * 100%);
-  transition:width 0.18s ease-out;
-  z-index:0;
-  pointer-events:none;
-}
-.hp-pill > *{position:relative;z-index:1}
-.hp-pill .slash{
-  font-size:14px;font-weight:400;
-  opacity:0.55;
-  margin:0 1px;
-}
-.temp-pill{
-  flex-shrink:0;
-  width:36px;height:36px;
-  border-radius:50%;
-  background:linear-gradient(135deg,#f5a3c7,#ee7eaa);
-  border:1px solid rgba(232,138,174,0.75);
-  display:flex;align-items:center;justify-content:center;
-  color:#fff;font-weight:800;font-size:13px;
-  box-shadow:0 2px 6px rgba(232,138,174,0.30),0 0 0 1px rgba(0,0,0,0.18) inset;
-}
-.ac-pill{
-  flex-shrink:0;
-  width:38px;height:42px;
-  background:linear-gradient(135deg,#7ec8f0,#3498db);
-  border:1px solid rgba(52,152,219,0.7);
-  /* Heater-shield silhouette. Top is straight; bottom comes to a
-     point. Padding-bottom shifts the centred number up so it doesn't
-     fall in the narrow tip. */
-  clip-path:polygon(0% 8%,100% 8%,100% 60%,50% 100%,0% 60%);
-  display:flex;align-items:center;justify-content:center;
-  color:#fff;font-weight:800;font-size:14px;
-  padding-bottom:8px;
-  filter:drop-shadow(0 2px 4px rgba(52,152,219,0.40));
-}
-
-/* Editable cell — wraps each input + its "previous value" hint that
-   pops above on focus so the user can still see the old number while
-   typing the new one. */
-.stat-cell{
-  position:relative;
-  display:flex;align-items:center;justify-content:center;
-  cursor:text;
-}
-.hp-pill .stat-cell{flex:1;align-self:stretch}
-.hp-pill .slash{pointer-events:none}
-.temp-pill,.ac-pill{cursor:text}
-.stat-cell .prev-hint{
-  position:absolute;
-  left:50%;bottom:calc(100% + 3px);
-  transform:translateX(-50%);
-  font-size:9.5px;font-weight:700;
-  color:rgba(255,255,255,0.92);
-  background:rgba(7,19,32,0.78);
-  padding:1px 6px;
-  border-radius:8px;
-  pointer-events:none;
-  white-space:nowrap;
-  opacity:0;
-  transition:opacity .12s, transform .12s;
-  z-index:20;
-  letter-spacing:0.3px;
-}
-.stat-cell.editing .prev-hint{
-  opacity:1;
-  transform:translateX(-50%) translateY(-2px);
-}
-.stat-input{
-  background:transparent;
-  border:none;
-  color:inherit;
-  font-family:inherit;font-weight:inherit;font-size:inherit;
-  text-align:center;
-  outline:none;
-  padding:0;
-  /* Inputs now fill their parent cell so a click ANYWHERE on the
-     pill focuses the editor — was previously a 1.5em-wide narrow
-     hit area centred on the digits, which was fiddly to land on
-     during combat. The cell's `cursor:text` keeps the affordance
-     legible. */
-  font-variant-numeric:tabular-nums;
-  width:100%;height:100%;
-  cursor:text;
-  caret-color:rgba(255,255,255,0.9);
-}
-.stat-input:focus{
-  /* No border / background change — only a subtle underline so the
-     edit affordance doesn't disrupt the shape outline. */
-  text-decoration:underline;
-  text-decoration-color:rgba(255,255,255,0.65);
-  text-decoration-thickness:1px;
-  text-underline-offset:2px;
-}
-
-/* Lock button at right end of stat banner. DM-only — rendered
-   conditionally by info-page.ts when role === GM. Closed lock
-   (data-locked="true") = combat-gated for players; open lock
-   (data-locked="false") = all-visible. */
-.stat-lock{
-  flex-shrink:0;
-  width:28px;height:28px;
-  display:flex;align-items:center;justify-content:center;
-  background:rgba(190,24,24,0.38);
-  border:1px solid rgba(248,113,113,0.95);
-  border-radius:7px;
-  cursor:pointer;
-  color:#fecaca;
-  box-shadow:0 0 0 2px rgba(127,29,29,0.28),0 0 12px rgba(248,113,113,0.35);
-  margin-left:auto;
-  padding:0;
-  transition:filter .12s, background .12s, border-color .12s, color .12s;
-}
-.stat-lock:hover{filter:brightness(1.18)}
-.stat-lock[data-locked="false"]{
-  background:transparent;
-  border-color:transparent;
-  color:rgba(255,255,255,0.48);
-  box-shadow:none;
-}
-/* Open shackle look — drop the right vertical of the U so the icon
-   visually opens. Pure CSS toggle on the path inside the SVG. */
-.stat-lock[data-locked="false"] .lock-shackle{
-  d:path("M5 7 V5 a3 3 0 0 1 6 0");
 }
 .row{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-bottom:6px}
 .chip{

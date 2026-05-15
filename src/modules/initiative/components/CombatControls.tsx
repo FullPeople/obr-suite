@@ -19,6 +19,29 @@ interface Props {
   onNextTurn: () => void;
   onEndCombat: () => void;
   lang: Lang;
+  // 2026-05-14 (#5) — manual reorder mode toggle. ON = the initiative
+  // strip enters click-to-pick / click-to-place mode (kart-slot gaps).
+  // GM-only; shown during prep + combat (when there's a list to sort).
+  reorderMode: boolean;
+  onToggleReorder: () => void;
+}
+
+function ReorderButton({
+  reorderMode,
+  onToggle,
+  lang,
+}: { reorderMode: boolean; onToggle: () => void; lang: Lang }) {
+  return (
+    <button
+      type="button"
+      className={`btn btn-reorder ${reorderMode ? "on" : "off"}`}
+      onClick={onToggle}
+      title={t(lang, "reorderTitle")}
+      aria-pressed={reorderMode}
+    >
+      {t(lang, reorderMode ? "reorderOn" : "reorderOff")}
+    </button>
+  );
 }
 
 function DragInAutoButton({
@@ -51,6 +74,8 @@ export function CombatControls({
   onNextTurn,
   onEndCombat,
   lang,
+  reorderMode,
+  onToggleReorder,
 }: Props) {
   // Idle: two buttons side by side — "战斗准备" (yellow) + "突袭" (red)
   if (!combatState.inCombat && !combatState.preparing) {
@@ -84,6 +109,7 @@ export function CombatControls({
       <div className="combat-controls">
         <div className="prep-controls">
           <DragInAutoButton dragInAuto={dragInAuto} onToggle={onToggleDragInAuto} lang={lang} />
+          {hasItems && <ReorderButton reorderMode={reorderMode} onToggle={onToggleReorder} lang={lang} />}
           <button
             className="btn btn-start"
             onClick={onStartCombat}
@@ -107,6 +133,7 @@ export function CombatControls({
     <div className="combat-controls">
       <div className="turn-controls">
         <DragInAutoButton dragInAuto={dragInAuto} onToggle={onToggleDragInAuto} lang={lang} />
+        {hasItems && <ReorderButton reorderMode={reorderMode} onToggle={onToggleReorder} lang={lang} />}
         <button className="btn btn-prev" onClick={onPrevTurn}>
           {t(lang, "prev")}
         </button>

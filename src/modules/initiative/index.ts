@@ -1,14 +1,28 @@
 import OBR from "@owlbear-rodeo/sdk";
+// 2026-05-14 — drag-in auto-roll uses broadcastDiceRoll directly so
+// the dice value lands on canvas (visual animation + history entry)
+// instead of being a silent metadata write. Hidden flag mirrors
+// CTX_INVISIBLE behaviour: invisible tokens get a dark roll.
+import { broadcastDiceRoll, isGlobalDarkRollEnabled } from "../dice/index";
 import {
   METADATA_KEY,
   OPTED_OUT_KEY,
   COMBAT_STATE_KEY,
   BROADCAST_OPEN_PANEL,
   BROADCAST_CLOSE_PANEL,
-  NEW_ITEM_DIALOG_ID,
   CTX_INVISIBLE,
+  CTX_INVISIBLE_ADD,
 } from "./utils/constants";
+// 2026-05-14 — auto-roll initiative on drag-in needs the dex-mod
+// metadata key that bind-page seeds when binding a character card.
+// Source-of-truth is utils/metadata.ts; we inline the string here to
+// avoid a circular import.
+const INIT_DEXMOD_META = "com.initiative-tracker/dexMod";
 import { Lang, t } from "./utils/i18n";
+// 2026-05-14 (#5 sortfix) — shared modifier-biased tiebreak generator.
+// Lives in utils/metadata.ts (a pure util file) so this background
+// module can import it without pulling in the React-hook file.
+import { genTiebreak } from "./utils/metadata";
 import {
   startSceneSync as startSuiteSync,
   getLocalLang,
@@ -22,6 +36,14 @@ import { assetUrl } from "../../asset-base";
 // `item.visible = false`.
 import { clearStealthOverlays } from "./utils/visualEffects";
 import { onViewportResize } from "../../utils/viewportAnchor";
+// 2026-05-14 — defer the gather move into the portals module's blink
+// handshake so the position update happens AT eyelid apex. Without
+// this, fog/wall plugins (Dynamic Fog, Smoke & Spectre) reject any
+// token carrying a light/vision source — the wall plugin sees a
+// straight line from origin to gather point and snaps the token back.
+// openBlinkAndGather strips meta + hides attachments + hides tokens
+// while the eyelid is closed, identical to a portal teleport.
+import { openBlinkAndGather } from "../portals/index";
 // STABLE_HIDES previously gated the stealth context menu — that
 // menu was deleted 2026-05-04 (see registerContextMenus). Import
 // removed.
@@ -77,7 +99,11 @@ function getDragInAutoEnabled(): boolean {
 
 const POPOVER_ID = "com.obr-suite/initiative-panel";
 const PANEL_URL = assetUrl("initiative-panel.html");
-const NEW_ITEM_URL = assetUrl("initiative-new-item.html");
+// 2026-05-14 — initiative-new-item.html (set-initiative modal) is no
+// longer opened from this module; drag-in now auto-rolls without a
+// popup. The HTML file is kept on disk for backward compat in case
+// any older surface still links to it, but no JS in this module
+// references it.
 const ICON_URL = assetUrl("initiative-icon.svg");
 
 // Hover-ring auto-hide watchdog. The previous round tried a broadcast
@@ -233,6 +259,7 @@ async function registerContextMenus(lang: Lang) {
   try { await OBR.contextMenu.remove(CTX_TOGGLE); } catch {}
   try { await OBR.contextMenu.remove(CTX_GATHER); } catch {}
   try { await OBR.contextMenu.remove(CTX_INVISIBLE); } catch {}
+  try { await OBR.contextMenu.remove(CTX_INVISIBLE_ADD); } catch {}
 
   await OBR.contextMenu.create({
     id: CTX_TOGGLE,
@@ -291,11 +318,17 @@ async function registerContextMenus(lang: Lang) {
       } else {
         await OBR.scene.items.updateItems(ids, (drafts) => {
           for (const d of drafts) {
+            // 2026-05-14 (#5 sortfix) — modifier-biased tiebreak so
+            // same-total ties default to "higher initiative modifier
+            // first" (the dropped 3rd sort tier's job). dexMod is
+            // read off the token's own metadata.
+            const dexMod = typeof (d.metadata as any)[INIT_DEXMOD_META] === "number"
+              ? (d.metadata as any)[INIT_DEXMOD_META] as number : 0;
             d.metadata[METADATA_KEY] = {
               count: 0,
               active: false,
               rolled: false,
-              tiebreak: Math.random(),
+              tiebreak: genTiebreak(dexMod),
               ownerId: d.createdUserId,
             };
             delete d.metadata[OPTED_OUT_KEY];
@@ -343,34 +376,39 @@ async function registerContextMenus(lang: Lang) {
       }
 
       const ids = items.map((i) => i.id);
-      await OBR.scene.items.updateItems(ids, (drafts) => {
-        drafts.forEach((d, idx) => {
-          if (positions[idx]) d.position = positions[idx];
-        });
-      });
-      // 2026-05-12 — broadcast "blink + focus" to every client so all
-      // players get the same cinematic the DM does. The portals
-      // module owns the modal + camera math (it already uses the
-      // exact recipe for portal teleports); we just tell it WHERE.
-      // Each client honours its own LS_BLINK_KEY (portal blink
-      // toggle in the portals settings tab) — blink off skips the
-      // modal but still smooth-pans the camera.
+
+      // 2026-05-14 — defer the actual position update into the blink
+      // handshake (openBlinkAndGather opens the blink modal, then at
+      // eyelid apex runs the fog-bypass move recipe identical to a
+      // portal teleport). Without this the move happens BEFORE the
+      // eyelid covers the screen, so:
+      //   1. Players see the token snap visibly before the blink.
+      //   2. Tokens with light sources / vision (Dynamic Fog, Smoke &
+      //      Spectre) get rejected and snapped back by the wall plugin.
+      // Each client honours its own LS_BLINK_KEY:
+      //   • DM blink ON — eyelid + instant camera + fog-bypass move at apex
+      //   • DM blink OFF — fog-bypass move + smooth camera (no eyelid)
+      //   • Player blink ON — eyelid + instant camera setPosition at apex
+      //     (positions sync from DM's updateItems during their blink)
+      //   • Player blink OFF — smooth camera animateTo (no eyelid)
+      // The REMOTE broadcast is camera-only blink; the DM's
+      // moveTokensWithFogBypass syncs positions to all players via
+      // OBR's normal item replication.
       try {
         const payload = { x: center.x, y: center.y };
-        await Promise.all([
-          OBR.broadcast.sendMessage(
-            "com.obr-suite/portals/blink-and-focus",
-            payload,
-            { destination: "LOCAL" },
-          ),
-          OBR.broadcast.sendMessage(
-            "com.obr-suite/portals/blink-and-focus",
-            payload,
-            { destination: "REMOTE" },
-          ),
-        ]);
+        await OBR.broadcast.sendMessage(
+          "com.obr-suite/portals/blink-and-focus",
+          payload,
+          { destination: "REMOTE" },
+        );
       } catch (e) {
-        console.warn("[obr-suite/initiative] gather broadcast failed", e);
+        console.warn("[obr-suite/initiative] gather REMOTE broadcast failed", e);
+      }
+      // DM (this client): open blink + do the actual move + camera.
+      try {
+        await openBlinkAndGather(ids, positions, center);
+      } catch (e) {
+        console.error("[obr-suite/initiative] openBlinkAndGather failed", e);
       }
     },
   });
@@ -459,6 +497,60 @@ async function registerContextMenus(lang: Lang) {
           // Toggle native visibility in lockstep. Reveal restores
           // visible=true; mark-invisible flips it false.
           d.visible = !willBeInvisible;
+        }
+      });
+    },
+  });
+
+  // 2026-05-14 — "隐形加入先攻" GM-only context menu. For tokens not
+  // yet in initiative, this is a one-click "add to initiative + flip
+  // invisible". Filter mirrors CTX_TOGGLE's add path (no METADATA_KEY)
+  // but restricts to GM. Handler does both writes in one updateItems
+  // call so the panel sees a single state transition.
+  await OBR.contextMenu.create({
+    id: CTX_INVISIBLE_ADD,
+    icons: [
+      {
+        icon: ICON_URL,
+        label: t(lang, "invisibleAddToInitiative"),
+        filter: {
+          roles: ["GM"],
+          every: [
+            { key: ["metadata", METADATA_KEY], value: undefined },
+          ],
+          some: [
+            { key: "layer", value: "CHARACTER" },
+          ],
+        },
+      },
+    ],
+    onClick: async (context) => {
+      const charItems = context.items.filter(
+        (item) => item.layer === "CHARACTER",
+      );
+      if (charItems.length === 0) return;
+      const ids = charItems.map((i) => i.id);
+      // Single write: add the standard initiative metadata blob with
+      // `invisible: true` baked in, AND flip item.visible = false so
+      // OBR's native per-client visibility hides the token from
+      // non-GM / non-owner clients (same matrix CTX_INVISIBLE uses
+      // for marking an existing initiative entry stealth).
+      await OBR.scene.items.updateItems(ids, (drafts) => {
+        for (const d of drafts) {
+          // 2026-05-14 (#5 sortfix) — modifier-biased tiebreak (see
+          // the CTX_TOGGLE add path above for the rationale).
+          const dexMod = typeof (d.metadata as any)[INIT_DEXMOD_META] === "number"
+            ? (d.metadata as any)[INIT_DEXMOD_META] as number : 0;
+          d.metadata[METADATA_KEY] = {
+            count: 0,
+            active: false,
+            rolled: false,
+            tiebreak: genTiebreak(dexMod),
+            ownerId: d.createdUserId,
+            invisible: true,
+          };
+          delete d.metadata[OPTED_OUT_KEY];
+          d.visible = false;
         }
       });
     },
@@ -597,12 +689,25 @@ export async function setupInitiative(): Promise<void> {
           return;
         }
 
-        // Drag-in auto-add toggle (per-GM localStorage). Read each tick so
+        // Auto-add toggle (per-GM localStorage). Read each tick so
         // toggling the button takes effect immediately. When OFF we still
         // refresh the known-id set so the GM doesn't get a flood of prompts
         // when re-enabling later.
+        //
+        // 2026-05-14 — replaced the old modal popup with an auto-roll:
+        // each new token enters with a fresh 1d20 + dex-mod result and
+        // is added straight into initiative. If the token landed
+        // already invisible (`item.visible === false` — e.g. dragged in
+        // from a hidden zone), it joins with `data.invisible = true`
+        // so the panel hides its value from non-owner clients (same
+        // matrix CTX_INVISIBLE uses for marking an existing entry).
         const dragInAuto = getDragInAutoEnabled();
         if (dragInAuto) {
+          // Collect IDs first so we can batch one updateItems call —
+          // multiple drag-ins at the same time (e.g. selecting a party
+          // and dropping it on the map) shouldn't fire N writes.
+          type Entry = { id: string; mod: number; invisible: boolean };
+          const toAdd: Entry[] = [];
           for (const item of characterItems) {
             if (
               !knownItemIds.has(item.id) &&
@@ -610,15 +715,85 @@ export async function setupInitiative(): Promise<void> {
               !item.metadata[OPTED_OUT_KEY]
             ) {
               knownItemIds.add(item.id);
-              const curLang = (getLocalLang() as Lang) ?? "zh";
-              OBR.modal.open({
-                id: NEW_ITEM_DIALOG_ID,
-                url: `${NEW_ITEM_URL}?itemId=${item.id}&itemName=${encodeURIComponent(
-                  item.name
-                )}&lang=${curLang}`,
-                width: 300,
-                height: 200,
+              const m = (item.metadata as any)[INIT_DEXMOD_META];
+              const mod = typeof m === "number" && Number.isFinite(m) ? m : 0;
+              toAdd.push({
+                id: item.id,
+                mod,
+                invisible: item.visible === false,
               });
+            }
+          }
+          if (toAdd.length > 0) {
+            // Roll the d20 for each token UP FRONT so the metadata
+            // write and the broadcast use the exact same number — if
+            // we rolled twice (once in metadata, once in broadcast)
+            // the dice on canvas would show one number while the panel
+            // showed another. We attach the roll to each entry then
+            // both consumers read from there.
+            type EntryWithRoll = Entry & { d20: number };
+            const rolled: EntryWithRoll[] = toAdd.map((e) => ({
+              ...e,
+              d20: Math.floor(Math.random() * 20) + 1,
+            }));
+            const ids = rolled.map((e) => e.id);
+            await OBR.scene.items.updateItems(ids, (drafts) => {
+              for (const d of drafts) {
+                const entry = rolled.find((e) => e.id === d.id);
+                if (!entry) continue;
+                // 2026-05-14 (#5 sortfix) — store the RAW d20 as
+                // `count`. The panel + sort add `modifier` (the dex
+                // mod) on top at display/sort time, so storing
+                // d20+mod here would DOUBLE-COUNT the modifier
+                // (total = count + modifier = d20 + 2·mod). This
+                // matches bestiary fireInitiative + rollInitiativeLocal,
+                // which both store raw d20.
+                d.metadata[METADATA_KEY] = {
+                  count: entry.d20,
+                  active: false,
+                  rolled: true,
+                  // modifier-biased tiebreak — same-total ties default
+                  // to "higher dex first".
+                  tiebreak: genTiebreak(entry.mod),
+                  ownerId: d.createdUserId,
+                  invisible: entry.invisible,
+                };
+                delete d.metadata[OPTED_OUT_KEY];
+                // If the token is already invisible at drag-in, leave
+                // item.visible alone — the GM set it that way on
+                // purpose. data.invisible = true ensures the panel
+                // hides the entry from non-owner clients.
+              }
+            });
+            // Fire one dice broadcast per token so each gets its own
+            // canvas dice animation anchored to its position. Hidden
+            // (dark) roll when the token is invisible — players don't
+            // see the value, but their clients still play the SFX.
+            // autoDismiss so the dice fade away after climax rather
+            // than lingering. Errors here are non-fatal — the
+            // metadata write above is the source of truth.
+            let rollerId = "";
+            try { rollerId = await OBR.player.getId(); } catch {}
+            // Dark roll when the token is invisible OR when the DM
+            // has 全局暗骰 toggle on — same gate every other roll
+            // path uses so players don't see auto-init values that
+            // the DM is currently hiding.
+            const globalDark = isGlobalDarkRollEnabled();
+            for (const entry of rolled) {
+              try {
+                await broadcastDiceRoll({
+                  itemId: entry.id,
+                  dice: [{ type: "d20", value: entry.d20 }],
+                  winnerIdx: 0,
+                  modifier: entry.mod,
+                  label: t(lastLang, "initiative"),
+                  rollerId,
+                  hidden: entry.invisible || globalDark,
+                  autoDismiss: true,
+                });
+              } catch (e) {
+                console.warn("[obr-suite/initiative] auto-roll broadcast failed", e);
+              }
             }
           }
         }
@@ -633,6 +808,7 @@ export async function teardownInitiative(): Promise<void> {
   try { await OBR.contextMenu.remove(CTX_TOGGLE); } catch {}
   try { await OBR.contextMenu.remove(CTX_GATHER); } catch {}
   try { await OBR.contextMenu.remove(CTX_INVISIBLE); } catch {}
+  try { await OBR.contextMenu.remove(CTX_INVISIBLE_ADD); } catch {}
   for (const u of unsubs.splice(0)) u();
   knownItemIds.clear();
   try { await clearStealthOverlays(); } catch {}

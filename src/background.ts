@@ -13,8 +13,10 @@ import { setupDice, teardownDice } from "./modules/dice";
 import { setupPortals, teardownPortals } from "./modules/portals";
 import { setupTrickster, teardownTrickster } from "./modules/trickster";
 import { setupCircleImage, teardownCircleImage } from "./modules/circleImage";
-import { setupFollow, teardownFollow } from "./modules/follow";
-import { setupResourceTracker } from "./modules/resourceTracker";
+// 2026-05-14 — Follow plugin retired from the dev build per user
+// request. The modules/follow/ source stays on disk (un-wired) in
+// case it's revived later; it's just no longer registered.
+import { setupResourceTracker, teardownResourceTracker } from "./modules/resourceTracker";
 import { setupBubbles, teardownBubbles } from "./modules/bubbles";
 import { setupStatusTracker, teardownStatusTracker } from "./modules/statusTracker";
 import { setupHpBar, teardownHpBar } from "./modules/hpBar";
@@ -557,6 +559,7 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
     teardown: async () => { teardownMetadataInspector(); },
   },
   statusTracker: { setup: setupStatusTracker, teardown: teardownStatusTracker },
+  resourceTracker: { setup: setupResourceTracker, teardown: teardownResourceTracker },
   search: { setup: setupSearch, teardown: teardownSearch },
   // Trickster + circle-image promoted from dev to stable on 2026-05-08.
   trickster: { setup: setupTrickster, teardown: teardownTrickster },
@@ -569,9 +572,7 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
           setup: async () => { await setupFullFog(); },
           teardown: async () => { await teardownFullFog(); },
         },
-        // Follow plugin — dev-only on first ship; promote once
-        // cycles / dead-target / cross-scene scenarios are tested.
-        follow: { setup: setupFollow, teardown: teardownFollow },
+        // 2026-05-14 — `follow` removed here per user request.
       }),
 };
 
@@ -656,15 +657,9 @@ OBR.onReady(async () => {
   // we always run it; it's a no-op when the user hasn't enabled it.
   void setupPerfWindow();
 
-  // Resource tracker — owns the lifecycle of the edit modal that
-  // pops out of the bestiary / character-card panels. Setup just
-  // wires four broadcast listeners; nothing happens until the
-  // resource-tracker UI inside a popover broadcasts an open
-  // request, so it's safe to always run.
-  // 2026-05-13 — Resource tracker graduated from dev-only to stable;
-  // the panel-side mount in monster-info-page.ts + cc info-page.ts
-  // no longer gates on STABLE_HIDES.
-  void setupResourceTracker();
+  // (resourceTracker is now wired through the module registry above —
+  // its enable flag lives in state.enabled.resourceTracker and is
+  // toggled in Settings → 资源追踪.)
 
   // (metadataInspector is now wired through the module registry —
   // its enable flag lives in state.enabled.metadataInspector and is

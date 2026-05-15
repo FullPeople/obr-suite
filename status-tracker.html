@@ -110,7 +110,8 @@ html,body{
 /* 2026-05-10 flat-modern revision — gradients + ::before specular
    highlights removed. Buttons now use plain solid colour fills with a
    simple hover/on state, matching contemporary flat-design toolbars. */
-.toolbar button{
+.toolbar button,
+.toolbar a.tb-link{
   flex:1 1 0;
   background:transparent;
   border:none;
@@ -121,8 +122,10 @@ html,body{
   display:inline-flex;align-items:center;justify-content:center;gap:5px;
   position:relative;
   transition:color .12s ease, background .12s ease;
+  text-decoration:none;
 }
-.toolbar button:hover{
+.toolbar button:hover,
+.toolbar a.tb-link:hover{
   color:var(--text);
   background:rgba(255,255,255,0.06);
 }
@@ -210,11 +213,89 @@ body.edit-mode .head .ttl::after{
   0%,100%{ opacity:0.55; }
   50%   { opacity:1; }
 }
-.toolbar button svg{
+.toolbar button svg,
+.toolbar .tb-link svg{
+  /* The .tb-link is an <a>, not a <button> — without listing it here
+     its <svg> (viewBox-only, no width/height attrs) renders at the
+     browser default size and blows the toolbar row out / wraps it. */
   width:13px;height:13px;flex-shrink:0;
   pointer-events:none;
 }
 /* tb-sp width override — see .toolbar .tb-sp at the top for the jelly version. */
+
+/* ====================================================================
+   PRESETS BAR (2026-05-15). One chip per saved preset — click for the
+   action menu (overwrite-all / merge-all / delete), drag for per-token
+   drop. Lives between the toolbar and the filters. */
+.presets-bar{
+  display:flex;flex-wrap:wrap;align-items:center;gap:4px;
+  padding:5px 8px;
+  background:rgba(0,0,0,0.20);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+  min-height:30px;
+  position:relative;
+}
+.presets-bar .presets-lbl{
+  font-size:9.5px;color:var(--text-dim);letter-spacing:0.5px;
+  font-weight:700;text-transform:uppercase;
+  padding:0 4px 0 0;
+}
+.presets-bar .presets-empty{
+  font-size:10.5px;color:var(--text-mute);
+  letter-spacing:0.2px;
+  flex:1;
+}
+.presets-bar .preset-chip{
+  display:inline-flex;align-items:center;gap:3px;
+  padding:2px 4px 2px 8px;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  font-size:11px;color:var(--text);font-family:inherit;
+  cursor:pointer;user-select:none;
+  transition:background .12s,border-color .12s;
+}
+.presets-bar .preset-chip:hover{
+  background:rgba(93,173,226,0.16);
+  border-color:rgba(93,173,226,0.42);
+}
+.presets-bar .preset-chip .pre-count{
+  font-size:9.5px;color:var(--text-dim);
+  font-family:ui-monospace,Consolas,monospace;
+  padding:0 4px;
+  background:rgba(255,255,255,0.06);
+  margin-left:2px;
+}
+.presets-bar .preset-save{
+  margin-left:auto;
+  background:rgba(46,204,113,0.18);
+  border:1px solid rgba(46,204,113,0.45);
+  color:#7be0a0;font-size:11px;font-family:inherit;font-weight:700;
+  padding:3px 9px;cursor:pointer;
+  transition:background .12s,color .12s;
+}
+.presets-bar .preset-save:hover{
+  background:rgba(46,204,113,0.30);color:#a8efb8;
+}
+.preset-menu{
+  position:absolute;z-index:30;
+  background:var(--bg);
+  border:1px solid var(--border-strong);
+  box-shadow:0 8px 24px rgba(0,0,0,0.55);
+  display:flex;flex-direction:column;
+  min-width:170px;
+  font-size:11.5px;
+}
+.preset-menu button{
+  background:transparent;border:none;color:var(--text);
+  font-family:inherit;font-size:11.5px;font-weight:600;
+  padding:7px 12px;text-align:left;cursor:pointer;
+  border-bottom:1px solid var(--border);
+  transition:background .12s,color .12s;
+}
+.preset-menu button:last-child{border-bottom:none}
+.preset-menu button:hover{background:rgba(93,173,226,0.20);color:#7ec8f0}
+.preset-menu button.danger:hover{background:rgba(231,76,60,.20);color:#ff7a6b}
 
 /* ====================================================================
    FILTERS (apply-mode = category filter row; edit-mode = editable
@@ -512,171 +593,35 @@ body.edit-mode .bubble.drop-after{
 }
 
 /* ====================================================================
-   2026-05-14 — WebM-effect picker block inside the buff edit popup.
-   Two columns: preview thumbnail (live-looping WebM) on the left,
-   filename + action buttons on the right. */
-.pop-webm-row{
-  display:flex; align-items:center; gap:8px;
-  padding:4px 0;
+   2026-05 — WebM-effect controls inside the buff edit popup.
+   Built-in buffs get a 2-way 无 / 默认特效 segmented toggle; custom
+   buffs get only the grey hint. The old prebuilt-variant library
+   modal + 更换 button were removed per user request. */
+.pop-webm-seg-row{
+  display:flex; gap:6px;
+  padding:2px 0;
 }
-.pop-webm-preview{
-  flex:0 0 48px;
-  width:48px; height:48px;
-  background:var(--bg-strong);
-  border:1px solid var(--border);
-  border-radius:6px;
-  overflow:hidden;
-  display:flex; align-items:center; justify-content:center;
-  position:relative;
-}
-.pop-webm-preview video{
-  width:100%; height:100%; object-fit:cover;
-  background:transparent;
-}
-.pop-webm-none{
-  color:var(--text-mute);
-  font-size:11px; font-weight:600;
-  text-align:center;
-}
-.pop-webm-info{
-  flex:1; min-width:0;
-  display:flex; flex-direction:column; gap:4px;
-}
-.pop-webm-name{
-  font-size:10.5px; font-weight:600;
-  color:var(--text-dim);
-  font-family:ui-monospace, Consolas, monospace;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-}
-.pop-webm-buttons{display:flex; gap:4px}
-.pop-webm-change, .pop-webm-clear{
+.pop-webm-seg{
   flex:1;
-  background:transparent;
-  border:1px solid var(--border-strong);
-  color:var(--text-dim);
-  font-family:inherit; font-size:10.5px; font-weight:700;
-  height:22px; padding:0 8px; border-radius:4px;
-  cursor:pointer;
-}
-.pop-webm-change:hover{color:var(--accent-dim); border-color:var(--accent)}
-.pop-webm-clear:hover:not(:disabled){color:var(--text); border-color:var(--border-strong)}
-.pop-webm-clear:disabled{opacity:0.4; cursor:not-allowed}
-
-/* ====================================================================
-   Variant browser modal — fullscreen overlay (z-index above popup),
-   grid of thumbnails grouped by template. Players pick by clicking
-   a thumbnail. */
-.buff-fx-picker-overlay{
-  position:fixed; inset:0;
-  background:rgba(0,0,0,0.65);
-  z-index:9999;
-  display:flex; align-items:center; justify-content:center;
-  padding:16px;
-}
-.bfp-card{
-  width:min(720px, 94vw);
-  max-height:90vh;
-  background:var(--bg);
-  border:1px solid var(--border-strong);
-  border-radius:10px;
-  box-shadow:0 12px 40px rgba(0,0,0,0.6);
-  display:flex; flex-direction:column;
-  overflow:hidden;
-}
-.bfp-hdr{
-  display:flex; align-items:center; justify-content:space-between;
-  padding:10px 14px;
-  border-bottom:1px solid var(--border);
-}
-.bfp-title{font-size:13px; font-weight:700; color:var(--text)}
-.bfp-x{
-  width:24px; height:24px;
-  background:transparent; border:none;
-  color:var(--text-dim); font-size:18px; line-height:1;
-  cursor:pointer; border-radius:4px;
-}
-.bfp-x:hover{background:var(--bg-strong); color:var(--text)}
-.bfp-filters{
-  display:flex; flex-wrap:wrap; gap:6px;
-  padding:10px 14px;
-  border-bottom:1px solid var(--border);
-}
-.bfp-tmpl{
   background:var(--bg-strong);
   border:1px solid var(--border);
   color:var(--text-dim);
   font-family:inherit; font-size:11px; font-weight:700;
-  padding:4px 12px; border-radius:4px;
+  height:26px; padding:0 8px; border-radius:5px;
   cursor:pointer;
-  letter-spacing:0.4px;
+  transition:color .12s, border-color .12s, background .12s;
 }
-.bfp-tmpl:hover{color:var(--text); border-color:var(--border-strong)}
-.bfp-tmpl.on{
+.pop-webm-seg:hover{ color:var(--text); border-color:var(--border-strong); }
+.pop-webm-seg.on{
   background:var(--bg-card);
   border-color:var(--accent);
   color:var(--accent-dim);
   box-shadow:inset 0 -2px 0 0 var(--accent);
 }
-.bfp-grid{
-  flex:1; min-height:0;
-  overflow-y:auto;
-  padding:12px 14px;
-  display:grid;
-  grid-template-columns:repeat(auto-fill, minmax(96px, 1fr));
-  gap:10px;
-}
-.bfp-cell{
-  position:relative;
-  background:var(--bg-strong);
-  border:1.5px solid transparent;
-  border-radius:6px;
-  padding:6px;
-  cursor:pointer;
-  display:flex; flex-direction:column; align-items:center; gap:4px;
-  transition:border-color .12s, background .12s;
-}
-.bfp-cell:hover{
-  background:var(--bg-card);
-  border-color:var(--border-strong);
-}
-.bfp-cell.bfp-current{
-  border-color:var(--accent);
-  background:rgba(74, 165, 217, 0.10);
-}
-.bfp-cell.bfp-current::after{
-  content:"✓";
-  position:absolute; top:2px; right:6px;
-  color:var(--accent);
-  font-size:14px; font-weight:900;
-}
-.bfp-thumb{
-  width:100%; aspect-ratio:1/1;
-  object-fit:contain;
-  background:repeating-linear-gradient(45deg,
-    rgba(255,255,255,0.025) 0 6px,
-    transparent 6px 12px);
-  border-radius:4px;
-}
-.bfp-cell-label{
-  font-size:10px; font-weight:600;
-  text-align:center;
-  color:var(--text-dim);
-  font-family:ui-monospace, Consolas, monospace;
-  line-height:1.25;
-  word-break:break-all;
-}
-.bfp-cell-label em{
-  font-style:normal;
+.pop-webm-hint{
+  font-size:10px; line-height:1.5;
   color:var(--text-mute);
-  font-size:9px;
-}
-.bfp-cell-none .bfp-none-icon{
-  width:100%; aspect-ratio:1/1;
-  display:flex; align-items:center; justify-content:center;
-  font-size:36px; color:var(--text-mute);
-  background:var(--bg);
-  border:1px dashed var(--border);
-  border-radius:4px;
+  padding:4px 0 2px;
 }
 
 .pop-actions{padding-top:1px}
@@ -763,6 +708,17 @@ body.edit-mode .bubble.drop-after{
       </svg>
       <span>导入</span>
     </button>
+    <span class="tb-sp"></span>
+    <!-- Buff Studio — external web tool for making buff-effect WebMs.
+         Status-tracker buffs render from WebM/image assets, so this is
+         where users go to author new ones. Opens in a new tab. -->
+    <a class="tb-link" href="https://obr.dnd.center/studio/buff-studio/" target="_blank" rel="noopener"
+       title="打开 Buff Studio：在线制作 buff 特效（多图层合成 / GIF·视频转 WebM），导出后放进 buff 库">
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 2.5l1.6 3.3 3.6.5-2.6 2.5.6 3.6L8 11.2 4.8 12.9l.6-3.6L2.8 6.8l3.6-.5z"/>
+      </svg>
+      <span>特效工坊</span>
+    </a>
     <input id="fileImport" type="file" accept=".json,application/json"/>
   </div>
   <div class="filters" id="filters"></div>
@@ -770,8 +726,16 @@ body.edit-mode .bubble.drop-after{
   <div class="foot" id="foot">
     <div class="foot-line"><b>左键</b>拖到目标释放 = 应用 buff</div>
     <div class="foot-line"><b>右键</b>拖过角色 = 路径切换 (有则去)</div>
-    <div class="foot-line"><b>左键</b>拖红色 ✕ = 单个清除</div>
-    <div class="foot-line"><b>右键</b>拖红色 ✕ = 路径全清</div>
+    <div class="foot-line"><b>左键</b>拖红色
+      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none"
+           stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+           style="vertical-align:-2px;margin:0 3px"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      = 单个清除</div>
+    <div class="foot-line"><b>右键</b>拖红色
+      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none"
+           stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+           style="vertical-align:-2px;margin:0 3px"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      = 路径全清</div>
     <div class="foot-line"><kbd>]</kbd> 关闭面板</div>
   </div>
   <div class="popup" id="popup"></div>

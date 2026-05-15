@@ -217,10 +217,35 @@ mark{
 .prev-empty-sub{font-size:10.5px;color:#555;margin-top:4px}
 .prev-loading{font-size:11.5px;color:#888;text-align:center;padding:20px 0}
 
-.prev-head{margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.08)}
+.prev-head{
+  position:relative;
+  margin-bottom:10px;padding-bottom:8px;padding-right:96px;
+  border-bottom:1px solid rgba(255,255,255,0.08);
+}
 .prev-title{font-size:15px;font-weight:700;color:#fff;line-height:1.25}
 .prev-eng{font-size:11px;color:#7aa;margin-top:2px}
 .prev-meta{font-size:10.5px;color:#888;margin-top:5px;font-family:ui-monospace,Consolas,monospace}
+/* 2026-05-15 — top-right "未显示？汇报" button. Posts the search entry
+   to the missing-reports log. Reserved space via padding-right above
+   so the title doesn't overlap. */
+.prev-report{
+  position:absolute;top:0;right:0;
+  display:inline-flex;align-items:center;
+  padding:3px 8px;
+  background:rgba(245,166,35,0.12);
+  border:1px solid rgba(245,166,35,0.45);
+  border-radius:0;
+  color:#f5d76e;
+  font-size:10.5px;font-weight:700;font-family:inherit;
+  cursor:pointer;
+  transition:background .12s, color .12s, border-color .12s;
+}
+.prev-report:hover{
+  background:rgba(245,166,35,0.22);
+  color:#fff;
+  border-color:rgba(245,166,35,0.75);
+}
+.prev-report:disabled{cursor:default;opacity:0.85}
 .prev-subtitle{font-size:11.5px;color:#bbb;margin:0 0 8px;font-style:italic}
 
 .chips{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 10px}

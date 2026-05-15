@@ -21,6 +21,12 @@ const BC_CARD_UPDATED = "com.obr-suite/cc-card-updated";
 // fade-in/out transition). Modal is fullScreen — no need for setWidth /
 // setHeight, the iframe always covers the viewport.
 const PANEL_MODAL_ID = "com.obr-suite/cc-panel";
+// Shared open-state key — index.ts's toolbar tool reads it to decide
+// open-vs-close. Cleared by every close path here (X / Esc / backdrop,
+// plus pagehide/beforeunload for OBR's click-outside close). A
+// synchronous localStorage write is reliable on unload; the async OBR
+// broadcast this replaced was not — the "click-twice-to-reopen" bug.
+const PANEL_OPEN_KEY = "com.obr-suite/cc-panel-open";
 const API_BASE = "https://obr.dnd.center/api/character";
 const SCENE_META_KEY = "com.character-cards/list";
 const LS_PREFIX = "character-cards/";
@@ -73,13 +79,13 @@ interface ResourceDef {
   url: string;
 }
 
-// Only 不全书 remains. Previously also had 5etool (5e.kiwee.top) pages —
-// they shared a single renderer process whose V8 heap blew past the ~4GB
-// ceiling and crashed the tab. Removed. 不全书 is a lighter site and safe
-// to keep resident for all players.
-const RESOURCES: ResourceDef[] = [
-  { slug: "bqs", label: "不全书", icon: ICONS.book, url: "https://5echm.kagangtuya.top/" },
-];
+// 2026-05-14 — removed 不全书 (5echm.kagangtuya.top) per user request.
+// Previous removal in this round dropped 5etool (5e.kiwee.top) for V8
+// heap reasons; now the entire book/resource column is retired. The
+// array is kept (empty) so the column wiring can re-host a future
+// resource without touching the render pipeline. buildResourceColumn
+// detects empty RESOURCES and hides the column entirely.
+const RESOURCES: ResourceDef[] = [];
 
 type View =
   | { type: "empty" }
@@ -159,18 +165,12 @@ async function setMaximized(next: boolean) {
       // a minimized state. Close the modal entirely; the user re-opens via
       // the cluster's "角色卡界面" button.
       saveState();
-      // Tell index.ts the panel just closed so its cached `panelOpen`
-      // flag stays in sync. Without this notification the next
-      // cluster-button click runs a closeMainPopover() against an
-      // already-closed modal (no-op), and the user has to click a
-      // SECOND time to reopen.
-      try {
-        OBR.broadcast.sendMessage(
-          "com.obr-suite/cc-panel-closed",
-          {},
-          { destination: "LOCAL" },
-        );
-      } catch {}
+      // Clear the shared open-state key so index.ts's toolbar tool
+      // sees the panel as closed. A synchronous localStorage write is
+      // reliable on every close path; the async OBR broadcast this
+      // replaced got killed mid-unload on the click-outside path —
+      // the root of the click-twice-to-reopen bug.
+      try { localStorage.removeItem(PANEL_OPEN_KEY); } catch {}
       await OBR.modal.close(PANEL_MODAL_ID);
       return;
     }
@@ -277,11 +277,13 @@ async function uploadFile(file: File) {
       });
       if (corrected) {
         try {
-          OBR.broadcast.sendMessage(
-            BC_CARD_UPDATED,
-            { cardId: entry.id, url: `${entry.url}data.json` },
-            { destination: "REMOTE" },
-          );
+          // 2026-05-14 — LOCAL+REMOTE so this client's background
+          // also propagates the new stats to bound tokens. Without
+          // LOCAL, the uploader sees stale HP/AC on the canvas until
+          // they re-bind manually.
+          const payload = { cardId: entry.id, url: `${entry.url}data.json` };
+          OBR.broadcast.sendMessage(BC_CARD_UPDATED, payload, { destination: "LOCAL" });
+          OBR.broadcast.sendMessage(BC_CARD_UPDATED, payload, { destination: "REMOTE" });
         } catch {}
       }
     } catch (e) {
@@ -401,11 +403,10 @@ async function refreshCardFromPicker(card: CardEntry): Promise<void> {
       });
       if (corrected) {
         try {
-          OBR.broadcast.sendMessage(
-            BC_CARD_UPDATED,
-            { cardId: updated.id, url: `${updated.url}data.json` },
-            { destination: "REMOTE" },
-          );
+          // 2026-05-14 — see same LOCAL+REMOTE comment in uploadFile.
+          const reconcilePayload = { cardId: updated.id, url: `${updated.url}data.json` };
+          OBR.broadcast.sendMessage(BC_CARD_UPDATED, reconcilePayload, { destination: "LOCAL" });
+          OBR.broadcast.sendMessage(BC_CARD_UPDATED, reconcilePayload, { destination: "REMOTE" });
         } catch {}
       }
     } catch (e) {
@@ -418,11 +419,12 @@ async function refreshCardFromPicker(card: CardEntry): Promise<void> {
       iframe.src = buildCardIframeSrc(card, true);
     }
     try {
-      OBR.broadcast.sendMessage(
-        BC_CARD_UPDATED,
-        { cardId: card.id, url: updated.url },
-        { destination: "REMOTE" },
-      );
+      // 2026-05-14 — LOCAL+REMOTE so this client's background propagates
+      // the refresh to bound tokens. Without LOCAL the refresher's own
+      // canvas still shows stale HP/AC until they re-bind manually.
+      const refreshPayload = { cardId: card.id, url: updated.url };
+      OBR.broadcast.sendMessage(BC_CARD_UPDATED, refreshPayload, { destination: "LOCAL" });
+      OBR.broadcast.sendMessage(BC_CARD_UPDATED, refreshPayload, { destination: "REMOTE" });
     } catch {}
     showStatus(`${ICONS.check} ${tt("ccPanelRefreshed")}: ${escapeHtml(updated.name)}`);
     render();
@@ -642,6 +644,12 @@ function render() {
 
 function buildResourceColumn() {
   resCol.innerHTML = "";
+  // 2026-05-14 — empty resource list collapses the column entirely so
+  // there's no zero-width sliver next to the card list.
+  if (RESOURCES.length === 0) {
+    resCol.style.display = "none";
+    return;
+  }
   for (const r of RESOURCES) {
     const btn = document.createElement("button");
     btn.className = "res-tab";
@@ -810,10 +818,19 @@ OBR.onReady(async () => {
 
   // Periodic save while open
   const saveInterval = setInterval(saveState, 5000);
-  window.addEventListener("beforeunload", () => {
+  // Clear the shared open-state key on EVERY unload path. OBR's
+  // click-outside modal close removes this iframe — that fires
+  // pagehide (reliable for iframe removal) and usually beforeunload;
+  // a synchronous localStorage write lands in both. Replaces an async
+  // OBR broadcast that did NOT reliably land mid-unload — the cause
+  // of the click-twice-to-reopen bug.
+  const onPanelUnload = () => {
     clearInterval(saveInterval);
     saveState();
-  });
+    try { localStorage.removeItem(PANEL_OPEN_KEY); } catch {}
+  };
+  window.addEventListener("pagehide", onPanelUnload);
+  window.addEventListener("beforeunload", onPanelUnload);
 
   // Initial load + react to scene metadata changes
   await refreshFromScene();

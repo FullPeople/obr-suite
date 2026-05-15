@@ -50,7 +50,7 @@ html,body{
   padding:8px 10px;
   font-size:12.5px;font-weight:600;
   font-family:inherit;cursor:pointer;
-  border-radius:6px 6px 0 0;
+  border-radius:0;
   transition:background .12s, color .12s;
 }
 .tab:hover{color:var(--text)}
@@ -81,7 +81,7 @@ html,body{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   background:var(--bg-card);
   border:1px solid var(--border);
-  border-radius:8px;
+  border-radius:0;
   padding:6px 0 5px;
   cursor:pointer;
   transition:transform .1s, background .12s, border-color .12s;
@@ -111,7 +111,7 @@ html,body{
   min-width:16px;height:16px;
   padding:0 4px;
   background:var(--bad);
-  border-radius:8px;
+  border-radius:0;
   color:#fff;font-size:10px;font-weight:800;
   display:none;align-items:center;justify-content:center;
   line-height:1;
@@ -142,7 +142,7 @@ html,body{
   flex:1;
   background:var(--bg-card);
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:0;
   color:var(--text-dim);
   font-size:10px;font-weight:700;
   font-family:inherit;cursor:pointer;
@@ -199,7 +199,7 @@ html,body{
   flex:1;min-width:0;height:46px;
   background:var(--bg-card);
   border:1px solid var(--border);
-  border-radius:8px;
+  border-radius:0;
   padding:0 12px;
   color:var(--text);
   font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
@@ -212,7 +212,7 @@ html,body{
   display:flex;flex-direction:row;
   height:46px;
   border:1px solid var(--border);
-  border-radius:8px;
+  border-radius:0;
   overflow:hidden;
   background:var(--bg-card);
   flex-shrink:0;
@@ -235,7 +235,7 @@ html,body{
   flex:1;height:34px;width:100%;
   background:var(--bg-card);
   border:1px solid var(--border);
-  border-radius:8px;
+  border-radius:0;
   padding:0 10px;
   font-size:12.5px;font-family:inherit;color:var(--text);
   outline:none;
@@ -251,7 +251,7 @@ html,body{
   border:1px solid var(--border-strong);
   color:var(--text);
   padding:9px 10px;
-  border-radius:8px;
+  border-radius:0;
   font-size:13px;font-weight:600;
   font-family:inherit;cursor:pointer;
   transition:background .12s, transform .08s, color .12s, border-color .12s;
@@ -367,6 +367,44 @@ html,body{
   color:#ddc0f0;
 }
 
+/* 2026-05-14 — 全局暗骰 toggle. Off state is a quieter outlined version
+   of the dark-roll palette; on state inverts to a solid violet fill so
+   the DM sees at a glance whether every regular roll is being treated
+   as dark. Sits inline with the existing 暗骰 button — same height,
+   half-width each via the parent flex row. */
+.btn.dark-roll-global{
+  flex:1 1 0;
+  width:auto;
+  background:linear-gradient(180deg, rgba(80,40,120,0.18), rgba(50,25,80,0.28));
+  border:1px dashed rgba(155,89,182,0.55);
+  color:#b89ad0;
+  font-weight:600;
+  letter-spacing:0.3px;
+  font-size:12px;
+}
+.btn.dark-roll-global:hover{
+  background:linear-gradient(180deg, rgba(95,50,140,0.32), rgba(60,30,95,0.42));
+  color:#d2b6e6;
+}
+.btn.dark-roll-global.on{
+  background:linear-gradient(180deg, rgba(155,89,182,0.78), rgba(105,55,140,0.85));
+  border:1px solid rgba(180,120,210,0.85);
+  color:#f4e7ff;
+  text-shadow:0 1px 2px rgba(0,0,0,0.5);
+  box-shadow:0 0 8px rgba(155,89,182,0.45) inset;
+}
+.btn.dark-roll-global.on:hover{
+  background:linear-gradient(180deg, rgba(175,109,202,0.85), rgba(120,65,155,0.92));
+}
+/* Inside the dark-roll row only, the 暗骰 button flexes to share the
+   row with 全局暗骰 toggle. We don't broaden this to .btn.dark-roll
+   in general — that class is also used by combo cards (.combo-dark),
+   where the old width:100% layout is still right. */
+#darkRollRow .btn.dark-roll{
+  flex:1 1 0;
+  width:auto;
+}
+
 /* Force-clear: hidden by default, shows below actions row only while
    a roll is in flight. */
 .btn.force-clr{
@@ -408,7 +446,7 @@ html,body{
    over them so the user has a clear "where will this land" cue. */
 .combo-section{
   border:1px solid var(--border);
-  border-radius:8px;
+  border-radius:0;
   overflow:hidden;
   background:rgba(255,255,255,0.015);
 }
@@ -428,14 +466,14 @@ html,body{
 }
 .combo-section-count{
   color:var(--text-dim);font-size:10.5px;
-  padding:1px 6px;border-radius:9px;
+  padding:1px 6px;border-radius:0;
   background:rgba(255,255,255,0.06);
   font-family:ui-monospace,monospace;
 }
 .combo-section .cat-act{
   background:transparent;border:none;color:var(--text-dim);
   cursor:pointer;font-size:11px;
-  padding:2px 5px;border-radius:4px;line-height:1;
+  padding:2px 5px;border-radius:0;line-height:1;
   font-family:inherit;
   transition:background .12s,color .12s;
 }
@@ -448,12 +486,12 @@ html,body{
 .combo-empty-drop{
   padding:8px;color:var(--text-dim);font-size:11px;
   text-align:center;letter-spacing:.4em;
-  border:1px dashed var(--border);border-radius:6px;
+  border:1px dashed var(--border);border-radius:0;
 }
 .combo-card{
   background:var(--bg-card);
   border:1px solid var(--border);
-  border-radius:8px;
+  border-radius:0;
   padding:8px 10px;
   cursor:default;
   transition:transform .08s,opacity .08s,box-shadow .12s;
@@ -530,7 +568,7 @@ html,body{
   background:var(--bg-card);
   border:1px solid var(--border);
   border-left:2px solid var(--accent);
-  border-radius:4px;
+  border-radius:0;
   cursor:pointer;
   transition:background .12s, border-color .12s, transform .08s;
 }
@@ -545,7 +583,7 @@ html,body{
   background:transparent; border:none;
   color:var(--text-dim, #9aa0b3);
   font-size:14px; font-weight:700;
-  cursor:pointer; border-radius:3px;
+  cursor:pointer; border-radius:0;
   opacity:0;
   display:flex; align-items:center; justify-content:center;
   transition:opacity .12s, color .12s, background .12s;
@@ -599,7 +637,7 @@ html,body{
   flex-shrink:0;display:inline-block;
   padding:1px 5px;
   background:rgba(120,60,180,0.7);
-  border-radius:3px;
+  border-radius:0;
   font-size:9px;font-weight:800;
   color:#fff;letter-spacing:0.4px;
   text-transform:uppercase;
@@ -609,7 +647,7 @@ html,body{
   flex-shrink:0;display:inline-block;
   padding:1px 5px;
   background:rgba(46,204,113,0.55);
-  border-radius:3px;
+  border-radius:0;
   font-size:9px;font-weight:800;
   color:#fff;letter-spacing:0.4px;
   margin-right:4px;
@@ -629,7 +667,7 @@ html,body{
 .die-chip{
   display:inline-flex;align-items:center;gap:2px;
   padding:0 4px 0 2px;
-  border-radius:6px;
+  border-radius:0;
   background:rgba(255,255,255,0.06);
   font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
   font-weight:700;color:var(--text);
@@ -670,7 +708,7 @@ html,body{
   display:inline-flex;align-items:center;
   gap:3px;
   padding:1px 7px 1px 4px;
-  border-radius:8px;
+  border-radius:0;
   background:rgba(255,255,255,0.05);
   border:1px solid rgba(255,255,255,0.10);
   white-space:nowrap;flex-shrink:0;
@@ -730,7 +768,7 @@ html,body{
   gap:3px;padding:3px;
   background:var(--bg-card);
   border:1px solid var(--border);
-  border-radius:8px;
+  border-radius:0;
   flex:1;min-width:0;
 }
 .seg-btn{
@@ -738,7 +776,7 @@ html,body{
   color:var(--text-dim);
   padding:4px 10px;
   font-size:11.5px;font-weight:600;font-family:inherit;
-  border-radius:5px;cursor:pointer;
+  border-radius:0;cursor:pointer;
   transition:background .12s, color .12s;
 }
 .seg-btn:hover{color:var(--text);background:rgba(255,255,255,0.05)}
@@ -750,7 +788,7 @@ html,body{
   padding:8px 10px;
   background:rgba(0,0,0,0.18);
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:0;
   color:var(--text-dim);
   font-size:11.5px;line-height:1.55;
 }
@@ -763,7 +801,7 @@ html,body{
   font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
   font-size:11px;
   background:rgba(255,255,255,0.06);
-  padding:1px 5px;border-radius:3px;
+  padding:1px 5px;border-radius:0;
   color:var(--accent-on);
 }
 .rules-hint b{color:var(--text);font-weight:700}
@@ -777,7 +815,7 @@ html,body{
   padding:8px 10px;
   background:rgba(0,0,0,0.18);
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:0;
 }
 .examples-title{
   font-size:10.5px;font-weight:700;text-transform:uppercase;
@@ -790,7 +828,7 @@ html,body{
   padding:6px 10px;
   background:linear-gradient(180deg, rgba(70,80,110,0.4), rgba(40,50,75,0.55));
   border:1px solid rgba(108,148,200,0.35);
-  border-radius:6px;
+  border-radius:0;
   color:#cdd9ec;font-family:inherit;cursor:pointer;
   text-align:left;
   transition:background .12s, border-color .12s, transform .08s;
@@ -807,6 +845,253 @@ html,body{
   font-size:10.5px;font-family:ui-monospace,monospace;
   color:var(--accent-on);letter-spacing:0.2px;
 }
+
+/* === Skins tab — per-die custom-art management. The right-click
+   ATTACHMENT picker is the primary entry; this tab reviews / resets /
+   sets-by-URL. Mirrors the dark card vocabulary of the rest of the
+   panel. === */
+.skin-intro{
+  font-size:11px;color:var(--text-dim);line-height:1.55;
+  padding:8px 10px;
+  background:rgba(0,0,0,0.18);
+  border:1px solid var(--border);border-radius:0;
+}
+.skin-intro b{color:var(--accent-on)}
+.skin-list{display:flex;flex-direction:column;gap:6px}
+.skin-row{
+  display:flex;align-items:flex-start;gap:8px;
+  padding:7px 8px;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:0;
+}
+.skin-thumb{
+  width:42px;height:42px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,0.28);
+  border-radius:0;overflow:hidden;
+}
+.skin-thumb img,.skin-thumb video{
+  max-width:100%;max-height:100%;object-fit:contain;display:block;
+}
+.skin-thumb img.is-default{filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5))}
+.skin-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.skin-head{display:flex;align-items:center;gap:6px}
+.skin-name{
+  font-size:12.5px;font-weight:800;color:var(--text);
+  font-family:ui-monospace,monospace;
+}
+.skin-status{
+  font-size:9.5px;font-weight:700;letter-spacing:0.3px;
+  padding:1px 6px;border-radius:0;
+  background:rgba(255,255,255,0.06);color:var(--text-dim);
+}
+.skin-status.custom{
+  background:rgba(93,173,226,0.18);color:var(--accent-on);
+}
+.skin-reset{
+  margin-left:auto;
+  background:transparent;
+  border:1px solid rgba(231,76,60,0.4);
+  color:#ffb0a8;
+  font-size:10.5px;font-weight:700;font-family:inherit;
+  padding:2px 8px;border-radius:0;cursor:pointer;
+  transition:background .12s,color .12s;
+}
+.skin-reset:hover{background:rgba(231,76,60,0.14);color:#ffd0c8}
+.skin-url-row{display:flex;gap:5px}
+.skin-url-input{
+  flex:1;min-width:0;height:26px;
+  background:var(--bg-strong);
+  border:1px solid var(--border);
+  border-radius:0;padding:0 8px;
+  color:var(--text);font-size:11px;font-family:inherit;
+  outline:none;transition:border-color .12s;
+}
+.skin-url-input::placeholder{color:var(--text-dim)}
+.skin-url-input:focus{border-color:var(--accent)}
+.skin-url-input.invalid{
+  border-color:var(--bad);
+  animation:rollShake 0.5s ease-out;
+}
+.skin-url-set{
+  flex-shrink:0;height:26px;padding:0 10px;
+  background:var(--bg-strong);
+  border:1px solid var(--border-strong);
+  color:var(--text);
+  font-size:11px;font-weight:700;font-family:inherit;
+  border-radius:0;cursor:pointer;
+  transition:background .12s;
+}
+.skin-url-set:hover{background:rgba(93,173,226,0.18)}
+
+/* === Skins tab — 2026-05-15 extension. Library / sets / random pool /
+   upload hint. Square corners and stacked card layout, mirroring the
+   character-card panel's "card-within-card" rhythm. === */
+.skin-hint{
+  font-size:11px;color:#cfd5e3;line-height:1.55;
+  padding:9px 10px;
+  background:linear-gradient(180deg, rgba(245,166,35,0.10), rgba(190,128,30,0.06));
+  border:1px solid rgba(245,166,35,0.32);
+  border-radius:0;
+  margin-bottom:6px;
+}
+.skin-hint b{color:#ffc66b}
+
+.skin-sets{
+  display:flex;flex-direction:column;gap:5px;
+  padding:8px 10px;
+  background:rgba(0,0,0,0.18);
+  border:1px solid var(--border);
+  border-radius:0;
+  margin-bottom:8px;
+}
+.skin-sets-head{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:6px;
+}
+.skin-sets-title{
+  font-size:10.5px;color:var(--text-dim);font-weight:700;
+  letter-spacing:0.5px;text-transform:uppercase;
+}
+.skin-sets .btn.small.skin-set-save{
+  padding:3px 8px;font-size:11px;
+  background:rgba(93,173,226,0.16);
+  border:1px solid rgba(93,173,226,0.36);
+  color:var(--accent);font-weight:700;
+  border-radius:0;
+}
+.skin-sets .btn.small.skin-set-save:hover{
+  background:rgba(93,173,226,0.26);
+}
+.skin-sets-empty{
+  font-size:10.5px;color:var(--text-dim);padding:3px 0;
+}
+.skin-sets-list{display:flex;flex-wrap:wrap;gap:4px}
+.skin-set-chip{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 4px 3px 9px;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:0;
+  font-size:11px;color:#cdd1de;
+  cursor:pointer;user-select:none;
+  transition:background .12s, border-color .12s, color .12s;
+}
+.skin-set-chip:hover{
+  background:rgba(93,173,226,0.15);
+  border-color:rgba(93,173,226,0.45);
+  color:var(--text);
+}
+.skin-set-chip .skin-set-name{font-weight:700}
+.skin-set-chip .skin-set-count{
+  font-size:9.5px;color:var(--text-dim);
+  font-family:ui-monospace,monospace;
+  padding:1px 5px;background:rgba(255,255,255,0.06);
+  border-radius:0;
+}
+.skin-set-chip .skin-set-del{
+  font-size:11px;color:var(--text-mute);line-height:1;
+  background:transparent;border:1px solid transparent;cursor:pointer;
+  padding:1px 5px;border-radius:0;
+  font-family:inherit;
+  transition:color .12s, background .12s, border-color .12s;
+}
+.skin-set-chip .skin-set-del:hover{
+  color:#fff;background:var(--bad);border-color:var(--bad);
+}
+
+/* per-die row — overrides for the new layout (library strip + random toggle) */
+.skin-row{align-items:flex-start}
+.skin-head{
+  display:flex;align-items:center;gap:8px;
+  flex-wrap:wrap;
+}
+.skin-random{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:10.5px;color:var(--text-dim);
+  cursor:pointer;user-select:none;
+  padding:2px 8px;
+  background:rgba(255,255,255,0.04);
+  border:1px solid var(--border);
+  border-radius:0;
+  transition:background .12s, color .12s, border-color .12s;
+}
+.skin-random:hover{
+  background:rgba(255,255,255,0.08);color:var(--text);
+}
+.skin-random input{
+  accent-color:var(--accent);margin:0;
+  width:11px;height:11px;
+}
+
+.skin-lib-strip{
+  display:flex;flex-wrap:wrap;gap:4px;
+  padding:5px;
+  background:rgba(0,0,0,0.20);
+  border:1px solid var(--border);
+  border-radius:0;
+  min-height:42px;
+  align-items:center;
+}
+.skin-lib-empty{
+  font-size:10.5px;color:var(--text-mute);padding:0 4px;
+  letter-spacing:0.2px;
+}
+.skin-lib-chip{
+  position:relative;
+  width:34px;height:34px;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,0.30);
+  border:1px solid var(--border);
+  border-radius:0;
+  cursor:pointer;
+  flex-shrink:0;
+  transition:border-color .12s, transform .08s;
+}
+.skin-lib-chip:hover{
+  border-color:var(--accent);
+  transform:translateY(-1px);
+}
+.skin-lib-chip.on{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(93,173,226,0.42) inset;
+}
+.skin-lib-thumb{
+  width:32px;height:32px;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;
+}
+.skin-lib-thumb img,.skin-lib-thumb video{
+  max-width:100%;max-height:100%;object-fit:contain;display:block;
+  -webkit-user-drag:none;
+}
+.skin-lib-del{
+  position:absolute;top:-5px;right:-5px;
+  width:14px;height:14px;
+  padding:0;line-height:1;
+  background:var(--bad);
+  border:1px solid #1a1c26;
+  color:#fff;
+  font-size:10px;font-weight:800;
+  cursor:pointer;border-radius:0;
+  font-family:inherit;
+  display:none;align-items:center;justify-content:center;
+  transition:filter .12s;
+}
+.skin-lib-chip:hover .skin-lib-del{display:flex}
+.skin-lib-del:hover{filter:brightness(1.2)}
+
+/* tighten the existing url-row + add the "primary" variant for 加入并应用 */
+.skin-url-row{align-items:center}
+.skin-url-set.primary{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#0b1320;font-weight:700;
+}
+.skin-url-set.primary:hover{
+  background:#7ec8f0;border-color:#7ec8f0;
+}
 </style>
 </head>
 <body>
@@ -815,6 +1100,7 @@ html,body{
     <button class="tab on" data-tab="roll" type="button" data-i18n="diceTabRoll">投掷</button>
     <button class="tab" data-tab="combos" type="button" data-i18n="diceTabCombos">组合</button>
     <button class="tab" data-tab="history" type="button" data-i18n="diceTabHistory">历史</button>
+    <button class="tab" data-tab="skins" type="button" data-i18n="diceTabSkins">皮肤</button>
   </div>
 
   <div class="body">
@@ -896,7 +1182,14 @@ html,body{
         <button class="btn compact danger" id="btnClear" type="button" data-i18n="diceBtnClear">清空</button>
       </div>
       <!-- DM-only dark roll button. Hidden by JS for non-DM clients. -->
-      <button class="btn dark-roll" id="btnDarkRoll" type="button" data-i18n="diceBtnDarkRoll" style="display:none">暗骰</button>
+      <div class="dark-roll-row" id="darkRollRow" style="display:flex; gap:6px;">
+        <button class="btn dark-roll" id="btnDarkRoll" type="button" data-i18n="diceBtnDarkRoll" style="display:none">暗骰</button>
+        <!-- 2026-05-14: 全局暗骰 toggle. Same DM-only gating as btnDarkRoll. -->
+        <button class="btn dark-roll-global" id="btnDarkRollGlobal" type="button"
+                data-i18n-title="diceBtnDarkRollGlobalTitle"
+                title="开启后，所有普通投掷都会自动变为暗骰。仅 DM 可见。"
+                style="display:none">全局暗骰：关</button>
+      </div>
       <button class="btn force-clr" id="btnForceClr" type="button" data-i18n="diceBtnForceClr">⚠ 强制结束(若动画卡住)</button>
 
       <div class="rules-hint">
@@ -931,6 +1224,14 @@ html,body{
         <button class="btn compact danger" id="btnClearHistory" type="button" data-i18n="diceBtnClear">清空</button>
       </div>
       <div class="history-list" id="historyList"></div>
+    </div>
+
+    <!-- ===== Skins tab ===== -->
+    <div class="tabPane" data-tab="skins">
+      <div class="skin-intro">
+        右键场景里任意「附件」图片 → <b>设为我的骰子皮肤</b>，把它设成你投出该骰子时的样子（支持 webm 动图）。设置后全场玩家投你的骰都会看到。也可以直接在下面粘贴图片 / webm 链接。
+      </div>
+      <div class="skin-list" id="skinList"></div>
     </div>
   </div>
 </div>

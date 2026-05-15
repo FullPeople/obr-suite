@@ -3,3 +3,6 @@ dist
 *.local
 tools/buff-fx-gen/__pycache__/
 tools/buff-fx-gen/.emoji-cache/
+
+# Local fog rollback backup (kept out-of-tree, not for git)
+_fog-backup-*/

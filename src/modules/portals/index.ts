@@ -141,6 +141,16 @@ let pendingTeleport: { destPortalId: string; tokenIds: string[] } | null = null;
 // teleport gives. Mutually exclusive with `pendingTeleport`; the
 // proceed handler picks whichever is set.
 let pendingFocus: { x: number; y: number } | null = null;
+// 2026-05-14 — third job kind: "blink + move tokens with fog bypass +
+// focus camera". The DM uses this for the initiative gather so the
+// position update happens AT eyelid apex (same as portal teleport).
+// Remote players just receive a `blink-and-focus` (camera-only) — the
+// DM's updateItems syncs the positions to them during their blink.
+let pendingGather: {
+  tokenIds: string[];
+  positions: { x: number; y: number }[];
+  center: { x: number; y: number };
+} | null = null;
 // Cross-client broadcast for "open blink modal + focus camera at (x, y)".
 // Receivers honour their OWN local blink-enabled setting — if a player
 // has blink off, they skip the modal but still get the camera focus.
@@ -712,6 +722,76 @@ async function closeBlinkModal() {
 // Honors LS_BLINK_KEY: blink-disabled clients skip the modal and
 // just smooth-pan the camera. Blink-enabled clients get the full
 // eyelid animation with an instant camera snap at the apex.
+// 2026-05-14 — DM-side entry for initiative gather. Opens the blink
+// modal locally, and at BLINK_PROCEED apex does:
+//   1. moveTokensWithFogBypass(tokenIds, positions)
+//   2. instant camera setPosition to center
+// Other players should receive a separate REMOTE blink-and-focus so
+// THEIR clients show the cinematic too — OBR scene-sync brings them
+// the new positions during their blink (they don't write items
+// themselves). Honors LS_BLINK_KEY: blink off → fog-bypass move +
+// smooth pan, no eyelid.
+//
+// Exported so the initiative module can call it directly without a
+// separate broadcast channel.
+export async function openBlinkAndGather(
+  tokenIds: string[],
+  positions: { x: number; y: number }[],
+  center: { x: number; y: number },
+): Promise<void> {
+  if (tokenIds.length === 0) return;
+  const blinkEnabled = readBlinkEnabled();
+  if (!blinkEnabled) {
+    // DM has blink disabled — still do the fog-bypass move (otherwise
+    // tokens with lights get rejected). Smooth-pan camera; no eyelid.
+    await moveTokensWithFogBypass(tokenIds, positions);
+    try {
+      const [vw, vh, vpScale] = await Promise.all([
+        OBR.viewport.getWidth(),
+        OBR.viewport.getHeight(),
+        OBR.viewport.getScale(),
+      ]);
+      const target = {
+        x: -center.x * vpScale + vw / 2,
+        y: -center.y * vpScale + vh / 2,
+      };
+      OBR.viewport.animateTo({ position: target, scale: vpScale }).catch(() => {});
+    } catch {}
+    return;
+  }
+  if (blinkModalOpen) return;
+  pendingGather = { tokenIds: [...tokenIds], positions: [...positions], center: { ...center } };
+  blinkModalOpen = true;
+  try {
+    await OBR.modal.open({
+      id: BLINK_MODAL_ID,
+      url: BLINK_URL,
+      fullScreen: true,
+      hideBackdrop: true,
+      hidePaper: true,
+      disablePointerEvents: false,
+    });
+  } catch (e) {
+    console.error("[obr-suite/portals] openBlinkAndGather failed", e);
+    blinkModalOpen = false;
+    pendingGather = null;
+    // Fall back to no-blink path so the DM still completes the gather.
+    await moveTokensWithFogBypass(tokenIds, positions);
+    try {
+      const [vw, vh, vpScale] = await Promise.all([
+        OBR.viewport.getWidth(),
+        OBR.viewport.getHeight(),
+        OBR.viewport.getScale(),
+      ]);
+      const target = {
+        x: -center.x * vpScale + vw / 2,
+        y: -center.y * vpScale + vh / 2,
+      };
+      OBR.viewport.animateTo({ position: target, scale: vpScale }).catch(() => {});
+    } catch {}
+  }
+}
+
 async function openBlinkAndFocus(center: { x: number; y: number }): Promise<void> {
   const blinkEnabled = readBlinkEnabled();
   if (!blinkEnabled) {
@@ -836,6 +916,198 @@ async function snapshotExtensionMetadata(tokenIds: string[]): Promise<ExtMetaSna
   return snap;
 }
 
+// 2026-05-14 — extracted from teleport(). Moves tokens to new positions
+// while bypassing fog/wall plugins (Dynamic Fog, Smoke & Spectre). Used
+// by both portal teleport AND initiative gather. Caller is responsible
+// for any camera animation — the helper only touches items.
+//
+// Phases (in order):
+//   1. Snapshot + strip extension metadata (fog/wall keys on token).
+//   1.5. Snapshot + hide attachments (scene + local).
+//   1.75. Snapshot + hide tokens themselves.
+//   2. updateItems(positions).
+//   2.25. Restore token visibility.
+//   2.5. Restore attachment visibility.
+//   3. Restore extension metadata.
+//
+// Also primes `recentlyTeleported` so the post-move scene.items.onChange
+// doesn't re-trigger the drag-end portal detector on the moved tokens.
+async function moveTokensWithFogBypass(
+  tokenIds: string[],
+  positions: { x: number; y: number }[],
+): Promise<void> {
+  if (tokenIds.length === 0) return;
+
+  // Mark tokens as "just moved" BEFORE any writes — see teleport()'s
+  // historical comment: the post-move scene.items.onChange will arm
+  // the drag-end debounce on every moved token, and without an
+  // up-front recentlyTeleported entry that debounce can fire ~350 ms
+  // later (before any guard is in place) and trigger the portal popup
+  // a second time on a token already sitting in a destination portal.
+  if (dragEndTimer) {
+    clearTimeout(dragEndTimer);
+    dragEndTimer = null;
+  }
+  const stamp = Date.now();
+  for (const id of tokenIds) recentlyTeleported.set(id, stamp);
+
+  // Phase 1 — strip extension metadata that fog/wall plugins use to
+  // validate token movement. Covers Dynamic Fog (light sources) and
+  // Smoke & Spectre vision keys (com.battle-system.smoke/...). All
+  // captured values restored verbatim in Phase 3.
+  const extSnap = await snapshotExtensionMetadata(tokenIds);
+  if (extSnap.size > 0) {
+    try {
+      await OBR.scene.items.updateItems([...extSnap.keys()], (drafts) => {
+        for (const d of drafts) {
+          const captured = extSnap.get(d.id);
+          if (!captured) continue;
+          for (const k of Object.keys(captured)) delete (d.metadata as any)[k];
+        }
+      });
+    } catch (e) {
+      console.warn("[obr-suite/portals] strip extension metadata failed", e);
+    }
+  }
+
+  // Phase 1.5 — handle Smoke & Spectre's ATTACHMENT-based wall
+  // collision. Stripping the token's own SS metadata isn't enough
+  // for tokens with vision sources because SS attaches separate
+  // scene items (light cones / vision sources) to the token; those
+  // attachments collide with walls during the position update and
+  // SS snaps the whole group back. Toggling the attachments' visible
+  // flag bypasses SS's wall check; we restore exactly what we saw.
+  type AttSnap = Map<string, boolean>;
+  const attVisible: AttSnap = new Map();
+  let attachmentIds: string[] = [];
+  let localAttachmentIds: string[] = [];
+  try {
+    const attachments = await OBR.scene.items.getItemAttachments(tokenIds);
+    for (const a of attachments) {
+      attVisible.set(a.id, a.visible);
+      attachmentIds.push(a.id);
+    }
+  } catch (e) {
+    console.warn("[obr-suite/portals] getItemAttachments failed", e);
+  }
+  try {
+    const localAttachments = await OBR.scene.local.getItemAttachments(tokenIds);
+    for (const a of localAttachments) {
+      attVisible.set(a.id, a.visible);
+      localAttachmentIds.push(a.id);
+    }
+  } catch (e) {
+    console.warn("[obr-suite/portals] local.getItemAttachments failed", e);
+  }
+  try {
+    if (attachmentIds.length > 0) {
+      await OBR.scene.items.updateItems(attachmentIds, (drafts) => {
+        for (const d of drafts) d.visible = false;
+      });
+    }
+    if (localAttachmentIds.length > 0) {
+      await OBR.scene.local.updateItems(localAttachmentIds, (drafts) => {
+        for (const d of drafts) d.visible = false;
+      });
+    }
+  } catch (e) {
+    console.warn("[obr-suite/portals] hide attachments failed", e);
+  }
+
+  // Phase 1.75 — hide the tokens themselves. User request 2026-05-12:
+  // "需要眼皮闭上时再进行隐藏且移动再显形" — during eyes-closed window,
+  // fully hide the token, move it, then reveal. The most robust way
+  // to bypass light/wall plugins that check the token's own collision
+  // with map geometry: an invisible token doesn't trigger those
+  // checks. Whole sequence runs WHILE THE BLINK OVERLAY IS UP so
+  // players never see the flash.
+  const tokenVisibleSnap = new Map<string, boolean>();
+  try {
+    const toks = await OBR.scene.items.getItems(tokenIds);
+    for (const t of toks) tokenVisibleSnap.set(t.id, t.visible);
+    if (toks.length > 0) {
+      await OBR.scene.items.updateItems(tokenIds, (drafts) => {
+        for (const d of drafts) d.visible = false;
+      });
+    }
+  } catch (e) {
+    console.warn("[obr-suite/portals] hide tokens before move failed", e);
+  }
+
+  // Phase 2 — actual position update.
+  try {
+    await OBR.scene.items.updateItems(tokenIds, (drafts) => {
+      drafts.forEach((d, idx) => {
+        if (positions[idx]) d.position = positions[idx];
+      });
+    });
+  } catch (e) {
+    console.error("[obr-suite/portals] move updateItems failed", e);
+  }
+
+  // Phase 2.25 — restore token visibility verbatim.
+  if (tokenVisibleSnap.size > 0) {
+    try {
+      await OBR.scene.items.updateItems(tokenIds, (drafts) => {
+        for (const d of drafts) {
+          const v = tokenVisibleSnap.get(d.id);
+          if (typeof v === "boolean") d.visible = v;
+        }
+      });
+    } catch (e) {
+      console.warn("[obr-suite/portals] restore token visibility failed", e);
+    }
+  }
+
+  // Phase 2.5 — restore attachments' visible state.
+  try {
+    if (attachmentIds.length > 0) {
+      await OBR.scene.items.updateItems(attachmentIds, (drafts) => {
+        for (const d of drafts) {
+          const v = attVisible.get(d.id);
+          if (typeof v === "boolean") d.visible = v;
+        }
+      });
+    }
+    if (localAttachmentIds.length > 0) {
+      await OBR.scene.local.updateItems(localAttachmentIds, (drafts) => {
+        for (const d of drafts) {
+          const v = attVisible.get(d.id);
+          if (typeof v === "boolean") d.visible = v;
+        }
+      });
+    }
+  } catch (e) {
+    console.warn("[obr-suite/portals] restore attachments visibility failed", e);
+  }
+
+  // Phase 3 — restore extension metadata verbatim.
+  if (extSnap.size > 0) {
+    try {
+      await OBR.scene.items.updateItems([...extSnap.keys()], (drafts) => {
+        for (const d of drafts) {
+          const captured = extSnap.get(d.id);
+          if (!captured) continue;
+          for (const [key, original] of Object.entries(captured)) {
+            (d.metadata as any)[key] = original;
+          }
+        }
+      });
+    } catch (e) {
+      console.warn("[obr-suite/portals] restore extension metadata failed", e);
+    }
+  }
+
+  // Refresh suppress timestamp so onChange noise from Phase 3 writes
+  // is also suppressed. Belt-and-suspenders for the in-flight debounce.
+  const endStamp = Date.now();
+  for (const id of tokenIds) recentlyTeleported.set(id, endStamp);
+  if (dragEndTimer) {
+    clearTimeout(dragEndTimer);
+    dragEndTimer = null;
+  }
+}
+
 async function teleport(
   destPortalId: string,
   tokenIds: string[],
@@ -849,32 +1121,14 @@ async function teleport(
   } catch {}
   if (!dest) return;
 
-  // Mark tokens as "just teleported" BEFORE any state changes. The
-  // upcoming `updateItems` will fire `scene.items.onChange`, which
-  // arms the drag-end debounce; without this guard set up-front, the
-  // debounce would fire after ~350ms — before our suppress flag is
-  // set — and `onDragEnd` would see the token sitting on the
-  // destination portal and pop the modal a second time. Setting it
-  // now (and clearing any in-flight debounce) makes the cancellation
-  // unconditional for the entire suppress window.
-  if (dragEndTimer) {
-    clearTimeout(dragEndTimer);
-    dragEndTimer = null;
-  }
-  const stamp = Date.now();
-  for (const id of tokenIds) recentlyTeleported.set(id, stamp);
-
   let dpi = 150;
   try { dpi = await OBR.scene.grid.getDpi(); } catch {}
   const spacing = dpi;
   const center = portalCenter(dest);
 
   // Find tokens already sitting at the destination portal so we don't
-  // land on top of them. The user reads "A teleports onto B" as
-  // "B teleported with A", and the visual overlap is genuinely
-  // confusing. Anyone within the destination's trigger radius +
-  // 1 grid cell is considered "already there" and their slots are
-  // skipped during placement.
+  // land on top of them. Anyone within the destination's trigger
+  // radius + 1 grid cell is "already there" and skipped during placement.
   const destMeta = readPortalMeta(dest);
   const destRadius = destMeta?.radius ?? spacing;
   let occupants: { x: number; y: number }[] = [];
@@ -920,157 +1174,18 @@ async function teleport(
     if (positions.length >= needed) break;
   }
   // Fallback — every candidate conflicted (small portal stuffed full
-  // of tokens). Stack on the center rather than refusing the
-  // teleport entirely.
+  // of tokens). Stack on the center rather than refusing the teleport.
   while (positions.length < needed) {
     positions.push({ x: center.x, y: center.y });
   }
 
-  // Phase 1 — strip extension metadata that fog/wall plugins use to
-  // validate token movement. Covers Dynamic Fog (light sources) and
-  // Smoke & Spectre vision keys (com.battle-system.smoke/...). All
-  // captured values restored verbatim in Phase 3.
-  const extSnap = await snapshotExtensionMetadata(tokenIds);
-  if (extSnap.size > 0) {
-    try {
-      await OBR.scene.items.updateItems([...extSnap.keys()], (drafts) => {
-        for (const d of drafts) {
-          const captured = extSnap.get(d.id);
-          if (!captured) continue;
-          for (const k of Object.keys(captured)) delete (d.metadata as any)[k];
-        }
-      });
-    } catch (e) {
-      console.warn("[obr-suite/portals] strip extension metadata failed", e);
-    }
-  }
-
-  // Phase 1.5 — handle Smoke & Spectre's ATTACHMENT-based wall
-  // collision. Stripping the token's own SS metadata isn't enough
-  // for tokens with vision sources because SS attaches separate
-  // scene items (light cones / vision sources) to the token; those
-  // attachments collide with walls during the position update and
-  // SS snaps the whole group back.
-  //
-  // The reference plugin (gitlab.com/resident-uhlig/owlbear-rodeo-portals)
-  // works around this by toggling the attachments' `visible` flag
-  // off during the move. Invisible items don't trigger SS's wall
-  // check. After the move we restore visible exactly as it was.
-  type AttSnap = Map<string, boolean>;
-  const attVisible: AttSnap = new Map();
-  let attachmentIds: string[] = [];
-  let localAttachmentIds: string[] = [];
-  try {
-    const attachments = await OBR.scene.items.getItemAttachments(tokenIds);
-    for (const a of attachments) {
-      attVisible.set(a.id, a.visible);
-      attachmentIds.push(a.id);
-    }
-  } catch (e) {
-    console.warn("[obr-suite/portals] getItemAttachments failed", e);
-  }
-  try {
-    const localAttachments = await OBR.scene.local.getItemAttachments(tokenIds);
-    for (const a of localAttachments) {
-      attVisible.set(a.id, a.visible);
-      localAttachmentIds.push(a.id);
-    }
-  } catch (e) {
-    console.warn("[obr-suite/portals] local.getItemAttachments failed", e);
-  }
-  try {
-    if (attachmentIds.length > 0) {
-      await OBR.scene.items.updateItems(attachmentIds, (drafts) => {
-        for (const d of drafts) d.visible = false;
-      });
-    }
-    if (localAttachmentIds.length > 0) {
-      await OBR.scene.local.updateItems(localAttachmentIds, (drafts) => {
-        for (const d of drafts) d.visible = false;
-      });
-    }
-  } catch (e) {
-    console.warn("[obr-suite/portals] hide attachments failed", e);
-  }
-
-  // 2026-05-12 — Phase 1.75: also hide the TOKENS themselves during
-  // the position write. Symmetric with Phase 1.5's attachment hide.
-  // User request: "需要眼皮闭上时再进行隐藏且移动再显形" — during
-  // eyes-closed window, fully hide the token, move it, then reveal.
-  // This is the most robust way to bypass light-source / wall plugins
-  // that check the token's own collision with map geometry: an
-  // invisible token doesn't trigger those checks. The whole sequence
-  // runs WHILE THE BLINK OVERLAY IS UP so players never see the flash.
-  const tokenVisibleSnap = new Map<string, boolean>();
-  try {
-    const toks = await OBR.scene.items.getItems(tokenIds);
-    for (const t of toks) tokenVisibleSnap.set(t.id, t.visible);
-    if (toks.length > 0) {
-      await OBR.scene.items.updateItems(tokenIds, (drafts) => {
-        for (const d of drafts) d.visible = false;
-      });
-    }
-  } catch (e) {
-    console.warn("[obr-suite/portals] hide tokens before move failed", e);
-  }
-
-  // Phase 2 — actual position update.
-  try {
-    await OBR.scene.items.updateItems(tokenIds, (drafts) => {
-      drafts.forEach((d, idx) => {
-        if (positions[idx]) d.position = positions[idx];
-      });
-    });
-  } catch (e) {
-    console.error("[obr-suite/portals] teleport updateItems failed", e);
-  }
-
-  // Phase 2.25 — restore token visibility verbatim. Runs BEFORE the
-  // attachment-restore so eye-open lands on a token that's already
-  // back to its original visible state.
-  if (tokenVisibleSnap.size > 0) {
-    try {
-      await OBR.scene.items.updateItems(tokenIds, (drafts) => {
-        for (const d of drafts) {
-          const v = tokenVisibleSnap.get(d.id);
-          if (typeof v === "boolean") d.visible = v;
-        }
-      });
-    } catch (e) {
-      console.warn("[obr-suite/portals] restore token visibility failed", e);
-    }
-  }
-
-  // Phase 2.5 — restore attachments' visible state. Symmetric with
-  // Phase 1.5; uses the captured value so we don't accidentally
-  // un-hide an item that the user intentionally had hidden.
-  try {
-    if (attachmentIds.length > 0) {
-      await OBR.scene.items.updateItems(attachmentIds, (drafts) => {
-        for (const d of drafts) {
-          const v = attVisible.get(d.id);
-          if (typeof v === "boolean") d.visible = v;
-        }
-      });
-    }
-    if (localAttachmentIds.length > 0) {
-      await OBR.scene.local.updateItems(localAttachmentIds, (drafts) => {
-        for (const d of drafts) {
-          const v = attVisible.get(d.id);
-          if (typeof v === "boolean") d.visible = v;
-        }
-      });
-    }
-  } catch (e) {
-    console.warn("[obr-suite/portals] restore attachments visibility failed", e);
-  }
+  // The move (all phases 1-3 with fog/wall plugin bypass).
+  await moveTokensWithFogBypass(tokenIds, positions);
 
   // Move the local camera to the destination portal (only on the
-  // originating client — BROADCAST_TELEPORT is LOCAL only). When
-  // called during the blink flow the camera should jump INSTANTLY so
-  // when the eyes open the destination is already centered;
-  // otherwise we keep the smooth animateTo for the legacy fallback
-  // path. Either way, scale is preserved.
+  // originating client — BROADCAST_TELEPORT is LOCAL only). Instant
+  // when called from the blink-proceed apex (overlay hides any flash),
+  // smooth-pan otherwise. Either way, scale is preserved.
   try {
     const [vw, vh, vpScale] = await Promise.all([
       OBR.viewport.getWidth(),
@@ -1082,51 +1197,17 @@ async function teleport(
       y: -center.y * vpScale + vh / 2,
     };
     if (instantCamera) {
-      // setPosition is synchronous from the camera's POV — no tween,
-      // canvas redraws on the next frame. The blink overlay covers
-      // any flash.
       await OBR.viewport.setPosition(targetPos).catch(() => {});
     } else {
       OBR.viewport.animateTo({ position: targetPos, scale: vpScale }).catch(() => {});
     }
   } catch {}
 
-  // Phase 3 — restore the original extension metadata values
-  // verbatim (Dynamic Fog light + Smoke & Spectre vision/wall keys).
-  if (extSnap.size > 0) {
-    try {
-      await OBR.scene.items.updateItems([...extSnap.keys()], (drafts) => {
-        for (const d of drafts) {
-          const captured = extSnap.get(d.id);
-          if (!captured) continue;
-          for (const [key, original] of Object.entries(captured)) {
-            (d.metadata as any)[key] = original;
-          }
-        }
-      });
-    } catch (e) {
-      console.warn("[obr-suite/portals] restore extension metadata failed", e);
-    }
-  }
-
-  // Refresh suppress timestamp at end so the full window covers any
-  // additional items.onChange noise from Phase 3 metadata writes.
-  const endStamp = Date.now();
-  for (const id of tokenIds) recentlyTeleported.set(id, endStamp);
-  // Belt-and-suspenders: also clear any debounce that armed during
-  // teleport. With the recentlyTeleported guard the timer's onDragEnd
-  // would no-op anyway, but cancelling it skips a wasted check.
-  if (dragEndTimer) {
-    clearTimeout(dragEndTimer);
-    dragEndTimer = null;
-  }
-
-  // Drop the teleported tokens from the player's selection. Without
-  // this, OBR's multi-select carryover means the next drag of any
-  // token in the set still moves the WHOLE party (OBR's documented
-  // multi-drag behavior). The user reads that as "single drag
-  // teleported the wrong tokens too" — fix by forcing a clean slate.
-  // Player has to click again to re-establish a fresh selection.
+  // Drop the teleported tokens from selection. Without this, OBR's
+  // multi-select carryover means the next drag of any token in the
+  // set moves the WHOLE party — user reads that as "drag teleported
+  // the wrong tokens too". Player has to click again to re-establish
+  // a fresh selection.
   try { await OBR.player.deselect(tokenIds); } catch {}
 }
 
@@ -1344,9 +1425,11 @@ export async function setupPortals(): Promise<void> {
     OBR.broadcast.onMessage(BROADCAST_BLINK_PROCEED, async () => {
       const tJob = pendingTeleport;
       const fJob = pendingFocus;
+      const gJob = pendingGather;
       pendingTeleport = null;
       pendingFocus = null;
-      if (!tJob && !fJob) {
+      pendingGather = null;
+      if (!tJob && !fJob && !gJob) {
         // Modal asked to proceed but we've already cleared the job
         // (e.g. modal opened twice somehow). Tell it to recover.
         blinkModalOpen = false;
@@ -1365,10 +1448,31 @@ export async function setupPortals(): Promise<void> {
         // — and any teleported token still sitting on its destination
         // portal will re-trigger the popover with the wrong tokenIds.
         for (const id of tJob.tokenIds) movedByMeIds.delete(id);
+      } else if (gJob) {
+        // Initiative gather (DM client only). Move tokens with the
+        // same fog/wall bypass that teleport uses, then instant-snap
+        // the camera to the gather point. Remote players got their
+        // own blink-and-focus broadcast separately — they only need
+        // the camera focus on their side (positions sync via OBR).
+        await moveTokensWithFogBypass(gJob.tokenIds, gJob.positions);
+        for (const id of gJob.tokenIds) movedByMeIds.delete(id);
+        try {
+          const [vw, vh, vpScale] = await Promise.all([
+            OBR.viewport.getWidth(),
+            OBR.viewport.getHeight(),
+            OBR.viewport.getScale(),
+          ]);
+          const target = {
+            x: -gJob.center.x * vpScale + vw / 2,
+            y: -gJob.center.y * vpScale + vh / 2,
+          };
+          await OBR.viewport.setPosition(target).catch(() => {});
+        } catch {}
       } else if (fJob) {
-        // Camera-only focus (used by initiative gather). No token
-        // movement on this client — the originating GM already
-        // updated positions; OBR scene-sync brings them here.
+        // Camera-only focus (remote-side companion to gather / any
+        // other "blink + focus" cinematic). No token movement on this
+        // client — the originating GM already updated positions; OBR
+        // scene-sync brings them here.
         try {
           const [vw, vh, vpScale] = await Promise.all([
             OBR.viewport.getWidth(),
@@ -1524,6 +1628,8 @@ export async function teardownPortals(): Promise<void> {
   }
   movedByMeIds.clear();
   pendingTeleport = null;
+  pendingFocus = null;
+  pendingGather = null;
   lastTokenPos.clear();
   recentlyTeleported.clear();
 }

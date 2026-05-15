@@ -6,14 +6,9 @@ import { bindRollableContextMenu, bindRollableClickPopup } from "../dice/context
 import { subscribeToSfx } from "../dice/sfx-broadcast";
 import { bindPanelDrag } from "../../utils/panelDrag";
 import { PANEL_IDS } from "../../utils/panelLayout";
-import {
-  parseStatInput,
-  readBubbles,
-  patchBubbles,
-  clampStat,
-  type BubblesData,
-} from "../../utils/statEdit";
+import { readBubbles, type BubblesData } from "../../utils/statEdit";
 import { mountResourcePanel } from "../resourceTracker/panel";
+import { mountStatBanner } from "../../utils/statBanner";
 
 // 2026-05-13 — Was previously dev-only (gated through STABLE_HIDES /
 // STABLE_HIDES_CC) until cc-fullscreen + hp-bar integration matured.
@@ -110,6 +105,11 @@ function setupRtTabSwitching(): void {
 }
 
 let rtMountHandle: { refresh: () => Promise<void>; unmount: () => void } | null = null;
+// Shared stat-banner component handle (HP / temp HP / AC / lock). Same
+// lifecycle as rtMountHandle — render() unmounts the previous instance
+// and re-mounts so the component's scene.items.onChange subscription
+// doesn't leak one listener per card switch.
+let ccStatHandle: { refresh: () => Promise<void>; unmount: () => void } | null = null;
 async function ensureRtResourceMount(): Promise<void> {
   const container = root.querySelector<HTMLElement>("#rt-mount");
   if (!container) return;
@@ -336,63 +336,26 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
 
   const rawUrl = `https://obr.dnd.center/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/`;
 
-  // Merged stat values: prefer the bound token's bubbles metadata
-  // (live state, what the HP bar draws from) and fall back to the
-  // card data when bubbles metadata isn't set yet.
+  // Stat banner — the shared `mountStatBanner` component (the SAME one
+  // the standalone DM resource tracker mounts). It owns the HP / temp HP
+  // / AC / lock UI plus all the edit + scene-sync logic, so render() just
+  // drops a host element here; the post-innerHTML step below mounts the
+  // component into it. `statFallback` supplies the card-data HP/AC for
+  // any field the bound token has no bubbles metadata for yet; the
+  // already-fetched `live` snapshot is passed as initialLive for a
+  // flicker-free first paint.
   const hp = cs.hp || {};
-  const liveHp = typeof live.health === "number" ? live.health : hp.current ?? 0;
-  const liveMaxHp = typeof live["max health"] === "number" ? live["max health"] : hp.max ?? 0;
-  const liveTempHp = typeof live["temporary health"] === "number" ? live["temporary health"] : hp.temp ?? 0;
-  const liveAc = typeof live["armor class"] === "number" ? live["armor class"] : (cs.ac ?? 10);
+  const statFallback: Partial<Record<keyof BubblesData, number>> = {
+    health: typeof hp.current === "number" ? hp.current : 0,
+    "max health": typeof hp.max === "number" ? hp.max : 0,
+    "temporary health": typeof hp.temp === "number" ? hp.temp : 0,
+    "armor class": typeof cs.ac === "number" ? cs.ac : 10,
+  };
 
   const speedStr = cs.speed != null ? `${cs.speed}尺` : "?";
   const castAbility = sp.spellcasting_ability || "—";
 
-  // Stat banner — single horizontal row with HP red pill + temp pink
-  // circle + AC shield. Each editable number is wrapped in a .stat-cell
-  // so the "previous value hint" can pop above on focus without
-  // shifting layout. Inputs accept absolute / +N / -N / A+B syntax;
-  // commit writes patch the bound token's bubbles metadata which the
-  // bubbles module re-reads to redraw the HP bar + heater shield over
-  // the token in real time.
-  // HP fill ratio for the pill mask. 1 = full, 0 = empty. Defaults
-  // to 1 when maxHp is 0 (no HP info yet) so the pill reads as the
-  // legacy solid red instead of an empty dark slot.
-  const hpRatio = liveMaxHp > 0
-    ? Math.max(0, Math.min(1, liveHp / liveMaxHp))
-    : 1;
-  const statBanner = `
-    <div class="stat-banner">
-      <div class="hp-pill" style="--hp-ratio: ${hpRatio.toFixed(3)}">
-        <span class="stat-cell">
-          <span class="prev-hint" data-prev></span>
-          <input class="stat-input" type="text" inputmode="numeric"
-                 data-field="health" value="${escapeHtml(String(liveHp))}"
-                 title="支持 20 / +5 / -3 / 15+5">
-        </span>
-        <span class="slash">/</span>
-        <span class="stat-cell">
-          <span class="prev-hint" data-prev></span>
-          <input class="stat-input" type="text" inputmode="numeric"
-                 data-field="max health" value="${escapeHtml(String(liveMaxHp))}"
-                 title="支持 20 / +5 / -3 / 15+5">
-        </span>
-      </div>
-      <div class="temp-pill stat-cell">
-        <span class="prev-hint" data-prev></span>
-        <input class="stat-input" type="text" inputmode="numeric"
-               data-field="temporary health" value="${escapeHtml(String(liveTempHp))}"
-               title="支持 20 / +5 / -3 / 15+5">
-      </div>
-      <div class="ac-pill stat-cell">
-        <span class="prev-hint" data-prev></span>
-        <input class="stat-input" type="text" inputmode="numeric"
-               data-field="armor class" value="${escapeHtml(String(liveAc))}"
-               title="支持 20 / +5 / -3 / 15+5">
-      </div>
-      ${cachedIsGM ? renderLockButton(live.locked !== false) : ""}
-    </div>
-  `;
+  const statBanner = `<div class="cc-stat-mount" id="cc-stat-mount"></div>`;
 
   // The remaining read-only chips (HP/AC moved to stat-rows above).
   const chips = `
@@ -478,7 +441,22 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
       // individual clickable chips. Splits on the most common
       // delimiters (Chinese / ASCII commas, slash, and the explicit
       // "精通：" prefix) so each tag becomes its own search query.
-      const prop = w.properties ? renderWeaponPropertyChips(String(w.properties)) : "";
+      //
+      // 2026-05-15 — also pull `w.mastery` (the parser's dedicated
+      // mastery column, AN32 in the 2024 layout). When present, fold
+      // it into the chip list with the "精通：" prefix so it renders
+      // identically to mastery written inline in the properties text.
+      // Description (AP32 effect) is NOT carried into the chip —
+      // global search resolves the rule line on click.
+      const propsRaw = String(w.properties ?? "");
+      const masteryName = String((w as any).mastery ?? "").trim();
+      const masteryPrefix = masteryName ? `精通：${masteryName}` : "";
+      // Merge into one string. If the raw props already contains a
+      // mastery tag (legacy cards), don't double-add the dedicated one.
+      const propsCombined = masteryPrefix && !/精通[：:]/.test(propsRaw)
+        ? (propsRaw ? `${propsRaw}, ${masteryPrefix}` : masteryPrefix)
+        : propsRaw;
+      const prop = propsCombined ? renderWeaponPropertyChips(propsCombined) : "";
       const dmgRaw = [w.damage, w.damage_type].filter(Boolean).join(" ");
       const wpName = w.name ?? "?";
       // Attack roll: parse the leading sign+number from attack_bonus.
@@ -596,7 +574,23 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
   // 2026-05-13 — resource-tracker graduated to stable; always set up.
   setupRtTabSwitching();
   void ensureRtResourceMount();
-  bindStatRowInputs();
+  // Mount the shared stat banner into its host element. Unmount any
+  // prior instance first — render() runs on every card switch, so
+  // without this the component's scene.items.onChange subscription
+  // would leak one listener per switch. `initialLive` is the freshly
+  // fetched bubbles snapshot, so the banner paints synchronously with
+  // the right values (no refresh() round-trip needed).
+  const statMount = root.querySelector<HTMLElement>("#cc-stat-mount");
+  if (statMount) {
+    ccStatHandle?.unmount();
+    ccStatHandle = mountStatBanner({
+      container: statMount,
+      getItemId: () => boundItemId,
+      isGM: cachedIsGM,
+      fallback: statFallback,
+      initialLive: live,
+    });
+  }
   // The drag handle DOM element is recreated on every render() (we
   // assigned root.innerHTML), so the existing pointer-event bindings
   // on the previous element are gone. Re-bind for the new node.
@@ -647,196 +641,6 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {}) 
 // DOM listeners die with them — but we still want to clear our local
 // pointer-capture state inside panelDrag, which the unbind handles.)
 let currentDragUnbind: (() => void) | null = null;
-
-// DM-only lock button at the right end of the stat banner. Closed
-// padlock = locked (default — players see no bar in idle, silhouette
-// in combat). Open padlock = unlocked (everyone sees full data). The
-// click handler is wired in `bindStatRowInputs` below alongside the
-// stat inputs.
-function renderLockButton(locked: boolean): string {
-  const titleZh = locked
-    ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
-    : "已解锁：所有玩家可见完整 HP / AC 数值";
-  const lockedAttr = locked ? "true" : "false";
-  // Single SVG path that covers both lock + unlock by toggling the
-  // shackle's right side via the data-locked attribute → CSS selector.
-  return `
-    <button class="stat-lock" data-locked="${lockedAttr}" title="${escapeHtml(titleZh)}" aria-label="${escapeHtml(titleZh)}" type="button">
-      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor" stroke="none"/>
-        <path class="lock-shackle" d="M5 7 V5 a3 3 0 0 1 6 0 V7"/>
-      </svg>
-    </button>
-  `;
-}
-
-// After every successful patch, push the cross-field-clamped values
-// back into all four stat inputs so the user sees what actually got
-// committed (e.g. typed HP=999 with max=66 → input snaps to 66).
-//
-// `skipFocused` (default true) prevents clobbering the input the user
-// is currently editing — relevant for the items.onChange external
-// sync path. Local commits run after blur so no input is focused.
-function refreshStatInputs(live: BubblesData, skipFocused = true): void {
-  const fields: Array<keyof BubblesData> = [
-    "health", "max health", "temporary health", "armor class",
-  ];
-  for (const f of fields) {
-    const v = live[f];
-    if (v == null) continue;
-    const sel = `.stat-input[data-field="${f}"]`;
-    const el = root.querySelector<HTMLInputElement>(sel);
-    if (!el) continue;
-    if (skipFocused && document.activeElement === el) continue;
-    el.value = String(v);
-  }
-  // Re-paint the HP pill's fill ratio so the masked overlay tracks
-  // edits live (otherwise the pill text updates but the colored fill
-  // stays at the previous ratio until the next render).
-  const hp = typeof live["health"] === "number" ? (live["health"] as number) : null;
-  const maxHp = typeof live["max health"] === "number" ? (live["max health"] as number) : null;
-  const ratio = (hp != null && maxHp != null && maxHp > 0)
-    ? Math.max(0, Math.min(1, hp / maxHp))
-    : 1;
-  const pill = root.querySelector<HTMLElement>(".hp-pill");
-  if (pill) pill.style.setProperty("--hp-ratio", ratio.toFixed(3));
-  // Lock button state — keeps icon in step with external `locked` flips.
-  const lockBtn = root.querySelector<HTMLButtonElement>(".stat-lock");
-  if (lockBtn) {
-    const locked = live.locked === undefined ? true : !!live.locked;
-    lockBtn.dataset.locked = locked ? "true" : "false";
-    lockBtn.title = locked
-      ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
-      : "已解锁：所有玩家可见完整 HP / AC 数值";
-  }
-}
-
-// 2026-05-10d — items.onChange external sync. Mirror of the same hook
-// in monster-info-page.ts. Keeps cc-info's HP / AC / lock inputs in
-// step with whatever else writes the bound token's bubbles metadata
-// (standalone hp-bar component, fullscreen card edits, dice damage
-// scripts, etc.). Earlier rounds had only the local-commit refresh
-// path, so an edit made in the standalone hp-bar didn't propagate
-// here even though both wrote the same scene-meta key.
-async function syncFromExternal(): Promise<void> {
-  if (!boundItemId) return;
-  let live: BubblesData = {};
-  try { live = await readBubbles(boundItemId); } catch {}
-  refreshStatInputs(live, /* skipFocused */ true);
-}
-
-// Wire pointer-events for the HP / max-HP / temp / AC inputs that
-// `render()` injected. Each input parses its own value on Enter / blur,
-// then patches the bound token's bubbles metadata. The matching
-// `.prev-hint` sibling pops above the cell during edit so the user
-// can still see the original number while typing the replacement.
-function bindStatRowInputs(): void {
-  // Lock button (DM only). Toggles BUBBLES_META.locked on the bound
-  // token. Visual state syncs from the data-locked attribute that
-  // render() set, then updates here on click.
-  const lockBtn = root.querySelector<HTMLButtonElement>(".stat-lock");
-  const lockTokenId = boundItemId;
-  if (lockBtn && lockTokenId) {
-    lockBtn.addEventListener("click", async () => {
-      const wasLocked = lockBtn.dataset.locked !== "false";
-      const next = !wasLocked;
-      lockBtn.dataset.locked = next ? "true" : "false";
-      lockBtn.title = next
-        ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
-        : "已解锁：所有玩家可见完整 HP / AC 数值";
-      try {
-        await patchBubbles(
-          lockTokenId,
-          { locked: next } as Partial<BubblesData>,
-        );
-      } catch (e) {
-        console.warn("[cc-info] toggle lock failed", e);
-        lockBtn.dataset.locked = wasLocked ? "true" : "false";
-      }
-    });
-  }
-
-  const inputs = root.querySelectorAll<HTMLInputElement>(".stat-input[data-field]");
-  inputs.forEach((input) => {
-    const field = input.dataset.field as keyof BubblesData | undefined;
-    if (!field) return;
-    // Track the "current value at edit start" so the +/- relative
-    // parser does the math against the displayed value, not against
-    // whatever the user is in the middle of typing.
-    let editStart = input.value;
-    const cell = input.closest<HTMLElement>(".stat-cell");
-    const prevHint = cell?.querySelector<HTMLElement>(".prev-hint");
-
-    const commit = async () => {
-      if (!boundItemId) {
-        input.value = editStart;
-        return;
-      }
-      const text = input.value;
-      const cur = parseFloat(editStart);
-      const parsed = parseStatInput(text, Number.isFinite(cur) ? cur : 0);
-      if (parsed == null) {
-        input.value = editStart;
-        return;
-      }
-      const next = clampStat(field, parsed);
-      try {
-        // patchBubbles returns the cross-field-clamped final state
-        // (e.g. setting health > maxHealth gets clamped down to
-        // maxHealth; lowering maxHealth below current health drags
-        // health down too). We refresh ALL four inputs so the user
-        // sees the corrected values even when their typed value
-        // exceeded the clamp.
-        const final = await patchBubbles(
-          boundItemId,
-          { [field]: next } as Partial<BubblesData>,
-        );
-        refreshStatInputs(final);
-        editStart = input.value;
-      } catch (e) {
-        console.warn("[cc-info] patch bubbles failed", e);
-        input.value = editStart;
-      }
-    };
-
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        input.blur();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        input.value = editStart;
-        input.blur();
-      }
-    });
-    input.addEventListener("focus", () => {
-      // Snapshot the current value so the prev-hint stays stable
-      // even if the user clears + retypes mid-edit, and so blur
-      // can revert to it on empty input.
-      editStart = input.value;
-      if (prevHint) prevHint.textContent = editStart;
-      cell?.classList.add("editing");
-      // Clear the input on focus instead of selecting it. Per user
-      // request: no blue text-selection rectangle, and the field
-      // becomes blank so they can either type a new absolute value
-      // or simply hit Enter / blur to keep the original (empty
-      // commit reverts back to editStart).
-      requestAnimationFrame(() => {
-        input.value = "";
-      });
-    });
-    input.addEventListener("blur", () => {
-      cell?.classList.remove("editing");
-      const text = input.value.trim();
-      if (text === "") {
-        // Empty submit = "I changed my mind" — restore the original.
-        input.value = editStart;
-        return;
-      }
-      if (text !== editStart) void commit();
-    });
-  });
-}
 
 // Compact name-only chips. Click → fires BC_SEARCH_QUERY to populate
 // the cluster's search input. The cluster echoes its own input value
@@ -1046,9 +850,7 @@ OBR.onReady(async () => {
     }
   });
 
-  // 2026-05-10d — items.onChange sync. Picks up bubbles metadata
-  // edits made elsewhere (standalone hp-bar component, fullscreen
-  // card stats, dice scripts) and repaints HP / AC / lock without a
-  // full card refetch.
-  OBR.scene.items.onChange(() => { void syncFromExternal(); });
+  // The stat banner self-syncs on scene.items.onChange (it's the
+  // shared mountStatBanner component now); the resource panel does
+  // too. No card-level items.onChange hook needed here anymore.
 });

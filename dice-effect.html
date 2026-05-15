@@ -74,6 +74,23 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
   pointer-events:none;
 }
 
+/* Custom skin (per-player dice art) — replaces the masked art-base /
+   art-fg pair when the rolling player has set a skin for this die
+   type. Shown as-is: no player-color tint, no multiply shading. Works
+   for both a background <div> (static skins) and a looping <video>
+   (webm skins) via the shared object-fit / background sizing. The
+   .die container's transforms (bounce / spin / scale / fly) still
+   apply since the skin element just fills the box. */
+.dice .art-custom{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  background-position:center;
+  background-size:contain;
+  background-repeat:no-repeat;
+  object-fit:contain;
+  pointer-events:none;
+}
+
 /* Slot-machine number — sits in the center of the dice. Blurred + tiny
    vertical jitter while rolling, snaps sharp on the final settle.
    Font-size scales with the die so multi-dice (smaller faces) still

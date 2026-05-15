@@ -1616,6 +1616,57 @@ async function onRowClick(idx: number) {
   await renderPreviewFor(pinnedEntry ?? entry);
 }
 
+// 2026-05-15 — "未显示？顺手汇报" button. Posts the search entry to
+// /api/character/missing-report (Flask) which appends one JSON line to
+// /var/log/obr-suite/missing-reports.jsonl. The maintainer greps the
+// file later to see which 5etools fields the renderer doesn't surface
+// yet. Best-effort: a network blip just shows an error pill.
+async function sendMissingReport(
+  entry: Entry,
+  bodyEl: HTMLElement | null,
+  btn: HTMLButtonElement,
+): Promise<void> {
+  // Once-per-click guard so accidental double-clicks don't double-log.
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const originalLabel = btn.innerHTML;
+  btn.innerHTML = `<span style="opacity:0.7">汇报中…</span>`;
+  // Lightweight visible-context snapshot: first ~600 chars of the
+  // body's textContent. Helps me see what DID render (or that it's
+  // empty) without needing the user to type anything.
+  let context = "";
+  try {
+    if (bodyEl) context = (bodyEl.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
+  } catch { /* ignore */ }
+  const payload = {
+    entry: {
+      id: entry.id,
+      n: entry.n,
+      cn: entry.cn ?? "",
+      c: entry.c,
+      s: entry.s,
+      p: entry.p,
+    },
+    context,
+    pageUrl: location.href,
+  };
+  try {
+    const r = await fetch("/api/character/missing-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    btn.innerHTML = `<span style="color:#7be0a0">✓ 已汇报，谢谢</span>`;
+    // Restore after a moment so the user can resubmit if needed
+    setTimeout(() => { btn.innerHTML = originalLabel; btn.disabled = false; }, 2400);
+  } catch (e) {
+    btn.innerHTML = `<span style="color:#ff7a6b">汇报失败，稍后再试</span>`;
+    setTimeout(() => { btn.innerHTML = originalLabel; btn.disabled = false; }, 2400);
+    console.warn("[search/missing-report]", e);
+  }
+}
+
 async function renderPreviewFor(entry: Entry) {
   const cat = categoryInfo(entry.c);
   const display = entry.cn || entry.n;
@@ -1627,6 +1678,14 @@ async function renderPreviewFor(entry: Entry) {
 
   previewEl.innerHTML = `
     <div class="prev-head">
+      <button class="prev-report" id="prev-report" type="button"
+              title="该词条没正确显示？点一下汇报，我会收集起来做适配。">
+        <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" fill="none"
+             stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+             style="vertical-align:-1px;margin-right:3px">
+          <circle cx="8" cy="8" r="6"/><path d="M8 5v4"/><path d="M8 11.2v.05"/>
+        </svg>未显示？顺手汇报
+      </button>
       <div class="prev-title">${escapeHtml(display)}</div>
       ${entry.n && entry.n !== display ? `<div class="prev-eng">${escapeHtml(entry.n)}</div>` : ""}
       <div class="prev-meta">${escapeHtml(cat.label)} · ${escapeHtml(srcDisplay)}${escapeHtml(page)}</div>
@@ -1634,6 +1693,14 @@ async function renderPreviewFor(entry: Entry) {
     <div class="prev-body" id="prev-body"><div class="prev-loading">加载中…</div></div>
   `;
   const bodyEl = previewEl.querySelector("#prev-body") as HTMLDivElement;
+  // Wire the "未显示？汇报" button. POST the search entry to the
+  // character-cards Flask service (it logs to a JSONL file the
+  // maintainer reviews). Single-shot per click, with a small toast on
+  // success/failure — see sendMissingReport below.
+  const reportBtn = previewEl.querySelector<HTMLButtonElement>("#prev-report");
+  if (reportBtn) {
+    reportBtn.addEventListener("click", () => void sendMissingReport(entry, bodyEl, reportBtn));
+  }
 
   if (!cat.data) {
     bodyEl.innerHTML = `<div class="prev-empty">该分类暂无内置详情<br><span class="prev-empty-sub">${escapeHtml(cat.label)} · 仅显示名称与来源</span></div>`;

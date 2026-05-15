@@ -37,7 +37,47 @@
 import OBR, { Item } from "@owlbear-rodeo/sdk";
 import { Resource, IconId, PLUGIN_ID } from "./types";
 import { ICON_LIBRARY } from "./icons";
-import { readResources, updateResource } from "./storage";
+import { readResources, updateResource, writeResources } from "./storage";
+
+// 2026-05-14 — small expression parser for click-to-input on bar /
+// number rows. Accepts:
+//   • Plain numbers: "10", "3.5", "-2"
+//   • Relative deltas: "+5" → current+5, "-3" → current-3
+//   • Special tokens: "current" | "cur" | "max" substituted at parse
+//     time. So "max-2", "current/2", "max*0.5+1" all work.
+//   • Pure arithmetic: +, -, *, /, parens. No exponents / functions.
+//
+// Returns null on parse failure (caller falls back to "no change").
+function parseValueExpression(
+  text: string,
+  current: number,
+  max: number,
+): number | null {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return null;
+  // Relative shortcut — "+5" or "-3" means current ± delta. We special-
+  // case this BEFORE substitution so "+5" doesn't get treated as an
+  // arithmetic expression with no LHS.
+  if (/^[+\-]\s*[\d.]+$/.test(trimmed)) {
+    const delta = Number(trimmed);
+    if (Number.isFinite(delta)) return current + delta;
+  }
+  // Substitute keywords. Order matters: replace "current" before "cur"
+  // so we don't end up with "currentent".
+  const substituted = trimmed
+    .replace(/current/gi, `(${current})`)
+    .replace(/cur/gi, `(${current})`)
+    .replace(/max/gi, `(${max})`);
+  // Whitelist chars to keep the Function() eval safe — only arithmetic
+  // primitives. Anything else aborts.
+  if (!/^[\d.\s+\-*/()]+$/.test(substituted)) return null;
+  try {
+    // eslint-disable-next-line no-new-func
+    const v = new Function(`return (${substituted})`)();
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  } catch {}
+  return null;
+}
 
 const BC_OPEN_EDIT = `${PLUGIN_ID}/edit-open`;
 // 2026-05-11 — fire on every value commit so the bottom-center
@@ -52,7 +92,7 @@ const CC_BIND_KEY = "com.character-cards/boundCardId";
 const CC_LIST_KEY = "com.character-cards/list";
 const BUBBLES_NAME_KEY = "com.owlbear-rodeo-bubbles-extension/name";
 
-async function resolveTokenDisplayName(itemId: string): Promise<string> {
+export async function resolveTokenDisplayName(itemId: string): Promise<string> {
   let item: any = null;
   try {
     const items = await OBR.scene.items.getItems([itemId]);
@@ -142,6 +182,11 @@ export function mountResourcePanel(opts: MountOptions): {
   // and re-render normally.
   let suppressRenderUntil = 0;
   const SUPPRESS_RENDER_MS = 800;
+  // 2026-05-14 — JS-side mirror of the active drag's source id. Some
+  // browsers don't deliver dataTransfer payload to drop events inside
+  // OBR popover iframes (cross-frame DataTransferItemList sanitisation),
+  // so we maintain our own copy that survives the whole drag.
+  let currentDraggedId: string | null = null;
 
   ensureStyles();
 
@@ -305,9 +350,27 @@ export function mountResourcePanel(opts: MountOptions): {
       case "bar":    pillsHtml = renderBarPill(r); break;
       case "number": pillsHtml = renderNumberPill(r); break;
     }
+    // 2026-05-14 — drag-reorder. Only the `.rt-row-grip` element is
+    // `draggable="true"`; the row itself is NOT. Earlier round had
+    // `draggable="true"` on the row + a guard that cancelled dragstart
+    // when the mousedown target wasn't the grip — user reported the
+    // guard didn't work and drag still initiated from the row body
+    // without producing any reorder. Restricting `draggable` to the
+    // grip span is the simpler, robust fix: the browser literally
+    // won't start a drag from anywhere else.
+    //
+    // Cross-target wiring: the grip carries the drag-source role
+    // (records the row's id on dragstart), while the ROW carries the
+    // drop-target role (dragover / drop fire on the row so the user
+    // can drop ANYWHERE on the target row, not just its tiny grip).
     return `
       <div class="rt-row" data-id="${escapeAttr(r.id)}">
         <div class="rt-row-head">
+          <span class="rt-row-grip"
+                data-action="row-grip"
+                data-rid="${escapeAttr(r.id)}"
+                draggable="true"
+                title="拖动以重新排序">≡</span>
           <div class="rt-row-name" title="${escapeAttr(r.name)}">${escapeHtml(r.name || "(未命名)")}</div>
           <div class="rt-row-meta" data-meta>${r.current} / ${r.max}</div>
           <button class="rt-row-edit" type="button" data-edit-id="${escapeAttr(r.id)}" title="编辑">⚙</button>
@@ -342,12 +405,21 @@ export function mountResourcePanel(opts: MountOptions): {
   // 进度 (bar) — number-prefix label + draggable bar with the
   // selected icon as the moving thumb. The number sits at the front
   // of the bar so the icon can't cover it during slide.
+  //
+  // 2026-05-14 — the number text (rt-bar-num) is now click-to-edit:
+  // clicking opens an inline input that accepts numbers, deltas
+  // (+5 / -3), or expressions (current+5, max/2, etc). See
+  // openValueEditor() for the parse rules.
   function renderBarPill(r: Resource): string {
     const max = Math.max(1, r.max);
     const cur = Math.max(0, Math.min(max, r.current));
     const ratio = (cur / max) * 100;
     return `
-      <div class="rt-bar-num" data-bar-num>${cur} / ${max}</div>
+      <div class="rt-bar-num"
+           data-bar-num
+           data-action="value-edit"
+           data-rid="${escapeAttr(r.id)}"
+           title="点击编辑：可输入数字 / +5 -3 / current+5 / max-2 等表达式">${cur} / ${max}</div>
       <div class="rt-bar"
            data-action="bar-drag"
            data-rid="${escapeAttr(r.id)}"
@@ -365,14 +437,19 @@ export function mountResourcePanel(opts: MountOptions): {
   // 数字 (number) — bar layout: [MIN] [−] [○ icon + number] [+] [MAX].
   // Center has a circle wrapping a large icon with the number
   // overlayed (stroke for legibility). Left/right ends show min/max
-  // values as static labels.
+  // values as proper buttons (user request 2026-05-14).
+  //
+  // 2026-05-14 — the centre orb number (rt-num-orb-val) is now click-
+  // to-edit; the orb's own click is rebound to the orb's icon. min/max
+  // ends are full buttons (styling lift; their click behaviour is
+  // unchanged — jump to 0 / jump to max).
   function renderNumberPill(r: Resource): string {
     const min = 0;                   // current schema doesn't have a free min; pin at 0
     const max = Math.max(0, r.max);
     const cur = r.current;
     return `
       <div class="rt-num-bar">
-        <span class="rt-num-end" data-num-end="min" title="跳到最小（${min}）">${min}</span>
+        <button class="rt-num-end" data-num-end="min" type="button" title="跳到最小（${min}）">${min}</button>
         <button class="rt-num-step rt-num-minus"
                 data-action="num-step"
                 data-rid="${escapeAttr(r.id)}"
@@ -380,11 +457,14 @@ export function mountResourcePanel(opts: MountOptions): {
                 type="button"
                 title="${escapeAttr(r.name)} −1">−</button>
         <span class="rt-num-orb"
-              data-action="num-orb"
               data-rid="${escapeAttr(r.id)}"
-              title="${escapeAttr(r.name)} ${cur}/${max} · 点击重置归满 / 归零再点也归满">
+              title="${escapeAttr(r.name)} ${cur}/${max}">
           <span class="rt-num-orb-icon">${ICON_LIBRARY[r.icon as IconId] ?? ICON_LIBRARY.gem}</span>
-          <span class="rt-num-orb-val" data-num-val>${cur}</span>
+          <span class="rt-num-orb-val"
+                data-num-val
+                data-action="value-edit"
+                data-rid="${escapeAttr(r.id)}"
+                title="点击编辑：可输入数字 / +5 -3 / current+5 / max-2 等表达式">${cur}</span>
         </span>
         <button class="rt-num-step rt-num-plus"
                 data-action="num-step"
@@ -392,7 +472,7 @@ export function mountResourcePanel(opts: MountOptions): {
                 data-dir="+1"
                 type="button"
                 title="${escapeAttr(r.name)} +1">+</button>
-        <span class="rt-num-end" data-num-end="max" title="跳到最大（${max}）">${max}</span>
+        <button class="rt-num-end" data-num-end="max" type="button" title="跳到最大（${max}）">${max}</button>
       </div>
     `;
   }
@@ -482,11 +562,97 @@ export function mountResourcePanel(opts: MountOptions): {
     root.querySelectorAll<HTMLElement>('[data-num-end]').forEach((el) => {
       el.addEventListener("click", () => void onNumberEndJump(id, el));
     });
+    // 2026-05-14 — click-to-input on bar number + number orb value.
+    // Both use data-action="value-edit" with the resource id on data-rid.
+    root.querySelectorAll<HTMLElement>('[data-action="value-edit"]').forEach((el) => {
+      el.addEventListener("click", (e) => {
+        e.stopPropagation(); // don't bubble into parent orb / bar handlers
+        void openValueEditor(id, el);
+      });
+    });
     root.querySelectorAll<HTMLButtonElement>(".rt-row-edit").forEach((b) => {
       b.addEventListener("click", () => {
         const rid = b.dataset.editId ?? "";
         const r = currentRender.find((x) => x.id === rid);
         if (r) openEdit(r);
+      });
+    });
+    // 2026-05-14 — HTML5 drag-reorder, source-grip + target-row split.
+    //
+    // Drag SOURCE: each `.rt-row-grip` is `draggable="true"`. On
+    // dragstart it stashes its parent row's id into dataTransfer +
+    // adds .rt-dragging to the row for visual feedback. Restricting
+    // `draggable` to just the grip is the robust way to prevent
+    // accidental row-body drags — the earlier mousedown-guard
+    // approach wasn't reliable.
+    //
+    // Drag TARGET: each `.rt-row` accepts dragover / drop. The drop
+    // zone is the whole row (not just its grip) so the user has a
+    // wide hit area. dragover decides above-vs-below based on the
+    // cursor's Y relative to the row's vertical midpoint.
+    //
+    // We rely on a module-scoped fallback (currentDraggedId) too —
+    // some browsers don't deliver dataTransfer payload to drop events
+    // inside iframes, so we keep a JS-side copy as backup.
+    root.querySelectorAll<HTMLElement>('[data-action="row-grip"]').forEach((grip) => {
+      grip.addEventListener("dragstart", (ev) => {
+        const e = ev as DragEvent;
+        const rid = grip.dataset.rid || "";
+        const row = grip.closest<HTMLElement>(".rt-row");
+        if (!rid || !row) {
+          e.preventDefault();
+          return;
+        }
+        currentDraggedId = rid;
+        try {
+          e.dataTransfer?.setData("text/plain", rid);
+          // Some browsers refuse to start a drag without setData on a
+          // supported type; text/plain is universally accepted.
+        } catch {}
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+        row.classList.add("rt-dragging");
+      });
+      grip.addEventListener("dragend", () => {
+        const row = grip.closest<HTMLElement>(".rt-row");
+        row?.classList.remove("rt-dragging");
+        container.querySelectorAll(".rt-row").forEach((r) => {
+          r.classList.remove("rt-drop-above", "rt-drop-below");
+        });
+        currentDraggedId = null;
+      });
+    });
+    root.querySelectorAll<HTMLElement>(".rt-row").forEach((row) => {
+      row.addEventListener("dragover", (ev) => {
+        // Only react if we're tracking an in-flight drag.
+        if (!currentDraggedId) return;
+        const e = ev as DragEvent;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        // Hovering over the row that's BEING dragged → no slot.
+        if ((row as HTMLElement).dataset.id === currentDraggedId) {
+          row.classList.remove("rt-drop-above", "rt-drop-below");
+          return;
+        }
+        const rect = (row as HTMLElement).getBoundingClientRect();
+        const isAbove = (e.clientY - rect.top) < rect.height / 2;
+        row.classList.toggle("rt-drop-above", isAbove);
+        row.classList.toggle("rt-drop-below", !isAbove);
+      });
+      row.addEventListener("dragleave", () => {
+        row.classList.remove("rt-drop-above", "rt-drop-below");
+      });
+      row.addEventListener("drop", (ev) => {
+        const e = ev as DragEvent;
+        e.preventDefault();
+        // dataTransfer.getData inside iframe drops returns empty on
+        // some browsers — fall back to the JS-side mirror.
+        const draggedId = (e.dataTransfer?.getData("text/plain") || currentDraggedId || "").trim();
+        const targetId = (row as HTMLElement).dataset.id || "";
+        const isAbove = row.classList.contains("rt-drop-above");
+        row.classList.remove("rt-drop-above", "rt-drop-below");
+        currentDraggedId = null;
+        if (!draggedId || !targetId || draggedId === targetId) return;
+        void commitReorder(id, draggedId, targetId, isAbove ? "before" : "after");
       });
     });
     // The "+ 新增资源" button only ever has one instance — bind on
@@ -637,6 +803,123 @@ export function mountResourcePanel(opts: MountOptions): {
     await applyChange(itemId, r, next, next - r.current, el);
   }
 
+  // 2026-05-14 — inline value editor for bar number + number orb.
+  // Replaces the target element with an <input> bound to a fresh
+  // expression. Enter commits, Esc cancels, blur commits. The input
+  // is sized to the element it replaced so layout doesn't jump.
+  async function openValueEditor(itemId: string, el: HTMLElement): Promise<void> {
+    const rid = el.dataset.rid;
+    if (!rid) return;
+    const r = currentRender.find((x) => x.id === rid);
+    if (!r) return;
+    // Avoid double-entry — if the user double-clicks fast we'd
+    // otherwise stack inputs.
+    if (el.querySelector("input")) return;
+    const originalHtml = el.innerHTML;
+    const originalContent = el.textContent || "";
+    // Build the input. Style inline to avoid a CSS round-trip.
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "rt-value-input";
+    input.value = String(r.current);
+    input.placeholder = "+5 / -3 / max/2 / 10";
+    input.spellcheck = false;
+    input.autocomplete = "off";
+    // Replace element content with the input.
+    el.textContent = "";
+    el.appendChild(input);
+    input.focus();
+    input.select();
+
+    let committed = false;
+    const restore = () => {
+      // Restore via textContent (atomic — clears any child input first).
+      // patchRow() later overwrites this when applyChange lands, so we
+      // only need to put SOMETHING legible here in case the user cancels.
+      el.textContent = originalContent;
+    };
+    const commit = async () => {
+      if (committed) return;
+      committed = true;
+      const text = input.value;
+      const parsed = parseValueExpression(text, r.current, r.max);
+      restore();
+      if (parsed == null) return; // bad expression — no change
+      // Round to 2 decimals, clamp to [0, max]. Bar mode enforces
+      // strict integers visually but we accept fractional for users
+      // who do something like "max/3"; resource icons coerce to int
+      // when rendering count anyway.
+      const clamped = Math.max(0, Math.min(r.max, Math.round(parsed * 100) / 100));
+      if (clamped === r.current) return;
+      const delta = clamped - r.current;
+      await applyChange(itemId, r, clamped, delta, null);
+    };
+    const cancel = () => {
+      if (committed) return;
+      committed = true;
+      restore();
+    };
+    // originalHtml unused after the rewrite — kept as a hook for any
+    // future "restore exact markup" variant; suppress unused-var via
+    // void.
+    void originalHtml;
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); void commit(); }
+      else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener("blur", () => { void commit(); });
+  }
+
+  // 2026-05-14 — drag-reorder commit. Computes a new ordering, re-
+  // stamps every resource's `order` field to match the new index, and
+  // writes the entire array in one scene update so all clients see a
+  // single atomic transition.
+  async function commitReorder(
+    itemId: string,
+    draggedId: string,
+    targetId: string,
+    position: "before" | "after",
+  ): Promise<void> {
+    const sorted = [...currentRender].sort((a, b) => {
+      const oa = a.order ?? Number.MAX_SAFE_INTEGER;
+      const ob = b.order ?? Number.MAX_SAFE_INTEGER;
+      return oa - ob;
+    });
+    const draggedIdx = sorted.findIndex((r) => r.id === draggedId);
+    if (draggedIdx < 0) return;
+    const [dragged] = sorted.splice(draggedIdx, 1);
+    let targetIdx = sorted.findIndex((r) => r.id === targetId);
+    if (targetIdx < 0) {
+      // Target gone after our splice — append at end as fallback.
+      sorted.push(dragged);
+    } else {
+      if (position === "after") targetIdx += 1;
+      sorted.splice(targetIdx, 0, dragged);
+    }
+    // Re-stamp order to match new index, gap-free.
+    const next: Resource[] = sorted.map((r, i) => ({ ...r, order: i }));
+    // Optimistic local update so the user doesn't see a flash before
+    // the scene-sync echo. Open the suppress window so the echo
+    // doesn't trigger a re-render.
+    currentRender = next;
+    lastSnapshotJson = JSON.stringify(next);
+    suppressRenderUntil = Date.now() + SUPPRESS_RENDER_MS;
+    // Apply DOM ordering to match next.
+    const list = container.querySelector<HTMLElement>(".rt-list");
+    if (list) {
+      for (const r of next) {
+        const row = list.querySelector<HTMLElement>(`.rt-row[data-id="${cssEscape(r.id)}"]`);
+        if (row) list.appendChild(row);
+      }
+    }
+    // Persist.
+    try {
+      await writeResources(itemId, next);
+    } catch (e) {
+      console.error("[obr-suite/resources] commitReorder failed", e);
+    }
+  }
+
   async function applyChange(
     itemId: string,
     r: Resource,
@@ -735,7 +1018,32 @@ function ensureStyles(): void {
       border:1px solid rgba(255,255,255,0.08);
       border-radius:6px;
       padding:8px 10px;
+      transition:background .12s, border-color .12s, transform .12s, opacity .12s;
     }
+    /* 2026-05-14 — drag-reorder visual feedback. */
+    .rt-row.rt-dragging {
+      opacity:0.35;
+      background:rgba(93,173,226,0.08);
+      border-color:rgba(93,173,226,0.45);
+    }
+    .rt-row.rt-drop-above {
+      box-shadow:0 -3px 0 0 #5dade2 inset;
+    }
+    .rt-row.rt-drop-below {
+      box-shadow:0 3px 0 0 #5dade2 inset;
+    }
+    .rt-row-grip {
+      cursor:grab;
+      color:#9aa0b3;
+      font-size:14px;
+      line-height:1;
+      padding:2px 4px;
+      border-radius:4px;
+      user-select:none;
+      transition:background .12s, color .12s;
+    }
+    .rt-row-grip:hover { background:rgba(255,255,255,0.08); color:#e6e8ee }
+    .rt-row-grip:active { cursor:grabbing }
     .rt-row-head { display:flex; align-items:center; gap:8px; margin-bottom:6px }
     .rt-row-name { flex:1; font-size:12px; font-weight:600; color:#e6e8ee; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
     .rt-row-meta { font-size:11px; color:#9aa0b3; font-variant-numeric:tabular-nums; transition:color .18s }
@@ -777,10 +1085,34 @@ function ensureStyles(): void {
       font-size:11px; font-weight:700; color:#e6e8ee;
       font-variant-numeric:tabular-nums;
       letter-spacing:0.3px;
-      padding:0 4px;
-      min-width:42px;
+      padding:2px 6px;
+      min-width:54px;
       text-align:center;
+      cursor:pointer;
+      border-radius:4px;
+      transition:background .12s, color .12s;
     }
+    /* 2026-05-14 — click-to-edit hover state for bar number. */
+    .rt-bar-num:hover { background:rgba(93,173,226,0.15); color:#a3d1ec }
+    /* Inline expression input — replaces the static number when
+       clicked. Sized to roughly the same width so the bar doesn't
+       jump in layout. */
+    .rt-value-input {
+      width:100%;
+      min-width:64px;
+      box-sizing:border-box;
+      background:#1a1c24;
+      color:#e6e8ee;
+      border:1px solid #5dade2;
+      border-radius:4px;
+      padding:2px 4px;
+      font-family:inherit;
+      font-size:11px;
+      font-weight:700;
+      text-align:center;
+      outline:none;
+    }
+    .rt-value-input:focus { border-color:#7ec8f0; box-shadow:0 0 0 1px rgba(126,200,240,0.4) }
     .rt-bar {
       flex:1; min-width:80px;
       height:22px;
@@ -829,14 +1161,29 @@ function ensureStyles(): void {
       align-items:center;
       padding:0 4px;
     }
+    /* 2026-05-14 — promoted from <span> to <button>; styled to look
+       like a peer to the rt-num-step ± buttons. Jumps current to 0
+       (min) or max on click. */
     .rt-num-end {
-      font-size:10.5px; font-weight:700; color:#9aa0b3;
+      min-width:28px; height:24px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(255,255,255,0.10);
+      border-radius:6px;
+      color:#cbd5e1;
+      font-size:11px; font-weight:700;
+      font-family:inherit;
       font-variant-numeric:tabular-nums;
       cursor:pointer;
-      padding:2px 4px; border-radius:4px;
-      transition:background .12s, color .12s;
+      padding:0 6px;
+      display:inline-flex; align-items:center; justify-content:center;
+      transition:background .12s, border-color .12s, color .12s, transform .12s;
     }
-    .rt-num-end:hover { background:rgba(255,255,255,0.08); color:#e6e8ee }
+    .rt-num-end:hover {
+      background:rgba(93,173,226,0.15);
+      border-color:rgba(93,173,226,0.45);
+      color:#7ec8f0;
+    }
+    .rt-num-end:active { transform:scale(0.94) }
     .rt-num-step {
       width:24px; height:24px;
       background:rgba(255,255,255,0.06);
@@ -895,7 +1242,13 @@ function ensureStyles(): void {
          0  -1px 0 #000, 0   1px 0 #000,
          0 0 4px rgba(0,0,0,0.95);
       font-variant-numeric:tabular-nums;
-      pointer-events:none;
+      /* 2026-05-14 — was pointer-events:none. Removed so click on the
+         orb (which the user perceives as clicking the icon, since val
+         sits on top of the icon at inset:0) actually triggers the
+         value-edit handler. Previously the click bypassed val into
+         the orb wrapper which has no JS handler, only the CSS :active
+         scale animation — producing the "anim but no input" bug. */
+      cursor:text;
     }
     .rt-num-orb.rt-pulse { animation: rt-pulse 0.28s cubic-bezier(.34,1.56,.64,1) }
   `;

@@ -6,9 +6,9 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#292d3c;--bg-strong:#1f2230;--bg-card:#323748;
-  --border:rgba(255,255,255,0.12);--border-strong:rgba(255,255,255,0.22);
-  --text:#e6e8ee;--text-dim:#9aa0b3;
+  --bg:#1d2030;--bg-strong:#13151f;--bg-card:#262a3a;--bg-elev:#2e3346;
+  --border:rgba(255,255,255,0.10);--border-strong:rgba(255,255,255,0.20);
+  --text:#e6e8ee;--text-dim:#9aa0b3;--text-mute:#5a6075;
   --accent:#5dade2;--accent-warm:#f5a623;--accent-red:#e74c3c;--accent-green:#2ecc71;
 }
 html,body{
@@ -18,160 +18,229 @@ html,body{
   font-size:13px;
   display:flex;align-items:center;justify-content:center;
 }
+
+/* ===== modal card — modern square design (zero rounded corners) ===== */
 .card{
-  width:min(420px, 92vw);
+  width:min(440px, 92vw);
   max-height:90vh;
   background:var(--bg);
   border:1px solid var(--border-strong);
-  border-radius:10px;
-  box-shadow:0 12px 36px rgba(0,0,0,0.55);
+  border-radius:0;
+  box-shadow:0 14px 40px rgba(0,0,0,0.6);
   display:flex;flex-direction:column;
   overflow:hidden;
 }
 .hdr{
   display:flex;align-items:center;gap:8px;
   padding:12px 16px;
+  background:var(--bg-strong);
   border-bottom:1px solid var(--border);
   flex-shrink:0;
 }
-.hdr .ttl{font-size:14px;font-weight:700;flex:1;letter-spacing:0.2px}
+.hdr .ttl{font-size:14px;font-weight:700;flex:1;letter-spacing:0.3px}
 .hdr .x{
-  cursor:pointer;font-size:18px;color:var(--text-dim);line-height:1;padding:0 4px;
-  background:none;border:none;transition:color .12s;
+  cursor:pointer;font-size:18px;color:var(--text-dim);line-height:1;
+  width:26px;height:26px;
+  display:flex;align-items:center;justify-content:center;
+  background:transparent;border:1px solid transparent;border-radius:0;
+  font-family:inherit;
+  transition:color .12s, background .12s, border-color .12s;
 }
-.hdr .x:hover{color:var(--text)}
+.hdr .x:hover{color:#fff;background:rgba(231,76,60,0.22);border-color:var(--accent-red)}
 
 .body{
   flex:1;min-height:0;overflow-y:auto;
   padding:14px 16px;
-  display:flex;flex-direction:column;gap:10px;
+  display:flex;flex-direction:column;gap:11px;
 }
 .body::-webkit-scrollbar{width:6px}
-.body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
+.body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12)}
 
-label.field{
+/* labelled fields */
+label.field, .field{
   display:flex;flex-direction:column;gap:4px;
-  font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;font-weight:700;
+}
+.field > span:first-child, .lbl{
+  font-size:10.5px;color:var(--text-dim);text-transform:uppercase;
+  letter-spacing:.5px;font-weight:700;
 }
 .field input[type=text],
 .field input[type=number],
 .field select{
-  height:30px;padding:0 10px;
+  height:32px;padding:0 10px;
   background:var(--bg-strong);
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:0;
   color:var(--text);font-size:13px;outline:none;
   font-family:inherit;
-  transition:border-color .12s, box-shadow .12s;
+  transition:border-color .12s, background .12s;
 }
 .field input:focus,.field select:focus{
   border-color:var(--accent);
-  box-shadow:0 0 0 1px rgba(93,173,226,0.30);
+  background:#171a26;
 }
 .row-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 
-/* 2026-05-11 — type selector toggle (replaces a <select> dropdown).
-   Mirrors the cluster's CN|EN switch pattern: 3 segments, click to
-   pick, accent-tinted active state. */
+/* ===== type toggle (个数 / 进度 / 数字) ===== */
 .type-toggle{
   display:grid;grid-template-columns:1fr 1fr 1fr;
-  height:30px;
+  height:32px;
   background:var(--bg-strong);
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:0;
   overflow:hidden;
 }
 .type-toggle button{
   background:transparent;border:none;
   color:var(--text-dim);
   font-family:inherit;font-size:12px;font-weight:700;
-  cursor:pointer;
-  letter-spacing:0.4px;
+  cursor:pointer;letter-spacing:0.4px;
   transition:background .12s, color .12s;
 }
-.type-toggle button:hover{color:var(--text)}
+.type-toggle button:hover{color:var(--text);background:rgba(255,255,255,0.04)}
 .type-toggle button.on{
   background:rgba(93,173,226,0.22);
   color:#7ec8f0;
+  box-shadow:inset 0 -2px 0 0 var(--accent);
 }
 .type-toggle button + button{border-left:1px solid var(--border)}
 
-.icon-label{
-  font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;font-weight:700;
-  margin-top:2px;
-}
+/* ===== icon grid — seamless square highlights, no gap, no per-cell radius =====
+   gap:0 + the host-grid border + each cell's right/bottom border draws a
+   uniform 1px lattice. The selection is a solid accent fill that snaps
+   exactly to the cell box — gapless, square, "modern". */
 .icon-grid{
-  display:grid;grid-template-columns:repeat(8, 1fr);gap:4px;
-  max-height:200px;overflow-y:auto;
-  padding:6px;
+  display:grid;grid-template-columns:repeat(8, 1fr);gap:0;
+  max-height:208px;overflow-y:auto;
   background:var(--bg-strong);
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:0;
 }
 .icon-grid::-webkit-scrollbar{width:6px}
-.icon-grid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:3px}
+.icon-grid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16)}
 .icon-pick{
-  width:34px;height:34px;
+  height:38px;
   display:flex;align-items:center;justify-content:center;
-  border-radius:5px;cursor:pointer;
-  border:1px solid transparent;
-  transition:background .12s, border-color .12s, transform .12s;
+  cursor:pointer;
+  background:transparent;
+  border:0;
+  border-right:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+  border-radius:0;
+  color:var(--text-dim);
+  transition:background .08s, color .08s;
 }
-.icon-pick:hover{
-  background:rgba(255,255,255,0.08);
-  transform:scale(1.06);
-}
+.icon-pick:hover{background:rgba(255,255,255,0.06);color:var(--text)}
 .icon-pick.on{
-  background:rgba(93,173,226,0.20);
-  border-color:var(--accent);
+  background:var(--accent);
+  color:#0b1320;
+  /* knock out the lattice line under the active cell so it reads as a
+     single seamless tile (the next-row cell's top border doesn't exist;
+     this cell's bottom border vanishes too). */
+  border-right-color:var(--accent);
+  border-bottom-color:var(--accent);
 }
-.icon-pick svg{width:24px;height:24px;pointer-events:none}
-.icon-name{font-size:10px;color:var(--text-dim);text-align:center}
+.icon-pick svg{width:22px;height:22px;pointer-events:none}
 
-.btn-row{
-  display:flex;gap:6px;
-  padding:12px 16px;
-  border-top:1px solid var(--border);
-  flex-shrink:0;
-  align-items:center;
+/* ===== presets — chip strip, mirrors portal's "名字预设" pattern ===== */
+.presets-wrap{display:flex;flex-direction:column;gap:5px}
+.presets-wrap .lbl-row{
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:10.5px;color:var(--text-dim);letter-spacing:.5px;
+  font-weight:700;text-transform:uppercase;
 }
-.btn{
-  height:30px;padding:0 14px;border-radius:6px;
-  background:var(--bg-card);color:var(--text);
-  border:1px solid var(--border);font-size:12px;cursor:pointer;
-  font-family:inherit;font-weight:600;
+.presets-wrap .add{
+  font-size:10.5px;color:var(--accent);cursor:pointer;
+  background:transparent;border:1px solid transparent;
+  padding:2px 8px;border-radius:0;
+  font-family:inherit;font-weight:700;
+  transition:background .12s, color .12s, border-color .12s;
+}
+.presets-wrap .add:hover{
+  background:rgba(93,173,226,0.15);color:#7ec8f0;
+  border-color:rgba(93,173,226,0.45);
+}
+.chips{display:flex;flex-wrap:wrap;gap:4px;min-height:24px}
+.chips .empty{font-size:10.5px;color:var(--text-mute);padding:3px 0}
+.chip{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:4px 6px 4px 10px;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:0;
+  font-size:11px;color:#cdd1de;
+  cursor:pointer;user-select:none;
   transition:background .12s, border-color .12s, color .12s;
 }
-.btn:hover{background:rgba(93,173,226,0.15);border-color:rgba(93,173,226,0.35);color:#7ec8f0}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn.primary:hover{background:#4a99ce;border-color:#4a99ce}
-.btn.danger:hover{background:rgba(231,76,60,.18);border-color:rgba(231,76,60,.5);color:#ff7a6b}
+.chip:hover{
+  background:rgba(93,173,226,0.15);
+  border-color:rgba(93,173,226,0.45);
+  color:var(--text);
+}
+.chip .ico{
+  width:13px;height:13px;display:inline-flex;align-items:center;justify-content:center;
+  color:var(--text-dim);
+}
+.chip .ico svg{width:13px;height:13px}
+.chip:hover .ico{color:var(--accent-dim)}
+.chip .del{
+  font-size:11px;color:var(--text-mute);line-height:1;
+  margin-left:2px;
+  background:transparent;border:1px solid transparent;cursor:pointer;
+  padding:1px 5px;border-radius:0;
+  font-family:inherit;
+  transition:color .12s, background .12s, border-color .12s;
+}
+.chip .del:hover{color:#fff;background:var(--accent-red);border-color:var(--accent-red)}
 
+/* ===== preview row ===== */
 .preview-row{
   display:flex;align-items:center;gap:8px;
   padding:8px 10px;
   background:var(--bg-strong);
   border:1px solid var(--border);
-  border-radius:6px;
+  border-radius:0;
 }
 .preview-icon{
-  width:32px;height:32px;
+  width:30px;height:30px;
   display:flex;align-items:center;justify-content:center;
+  color:var(--accent-dim);
 }
-.preview-icon svg{width:28px;height:28px}
+.preview-icon svg{width:26px;height:26px}
 .preview-label{flex:1;font-size:11px;color:var(--text-dim)}
+
+/* ===== bottom action row ===== */
+.btn-row{
+  display:flex;gap:6px;
+  padding:12px 16px;
+  background:var(--bg-strong);
+  border-top:1px solid var(--border);
+  flex-shrink:0;
+  align-items:center;
+}
+.btn{
+  height:30px;padding:0 14px;border-radius:0;
+  background:var(--bg-card);color:var(--text);
+  border:1px solid var(--border);font-size:12px;cursor:pointer;
+  font-family:inherit;font-weight:600;letter-spacing:0.3px;
+  transition:background .12s, border-color .12s, color .12s;
+}
+.btn:hover{background:rgba(93,173,226,0.18);border-color:rgba(93,173,226,0.45);color:#7ec8f0}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#0b1320;font-weight:700}
+.btn.primary:hover{background:#7ec8f0;border-color:#7ec8f0;color:#0b1320}
+.btn.danger:hover{background:rgba(231,76,60,.20);border-color:rgba(231,76,60,.55);color:#ff7a6b}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="hdr">
     <span class="ttl" id="title">编辑资源</span>
-    <button class="x" id="btnX" type="button">×</button>
+    <button class="x" id="btnX" type="button" title="关闭">×</button>
   </div>
   <div class="body">
     <label class="field">
       <span>名字</span>
-      <input type="text" id="name" maxlength="32" placeholder="如：一环法术槽" />
+      <input type="text" id="name" maxlength="32" placeholder="如：一环法术槽 / 灵感" />
     </label>
 
     <div class="field">
@@ -194,8 +263,18 @@ label.field{
       </label>
     </div>
 
-    <div class="icon-label">图标</div>
-    <div class="icon-grid" id="iconGrid"></div>
+    <div class="field">
+      <span>图标</span>
+      <div class="icon-grid" id="iconGrid"></div>
+    </div>
+
+    <div class="presets-wrap">
+      <div class="lbl-row">
+        <span>预设（名字 · 类型 · 上限 · 图标 一起存）</span>
+        <button class="add" id="btnAddPreset" type="button">+ 保存当前为预设</button>
+      </div>
+      <div class="chips" id="chipsPresets"></div>
+    </div>
 
     <div class="preview-row" id="preview">
       <span class="preview-icon" id="previewIcon"></span>

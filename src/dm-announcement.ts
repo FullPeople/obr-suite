@@ -386,35 +386,42 @@ async function loadAndRender(): Promise<void> {
   rerenderForLang(lang);
 }
 
-OBR.onReady(() => {
-  void loadAndRender();
-  const params = new URLSearchParams(location.search);
-  const isAuto = params.get("auto") === "1";
-  let autoTimer: number | null = null;
-  let autoCancelled = false;
-  const progress = document.getElementById("auto-progress");
-  const cancelAutoClose = () => {
-    if (!isAuto || autoCancelled) return;
-    autoCancelled = true;
-    if (autoTimer !== null) {
-      window.clearTimeout(autoTimer);
-      autoTimer = null;
-    }
-    progress?.classList.add("paused");
-  };
-  if (isAuto) {
-    progress?.classList.add("on");
-    autoTimer = window.setTimeout(async () => {
-      if (autoCancelled) return;
-      try { await OBR.modal.close(MODAL_ID); } catch {}
-    }, 5000);
-    for (const ev of ["pointerdown", "wheel", "keydown", "touchstart", "scroll"]) {
-      window.addEventListener(ev, cancelAutoClose, { passive: true, capture: true });
+// 2026-05-14 — stamp the running build version into the modal title.
+// The dev build serves `manifest-dev.json`, stable serves
+// `manifest.json`; we try dev first and fall back, so the same code
+// works on both channels (the 404 on the wrong-channel file just
+// falls through).
+async function loadVersionIntoTitle(): Promise<void> {
+  const titleEl = document.querySelector<HTMLElement>(".head .title");
+  if (!titleEl) return;
+  for (const name of ["manifest-dev.json", "manifest.json"]) {
+    try {
+      const res = await fetch(assetUrl(name), { cache: "no-cache" });
+      if (!res.ok) continue;
+      const m = await res.json();
+      if (m && typeof m.version === "string" && m.version) {
+        titleEl.textContent = `Full Suite v${m.version}`;
+        return;
+      }
+    } catch {
+      /* try the next candidate */
     }
   }
+}
+
+OBR.onReady(() => {
+  void loadAndRender();
+  void loadVersionIntoTitle();
+
+  // 2026-05-14 — the announcement now ONLY closes via the "我知道了"
+  // button. The previous auto-close timer (?auto=1 → 5 s) and the
+  // Escape-to-close handler were both removed per user request: the
+  // DM should explicitly acknowledge the announcement. The `?auto=1`
+  // URL param + the .auto-progress bar are now inert.
   document.getElementById("btn-close")?.addEventListener("click", async () => {
     try { await OBR.modal.close(MODAL_ID); } catch {}
   });
+
   // Independent CN|EN toggle in the modal header — only switches which
   // language sections render here. It does NOT touch the suite-wide
   // language preference (which is set in the Settings panel).
@@ -427,11 +434,5 @@ OBR.onReady(() => {
     writeAnnounceLang("en");
     applyLangButtons("en");
     rerenderForLang("en");
-  });
-  window.addEventListener("keydown", async (e) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      try { await OBR.modal.close(MODAL_ID); } catch {}
-    }
   });
 });

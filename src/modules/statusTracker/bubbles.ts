@@ -105,6 +105,19 @@ const FONT_FAMILY = '"Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji","Tw
 // Fully opaque bubble per user spec (was 0.65 — felt too washed-out).
 const FILL_OPACITY = 1.0;
 
+// 2026-05-15 — strip pictographic emoji from buff names when rendering
+// the on-token bubble pills + labels. Doesn't mutate the underlying
+// buff data: legacy "麻痹 ⚡" / "魅惑 💘" etc. saves still load, the
+// label just renders as the textual portion ("麻痹" / "魅惑"). Width
+// estimates use the cleaned string too so layout stays consistent.
+function stripEmoji(s: string): string {
+  return s.replace(/\p{Extended_Pictographic}/gu, "")
+          .replace(/[\u{FE0E}\u{FE0F}\u{200D}]/gu, "")
+          .replace(/[\u{1F3FB}-\u{1F3FF}]/gu, "")
+          .replace(/\s+/g, " ")
+          .trim();
+}
+
 // Split text into grapheme clusters so emoji ZWJ sequences (👨‍👩‍👧
 // etc.) stay together as single "characters". Falls back to
 // codepoint iteration if Intl.Segmenter is unavailable.
@@ -170,77 +183,6 @@ function darken(hex: string, amount = 0.30): string {
   b = Math.round(b * (1 - amount));
   const toHex = (n: number) => n.toString(16).padStart(2, "0");
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
-
-// === Color helpers: hex ↔ HSL + per-buff gradient deriver ==================
-//
-// We derive a 2-stop linear gradient from each buff's main hex colour.
-// The two stops are the main colour shifted ±L (lightness) by an
-// amount seeded from the buff id so the result is deterministic per
-// buff but varies between buffs. Hue stays put — main colour identity
-// must remain recognisable.
-
-function hexToHsl(hex: string): { h: number; s: number; l: number } {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return { h: 0, s: 0, l: 50 };
-  const v = parseInt(m[1], 16);
-  const r = ((v >> 16) & 0xff) / 255;
-  const g = ((v >> 8) & 0xff) / 255;
-  const b = (v & 0xff) / 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  let h = 0, s = 0;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    if (max === r)      h = ((g - b) / d) + (g < b ? 6 : 0);
-    else if (max === g) h = ((b - r) / d) + 2;
-    else                h = ((r - g) / d) + 4;
-    h *= 60;
-  }
-  return { h, s: s * 100, l: l * 100 };
-}
-
-function hslToHex(h: number, s: number, l: number): string {
-  s = Math.max(0, Math.min(100, s)) / 100;
-  l = Math.max(0, Math.min(100, l)) / 100;
-  const c = (1 - Math.abs(2 * l - 1)) * s;
-  const hh = ((h % 360) + 360) % 360 / 60;
-  const x = c * (1 - Math.abs((hh % 2) - 1));
-  let r = 0, g = 0, b = 0;
-  if (hh < 1)      { r = c; g = x; }
-  else if (hh < 2) { r = x; g = c; }
-  else if (hh < 3) {        g = c; b = x; }
-  else if (hh < 4) {        g = x; b = c; }
-  else if (hh < 5) { r = x;        b = c; }
-  else             { r = c;        b = x; }
-  const m = l - c / 2;
-  const toHex = (n: number) => Math.round((n + m) * 255).toString(16).padStart(2, "0");
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
-
-/** Stable string hash → 32-bit int. Same string in = same number out. */
-function hashStr(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = ((h * 31) + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-/** Derive a 2-stop gradient + angle from the buff's main colour, seeded
- *  by the buff id so a buff always renders with the same gradient. */
-function deriveGradient(mainHex: string, seedStr: string): { a: string; b: string; angleDeg: number } {
-  const h = hashStr(seedStr);
-  const r1 = (h & 0xff) / 0xff;
-  const r2 = ((h >> 8) & 0xff) / 0xff;
-  const hsl = hexToHsl(mainHex);
-  // Shift lightness ±delta. Delta varies 14..28 so each buff has a
-  // visibly distinct "punch" without losing the main colour identity.
-  const delta = 14 + r1 * 14;
-  const a = hslToHex(hsl.h, hsl.s, hsl.l - delta);
-  const b = hslToHex(hsl.h, hsl.s, hsl.l + delta);
-  // Random gradient direction 0..360°.
-  const angleDeg = r2 * 360;
-  return { a, b, angleDeg };
 }
 
 // === Curved-band path commands =============================================
@@ -364,19 +306,20 @@ interface PillBgDescriptor {
   /** 2026-05-13 — token-z-locked zIndex. See computeStackBase. */
   zIndex: number;
 }
-// Each glyph is its own TEXT item, positioned tangent to the band's
-// arc and rotated to match. Splitting per-glyph fixes the
-// "fragmented / transparent text" rendering bug we saw with a single
-// rotated rectangle covering the whole label — small bbox + low
-// rotation magnitude per item works around whatever subpixel /
-// caching quirk OBR's text rasteriser was hitting.
-interface GlyphDescriptor {
+// ONE TEXT item per buff — the whole name as a single flat rectangle
+// laid over the curved band. (An earlier revision split the label
+// per-grapheme to hug the arc; the user asked to go back to one item
+// per buff to cut item count / render load. The font is scaled down
+// so the flat text stays inside the curved band — the box itself is
+// kept generously larger than the rendered text so OBR's rotated-text
+// rasteriser never clips it.)
+interface LabelDescriptor {
   buffId: string; effect: BuffEffect;
   posX: number; posY: number; rotationDeg: number;
-  charBoxW: number; charBoxH: number;
+  boxW: number; boxH: number;
   fontSize: number;
   fg: string;
-  glyph: string;
+  text: string;
   /** 2026-05-13 — token-z-locked zIndex. See computeStackBase. */
   zIndex: number;
 }
@@ -390,20 +333,17 @@ interface GlyphDescriptor {
 //     current token is above another token, its status should also
 //     be above").
 //   • Within a single token, slot offsets order the layers:
-//        bg main      = base + 0
-//        bg highlight = base + 1
-//        glyphs       = base + GLYPH_OFFSET (well above all bg paths)
+//        bg band = base + 0
+//        label   = base + SLOT_LABEL (above the band path)
 // STACK_MULT = 1000 leaves room for 999 inner-slot items per token
-// before colliding with the next token's stack — generous, given
-// the typical max is ~20 (bg main + bg highlight + ~18 glyphs per
-// short buff name × few buffs).
+// before colliding with the next token's stack — generous, given a
+// no-effect buff is now just 2 items (one band path + one text label).
 const STACK_MULT = 1000;
 const SLOT_BG_MAIN = 0;
-const SLOT_BG_HIGHLIGHT = 1;
-const SLOT_GLYPH = 100;
-// WebM effect items sit ABOVE the curved-band glyphs of the same token
+const SLOT_LABEL = 100;
+// WebM effect items sit ABOVE the curved-band label of the same token
 // but BELOW any other token whose zIndex is higher. Slot 200 leaves
-// room for additional in-stack roles between glyphs and webm if
+// room for additional in-stack roles between label and webm if
 // needed later.
 const SLOT_WEBM = 200;
 function computeStackBase(token: Image): number {
@@ -431,9 +371,19 @@ interface WebmDescriptor {
    *  natural footprint × per-buff webmScale. */
   scale: number;
   /** Intrinsic WebM resolution (assumed square 192×192 — matches the
-   *  generator's defaults). Used as ImageContent.width/height AND as
-   *  the offset (half) for centre-anchor positioning. */
+   *  generator's defaults). Used as the offset (half) for
+   *  centre-anchor positioning, and as the fallback square dims. */
   intrinsicSize: number;
+  /** 2026-05-14 (#2) — explicit width/height. WebM buffs leave these
+   *  at intrinsicSize (square). Static-image buffs (iconAsset) set
+   *  the image's real dimensions so non-square pictures keep their
+   *  aspect ratio. */
+  intrinsicW: number;
+  intrinsicH: number;
+  /** 2026-05-14 (#2) — content mime. WebM buffs → "video/webm";
+   *  static-image (iconAsset) buffs → the image's real mime so OBR
+   *  renders a still picture, not a broken video element. */
+  mime: string;
   /** Scene grid DPI captured at describe-time. Plugged into
    *  ImageGrid.dpi so OBR scales the image correctly — using the
    *  image's intrinsic 192 as dpi made it render (192/sceneDpi)
@@ -445,7 +395,7 @@ interface WebmDescriptor {
 
 interface TokenDescriptors {
   bgs: PillBgDescriptor[];
-  glyphs: GlyphDescriptor[];
+  labels: LabelDescriptor[];
   /** Buffs whose `effect` is non-default — these are passed verbatim
    *  to particles.syncForToken which manages its own item set. */
   effectBuffs: BuffDef[];
@@ -467,12 +417,18 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
   const { cx, cy, radius: ringRadius } = getTokenCircleSpec(token, sceneDpi);
   const imgDpi = token.grid?.dpi ?? sceneDpi;
   const ratio = sceneDpi / Math.max(1, imgDpi);
-  const tokenH = (token.image?.height ?? imgDpi) * ratio * (token.scale?.y ?? 1);
-  const tokenW = (token.image?.width ?? imgDpi) * ratio * (token.scale?.x ?? 1);
+  // Math.abs on the scale — a flipped token has scale.x or scale.y = -1
+  // (horizontal / vertical flip; a full 180° flip is both at -1).
+  // tokenW/tokenH are a FOOTPRINT MAGNITUDE — they drive pill sizing and
+  // the WebM Image's `scale`. Without abs(), a flip propagated a negative
+  // dimension → negative WebM scale → the effect rendered mirrored /
+  // upside-down. The flip is orientation, not size; it must not bleed in.
+  const tokenH = (token.image?.height ?? imgDpi) * ratio * Math.abs(token.scale?.y ?? 1);
+  const tokenW = (token.image?.width ?? imgDpi) * ratio * Math.abs(token.scale?.x ?? 1);
   const stackBase = computeStackBase(token);
 
   if (buffs.length === 0) {
-    return { bgs: [], glyphs: [], effectBuffs: [], webms: [], cx, cy, tokenW, tokenH, ringRadius };
+    return { bgs: [], labels: [], effectBuffs: [], webms: [], cx, cy, tokenW, tokenH, ringRadius };
   }
 
   const halfH = tokenH / 2;
@@ -482,15 +438,14 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
 
   // 2026-05-14 — Three-way buff routing:
   //   1. webms        — buff has `webmAsset` → ONE Image-with-video item
-  //                     per buff. Best perf path (1 item vs ~20), used
-  //                     for paralyzed / stunned / poisoned. Stacks
-  //                     multiple WebMs centred on the same token; they
-  //                     blend via alpha.
+  //                     per buff. Best perf path, used for paralyzed /
+  //                     stunned / poisoned. Stacks multiple WebMs
+  //                     centred on the same token; they blend via alpha.
   //   2. effectBuffs  — non-default `effect` AND particles enabled →
   //                     particle system (currently disabled by feature
   //                     flag).
-  //   3. defaultBuffs — fallback to the static curved-band + glyph
-  //                     pipeline.
+  //   3. defaultBuffs — "无特效" fallback: one solid curved band + one
+  //                     flat text label (2 items per buff).
   const webms: WebmDescriptor[] = [];
   const defaultBuffs: Array<{ buff: BuffDef; pillW: number }> = [];
   const effectBuffs: BuffDef[] = [];
@@ -522,9 +477,41 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
         centre: { x: cx, y: cy },
         scale,
         intrinsicSize: DEFAULT_WEBM_INTRINSIC_SIZE,
+        intrinsicW: DEFAULT_WEBM_INTRINSIC_SIZE,
+        intrinsicH: DEFAULT_WEBM_INTRINSIC_SIZE,
+        mime: "video/webm",
         sceneDpi,
-        // SLOT_WEBM (200) is above SLOT_GLYPH (100) so WebMs draw over
-        // any sibling curved-band glyphs on the same token.
+        // SLOT_WEBM (200) is above SLOT_LABEL (100) so WebMs draw over
+        // any sibling curved-band label on the same token.
+        zIndex: stackBase + SLOT_WEBM,
+      });
+      continue;
+    }
+    // 2026-05-14 (#2) — static-image buff ("以此创建状态"). Rendered
+    // through the SAME webms[] pipeline as a WebM (one centre-anchored
+    // Image item, scale/rotation inheritance off) — the only
+    // differences are the real image mime + the image's real
+    // dimensions (so non-square pictures aren't squished). webmScale
+    // applies here too. Skipped when webmAsset is also set (webm wins).
+    if (b.iconAsset) {
+      const iconScale = typeof b.webmScale === "number" && b.webmScale > 0 ? b.webmScale : 1.0;
+      const iw = typeof b.iconWidth === "number" && b.iconWidth > 0 ? b.iconWidth : 256;
+      const ih = typeof b.iconHeight === "number" && b.iconHeight > 0 ? b.iconHeight : 256;
+      // Scale so the image's LONGEST edge matches the token footprint
+      // × iconScale — keeps the aspect ratio, fits inside the cell.
+      const longEdge = Math.max(iw, ih);
+      const footprint = baseFootprint * iconScale;
+      const scale = footprint / longEdge;
+      webms.push({
+        buffId: b.id,
+        url: b.iconAsset,
+        centre: { x: cx, y: cy },
+        scale,
+        intrinsicSize: longEdge,
+        intrinsicW: iw,
+        intrinsicH: ih,
+        mime: typeof b.iconMime === "string" && b.iconMime ? b.iconMime : "image/png",
+        sceneDpi,
         zIndex: stackBase + SLOT_WEBM,
       });
       continue;
@@ -533,7 +520,7 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
     if (useEffect) {
       effectBuffs.push(b);
     } else {
-      const pillW = Math.max(20, padX * 2 + estimateNameWidth(b.name, fontSize));
+      const pillW = Math.max(20, padX * 2 + estimateNameWidth(stripEmoji(b.name), fontSize));
       defaultBuffs.push({ buff: b, pillW });
     }
   }
@@ -546,9 +533,9 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
   );
 
   const bgs: PillBgDescriptor[] = [];
-  const glyphs: GlyphDescriptor[] = [];
+  const labels: LabelDescriptor[] = [];
   // (stackBase computed at the top of describe() — used by WebMs above
-  // and by glyph descriptors below.)
+  // and by label descriptors below.)
 
   for (let i = 0; i < defaultBuffs.length; i++) {
     const { buff, pillW } = defaultBuffs[i];
@@ -561,38 +548,10 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
     const rInner = p.ringRadius - pillH / 2;
     const rOuter = p.ringRadius + pillH / 2;
 
-    // Pseudo-gradient via 2 stacked paths (OBR Path can't do native
-    // gradients; SVG Image data URIs aren't supported by OBR's
-    // image-fetcher, hence this approach).
-    //
-    //   Main band  — full radial range, solid main colour, fully
-    //                opaque, with stroke. Always rendered first.
-    //   Highlight  — half the radial range (inner OR outer half,
-    //                seeded by buff id) at a derived shade with ~55%
-    //                alpha so it blends with the main beneath. No
-    //                stroke. Rendered second so it lands on top.
-    //
-    // The blend gives a clear two-tone "shaded" look without leaving
-    // any pixel translucent against the scene — the main band is
-    // always 100% opaque underneath, satisfying the "气泡不要半透明"
-    // request while still varying the colour within the bubble.
-    const grad = deriveGradient(buff.color, buff.id);
-    // Per user spec: "靠近token的80%是原色，远离token的20%是暗色".
-    // Inner 80% of band shows pure main colour, outer 20% (the rim
-    // farthest from the token, i.e. the "crust edge") is shaded.
-    // For very dark input colours (l < 25), the darker derivation
-    // (grad.a) clamps near pure black with no contrast against
-    // an already-dark main — switch to grad.b (lighter) instead so
-    // black/navy buffs still get a visible rim. Threshold is the
-    // lightness in HSL%.
-    const HL_SPAN = 0.20;
-    const radSpan = rOuter - rInner;
-    const hlR1 = rInner + radSpan * (1 - HL_SPAN);  // 80% from inner = outer 20%
-    const hlR2 = rOuter;
-    const mainHsl = hexToHsl(buff.color);
-    const hlColor = mainHsl.l < 25 ? grad.b : grad.a;
-
-    // Path 1 — the main band (always pushed first).
+    // ONE solid curved band — background only. The earlier 2-path
+    // pseudo-gradient (main + ~55%-alpha highlight overlay) was
+    // dropped per user request: a no-effect buff is just background +
+    // text now. Band stays fully opaque so nothing shows through.
     bgs.push({
       buffId: buff.id, effect: "default",
       cx, cy,
@@ -607,82 +566,65 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
       zIndex: stackBase + SLOT_BG_MAIN,
     });
 
-    // Path 2 — the highlight overlay (pushed second → higher zIndex).
-    // Same angular extent as the main band so the highlight goes
-    // edge-to-edge tangentially.
-    bgs.push({
-      buffId: buff.id, effect: "default",
-      cx, cy,
-      thetaCenterRad: angRad,
-      thetaHalfRad,
-      rInner: hlR1, rOuter: hlR2,
-      fillColor: hlColor,
-      fillOpacity: 0.55,
-      stroke: "#000000",
-      strokeOpacity: 0,
-      borderW: 0,
-      zIndex: stackBase + SLOT_BG_HIGHLIGHT,
-    });
-
-    // Per-glyph text along the arc.
+    // ONE flat TEXT label for the whole buff name (was: one item per
+    // grapheme hugging the arc). The band is an arc but the text box
+    // is a straight rectangle, so the font is scaled DOWN until the
+    // rendered text fits the largest flat rectangle that still sits
+    // inside the curved band — guaranteeing "文字即使横着也在披萨边内部".
     //
-    // Compute the angular span occupied by the glyph row (excluding
-    // the band's padX padding on each side), then divide it by N
-    // glyphs so each one gets an even angular slice.
+    //   • radial fit — box centred at ringRadius, radial half-height
+    //     `safeHalfH`; its outer corners must stay within rOuter,
+    //     which bounds the tangential half-width `wOuter`.
+    //   • angular fit — at the box's inner radius the tangential
+    //     half-width must stay within the band's angular span → wAng.
     //
-    // Tangent-space text width = pillW - 2·padX = N·fontSize·0.85
-    // (matches the pillW formula in the buff filter above). We
-    // re-derive it from pillW so changes there propagate.
-    const graphemes = splitGraphemes(buff.name);
-    const N = graphemes.length;
-    if (N === 0) continue;
+    // The TEXT item's *box* is then sized generously around the
+    // already-fitted text so OBR's rotated-text rasteriser never clips
+    // it; box overflow past the band is invisible (the item has no
+    // fill — only the centred glyphs are visible).
+    if (!buff.name) continue;
     const fg = textColorFor(buff.color);
-    const textTangentW = Math.max(1, pillW - padX * 2);
-    const textAngleHalf = Math.atan((textTangentW / 2) / p.ringRadius);
-    const slotAngle = (2 * textAngleHalf) / N;
-
-    for (let j = 0; j < N; j++) {
-      const glyph = graphemes[j];
-      // Slot j centred at: textStartAng + (j + 0.5) · slotAngle
-      const slotAngOff = -textAngleHalf + (j + 0.5) * slotAngle;
-      const θ = angRad + slotAngOff;
-      const θdeg = θ * (180 / Math.PI);
-      // Position the glyph's visual centre at (gcx, gcy) on the arc.
-      const gcx = cx + Math.sin(θ) * p.ringRadius;
-      const gcy = cy - Math.cos(θ) * p.ringRadius;
-      // Bounding box for the single-char Text item. Padded
-      // generously (1.6× fontSize wide, 1.6× pillH tall) so the
-      // text rasteriser has plenty of room — tight bboxes were
-      // causing the fragmented / fully-transparent glyph bug
-      // because subpixel jitter at certain rotations clipped the
-      // glyph against its own bounding box.
-      const charBoxW = fontSize * 1.6;
-      const charBoxH = pillH * 1.6;
-      // Rotation pivots around top-left, so compute that top-left
-      // such that after rotating by θ° the visual centre lands at
-      // (gcx, gcy). Same trig as before:
-      //   pos = (cx - w/2 cosθ + h/2 sinθ, cy - w/2 sinθ - h/2 cosθ)
-      const cT = Math.cos(θ);
-      const sT = Math.sin(θ);
-      const posX = gcx - (charBoxW / 2) * cT + (charBoxH / 2) * sT;
-      const posY = gcy - (charBoxW / 2) * sT - (charBoxH / 2) * cT;
-      glyphs.push({
-        buffId: buff.id, effect: "default",
-        posX, posY,
-        rotationDeg: θdeg,
-        charBoxW, charBoxH,
-        fontSize,
-        fg,
-        glyph,
-        zIndex: stackBase + SLOT_GLYPH,
-      });
-    }
+    const safeHalfH = pillH * 0.33;
+    const wOuterSq = rOuter * rOuter - (p.ringRadius + safeHalfH) * (p.ringRadius + safeHalfH);
+    const wOuter = wOuterSq > 0 ? Math.sqrt(wOuterSq) : 0;
+    const wAng = Math.max(0, p.ringRadius - safeHalfH) * Math.tan(thetaHalfRad);
+    const safeW = Math.max(6, Math.min(wOuter, wAng) * 2 * 0.90);
+    const safeH = safeHalfH * 2 * 0.92;
+    // estimateNameWidth is linear in fontSize, so width at size 1 is
+    // the per-unit width — divide safeW by it to get the largest font
+    // that still fits tangentially. Also cap by safeH and the nominal
+    // fontSize so short names don't blow up past the band thickness.
+    const cleanName = stripEmoji(buff.name);
+    const unitW = Math.max(0.01, estimateNameWidth(cleanName, 1));
+    const labelFont = Math.max(5, Math.min(fontSize, safeW / unitW, safeH));
+    const renderedW = estimateNameWidth(cleanName, labelFont);
+    const boxW = renderedW * 1.35 + labelFont * 1.2;
+    const boxH = labelFont * 1.9;
+    // Place the box centre on the band's mid-radius, rotated to the
+    // band's centre angle. Rotation pivots around the box's top-left,
+    // so back it out so the centre lands on (gcx, gcy).
+    const cT = Math.cos(angRad);
+    const sT = Math.sin(angRad);
+    const gcx = cx + sT * p.ringRadius;
+    const gcy = cy - cT * p.ringRadius;
+    const posX = gcx - (boxW / 2) * cT + (boxH / 2) * sT;
+    const posY = gcy - (boxW / 2) * sT - (boxH / 2) * cT;
+    labels.push({
+      buffId: buff.id, effect: "default",
+      posX, posY,
+      rotationDeg: angDeg,
+      boxW, boxH,
+      fontSize: labelFont,
+      fg,
+      text: cleanName,
+      zIndex: stackBase + SLOT_LABEL,
+    });
   }
 
   // Effect-mode buffs are handed off to particles.syncForToken
   // verbatim. Geom snapshot lets the particle module compute
   // absolute scene-coord positions per tick.
-  return { bgs, glyphs, effectBuffs, webms, cx, cy, tokenW, tokenH, ringRadius };
+  return { bgs, labels, effectBuffs, webms, cx, cy, tokenW, tokenH, ringRadius };
 }
 
 // === Item factories ========================================================
@@ -731,7 +673,10 @@ function buildBgItem(token: Image, d: PillBgDescriptor): Item {
  *      NOTE / TEXT; effects visibly overlay the token */
 function buildWebmItem(token: Image, d: WebmDescriptor): Item {
   return buildImage(
-    { width: d.intrinsicSize, height: d.intrinsicSize, mime: "video/webm", url: d.url },
+    // 2026-05-14 (#2) — width/height + mime now come off the
+    // descriptor. WebM buffs pass square 192 + "video/webm";
+    // static-image buffs pass the image's real dims + real mime.
+    { width: d.intrinsicW, height: d.intrinsicH, mime: d.mime, url: d.url },
     // 2026-05-15 — ImageGrid recipe matches Embers' working pattern:
     //   dpi    = scene grid DPI (NOT the image's intrinsic resolution).
     //            Critical — using the image's intrinsic 192 here made
@@ -741,7 +686,7 @@ function buildWebmItem(token: Image, d: WebmDescriptor): Item {
     //            left drift.
     //   offset = image centre. Combined with .position(centre) below,
     //            the WebM's midpoint lands exactly on the token centre.
-    { dpi: d.sceneDpi, offset: { x: d.intrinsicSize / 2, y: d.intrinsicSize / 2 } },
+    { dpi: d.sceneDpi, offset: { x: d.intrinsicW / 2, y: d.intrinsicH / 2 } },
   )
     .position(d.centre)
     .scale({ x: d.scale, y: d.scale })
@@ -757,20 +702,20 @@ function buildWebmItem(token: Image, d: WebmDescriptor): Item {
     .build();
 }
 
-function buildGlyphItem(token: Image, d: GlyphDescriptor): Item {
-  // 2026-05-13 — zIndex is now token-z-locked (was hardcoded
-  // `Date.now() + 1_000_000_000`). Glyphs sit at stackBase + SLOT_GLYPH
-  // so they're above both bg paths of the same token, while still
-  // sorting consistently with other tokens' status items per the
-  // user spec "保证当前 token 如果在别的 token 的上方，那么该 token
-  // 的状态应该也在上方".
+function buildLabelItem(token: Image, d: LabelDescriptor): Item {
+  // 2026-05-13 — zIndex is token-z-locked (was hardcoded
+  // `Date.now() + 1_000_000_000`). The label sits at stackBase +
+  // SLOT_LABEL so it's above the band path of the same token, while
+  // still sorting consistently with other tokens' status items per
+  // the user spec "保证当前 token 如果在别的 token 的上方，那么该
+  // token 的状态应该也在上方".
   return buildText()
     .textType("PLAIN")            // CRITICAL — see TextBuilder.js line 27
-    .plainText(d.glyph)
+    .plainText(d.text)
     .position({ x: d.posX, y: d.posY })
     .rotation(d.rotationDeg)
-    .width(d.charBoxW)
-    .height(d.charBoxH)
+    .width(d.boxW)
+    .height(d.boxH)
     .fontSize(d.fontSize)
     .fontFamily(FONT_FAMILY)
     .fontWeight(700)
@@ -847,10 +792,10 @@ export async function syncTokenBuffs(token: Image, buffs: BuffDef[]): Promise<vo
     staleLocalIds = ex.map((it) => it.id);
   } catch {}
 
-  const labels: Item[] = [];
-  for (const d of desc.bgs)    labels.push(buildBgItem(token, d));
-  for (const d of desc.glyphs) labels.push(buildGlyphItem(token, d));
-  for (const d of desc.webms)  labels.push(buildWebmItem(token, d));
+  const items: Item[] = [];
+  for (const d of desc.bgs)    items.push(buildBgItem(token, d));
+  for (const d of desc.labels) items.push(buildLabelItem(token, d));
+  for (const d of desc.webms)  items.push(buildWebmItem(token, d));
 
   if (existingIds.length > 0) {
     try { await OBR.scene.items.deleteItems(existingIds); }
@@ -859,9 +804,9 @@ export async function syncTokenBuffs(token: Image, buffs: BuffDef[]): Promise<vo
   if (staleLocalIds.length > 0) {
     try { await OBR.scene.local.deleteItems(staleLocalIds); } catch {}
   }
-  if (labels.length > 0) {
-    try { await OBR.scene.items.addItems(labels); }
-    catch (e) { logErr(`addItems(labels token=${token.id}) failed`, e); }
+  if (items.length > 0) {
+    try { await OBR.scene.items.addItems(items); }
+    catch (e) { logErr(`addItems(token=${token.id}) failed`, e); }
   }
 
   await particles.syncForToken(token.id, desc.effectBuffs, {

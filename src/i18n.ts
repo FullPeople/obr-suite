@@ -75,6 +75,7 @@ const TR: Dict = {
   diceTabRoll: { zh: "投掷", en: "Roll" },
   diceTabCombos: { zh: "组合", en: "Combos" },
   diceTabHistory: { zh: "历史", en: "History" },
+  diceTabSkins: { zh: "皮肤", en: "Skins" },
   diceSectDice: { zh: "骰子", en: "Dice" },
   diceSectExpression: { zh: "表达式", en: "Expression" },
   diceHintDicePm: {
@@ -112,6 +113,12 @@ const TR: Dict = {
   diceBtnSaveCombo: { zh: "保存组合", en: "Save Combo" },
   diceBtnClear: { zh: "清空", en: "Clear" },
   diceBtnDarkRoll: { zh: "暗骰", en: "Dark Roll" },
+  diceBtnDarkRollGlobalOn: { zh: "全局暗骰：开", en: "Global Dark: ON" },
+  diceBtnDarkRollGlobalOff: { zh: "全局暗骰：关", en: "Global Dark: OFF" },
+  diceBtnDarkRollGlobalTitle: {
+    zh: "开启后，所有普通投掷都会自动变为暗骰（包括组合面板的投掷按钮）。仅 DM 可见。",
+    en: "When ON, all normal rolls (including combo panel roll buttons) are auto-treated as Dark Rolls. DM only.",
+  },
   diceBtnForceClr: { zh: "⚠ 强制结束(若动画卡住)", en: "⚠ Force End (if stuck)" },
   diceRulesTitle: { zh: "表达式说明", en: "Expression Guide" },
   diceRule1: {
@@ -312,8 +319,8 @@ const TR: Dict = {
   ccPanelUploaded: { zh: "已上传", en: "Uploaded" },
   ccPanelUploadFailed: { zh: "上传失败", en: "Upload failed" },
   ccPanelUploadHint: {
-    zh: "请检查：① 角色卡版本是否受支持（v1.0.0 / v1.0.12 / v1.0.12-2014mode 悲灵卡）；② 角色卡内是否嵌入了损坏 / 超大图片（先在 Excel 里删除图片再上传）。",
-    en: "Please check: (1) sheet version is supported (v1.0.0 / v1.0.12 / v1.0.12-2014mode 悲灵 sheets); (2) no broken or oversized embedded images (remove images in Excel first, then re-upload).",
+    zh: "请检查：① 角色卡版本是否受支持（v1.0.12 即 2024 / v1.0.12-2014mode 即 2014 悲灵卡）；② 角色卡内是否嵌入了损坏 / 超大图片（先在 Excel 里删除图片再上传）。",
+    en: "Please check: (1) sheet version is supported (v1.0.12 = 2024 / v1.0.12-2014mode = 2014 悲灵 sheets); (2) no broken or oversized embedded images (remove images in Excel first, then re-upload).",
   },
   ccPanelOnlyXlsx: { zh: "只支持 .xlsx 文件", en: "Only .xlsx files are supported" },
   ccPanelRefreshed: { zh: "已刷新", en: "Refreshed" },

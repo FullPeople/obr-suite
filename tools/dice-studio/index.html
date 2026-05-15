@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dice Studio · 骰子工坊</title>
+<link rel="stylesheet" href="./style.css?v=2026-05-15c">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 13 L9 7"/><path d="M8 4 L12 8 L13 6 L11 4 z"/><path d="M3 13 L5 11 L11 5"/>
+    </svg>
+    <span class="brand-name">OBR Suite Studio</span>
+  </div>
+  <nav class="studio-tabs">
+    <a class="studio-tab" href="../monster-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 6 L4 4 L6 6"/><path d="M10 6 L12 4 L14 6"/>
+        <path d="M4 8 Q8 12 12 8"/><circle cx="5.5" cy="9" r="0.7" fill="currentColor"/><circle cx="10.5" cy="9" r="0.7" fill="currentColor"/>
+      </svg>
+      <span>怪物编辑</span>
+    </a>
+    <a class="studio-tab" href="../buff-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 2 L8 14 M2 8 L14 8 M3.5 3.5 L12.5 12.5 M3.5 12.5 L12.5 3.5"/>
+      </svg>
+      <span>Buff 合成</span>
+    </a>
+    <a class="studio-tab active" href="../dice-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="10" height="10" rx="1.6"/>
+        <circle cx="6" cy="6" r="0.8" fill="currentColor"/><circle cx="10" cy="10" r="0.8" fill="currentColor"/><circle cx="8" cy="8" r="0.8" fill="currentColor"/>
+      </svg>
+      <span>骰子工坊</span>
+    </a>
+  </nav>
+  <div class="topbar-actions">
+    <a href="https://obr.dnd.center/suite/manifest.json" target="_blank" class="pill-link">OBR Suite ↗</a>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- LEFT: die picker + draw canvas -->
+  <section class="col col-main">
+    <div class="card">
+      <span class="card-title">① 骰子类型 / Die <span class="card-hint">— 选一种骰子，画布会显示该骰面的轮廓参考</span></span>
+      <div class="die-grid" id="dieGrid"></div>
+    </div>
+
+    <div class="card">
+      <span class="card-title">② 画布 / Canvas
+        <span class="card-hint">— 在轮廓里画你的骰面（数字 / 图案）。轮廓只是参考，不会被导出</span></span>
+      <div class="canvas-bar">
+        <label class="field">画布尺寸
+          <select id="sizeSelect">
+            <option value="256">256 × 256</option>
+            <option value="512" selected>512 × 512</option>
+            <option value="1024">1024 × 1024</option>
+          </select>
+        </label>
+        <label class="chk"><input type="checkbox" id="showGuide" checked> 显示骰面轮廓参考</label>
+      </div>
+      <div id="drawMount"></div>
+    </div>
+  </section>
+
+  <!-- RIGHT: export + gallery + help -->
+  <section class="col col-side">
+    <div class="card">
+      <span class="card-title">③ 导出 / Export</span>
+      <button class="btn-primary btn-big" id="downloadBtn">⬇ 下载 PNG（透明背景）</button>
+      <p class="side-hint">导出的是带透明背景的 PNG —— 只有你画的内容，不含轮廓参考。
+        可直接做成骰子贴图，或放进 OBR Suite 当素材。</p>
+    </div>
+
+    <div class="card">
+      <span class="card-title">④ 我的骰面 / Saved <span class="card-hint">— 存于此浏览器</span></span>
+      <div class="dice-gallery" id="diceGallery"></div>
+    </div>
+
+    <div class="card help-card">
+      <details open>
+        <summary>使用说明 / How to use</summary>
+        <ol>
+          <li><b>① 选骰子</b>：d4 / d6 / d8 / d10 / d12 / d20 / d100，画布会画出对应骰面的轮廓参考线</li>
+          <li><b>② 画</b>：画笔 · 橡皮 · 油漆桶 · 直线 / 矩形 / 椭圆 · 吸色 · 选框 / 套索 · 移动 —— Photoshop 基础工具齐全</li>
+          <li>选框 / 套索框出选区后，画笔 · 填充只作用于选区内；移动工具拖动选区像素</li>
+          <li><b>③ 导出</b>：点「下载 PNG」得到透明背景图；或用画板上的「保存」存进右侧「我的骰面」</li>
+        </ol>
+        <p>轮廓参考线只是辅助，<b>永远不会出现在导出的 PNG 里</b>。</p>
+      </details>
+    </div>
+  </section>
+
+</main>
+
+<script type="module" src="./app.js"></script>
+
+</body>
+</html>

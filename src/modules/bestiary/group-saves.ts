@@ -1,6 +1,6 @@
 import OBR, { Item } from "@owlbear-rodeo/sdk";
 import { fireQuickRoll } from "../dice/tags";
-import { broadcastDiceRoll, BROADCAST_DICE_ROLL, type DiceRollPayload } from "../dice";
+import { broadcastDiceRoll, BROADCAST_DICE_ROLL, isGlobalDarkRollEnabled, type DiceRollPayload } from "../dice";
 import { getLocalLang, onLangChange } from "../../state";
 import { assetUrl } from "../../asset-base";
 import { onViewportResize } from "../../utils/viewportAnchor";
@@ -332,9 +332,13 @@ async function fireInitiative(
     // metadata flag set by the right-click "Mark Invisible" menu).
     // Read here per-token instead of upfront because each iteration
     // already has the item handy via `itemMap`.
+    // 2026-05-14: also force dark when DM has 全局暗骰 toggle on. The
+    // toggle covers attack checks, group saves, etc. — group initiative
+    // is the same conceptual category.
     const initData = (it.metadata as any)?.[INITIATIVE_DATA_KEY];
     const isInvisible =
       !!(initData && typeof initData === "object" && initData.invisible);
+    const hiddenRoll = isInvisible || isGlobalDarkRollEnabled();
 
     try {
       await broadcastDiceRoll({
@@ -355,7 +359,7 @@ async function fireInitiative(
         rollId,
         autoDismiss: true,
         collectiveId,
-        hidden: isInvisible,
+        hidden: hiddenRoll,
       });
     } catch (e) {
       console.error("[obr-suite/group-saves] fireInitiative broadcast failed for", m.itemId, e);

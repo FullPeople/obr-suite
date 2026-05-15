@@ -28,6 +28,7 @@ export type ModuleId =
   | "portals"
   | "bubbles"
   | "statusTracker"
+  | "resourceTracker"
   | "hpBar"
   | "metadataInspector"
   | "fullFog"
@@ -156,6 +157,10 @@ export const DEFAULT_STATE: SuiteState = {
     // toolbar tool both work for everyone (no role gate); per-token
     // buff metadata is enforced by OBR's normal item-edit permissions.
     statusTracker: true,
+    // Resource tracker — per-token consumable / progress / numeric
+    // resources, plus a DM-only toolbar tool that opens a full-screen
+    // stats panel of every player character's resources. Default ON.
+    resourceTracker: true,
     // HP bar component — standalone draggable HP/Temp/AC popover
     // that auto-shows on selection of "lightweight" tokens (no
     // bestiary binding, no character-card binding). Right-click
@@ -185,13 +190,12 @@ export const DEFAULT_STATE: SuiteState = {
     // user drags from there to the scene. Promoted from dev to
     // stable on 2026-05-08; available everywhere now.
     circleImage: true,
-    // Follow — right-click "跟随" on a token, then click another token
-    // to bind: the source auto-moves to maintain its current relative
-    // offset whenever the target finishes a drag. GM-only context
-    // menu; binding metadata propagates so all clients stay in sync.
-    // Dev-only on first ship until field-tested (cycles, perf, dead
-    // followers when target is deleted). Hidden from stable.
-    follow: !STABLE_HIDES,
+    // Follow — retired 2026-05-14 per user request. The flag stays in
+    // the type/state shape (removing it would ripple through settings
+    // + saved scene metadata) but it's hard-pinned OFF and no longer
+    // registered as a module in background.ts. modules/follow/ source
+    // is kept on disk un-wired in case it's revived.
+    follow: false,
   },
   dataVersion: "2024",
   allowPlayerMonsters: false,

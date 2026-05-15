@@ -71,15 +71,28 @@ const BIND_META = `${PLUGIN_ID}/boundCardId`;
 const SCENE_META_KEY = `${PLUGIN_ID}/list`;
 const BUBBLES_META_KEY = "com.obr-suite/bubbles/data";
 const EXTERNAL_BUBBLES_META_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
+const INIT_DEXMOD_META = "com.initiative-tracker/dexMod";
 const AUTO_INFO_KEY = "character-cards/auto-info";
 const TOGGLE_MSG = `${PLUGIN_ID}/auto-info-toggled`;
 const INFO_SHOW_MSG = `${PLUGIN_ID}/info-show`;
 const CTX_BIND = "com.obr-suite/cc-bind-menu";
 
-// Tool action with shortcut — registered on the Select tool so pressing
-// Shift toggles the panel while in Select mode.
-const TOOL_ACTION_TOGGLE = "com.obr-suite/cc-toggle-shortcut";
-const SELECT_TOOL = "rodeo.owlbear.tool/select";
+// 2026-05-14 — BC_CARD_UPDATED is broadcast by panel-page (xlsx
+// upload / refresh) and fullscreen-page (JSON import). When we
+// receive it we propagate the new card stats to every token bound
+// to that cardId, so the bubbles overlay + initiative dex-mod stay
+// in sync without the user manually re-binding. CURRENT HP is left
+// alone — mid-session HP edits shouldn't be wiped by a passive
+// refresh.
+const BC_CARD_UPDATED = "com.obr-suite/cc-card-updated";
+const SERVER_ORIGIN = "https://obr.dnd.center";
+
+// Standalone TOOL id — a top-level button in OBR's tool toolbar
+// (alongside Move / Select / Measure / …), NOT an action nested
+// under another tool. Its onClick returns false so clicking it just
+// toggles the character-card panel without switching the active
+// tool. Replaces the old suite-cluster "角色卡界面" button.
+const CC_TOOL_ID = "com.obr-suite/cc-panel-tool";
 
 const POPOVER_BOX = 64;
 const BOTTOM_OFFSET = 160;
@@ -95,7 +108,17 @@ let currentInfoCard: string | null = null;
 // resize handler can re-issue the popover with the same URL (different
 // URL would force OBR to reload the iframe).
 let currentInfoItemId: string | null = null;
-let panelOpen = false;
+// Panel open-state is tracked in localStorage (shared across this
+// client's same-origin iframes), NOT a cached boolean. The panel
+// iframe clears the key on EVERY close path — including OBR's
+// click-outside close, which only fires pagehide/beforeunload, where a
+// synchronous localStorage write lands reliably but an async OBR
+// broadcast does not. That async-broadcast unreliability was the root
+// of the long-standing "click the tool twice to reopen" bug.
+const PANEL_OPEN_KEY = "com.obr-suite/cc-panel-open";
+function isPanelOpen(): boolean {
+  try { return localStorage.getItem(PANEL_OPEN_KEY) === "1"; } catch { return false; }
+}
 let ccMyId = "";
 let ccRole: "GM" | "PLAYER" = "PLAYER";
 
@@ -105,22 +128,35 @@ function isAutoInfoEnabled(): boolean {
   } catch { return true; }
 }
 
-// The main panel opens already-maximized (full viewport). The blue circular
-// mini button was removed in v1.1 — the suite cluster's "角色卡界面"
-// button is the only way in. The panel-page itself listens for the
-// "panel-open" broadcast and calls setMaximized(true), which sets up the
-// popover-wide layout.
+// The main panel opens as a SIZED modal (NOT fullScreen), leaving a
+// gap on each side so OBR's left tool toolbar stays visible and
+// clickable while the panel is open — the panel is now launched from
+// a toolbar action, and the user wants the toolbar reachable
+// underneath (this is the pattern a future big status/resource stats
+// panel will reuse). OBR's Modal type exposes only width/height (no
+// inset/position), and modals are centred, so the gap is symmetric
+// left+right; `hideBackdrop` keeps those side strips interactive.
+const PANEL_SIDE_GAP = 64;
 async function openMainPopover() {
   try {
+    let vw = 1280;
+    let vh = 800;
+    try {
+      [vw, vh] = await Promise.all([
+        OBR.viewport.getWidth(),
+        OBR.viewport.getHeight(),
+      ]);
+    } catch { /* viewport read failed — fall back to sane defaults */ }
     await OBR.modal.open({
       id: PANEL_MODAL_ID,
       url: PANEL_URL,
-      fullScreen: true,
-      hideBackdrop: true, // no dark overlay
+      width: Math.max(360, Math.round(vw) - PANEL_SIDE_GAP * 2),
+      height: Math.max(240, Math.round(vh)),
+      hideBackdrop: true, // no dark overlay → the side gaps stay interactive
       hidePaper: true,    // no Material paper container
       // disablePointerEvents stays default (false) — panel buttons need clicks
     });
-    panelOpen = true;
+    try { localStorage.setItem(PANEL_OPEN_KEY, "1"); } catch {}
   } catch (e) {
     console.error("[obr-suite/character-cards] openMainPopover failed", e);
   }
@@ -128,11 +164,11 @@ async function openMainPopover() {
 
 async function closeMainPopover() {
   try { await OBR.modal.close(PANEL_MODAL_ID); } catch {}
-  panelOpen = false;
+  try { localStorage.removeItem(PANEL_OPEN_KEY); } catch {}
 }
 
 async function toggleMainPanel() {
-  if (panelOpen) await closeMainPopover();
+  if (isPanelOpen()) await closeMainPopover();
   else await openMainPopover();
 }
 
@@ -297,6 +333,83 @@ async function handleSelection(selection: string[] | undefined) {
   await showInfoFor(boundId, selection[0] ?? null);
 }
 
+// 2026-05-14 — fetch the minimal card stats we need to push to bound
+// tokens after a refresh / import / save. Server URL pattern mirrors
+// `bind-page.ts`. Returns null on any failure (network, parse, missing
+// fields) so callers can early-return without writing stale data.
+async function fetchCardSnapshot(cardId: string): Promise<{
+  maxHp: number | null;
+  ac: number | null;
+  initBonus: number | null;
+} | null> {
+  try {
+    const roomId = (OBR.room?.id || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const url = `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data.json`;
+    // cache:'no-store' so multi-edit roundtrips don't see the previous
+    // version sitting in HTTP cache. The data.json is small (typically
+    // < 50 KB) so the per-edit fetch is cheap.
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const cs = d?.core_stats || {};
+    const hp = cs.hp || {};
+    return {
+      maxHp: typeof hp.max === "number" ? hp.max : null,
+      ac: typeof cs.ac === "number" ? cs.ac : null,
+      initBonus: typeof cs.initiative === "number" ? cs.initiative : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Find every token bound to `cardId` and push the refreshed stats
+// (max HP / AC / initiative dex-mod) into their metadata. CURRENT HP
+// is preserved — see comment at BC_CARD_UPDATED above. GM-only, because
+// the GM has write access to every bound token regardless of who owns
+// it; players run their own copies of this listener but bail at the
+// role gate so we don't fight over the same writes.
+async function propagateCardRefresh(cardId: string): Promise<void> {
+  if (ccRole !== "GM") return;
+  const snap = await fetchCardSnapshot(cardId);
+  if (!snap) return;
+  // No-op if nothing meaningful to push (server returned a parseable
+  // but empty data.json — avoids spurious metadata churn).
+  if (snap.maxHp == null && snap.ac == null && snap.initBonus == null) return;
+  try {
+    const boundTokens = await OBR.scene.items.getItems(
+      (it: any) =>
+        (it.metadata as Record<string, unknown> | undefined)?.[BIND_META] === cardId,
+    );
+    if (boundTokens.length === 0) return;
+    const ids = boundTokens.map((it: any) => it.id);
+    await OBR.scene.items.updateItems(ids, (drafts: any[]) => {
+      for (const d of drafts) {
+        // Bubbles seed: merge new max/ac into whichever shape already
+        // exists on the token (suite key takes priority, fall through
+        // to legacy Stat-Bubbles external key). Preserves all other
+        // bubble fields (current hp, temp hp, hide flag, lock flag).
+        const cur = d.metadata[BUBBLES_META_KEY] as Record<string, unknown> | undefined;
+        const ext = d.metadata[EXTERNAL_BUBBLES_META_KEY] as Record<string, unknown> | undefined;
+        const existing = cur ?? ext ?? {};
+        const next: Record<string, unknown> = { ...existing };
+        if (snap.maxHp != null) next["max health"] = snap.maxHp;
+        if (snap.ac != null) next["armor class"] = snap.ac;
+        if (!("temporary health" in next)) next["temporary health"] = 0;
+        d.metadata[BUBBLES_META_KEY] = next;
+        if (d.metadata[EXTERNAL_BUBBLES_META_KEY] != null) {
+          d.metadata[EXTERNAL_BUBBLES_META_KEY] = next;
+        }
+        if (snap.initBonus != null) {
+          d.metadata[INIT_DEXMOD_META] = snap.initBonus;
+        }
+      }
+    });
+  } catch (e) {
+    console.warn("[obr-suite/character-cards] propagateCardRefresh failed", e);
+  }
+}
+
 export async function setupCharacterCards(): Promise<void> {
   try {
     const p = await OBR.player.getRole();
@@ -311,39 +424,29 @@ export async function setupCharacterCards(): Promise<void> {
       await openMainPopover();
     })
   );
-  unsubs.push(
-    OBR.broadcast.onMessage("com.obr-suite/cc-panel-toggle", async () => {
-      await toggleMainPanel();
-    })
-  );
 
-  // Panel-page broadcasts this when its own X button closed the modal,
-  // so our cached `panelOpen` flag doesn't drift out of sync. Without
-  // this, the next cluster-button click would close-an-already-closed
-  // modal (no-op), and the user had to click a SECOND time to reopen.
-  unsubs.push(
-    OBR.broadcast.onMessage("com.obr-suite/cc-panel-closed", () => {
-      panelOpen = false;
-    })
-  );
-
-  // CapsLock shortcut on the Select tool — toggles the cc panel.
-  // (User swapped: cc gets CapsLock, bestiary gets Shift+A.)
+  // 角色卡界面 — a standalone TOOL in OBR's toolbar (its own top-level
+  // icon, not an action nested under Select/etc.). `onClick` returns
+  // false so the tool is never actually "selected" — the active tool
+  // stays whatever it was; clicking just toggles the panel like a
+  // button. CapsLock triggers it too. Replaces the cluster button.
   try {
-    await OBR.tool.createAction({
-      id: TOOL_ACTION_TOGGLE,
+    await OBR.tool.create({
+      id: CC_TOOL_ID,
       shortcut: "CapsLock",
       icons: [
         {
           icon: ICON_URL,
-          label: "切换角色卡面板",
-          filter: { activeTools: [SELECT_TOOL] },
+          label: "角色卡界面",
         },
       ],
-      onClick: async () => { await toggleMainPanel(); },
+      onClick: async () => {
+        await toggleMainPanel();
+        return false; // don't switch the active tool — act as a button
+      },
     });
   } catch (e) {
-    console.error("[obr-suite/character-cards] createAction failed", e);
+    console.error("[obr-suite/character-cards] create tool failed", e);
   }
 
   // CapsLock from inside the panel iframe also toggles (panel listens
@@ -421,6 +524,21 @@ export async function setupCharacterCards(): Promise<void> {
     })
   );
 
+  // 2026-05-14 — propagate refreshed card stats to bound tokens. Fires
+  // on every BC_CARD_UPDATED, which panel-page broadcasts after xlsx
+  // upload / xlsx refresh, and fullscreen-page broadcasts after JSON
+  // import. Both sources now send LOCAL+REMOTE so the originating
+  // client (often the GM) ALSO propagates — without LOCAL, only
+  // remote viewers would see the new stats, and the DM would still
+  // need to re-bind.
+  unsubs.push(
+    OBR.broadcast.onMessage(BC_CARD_UPDATED, async (event) => {
+      const data = event.data as { cardId?: string } | undefined;
+      if (!data?.cardId) return;
+      await propagateCardRefresh(data.cardId);
+    }),
+  );
+
   // Hide info if the bound card was deleted from scene metadata, or its
   // host token was removed.
   unsubs.push(
@@ -485,6 +603,6 @@ export async function teardownCharacterCards(): Promise<void> {
   await closeMainPopover();
   await closeInfoPopover();
   try { await OBR.contextMenu.remove(CTX_BIND); } catch {}
-  try { await OBR.tool.removeAction(TOOL_ACTION_TOGGLE); } catch {}
+  try { await OBR.tool.remove(CC_TOOL_ID); } catch {}
   for (const u of unsubs.splice(0)) u();
 }

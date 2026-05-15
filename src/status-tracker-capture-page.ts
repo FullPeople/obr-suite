@@ -6,10 +6,17 @@
 //   buff = encoded JSON of BuffDef (when kind=buff)
 //
 // Behaviour by mode:
-//   drop          — track cursor, draw the cursor ghost. On pointerup,
-//                   apply the buff to whichever single token's ring
-//                   the cursor is currently over (no-op outside a
-//                   ring). Used for left-click drags.
+//   click-place   — the buff is "carried" on the cursor (no button
+//                   held). The NEXT pointerdown places it: on a
+//                   token's ring = apply, on empty space = discard.
+//                   Used for LEFT-click on palette buffs / eraser /
+//                   manage pill. (The pickup click itself completes
+//                   back on the palette; the pickup's release is a
+//                   no-op here.)
+//   drop          — track cursor while a button is held; on pointerup
+//                   apply to whichever single token's ring the cursor
+//                   is over. Still used by the manage-transfer drag
+//                   out of the manage popover.
 //   paint-toggle  — drag-paint as cursor crosses each token's ring.
 //                   For each token entered, TOGGLE the buff (apply
 //                   if missing, remove if present). Used for right-
@@ -35,15 +42,23 @@ const BC_DRAG_END = `${PLUGIN_ID}/drag-end`;
 const BC_OPEN_MANAGE = `${PLUGIN_ID}/open-manage`;
 
 const params = new URLSearchParams(location.search);
-type DragKind = "buff" | "clear" | "manage" | "manage-transfer";
+type DragKind = "buff" | "clear" | "manage" | "manage-transfer" | "preset";
 const kind = (params.get("kind") || "buff") as DragKind;
-const mode = (params.get("mode") || "drop") as "drop" | "paint-toggle";
+const mode = (params.get("mode") || "drop") as "drop" | "paint-toggle" | "click-place";
 // Source token id — only set when kind === "manage-transfer". The
 // buff was dragged out of the manage popover, which we use to look
 // up the originating token so we can remove from it on drop.
 const sourceTokenId = params.get("source") || null;
+// Preset id — only set when kind === "preset". The capture page does
+// NOT carry the preset's buff list (the palette page holds it); on
+// drop we broadcast {presetId, tokenId} back to the palette page
+// which then applies the buffs.
+const presetId = params.get("preset") || null;
+const presetName = params.get("presetName") ? decodeURIComponent(params.get("presetName")!) : "";
+const presetCount = Number(params.get("presetCount") || 0);
+const BC_PRESET_DROP = `${PLUGIN_ID}/preset-drop`;
 const buff: BuffDef | null = (() => {
-  if (kind === "clear" || kind === "manage") return null;
+  if (kind === "clear" || kind === "manage" || kind === "preset") return null;
   const raw = params.get("buff");
   if (!raw) return null;
   try {
@@ -56,16 +71,53 @@ const buff: BuffDef | null = (() => {
 const ringsEl = document.getElementById("rings") as HTMLDivElement;
 const cursorEl = document.getElementById("cursor") as HTMLDivElement;
 
+// 2026-05-15 — emoji → SVG sweep. Inline SVGs match the palette page's
+// SVG_CROSS / SVG_WRENCH glyphs so the cursor ghost reads as a unified
+// affordance with the source pill the user just dragged.
+const CURSOR_SVG_CROSS =
+  `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none"`
+  + ` stroke="currentColor" stroke-width="1.8" stroke-linecap="round"`
+  + ` style="vertical-align:-2px;margin-right:5px">`
+  + `<path d="M4 4l8 8M12 4l-8 8"/></svg>`;
+const CURSOR_SVG_WRENCH =
+  `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none"`
+  + ` stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"`
+  + ` style="vertical-align:-2px;margin-right:5px">`
+  + `<path d="M11 3.5a3 3 0 0 1-4.2 4.2L3 11.5l1.5 1.5 3.8-3.8a3 3 0 0 1 4.2-4.2l-2 2 .5 1.5 1.5.5z"/></svg>`;
+
+// Strip pictographic emoji from displayed buff names — same logic as
+// the palette page's stripEmoji. Buff data still carries the legacy
+// "麻痹 ⚡" / etc.; only the rendered cursor label drops them.
+function stripEmoji(s: string): string {
+  return s.replace(/\p{Extended_Pictographic}/gu, "")
+          .replace(/[\u{FE0E}\u{FE0F}\u{200D}]/gu, "")
+          .replace(/[\u{1F3FB}-\u{1F3FF}]/gu, "")
+          .replace(/\s+/g, " ")
+          .trim();
+}
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
+
 // Cursor ghost setup — solid color matching the dragged buff.
 if (kind === "clear") {
   cursorEl.classList.add("eraser");
-  cursorEl.textContent = "✕  清除全部 buff";
+  cursorEl.innerHTML = `${CURSOR_SVG_CROSS}清除全部 buff`;
 } else if (kind === "manage") {
   // Reuse the warning-orange "manage" cue from the palette pill so
   // the user sees a consistent visual for "you're about to manage
   // this token". CSS class added below in style overrides.
   cursorEl.classList.add("manage");
-  cursorEl.textContent = "🛠  管理 buff";
+  cursorEl.innerHTML = `${CURSOR_SVG_WRENCH}管理 buff`;
+} else if (kind === "preset") {
+  // Preset chip cursor — green-accent pill matching the palette's
+  // .preset-chip family. The right-side count badge mirrors the chip
+  // so the user keeps seeing "战斗起始 (3)" while dragging.
+  cursorEl.classList.add("preset");
+  cursorEl.innerHTML =
+    `${escapeHtml(presetName || "预设")}` +
+    (presetCount > 0 ? `<span style="margin-left:5px;font-size:9.5px;opacity:0.75">×${presetCount}</span>` : "");
 } else if (buff) {
   // Set the buff colour as a CSS variable so the stylesheet's
   // `color-mix(... var(--bubble-bg) 80%, transparent)` flat-tint
@@ -74,7 +126,7 @@ if (kind === "clear") {
   // as the "old / 90s" look in 2026-05-10 feedback.
   cursorEl.style.setProperty("--bubble-bg", buff.color);
   cursorEl.style.color = textColorFor(buff.color);
-  cursorEl.textContent = buff.name;
+  cursorEl.innerHTML = escapeHtml(stripEmoji(buff.name));
 }
 cursorEl.style.left = "-1000px";
 cursorEl.style.top = "-1000px";
@@ -284,6 +336,20 @@ async function actOnToken(r: RingState): Promise<void> {
     await applyBuff(r.tokenId);
     return;
   }
+  if (kind === "preset") {
+    if (!presetId) return;
+    // The capture page doesn't carry the preset's buff list — it just
+    // signals "drop happened on this token". The palette page (which
+    // owns presets) listens for BC_PRESET_DROP and applies the buffs.
+    try {
+      await OBR.broadcast.sendMessage(
+        BC_PRESET_DROP,
+        { presetId, tokenId: r.tokenId },
+        { destination: "LOCAL" },
+      );
+    } catch {}
+    return;
+  }
   if (!buff) return;
   // kind === "buff": original apply/toggle behaviour.
   if (r.buffIds.includes(buff.id)) {
@@ -330,8 +396,11 @@ function paintRingHover(activeId: string | null): void {
 window.addEventListener("pointermove", (e) => {
   cursorEl.style.left = `${e.clientX}px`;
   cursorEl.style.top = `${e.clientY}px`;
-  if ((e.buttons & 0b11) === 0) {
-    // Neither left nor right held — user already released. End drag.
+  // click-place carries the buff on the cursor with NO button held,
+  // so a released button is the NORMAL state — never end on it.
+  // drop / paint-toggle are press-drag gestures: a released button
+  // means the user already let go, so end the drag.
+  if (mode !== "click-place" && (e.buttons & 0b11) === 0) {
     void endDrag();
     return;
   }
@@ -355,6 +424,11 @@ window.addEventListener("pointermove", (e) => {
 });
 
 window.addEventListener("pointerup", async (e) => {
+  // click-place: pointerup is either the PICKUP release or a
+  // PLACEMENT click's release — both are no-ops here. The carry must
+  // survive a button release, and placement is handled on
+  // pointerdown below.
+  if (mode === "click-place") return;
   // Drop mode applies on release if cursor is over a ring.
   if (mode === "drop" && kind !== "clear") {
     const hit = pointerToRing(e.clientX, e.clientY);
@@ -372,6 +446,18 @@ window.addEventListener("pointerup", async (e) => {
     const hit = pointerToRing(e.clientX, e.clientY);
     if (hit) await clearAll(hit.tokenId);
   }
+  await endDrag();
+});
+
+// click-place placement: the buff was picked up by a left-click on
+// the palette (that click completed back on the palette window), so
+// the FIRST pointerdown the overlay sees is the PLACEMENT. A click
+// on a token's ring applies / clears / manages it; a click on empty
+// space just discards the carried buff. Either way the carry ends.
+window.addEventListener("pointerdown", async (e) => {
+  if (mode !== "click-place") return;
+  const hit = pointerToRing(e.clientX, e.clientY);
+  if (hit) await actOnToken(hit);
   await endDrag();
 });
 
@@ -415,18 +501,25 @@ window.addEventListener("pointerdown", bumpPointerActivity, true);
 window.addEventListener("pointerup", bumpPointerActivity, true);
 
 const dragStartedAt = Date.now();
+// click-place is a deliberate "carry until you click" gesture — the
+// user may legitimately pause to decide where to place — so it gets
+// far more generous watchdog limits than a press-drag (which is
+// always a sub-second gesture).
+const IDLE_LIMIT_MS = mode === "click-place" ? 20000 : 5000;
+const CAP_LIMIT_MS = mode === "click-place" ? 120000 : 30000;
 const watchdogId = setInterval(() => {
   const now = Date.now();
-  // Idle watchdog: no pointer activity for 5s → assume the
-  // pointerup was lost in transit.
-  if (now - lastPointerActivity > 5000) {
-    console.warn("[status/capture] watchdog: no pointer activity in 5s, closing");
+  // Idle watchdog: no pointer activity for a while → assume the
+  // pointerup was lost in transit (press-drag) or the carry was
+  // forgotten (click-place).
+  if (now - lastPointerActivity > IDLE_LIMIT_MS) {
+    console.warn(`[status/capture] watchdog: no pointer activity in ${IDLE_LIMIT_MS}ms, closing`);
     void endDrag();
     return;
   }
-  // Absolute timer: no drag legitimately takes >30s.
-  if (now - dragStartedAt > 30000) {
-    console.warn("[status/capture] watchdog: 30s cap reached, closing");
+  // Absolute timer: no interaction legitimately takes this long.
+  if (now - dragStartedAt > CAP_LIMIT_MS) {
+    console.warn(`[status/capture] watchdog: ${CAP_LIMIT_MS}ms cap reached, closing`);
     void endDrag();
     return;
   }

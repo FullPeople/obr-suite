@@ -258,31 +258,22 @@ function readUserScale(): number {
   return 1;
 }
 
+// 2026-05-14 (#4) — verticalOffset / offsetByText / overheadMode moved
+// from per-client localStorage to DM-synced scene metadata (under
+// SCENE_BUBBLES_SETTINGS_KEY, alongside playerThreshold +
+// autoScaleText). Only `scale` (气泡大小) stays per-client. These
+// read* functions now return the cached scene value; the cache is
+// refreshed on scene-ready + onMetadataChange (same as
+// cachedPlayerThreshold). The LS_BUBBLES_* constants are kept only
+// as one-shot migration sources — see migrateLocalBubbleSettings().
 function readVerticalOffset(): number {
-  try {
-    const v = localStorage.getItem(LS_BUBBLES_VERTICAL_OFFSET);
-    if (v != null && v !== "") {
-      const n = Number(v);
-      if (Number.isFinite(n)) return n;
-    }
-  } catch {}
-  return DEFAULT_VERTICAL_OFFSET;
+  return cachedVerticalOffset;
 }
-
 function readOffsetByText(): boolean {
-  try {
-    const v = localStorage.getItem(LS_BUBBLES_OFFSET_BY_TEXT);
-    if (v === "1") return true;
-  } catch {}
-  return false;
+  return cachedOffsetByText;
 }
-
 function readOverheadMode(): boolean {
-  try {
-    const v = localStorage.getItem(LS_BUBBLES_OVERHEAD_MODE);
-    if (v === "1") return true;
-  } catch {}
-  return false;
+  return cachedOverheadMode;
 }
 
 function readPlayerThreshold(): number {
@@ -309,6 +300,12 @@ function quantiseRatio(ratio: number, thresholdPercent: number): number {
 let cachedCombatActive = false;
 let cachedPlayerThreshold = DEFAULT_PLAYER_THRESHOLD;
 let cachedAutoScaleText = false;
+// 2026-05-14 (#4) — DM-synced bubble settings cache. Mirrors the
+// scene-metadata SCENE_BUBBLES_SETTINGS_KEY object. Refreshed on
+// scene-ready + onMetadataChange.
+let cachedVerticalOffset = DEFAULT_VERTICAL_OFFSET;
+let cachedOffsetByText = false;
+let cachedOverheadMode = false;
 function readCombatActive(meta: Record<string, unknown>): boolean {
   const c = meta[COMBAT_STATE_KEY] as { inCombat?: boolean; preparing?: boolean } | undefined;
   return !!(c?.inCombat || c?.preparing);
@@ -317,6 +314,53 @@ function readScenePlayerThreshold(meta: Record<string, unknown>): number {
   const settings = meta[SCENE_BUBBLES_SETTINGS_KEY] as { playerThreshold?: unknown } | undefined;
   const n = Number(settings?.playerThreshold);
   return Number.isFinite(n) && n >= 0 && n <= 100 ? n : DEFAULT_PLAYER_THRESHOLD;
+}
+function readSceneVerticalOffset(meta: Record<string, unknown>): number {
+  const settings = meta[SCENE_BUBBLES_SETTINGS_KEY] as { verticalOffset?: unknown } | undefined;
+  const n = Number(settings?.verticalOffset);
+  return Number.isFinite(n) ? n : DEFAULT_VERTICAL_OFFSET;
+}
+function readSceneOffsetByText(meta: Record<string, unknown>): boolean {
+  const settings = meta[SCENE_BUBBLES_SETTINGS_KEY] as { offsetByText?: unknown } | undefined;
+  return !!settings?.offsetByText;
+}
+function readSceneOverheadMode(meta: Record<string, unknown>): boolean {
+  const settings = meta[SCENE_BUBBLES_SETTINGS_KEY] as { overheadMode?: unknown } | undefined;
+  return !!settings?.overheadMode;
+}
+// One-shot migration: if the scene has NO bubble-settings object yet
+// but this client carries legacy per-client localStorage values for
+// the now-DM-synced fields, seed the scene metadata from them so a
+// table that's mid-campaign doesn't lose the GM's tuning. GM-only
+// (only the GM can write scene metadata); runs once on setup.
+async function migrateLocalBubbleSettings(): Promise<void> {
+  if (role !== "GM") return;
+  try {
+    const meta = await OBR.scene.getMetadata();
+    const existing = meta[SCENE_BUBBLES_SETTINGS_KEY] as Record<string, unknown> | undefined;
+    // Already has the new fields → nothing to migrate.
+    if (existing && "verticalOffset" in existing) return;
+    let lsOffset: number | null = null;
+    let lsOffsetByText = false;
+    let lsOverhead = false;
+    try {
+      const vo = localStorage.getItem(LS_BUBBLES_VERTICAL_OFFSET);
+      if (vo != null && vo !== "" && Number.isFinite(Number(vo))) lsOffset = Number(vo);
+      lsOffsetByText = localStorage.getItem(LS_BUBBLES_OFFSET_BY_TEXT) === "1";
+      lsOverhead = localStorage.getItem(LS_BUBBLES_OVERHEAD_MODE) === "1";
+    } catch {}
+    await OBR.scene.setMetadata({
+      [SCENE_BUBBLES_SETTINGS_KEY]: {
+        playerThreshold: readScenePlayerThreshold(meta as Record<string, unknown>),
+        autoScaleText: readSceneAutoScaleText(meta as Record<string, unknown>),
+        verticalOffset: lsOffset ?? DEFAULT_VERTICAL_OFFSET,
+        offsetByText: lsOffsetByText,
+        overheadMode: lsOverhead,
+      },
+    });
+  } catch (e) {
+    console.warn("[obr-suite/bubbles] settings migration skipped", e);
+  }
 }
 // Auto-scale-text: when ON, the HP-bar / AC / temp bubble font size
 // follows the token's renderedSize (in addition to the user's
@@ -1842,24 +1886,28 @@ export async function setupBubbles(): Promise<void> {
     scheduleSync();
   }));
 
+  // 2026-05-14 (#4) — `storage` listener now only watches the
+  // STILL-per-client keys: enabled + scale. verticalOffset /
+  // offsetByText / overheadMode moved to scene metadata and are
+  // picked up by the onMetadataChange handler below instead.
   const onStorage = (e: StorageEvent) => {
-    if (
-      e.key === LS_BUBBLES_ENABLED ||
-      e.key === LS_BUBBLES_SCALE ||
-      e.key === LS_BUBBLES_VERTICAL_OFFSET ||
-      e.key === LS_BUBBLES_OFFSET_BY_TEXT ||
-      e.key === LS_BUBBLES_OVERHEAD_MODE
-    ) {
+    if (e.key === LS_BUBBLES_ENABLED || e.key === LS_BUBBLES_SCALE) {
       void clearAll().then(() => syncBubbles().catch(() => {}));
     }
   };
   window.addEventListener("storage", onStorage);
   unsubs.push(() => window.removeEventListener("storage", onStorage));
 
+  // One-shot: seed scene metadata from any legacy local settings.
+  await migrateLocalBubbleSettings();
+
   try {
     const meta = await OBR.scene.getMetadata();
     cachedPlayerThreshold = readScenePlayerThreshold(meta as Record<string, unknown>);
     cachedAutoScaleText = readSceneAutoScaleText(meta as Record<string, unknown>);
+    cachedVerticalOffset = readSceneVerticalOffset(meta as Record<string, unknown>);
+    cachedOffsetByText = readSceneOffsetByText(meta as Record<string, unknown>);
+    cachedOverheadMode = readSceneOverheadMode(meta as Record<string, unknown>);
   } catch {}
 
   // Combat state and synced bubble settings changes.
@@ -1868,20 +1916,32 @@ export async function setupBubbles(): Promise<void> {
       const next = readCombatActive(meta);
       const nextThreshold = readScenePlayerThreshold(meta as Record<string, unknown>);
       const nextAutoScale = readSceneAutoScaleText(meta as Record<string, unknown>);
+      const nextVOffset = readSceneVerticalOffset(meta as Record<string, unknown>);
+      const nextOffsetByText = readSceneOffsetByText(meta as Record<string, unknown>);
+      const nextOverhead = readSceneOverheadMode(meta as Record<string, unknown>);
       if (
         next !== cachedCombatActive ||
         nextThreshold !== cachedPlayerThreshold ||
-        nextAutoScale !== cachedAutoScaleText
+        nextAutoScale !== cachedAutoScaleText ||
+        nextVOffset !== cachedVerticalOffset ||
+        nextOffsetByText !== cachedOffsetByText ||
+        nextOverhead !== cachedOverheadMode
       ) {
         const autoScaleChanged = nextAutoScale !== cachedAutoScaleText;
+        // Any of the layout-affecting DM settings (offset / offset-by-
+        // text / overhead mode) changing also needs a full rebuild,
+        // not just a patchGeometry — same reasoning as autoScale.
+        const layoutChanged =
+          nextVOffset !== cachedVerticalOffset ||
+          nextOffsetByText !== cachedOffsetByText ||
+          nextOverhead !== cachedOverheadMode;
         cachedCombatActive = next;
         cachedPlayerThreshold = nextThreshold;
         cachedAutoScaleText = nextAutoScale;
-        // Auto-scale toggling changes both font sizes AND the
-        // verticalOffset rule — tokens need a full layout rebuild,
-        // not just patchGeometry. clearAll forces re-add on the
-        // next sync.
-        if (autoScaleChanged) {
+        cachedVerticalOffset = nextVOffset;
+        cachedOffsetByText = nextOffsetByText;
+        cachedOverheadMode = nextOverhead;
+        if (autoScaleChanged || layoutChanged) {
           void clearAll();
         }
         scheduleSync();

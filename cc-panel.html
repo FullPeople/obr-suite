@@ -15,16 +15,22 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
 .mini-wrap{display:none}
 .mini-btn{display:none}
 
-.panel{display:flex;height:100%;padding:20px;gap:14px}
+/* overflow:hidden — the panel itself is a fixed-size box; any pane
+   whose content is too tall scrolls INTERNALLY (each pane sets its
+   own overflow), the outer frame never gets a scrollbar. */
+.panel{display:flex;height:100%;padding:20px;gap:14px;overflow:hidden}
 
 /* === Left: card viewer (no drop) === */
 .viewer{
-  flex:1;min-width:0;
-  background:#fff;border-radius:10px;overflow:hidden;
+  flex:1;min-width:0;min-height:0;
+  /* Match the loaded sheet's canvas (cc-fullscreen --bg #1c2030) so the
+     iframe-load gap on first open / card switch / refresh reads as the
+     card color instead of a jarring white flash. */
+  background:#1c2030;border-radius:10px;overflow:hidden;
   box-shadow:0 8px 40px rgba(0,0,0,0.5);
   position:relative;
 }
-.viewer iframe{border:none;width:100%;height:100%;display:block;position:absolute;inset:0}
+.viewer iframe{border:none;width:100%;height:100%;display:block;position:absolute;inset:0;background:#1c2030}
 .viewer .empty-state{
   position:absolute;inset:0;
   background:rgba(255,255,255,0.04);
@@ -33,14 +39,14 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
   border:1px dashed rgba(255,255,255,0.15);border-radius:10px;
   text-align:center;padding:20px;gap:10px;
 }
-.viewer.has-content{background:#fff}
+.viewer.has-content{background:#1c2030}
 .viewer.is-empty .empty-state{display:flex}
 .viewer:not(.is-empty) .empty-state{display:none}
 .viewer .empty-state .big{font-size:48px;opacity:.5}
 
 /* === Resource tab column (DM only) === */
 .res-col{
-  width:72px;flex-shrink:0;
+  width:72px;flex-shrink:0;min-height:0;
   background:rgba(22,33,62,0.85);
   border-radius:10px;
   display:flex;flex-direction:column;gap:4px;padding:10px 6px;
@@ -75,6 +81,12 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
   background:rgba(22,33,62,0.85);
   border-radius:10px;
   display:flex;flex-direction:column;overflow:hidden;
+  /* min-height:0 — without it the flexbox `min-height:auto` default
+     lets the column's content force `.side` taller than the frame
+     instead of staying boxed; the card list below then can't scroll
+     internally. With it, `.side` is exactly the frame height and
+     `.card-list` gets its own scrollbar. */
+  min-height:0;
   box-shadow:0 8px 30px rgba(0,0,0,0.4);
   backdrop-filter:blur(4px);
   position:relative;
@@ -123,7 +135,7 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
 .card-refresh.spinning{opacity:1;animation:cc-spin 0.8s linear infinite}
 @keyframes cc-spin { to { transform:rotate(360deg) } }
 
-.card-list{flex:1;overflow-y:auto;padding:6px 8px 10px}
+.card-list{flex:1;min-height:0;overflow-y:auto;padding:6px 8px 10px}
 .card-list::-webkit-scrollbar{width:3px}
 .card-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:2px}
 
@@ -192,8 +204,8 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
              installs each download their own deploy's templates. -->
         <a
           class="icon-btn"
-          href="template-belling-2014-v3.5.9.xlsx"
-          download="DND5E人物卡_悲灵v3.5.9 (2014).xlsx"
+          href="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx"
+          download="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx"
           target="_blank"
           rel="noopener"
           data-i18n="ccPanelDownloadTpl2014"
@@ -202,8 +214,8 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
         >2014 模板</a>
         <a
           class="icon-btn"
-          href="template-belling-v1.0.12.xlsx"
-          download="DND5.5E人物卡-悲灵v1.0.12 (2024).xlsx"
+          href="DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx"
+          download="DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx"
           target="_blank"
           rel="noopener"
           data-i18n="ccPanelDownloadTpl2024"

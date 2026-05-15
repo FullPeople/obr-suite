@@ -44,13 +44,15 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   --shadow-lg:    0 8px 28px rgba(0,0,0,0.5);
 }
 
-html,body{background:var(--bg);color:var(--ink)}
+/* 2026-05-14 (#14 f2) — html/body are now TRANSPARENT. The loaded
+   character sheet stays fully opaque because every band that fills
+   the viewport (.cc-head / .cc-stats / .cc-tabs / .cc-body) carries
+   its own solid background — see each rule below. With a transparent
+   body, the no-card states (.cc-translucent) let the OBR canvas read
+   through behind a soft navy wash. */
+html,body{background:transparent;color:var(--ink)}
 body{
   font-size:13px;line-height:1.5;
-  background:
-    /* Subtle suite-signature accent glow at the top */
-    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(245,166,35,0.05) 0%, transparent 65%),
-    var(--bg);
 }
 
 #app{height:100%;overflow:hidden;display:flex;flex-direction:column}
@@ -101,31 +103,60 @@ body{
   border-left:1px solid var(--border);
   background:var(--bg-soft);
 }
+/* 2026-05-14 (#14 follow-up) — modernized button shape per user
+   feedback: less rounded, larger hit area, lighter font weight so
+   the button reads as "control surface" not "decorative pill". */
 .cc-btn{
-  display:inline-flex;align-items:center;gap:5px;
-  padding:6px 12px;
+  display:inline-flex;align-items:center;gap:6px;
+  padding:8px 14px;
   background:var(--surface-2);
   border:1px solid var(--border-strong);
-  border-radius:5px;
-  color:var(--ink);font-family:inherit;font-size:11.5px;font-weight:600;
+  border-radius:3px;
+  color:var(--ink);font-family:inherit;font-size:12.5px;font-weight:500;
   cursor:pointer;
   transition:background .12s, border-color .12s, color .12s;
   white-space:nowrap;
+  letter-spacing:0.2px;
 }
-.cc-btn:hover{background:var(--surface-3);border-color:var(--gold-soft);color:var(--ink-strong)}
+.cc-btn:hover{background:var(--surface-3);border-color:var(--border-strong);color:var(--ink-strong)}
+/* 2026-05-14 (#14 f2) — primary buttons (编辑中 / 保存) now use a
+   white-bright accent instead of gold. Per user spec, gold is
+   reserved for DATA values; chrome controls stay in the white/ink
+   range so the panel reads as "枭熊 suite" not "amber notebook". */
 .cc-btn.primary{
-  background:rgba(212,160,86,0.15);
-  border-color:var(--gold-soft);color:var(--gold);
+  background:rgba(255,255,255,0.12);
+  border-color:var(--ink-dim);color:var(--ink-strong);
 }
-.cc-btn.primary:hover{background:rgba(212,160,86,0.25);color:var(--ink-strong)}
+.cc-btn.primary:hover{background:rgba(255,255,255,0.2);border-color:var(--ink);color:#fff}
 .cc-btn.danger:hover{border-color:var(--ember);color:#ffa093;background:rgba(232,103,94,0.18)}
-.cc-btn .ic{font-size:13px;line-height:1}
+.cc-btn .ic{font-size:14px;line-height:1;display:inline-flex;align-items:center}
+.cc-btn .ic svg{display:block}
+/* 2026-05-14 (#14 f2) — fused button group: a main button + an
+   icon-only sub-button sharing one seamless outline. Used for
+   导出JSON|复制 and 导入JSON|粘贴. The main button loses its right
+   radius, the sub-button loses its left radius + left border, so
+   the pair reads as a single control with a divider. */
+.cc-btn-group{display:inline-flex}
+.cc-btn-group > .cc-btn:first-child{
+  border-top-right-radius:0;border-bottom-right-radius:0;
+}
+.cc-btn-sub{
+  border-top-left-radius:0;border-bottom-left-radius:0;
+  border-left:1px solid var(--border);
+  padding:8px 9px;
+  color:var(--ink-dim);
+}
+.cc-btn-sub:hover{color:var(--ink-strong)}
 
 /* === Stat banner — under header === */
+/* 2026-05-14 (#14 follow-up) — flatter cards, sharper corners,
+   bigger numbers. HP / AC / 先攻 lose their gradient backgrounds —
+   color now lives on the NUMBER itself, not on the card surface.
+   The label is smaller and quieter so the value dominates. */
 .cc-stats{
   flex:0 0 auto;
   display:flex;align-items:stretch;
-  gap:10px;padding:14px 20px 12px;
+  gap:8px;padding:14px 20px 14px;
   background:var(--bg);
   border-bottom:1px solid var(--border);
 }
@@ -133,28 +164,29 @@ body{
   flex:1;min-width:0;
   background:var(--surface);
   border:1px solid var(--border);
-  border-radius:7px;
-  padding:8px 12px 7px;
+  border-radius:4px;
+  padding:10px 14px 9px;
   display:flex;flex-direction:column;justify-content:center;
   position:relative;
 }
-.stat-cell.hp{border-color:rgba(232,103,94,0.55);background:linear-gradient(180deg, rgba(232,103,94,0.12), var(--surface) 60%)}
-.stat-cell.ac{border-color:rgba(212,160,86,0.55);background:linear-gradient(180deg, rgba(212,160,86,0.13), var(--surface) 60%)}
-.stat-cell.init{border-color:rgba(109,172,138,0.40)}
+.stat-cell.hp{border-color:rgba(232,103,94,0.35)}
+.stat-cell.ac{border-color:rgba(212,160,86,0.35)}
+.stat-cell.init{border-color:rgba(109,172,138,0.30)}
 .stat-cell-label{
-  font-size:10px;color:var(--ink-dim);font-weight:700;letter-spacing:0.8px;text-transform:uppercase;
-  margin-bottom:1px;
+  font-size:10.5px;color:var(--ink-dim);font-weight:500;letter-spacing:0.6px;
+  margin-bottom:3px;
 }
 .stat-cell-val{
-  display:flex;align-items:baseline;gap:4px;
-  font-family:"Noto Serif SC",Georgia,serif;
+  display:flex;align-items:baseline;gap:5px;
+  font-family:inherit;
   color:var(--ink-strong);
-  font-weight:700;
+  font-weight:600;
+  font-variant-numeric:tabular-nums;
 }
-.stat-cell-val .big{font-size:22px;line-height:1.1}
-.stat-cell-val .slash{color:var(--ink-mute);font-weight:400;font-size:16px;margin:0 1px}
-.stat-cell-val .small{font-size:14px;color:var(--ink-dim);font-weight:600}
-.stat-cell-val .unit{font-size:11px;color:var(--ink-dim);font-weight:500;margin-left:2px}
+.stat-cell-val .big{font-size:26px;line-height:1.0}
+.stat-cell-val .slash{color:var(--ink-mute);font-weight:400;font-size:18px;margin:0 1px}
+.stat-cell-val .small{font-size:15px;color:var(--ink-dim);font-weight:500}
+.stat-cell-val .unit{font-size:11px;color:var(--ink-dim);font-weight:400;margin-left:3px}
 .stat-cell.hp .stat-cell-val .big{color:#ffa093}
 .stat-cell.ac .stat-cell-val .big{color:#e6c07a}
 .stat-cell.init .stat-cell-val .big{color:var(--teal)}
@@ -170,30 +202,35 @@ body{
 .stat-input:focus{border-bottom-color:var(--gold)}
 
 /* === Tabs === */
+/* 2026-05-14 (#14 follow-up) — bigger tab labels (was 13 → 15 px),
+   medium weight not bold. Underline indicator stays but slimmer. */
 .cc-tabs{
   flex:0 0 auto;
   display:flex;
-  background:var(--bg-soft);
+  /* 2026-05-14 (#14 f2) — solid bg required: body is transparent now,
+     so without this the tab strip would let the canvas bleed through
+     between header and content. */
+  background:var(--bg);
   border-bottom:1px solid var(--border);
-  padding:0 12px;
-  gap:2px;
+  padding:0 20px;
+  gap:4px;
   overflow-x:auto;
   scrollbar-width:none;
 }
 .cc-tabs::-webkit-scrollbar{display:none}
 .cc-tab{
   flex-shrink:0;
-  padding:10px 16px;
+  padding:12px 18px;
   background:transparent;
   border:0;border-bottom:2px solid transparent;
   color:var(--ink-dim);
-  font-family:inherit;font-size:13px;font-weight:600;
+  font-family:inherit;font-size:15px;font-weight:500;
   cursor:pointer;
   letter-spacing:0.3px;
   transition:color .12s, border-color .12s;
 }
 .cc-tab:hover{color:var(--ink)}
-.cc-tab.is-on{color:var(--gold);border-bottom-color:var(--gold)}
+.cc-tab.is-on{color:var(--gold);border-bottom-color:var(--gold);font-weight:600}
 
 /* === Content area === */
 .cc-body{
@@ -216,71 +253,77 @@ body{
 }
 
 /* === Section card === */
+/* 2026-05-14 (#14 follow-up) — minimalist refresh per user spec.
+   Removed: gradient background on header, gold left rail decoration,
+   serif font + uppercase + 1px letter-spacing on titles. Replaced
+   with: flat surface, sharper corners, lighter borders. Information
+   leads, style steps back. */
 .sec{
   background:var(--surface);
   border:1px solid var(--border);
-  border-radius:8px;
+  border-radius:4px;
   overflow:hidden;
-  box-shadow:var(--shadow);
+  margin-bottom:16px;
 }
+.sec:last-child{margin-bottom:0}
 .sec-h{
-  display:flex;align-items:center;justify-content:space-between;gap:8px;
-  padding:9px 14px 8px;
-  background:linear-gradient(180deg, var(--surface-2), var(--surface));
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:12px 16px 10px;
+  background:transparent;
   border-bottom:1px solid var(--border);
-  position:relative;
-}
-.sec-h::before{
-  content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
-  background:var(--gold-soft);
 }
 .sec-h-title{
-  font-family:"Noto Serif SC",Georgia,serif;
-  font-size:13px;font-weight:700;color:var(--ink-strong);
-  letter-spacing:1px;
-  text-transform:uppercase;
+  font-family:inherit;
+  font-size:15px;font-weight:600;color:var(--ink-strong);
+  letter-spacing:0.4px;
 }
-.sec-h-meta{font-size:11px;color:var(--ink-dim);font-weight:500}
-.sec-body{padding:12px 14px}
-.sec-body.dense{padding:8px 10px}
+.sec-h-meta{font-size:12px;color:var(--ink-dim);font-weight:400}
+.sec-body{padding:14px 16px}
+.sec-body.dense{padding:10px 12px}
 
 /* === Abilities grid === */
+/* 2026-05-14 (#14 follow-up) — bigger ability score (was 24 → 32 px),
+   sharper card edges, drop the decorative serif on the totals
+   (Noto Serif SC stays only on character name + page-level headers).
+   "Information first, style steps back." */
 .abl-grid{
   display:grid;
   grid-template-columns:repeat(3, 1fr);
-  gap:10px;
+  gap:8px;
 }
 .abl{
   background:var(--bg-soft);
   border:1px solid var(--border);
-  border-radius:7px;
-  padding:10px 8px 8px;
+  border-radius:4px;
+  padding:12px 8px 10px;
   text-align:center;
   position:relative;
 }
 .abl-name{
-  font-size:11px;color:var(--ink-dim);font-weight:700;
-  letter-spacing:1px;
-  font-family:"Noto Serif SC",Georgia,serif;
+  font-size:11px;color:var(--ink-dim);font-weight:600;
+  letter-spacing:0.6px;
+  font-family:inherit;
 }
 .abl-total{
-  font-size:24px;font-weight:700;color:var(--ink-strong);
-  line-height:1.05;margin-top:2px;
-  font-family:"Noto Serif SC",Georgia,serif;
+  font-size:32px;font-weight:600;color:var(--ink-strong);
+  line-height:1.0;margin-top:4px;
+  font-family:inherit;
+  font-variant-numeric:tabular-nums;
 }
 .abl-mod{
   display:inline-block;
-  margin-top:3px;
-  padding:1px 7px;
-  background:var(--surface-3);
-  border:1px solid var(--border);
-  border-radius:99px;
-  font-size:11.5px;color:var(--gold);font-weight:700;
-  font-family:Georgia,serif;
+  margin-top:6px;
+  padding:2px 10px;
+  background:transparent;
+  border:1px solid var(--border-strong);
+  border-radius:3px;
+  font-size:12px;color:var(--gold);font-weight:600;
+  font-family:inherit;
+  font-variant-numeric:tabular-nums;
   cursor:pointer;
-  transition:background .12s, color .12s;
+  transition:background .12s, color .12s, border-color .12s;
 }
-.abl-mod:hover{background:var(--gold-soft);color:var(--ink-strong)}
+.abl-mod:hover{background:var(--gold-soft);color:var(--ink-strong);border-color:var(--gold-soft)}
 .abl-save{
   margin-top:5px;font-size:10px;color:var(--ink-mute);font-weight:600;
   display:flex;align-items:center;justify-content:center;gap:3px;
@@ -295,6 +338,23 @@ body{
   content:"○";font-size:9px;
 }
 .abl-save b{font-weight:700;font-family:Georgia,serif}
+/* 2026-05-14 (#14 f2) — edit-mode save row uses its OWN class
+   (`abl-save-edit`) so the `.abl-save::before` pseudo (which
+   auto-draws a ●/○) never applies. The explicit `.abl-save-dot`
+   span is the only proficiency dot in edit mode. The earlier
+   `:has(input)` override didn't take effect in OBR's iframe
+   runtime — a separate class sidesteps the issue entirely. */
+.abl-save-edit{
+  margin-top:5px;
+  display:flex;align-items:center;justify-content:center;gap:5px;
+  color:var(--ink-mute);
+}
+.abl-save-edit.is-prof{color:var(--teal)}
+.abl-save-dot{
+  font-size:11px;cursor:pointer;user-select:none;
+  transition:transform .1s;
+}
+.abl-save-dot:hover{transform:scale(1.25)}
 
 /* === Skills list === */
 .sk-list{
@@ -333,35 +393,42 @@ body{
 .kv dd{color:var(--ink)}
 
 /* === Combat: weapons === */
+/* 2026-05-14 (#14 follow-up) — bigger row padding (was 7 → 9 px),
+   square corners, drop the Georgia serif on numbers. */
 .weap{
   display:grid;
   grid-template-columns:1fr auto auto;
-  gap:6px 10px;align-items:center;
-  padding:7px 10px;
-  border:1px solid var(--border);border-radius:6px;
+  gap:8px 12px;align-items:center;
+  padding:9px 12px;
+  border:1px solid var(--border);border-radius:4px;
   background:var(--bg-soft);
-  margin-bottom:4px;
+  margin-bottom:6px;
 }
-.weap-name{font-weight:700;color:var(--ink);font-size:12.5px;display:flex;align-items:center;gap:6px}
-.weap-prof{font-size:9px;color:var(--teal);background:var(--teal-soft);padding:1px 5px;border-radius:3px}
+.weap-name{font-weight:600;color:var(--ink);font-size:13.5px;display:flex;align-items:center;gap:6px}
+.weap-prof{
+  font-size:10px;color:var(--teal);background:var(--teal-soft);
+  padding:1px 6px;border-radius:2px;font-weight:500;
+}
 .weap-prof.is-off{color:var(--ink-dim);background:rgba(255,255,255,0.06)}
 .weap-atk{
-  font-family:Georgia,serif;font-weight:700;color:var(--gold);
-  cursor:pointer;font-size:13px;
-  padding:1px 7px;border:1px solid var(--gold-soft);border-radius:4px;
-  background:rgba(212,160,86,0.08);
+  font-family:inherit;font-weight:600;color:var(--gold);
+  cursor:pointer;font-size:14px;
+  padding:3px 9px;border:1px solid var(--gold-soft);border-radius:3px;
+  background:transparent;
+  font-variant-numeric:tabular-nums;
 }
-.weap-atk:hover{background:rgba(212,160,86,0.22)}
+.weap-atk:hover{background:rgba(212,160,86,0.18)}
 .weap-dmg{
-  font-family:Georgia,serif;font-weight:700;color:var(--ember);
-  cursor:pointer;font-size:12.5px;
-  padding:1px 7px;border:1px solid var(--ember-soft);border-radius:4px;
-  background:rgba(192,57,43,0.08);
+  font-family:inherit;font-weight:600;color:var(--ember);
+  cursor:pointer;font-size:13.5px;
+  padding:3px 9px;border:1px solid var(--ember-soft);border-radius:3px;
+  background:transparent;
+  font-variant-numeric:tabular-nums;
 }
-.weap-dmg:hover{background:rgba(192,57,43,0.22)}
+.weap-dmg:hover{background:rgba(192,57,43,0.18)}
 .weap-props{
-  grid-column:1/-1;font-size:10.5px;color:var(--ink-mute);
-  font-style:italic;line-height:1.4;
+  grid-column:1/-1;font-size:11.5px;color:var(--ink-mute);
+  font-style:normal;line-height:1.5;
 }
 
 /* === Spells === */
@@ -545,11 +612,149 @@ body{
 .def-tag.adv{border-color:var(--teal-soft);color:var(--teal)}
 .def-tag.dis{border-color:var(--ember-soft);color:#ff8d76}
 
+/* 2026-05-14 (#14 follow-up) — minimalist tag overrides. The .def-row
+   defaults still apply; we just sharpen the corners (was 99px pill →
+   3px square) and lift the type size slightly. */
+.def-tag{
+  border-radius:3px;
+  font-size:12px;
+  padding:3px 9px;
+}
+.def-label{
+  font-size:11.5px;font-weight:500;
+}
+
+/* === 2026-05-14 (#14) — Edit mode controls ============================ */
+.cc-edit-num,.cc-edit-text{
+  background:var(--bg, #161513);
+  color:var(--ink, #e8e3d8);
+  border:1px solid var(--border-strong, #4a4640);
+  border-radius:4px;
+  padding:3px 6px;
+  font-family:inherit;
+  font-size:12px;
+  outline:none;
+  transition:border-color .12s;
+}
+.cc-edit-num{width:60px;text-align:center;font-variant-numeric:tabular-nums}
+.cc-edit-text{width:auto}
+.cc-edit-num:focus,.cc-edit-text:focus{border-color:var(--gold, #d4a056)}
+/* Hide spinner arrows so the number input looks like the static spans
+   it's replacing — keeps the stat banner / abilities grid visually
+   stable when toggling between view and edit. */
+.cc-edit-num::-webkit-inner-spin-button,
+.cc-edit-num::-webkit-outer-spin-button{
+  -webkit-appearance:none;margin:0;
+}
+/* Tiny "×" delete button used on tags / weapon rows / item rows.
+   2026-05-14 (#14 f2) — square corners to match the rest of the
+   modernized control set. Stays ember (delete = destructive cue). */
+.cc-tag-x{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:18px;height:18px;
+  margin-left:4px;
+  background:transparent;
+  border:1px solid var(--ember-soft, rgba(232,103,94,0.4));
+  border-radius:3px;
+  color:#ff8d76;
+  font-size:12px;font-weight:600;line-height:1;
+  cursor:pointer;
+  transition:background .12s,color .12s;
+  padding:0;
+}
+.cc-tag-x:hover{
+  background:rgba(232,103,94,0.2);
+  color:#ffa093;
+}
+/* "+" add button — category headers + tag rows.
+   2026-05-14 (#14 f2) — was a gold rounded pill; user feedback said
+   it read as "丑陋 + 不符合风格". Now: square corners, white/ink
+   palette (gold reserved for DATA VALUES, not chrome), flat. */
+.cc-add-tag{
+  display:inline-flex;align-items:center;justify-content:center;
+  height:22px;padding:0 10px;
+  background:rgba(255,255,255,0.06);
+  border:1px solid var(--border-strong, rgba(255,255,255,0.18));
+  border-radius:3px;
+  color:var(--ink, #e6e8ee);
+  font-size:12px;font-weight:500;line-height:1;
+  cursor:pointer;
+  transition:background .12s,color .12s,border-color .12s;
+  font-family:inherit;
+}
+.cc-add-tag:hover{
+  background:rgba(255,255,255,0.14);
+  border-color:var(--ink-dim, #9aa0b3);
+  color:var(--ink-strong, #fff);
+}
+
+/* === 2026-05-14 (#14 f2) — SpellPickModal =========================== */
+.cc-modal-backdrop{
+  position:fixed;inset:0;z-index:9999;
+  background:rgba(0,0,0,0.55);
+  display:flex;align-items:center;justify-content:center;
+  padding:40px;
+}
+.cc-modal{
+  width:min(460px,92vw);max-height:78vh;
+  display:flex;flex-direction:column;
+  background:var(--surface,#262a3a);
+  border:1px solid var(--border-strong,rgba(255,255,255,0.18));
+  border-radius:5px;
+  box-shadow:var(--shadow-lg,0 8px 28px rgba(0,0,0,0.5));
+  padding:16px 16px 14px;
+}
+.cc-modal-h{
+  display:flex;align-items:baseline;gap:10px;justify-content:space-between;
+  margin-bottom:10px;
+}
+.cc-modal-h h3{
+  margin:0;font-size:15px;font-weight:600;color:var(--ink-strong,#fff);
+}
+.cc-modal-hint{font-size:11px;color:var(--ink-mute,#6b7080)}
+.cc-modal-list{
+  flex:1;min-height:0;overflow-y:auto;
+  display:flex;flex-direction:column;gap:2px;
+  border:1px solid var(--border,rgba(255,255,255,0.10));
+  border-radius:3px;padding:4px;
+  background:var(--bg,#1c2030);
+}
+.cc-modal-list::-webkit-scrollbar{width:7px}
+.cc-modal-list::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px}
+.cc-modal-row{
+  text-align:left;
+  padding:7px 10px;
+  background:transparent;border:0;border-radius:3px;
+  color:var(--ink,#e6e8ee);font-family:inherit;font-size:13px;
+  cursor:pointer;
+  transition:background .1s;
+  display:flex;align-items:baseline;gap:8px;
+}
+.cc-modal-row:hover{background:rgba(255,255,255,0.08)}
+/* English sub-name shown dim to the right of the Chinese label. */
+.cc-modal-row-en{
+  font-size:11px;color:var(--ink-mute,#6b7080);
+  font-family:Georgia,"Noto Serif",serif;font-style:italic;
+}
+.cc-modal-row-free{
+  color:var(--ink-strong,#fff);font-weight:600;
+  border-bottom:1px solid var(--border);
+  margin-bottom:2px;
+}
+.cc-modal-msg{
+  padding:14px 10px;text-align:center;
+  color:var(--ink-mute,#6b7080);font-size:12.5px;
+}
+.cc-modal-foot{
+  display:flex;justify-content:flex-end;gap:8px;
+  margin-top:10px;
+}
+
 /* === Empty / error === */
 .cc-empty,.cc-loading,.cc-error{
   flex:1;display:flex;align-items:center;justify-content:center;
   flex-direction:column;gap:8px;
-  color:var(--ink-mute);font-size:14px;
+  color:var(--ink-mute);font-size:15px;
   padding:40px;text-align:center;
 }
 .cc-loading::before{
@@ -559,6 +764,19 @@ body{
 @keyframes cc-pulse{0%,100%{opacity:.4}50%{opacity:1}}
 .cc-error{color:#ff8d76}
 .cc-error::before{content:"⚠";font-size:32px}
+/* 2026-05-14 (#14 f2) — no-card states (loading / error) get a
+   translucent navy wash so the OBR canvas reads through behind them.
+   `position:fixed; inset:0` because these render in place of the
+   whole panel (App returns just this div when !data), and the body
+   is transparent now. The loaded sheet stays solid (its own bands
+   carry opaque backgrounds). 0.62 alpha = clearly "枭熊 navy" but
+   you can still see what's underneath. */
+.cc-translucent{
+  position:fixed;inset:0;
+  background:rgba(28,32,48,0.62);
+  backdrop-filter:blur(2px);
+  -webkit-backdrop-filter:blur(2px);
+}
 
 /* === Hidden file input for import === */
 .cc-file-input{display:none}

@@ -65,6 +65,7 @@ const EMAIL = "1763086701@qq.com";
 const GITHUB_URL = "https://github.com/FullPeople";
 const BUBBLES_SETTINGS_KEY = "com.obr-suite/bubbles/settings";
 const DEFAULT_BUBBLES_PLAYER_THRESHOLD = 25;
+const DEFAULT_BUBBLES_VERTICAL_OFFSET = -20;
 
 interface BilingualHtml { zh: string; en: string; }
 interface TabDef {
@@ -83,8 +84,14 @@ interface TabDef {
 
 let activeTab = "support";
 let isGM = false;
+// 2026-05-14 (#4) — these bubble settings all live in DM-synced scene
+// metadata now (only 气泡大小 / scale stays per-client localStorage).
+// Mirrored into module vars for synchronous render reads.
 let bubblePlayerThreshold = DEFAULT_BUBBLES_PLAYER_THRESHOLD;
 let bubbleAutoScaleText = false;
+let bubbleVerticalOffset = DEFAULT_BUBBLES_VERTICAL_OFFSET;
+let bubbleOffsetByText = false;
+let bubbleOverheadMode = false;
 
 interface Supporter {
   name: string;
@@ -203,40 +210,78 @@ function readBubbleAutoScaleFromMeta(meta: Record<string, unknown>): boolean {
   return !!settings?.autoScaleText;
 }
 
+// 2026-05-14 (#4) — three more fields now live in the same scene
+// metadata object: verticalOffset / offsetByText / overheadMode.
+function readBubbleVerticalOffsetFromMeta(meta: Record<string, unknown>): number {
+  const settings = meta[BUBBLES_SETTINGS_KEY] as { verticalOffset?: unknown } | undefined;
+  const n = Number(settings?.verticalOffset);
+  return Number.isFinite(n) ? n : DEFAULT_BUBBLES_VERTICAL_OFFSET;
+}
+function readBubbleOffsetByTextFromMeta(meta: Record<string, unknown>): boolean {
+  const settings = meta[BUBBLES_SETTINGS_KEY] as { offsetByText?: unknown } | undefined;
+  return !!settings?.offsetByText;
+}
+function readBubbleOverheadModeFromMeta(meta: Record<string, unknown>): boolean {
+  const settings = meta[BUBBLES_SETTINGS_KEY] as { overheadMode?: unknown } | undefined;
+  return !!settings?.overheadMode;
+}
+
 async function refreshBubbleSettings(): Promise<void> {
   try {
     const meta = await OBR.scene.getMetadata();
-    bubblePlayerThreshold = readBubbleThresholdFromMeta(meta as Record<string, unknown>);
-    bubbleAutoScaleText = readBubbleAutoScaleFromMeta(meta as Record<string, unknown>);
+    const m = meta as Record<string, unknown>;
+    bubblePlayerThreshold = readBubbleThresholdFromMeta(m);
+    bubbleAutoScaleText = readBubbleAutoScaleFromMeta(m);
+    bubbleVerticalOffset = readBubbleVerticalOffsetFromMeta(m);
+    bubbleOffsetByText = readBubbleOffsetByTextFromMeta(m);
+    bubbleOverheadMode = readBubbleOverheadModeFromMeta(m);
   } catch {
     bubblePlayerThreshold = DEFAULT_BUBBLES_PLAYER_THRESHOLD;
     bubbleAutoScaleText = false;
+    bubbleVerticalOffset = DEFAULT_BUBBLES_VERTICAL_OFFSET;
+    bubbleOffsetByText = false;
+    bubbleOverheadMode = false;
   }
 }
 
-// Merge-write: read the current settings object first so we don't
-// blow away unrelated fields when toggling one of them. OBR's
-// setMetadata replaces the whole `BUBBLES_SETTINGS_KEY` value, not
-// just the named field.
-async function setBubblePlayerThreshold(value: number): Promise<void> {
-  const clamped = Math.max(0, Math.min(100, Math.round(value)));
-  bubblePlayerThreshold = clamped;
-  await OBR.scene.setMetadata({
-    [BUBBLES_SETTINGS_KEY]: {
-      playerThreshold: clamped,
-      autoScaleText: bubbleAutoScaleText,
-    },
-  });
-}
-
-async function setBubbleAutoScaleText(value: boolean): Promise<void> {
-  bubbleAutoScaleText = !!value;
+// Full-object write. OBR's setMetadata REPLACES the whole
+// `BUBBLES_SETTINGS_KEY` value, so every setter has to write all six
+// fields from the current module vars. Callers mutate the relevant
+// module var first, then call this. GM-only — only the GM has scene
+// write permission; the settings UI also disables these controls for
+// non-GM clients, this is just belt-and-suspenders.
+async function writeBubbleSettings(): Promise<void> {
+  if (!isGM) return;
   await OBR.scene.setMetadata({
     [BUBBLES_SETTINGS_KEY]: {
       playerThreshold: bubblePlayerThreshold,
       autoScaleText: bubbleAutoScaleText,
+      verticalOffset: bubbleVerticalOffset,
+      offsetByText: bubbleOffsetByText,
+      overheadMode: bubbleOverheadMode,
     },
   });
+}
+
+async function setBubblePlayerThreshold(value: number): Promise<void> {
+  bubblePlayerThreshold = Math.max(0, Math.min(100, Math.round(value)));
+  await writeBubbleSettings();
+}
+async function setBubbleAutoScaleText(value: boolean): Promise<void> {
+  bubbleAutoScaleText = !!value;
+  await writeBubbleSettings();
+}
+async function setBubbleVerticalOffset(value: number): Promise<void> {
+  bubbleVerticalOffset = Math.max(-200, Math.min(200, Math.round(value)));
+  await writeBubbleSettings();
+}
+async function setBubbleOffsetByText(value: boolean): Promise<void> {
+  bubbleOffsetByText = !!value;
+  await writeBubbleSettings();
+}
+async function setBubbleOverheadMode(value: boolean): Promise<void> {
+  bubbleOverheadMode = !!value;
+  await writeBubbleSettings();
 }
 
 const SUPPORT: BilingualHtml = {
@@ -1129,12 +1174,22 @@ function renderLibrariesBody(lang: Language): string {
   const head = lang === "zh"
     ? `
       <div class="lib-warn">
-        ⚠ <b>数据格式按 5etools 规范适配。</b>当前内置库为 kiwee.top（5etools 中文镜像）。你可以添加自己的库（自托管 / 公开 URL）。库必须提供与 5etools 相同的 JSON 结构（<code>search/index.json</code> + <code>data/&lt;file&gt;.json</code>）。所有启用的库会在搜索/图鉴里合并显示。
+        ⚠ <b>数据格式按 5etools 规范适配。</b>当前内置库为 kiwee.top（5etools 中文镜像）。你可以添加自己的库（自托管 / 公开 URL）。库必须提供与 5etools 相同的 JSON 结构（<code>search/index.json</code> + <code>data/&lt;file&gt;.json</code>）。所有启用的库会在搜索/图鉴里合并显示。<br>
+        <b>数据来源与协议：</b>内置库数据来自 5et 中文站 —— 代码主体与英文数据采用 MIT 协议，中文译文采用 CC BY-NC-SA 4.0 协议。使用其数据时请遵守协议并注明来源（署名 / 非商业 / 相同方式共享）。
+      </div>
+      <div class="lib-studio">
+        <span class="lib-studio-txt">不想手写 JSON？<b>Monster Studio</b> 是一个在线可视化怪物编辑器：导入 / 表单编辑 / 实时预览 / 导出。导出的 JSON 可直接「本地导入」或放进你的库。</span>
+        <a class="lib-studio-btn" href="https://obr.dnd.center/studio/monster-studio/" target="_blank" rel="noopener">🐲 打开 Monster Studio ↗</a>
       </div>
     `
     : `
       <div class="lib-warn">
-        ⚠ <b>Library data must follow the 5etools JSON schema.</b> The default built-in is kiwee.top (Chinese mirror). You can add custom libraries (self-hosted or public URLs) that expose the same shape (<code>search/index.json</code> + <code>data/&lt;file&gt;.json</code>). All enabled libraries are merged in search / bestiary results.
+        ⚠ <b>Library data must follow the 5etools JSON schema.</b> The default built-in is kiwee.top (Chinese mirror). You can add custom libraries (self-hosted or public URLs) that expose the same shape (<code>search/index.json</code> + <code>data/&lt;file&gt;.json</code>). All enabled libraries are merged in search / bestiary results.<br>
+        <b>Source &amp; license:</b> the built-in library's data comes from the 5etools CN site — the code base and English data are under MIT, Chinese translations under CC BY-NC-SA 4.0. Follow the license and attribute the source when using its data (attribution / non-commercial / share-alike).
+      </div>
+      <div class="lib-studio">
+        <span class="lib-studio-txt">Don't want to hand-write JSON? <b>Monster Studio</b> is an online visual monster editor — import / form-edit / live preview / export. The exported JSON imports directly via "Local content" or drops into your library.</span>
+        <a class="lib-studio-btn" href="https://obr.dnd.center/studio/monster-studio/" target="_blank" rel="noopener">🐲 Open Monster Studio ↗</a>
       </div>
     `;
   const list = libs.map((l) => libraryRowHtml(l, lang, isGM)).join("");
@@ -1845,29 +1900,30 @@ const TABS: TabDef[] = [
       // Two templates side-by-side — both share the same xlsx layout
       // (parsed by the same rules), only the D&D edition differs.
       // 2014 = traditional 5e; 2024 = the revised "One D&D" rules.
-      // 2014 sheet bumped 2026-05-02 to v3.5.9_1 (latest 悲灵 revision
-      // the user maintains for 2014 mode).
-      const tpl2014 = assetUrl("template-belling-2014-v3.5.9_1.xlsx");
-      const tpl2024 = assetUrl("template-belling-v1.0.12.xlsx");
+      // 2026-05-15 — refreshed both files to the new "悲灵 / 弗人 / 枭熊
+      // 适配版" cut. URLs kept stable (no version-numbered file rename)
+      // so external links / cached docs keep resolving.
+      const tpl2014 = assetUrl("DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx");
+      const tpl2024 = assetUrl("DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx");
       const btns = lang === "zh"
         ? `<div class="dl-row">
              <a class="dl-btn" href="${tpl2014}"
-                download="DND5E人物卡_悲灵v3.5.9_1 (2014).xlsx" target="_blank" rel="noopener">
-               ⬇ 5E2014 模板（传统 5e · 悲灵 v3.5.9_1）
+                download="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx" target="_blank" rel="noopener">
+               ⬇ 5E2014 模板（悲灵 · 弗人 · 枭熊适配版）
              </a>
              <a class="dl-btn" href="${tpl2024}"
-                download="DND5.5E人物卡-悲灵v1.0.12 (2024).xlsx" target="_blank" rel="noopener">
-               ⬇ 5E2024 模板（5e 修订 · 悲灵 v1.0.12）
+                download="DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx" target="_blank" rel="noopener">
+               ⬇ 5E2024 模板（悲灵 · 弗人 · 枭熊适配版）
              </a>
            </div>`
         : `<div class="dl-row">
              <a class="dl-btn" href="${tpl2014}"
-                download="DND5E-Character-Sheet-v3.5.9_1 (2014).xlsx" target="_blank" rel="noopener">
-               ⬇ 5E2014 sheet (legacy 5e · 悲灵 v3.5.9_1)
+                download="DND5E-Character-Sheet-Belling-FullPeople-OwlbearAdapted.xlsx" target="_blank" rel="noopener">
+               ⬇ 5E2014 sheet (Belling · FullPeople · Owlbear-adapted)
              </a>
              <a class="dl-btn" href="${tpl2024}"
-                download="DND5.5E-Character-Sheet-v1.0.12 (2024).xlsx" target="_blank" rel="noopener">
-               ⬇ 5E2024 sheet (revised 5e · 悲灵 v1.0.12)
+                download="DND5R-Character-Sheet-Belling-FullPeople-OwlbearAdapted.xlsx" target="_blank" rel="noopener">
+               ⬇ 5E2024 sheet (Belling · FullPeople · Owlbear-adapted)
              </a>
            </div>`;
       return `${desc}${btns}`;
@@ -2112,45 +2168,17 @@ const TABS: TabDef[] = [
     en: `${ICONS.heart} HP Bubbles`,
     moduleId: "bubbles",
     dynamicBody: (lang) => {
-      // Per-client vertical-offset preference. Negative shifts the
-      // whole bubble cluster up; default -20 keeps it clear of the
-      // OBR token-name label that hangs below the token. Match the
-      // localStorage key exported from `modules/bubbles/index.ts`.
-      const offset = (() => {
-        try {
-          const v = localStorage.getItem("com.obr-suite/bubbles/vertical-offset");
-          if (v != null && v !== "") {
-            const n = Number(v);
-            if (Number.isFinite(n)) return n;
-          }
-        } catch {}
-        return -20;
-      })();
-      // 2026-05-09: new per-client toggle. ON = bubbles offset upward
-      // by the auto-scale-text font-size px (TOKEN_TEXT_FONT_BASE = 20
-      // baked native, scales with token via SCALE inheritance), and
-      // the manual `offset` slider is ignored.
-      const offsetByText = (() => {
-        try {
-          return localStorage.getItem("com.obr-suite/bubbles/offset-by-text") === "1";
-        } catch { return false; }
-      })();
-      // 2026-05-13 — overhead mode (头顶模式) per-client toggle. When
-      // ON: bar above token's head, no rounded corners + visible
-      // border, AC shield inline at the bar's right end on the same
-      // plane. The "offset by font size" toggle is force-disabled
-      // when this is on (overhead owns the vertical placement).
-      const overheadMode = (() => {
-        try {
-          return localStorage.getItem("com.obr-suite/bubbles/overhead-mode") === "1";
-        } catch { return false; }
-      })();
-      // Player visibility threshold — see LS_BUBBLES_PLAYER_THRESHOLD
-      // in modules/bubbles/index.ts. 0..100. Locked tokens shown to
-      // players quantise their HP ratio to multiples of this percent.
-      const threshold = (() => {
-        return bubblePlayerThreshold;
-      })();
+      // 2026-05-14 (#4) — vertical-offset / offset-by-text / overhead
+      // mode are now DM-synced scene metadata, mirrored into module
+      // vars by refreshBubbleSettings(). Only 气泡大小 (scale) is still
+      // per-client localStorage. Reads below pull straight from the
+      // mirrored vars.
+      const offset = bubbleVerticalOffset;
+      const offsetByText = bubbleOffsetByText;
+      const overheadMode = bubbleOverheadMode;
+      // Player visibility threshold — DM-synced. 0..100. Locked tokens
+      // shown to players quantise their HP ratio to multiples of this.
+      const threshold = bubblePlayerThreshold;
       // Per-client bubble scale — multiplier applied to BAR_HEIGHT /
       // DIAMETER / font size in modules/bubbles/index.ts. 0.5..2.0
       // covers everything from "tiny minimap-friendly" to "the table
@@ -2197,29 +2225,35 @@ const TABS: TabDef[] = [
   <li>Drag the popover by its grip — position persists via the unified <b>panel layout</b> system</li>
   <li>Closes automatically on deselect</li>
 </ul>`;
+      // 2026-05-14 (#4) — DM-synced now. The non-GM clients see these
+      // controls disabled (DM controls them table-wide). Descriptions
+      // say "DM 同步（全场一致）" instead of "本机偏好".
+      const dmHint = lang === "zh"
+        ? (isGM ? "DM 同步（全场一致）。" : "DM 同步（全场一致），由 DM 控制。")
+        : (isGM ? "DM-synced (table-wide). " : "DM-synced (table-wide) — controlled by the DM. ");
       const offsetLbl = lang === "zh" ? "上下偏移" : "Vertical offset";
       const offsetDesc = lang === "zh"
-        ? "本机偏好。负值向上偏移（远离 token），正值向下。默认 -20 让气泡不和角色名字标签重叠。开启「按字号偏移」后此项灰掉不生效。"
-        : "Per-client preference. Negative shifts up (away from token), positive shifts down. Default -20 keeps bubbles clear of the OBR name label. Greyed out when 'offset by font size' is on.";
+        ? `${dmHint}负值向上偏移（远离 token），正值向下。默认 -20 让气泡不和角色名字标签重叠。开启「按字号偏移」后此项灰掉不生效。`
+        : `${dmHint}Negative shifts up (away from token), positive shifts down. Default -20 keeps bubbles clear of the OBR name label. Greyed out when 'offset by font size' is on.`;
       const offsetByTextLbl = lang === "zh" ? "按字号上偏移" : "Offset by font size";
       const offsetByTextDesc = lang === "zh"
-        ? "开启后气泡向上偏移文字字号的像素数（即「字号随 token 自动缩放」中的字号，默认 20 px），自动随 token 缩放。开启时上方「上下偏移」灰掉。头顶模式下该开关强制关闭。"
-        : "When ON, bubbles offset upward by the font-size px (same number as 'auto-scale text with token', default 20). Scales naturally with token. The manual 'vertical offset' above is greyed out while this is on. Force-disabled when overhead mode is on.";
+        ? `${dmHint}开启后气泡向上偏移文字字号的像素数（即「字号随 token 自动缩放」中的字号，默认 20 px），自动随 token 缩放。开启时上方「上下偏移」灰掉。头顶模式下该开关强制关闭。`
+        : `${dmHint}When ON, bubbles offset upward by the font-size px (same number as 'auto-scale text with token', default 20). Scales naturally with token. The manual 'vertical offset' above is greyed out while this is on. Force-disabled when overhead mode is on.`;
       // 2026-05-13 — overhead mode toggle. CN|EN-style two-position
       // switch instead of an ON/OFF toggle so the user reads it as a
       // pair of named modes rather than a boolean.
       const overheadLbl = lang === "zh" ? "血条显示模式" : "HP bar mode";
       const overheadDesc = lang === "zh"
-        ? "标准模式：血条贴在 token 底部，气泡浮在上方。头顶模式：血条悬浮在 token 头顶一小段距离上方，取消圆角并加上边框，护盾和临时血在血条尽头（最右侧）与血条同平面显示。头顶模式下「按字号上偏移」自动失效。"
-        : "Standard: HP bar sits below the token with stat bubbles floating above it. Overhead: bar hovers a short gap above the token's head, sharp corners + border, AC shield (+ Temp HP) appear inline at the bar's right end on the same plane. The 'Offset by font size' toggle is force-disabled in Overhead mode.";
+        ? `${dmHint}标准模式：血条贴在 token 底部，气泡浮在上方。头顶模式：血条悬浮在 token 头顶一小段距离上方，取消圆角并加上边框，护盾和临时血在血条尽头（最右侧）与血条同平面显示。头顶模式下「按字号上偏移」自动失效。`
+        : `${dmHint}Standard: HP bar sits below the token with stat bubbles floating above it. Overhead: bar hovers a short gap above the token's head, sharp corners + border, AC shield (+ Temp HP) appear inline at the bar's right end on the same plane. The 'Offset by font size' toggle is force-disabled in Overhead mode.`;
       const thresholdLbl = lang === "zh" ? "玩家进度阈值" : "Player threshold";
       const thresholdDesc = lang === "zh"
-        ? "上锁角色对玩家显示的血条进度按这个百分比量化。默认 25：玩家只在血量降至 75% / 50% / 25% / 0% 时看到血条变化。设为 0 则连续显示真实比例，100 则始终显示满血（玩家看不到任何进度）。"
-        : "Locked tokens' HP ratio shown to players quantises to this percent. Default 25 → players see the bar change only at 75% / 50% / 25% / 0%. 0 = continuous, 100 = always full (progress hidden).";
+        ? "DM 同步（全场一致）。上锁角色对玩家显示的血条进度按这个百分比量化。默认 25：玩家只在血量降至 75% / 50% / 25% / 0% 时看到血条变化。设为 0 则连续显示真实比例，100 则始终显示满血（玩家看不到任何进度）。"
+        : "DM-synced (table-wide). Locked tokens' HP ratio shown to players quantises to this percent. Default 25 → players see the bar change only at 75% / 50% / 25% / 0%. 0 = continuous, 100 = always full (progress hidden).";
       const sizeLbl = lang === "zh" ? "气泡大小" : "Bubble size";
       const sizeDesc = lang === "zh"
-        ? "本机偏好。乘到 HP 条 / AC 盾 / 字号上的统一缩放。0.5 紧凑（小图小屏），2.0 放大（远观看牌或老花眼）。默认 1.0。"
-        : "Per-client preference. Multiplier applied to the HP bar / AC shield / font size. 0.5 = compact, 2.0 = chunky. Default 1.0.";
+        ? "本机偏好（每个客户端独立，不同步）。乘到 HP 条 / AC 盾 / 字号上的统一缩放。0.5 紧凑（小图小屏），2.0 放大（远观看牌或老花眼）。默认 1.0。"
+        : "Per-client preference (each client independent, not synced). Multiplier applied to the HP bar / AC shield / font size. 0.5 = compact, 2.0 = chunky. Default 1.0.";
       const autoScaleLbl = lang === "zh" ? "字号随 token 自动缩放" : "Auto-scale text with token";
       const autoScaleDesc = lang === "zh"
         ? "DM 全局开关。开启后 token 名字标签的字号会跟着 token 大小缩放（小怪物小字、巨型生物大字）。关闭时字号在所有 token 上保持一致。该开关只影响字号，不影响气泡上下偏移（要用「按字号上偏移」单独控制）。"
@@ -2243,8 +2277,8 @@ const TABS: TabDef[] = [
           </div>
           <input type="number" step="1" value="${offset}"
                  data-key="bubblesVerticalOffset"
-                 ${offsetByText ? "disabled" : ""}
-                 style="flex:0 0 80px;align-self:center;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:3px 6px;color:#fff;font:inherit;text-align:right${offsetByText ? ";opacity:0.45" : ""}"/>
+                 ${(offsetByText || !isGM) ? "disabled" : ""}
+                 style="flex:0 0 80px;align-self:center;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:3px 6px;color:#fff;font:inherit;text-align:right${(offsetByText || !isGM) ? ";opacity:0.45" : ""}"/>
           <span style="flex:0 0 28px;text-align:right;color:#9aa0b3;font-size:11px">px</span>
         </div>
         <div class="row">
@@ -2255,10 +2289,10 @@ const TABS: TabDef[] = [
           <button type="button"
                   class="tog ${offsetByText && !overheadMode ? "on" : ""}"
                   data-key="bubblesOffsetByText"
-                  ${overheadMode ? "disabled" : ""}
-                  style="${overheadMode ? "opacity:0.45;cursor:not-allowed;" : ""}"
+                  ${(overheadMode || !isGM) ? "disabled" : ""}
+                  style="${(overheadMode || !isGM) ? "opacity:0.45;cursor:not-allowed;" : ""}"
                   aria-pressed="${offsetByText && !overheadMode ? "true" : "false"}"
-                  title="${overheadMode ? (lang === "zh" ? "头顶模式下不可用" : "Not available in Overhead mode") : ""}"></button>
+                  title="${overheadMode ? (lang === "zh" ? "头顶模式下不可用" : "Not available in Overhead mode") : (!isGM ? (lang === "zh" ? "由 DM 控制" : "Controlled by the DM") : "")}"></button>
         </div>
         <div class="row">
           <div class="lbl">
@@ -2268,7 +2302,8 @@ const TABS: TabDef[] = [
           <div class="mode-switch" data-key="bubblesOverheadMode"
                role="radiogroup"
                aria-label="${overheadLbl}"
-               style="display:inline-flex;border:1px solid rgba(255,255,255,0.18);border-radius:6px;overflow:hidden;font-size:11px;font-weight:600;user-select:none;align-self:center">
+               title="${!isGM ? (lang === "zh" ? "由 DM 控制" : "Controlled by the DM") : ""}"
+               style="display:inline-flex;border:1px solid rgba(255,255,255,0.18);border-radius:6px;overflow:hidden;font-size:11px;font-weight:600;user-select:none;align-self:center${!isGM ? ";opacity:0.45;pointer-events:none" : ""}">
             <button type="button" data-mode="standard"
                     class="${overheadMode ? "" : "on"}"
                     aria-pressed="${overheadMode ? "false" : "true"}"
@@ -2321,22 +2356,22 @@ const TABS: TabDef[] = [
     afterRender: (root) => {
       const offsetInput = root.querySelector<HTMLInputElement>('input[data-key="bubblesVerticalOffset"]');
       if (offsetInput) {
+        // 2026-05-14 (#4) — DM-synced. Writes to scene metadata via
+        // setBubbleVerticalOffset (GM-gated inside the setter +
+        // disabled in the render for non-GM).
         const commit = () => {
+          if (!isGM) return;
           const raw = offsetInput.value.trim();
           if (raw === "") {
-            // Empty submit = restore default (-20). Persist the
-            // explicit value so subsequent reads are deterministic.
-            offsetInput.value = "-20";
-            try { localStorage.setItem("com.obr-suite/bubbles/vertical-offset", "-20"); } catch {}
+            offsetInput.value = String(DEFAULT_BUBBLES_VERTICAL_OFFSET);
+            void setBubbleVerticalOffset(DEFAULT_BUBBLES_VERTICAL_OFFSET);
             return;
           }
           const n = Number(raw);
           if (!Number.isFinite(n)) return;
-          // Clamp to a sane range — runaway values would push the
-          // whole bubble row off-screen.
           const clamped = Math.max(-200, Math.min(200, Math.round(n)));
           offsetInput.value = String(clamped);
-          try { localStorage.setItem("com.obr-suite/bubbles/vertical-offset", String(clamped)); } catch {}
+          void setBubbleVerticalOffset(clamped);
         };
         offsetInput.addEventListener("change", commit);
         offsetInput.addEventListener("blur", commit);
@@ -2399,49 +2434,29 @@ const TABS: TabDef[] = [
           if (activeTab === "bubbles") renderContent();
         });
       }
-      // Per-client offset-by-text toggle. Writes localStorage; the
-      // bubbles module's `storage` event listener picks up the
-      // change and re-syncs.
+      // 2026-05-14 (#4) — offset-by-text toggle is DM-synced now.
+      // Writes to scene metadata via setBubbleOffsetByText; the
+      // bubbles module's onMetadataChange handler re-syncs every
+      // client.
       const offsetByTextBtn = root.querySelector<HTMLButtonElement>('button[data-key="bubblesOffsetByText"]');
       if (offsetByTextBtn) {
-        offsetByTextBtn.addEventListener("click", () => {
-          if (offsetByTextBtn.disabled) return;
-          // Re-read inside the handler so the toggle reflects current
-          // LS even if the user navigated away & back without
-          // re-rendering.
-          let cur = false;
-          try {
-            cur = localStorage.getItem("com.obr-suite/bubbles/offset-by-text") === "1";
-          } catch {}
-          try {
-            localStorage.setItem("com.obr-suite/bubbles/offset-by-text", cur ? "0" : "1");
-          } catch {}
+        offsetByTextBtn.addEventListener("click", async () => {
+          if (offsetByTextBtn.disabled || !isGM) return;
+          await setBubbleOffsetByText(!bubbleOffsetByText);
           if (activeTab === "bubbles") renderContent();
         });
       }
-      // 2026-05-13 — overhead-mode mode-switch (标准 / 头顶). Two
-      // buttons inside a single .mode-switch container; clicking
-      // either toggles ON the corresponding mode. Persists to
-      // localStorage; the bubbles module's storage listener picks up
-      // the change and re-syncs. Also re-renders the settings panel
-      // so the offsetByText toggle's disabled state updates.
+      // 2026-05-13 — overhead-mode mode-switch (标准 / 头顶).
+      // 2026-05-14 (#4) — now DM-synced via setBubbleOverheadMode;
+      // re-renders the settings panel so the offsetByText toggle's
+      // disabled state updates.
       const modeSwitch = root.querySelector<HTMLElement>('.mode-switch[data-key="bubblesOverheadMode"]');
       if (modeSwitch) {
         modeSwitch.querySelectorAll<HTMLButtonElement>("button[data-mode]").forEach((btn) => {
-          btn.addEventListener("click", () => {
-            const mode = btn.dataset.mode === "overhead" ? "1" : "0";
-            try {
-              localStorage.setItem("com.obr-suite/bubbles/overhead-mode", mode);
-            } catch {}
-            // Re-fire storage event manually for same-tab listeners
-            // (StorageEvent only fires for OTHER tabs; we're the
-            // writer + reader in this case).
-            try {
-              window.dispatchEvent(new StorageEvent("storage", {
-                key: "com.obr-suite/bubbles/overhead-mode",
-                newValue: mode,
-              }));
-            } catch {}
+          btn.addEventListener("click", async () => {
+            if (!isGM) return;
+            const overhead = btn.dataset.mode === "overhead";
+            await setBubbleOverheadMode(overhead);
             if (activeTab === "bubbles") renderContent();
           });
         });
@@ -2495,6 +2510,24 @@ const TABS: TabDef[] = [
   <li><b>Open</b>: press <kbd>]</kbd> while in the Select tool, or click the toolbar action</li>
   <li><b>Bottom-right palette</b>: drag a status onto a character to apply it. The buff label appears as an arc-style bubble above the token</li>
   <li>Applied buffs: <b>drag to another</b> = transfer, <b>drag to empty space</b> = remove</li>
+</ul>`,
+    },
+  },
+  {
+    id: "resourceTracker",
+    zh: `📊 资源追踪`,
+    en: `📊 Resource Tracker`,
+    moduleId: "resourceTracker",
+    body: {
+      zh: `<p><b>资源追踪</b>：为 token 配置消耗品 / 进度 / 数值资源（法术位、生命骰、灵感…）。</p>
+<ul>
+  <li><b>配置</b>：在怪物图鉴 / 角色卡信息面板里给单个 token 添加资源</li>
+  <li><b>全员总览</b>：DM 专属 —— 工具栏的「资源追踪」按钮打开全屏面板，一屏查看并修改所有玩家角色的资源</li>
+</ul>`,
+      en: `<p><b>Resource Tracker</b> — per-token consumable / progress / numeric resources (spell slots, hit dice, inspiration…).</p>
+<ul>
+  <li><b>Configure</b>: add resources to a single token from the bestiary / character-card info panels</li>
+  <li><b>All-party overview</b>: DM-only — the "资源追踪" toolbar tool opens a full-screen panel to view and edit every player character's resources at once</li>
 </ul>`,
     },
   },
@@ -2832,8 +2865,10 @@ const TABS: TabDef[] = [
 ];
 
 // Stable channel hides modules still in dev; dev keeps them visible.
+// 2026-05-14 — `follow` is now hidden EVERYWHERE (retired from the
+// dev build per user request); only `fullFog` remains dev-only.
 const HIDDEN_TAB_IDS = new Set<string>(
-  STABLE_HIDES ? ["fullFog", "follow"] : [],
+  STABLE_HIDES ? ["fullFog", "follow"] : ["follow"],
 );
 const VISIBLE_TABS = TABS.filter((t) => !HIDDEN_TAB_IDS.has(t.id));
 
@@ -2863,6 +2898,7 @@ function moduleLabelKey(id: ModuleId): string {
     case "portals": return lang === "zh" ? "传送门" : "Portals";
     case "bubbles": return lang === "zh" ? "血量气泡" : "HP Bubbles";
     case "statusTracker": return lang === "zh" ? "状态追踪" : "Status Tracker";
+    case "resourceTracker": return lang === "zh" ? "资源追踪" : "Resource Tracker";
     case "hpBar": return lang === "zh" ? "小血条组件" : "HP Bar";
     case "metadataInspector": return lang === "zh" ? "元数据检查" : "Metadata Inspector";
     case "fullFog": return lang === "zh" ? "迷雾编辑" : "Fog Editor";
@@ -2989,11 +3025,27 @@ OBR.onReady(async () => {
   } catch {}
   startSceneSync();
   OBR.scene.onMetadataChange((meta) => {
-    const next = readBubbleThresholdFromMeta(meta as Record<string, unknown>);
-    const nextAutoScale = readBubbleAutoScaleFromMeta(meta as Record<string, unknown>);
-    if (next !== bubblePlayerThreshold || nextAutoScale !== bubbleAutoScaleText) {
+    const m = meta as Record<string, unknown>;
+    const next = readBubbleThresholdFromMeta(m);
+    const nextAutoScale = readBubbleAutoScaleFromMeta(m);
+    // 2026-05-14 (#4) — the three newly-DM-synced fields also live in
+    // the same scene-metadata object; mirror them so a non-GM client
+    // (or a second GM tab) sees the DM's changes live.
+    const nextVOffset = readBubbleVerticalOffsetFromMeta(m);
+    const nextOffsetByText = readBubbleOffsetByTextFromMeta(m);
+    const nextOverhead = readBubbleOverheadModeFromMeta(m);
+    if (
+      next !== bubblePlayerThreshold ||
+      nextAutoScale !== bubbleAutoScaleText ||
+      nextVOffset !== bubbleVerticalOffset ||
+      nextOffsetByText !== bubbleOffsetByText ||
+      nextOverhead !== bubbleOverheadMode
+    ) {
       bubblePlayerThreshold = next;
       bubbleAutoScaleText = nextAutoScale;
+      bubbleVerticalOffset = nextVOffset;
+      bubbleOffsetByText = nextOffsetByText;
+      bubbleOverheadMode = nextOverhead;
       if (activeTab === "bubbles") renderContent();
     }
   });

@@ -1,5 +1,6 @@
-import OBR from "@owlbear-rodeo/sdk";
+import OBR, { isImage } from "@owlbear-rodeo/sdk";
 import { DiceType, DIE_SIDES, DieResult, rollDie, sidesOf } from "./types";
+import { readSkinsForPlayer } from "./dice-skins";
 import { assetUrl } from "../../asset-base";
 import { onViewportResize } from "../../utils/viewportAnchor";
 import {
@@ -85,11 +86,33 @@ const CROSSHAIR_MODAL_ID = "com.obr-suite/dice-crosshair";
 const CROSSHAIR_URL = assetUrl("dice-crosshair.html");
 let crosshairOpen = false;
 
+// Dice-skin picker — opened from the right-click "设为我的骰子皮肤"
+// context menu on ATTACHMENT-layer image items. The picker modal
+// receives the item's image (url + mime + name) in its URL hash and
+// writes the chosen die's skin into this player's OBR metadata, which
+// OBR syncs room-wide so everyone sees that player's custom dice.
+const SKIN_CTX_ID = "com.obr-suite/dice-skin-ctx";
+const SKIN_PICKER_MODAL_ID = "com.obr-suite/dice-skin-picker";
+const SKIN_PICKER_URL = assetUrl("dice-skin-picker.html");
+const SKIN_CTX_ICON = assetUrl("d20.png");
+
 // Quick-roll channel — any iframe (search, bestiary, character cards,
 // 5etools-tag click handlers) can fire `BC_QUICK_ROLL` with a simple
 // payload to trigger a roll. The background module parses the
 // expression, rolls, broadcasts via the normal pipeline.
 const BC_QUICK_ROLL = "com.obr-suite/dice-quick-roll";
+
+// 2026-05-14 — exported so paths that bypass handleQuickRoll and call
+// broadcastDiceRoll directly (initiative-panel rollInitiativeLocal,
+// bestiary fireInitiative, the suite's drag-in auto-roll) can honour
+// the DM 全局暗骰 toggle without duplicating the LS key string.
+// Source-of-truth for the LS key lives in dice/panel-page.ts; we read
+// the same key here.
+export function isGlobalDarkRollEnabled(): boolean {
+  try {
+    return localStorage.getItem("obr-suite/dice/global-dark-roll") === "1";
+  } catch { return false; }
+}
 // Sent by the dice-history popover's X button. Closes the popover
 // WITHOUT touching the cluster's "投骰记录" toggle state — so the
 // next dice roll re-opens it. The cluster toggle is the only thing
@@ -475,6 +498,17 @@ async function showDiceEffect(p: DiceRollPayload): Promise<void> {
   // empty if not in repeat-mode. Last row implicitly ends at dice.length.
   const rowStarts = (p.rowStarts ?? []).join(",");
   const sameHighlight = p.sameHighlight ? "1" : "0";
+  // The roller's custom dice skins (synced via OBR player metadata).
+  // Passed inline so every client's effect page renders them without
+  // its own metadata round-trip. Omitted entirely when the roller has
+  // no skins, keeping the common-case URL short.
+  let skinsParam = "";
+  try {
+    const skins = await readSkinsForPlayer(p.rollerId);
+    if (Object.keys(skins).length > 0) {
+      skinsParam = `&skins=${encodeURIComponent(JSON.stringify(skins))}`;
+    }
+  } catch { /* no skins — effect page falls back to default art */ }
   const url =
     `${EFFECT_URL}?dtypes=${dtypes}` +
     `&dvalues=${dvalues}` +
@@ -496,7 +530,8 @@ async function showDiceEffect(p: DiceRollPayload): Promise<void> {
     `&same=${sameHighlight}` +
     // World coords don't contain token-id; pass it through so the
     // effect-page can keep tracking the token if it moves.
-    `&itemId=${encodeURIComponent(p.itemId ?? "")}`;
+    `&itemId=${encodeURIComponent(p.itemId ?? "")}` +
+    skinsParam;
 
   try {
     try { await OBR.modal.close(modalId); } catch {}
@@ -510,6 +545,28 @@ async function showDiceEffect(p: DiceRollPayload): Promise<void> {
     });
   } catch (e) {
     console.error("[obr-suite/dice] open effect modal failed", e);
+  }
+}
+
+// --- Skin picker modal ---
+
+async function openSkinPicker(payload: {
+  url: string;
+  mime: string;
+  name: string;
+}): Promise<void> {
+  try {
+    try { await OBR.modal.close(SKIN_PICKER_MODAL_ID); } catch {}
+    const hash = encodeURIComponent(JSON.stringify(payload));
+    await OBR.modal.open({
+      id: SKIN_PICKER_MODAL_ID,
+      url: `${SKIN_PICKER_URL}#${hash}`,
+      fullScreen: true,
+      hideBackdrop: true,
+      hidePaper: true,
+    });
+  } catch (e) {
+    console.error("[obr-suite/dice] open skin picker failed", e);
   }
 }
 
@@ -530,6 +587,38 @@ export async function setupDice(): Promise<void> {
   // 5-second history modal again — there's no UI left to flip the flag
   // back on. Always-on is the new behaviour; LS becomes inert.
   try { localStorage.removeItem(LS_AUTO_DICE_HISTORY); } catch {}
+
+  // Right-click an ATTACHMENT-layer image → "设为我的骰子皮肤". Opens
+  // the skin picker carrying that image; the picker writes the chosen
+  // die's skin into this player's metadata (synced to the whole room).
+  // Available to every player — each sets their own dice.
+  try {
+    await OBR.contextMenu.create({
+      id: SKIN_CTX_ID,
+      icons: [{
+        icon: SKIN_CTX_ICON,
+        label: "设为我的骰子皮肤",
+        filter: {
+          every: [
+            { key: "type", value: "IMAGE" },
+            { key: "layer", value: "ATTACHMENT" },
+          ],
+          max: 1,
+        },
+      }],
+      onClick: async (ctx) => {
+        const item = ctx.items[0];
+        if (!item || !isImage(item)) return;
+        await openSkinPicker({
+          url: item.image.url,
+          mime: item.image.mime ?? "",
+          name: item.name ?? "",
+        });
+      },
+    });
+  } catch (e) {
+    console.error("[obr-suite/dice] create skin context menu failed", e);
+  }
 
   // Re-anchor history popover on viewport resize. The dedicated
   // trigger button was removed — history auto-opens on every dice
@@ -838,14 +927,35 @@ export async function setupDice(): Promise<void> {
     OBR.broadcast.onMessage(BC_QUICK_ROLL, async (event) => {
       const req = event.data as QuickRollRequest | undefined;
       if (!req || typeof req.expression !== "string" || !req.expression.trim()) return;
+
+      // 2026-05-14 — DM 全局暗骰 toggle. When the LS flag is "1", force
+      // every quick-roll hidden regardless of caller's intent. This
+      // is what makes group saves (bestiary fireSave), group initiative
+      // (group-saves fireInitiative), attack-check tag clicks (5etools
+      // tags / cc-info / monster-info / search-bar / dice-rollable-
+      // menu), and adv/dis/crit variants all honour the toggle — the
+      // panel's own btnRoll handles its path separately by passing
+      // hidden:true at call time.
+      // Player clients never have this LS set (the toggle button is
+      // GM-only in panel-page.ts), so this gate naturally restricts to
+      // DM-only impact even though we don't check role here.
+      let effectiveReq = req;
+      if (!req.hidden) {
+        try {
+          if (localStorage.getItem("obr-suite/dice/global-dark-roll") === "1") {
+            effectiveReq = { ...req, hidden: true };
+          }
+        } catch {}
+      }
+
       const sig = [
-        req.expression.trim(),
-        req.label ?? "",
-        req.itemId ?? "",
-        req.advMode ?? "",
-        req.critMode ? "1" : "",
-        req.hidden ? "1" : "",
-        req.collectiveId ?? "",
+        effectiveReq.expression.trim(),
+        effectiveReq.label ?? "",
+        effectiveReq.itemId ?? "",
+        effectiveReq.advMode ?? "",
+        effectiveReq.critMode ? "1" : "",
+        effectiveReq.hidden ? "1" : "",
+        effectiveReq.collectiveId ?? "",
       ].join("|");
       const now = Date.now();
       const last = recentQuickRolls.get(sig);
@@ -864,7 +974,7 @@ export async function setupDice(): Promise<void> {
         }
       }
       try {
-        await handleQuickRoll(req);
+        await handleQuickRoll(effectiveReq);
       } catch (e) {
         console.error("[obr-suite/dice] quick-roll failed", e);
       }
@@ -1001,6 +1111,8 @@ export async function teardownDice(): Promise<void> {
   await closeActionPanel();
   await closeHistory();
   await closeCrosshair();
+  try { await OBR.contextMenu.remove(SKIN_CTX_ID); } catch {}
+  try { await OBR.modal.close(SKIN_PICKER_MODAL_ID); } catch {}
   for (const u of unsubs.splice(0)) u();
   setupDiceRegistered = false;
 }

@@ -5,7 +5,7 @@
 // Set STABLE_HIDES = false before building the dev channel
 // (`/suite-dev/`) so the full feature set shows up for ongoing
 // iteration / testing.
-export const STABLE_HIDES = false;
+export const STABLE_HIDES = true;
 
 // === Mobile detection (per-iframe) =====================================
 // Modules that run heavy WebGL / continuous rAF work (status tracker

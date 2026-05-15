@@ -21,6 +21,8 @@ const BC_TOGGLE = "com.obr-suite/timestop-toggle";
 const BC_STATE = "com.obr-suite/timestop-state";
 
 const MENU_ID = `${PLUGIN_ID}/toggle`;
+// 2026-05-14 (#7) — "显示为 CG" right-click menu on MAP items.
+const CG_MENU_ID = `${PLUGIN_ID}/show-as-cg`;
 const ICON_URL = assetUrl("timestop-icon.svg");
 const OVERLAY_URL = assetUrl("timestop-overlay.html");
 
@@ -34,6 +36,23 @@ async function isTimeStopActive(): Promise<boolean> {
   } catch { return false; }
 }
 
+// 2026-05-14 (#7) — full time-stop state including the optional CG
+// image url. The scene-metadata value is `{ active, cgUrl? }`;
+// cgUrl present → the overlay shows that image fullscreen instead of
+// the cinematic bars.
+async function getTimeStopState(): Promise<{ active: boolean; cgUrl: string | null }> {
+  try {
+    const meta = await OBR.scene.getMetadata();
+    const s = meta[META_KEY] as { active?: unknown; cgUrl?: unknown } | undefined;
+    return {
+      active: !!s?.active,
+      cgUrl: typeof s?.cgUrl === "string" && s.cgUrl ? s.cgUrl : null,
+    };
+  } catch {
+    return { active: false, cgUrl: null };
+  }
+}
+
 // Track local overlay state so we don't re-issue OBR.modal.open on a
 // modal that's already shown — that re-fires the iframe's CSS
 // transition and the user sees the cinematic letterbox bars
@@ -42,14 +61,31 @@ async function isTimeStopActive(): Promise<boolean> {
 // a re-checkState which would call showOverlay a second time).
 let overlayShown = false;
 let overlayPassThrough = false;
+// 2026-05-14 (#7) — currently-displayed CG url (null = cinematic-bars
+// mode). Part of the dedupe key so a state-sync re-check doesn't
+// needlessly reload the iframe, but a switch INTO / OUT OF cg mode
+// (or a different cg image) does reopen it.
+let overlayCgUrl: string | null = null;
 
-async function showOverlay(passThrough: boolean) {
-  // Already visible with the same gating? Nothing to do.
-  if (overlayShown && overlayPassThrough === passThrough) return;
+async function showOverlay(passThrough: boolean, cgUrl: string | null = null) {
+  // Already visible with the exact same gating + cg url? No-op.
+  if (overlayShown && overlayPassThrough === passThrough && overlayCgUrl === cgUrl) return;
+  // Switching cg state / image → close first so the iframe reloads
+  // cleanly with the new URL params (OBR.modal.open on the same id
+  // doesn't reliably re-navigate the iframe).
+  if (overlayShown && overlayCgUrl !== cgUrl) {
+    await hideOverlay();
+  }
   try {
+    // CG mode encodes the image url + (for the GM) a `dm=1` flag so
+    // the overlay renders the image at 0.1 opacity behind the
+    // pass-through modal.
+    const url = cgUrl
+      ? `${OVERLAY_URL}?cg=${encodeURIComponent(cgUrl)}${isGM ? "&dm=1" : ""}`
+      : OVERLAY_URL;
     await OBR.modal.open({
       id: MODAL_ID,
-      url: OVERLAY_URL,
+      url,
       fullScreen: true,
       hidePaper: true,
       hideBackdrop: true,
@@ -57,12 +93,14 @@ async function showOverlay(passThrough: boolean) {
     });
     overlayShown = true;
     overlayPassThrough = passThrough;
+    overlayCgUrl = cgUrl;
   } catch {}
 }
 
 async function hideOverlay() {
   try { await OBR.modal.close(MODAL_ID); } catch {}
   overlayShown = false;
+  overlayCgUrl = null;
 }
 
 /**
@@ -134,10 +172,17 @@ function notifyClusterState(active: boolean) {
   } catch {}
 }
 
-async function turnOn() {
-  await OBR.scene.setMetadata({ [META_KEY]: { active: true } });
-  await OBR.broadcast.sendMessage(BROADCAST_ON, {});
-  await showOverlay(true); // GM gets pass-through overlay
+// `cgUrl` non-null → "显示为 CG" variant: every client shows that
+// image fullscreen instead of the cinematic bars. The GM still gets
+// a pass-through overlay (so they can keep working — the image just
+// sits at 0.1 opacity on the GM client); players get a blocking
+// overlay (handled in the BROADCAST_ON listener).
+async function turnOn(cgUrl: string | null = null) {
+  await OBR.scene.setMetadata({
+    [META_KEY]: { active: true, ...(cgUrl ? { cgUrl } : {}) },
+  });
+  await OBR.broadcast.sendMessage(BROADCAST_ON, { cgUrl: cgUrl ?? undefined });
+  await showOverlay(true, cgUrl); // GM gets pass-through overlay
   // Belt-and-suspenders: scrub any legacy locked tokens left over
   // from the old "lock all characters" behaviour so they don't stay
   // un-movable by the GM during this time stop.
@@ -173,8 +218,47 @@ async function toggle() {
 export async function setupTimeStop(): Promise<void> {
   isGM = (await OBR.player.getRole()) === "GM";
 
-  // Right-click context menu removed per user feedback — the only entry
-  // point is now the cluster's 时停 button (GM-only).
+  // The 开启/关闭时停 right-click menu was removed earlier — the
+  // cluster's 时停 button is the toggle entry point.
+  //
+  // 2026-05-14 (#7) — but we DO add a GM-only "显示为 CG" menu on MAP
+  // items: right-click a map image → every client time-stops AND the
+  // overlay paints that image fullscreen (aspect-correct, letterboxed
+  // black, no cinematic bars). The GM's copy is pass-through + 0.1
+  // opacity so they can keep running the game behind it. Turn it off
+  // with the normal 时停 cluster button (turnOff clears cgUrl too).
+  if (isGM) {
+    try {
+      await OBR.contextMenu.create({
+        id: CG_MENU_ID,
+        icons: [
+          {
+            icon: ICON_URL,
+            label: "显示为 CG",
+            filter: {
+              roles: ["GM"],
+              every: [
+                { key: "type", value: "IMAGE" },
+                { key: "layer", value: "MAP" },
+              ],
+              max: 1,
+            },
+          },
+        ],
+        onClick: async (ctx) => {
+          const item = ctx.items[0] as { image?: { url?: unknown } } | undefined;
+          const url = item?.image?.url;
+          if (typeof url !== "string" || !url) return;
+          // turnOn() with a cgUrl works whether or not time-stop is
+          // already active — re-firing just switches the overlay to
+          // (or between) CG image(s).
+          await turnOn(url);
+        },
+      });
+    } catch (e) {
+      console.warn("[obr-suite/timeStop] CG menu create failed", e);
+    }
+  }
 
   unsubs.push(
     OBR.broadcast.onMessage(BC_TOGGLE, async () => {
@@ -188,11 +272,14 @@ export async function setupTimeStop(): Promise<void> {
   // interrupt is critical — bare deselect doesn't kill an active
   // drag, so a player mid-drag at the moment of time-stop would
   // happily fly their token across the map.
+  // 2026-05-14 (#7) — the payload may carry `cgUrl`; when set the
+  // player's overlay shows that image fullscreen instead of the bars.
   unsubs.push(
-    OBR.broadcast.onMessage(BROADCAST_ON, async () => {
+    OBR.broadcast.onMessage(BROADCAST_ON, async (event) => {
+      const cgUrl = (event.data as { cgUrl?: string } | undefined)?.cgUrl ?? null;
       if (!isGM) {
         await interruptInFlightDrag();
-        await showOverlay(false);
+        await showOverlay(false, cgUrl);
       }
       notifyClusterState(true);
     })
@@ -205,12 +292,14 @@ export async function setupTimeStop(): Promise<void> {
     })
   );
 
-  // Mid-scene join: re-apply state.
+  // Mid-scene join: re-apply state — including the CG image if the
+  // current time-stop is a "显示为 CG" one.
   const checkState = async () => {
     if (!(await OBR.scene.isReady())) return;
-    if (await isTimeStopActive()) {
+    const st = await getTimeStopState();
+    if (st.active) {
       if (!isGM) await interruptInFlightDrag();
-      await showOverlay(isGM);
+      await showOverlay(isGM, st.cgUrl);
       notifyClusterState(true);
     } else {
       notifyClusterState(false);
@@ -223,9 +312,10 @@ export async function setupTimeStop(): Promise<void> {
 }
 
 export async function teardownTimeStop(): Promise<void> {
-  // Context menu was removed but we still try in case an old listener
-  // lingered.
+  // MENU_ID was removed in an earlier version but we still try in case
+  // an old listener lingered. CG_MENU_ID is the live one (#7).
   try { await OBR.contextMenu.remove(MENU_ID); } catch {}
+  try { await OBR.contextMenu.remove(CG_MENU_ID); } catch {}
   for (const u of unsubs.splice(0)) u();
   await hideOverlay();
 }
