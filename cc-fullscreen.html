@@ -263,7 +263,16 @@ body{
    tab strip takes over). */
 .cc-tabs-side{display:none}
 
-@media (min-width:1100px){
+/* 2026-05-16 — breakpoint lowered 1100 → 600 px. cc-fullscreen is
+   typically rendered inside cc-panel's .viewer iframe, which is
+   ~500-900 px wide depending on the user's OBR viewport. The old
+   1100 px threshold meant wide-mode (sidebar + no outer scroll)
+   almost never kicked in there, so cc-body fell back to its narrow
+   overflow-y:auto path and the user saw "div.panel 高度 919 但
+   内容溢出 → 滚动条". 600 px is the iPad-portrait split: anything
+   wider gets the no-outer-scroll sidebar layout, narrower drops to
+   the legacy top-tabs path. */
+@media (min-width:600px){
   /* Top horizontal tabs hidden in wide mode — the right sidebar is
      the canonical tab navigation here. */
   .cc-tabs.cc-tabs-top{display:none}
