@@ -1066,6 +1066,24 @@ html,body{
   max-width:100%;max-height:100%;object-fit:contain;display:block;
   -webkit-user-drag:none;
 }
+/* 2026-05-15 — webm library chips render as <img> posters extracted
+   asynchronously to avoid Chrome's per-tab WebMediaPlayer cap.
+   While extraction is pending the placeholder shows a subtle dark
+   square; if extraction fails, a 🎞 fallback marker is shown. */
+.skin-lib-thumb .webm-poster-pending{
+  width:24px;height:24px;
+  background:rgba(255,255,255,0.06);
+  border-radius:3px;
+}
+.skin-lib-thumb .webm-fallback{
+  font-size:18px;line-height:1;
+  color:var(--text-dim);
+  display:inline-flex;align-items:center;justify-content:center;
+  width:24px;height:24px;
+  background:rgba(255,255,255,0.06);
+  border-radius:3px;
+  user-select:none;
+}
 .skin-lib-del{
   position:absolute;top:-5px;right:-5px;
   width:14px;height:14px;

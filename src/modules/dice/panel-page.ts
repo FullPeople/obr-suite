@@ -1665,27 +1665,126 @@ function guessMime(url: string): string {
   return "";
 }
 
-// 2026-05-15 — `animate` gates the costly `<video autoplay loop>`
-// path. Chrome allocates one WebMediaPlayer per autoplay video and
-// caps the global pool — past ~75 in a tab it logs
-// `[Intervention] Blocked attempt to create a WebMediaPlayer …` and
-// then everything (including OBR scene-items IPC) starts choking.
+// 2026-05-15 — Chrome allocates one WebMediaPlayer per `<video>` with
+// any non-`none` preload, and caps the global pool — past ~75 in a
+// tab the renderer logs `[Intervention] Blocked attempt to create a
+// WebMediaPlayer …` and starts thrashing. With a webm skin library
+// of N skins × 7 dice the skins tab alone blew that cap to 6000+,
+// taking down the dice action panel and the OBR IPC with it (the
+// 5-second `OBR_SCENE_ITEMS_GET_ITEMS` timeout the user saw).
 //
-// The skins tab can easily blow past that: 7 dice × N library chips
-// each. So we ONLY autoplay the ACTIVE thumb (one per die row, max 7
-// total) and use a `preload="metadata"` poster frame for every other
-// chip. preload=metadata loads the first frame without claiming a
-// player slot — perfect for a thumbnail. `disableremoteplayback`
-// also shaves a couple of milliseconds per element.
+// Earlier `preload="metadata"` attempt didn't help — Chrome STILL
+// creates the player slot. The only fix that doesn't hit the cap is
+// to render library chips as `<img>` posters, extracted ONCE off a
+// throw-away video element (sequential, max 1 in flight) then cached
+// to a data URL. The active thumb (one per die row, max 7) keeps the
+// real `<video autoplay loop>` so the user sees the animation.
+
+// Module-level poster cache. value === undefined → not yet attempted;
+// string → data URL; null → extraction failed (CORS, decode error,
+// timeout); empty string treated as null.
+const webmPosterCache = new Map<string, string | null>();
+// Sequential-extraction gate. Each call chains to the previous so at
+// most ONE extractor video element exists at a time globally.
+let webmExtractChain: Promise<unknown> = Promise.resolve();
+
+function extractWebmPoster(url: string): Promise<string | null> {
+  const hit = webmPosterCache.get(url);
+  if (hit !== undefined) return Promise.resolve(hit || null);
+  const next = webmExtractChain.then(() => new Promise<string | null>((resolve) => {
+    if (webmPosterCache.has(url)) { resolve(webmPosterCache.get(url) || null); return; }
+    const v = document.createElement("video");
+    v.muted = true;
+    v.crossOrigin = "anonymous";
+    v.preload = "auto";
+    v.playsInline = true;
+    let done = false;
+    const finish = (result: string | null) => {
+      if (done) return;
+      done = true;
+      webmPosterCache.set(url, result);
+      try { v.src = ""; v.removeAttribute("src"); v.load(); } catch { /* ignore */ }
+      try { v.remove(); } catch { /* ignore */ }
+      resolve(result);
+    };
+    v.onloadeddata = () => {
+      try { v.currentTime = 0.01; } catch { finish(null); }
+    };
+    v.onseeked = () => {
+      try {
+        const w = v.videoWidth || 64;
+        const h = v.videoHeight || 64;
+        const c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        const ctx = c.getContext("2d");
+        if (!ctx) { finish(null); return; }
+        ctx.drawImage(v, 0, 0, w, h);
+        // toDataURL throws SecurityError if the canvas is tainted by
+        // a CORS-deficient video — fall through to the catch.
+        finish(c.toDataURL("image/png"));
+      } catch { finish(null); }
+    };
+    v.onerror = () => finish(null);
+    // Safety net: 6s ceiling per extraction so a stuck URL doesn't
+    // block the whole queue forever.
+    setTimeout(() => finish(null), 6000);
+    v.src = url;
+  }));
+  webmExtractChain = next.catch(() => null);
+  return next;
+}
+
 function thumbHtml(skin: DiceSkin | null, type: DiceType, animate = false): string {
   if (skin) {
     if (isVideoSkin(skin)) {
-      const playFlags = animate ? "autoplay loop muted playsinline" : "preload=\"metadata\" muted playsinline disableremoteplayback";
-      return `<video src="${escapeHtml(skin.url)}" ${playFlags}></video>`;
+      // Active thumb (max 7 globally) — full animated video.
+      if (animate) {
+        return `<video src="${escapeHtml(skin.url)}" autoplay loop muted playsinline></video>`;
+      }
+      // Library chip — poster mode. Use cached data URL if we have
+      // one; otherwise emit a placeholder `<img data-webm-src=...>`
+      // that hydratePosters() fills in async. Cache miss + `null`
+      // (failed extraction) renders a small 🎞 fallback.
+      const cached = webmPosterCache.get(skin.url);
+      if (typeof cached === "string" && cached) {
+        return `<img src="${escapeHtml(cached)}" alt="" loading="lazy">`;
+      }
+      if (cached === null) {
+        return `<span class="webm-fallback" title="webm 缩略图无法预览（CORS / 解码失败）">🎞</span>`;
+      }
+      return `<img data-webm-src="${escapeHtml(skin.url)}" class="webm-poster-pending" alt="" loading="lazy">`;
     }
     return `<img src="${escapeHtml(skin.url)}" alt="" loading="lazy">`;
   }
   return `<img src="${escapeHtml(assetUrl(`${type}.png`))}" alt="${type}" class="is-default" loading="lazy">`;
+}
+
+// After the skin tab is rendered, walk the placeholder `<img>` chips
+// and extract their posters one by one. Filling `src` in place keeps
+// the layout stable. Disconnected nodes (panel re-rendered before
+// extraction landed) get skipped.
+function hydrateWebmPosters(): void {
+  if (!skinList) return;
+  const pending = skinList.querySelectorAll<HTMLImageElement>("img[data-webm-src]");
+  pending.forEach((img) => {
+    const url = img.dataset.webmSrc;
+    if (!url) return;
+    void extractWebmPoster(url).then((poster) => {
+      if (!img.isConnected) return;
+      if (poster) {
+        img.src = poster;
+        img.classList.remove("webm-poster-pending");
+        img.removeAttribute("data-webm-src");
+      } else {
+        // Replace the broken-poster img with the fallback marker.
+        const span = document.createElement("span");
+        span.className = "webm-fallback";
+        span.title = "webm 缩略图无法预览（CORS / 解码失败）";
+        span.textContent = "🎞";
+        img.replaceWith(span);
+      }
+    });
+  });
 }
 
 async function renderSkinsTab(): Promise<void> {
@@ -1772,6 +1871,10 @@ async function renderSkinsTab(): Promise<void> {
   }).join("");
 
   skinList.innerHTML = hintHtml + setsHtml + rowsHtml;
+  // Kick off async poster extraction for the placeholder webm chips.
+  // The extraction is sequential (1 video element at a time globally)
+  // so the WebMediaPlayer pool never blows.
+  hydrateWebmPosters();
 }
 
 if (skinList) {
