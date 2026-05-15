@@ -1915,11 +1915,39 @@ async function renderSkinsTab(): Promise<void> {
     );
   }).join("");
 
+  // 2026-05-15 — explicitly release every existing `<video>` element's
+  // WebMediaPlayer slot BEFORE replacing innerHTML. Chrome's slot GC
+  // is async + lazy: just removing the DOM node lets the slot linger
+  // for several seconds. Across rapid re-renders (OBR.player.onChange
+  // fires once per metadata write, including OUR OWN setActiveSkin
+  // writes triggered by chip clicks) the slots accumulate past 75
+  // and the renderer chokes — exactly the user's "卡死" symptom.
+  // pause + src="" + load() forces immediate release.
+  const oldVideos = skinList.querySelectorAll<HTMLVideoElement>("video");
+  oldVideos.forEach((v) => {
+    try { v.pause(); } catch { /* ignore */ }
+    try { v.removeAttribute("src"); v.load(); } catch { /* ignore */ }
+  });
+
   skinList.innerHTML = hintHtml + setsHtml + rowsHtml;
   // Kick off async poster extraction for the placeholder webm chips.
   // The extraction is sequential (1 video element at a time globally)
   // so the WebMediaPlayer pool never blows.
   hydrateWebmPosters();
+}
+
+// 2026-05-15 — debounced renderSkinsTab. `OBR.player.onChange` and
+// chip-click handlers both call renderSkinsTab; without coalescing,
+// a quick double-click fires 2-3 renders in <50 ms and the active-
+// thumb videos race the cleanup pass. 80 ms window is well under
+// human perception but enough to merge rapid bursts into one render.
+let _renderSkinsTabTimer: number | null = null;
+function scheduleRenderSkinsTab(): void {
+  if (_renderSkinsTabTimer != null) return;
+  _renderSkinsTabTimer = window.setTimeout(() => {
+    _renderSkinsTabTimer = null;
+    void renderSkinsTab();
+  }, 80);
 }
 
 if (skinList) {
@@ -1934,7 +1962,7 @@ if (skinList) {
       if (id) {
         try { await deleteSet(id); }
         catch (err) { console.error("[obr-suite/dice] delete set failed", err); }
-        await renderSkinsTab();
+        scheduleRenderSkinsTab();
       }
       return;
     }
@@ -1944,7 +1972,7 @@ if (skinList) {
       if (id) {
         try { await applySet(id); }
         catch (err) { console.error("[obr-suite/dice] apply set failed", err); }
-        await renderSkinsTab();
+        scheduleRenderSkinsTab();
       }
       return;
     }
@@ -1954,7 +1982,7 @@ if (skinList) {
       if (name && name.trim()) {
         try { await saveCurrentAsSet(name.trim()); }
         catch (err) { console.error("[obr-suite/dice] save set failed", err); }
-        await renderSkinsTab();
+        scheduleRenderSkinsTab();
       }
       return;
     }
@@ -1968,7 +1996,7 @@ if (skinList) {
       if (type && url) {
         try { await removeFromLibrary(type, url); }
         catch (err) { console.error("[obr-suite/dice] remove from library failed", err); }
-        await renderSkinsTab();
+        scheduleRenderSkinsTab();
       }
       return;
     }
@@ -1985,7 +2013,7 @@ if (skinList) {
         } catch (err) {
           console.error("[obr-suite/dice] set active from library failed", err);
         }
-        await renderSkinsTab();
+        scheduleRenderSkinsTab();
       }
       return;
     }
@@ -1996,7 +2024,7 @@ if (skinList) {
       const type = resetBtn.dataset.type as DiceType;
       try { await setActiveSkin(type, null); }
       catch (err) { console.error("[obr-suite/dice] reset skin failed", err); }
-      await renderSkinsTab();
+      scheduleRenderSkinsTab();
       return;
     }
     const setBtn = target.closest<HTMLButtonElement>(".skin-url-set");
@@ -2025,7 +2053,7 @@ if (skinList) {
         console.error("[obr-suite/dice] set skin url failed", err);
       }
       if (input) input.value = "";
-      await renderSkinsTab();
+      scheduleRenderSkinsTab();
       return;
     }
   });
@@ -2038,7 +2066,7 @@ if (skinList) {
     const type = cb.dataset.rand as DiceType;
     try { await setRandomMode(type, cb.checked); }
     catch (err) { console.error("[obr-suite/dice] toggle random failed", err); }
-    await renderSkinsTab();
+    scheduleRenderSkinsTab();
   });
 }
 
@@ -2854,11 +2882,18 @@ OBR.onReady(async () => {
   // (initial paint ran before isDM was resolved).
   renderCombos();
 
-  // Keep the skins tab fresh while it's the one on screen — a skin set
-  // via the right-click ATTACHMENT picker writes this player's
+  // Keep the skins tab fresh while it's the one on screen — a skin
+  // set via the right-click ATTACHMENT picker writes this player's
   // metadata, which fires onChange here.
+  //
+  // 2026-05-15 — debounced. onChange ALSO fires for OUR OWN writes
+  // (every chip click → setActiveSkin → metadata write → onChange).
+  // A burst of chip clicks would otherwise pile up renderSkinsTab
+  // calls faster than Chrome could reclaim WebMediaPlayer slots from
+  // the previous render's active-thumb videos, blowing the 75-slot
+  // cap. The 80 ms scheduler window coalesces bursts into one paint.
   OBR.player.onChange(() => {
-    if (activeTab === "skins") void renderSkinsTab();
+    if (activeTab === "skins") scheduleRenderSkinsTab();
   });
 
   OBR.broadcast.onMessage(BROADCAST_DICE_ROLL, (event) => {
