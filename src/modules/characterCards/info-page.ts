@@ -134,15 +134,26 @@ const SHOW_MSG = "com.character-cards/info-show";
 const root = document.getElementById("root") as HTMLDivElement;
 
 // 2026-05-15 — popover-height auto-shrink. The popover opens at
-// INFO_HEIGHT (360px in index.ts) so it has room for the tallest
-// likely card, but on most cards the actual content is ~220-280px and
+// INFO_HEIGHT (260px in index.ts) so it has room for the tallest
+// likely card, but on most cards the actual content is ~180-240px and
 // the leftover whitespace makes the panel feel oversized + blocks
 // canvas underneath. After every render / pane-switch we measure
-// `root.scrollHeight` and ask OBR to shrink the popover. We never
-// grow past INFO_MAX_HEIGHT (captured at OBR.onReady from the actual
-// opened popover height — respects user resize via the layout editor),
-// so long content keeps an inner scrollbar instead of escaping the
-// popover. Mirrors the bestiary monster-info-page adjustHeight pattern.
+// the content's actual extent and ask OBR to shrink the popover. We
+// never grow past INFO_MAX_HEIGHT (captured at OBR.onReady from the
+// actual opened popover height — respects user resize via the layout
+// editor), so long content keeps an inner scrollbar instead of
+// escaping the popover.
+//
+// NOTE on measurement: `root.scrollHeight` does NOT work here. Per
+// CSSOM spec, scrollHeight on an `overflow:auto` box returns
+// max(content, clientHeight) — i.e. when content is SHORTER than
+// the box it just returns the box height, defeating the shrink. So
+// we measure the children's bounding rects directly: the bottom of
+// the lowest child minus the top of the highest child + root's own
+// vertical padding gives the true content extent regardless of box
+// size. This is the bug the user reported as "高度依旧过高导致需要
+// 滚轮，但实际上内容并没有到需要滚轮的程度" — content fit fine but
+// the popover stayed at INFO_HEIGHT because scrollHeight === clientHeight.
 const INFO_POPOVER_ID = "com.obr-suite/cc-info";
 const INFO_MIN_HEIGHT = 140;
 let INFO_MAX_HEIGHT = 360;
@@ -163,8 +174,35 @@ function queueAdjustHeight(): void {
   });
 }
 
+function measureContentHeight(): number {
+  if (!root.children.length) return 0;
+  const rootRect = root.getBoundingClientRect();
+  let contentTop = rootRect.bottom;
+  let contentBottom = rootRect.top;
+  for (const child of Array.from(root.children) as HTMLElement[]) {
+    // Skip invisible children (e.g. inactive .rt-pane is height:0 +
+    // overflow:hidden — its bounding rect is a zero-height line but
+    // still contributes a single point, throwing off the min/max.
+    // `offsetHeight === 0` filters cleanly).
+    if (child.offsetHeight === 0) continue;
+    const r = child.getBoundingClientRect();
+    if (r.top < contentTop) contentTop = r.top;
+    if (r.bottom > contentBottom) contentBottom = r.bottom;
+  }
+  if (contentBottom <= contentTop) return 0;
+  const cs = getComputedStyle(root);
+  const padTop = parseFloat(cs.paddingTop) || 0;
+  const padBottom = parseFloat(cs.paddingBottom) || 0;
+  // contentTop is at root's padding-top edge in viewport coords; root's
+  // top is `rootRect.top` (= padding-top edge minus padTop). So the
+  // content area extent is (contentBottom - contentTop), and adding
+  // both vertical paddings reconstructs the full box height the popover
+  // would need.
+  return (contentBottom - contentTop) + padTop + padBottom;
+}
+
 async function adjustHeight(): Promise<void> {
-  const contentH = root.scrollHeight;
+  const contentH = measureContentHeight();
   if (!contentH) return;
   // +6 for a tiny breathing margin so the bottom border doesn't kiss
   // the popover edge. Clamp to [MIN, MAX] — never exceed the popover's

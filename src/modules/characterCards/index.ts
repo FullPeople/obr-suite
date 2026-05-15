@@ -98,7 +98,13 @@ const POPOVER_BOX = 64;
 const BOTTOM_OFFSET = 160;
 const RIGHT_OFFSET = 12;
 const INFO_WIDTH = 320;
-const INFO_HEIGHT = 360;
+// 2026-05-15 — was 360. Reduced to 260 because info-page.ts now
+// auto-shrinks to the actual content height after first render, and
+// most cards measure ~180-240 px. The smaller default means the
+// first paint (before adjustHeight lands) doesn't block as much
+// canvas. setHeight can still grow to the user's saved size on a
+// resized popover; this is just the un-resized default.
+const INFO_HEIGHT = 260;
 const INFO_GAP = 8;
 
 const unsubs: Array<() => void> = [];

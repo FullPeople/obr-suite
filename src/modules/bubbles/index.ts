@@ -987,7 +987,14 @@ function computeLayoutFromMetrics(
   const showHp = data.maxHp > 0;
   const inlineGap = 2 * s;
   const acSlotW = overheadMode && data.ac != null ? diameter : 0;
-  const tempSlotW = overheadMode && data.tempHp > 0 && showHp ? diameter : 0;
+  // 2026-05-15 — overhead mode: temp HP no longer reserves an inline
+  // slot. The bar text already renders "45/60 +12" so the temp HP
+  // is visible there; an additional pink bubble between the bar and
+  // the AC shield was just shrinking the bar for redundant info.
+  // User: "为什么添加临时生命值会导致血条缩短？不应该缩短." Standard
+  // (non-overhead) mode is unchanged — temp HP still appears as its
+  // own bubble in the floating row above the bar there.
+  const tempSlotW = 0;
   const inlineSlotsTotal = acSlotW + tempSlotW
     + (acSlotW > 0 && tempSlotW > 0 ? inlineGap : 0);
   // 1.0.105 used `inlineSlotsTotal + inlineGap` as the bar's shrinkage
@@ -1037,19 +1044,13 @@ function computeLayoutFromMetrics(
     // 2026-05-13d — AC shield CENTRE sits ON the bar's terminal x
     // (was: right-edge-flush). Half of the shield overlaps the
     // bar's right end, the other half hangs off to the right of
-    // the bar's endpoint. Temp HP (if any) sits a full diameter +
-    // gap to the LEFT of AC, still vertically aligned with the
-    // bar's centre line.
+    // the bar's endpoint.
+    // 2026-05-15 — temp HP bubble removed from overhead mode (the
+    // bar text already shows "+N"); see tempSlotW comment above.
     const inlineY = barOrigin.y + barHeight / 2;
     const barRightX = barOrigin.x + barWidth;
     if (data.ac != null) {
       acCenter = { x: barRightX, y: inlineY };
-    }
-    if (data.tempHp > 0 && showHp) {
-      const tempCenterX = data.ac != null
-        ? barRightX - diameter - inlineGap
-        : barRightX;
-      tempCenter = { x: tempCenterX, y: inlineY };
     }
   } else {
     // Standard layout — float above the bar.

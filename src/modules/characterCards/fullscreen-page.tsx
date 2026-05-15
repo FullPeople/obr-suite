@@ -1928,16 +1928,6 @@ function App() {
   const [data, setData] = useState<CharacterData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
-  // 2026-05-15 — split-pane secondary tab. Null = single-pane mode.
-  // On wide viewports (>= 1400 px), the "⇆ 并排" toggle in the tab
-  // strip opens a second pane next to the primary, each showing a
-  // different tab and scrolling independently. Below 1400 px the
-  // resize listener forces this back to null + CSS hides the toggle,
-  // so narrow screens always see a single pane.
-  const [tab2, setTab2] = useState<TabKey | null>(null);
-  const [isWide, setIsWide] = useState(() =>
-    typeof window !== "undefined" && window.matchMedia("(min-width: 1400px)").matches,
-  );
   // 2026-05-14 (#14) — edit-mode flag, toggled from the header.
   const [editing, setEditing] = useState(false);
   const [savingEdits, setSavingEdits] = useState(false);
@@ -1964,22 +1954,6 @@ function App() {
   }, [roomId, cardId]);
 
   useEffect(() => { void loadData(); }, [loadData]);
-
-  // 2026-05-15 — wide-screen tracker for split-pane mode. Below the
-  // 1400 px breakpoint the secondary pane is forcibly closed so the
-  // narrow CSS path (single column, full-width tab strip) stays clean
-  // even if the user happened to have tab2 set on a previously-wider
-  // window. Removed on unmount so the listener doesn't leak across
-  // hot-module-replacement reloads in dev.
-  useEffect(() => {
-    const mql = window.matchMedia("(min-width: 1400px)");
-    const handler = (e: MediaQueryListEvent) => {
-      setIsWide(e.matches);
-      if (!e.matches) setTab2(null);
-    };
-    mql.addEventListener("change", handler);
-    return () => mql.removeEventListener("change", handler);
-  }, []);
 
   // Multi-client sync — when another client imports / refreshes this
   // same card, BC_CARD_UPDATED arrives on REMOTE; we re-fetch
@@ -2363,65 +2337,41 @@ function App() {
         />
       )}
       <StatsBanner data={data} onPatch={onPatch} />
-      <div class="cc-tabs">
+      {/* 2026-05-15 — top horizontal tab strip for narrow viewports.
+          Hidden via CSS (.cc-tabs-top { display:none }) above the
+          1100 px breakpoint, where the right-sidebar tab list takes
+          over. Both renderers share the same setTab handler. */}
+      <div class="cc-tabs cc-tabs-top">
         {TABS.map((t) => (
           <button
-            class={`cc-tab ${tab === t.key ? "is-on" : ""} ${tab2 === t.key ? "is-on-2" : ""}`}
-            onClick={(e: any) => {
-              // 2026-05-15 — split-pane interaction model:
-              //   Shift+click on wide screen → open as secondary (or
-              //   if it IS the secondary, close it).
-              //   Plain click → always becomes primary; if it was
-              //   the secondary, also clear the secondary so the
-              //   two panes don't end up showing the same tab.
-              if (isWide && e.shiftKey) {
-                setTab2((cur) => (cur === t.key ? null : t.key));
-                return;
-              }
-              setTab(t.key);
-              if (tab2 === t.key) setTab2(null);
-            }}
-            title={isWide ? `${t.label}（Shift+点击 = 并排打开为第二面板）` : t.label}>
+            class={`cc-tab ${tab === t.key ? "is-on" : ""}`}
+            onClick={() => setTab(t.key)}
+            title={t.label}>
             {t.label}
           </button>
         ))}
-        {isWide && (
-          <button
-            class={`cc-tab-split-toggle ${tab2 ? "is-on" : ""}`}
-            onClick={() => {
-              if (tab2) { setTab2(null); return; }
-              // Open the NEXT tab in the strip as the secondary — a
-              // sensible default for one-click "show me two tabs".
-              const idx = TABS.findIndex((t) => t.key === tab);
-              const next = TABS[(idx + 1) % TABS.length].key;
-              setTab2(next);
-            }}
-            title={tab2 ? "关闭并排显示" : "并排显示两个标签 — 也可 Shift+点击任意标签"}>
-            ⇆ 并排
-          </button>
-        )}
       </div>
-      <div class={`cc-body ${tab2 ? "is-split" : ""}`}>
-        <div class="cc-pane">
-          {tab2 && (
-            <div class="cc-pane-label">
-              <span class="cc-pane-dot"></span>
-              {TABS.find((t) => t.key === tab)?.label}
-            </div>
-          )}
+      {/* 2026-05-15 — left main + right vertical-tabs sidebar. The
+          outer cc-body switches to flex-row + overflow:hidden in wide
+          mode so neither the page nor cc-body scroll; only the inner
+          .cc-main and .cc-tabs-side scroll independently. In narrow
+          mode (< 1100 px) the sidebar is hidden via @media and
+          cc-body falls back to its legacy single-column overflow-y
+          behavior so phones / small windows stay usable. */}
+      <div class="cc-body">
+        <div class="cc-main">
           {renderTabSection(tab, data)}
         </div>
-        {tab2 && (
-          <div class="cc-pane cc-pane-2">
-            <div class="cc-pane-label">
-              <span class="cc-pane-dot"></span>
-              {TABS.find((t) => t.key === tab2)?.label}
-              <button class="cc-pane-close" onClick={() => setTab2(null)}
-                title="关闭第二面板">×</button>
-            </div>
-            {renderTabSection(tab2, data)}
-          </div>
-        )}
+        <nav class="cc-tabs-side" aria-label="角色卡标签">
+          {TABS.map((t) => (
+            <button
+              class={`cc-tab cc-tab-side ${tab === t.key ? "is-on" : ""}`}
+              onClick={() => setTab(t.key)}
+              title={t.label}>
+              {t.label}
+            </button>
+          ))}
+        </nav>
       </div>
     </EditCtx.Provider>
   );
