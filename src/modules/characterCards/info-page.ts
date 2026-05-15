@@ -345,8 +345,13 @@ async function showCard(cardId: string, roomId: string) {
 
   try {
     const [res, live] = await Promise.all([
+      // 2026-05-15 — `cache: 'no-store'` so BC_CARD_UPDATED refetches
+      // never get served stale data from the HTTP cache. fullscreen-
+      // page.ts uses the same flag; without it the user saw "保存了但
+      // 小面板没刷新" because the browser handed back the old data.json.
       fetch(
-        `https://obr.dnd.center/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data.json`
+        `https://obr.dnd.center/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data.json`,
+        { cache: "no-store" },
       ),
       readLiveBubbles(),
     ]);

@@ -295,20 +295,9 @@ function downloadJson(filename: string, data: any) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// 2026-05-15 (#12) — embedded-mode flag. When the page is opened from
-// a DOWNLOADED standalone HTML (built by onDownloadStandalone below),
-// it carries the character data in `window.__CC_BUNDLED__` and runs
-// outside of OBR. We hide the server-writing buttons (编辑 / 保存 /
-// 刷新 / 导入 / 粘贴) since they'd all fail without a server, and we
-// skip the loadData / broadcast subscriptions that need OBR.
-function isEmbeddedMode(): boolean {
-  return typeof window !== "undefined" && !!(window as any).__CC_BUNDLED__;
-}
-
 // ===== Subcomponents =========================================
 function Header({
-  data, onExport, onCopyJson, onImport, onPasteJson, onRefresh,
-  editing, onToggleEditing, onSaveEdits, savingEdits, onDownloadStandalone,
+  data, onExport, onCopyJson, onImport, onPasteJson, onRefresh, editing, onToggleEditing, onSaveEdits, savingEdits,
 }: {
   data: CharacterData;
   onExport: () => void;
@@ -320,9 +309,7 @@ function Header({
   onToggleEditing: () => void;
   onSaveEdits: () => void;
   savingEdits: boolean;
-  onDownloadStandalone: () => void;
 }) {
-  const embedded = isEmbeddedMode();
   const id = data.identity || {};
   const cs = data.core_stats || {};
   const name = id.display_name || id.character_name || "未命名";
@@ -358,23 +345,20 @@ function Header({
             below renders its editable variant: stat cells become inputs,
             list sections sprout + / × buttons, text blocks become
             textareas. Saved live through the same onPatch pipeline
-            that already handles inline HP/AC edits.
-            Hidden in embedded mode — there's no server to save to. */}
-        {!embedded && (
-          <button
-            class={`cc-btn ${editing ? "primary" : ""}`}
-            onClick={onToggleEditing}
-            title={editing
-              ? "退出编辑模式（再次切换回只读视图）"
-              : "进入编辑模式：自由修改属性、添加词条、法术、特性、装备、背景"}>
-            <span class="ic">{editing ? "✎" : "🔧"}</span>{editing ? "编辑中" : "编辑"}
-          </button>
-        )}
+            that already handles inline HP/AC edits. */}
+        <button
+          class={`cc-btn ${editing ? "primary" : ""}`}
+          onClick={onToggleEditing}
+          title={editing
+            ? "退出编辑模式（再次切换回只读视图）"
+            : "进入编辑模式：自由修改属性、添加词条、法术、特性、装备、背景"}>
+          <span class="ic">{editing ? "✎" : "🔧"}</span>{editing ? "编辑中" : "编辑"}
+        </button>
         {/* Save button — only visible in edit mode. Persists the
             current local data to the server via the same PUT endpoint
             JSON import uses, then broadcasts BC_CARD_UPDATED so bound
             tokens + other clients refresh. */}
-        {!embedded && editing && (
+        {editing && (
           <button
             class="cc-btn primary"
             onClick={onSaveEdits}
@@ -383,18 +367,13 @@ function Header({
             <span class="ic">💾</span>{savingEdits ? "保存中…" : "保存"}
           </button>
         )}
-        {!embedded && (
-          <button class="cc-btn" onClick={onRefresh} title="重新拉取服务器上的最新数据">
-            刷新
-          </button>
-        )}
+        <button class="cc-btn" onClick={onRefresh} title="重新拉取服务器上的最新数据">
+          刷新
+        </button>
         {/* 2026-05-14 (#14 f2) — 导出 JSON + 仅复制 fused into one
             button group. 复制 is now a borderless icon-only sub-button
             seamlessly joined to the right edge of 导出 JSON (shared
-            border, no gap). SVG icon, no emoji / text.
-            2026-05-15 (#12) — followed by a "下载页面" button that
-            bundles the current data into a standalone HTML snapshot
-            (works both online and embedded). */}
+            border, no gap). SVG icon, no emoji / text. */}
         <div class="cc-btn-group">
           <button class="cc-btn" onClick={onExport} title="把当前角色卡数据导出为 JSON 文件">
             导出 JSON
@@ -403,24 +382,15 @@ function Header({
             <span class="ic" dangerouslySetInnerHTML={{ __html: ICON_COPY }} />
           </button>
         </div>
-        <button
-          class="cc-btn"
-          onClick={onDownloadStandalone}
-          title="下载当前角色卡的独立 HTML 文件（已植入数据，可离线分享 / 打印）">
-          <span class="ic">⬇</span>下载页面
-        </button>
-        {/* 导入 JSON + 仅粘贴 fused the same way. Hidden in embedded
-            mode — both writes back to the server. */}
-        {!embedded && (
-          <div class="cc-btn-group">
-            <button class="cc-btn" onClick={onImport} title="从 JSON 文件加载角色卡">
-              导入 JSON
-            </button>
-            <button class="cc-btn cc-btn-sub" onClick={onPasteJson} title="仅粘贴：弹窗输入 JSON 文本，识别后应用为当前角色卡数据">
-              <span class="ic" dangerouslySetInnerHTML={{ __html: ICON_PASTE }} />
-            </button>
-          </div>
-        )}
+        {/* 导入 JSON + 仅粘贴 fused the same way. */}
+        <div class="cc-btn-group">
+          <button class="cc-btn" onClick={onImport} title="从 JSON 文件加载角色卡">
+            导入 JSON
+          </button>
+          <button class="cc-btn cc-btn-sub" onClick={onPasteJson} title="仅粘贴：弹窗输入 JSON 文本，识别后应用为当前角色卡数据">
+            <span class="ic" dangerouslySetInnerHTML={{ __html: ICON_PASTE }} />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1955,19 +1925,7 @@ function InventorySection({ data }: { data: CharacterData }) {
 
 // ===== Main app ==============================================
 function App() {
-  // 2026-05-15 (#12) — embedded-mode bootstrap. When the page is
-  // opened from a downloaded standalone HTML, the bundled data is
-  // present on `window.__CC_BUNDLED__` and we hydrate state from it
-  // synchronously (initialiser form of useState). The matching effect
-  // below skips loadData / OBR.broadcast subscriptions when this is
-  // the case so the page renders cleanly outside of OBR.
-  const [data, setData] = useState<CharacterData | null>(() => {
-    const embedded = (window as any).__CC_BUNDLED__;
-    if (embedded && embedded.data) {
-      try { return normalizeCombatGearFlags(embedded.data); } catch { return embedded.data; }
-    }
-    return null;
-  });
+  const [data, setData] = useState<CharacterData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
   // 2026-05-15 — split-pane secondary tab. Null = single-pane mode.
@@ -2005,13 +1963,7 @@ function App() {
     }
   }, [roomId, cardId]);
 
-  useEffect(() => {
-    // 2026-05-15 (#12) — embedded mode (downloaded snapshot): data is
-    // already hydrated from window.__CC_BUNDLED__ in the useState
-    // initialiser, and there's no server to refetch from. Bail.
-    if ((window as any).__CC_BUNDLED__) return;
-    void loadData();
-  }, [loadData]);
+  useEffect(() => { void loadData(); }, [loadData]);
 
   // 2026-05-15 — wide-screen tracker for split-pane mode. Below the
   // 1400 px breakpoint the secondary pane is forcibly closed so the
@@ -2091,77 +2043,27 @@ function App() {
     downloadJson(`${name}-${cardId.slice(0,6)}.json`, data);
   }, [data, cardId]);
 
-  // 2026-05-15 (#12) — download a single self-contained HTML snapshot
-  // of the current character card. Fetches THIS page's source from
-  // the same origin, rewrites relative `href` / `src` URLs to absolute
-  // (so the JS bundle + CSS still load from obr.dnd.center when the
-  // user opens the file standalone), then injects an inline
-  // `window.__CC_BUNDLED__` script BEFORE the module script so the
-  // App's useState initialiser sees the data on first paint. The
-  // result is a shareable HTML the user can mail / print / archive —
-  // online-only for assets, offline for data.
-  const onDownloadStandalone = useCallback(async () => {
-    if (!data) return;
+  // 2026-05-15 — refresh handler. ALSO broadcasts BC_CARD_UPDATED so
+  // the small cc-info popover (on this client AND every other client
+  // in the room) drops its cache and re-fetches. Without the
+  // broadcast, the user reported "刷新只刷新大面板，小面板还是旧数据"
+  // — the small panel doesn't know fresh data.json is available.
+  const onRefresh = useCallback(async () => {
+    await loadData();
     try {
-      // Same-origin fetch of the current HTML page (cc-fullscreen.html).
-      const htmlRes = await fetch(window.location.pathname, { cache: "no-store" });
-      if (!htmlRes.ok) throw new Error(`HTTP ${htmlRes.status}`);
-      let html = await htmlRes.text();
-      // Rewrite relative asset paths to absolute URLs. Captures `src`
-      // and `href` values that aren't already absolute (http(s):, //,
-      // data:, blob:). The cc-fullscreen.html references
-      // ./assets/cc-fullscreen-XXX.js and similar — these need to
-      // become https://obr.dnd.center/<path>/assets/... so the
-      // downloaded file resolves them correctly when opened.
-      const origin = window.location.origin;
-      const pathname = window.location.pathname;
-      const baseDir = origin + pathname.substring(0, pathname.lastIndexOf("/") + 1);
-      html = html.replace(
-        /(\s(?:href|src)=)(["'])(?!https?:|\/\/|data:|blob:|#)([^"']+)\2/gi,
-        (_m, prefix, q, path) => {
-          // Strip a single leading "./" for cleanliness; otherwise the
-          // path joins as-is to the base dir.
-          const cleaned = path.replace(/^\.\//, "");
-          return `${prefix}${q}${baseDir}${cleaned}${q}`;
-        },
-      );
-      // Build the embedded payload. We bundle the data + a tiny meta
-      // block with the original room/card ids and a timestamp so the
-      // standalone file can self-identify when shared.
-      const payload = JSON.stringify({
-        data,
-        meta: {
-          room: roomId,
-          card: cardId,
-          savedAt: new Date().toISOString(),
-          source: baseDir,
-        },
-      });
-      // Inject right after the opening <head> tag so the global is
-      // set before the module script (which is at end of <body>) runs.
-      // The replacement is regex-based but bounded — there's exactly
-      // one <head> in the page.
-      const injection = `<script>window.__CC_BUNDLED__=${payload};</script>`;
-      html = html.replace(/<head([^>]*)>/i, `<head$1>${injection}`);
-      // Filename: display name + short card id, both URL-safe.
-      const idObj = data.identity || {};
-      const rawName = idObj.display_name || idObj.character_name || "character";
-      const safeName = String(rawName).replace(/[\\/:*?"<>|]+/g, "_").trim() || "character";
-      const fname = `${safeName}-${(cardId || "snapshot").slice(0, 6)}.html`;
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fname;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e: any) {
-      console.warn("[cc-fullscreen] standalone download failed", e);
-      window.alert(`下载页面失败：${e?.message || String(e)}`);
+      if (cardId) {
+        const updatedPayload = {
+          cardId,
+          url: `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/`,
+        };
+        OBR.broadcast.sendMessage(BC_CARD_UPDATED, updatedPayload, { destination: "LOCAL" });
+        OBR.broadcast.sendMessage(BC_CARD_UPDATED, updatedPayload, { destination: "REMOTE" });
+      }
+    } catch (e) {
+      console.warn("[cc-fullscreen] refresh broadcast failed", e);
     }
-  }, [data, cardId, roomId]);
+  }, [loadData, roomId, cardId]);
+
 
   // 2026-05-14 — copy-to-clipboard variant of export. Same JSON shape
   // as the file download, just lands in the clipboard so the user can
@@ -2420,8 +2322,7 @@ function App() {
         onCopyJson={onCopyJson}
         onImport={onImport}
         onPasteJson={onPasteJson}
-        onRefresh={loadData}
-        onDownloadStandalone={onDownloadStandalone}
+        onRefresh={onRefresh}
         editing={editing}
         onToggleEditing={() => setEditing((v) => !v)}
         savingEdits={savingEdits}

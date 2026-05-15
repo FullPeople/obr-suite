@@ -65,6 +65,17 @@ function resume(): void {
   if (c && c.state === "suspended") c.resume().catch(() => {});
 }
 
+// 2026-05-15 — note: tone() / noiseBurst() / playSample() each gate
+// scheduling on `c.state === "running"`. Without that gate, every
+// play call BEFORE the first user gesture queues a buffer source or
+// oscillator at currentTime (frozen at 0 while suspended); when the
+// user finally clicks and the context resumes, ALL queued sources
+// fire on the same frame — heard as 10+ identical chimes overlapping.
+// Reported as "首次播放音效时可能会重叠播放许多次，切换回合 / 切换资源
+// / 骰子等". `resume()` is still called from each play path so the
+// next gesture wakes the ctx; we just refuse to SCHEDULE until the
+// wake-up has actually landed.
+
 // --- Audio sample playback (mp3 / wav) ---
 //
 // Two real samples ship with the suite:
@@ -116,9 +127,16 @@ function playSample(url: string, gain: number = 0.55): void {
   resume();
   const c = getCtx();
   if (!c) return;
+  // 2026-05-15 — bail if the context is still suspended. Sample
+  // playback via createBufferSource has the same queue-and-burst
+  // behaviour as oscillator scheduling when suspended.
+  if (c.state !== "running") return;
   // Prime the buffer load. Once cached, subsequent plays are sync.
   loadSample(url).then((buf) => {
     if (!buf) return;
+    // Re-check inside the async resolve — the ctx may have suspended
+    // again between when we scheduled the fetch and when it resolved.
+    if (c.state !== "running") return;
     const src = c.createBufferSource();
     src.buffer = buf;
     const g = c.createGain();
@@ -146,6 +164,10 @@ interface ToneOpts {
 function tone(opts: ToneOpts): void {
   const c = getCtx();
   if (!c) return;
+  // 2026-05-15 — bail if the context is still suspended. Scheduling
+  // with a frozen currentTime causes the "stack of identical chimes
+  // on first interaction" bug.
+  if (c.state !== "running") return;
   const t0 = c.currentTime + (opts.delay ?? 0);
   const dur = opts.duration;
   const peak = opts.gain ?? 0.18;
@@ -197,6 +219,8 @@ function noiseBurst(opts: {
 }): void {
   const c = getCtx();
   if (!c) return;
+  // 2026-05-15 — same suspended-ctx guard as tone(); see comment there.
+  if (c.state !== "running") return;
   const t0 = c.currentTime + (opts.delay ?? 0);
   const dur = opts.duration;
 

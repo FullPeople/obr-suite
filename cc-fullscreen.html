@@ -270,16 +270,25 @@ body{
    its own independently-scrolling column. Below 1400 px the toggle
    button is hidden + the body falls back to single pane (the App
    force-clears tab2 on the resize event so we don't have to handle
-   stale state here). */
+   stale state here).
+   2026-05-15 fix — switched from `display:grid` to flex. Grid was
+   leaving rows at `auto` height so each pane sized to its own
+   content; the taller pane (e.g. spells with 60+ entries) overflowed
+   the body, causing the right column scrollbar to appear AFTER the
+   bottom edge of the visible interface. Flex with `height:100%` on
+   each pane pins them to the body's flex-allocated height so the
+   inner overflow-y:auto kicks in inside the visible area. */
 .cc-body.is-split{
-  display:grid;
-  grid-template-columns:1fr 1fr;
+  display:flex;
+  flex-direction:row;
   gap:0;
   overflow:hidden; /* the two panes scroll independently */
   padding:0;
 }
 .cc-body.is-split .cc-pane{
+  flex:1 1 0;
   min-width:0;
+  height:100%;
   overflow-y:auto;
   padding:18px 20px 30px;
 }
