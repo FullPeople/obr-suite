@@ -205,12 +205,25 @@ async function openInfoPopoverFor(cardId: string, roomId: string, itemId: string
       OBR.viewport.getHeight(),
     ]);
     const buttonTop = vh - (BOTTOM_OFFSET + 48 + 8);
-    const anchorTop = buttonTop - INFO_GAP;
+    // `desiredBottom` is the screen-y the popover SHOULD bottom-out at
+    // (the inset above the action button). With BOTTOM anchor we passed
+    // this as `anchorPosition.top` directly; with TOP anchor (used here
+    // since 2026-05-16) we compute the TOP from it: top = bottom - h.
+    const desiredBottom = buttonTop - INFO_GAP;
     const itemParam = itemId ? `&itemId=${encodeURIComponent(itemId)}` : "";
     const userOff = getPanelOffset(PANEL_IDS.ccInfo);
     const sizeOverride = getPanelSize(PANEL_IDS.ccInfo);
     const w = sizeOverride?.width ?? INFO_WIDTH;
     const h = sizeOverride?.height ?? INFO_HEIGHT;
+    // 2026-05-16 — switched to TOP-anchored vertical alignment so the
+    // popover's TOP edge stays fixed when info-page.ts auto-shrinks it
+    // via OBR.popover.setHeight (e.g. when switching tabs to a shorter
+    // pane). Previously the BOTTOM was fixed and a shrink visibly
+    // pulled the top down ("突兀变下面去了" — user). The initial open
+    // is at the same visual position as before because we compute
+    // `top = desiredBottom - h` so the open-time bottom still lands
+    // at `desiredBottom`. Later shrinks keep the top put and let the
+    // bottom move up instead.
     await OBR.popover.open({
       id: INFO_POPOVER_ID,
       url: `${INFO_URL}?cardId=${encodeURIComponent(cardId)}&roomId=${encodeURIComponent(
@@ -221,10 +234,10 @@ async function openInfoPopoverFor(cardId: string, roomId: string, itemId: string
       anchorReference: "POSITION",
       anchorPosition: {
         left: vw - RIGHT_OFFSET + userOff.dx,
-        top: anchorTop + userOff.dy,
+        top: desiredBottom - h + userOff.dy,
       },
-      anchorOrigin: { horizontal: "RIGHT", vertical: "BOTTOM" },
-      transformOrigin: { horizontal: "RIGHT", vertical: "BOTTOM" },
+      anchorOrigin: { horizontal: "RIGHT", vertical: "TOP" },
+      transformOrigin: { horizontal: "RIGHT", vertical: "TOP" },
       hidePaper: true,
       disableClickAway: true,
     });

@@ -98,7 +98,11 @@ const NON_RESIZABLE = new Set<string>([
 type AnchorH = "left" | "right";
 type AnchorV = "top" | "bottom";
 const PANEL_ANCHOR: Record<string, { h: AnchorH; v: AnchorV }> = {
-  [PANEL_IDS.ccInfo]:         { h: "right", v: "bottom" }, // characterCards/index.ts
+  // 2026-05-16 — ccInfo flipped to TOP-anchored so its top edge stays
+  // fixed when info-page.ts auto-shrinks via setHeight on tab switch.
+  // See characterCards/index.ts:openInfoPopoverFor for the matching
+  // `vertical: "TOP"` change.
+  [PANEL_IDS.ccInfo]:         { h: "right", v: "top" },    // characterCards/index.ts
   [PANEL_IDS.bestiaryInfo]:   { h: "right", v: "top" },    // bestiary/index.ts
   [PANEL_IDS.bestiaryPanel]:  { h: "right", v: "top" },    // bestiary/index.ts
   [PANEL_IDS.diceHistory]:    { h: "right", v: "bottom" }, // dice/index.ts

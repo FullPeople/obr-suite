@@ -874,10 +874,17 @@ const ccIframeOriginGetter = async () => {
     OBR.viewport.getWidth().catch(() => 1280),
     OBR.viewport.getHeight().catch(() => 720),
   ]);
-  const anchorTop = vh - CC_BOTTOM_OFFSET - CC_BUTTON_HEIGHT - CC_INFO_GAP;
+  const anchorBottom = vh - CC_BOTTOM_OFFSET - CC_BUTTON_HEIGHT - CC_INFO_GAP;
+  // 2026-05-16 — with TOP-anchored popover the iframe's top stays at
+  // anchorPosition.top = anchorBottom - h_open. h_open is captured
+  // into INFO_MAX_HEIGHT at OBR.onReady. window.innerHeight tracks
+  // the CURRENT (post-setHeight) height which can be smaller, so
+  // using it here would drift the rollable / dice menu origin a few
+  // dozen pixels off after the popover auto-shrinks. INFO_MAX_HEIGHT
+  // is the right constant because it equals the open-time height.
   return {
     left: Math.round(vw - CC_RIGHT_OFFSET - window.innerWidth),
-    top: Math.round(anchorTop - window.innerHeight),
+    top: Math.round(anchorBottom - INFO_MAX_HEIGHT),
   };
 };
 bindRollableContextMenu(
