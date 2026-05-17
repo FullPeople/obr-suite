@@ -735,6 +735,35 @@ html, body, #root { height: 100%; background: transparent; }
 }
 .btn-end:hover { background: rgba(231, 76, 60, 0.95); }
 
+/* 2026-05-16 — "一键清空" two-click button. Idle = subdued, armed =
+   bright red + outlined pulse so the second-click hot state is
+   unmistakable. The hook clears the armed state after 3 s or mouse
+   leave. */
+.btn-clear-all {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  border-radius: 13px;
+  background: rgba(120, 40, 40, 0.55);
+  border: 1px solid rgba(231, 76, 60, 0.5);
+  color: #f5d0c8;
+  cursor: pointer;
+  transition: background .14s, color .14s, border-color .14s, box-shadow .14s;
+}
+.btn-clear-all:hover {
+  background: rgba(160, 50, 50, 0.7);
+  color: #fff;
+  border-color: rgba(231, 76, 60, 0.85);
+}
+.btn-clear-all.armed {
+  background: rgba(231, 76, 60, 0.95);
+  border-color: rgba(255, 90, 75, 1);
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.35);
+}
+
 .btn-icon { font-size: 13px; }
 
 /* Drag-in auto-add toggle. Solid backgrounds matching the rest of the

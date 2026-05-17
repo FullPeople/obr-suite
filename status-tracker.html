@@ -680,6 +680,12 @@ body.edit-mode .bubble.drop-after{
       </svg>
     </div>
     <span class="ttl">状态调色板</span>
+    <!-- 2026-05-16 — global render-mode toggle. 3 states: AUTO / 特效 /
+         文字. Click cycles. Affects every buff this client renders
+         on tokens regardless of per-buff settings. Per-client (stored
+         in localStorage), so each player can pick their own preference. -->
+    <button class="x" id="btnRenderMode" type="button" title="渲染模式：循环 自动 → 特效 → 文字 → 自动 …"
+            style="width:auto;padding:0 8px;font-size:11px;letter-spacing:0.5px">自动</button>
     <button class="x" id="btnClose" type="button" title="关闭 (])">×</button>
   </div>
   <div class="toolbar">

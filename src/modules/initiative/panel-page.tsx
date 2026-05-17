@@ -21,6 +21,7 @@ import {
 } from "./utils/visualEffects";
 import { subscribeToSfx } from "../dice/sfx-broadcast";
 import { bindPanelDrag } from "../../utils/panelDrag";
+import { getState, onStateChange } from "../../state";
 import { PANEL_IDS } from "../../utils/panelLayout";
 import "./styles/initiative.css";
 
@@ -99,6 +100,7 @@ function App() {
     nextTurn,
     prevTurn,
     endCombat,
+    clearAllInitiative,
     requestEndTurn,
     dicePlusAvailable,
     resolveOwnerColor,
@@ -138,7 +140,22 @@ function App() {
     };
   }, []);
 
+  // 2026-05-16 — hide-percent-hp setting. When ON, resolveHpRatio
+  // always returns null so InitiativeItemRow skips the bar entirely
+  // for every viewer (DM included — the toggle is meant as a "no HP
+  // leaks in the strip" preference, applying uniformly). useState +
+  // onStateChange so a settings flip re-renders us live.
+  const [hidePercentHpBar, setHidePercentHpBar] = useState(() =>
+    !!getState().initiativeHidePercentHpBar,
+  );
+  useEffect(() => {
+    const off = onStateChange((s) =>
+      setHidePercentHpBar(!!s.initiativeHidePercentHpBar),
+    );
+    return off;
+  }, []);
   const resolveHpRatio = useCallback((item: InitiativeItem): number | null => {
+    if (hidePercentHpBar) return null;
     if (item.maxHp <= 0) return null;
     const ratio = Math.max(0, Math.min(1, item.hp / item.maxHp));
     const ownsItem = !!myIdRef.current && item.ownerId === myIdRef.current;
@@ -156,7 +173,7 @@ function App() {
       return Math.max(0, Math.min(1, Math.ceil(ratio / step) * step));
     }
     return ratio;
-  }, [isGM, combatState.inCombat, combatState.preparing, playerThreshold]);
+  }, [hidePercentHpBar, isGM, combatState.inCombat, combatState.preparing, playerThreshold]);
 
   // Suppress unused-import warning until this hook becomes useMemo'd
   // (kept import for future-proofing other helpers in this file).
@@ -714,6 +731,7 @@ function App() {
                 onPrevTurn={prevTurn}
                 onNextTurn={nextTurn}
                 onEndCombat={endCombat}
+                onClearAllInit={clearAllInitiative}
                 lang={lang}
                 reorderMode={reorderMode}
                 onToggleReorder={toggleReorder}

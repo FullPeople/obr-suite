@@ -63,6 +63,11 @@ interface CharEntry {
   id: string;
   name: string;
   owner: string;
+  // 2026-05-16 — kind drives section grouping in render(): "player"
+  // tokens go in the first section ("玩家"), "monster" tokens (GM-owned
+  // tokens currently in the initiative tracker) go in the second
+  // ("先攻中的怪物").
+  kind: "player" | "monster";
   // The token's bubbles metadata snapshot, handed to the stat banner
   // for a flicker-free initial paint.
   live: BubblesData;
@@ -116,11 +121,17 @@ async function gather(): Promise<CharEntry[]> {
       id: it.id,
       name,
       owner: ownerLabel,
+      kind: isPlayerOwned ? "player" : "monster",
       live,
     });
   }
-  // Stable sort by owner then name so the grid doesn't jump on rerender.
-  out.sort((a, b) => a.owner.localeCompare(b.owner) || a.name.localeCompare(b.name));
+  // 2026-05-16 — players first, then monsters; alphabetical within
+  // each group. render() inserts a divider between the two groups so
+  // the DM can tell at a glance which row is whose.
+  out.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "player" ? -1 : 1;
+    return a.owner.localeCompare(b.owner) || a.name.localeCompare(b.name);
+  });
   return out;
 }
 
@@ -220,8 +231,22 @@ function render(chars: CharEntry[]): void {
       cards.delete(id);
     }
   }
-  // Re-attach in sorted order (appendChild moves an existing child).
+  // 2026-05-16 — re-attach in sorted order WITH section dividers
+  // between player and monster groups. Dividers are simple DOM nodes
+  // that span the full grid row (CSS sets grid-column: 1/-1). We
+  // rebuild divider nodes every render (cheap, content-free) so
+  // group transitions stay accurate as tokens come and go.
+  bodyEl.querySelectorAll(".rt-section-divider").forEach((d) => d.remove());
+  let lastKind: "player" | "monster" | null = null;
   for (const c of chars) {
+    if (c.kind !== lastKind) {
+      const divider = document.createElement("div");
+      divider.className = "rt-section-divider";
+      divider.dataset.kind = c.kind;
+      divider.textContent = c.kind === "player" ? "玩家" : "先攻中的怪物";
+      bodyEl.appendChild(divider);
+      lastKind = c.kind;
+    }
     const st = cards.get(c.id);
     if (st) bodyEl.appendChild(st.el);
   }

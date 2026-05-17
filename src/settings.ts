@@ -1938,6 +1938,7 @@ const TABS: TabDef[] = [
       const s = getState();
       const focusOn = s.initiativeFocusOnTurnChange !== false;
       const autoSnap = !!s.initiativeAutoSnapOnPrep;
+      const hideHpBar = !!s.initiativeHidePercentHpBar;
       const sfxOn = (() => {
         try {
           const v = localStorage.getItem("obr-suite/sfx-initiative");
@@ -1980,6 +1981,21 @@ const TABS: TabDef[] = [
         </div>
         <div class="row">
           <div class="lbl">
+            ${lang === "zh" ? "隐藏先攻条上的百分比血条" : "Hide percent HP bar in initiative strip"}
+            <div class="desc"><em>${
+              lang === "zh"
+                ? "默认每个 token 头像下会显示一条按百分比变色的血条；勾选后隐藏，适合不想让玩家通过先攻条看到敌方血量进度的桌子。"
+                : "By default each token's portrait shows a percent-coloured HP bar underneath; check to hide it for tables that don't want players inferring enemy HP from the strip."
+            }</em></div>
+          </div>
+          <button class="tog ${
+            hideHpBar ? "on" : ""
+          }" data-key="initiativeHidePercentHpBar" type="button" ${
+            isGM ? "" : "disabled"
+          } aria-pressed="${hideHpBar}"></button>
+        </div>
+        <div class="row">
+          <div class="lbl">
             ${lang === "zh" ? "启用先攻 / 同步视口音效" : "Enable initiative + sync-viewport SFX"}
             <div class="desc"><em>${
               lang === "zh"
@@ -2007,6 +2023,13 @@ const TABS: TabDef[] = [
           if (!isGM) return;
           const cur = !!getState().initiativeAutoSnapOnPrep;
           await setState({ initiativeAutoSnapOnPrep: !cur });
+        });
+      root
+        .querySelector<HTMLButtonElement>('.tog[data-key="initiativeHidePercentHpBar"]')
+        ?.addEventListener("click", async () => {
+          if (!isGM) return;
+          const cur = !!getState().initiativeHidePercentHpBar;
+          await setState({ initiativeHidePercentHpBar: !cur });
         });
       root
         .querySelector<HTMLButtonElement>('.tog[data-key="sfxInitiative"]')

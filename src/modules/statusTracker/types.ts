@@ -5,6 +5,31 @@ export const STATUS_BUFFS_KEY = `${PLUGIN_ID}/buffs`;
 export const STATUS_BUFF_ROUNDS_KEY = `${PLUGIN_ID}/buff-rounds`;
 export const STATUS_RESOURCES_KEY = `${PLUGIN_ID}/resources`;
 
+// 2026-05-16 — per-client global render-mode override.
+//   "auto"   — fall back to per-buff settings (default).
+//   "effect" — force the webm/icon path for every buff that HAS one;
+//              fall back to text for buffs without.
+//   "text"   — force the curved-band + text-label path for every
+//              buff, ignoring webmAsset / iconAsset.
+// Stored in localStorage so each client can choose its own preference
+// (some players prefer the cleaner text-only view; some DMs want full
+// effects on; per-buff defaults remain available via "auto").
+export type StatusRenderMode = "auto" | "effect" | "text";
+export const LS_STATUS_RENDER_MODE = `${PLUGIN_ID}/render-mode`;
+export function getStatusRenderMode(): StatusRenderMode {
+  try {
+    const v = localStorage.getItem(LS_STATUS_RENDER_MODE);
+    if (v === "effect" || v === "text" || v === "auto") return v;
+  } catch {}
+  return "auto";
+}
+export function setStatusRenderMode(mode: StatusRenderMode): void {
+  try {
+    if (mode === "auto") localStorage.removeItem(LS_STATUS_RENDER_MODE);
+    else localStorage.setItem(LS_STATUS_RENDER_MODE, mode);
+  } catch {}
+}
+
 export const SCENE_BUFF_CATALOG_KEY = `${PLUGIN_ID}/buff-catalog`;
 export const SCENE_RESOURCE_CATALOG_KEY = `${PLUGIN_ID}/resource-catalog`;
 

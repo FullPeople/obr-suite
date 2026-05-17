@@ -103,6 +103,11 @@ export interface SuiteState {
   // turn order tokens line up cleanly. Default false (most groups
   // pre-position by hand).
   initiativeAutoSnapOnPrep: boolean;
+  // 2026-05-16 — Initiative tracker — hide the percent HP bar that
+  // appears under each token's portrait in the initiative strip.
+  // Some tables prefer not to leak HP info to players via the strip.
+  // Default false (strip shows the bar).
+  initiativeHidePercentHpBar: boolean;
   // Cross-scene sync. When ON, the suite's scene-state is mirrored
   // to ROOM metadata so every scene in the room shares the same
   // settings. The flag itself rides along with the state (it's part
@@ -204,6 +209,7 @@ export const DEFAULT_STATE: SuiteState = {
   bestiaryAutoName: false,
   initiativeFocusOnTurnChange: true,
   initiativeAutoSnapOnPrep: false,
+  initiativeHidePercentHpBar: false,
   crossSceneSyncSettings: false,
   crossSceneSyncCards: false,
   libraries: DEFAULT_LIBRARIES,
@@ -272,6 +278,8 @@ function merge(partial: any): SuiteState {
       partial.initiativeFocusOnTurnChange ?? DEFAULT_STATE.initiativeFocusOnTurnChange,
     initiativeAutoSnapOnPrep:
       partial.initiativeAutoSnapOnPrep ?? DEFAULT_STATE.initiativeAutoSnapOnPrep,
+    initiativeHidePercentHpBar:
+      partial.initiativeHidePercentHpBar ?? DEFAULT_STATE.initiativeHidePercentHpBar,
     crossSceneSyncSettings:
       partial.crossSceneSyncSettings ?? DEFAULT_STATE.crossSceneSyncSettings,
     crossSceneSyncCards:
@@ -288,6 +296,7 @@ function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
   if (a.bestiaryAutoName !== b.bestiaryAutoName) return false;
   if (a.initiativeFocusOnTurnChange !== b.initiativeFocusOnTurnChange) return false;
   if (a.initiativeAutoSnapOnPrep !== b.initiativeAutoSnapOnPrep) return false;
+  if (a.initiativeHidePercentHpBar !== b.initiativeHidePercentHpBar) return false;
   if (a.crossSceneSyncSettings !== b.crossSceneSyncSettings) return false;
   if (a.crossSceneSyncCards !== b.crossSceneSyncCards) return false;
   for (const k of Object.keys(a.enabled) as ModuleId[]) {

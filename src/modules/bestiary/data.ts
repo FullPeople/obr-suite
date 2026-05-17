@@ -88,11 +88,30 @@ const SIZE_MAP: Record<string, string> = {
   T: "超小型", S: "小型", M: "中型", L: "大型", H: "巨型", G: "超巨型",
 };
 
+// 2026-05-17 — accepts BOTH shapes used by the various data sources:
+//   • number              → 5etools-style "ac: 15"
+//   • array               → 5etools "ac: [15]" / "ac: [{ac:15, from:[...]}]"
+//   • string              → digit-only "15" (rare; fall back parsing)
+// Previously only handled the array shape; monster-studio's exporter
+// emits a plain number for ACs without source notes, so the bestiary
+// fell back to 10 for every monster authored there. User report:
+// "怪物编辑器中不管填写AC为多少，最后绑定在token上时AC都显示为10".
 function parseAC(ac: any): number {
-  if (!ac || !Array.isArray(ac) || ac.length === 0) return 10;
-  const first = ac[0];
-  if (typeof first === "number") return first;
-  if (first && typeof first === "object" && "ac" in first) return first.ac;
+  if (ac == null) return 10;
+  if (typeof ac === "number" && Number.isFinite(ac)) return ac;
+  if (typeof ac === "string") {
+    const m = /(\d+)/.exec(ac);
+    if (m) return Number(m[1]);
+    return 10;
+  }
+  if (Array.isArray(ac) && ac.length > 0) {
+    const first = ac[0];
+    if (typeof first === "number") return first;
+    if (first && typeof first === "object" && "ac" in first) {
+      const v = (first as any).ac;
+      if (typeof v === "number") return v;
+    }
+  }
   return 10;
 }
 

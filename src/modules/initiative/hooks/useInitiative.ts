@@ -580,8 +580,17 @@ export function useInitiative() {
           // Fit bbox with 1.4× padding; never zoom IN past the user's
           // current zoom (avoids jarring close-ups when only one other
           // token is left).
+          // 2026-05-16 — also cap the zoom-OUT at 0.5× current scale.
+          // If the other initiative tokens are scattered across a huge
+          // map (e.g. one nearby, one in another room 5000 units
+          // away), the raw fitScale becomes microscopic and the
+          // camera was zooming out far enough that the player saw a
+          // sea-of-pixels view — user bug report: "玩家视角轮到隐形单位
+          // 的回合时视角被拉的特别特别大". Clamping to scaleNow*0.5
+          // limits the drama to 2× zoom out from where the user was.
           const fitScale = Math.min(vw / (bboxW * 1.4), vh / (bboxH * 1.4));
-          const targetScale = Math.min(fitScale, scaleNow);
+          const zoomOutFloor = scaleNow * 0.5;
+          const targetScale = Math.max(zoomOutFloor, Math.min(fitScale, scaleNow));
           OBR.viewport.animateTo({
             position: {
               x: -cx * targetScale + vw / 2,
@@ -1242,6 +1251,30 @@ export function useInitiative() {
     fireBroadcast(BROADCAST_CLOSE_PANEL, {});
   }, [writeCombatState]);
 
+  // 2026-05-16 — "一键清空先攻" — strip initiative metadata from EVERY
+  // token currently in the tracker, leaving the scene tokens
+  // themselves intact. Distinct from endCombat: end-combat keeps the
+  // entries (so the same initiative order can be reused for the next
+  // round), this wipes them so the DM starts fresh. UI gates this
+  // behind a two-click confirm to prevent fat-finger accidents.
+  const clearAllInitiative = useCallback(async () => {
+    prevActiveId.current = null;
+    optimisticActiveIdRef.current = null;
+    lastWrittenActiveIdRef.current = null;
+    const allIds = allItemsRef.current.map((i) => i.id);
+    if (allIds.length > 0) {
+      await OBR.scene.items.updateItems(allIds, (drafts) => {
+        for (const d of drafts) {
+          if (METADATA_KEY in d.metadata) {
+            delete d.metadata[METADATA_KEY];
+          }
+        }
+      });
+    }
+    await writeCombatState({ inCombat: false, preparing: false, round: 0 });
+    fireBroadcast(BROADCAST_COMBAT_END, {});
+  }, [writeCombatState]);
+
   // Resolve a per-token tint colour. Owner = `item.createdUserId`,
   // looked up against the live party color map (other players) +
   // this client's own color (myColor). DM-owned tokens get the local
@@ -1274,6 +1307,7 @@ export function useInitiative() {
     nextTurn,
     prevTurn,
     endCombat,
+    clearAllInitiative,
     requestEndTurn,
     resolveOwnerColor,
   };

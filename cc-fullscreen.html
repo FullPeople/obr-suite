@@ -337,6 +337,16 @@ body{
   grid-template-columns:1fr 1fr;
   gap:18px;
 }
+/* 2026-05-16 — without `min-width: 0` on grid items, each track's
+   intrinsic min-content keeps the grid from honouring `1fr 1fr`.
+   In edit mode the Defenses section grows tag chips / inputs with
+   `white-space:nowrap` content, so the right column would push to
+   fit its widest row and the left (Abilities) column got clipped.
+   User: "点击编辑会导致排版异常，防御 · 语言 · 工具所在的列过宽
+   导致左边的属性豁免技能被裁剪了."
+   `min-width: 0` lets each track shrink past its content's intrinsic
+   min, restoring the equal 1fr split. */
+.cc-grid > * { min-width: 0; }
 @media (max-width:900px){
   .cc-grid{grid-template-columns:1fr}
 }

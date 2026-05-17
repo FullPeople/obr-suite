@@ -39,6 +39,9 @@ import {
   BuffDef,
   BuffEffect,
   textColorFor,
+  getStatusRenderMode,
+  setStatusRenderMode,
+  type StatusRenderMode,
 } from "./modules/statusTracker/types";
 import { bindPanelDrag } from "./utils/panelDrag";
 import { PANEL_IDS } from "./utils/panelLayout";
@@ -47,6 +50,7 @@ import { assetUrl } from "./asset-base";
 const BC_DRAG_START = `${PLUGIN_ID}/drag-start`;
 const BC_DRAG_END = `${PLUGIN_ID}/drag-end`;
 const BC_TOGGLE = `${PLUGIN_ID}/toggle`;
+const BC_REFRESH_TOKEN = `${PLUGIN_ID}/refresh-token`;
 
 // Mode of the most recent BC_DRAG_START. The safety-net pointerup
 // handler skips its BC_DRAG_END broadcast while this is
@@ -58,6 +62,7 @@ let lastDragStartMode: "click-place" | "paint-toggle" | null = null;
 const dragHandle = document.getElementById("dragHandle") as HTMLDivElement;
 const btnClose = document.getElementById("btnClose") as HTMLButtonElement;
 const btnEdit = document.getElementById("btnEdit") as HTMLButtonElement;
+const btnRenderMode = document.getElementById("btnRenderMode") as HTMLButtonElement | null;
 const btnExport = document.getElementById("btnExport") as HTMLButtonElement;
 const btnImport = document.getElementById("btnImport") as HTMLButtonElement;
 const fileImport = document.getElementById("fileImport") as HTMLInputElement;
@@ -988,6 +993,25 @@ window.addEventListener("pointercancel", async () => {
   } catch {}
 });
 
+// 2026-05-16 — safety-net Escape handler on the PALETTE too. The
+// capture-page modal already listens for Esc, but if it lost focus
+// mid-gesture (popover stole focus, browser tab-switched, modal
+// failed to open in time, etc.) the user could be left with a buff
+// "stuck on the cursor" with no way out short of refreshing. Esc on
+// the palette broadcasts BC_DRAG_END so the background closes the
+// capture overlay regardless. Also resets lastDragStartMode so the
+// next gesture starts clean. User report: "状态追踪中拖拽状态时常
+// 会卡住，没办法脱离拖拽状态，黏在手上，除非刷新界面否则取消不了."
+window.addEventListener("keydown", async (e) => {
+  if (e.key !== "Escape") return;
+  e.preventDefault();
+  e.stopPropagation();
+  lastDragStartMode = null;
+  try {
+    await OBR.broadcast.sendMessage(BC_DRAG_END, {}, { destination: "LOCAL" });
+  } catch {}
+}, true);
+
 // === Edit popup =============================================================
 
 // Display labels for the experimental effect modes. Drives both the
@@ -1463,6 +1487,43 @@ bindPanelDrag(dragHandle, PANEL_IDS.statusPalette);
 btnClose.addEventListener("click", async () => {
   try { await OBR.broadcast.sendMessage(BC_TOGGLE, {}, { destination: "LOCAL" }); } catch {}
 });
+
+// 2026-05-16 — render-mode cycle button. auto → effect → text → auto.
+// Per-client localStorage; bubbles.ts reads getStatusRenderMode() on
+// every describe(). Refresh visible tokens after a flip so the user
+// sees the change immediately rather than waiting for the next
+// items.onChange.
+function refreshRenderModeLabel(): void {
+  if (!btnRenderMode) return;
+  const mode = getStatusRenderMode();
+  btnRenderMode.textContent =
+    mode === "effect" ? "特效" :
+    mode === "text"   ? "文字" :
+                        "自动";
+  btnRenderMode.dataset.mode = mode;
+}
+refreshRenderModeLabel();
+if (btnRenderMode) {
+  btnRenderMode.addEventListener("click", async () => {
+    const cur = getStatusRenderMode();
+    const next: StatusRenderMode =
+      cur === "auto"   ? "effect" :
+      cur === "effect" ? "text"   :
+                         "auto";
+    setStatusRenderMode(next);
+    refreshRenderModeLabel();
+    // Force-resync visible tokens so the mode flip lands right away.
+    try {
+      const items = await OBR.scene.items.getItems();
+      for (const it of items) {
+        if ((it as any).type !== "IMAGE") continue;
+        try {
+          OBR.broadcast.sendMessage(BC_REFRESH_TOKEN, { tokenId: it.id }, { destination: "LOCAL" });
+        } catch {}
+      }
+    } catch {}
+  });
+}
 window.addEventListener("keydown", async (e) => {
   if (e.key === "]" || e.key === "Escape") {
     if (popupBuffId) {

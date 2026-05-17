@@ -116,7 +116,11 @@ let previewItemId: string | null = null;
 //      → no future entries could fire.
 // The drag-end approach has zero accumulated state per token; each
 // drag-end is evaluated fresh against the current world.
-const DRAG_END_MS = 350;
+// 2026-05-17 — reduced from 350 ms to 200 ms. Multi-fire position
+// updates during a held drag still get debounced, but the popover
+// now opens within ~200 ms of release instead of the 350 ms perceived
+// lag the user reported ("显示的非常延迟").
+const DRAG_END_MS = 200;
 let dragEndTimer: ReturnType<typeof setTimeout> | null = null;
 const lastTokenPos = new Map<string, { x: number; y: number }>();
 // Tokens just teleported by this client — their drag-end check is
@@ -632,13 +636,16 @@ async function openDestinationPopover(
   anchorLeft = Math.max(half + 8, Math.min(vw - half - 8, anchorLeft));
 
   destPopoverOpen = true;
-  // Hard safety net: 60 s force-reset of destPopoverOpen so a missed
-  // close-signal can't permanently lock the entry detector.
+  // 2026-05-17 — was 60 s. Reduced to 12 s because a 60 s lockout
+  // after any glitchy close-signal feels broken (user thinks the
+  // plugin is dead). 12 s is generous enough for a real teleport
+  // pick + blink animation (~3-4 s total) and still recovers fast
+  // if the destination popover orphans somehow.
   if (destPopoverSafetyTimer) clearTimeout(destPopoverSafetyTimer);
   destPopoverSafetyTimer = setTimeout(() => {
     destPopoverOpen = false;
     destPopoverSafetyTimer = null;
-  }, 60_000);
+  }, 12_000);
 
   const payload = {
     entryName: entryMeta.name || _t("portalUnnamed"),
@@ -1209,6 +1216,34 @@ async function teleport(
   // the wrong tokens too". Player has to click again to re-establish
   // a fresh selection.
   try { await OBR.player.deselect(tokenIds); } catch {}
+
+  // 2026-05-17 — defensive reset of the entry-detector state machine
+  // so a teleport can't leave anything latched ON. Without this, a
+  // successful teleport that didn't go through the blink path (rare
+  // — e.g. blink disabled + closeDestinationPopover failed) could
+  // leave destPopoverOpen=true, blocking every subsequent drag-into
+  // -portal from ever firing the popover again. User report:
+  // "进行过一次传送后，那么就没办法再次进行传送了，不会显示弹窗".
+  destPopoverOpen = false;
+  if (destPopoverSafetyTimer) {
+    clearTimeout(destPopoverSafetyTimer);
+    destPopoverSafetyTimer = null;
+  }
+  blinkModalOpen = false;
+  // Clear stale moved-IDs so the next drag's onDragEnd doesn't see
+  // teleported tokens in its working set. The proceed handler also
+  // strips tJob.tokenIds, but if we teleported via the no-blink path
+  // that handler never runs.
+  for (const id of tokenIds) {
+    movedByMeIds.delete(id);
+    lastTokenPos.delete(id);
+  }
+  // Cancel any debounce timer that fired during teleport — its
+  // callback would see an inconsistent world.
+  if (dragEndTimer) {
+    clearTimeout(dragEndTimer);
+    dragEndTimer = null;
+  }
 }
 
 // --- Setup / teardown -----------------------------------------------------

@@ -63,6 +63,29 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
   font-size:13px;line-height:1.9;padding:60px 20px;
 }
 
+/* 2026-05-16 — section divider between player + monster groups.
+   Spans the full grid row via grid-column:1/-1; renders as a
+   small heading + bottom hairline. Monster divider uses the
+   bestiary purple tone; player divider stays in the gold accent
+   so the DM can distinguish at a glance. */
+.rt-section-divider{
+  grid-column:1/-1;
+  display:flex;align-items:center;gap:10px;
+  font-size:12px;font-weight:700;letter-spacing:1px;
+  text-transform:uppercase;
+  color:var(--gold);
+  padding:4px 2px;
+  margin-top:4px;
+}
+.rt-section-divider:first-child{margin-top:0}
+.rt-section-divider::after{
+  content:"";
+  flex:1;
+  height:1px;
+  background:linear-gradient(90deg, var(--border-strong), transparent);
+}
+.rt-section-divider[data-kind="monster"]{color:var(--accent-dim)}
+
 /* ===== Character card ===== */
 .rt-char{
   background:var(--bg2);

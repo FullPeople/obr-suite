@@ -188,6 +188,15 @@ const CTX_GATHER = `${METADATA_KEY}/gather-empty`;
 const unsubs: Array<() => void> = [];
 let knownItemIds = new Set<string>();
 let initiativeRole: "GM" | "PLAYER" = "PLAYER";
+// 2026-05-16 — cold-start guard for the drag-in auto-add detector.
+// True once we've seen at least one items.onChange tick AND
+// initKnownItems has populated. The detector skips its "any new token?"
+// pass while this is false, otherwise a network-lagged scene load
+// (or a fresh page refresh while combat is active) would see the
+// entire scene's CHARACTER-layer items as "newly dragged in" and
+// auto-roll initiative for every one of them. User report: "网络卡了
+// 一下没加载出来，刷新一下之后所有token都加入先攻了."
+let dragInDetectorReady = false;
 
 // Tracks whether the initiative panel is currently displayed so the
 // viewport-resize handler can avoid spawning a popover when it
@@ -246,6 +255,14 @@ async function initKnownItems() {
     );
     knownItemIds.clear();
     all.forEach((i) => knownItemIds.add(i.id));
+    // 2026-05-16 — arm the drag-in detector only AFTER we've
+    // successfully snapshotted the existing items. Without this gate,
+    // a slow scene-load could let the items.onChange handler fire
+    // first with knownItemIds still empty, flagging every existing
+    // token as "newly dragged in" → auto-roll initiative for all of
+    // them. Resetting in onSceneReady (below) keeps cold-start
+    // behaviour correct for scene switches too.
+    dragInDetectorReady = true;
   } catch (e) {
     console.error("[obr-suite/initiative] initKnown failed", e);
   }
@@ -668,7 +685,16 @@ export async function setupInitiative(): Promise<void> {
     await initKnownItems();
     unsubs.push(
       OBR.scene.onReadyChange(async (ready) => {
-        if (ready) await initKnownItems();
+        if (ready) {
+          // 2026-05-16 — disarm the drag-in detector across scene
+          // switches so a new scene's existing items don't get
+          // auto-added on first onChange. initKnownItems re-arms it
+          // once the new scene's snapshot is in.
+          dragInDetectorReady = false;
+          await initKnownItems();
+        } else {
+          dragInDetectorReady = false;
+        }
       })
     );
     unsubs.push(
@@ -686,6 +712,18 @@ export async function setupInitiative(): Promise<void> {
         if (!active) {
           knownItemIds.clear();
           characterItems.forEach((i) => knownItemIds.add(i.id));
+          return;
+        }
+
+        // 2026-05-16 — cold-start guard. If initKnownItems hasn't
+        // populated yet (network lag, page refresh, etc.), treat THIS
+        // onChange as the initial snapshot — populate knownItemIds
+        // and bail without auto-adding. The next genuine drag-in will
+        // then be a real diff against this baseline.
+        if (!dragInDetectorReady) {
+          knownItemIds.clear();
+          characterItems.forEach((i) => knownItemIds.add(i.id));
+          dragInDetectorReady = true;
           return;
         }
 

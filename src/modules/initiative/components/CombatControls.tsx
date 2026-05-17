@@ -1,4 +1,5 @@
 
+import { useState, useRef, useEffect } from "preact/hooks";
 import { CombatState } from "../types";
 import { EffectType } from "../hooks/useInitiative";
 import { Lang, t } from "../utils/i18n";
@@ -18,12 +19,64 @@ interface Props {
   onPrevTurn: () => void;
   onNextTurn: () => void;
   onEndCombat: () => void;
+  /** 2026-05-16 — wipe every token's initiative metadata. UI gates
+   *  this behind a two-click confirm (first click arms the button,
+   *  second within 3 s commits, mouse-out / 3-s timer disarms). */
+  onClearAllInit: () => void;
   lang: Lang;
   // 2026-05-14 (#5) — manual reorder mode toggle. ON = the initiative
   // strip enters click-to-pick / click-to-place mode (kart-slot gaps).
   // GM-only; shown during prep + combat (when there's a list to sort).
   reorderMode: boolean;
   onToggleReorder: () => void;
+}
+
+/**
+ * Two-click confirm button. First click arms (red + "再点一次确认"
+ * label); second click within 3 s commits. Mouse-out + timeout both
+ * disarm so a wandering cursor doesn't leave the button armed.
+ */
+function ClearAllButton({
+  onConfirm,
+  disabled,
+  lang,
+}: { onConfirm: () => void; disabled: boolean; lang: Lang }) {
+  const [armed, setArmed] = useState(false);
+  const timerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (timerRef.current != null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+  const disarm = () => {
+    if (timerRef.current != null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setArmed(false);
+  };
+  const handle = () => {
+    if (armed) {
+      disarm();
+      onConfirm();
+      return;
+    }
+    setArmed(true);
+    timerRef.current = window.setTimeout(disarm, 3000);
+  };
+  return (
+    <button
+      type="button"
+      className={`btn btn-clear-all ${armed ? "armed" : ""}`}
+      onClick={handle}
+      onMouseLeave={armed ? disarm : undefined}
+      disabled={disabled}
+      title={t(lang, "clearAllInitTitle")}
+    >
+      {t(lang, armed ? "clearAllInitConfirm" : "clearAllInit")}
+    </button>
+  );
 }
 
 function ReorderButton({
@@ -73,11 +126,15 @@ export function CombatControls({
   onPrevTurn,
   onNextTurn,
   onEndCombat,
+  onClearAllInit,
   lang,
   reorderMode,
   onToggleReorder,
 }: Props) {
-  // Idle: two buttons side by side — "战斗准备" (yellow) + "突袭" (red)
+  // Idle: two buttons side by side — "战斗准备" (yellow) + "突袭" (red).
+  // 2026-05-16 — "一键清空" appears here too when there are items
+  // already in initiative (DM may want to wipe leftover entries from a
+  // previous fight before starting the next encounter).
   if (!combatState.inCombat && !combatState.preparing) {
     return (
       <div className="combat-controls">
@@ -98,6 +155,9 @@ export function CombatControls({
           >
             <span className="btn-icon" dangerouslySetInnerHTML={{ __html: ICONS.zap }} /> {t(lang, "ambush")}
           </button>
+          {hasItems && (
+            <ClearAllButton onConfirm={onClearAllInit} disabled={false} lang={lang} />
+          )}
         </div>
       </div>
     );
@@ -128,7 +188,7 @@ export function CombatControls({
     );
   }
 
-  // In Combat: prev/next + end
+  // In Combat: prev/next + end + clear-all
   return (
     <div className="combat-controls">
       <div className="turn-controls">
@@ -141,9 +201,12 @@ export function CombatControls({
           {t(lang, "next")}
         </button>
       </div>
-      <button className="btn btn-end" onClick={onEndCombat}>
-        <span className="btn-icon" dangerouslySetInnerHTML={{ __html: ICONS.stop }} /> {t(lang, "endCombat")}
-      </button>
+      <div className="end-row" style={{ display: "flex", gap: "6px" }}>
+        <ClearAllButton onConfirm={onClearAllInit} disabled={false} lang={lang} />
+        <button className="btn btn-end" onClick={onEndCombat}>
+          <span className="btn-icon" dangerouslySetInnerHTML={{ __html: ICONS.stop }} /> {t(lang, "endCombat")}
+        </button>
+      </div>
     </div>
   );
 }

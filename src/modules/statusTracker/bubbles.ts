@@ -72,6 +72,7 @@ import {
   BuffDef,
   BuffEffect,
   textColorFor,
+  getStatusRenderMode,
 } from "./types";
 import * as particles from "./particles";
 
@@ -446,6 +447,14 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
   //                     flag).
   //   3. defaultBuffs — "无特效" fallback: one solid curved band + one
   //                     flat text label (2 items per buff).
+  //
+  // 2026-05-16 — global render-mode override (per-client localStorage):
+  //   "text"   — force every buff into defaultBuffs (skip webms even if
+  //              the buff has a webmAsset / iconAsset).
+  //   "effect" — keep webm/icon routing; only skip the per-buff
+  //              `default` fallback to text would happen anyway.
+  //   "auto"   — legacy per-buff behaviour.
+  const renderMode = getStatusRenderMode();
   const webms: WebmDescriptor[] = [];
   const defaultBuffs: Array<{ buff: BuffDef; pillW: number }> = [];
   const effectBuffs: BuffDef[] = [];
@@ -464,7 +473,7 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
   const baseFootprint = Math.min(tokenW, tokenH);
 
   for (const b of buffs) {
-    if (b.webmAsset) {
+    if (b.webmAsset && renderMode !== "text") {
       const buffScale = typeof b.webmScale === "number" && b.webmScale > 0 ? b.webmScale : 1.0;
       const footprint = baseFootprint * buffScale;
       const scale = footprint / DEFAULT_WEBM_INTRINSIC_SIZE;
@@ -493,7 +502,7 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
     // differences are the real image mime + the image's real
     // dimensions (so non-square pictures aren't squished). webmScale
     // applies here too. Skipped when webmAsset is also set (webm wins).
-    if (b.iconAsset) {
+    if (b.iconAsset && renderMode !== "text") {
       const iconScale = typeof b.webmScale === "number" && b.webmScale > 0 ? b.webmScale : 1.0;
       const iw = typeof b.iconWidth === "number" && b.iconWidth > 0 ? b.iconWidth : 256;
       const ih = typeof b.iconHeight === "number" && b.iconHeight > 0 ? b.iconHeight : 256;
