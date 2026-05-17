@@ -45,6 +45,9 @@ html,body{
     -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Roboto,sans-serif;
   user-select:none;
 }
+/* 2026-05-16 — `--panel-zoom` set live by status-tracker-page.ts
+   (baseline 340×544 from statusTracker/index.ts). */
+html{zoom:var(--panel-zoom, 1)}
 
 .card{
   position:absolute;inset:0;

@@ -9,6 +9,7 @@ import { PANEL_IDS } from "../../utils/panelLayout";
 import { readBubbles, type BubblesData } from "../../utils/statEdit";
 import { mountResourcePanel } from "../resourceTracker/panel";
 import { mountStatBanner } from "../../utils/statBanner";
+import { installPanelZoom } from "../../utils/panelZoom";
 
 // 2026-05-13 — Was previously dev-only (gated through STABLE_HIDES /
 // STABLE_HIDES_CC) until cc-fullscreen + hp-bar integration matured.
@@ -900,24 +901,6 @@ bindRollableClickPopup(
   ccIframeOriginGetter,
 );
 
-// 2026-05-16 — install a viewport-driven zoom multiplier so a manually-
-// resized larger popover gets visibly larger text + click targets, not
-// just more whitespace. Reads the iframe height vs the design
-// baseline (260 px = the default INFO_HEIGHT in characterCards/index.ts)
-// and feeds Chrome's CSS `zoom` via the `--panel-zoom` custom property
-// on .root. Clamped so absurdly small / large overrides don't make the
-// UI unreadable.
-const ZOOM_BASELINE_H = 260;
-const ZOOM_MIN = 0.85;
-const ZOOM_MAX = 1.6;
-function updatePanelZoom(): void {
-  const h = window.innerHeight;
-  if (h <= 0) return;
-  const raw = h / ZOOM_BASELINE_H;
-  const zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, raw));
-  root.style.setProperty("--panel-zoom", String(zoom));
-}
-
 OBR.onReady(async () => {
   installDebugOverlay();
   subscribeToSfx();
@@ -928,11 +911,13 @@ OBR.onReady(async () => {
   // longer than the ceiling keeps the inner scrollbar instead of
   // forcing the popover to balloon.
   if (window.innerHeight > 0) INFO_MAX_HEIGHT = window.innerHeight;
-  // 2026-05-16 — initial zoom + listen for live size changes. Resize
-  // fires when adjustHeight runs setHeight, when the user drags the
-  // layout-editor handle, and on viewport changes.
-  updatePanelZoom();
-  window.addEventListener("resize", updatePanelZoom);
+  // 2026-05-16 — install the shared panel-zoom: scales text / spacing
+  // / click targets when the user resizes via the layout editor.
+  // Baseline = (INFO_WIDTH, INFO_HEIGHT) from characterCards/index.ts.
+  // Uses the MIN of width-ratio and height-ratio so content fits both
+  // axes — pulling the panel taller-but-not-wider doesn't make text
+  // overflow horizontally.
+  installPanelZoom({ baseWidth: 320, baseHeight: 260, target: root });
   // Cache the player's role BEFORE first render so the DM-only lock
   // button appears on first paint instead of waiting for a re-render.
   try {

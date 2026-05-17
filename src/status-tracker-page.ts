@@ -29,6 +29,7 @@
 
 import OBR from "@owlbear-rodeo/sdk";
 import { installDebugOverlay } from "./utils/debugOverlay";
+import { installPanelZoom } from "./utils/panelZoom";
 import {
   PLUGIN_ID,
   SCENE_BUFF_CATALOG_KEY,
@@ -1551,6 +1552,9 @@ fileImport.addEventListener("change", async () => {
 
 OBR.onReady(async () => {
   installDebugOverlay();
+  // 2026-05-16 — scale text + buff icons with palette size. Baseline
+  // = PALETTE_W × PALETTE_H from statusTracker/index.ts.
+  installPanelZoom({ baseWidth: 340, baseHeight: 544 });
   await loadCatalog();
   loadPresets();
   renderPresets();

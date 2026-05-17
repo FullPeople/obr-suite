@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="/suite/icon.svg" type="image/svg+xml" />
   <title>Bestiary</title>
+  <style>
+    /* 2026-05-16 — `--panel-zoom` is set live by panel-page.tsx via
+       installPanelZoom (baseline 350×600 from bestiary/index.ts).
+       Chrome's CSS `zoom` scales the whole tree so resize visibly
+       affects text + spacing + click targets, not just whitespace. */
+    html { zoom: var(--panel-zoom, 1); }
+  </style>
 </head>
 <body>
   <div id="root"></div>

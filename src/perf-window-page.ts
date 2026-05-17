@@ -14,6 +14,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import { bindPanelDrag } from "./utils/panelDrag";
 import { PANEL_IDS } from "./utils/panelLayout";
 import { installDebugOverlay } from "./utils/debugOverlay";
+import { installPanelZoom } from "./utils/panelZoom";
 
 const fpsEl = document.getElementById("fps") as HTMLSpanElement;
 const drawEl = document.getElementById("draw") as HTMLSpanElement;
@@ -64,6 +65,8 @@ async function refreshDraw(): Promise<void> {
 
 OBR.onReady(() => {
   installDebugOverlay();
+  // 2026-05-16 — scale text with panel size (PERF_W × PERF_H baseline).
+  installPanelZoom({ baseWidth: 130, baseHeight: 56 });
   void refreshDraw();
   // onChange refresh — most accurate, no polling cost when scene is
   // idle.

@@ -6,6 +6,7 @@ import { bindRollableContextMenu, bindRollableClickPopup } from "../dice/context
 import { subscribeToSfx } from "../dice/sfx-broadcast";
 import { bindPanelDrag } from "../../utils/panelDrag";
 import { PANEL_IDS } from "../../utils/panelLayout";
+import { installPanelZoom } from "../../utils/panelZoom";
 import {
   parseStatInput,
   readBubbles,
@@ -1249,6 +1250,11 @@ OBR.onReady(async () => {
   subscribeToSfx();
   // Capture the popover's opened height as the ceiling for future resizes.
   if (window.innerHeight > 0) INFO_MAX_HEIGHT = window.innerHeight;
+  // 2026-05-16 — scale text + spacing with panel size. Baseline
+  // = (INFO_WIDTH, INFO_HEIGHT) from bestiary/index.ts. The root
+  // element is the same `.root` block the popover already renders into;
+  // its CSS reads `--panel-zoom` via the rule added below.
+  installPanelZoom({ baseWidth: 520, baseHeight: 340, target: root });
 
   // 2026-05-10: re-render on language flip so labels (section titles,
   // ability abbreviations, "Hit:" / "Save:" / "Recharge" prefixes)

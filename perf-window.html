@@ -16,6 +16,9 @@ html,body{
   color:#e6e8ee;
   user-select:none;
 }
+/* 2026-05-16 — `--panel-zoom` set live by perf-window-page.ts
+   (baseline 130×56 from perfWindow/index.ts). */
+html{zoom:var(--panel-zoom, 1)}
 /* OBR's popover host wraps each iframe with its own rounded outer
    shadow + clip mask, even when `hidePaper:true`. We match that
    shape with our own border-radius so the inner card aligns

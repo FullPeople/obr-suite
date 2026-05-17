@@ -12,6 +12,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import { installDebugOverlay } from "./utils/debugOverlay";
 import { bindPanelDrag } from "./utils/panelDrag";
 import { PANEL_IDS } from "./utils/panelLayout";
+import { installPanelZoom } from "./utils/panelZoom";
 import {
   parseStatInput,
   readBubbles,
@@ -253,6 +254,9 @@ lockBtn?.addEventListener("click", async () => {
 
 OBR.onReady(async () => {
   installDebugOverlay();
+  // 2026-05-16 — scale text + click targets with panel size. Baseline
+  // = POPOVER_W × POPOVER_H from hpBar/index.ts.
+  installPanelZoom({ baseWidth: 320, baseHeight: 78 });
   try {
     isGM = (await OBR.player.getRole()) === "GM";
   } catch {}

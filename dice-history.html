@@ -14,6 +14,9 @@ html,body{
   font-size:12.5px;
 }
 html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
+/* 2026-05-16 — `--panel-zoom` is set live by history-page.ts via
+   installPanelZoom (baseline 320×218 from dice/index.ts). */
+html{zoom:var(--panel-zoom, 1)}
 
 :root{
   --bg-soft:rgba(31,34,48,0.92);

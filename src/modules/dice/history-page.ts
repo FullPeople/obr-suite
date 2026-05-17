@@ -5,6 +5,7 @@ import { getLocalLang, onLangChange } from "../../state";
 import { bindPanelDrag } from "../../utils/panelDrag";
 import { PANEL_IDS } from "../../utils/panelLayout";
 import { installDebugOverlay } from "../../utils/debugOverlay";
+import { installPanelZoom } from "../../utils/panelZoom";
 
 let lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -766,6 +767,9 @@ let myPlayerId = "";
 
 OBR.onReady(async () => {
   installDebugOverlay();
+  // 2026-05-16 — scale text + spacing with panel size. Baseline =
+  // HISTORY_W × HISTORY_H from dice/index.ts.
+  installPanelZoom({ baseWidth: 320, baseHeight: 218 });
   // Rebuild the LS key with the actual room id and reload history
   // from THIS room's slice. Skipping this step (or running it after
   // the first render) leaks yesterday's "default"-suffixed entries

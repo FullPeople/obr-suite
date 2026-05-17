@@ -38,6 +38,11 @@ html,body{
   padding:10px 14px;height:100%;overflow-y:auto;
   scrollbar-width:none;          /* Firefox */
   -ms-overflow-style:none;       /* old IE/Edge */
+  /* 2026-05-16 — `--panel-zoom` set live by monster-info-page.ts based
+     on the iframe's current size vs the design baseline (520×340).
+     Chrome's CSS `zoom` scales text + spacing + click targets together
+     so a manually-resized larger popover gets visibly bigger content. */
+  zoom:var(--panel-zoom, 1);
 }
 .root::-webkit-scrollbar{display:none;width:0;height:0}
 

@@ -97,12 +97,21 @@ const NON_RESIZABLE = new Set<string>([
 // natural growth direction; matches the proxy's preview exactly).
 type AnchorH = "left" | "right";
 type AnchorV = "top" | "bottom";
+// `v` here represents "which edge is geometrically fixed when height
+// changes" — i.e. which edge stays put if we reopen the popover with
+// a different h but the SAME stored dy.
+//
+// For most panels this matches the OBR `anchorOrigin.vertical` exactly.
+// cc-info is the odd one out: it passes OBR `vertical: "TOP"` (so
+// OBR.popover.setHeight keeps the visual top fixed mid-session) but
+// its anchorPosition.top is computed as `desiredBottom - h + dy`. That
+// formula makes the iframe's actual TOP depend on h, so when the
+// layout-editor reopens with a different h, the TOP drifts unless we
+// add a heightDelta compensation to dy. From the resize-compensation
+// perspective that's effectively v:"bottom" — the BOTTOM is the
+// geometrically fixed edge here.
 const PANEL_ANCHOR: Record<string, { h: AnchorH; v: AnchorV }> = {
-  // 2026-05-16 — ccInfo flipped to TOP-anchored so its top edge stays
-  // fixed when info-page.ts auto-shrinks via setHeight on tab switch.
-  // See characterCards/index.ts:openInfoPopoverFor for the matching
-  // `vertical: "TOP"` change.
-  [PANEL_IDS.ccInfo]:         { h: "right", v: "top" },    // characterCards/index.ts
+  [PANEL_IDS.ccInfo]:         { h: "right", v: "bottom" }, // characterCards/index.ts — TOP-anchored but desiredBottom-h formula
   [PANEL_IDS.bestiaryInfo]:   { h: "right", v: "top" },    // bestiary/index.ts
   [PANEL_IDS.bestiaryPanel]:  { h: "right", v: "top" },    // bestiary/index.ts
   [PANEL_IDS.diceHistory]:    { h: "right", v: "bottom" }, // dice/index.ts
@@ -116,6 +125,27 @@ const PANEL_ANCHOR: Record<string, { h: AnchorH; v: AnchorV }> = {
 // become unusable.
 const MIN_W = 160;
 const MIN_H = 100;
+
+// 2026-05-16 — per-panel min sizes. The fallback (MIN_W / MIN_H) is
+// loose enough that some panels would break their internal layout if
+// shrunk all the way down (cc-info needs ~280 wide for the header
+// chips + ~220 tall for the stat banner; bestiary needs even more
+// because of the wide stat-block tables). Drag-resize is clamped to
+// these per-panel floors so the user can't drag a panel into a
+// non-functional state.
+const PANEL_MIN: Record<string, { w: number; h: number }> = {
+  [PANEL_IDS.ccInfo]:        { w: 280, h: 220 }, // header chips + stat banner
+  [PANEL_IDS.bestiaryInfo]:  { w: 380, h: 240 }, // stat-block tables don't wrap nicely
+  [PANEL_IDS.bestiaryPanel]: { w: 340, h: 280 }, // monster list rows + search input
+  [PANEL_IDS.diceHistory]:   { w: 280, h: 200 }, // row text + roll history scroll
+  [PANEL_IDS.perfWindow]:    { w: 220, h: 140 }, // small fps / mem readout
+  [PANEL_IDS.statusPalette]: { w: 220, h: 200 }, // buff palette grid
+  [PANEL_IDS.hpBar]:         { w: 200, h: 60 },  // single-line bar
+  [PANEL_IDS.portalEdit]:    { w: 260, h: 200 }, // form fields
+};
+function minFor(panelId: string): { w: number; h: number } {
+  return PANEL_MIN[panelId] ?? { w: MIN_W, h: MIN_H };
+}
 
 const proxies: ProxyRect[] = [];
 
@@ -161,11 +191,16 @@ function clampToViewport(p: ProxyRect): void {
   // off-screen allowed" we can drop the lower bound to negative.
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+  // 2026-05-16 — per-panel min size first, then the viewport cap. The
+  // per-panel floor prevents drag-resize from breaking each panel's
+  // internal layout (cc-info needs ~280×220, bestiary needs ~380×240,
+  // etc. — see PANEL_MIN). Falls back to the loose MIN_W/MIN_H for
+  // any panel not in the table.
+  const m = minFor(p.panelId);
+  p.width = Math.max(m.w, Math.min(vw, p.width));
+  p.height = Math.max(m.h, Math.min(vh, p.height));
   p.left = Math.max(0, Math.min(vw - p.width, p.left));
   p.top = Math.max(0, Math.min(vh - p.height, p.top));
-  // Also cap size if the proxy is bigger than the viewport.
-  p.width = Math.max(MIN_W, Math.min(vw, p.width));
-  p.height = Math.max(MIN_H, Math.min(vh, p.height));
 }
 
 function applyProxyDom(p: ProxyRect): void {

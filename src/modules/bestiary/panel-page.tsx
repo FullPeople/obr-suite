@@ -2,6 +2,7 @@ import { render } from "preact";
 import { useEffect, useState, useCallback, useRef } from "preact/compat";
 import OBR from "@owlbear-rodeo/sdk";
 import { installDebugOverlay } from "../../utils/debugOverlay";
+import { installPanelZoom } from "../../utils/panelZoom";
 import { ParsedMonster, MonsterEdition } from "./types";
 import { loadAllMonsters, searchMonsters, getRawMonster, makeSlug } from "./data";
 import { spawnMonster } from "./spawn";
@@ -826,6 +827,13 @@ function PluginGate() {
   useEffect(() => {
     OBR.onReady(() => {
       installDebugOverlay();
+      // 2026-05-16 — content-scale with the panel size. Baseline =
+      // POPOVER_WIDTH × POPOVER_HEIGHT from bestiary/index.ts.
+      // Target = document.documentElement so the whole iframe scales
+      // (the panel's root container is the React-managed #root which
+      // can't easily host the zoom variable on the auto-generated
+      // wrapper).
+      installPanelZoom({ baseWidth: 350, baseHeight: 600 });
       setReady(true);
     });
   }, []);

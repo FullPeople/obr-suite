@@ -12,6 +12,10 @@ html,body{
   color:#eee;background:transparent;
   user-select:none;
 }
+/* 2026-05-16 — `--panel-zoom` set live by hp-bar-page.ts (baseline
+   320×78 from hpBar/index.ts). Chrome's CSS `zoom` scales the whole
+   tree as a unit when the user resizes the panel via layout editor. */
+html{zoom:var(--panel-zoom, 1)}
 
 .card{
   position:absolute;inset:0;
