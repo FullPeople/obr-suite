@@ -29,8 +29,11 @@ import {
   resetAllPanelOffsets,
   BC_PANEL_DRAG_END,
   BC_PANEL_RESET,
+  BC_LAYOUT_EDITOR_REFRESH,
+  BC_LAYOUT_EDITOR_BBOXES,
   type PanelOffset,
   type PanelSize,
+  type LayoutEditorBboxesPayload,
 } from "./utils/panelLayout";
 
 interface ProxyRect {
@@ -443,27 +446,54 @@ OBR.onReady(() => {
     hintEl.textContent = "拖动整体移动，拖右下角调整大小（虚线 = 当前未打开）";
   }
 
+  // 2026-05-16 — listen for background's reply to the post-reset
+  // bbox refresh. Each proxy gets snapped to its NEW (= no-offset
+  // default) position + size; startLeft/Top/Width/Height also get
+  // rebased so the next drag computes deltas from the fresh
+  // baseline.
+  OBR.broadcast.onMessage(BC_LAYOUT_EDITOR_BBOXES, (event) => {
+    const payload = event.data as LayoutEditorBboxesPayload | undefined;
+    if (!payload?.bboxes) return;
+    for (const p of proxies) {
+      const fresh = payload.bboxes[p.panelId];
+      if (!fresh) continue;
+      p.left = fresh.left;
+      p.top = fresh.top;
+      p.width = fresh.width;
+      p.height = fresh.height;
+      p.startLeft = fresh.left;
+      p.startTop = fresh.top;
+      p.startWidth = fresh.width;
+      p.startHeight = fresh.height;
+      p.startOffset = { dx: 0, dy: 0 };
+      p.startSize = { width: fresh.width, height: fresh.height };
+      applyProxyDom(p);
+    }
+  });
+
   btnReset.addEventListener("click", () => {
-    const ok = window.confirm("重置所有面板位置和大小到默认？");
+    const ok = window.confirm("重置所有面板位置和大小到默认?");
     if (!ok) return;
     resetAllPanelOffsets();
     try {
       OBR.broadcast.sendMessage(BC_PANEL_RESET, {}, { destination: "LOCAL" });
     } catch {}
-    // Re-snap each on-screen proxy back to its default bbox (the
-    // bbox passed in via the URL hash is already the no-offset
-    // baseline, since the offset hadn't been applied to it). This
-    // gives instant visual feedback without closing the editor —
-    // the user can immediately resume arranging from a clean slate.
-    for (const p of proxies) {
-      p.left = p.startLeft;
-      p.top = p.startTop;
-      p.width = p.startWidth;
-      p.height = p.startHeight;
-      p.startOffset = { dx: 0, dy: 0 };
-      p.startSize = { width: p.startWidth, height: p.startHeight };
-      applyProxyDom(p);
-    }
+    // 2026-05-16 — ask background for fresh bboxes. Earlier this
+    // path snapped proxies back to their open-time startLeft/Top —
+    // but the bbox provider for cc-info / others factors `userOff`
+    // into the bbox, so startLeft/Top were the OFFSET-APPLIED
+    // position, not the default. Reset cleared localStorage but the
+    // proxies stayed put. Now BC_LAYOUT_EDITOR_REFRESH fires after
+    // the localStorage clear; background re-runs each bbox provider
+    // (which now reads userOff={0,0}) and broadcasts the defaults
+    // back via BC_LAYOUT_EDITOR_BBOXES — see listener at top level.
+    try {
+      OBR.broadcast.sendMessage(
+        BC_LAYOUT_EDITOR_REFRESH,
+        {},
+        { destination: "LOCAL" },
+      );
+    } catch {}
     hintEl.textContent = "已重置 · 拖动整体移动，拖右下角调整大小";
   });
 

@@ -206,6 +206,23 @@ export const LAYOUT_EDITOR_MODAL_ID = "com.obr-suite/layout-editor";
  *  registry only exists in the background iframe. */
 export const BC_OPEN_LAYOUT_EDITOR = "com.obr-suite/open-layout-editor";
 
+/** LOCAL broadcast: layout-editor → background. After
+ *  resetAllPanelOffsets clears every stored offset/size, the editor
+ *  needs fresh post-reset bboxes (which now reflect each panel's
+ *  default geometry) to re-snap its on-screen proxies. The editor
+ *  can't compute them itself — the bbox registry lives in
+ *  background. */
+export const BC_LAYOUT_EDITOR_REFRESH = "com.obr-suite/layout-editor-refresh";
+
+/** LOCAL broadcast: background → layout-editor. Reply to
+ *  BC_LAYOUT_EDITOR_REFRESH with a fresh `panelId → bbox` map.
+ *  Payload shape: `LayoutEditorBboxesPayload`. */
+export const BC_LAYOUT_EDITOR_BBOXES = "com.obr-suite/layout-editor-bboxes";
+
+export interface LayoutEditorBboxesPayload {
+  bboxes: Record<string, { left: number; top: number; width: number; height: number }>;
+}
+
 /** LOCAL broadcast: tell an iframe its panel's drag-handle side
  *  should flip (panel just got dragged across the viewport midpoint).
  *  Payload: `{ panelId, side: "left" | "right" }`. Iframes that have

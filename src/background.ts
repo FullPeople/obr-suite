@@ -37,6 +37,8 @@ import {
   BC_PANEL_DRAG_CANCEL,
   BC_PANEL_RESET,
   BC_OPEN_LAYOUT_EDITOR,
+  BC_LAYOUT_EDITOR_REFRESH,
+  BC_LAYOUT_EDITOR_BBOXES,
   BC_PANEL_SIDE_HINT,
   DRAG_PREVIEW_MODAL_ID,
   LAYOUT_EDITOR_MODAL_ID,
@@ -413,27 +415,35 @@ OBR.onReady(() => {
   // from the get-go. Done here (not in settings) because the bbox
   // registry only exists in this background iframe.
   const LAYOUT_EDITOR_URL = assetUrl("layout-editor.html");
-  OBR.broadcast.onMessage(BC_OPEN_LAYOUT_EDITOR, async () => {
-    const bboxMap: Record<string, unknown> = {};
-    const panelIds = [
-      PANEL_IDS.cluster,
-      PANEL_IDS.clusterRow,
-      PANEL_IDS.diceHistory,
-      PANEL_IDS.perfWindow,
-      PANEL_IDS.search,
-      PANEL_IDS.initiative,
-      PANEL_IDS.bestiaryPanel,
-      PANEL_IDS.bestiaryInfo,
-      PANEL_IDS.ccInfo,
-      PANEL_IDS.portalEdit,
-      PANEL_IDS.statusPalette,
-    ];
-    for (const id of panelIds) {
+  // 2026-05-16 — extracted so the post-reset refresh handler below
+  // can reuse the same panel list. Keep in sync with layout-editor.ts's
+  // PANEL_ANCHOR / PANEL_MIN keys (or any future panel that wants a
+  // proxy in the editor).
+  const layoutEditorPanelIds = [
+    PANEL_IDS.cluster,
+    PANEL_IDS.clusterRow,
+    PANEL_IDS.diceHistory,
+    PANEL_IDS.perfWindow,
+    PANEL_IDS.search,
+    PANEL_IDS.initiative,
+    PANEL_IDS.bestiaryPanel,
+    PANEL_IDS.bestiaryInfo,
+    PANEL_IDS.ccInfo,
+    PANEL_IDS.portalEdit,
+    PANEL_IDS.statusPalette,
+  ];
+  async function collectLayoutEditorBboxes(): Promise<Record<string, { left: number; top: number; width: number; height: number }>> {
+    const bboxMap: Record<string, { left: number; top: number; width: number; height: number }> = {};
+    for (const id of layoutEditorPanelIds) {
       try {
         const bbox = await computePanelBbox(id);
         if (bbox) bboxMap[id] = bbox;
       } catch {}
     }
+    return bboxMap;
+  }
+  OBR.broadcast.onMessage(BC_OPEN_LAYOUT_EDITOR, async () => {
+    const bboxMap = await collectLayoutEditorBboxes();
     const url = `${LAYOUT_EDITOR_URL}#${encodeURIComponent(JSON.stringify(bboxMap))}`;
     try {
       await OBR.modal.open({
@@ -445,6 +455,26 @@ OBR.onReady(() => {
     } catch (e) {
       console.warn("[obr-suite/layout-editor] open failed", e);
     }
+  });
+
+  // 2026-05-16 — layout-editor reset-all path. After the editor
+  // clears every panel-offset/size from localStorage it asks
+  // background for a fresh bbox map (each provider now sees
+  // userOff = {0,0} so the returned bboxes are the no-offset
+  // defaults). We reply on BC_LAYOUT_EDITOR_BBOXES; the editor
+  // re-snaps each proxy in its own listener. Fixes "重置全部时
+  // 当前预览的所有框没有重置" — previously reset cleared storage
+  // but the editor only snapped proxies back to startLeft/startTop
+  // which were already offset-applied at open time.
+  OBR.broadcast.onMessage(BC_LAYOUT_EDITOR_REFRESH, async () => {
+    const bboxMap = await collectLayoutEditorBboxes();
+    try {
+      OBR.broadcast.sendMessage(
+        BC_LAYOUT_EDITOR_BBOXES,
+        { bboxes: bboxMap },
+        { destination: "LOCAL" },
+      );
+    } catch {}
   });
 
   // ----- Drag-preview modal lifecycle ---------------------------------
