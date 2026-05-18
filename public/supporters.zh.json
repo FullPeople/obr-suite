@@ -95,5 +95,10 @@
   { "name": "钟理", "amount":100 },
   { "name": "aliex", "amount":7 },
   { "name": "迈特迈迈", "amount":5 },
-  { "name": "鎏金匙匙", "amount":10 }
+  { "name": "鎏金匙匙", "amount":10 },
+  { "name": "旅行者", "amount":50 },
+  { "name": "Arashi岚", "amount":50 },
+  { "name": "桌角剧团的囧神", "amount":10 },
+  { "name": "感谢做出的枭熊插件", "amount":50 },
+  { "name": "君兮同学", "amount":50 }
 ]

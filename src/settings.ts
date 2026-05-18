@@ -113,6 +113,46 @@ let sharedSupportersEn: Supporter[] = normalizeSupporterArray(bundledSupportersE
 // and a stale hardcoded list silently shadowing real data has bitten us
 // before (see git history around 2026-05-08).
 
+// 2026-05-18 — supporter-avatar lookup. Pic files live in
+// public/supporter-avatars/ (sourced from /shared/pics/ at deploy
+// time). Filename → supporter name is fuzzy-matched: case-insensitive,
+// underscores treated as dots, trailing punctuation trimmed. This map
+// lists every shipped avatar with the EXACT supporter-name string in
+// supporters.zh.json so the lookup is O(1) at render time.
+//
+// Add a new avatar = drop the file in /shared/pics/ + add one row
+// below. (Auto-generation from a directory listing is impractical
+// without a build step that reads /public/ at build time.)
+const SUPPORTER_AVATARS: Record<string, string> = {
+  "Dino":                       "supporter-avatars/Dino.jpg",
+  "St.Monk":                    "supporter-avatars/St_Monk.png",
+  "lingkkkkuang":               "supporter-avatars/lingkkkkuang.png",
+  "不周":                        "supporter-avatars/不周.png",
+  "凸守早苗":                    "supporter-avatars/凸守早苗.png",
+  "咖啡":                        "supporter-avatars/咖啡.png",
+  "姜川安.":                     "supporter-avatars/姜川安.jpg",
+  "折云":                        "supporter-avatars/折云.jpg",
+  "桌角剧团的囧神":              "supporter-avatars/桌角剧团的囧神.png",
+  "武御":                        "supporter-avatars/武御.png",
+  "蚀星ErosionStar":             "supporter-avatars/蚀星Erosionstar.png",
+  "跑冰风谷水群被抓的某位":      "supporter-avatars/跑冰风谷水群被抓的某位.png",
+  "鱼喵":                        "supporter-avatars/鱼喵.png",
+};
+
+function findSupporterAvatar(name: string): string | null {
+  // Fast path: exact match.
+  const exact = SUPPORTER_AVATARS[name];
+  if (exact) return exact;
+  // Fuzzy path: case-insensitive + strip trailing dots/spaces/whitespace.
+  // Keeps the map small even if a supporter's name has variant casing
+  // ("ErosionStar" vs "Erosionstar"). Looks up by normalised key.
+  const norm = name.toLowerCase().replace(/[.\s]+$/, "");
+  for (const [k, v] of Object.entries(SUPPORTER_AVATARS)) {
+    if (k.toLowerCase().replace(/[.\s]+$/, "") === norm) return v;
+  }
+  return null;
+}
+
 function supportersHtml(lang: Language): string {
   const source =
     lang === "en" && sharedSupportersEn.length > 0
@@ -122,7 +162,19 @@ function supportersHtml(lang: Language): string {
     const tier = supporterTier(s.amount);
     const amount = Number.isInteger(s.amount) ? String(s.amount) : String(s.amount);
     const size = supporterFontSize(s.amount);
-    return `<span class="backer ${tier}" data-amount="${escapeAttr(amount)}" style="font-size:${size}px">${escapeAttr(s.name)}</span>`;
+    // 2026-05-18 — when an avatar exists for this supporter, render
+    // a small round image BEFORE the name, sized to the text's
+    // computed font-size. `loading="lazy" + decoding="async"` keeps
+    // the settings page fast even with many avatars — the browser
+    // only fetches each pic when it scrolls into view, then caches
+    // by URL across re-renders. The supporter <span> becomes
+    // inline-flex so the img + name baseline-align cleanly without
+    // disrupting the existing wrap layout.
+    const avatarUrl = findSupporterAvatar(s.name);
+    const avatarHtml = avatarUrl
+      ? `<img class="backer-avatar" src="${escapeAttr(assetUrl(avatarUrl))}" alt="" loading="lazy" decoding="async" style="width:${size}px;height:${size}px">`
+      : "";
+    return `<span class="backer ${tier} ${avatarHtml ? "has-avatar" : ""}" data-amount="${escapeAttr(amount)}" style="font-size:${size}px">${avatarHtml}${escapeAttr(s.name)}</span>`;
   }).join("");
   return lang === "zh"
     ? `<h3>${ICONS.heart} 鸣谢</h3>

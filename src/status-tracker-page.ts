@@ -141,7 +141,12 @@ const LS_BUFF_CATALOG = "obr-suite/status/buff-catalog";
 // migration below to run again on existing clients. The version is
 // stored in localStorage alongside the catalog; mismatched value
 // triggers `migrateDefaultsInPlace`.
-const DEFAULTS_MIGRATION_VERSION = 2;
+// v3: revert from the 76-entry public/buff-fx auto-list back to the
+// 12-entry user-curated set; expand DEFAULT_BUFF_RETIRED_IDS to cover
+// every retired id from BOTH the original 32 and the v2 76-list so
+// matching-untouched users get cleaned up regardless of which
+// version they previously migrated to.
+const DEFAULTS_MIGRATION_VERSION = 3;
 const LS_DEFAULTS_VERSION = "obr-suite/status/defaults-version";
 
 /**
