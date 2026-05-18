@@ -82,17 +82,35 @@ body{
   font-family:"Noto Serif SC",-apple-system,"Microsoft YaHei",serif;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   text-shadow:0 1px 2px rgba(0,0,0,0.4);
+  /* 2026-05-18 — `word-break: keep-all` + `min-width: 0` defensive
+     against the "末字自动换行" report. Without keep-all, CJK ideographs
+     can be inserted into a line-break opportunity at almost any
+     position even with `nowrap` set on certain ancestor / inline-flex
+     parents; with it, breaks only happen at spaces / hyphens. The
+     `min-width:0` ensures this block can actually shrink narrower than
+     its content (so ellipsis kicks in cleanly instead of pushing the
+     last char to a soft-wrap that overflow:hidden then clips). */
+  word-break:keep-all;
+  line-break:strict;
+  min-width:0;
 }
 .cc-head-name .en{
   font-size:13px;color:var(--ink-dim);
   margin-left:10px;font-family:Georgia,"Noto Serif",serif;font-weight:400;font-style:italic;
+  white-space:nowrap;
 }
 .cc-head-meta{
   display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;
   font-size:12px;color:var(--ink-dim);
+  min-width:0;
 }
 .cc-head-meta .pip{
   display:inline-flex;align-items:center;gap:4px;
+  /* 2026-05-18 — keep each pip's content on one line; the flex parent
+     above already wraps whole pips to a second line when total width
+     overflows, but WITHOUT this each pip's own text could break mid-
+     phrase ("战士（裁决者）" → "战士（裁\n决者）"). */
+  white-space:nowrap;
 }
 .cc-head-meta .pip b{color:var(--ink);font-weight:600}
 

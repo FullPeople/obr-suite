@@ -36,6 +36,8 @@ import {
   STATUS_BUFFS_KEY,
   STATUS_EFFECTS_ENABLED,
   DEFAULT_BUFFS,
+  DEFAULT_BUFF_RETIRED_IDS,
+  matchesOldDefault,
   BuffDef,
   BuffEffect,
   textColorFor,
@@ -135,35 +137,107 @@ let popupBuffId: string | null = null;
 
 const LS_BUFF_CATALOG = "obr-suite/status/buff-catalog";
 
+// 2026-05-18 — bump when DEFAULT_BUFFS changes shape and we want the
+// migration below to run again on existing clients. The version is
+// stored in localStorage alongside the catalog; mismatched value
+// triggers `migrateDefaultsInPlace`.
+const DEFAULTS_MIGRATION_VERSION = 2;
+const LS_DEFAULTS_VERSION = "obr-suite/status/defaults-version";
+
+/**
+ * Merge the new DEFAULT_BUFFS into a user's existing catalog:
+ *  - Any buff whose id is in DEFAULT_BUFF_RETIRED_IDS AND whose stored
+ *    state matches the OLD default signature is REMOVED. User-customised
+ *    entries (any field changed) are left untouched.
+ *  - Any buff in DEFAULT_BUFFS not already present in the catalog
+ *    (by id) is appended.
+ * Returns the merged buff list + the original groupOrder, padded with
+ * any new groups introduced by the appended defaults.
+ */
+function migrateDefaultsInPlace(
+  existing: BuffDef[],
+  existingOrder: string[],
+): { buffs: BuffDef[]; groupOrder: string[] } {
+  // Pass 1: drop retired-default entries that match the old signature.
+  const kept = existing.filter((b) => {
+    if (!DEFAULT_BUFF_RETIRED_IDS.has(b.id)) return true; // user-defined → keep
+    return !matchesOldDefault(b); // user-customised retired buff → keep
+  });
+  // Pass 2: append new defaults that aren't already there (by id).
+  const existingIds = new Set(kept.map((b) => b.id));
+  for (const def of DEFAULT_BUFFS) {
+    if (!existingIds.has(def.id)) {
+      kept.push({ ...def });
+      existingIds.add(def.id);
+    }
+  }
+  // Pass 3: pad groupOrder with any new groups (preserves user's prior
+  // group ordering so they don't see their layout reshuffled).
+  const seenGroups = new Set(existingOrder);
+  const finalOrder = [...existingOrder];
+  for (const b of kept) {
+    const g = b.group;
+    if (g && !seenGroups.has(g)) {
+      finalOrder.push(g);
+      seenGroups.add(g);
+    }
+  }
+  return { buffs: kept, groupOrder: finalOrder };
+}
+
 async function loadCatalog(): Promise<void> {
+  let loaded: { buffs: BuffDef[]; groupOrder: string[] } | null = null;
+  let source: "ls" | "scene" | "default" = "default";
   // 1) Local storage — primary source post-2026-05-09.
   try {
     const raw = localStorage.getItem(LS_BUFF_CATALOG);
     if (raw) {
       const parsed = parseCatalog(JSON.parse(raw));
-      if (parsed) {
-        buffs = parsed.buffs;
-        groupOrder = parsed.groupOrder;
-        if (!popupBuffId) render();
-        return;
-      }
+      if (parsed) { loaded = parsed; source = "ls"; }
     }
   } catch {}
   // 2) One-time migration from scene metadata when LS is empty.
+  if (!loaded) {
+    try {
+      const meta = await OBR.scene.getMetadata();
+      const v = meta[SCENE_BUFF_CATALOG_KEY] as unknown;
+      const parsed = parseCatalog(v);
+      if (parsed) { loaded = parsed; source = "scene"; }
+    } catch {}
+  }
+  // 3) If still nothing, the constructor-initialised `buffs` already
+  //    holds DEFAULT_BUFFS.slice(); just record the version stamp so
+  //    the migration doesn't try to re-run on the first save.
+  if (!loaded) {
+    try { localStorage.setItem(LS_DEFAULTS_VERSION, String(DEFAULTS_MIGRATION_VERSION)); } catch {}
+    if (!popupBuffId) render();
+    return;
+  }
+  // 4) Run the defaults migration if this client hasn't seen the
+  //    current version yet. Idempotent — version stamp prevents
+  //    repeated runs.
+  let storedVersion = 0;
   try {
-    const meta = await OBR.scene.getMetadata();
-    const v = meta[SCENE_BUFF_CATALOG_KEY] as unknown;
-    const parsed = parseCatalog(v);
-    if (parsed) {
-      buffs = parsed.buffs;
-      groupOrder = parsed.groupOrder;
-      // Persist locally so the migration only runs once.
-      try {
-        const file: CatalogFile = { version: 2, buffs, groupOrder };
-        localStorage.setItem(LS_BUFF_CATALOG, JSON.stringify(file));
-      } catch {}
-    }
+    const raw = localStorage.getItem(LS_DEFAULTS_VERSION);
+    if (raw) storedVersion = Number(raw) || 0;
   } catch {}
+  if (storedVersion < DEFAULTS_MIGRATION_VERSION) {
+    loaded = migrateDefaultsInPlace(loaded.buffs, loaded.groupOrder);
+    // Persist + stamp.
+    try {
+      const file: CatalogFile = { version: 2, buffs: loaded.buffs, groupOrder: loaded.groupOrder };
+      localStorage.setItem(LS_BUFF_CATALOG, JSON.stringify(file));
+      localStorage.setItem(LS_DEFAULTS_VERSION, String(DEFAULTS_MIGRATION_VERSION));
+    } catch {}
+  } else if (source === "scene") {
+    // First-run scene → LS migration (legacy path) — persist as before.
+    try {
+      const file: CatalogFile = { version: 2, buffs: loaded.buffs, groupOrder: loaded.groupOrder };
+      localStorage.setItem(LS_BUFF_CATALOG, JSON.stringify(file));
+    } catch {}
+  }
+  buffs = loaded.buffs;
+  groupOrder = loaded.groupOrder;
   if (!popupBuffId) render();
 }
 
