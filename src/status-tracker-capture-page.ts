@@ -126,7 +126,22 @@ if (kind === "clear") {
   // as the "old / 90s" look in 2026-05-10 feedback.
   cursorEl.style.setProperty("--bubble-bg", buff.color);
   cursorEl.style.color = textColorFor(buff.color);
-  cursorEl.innerHTML = escapeHtml(stripEmoji(buff.name));
+  // 2026-05-18 — prepend a small inline preview of the buff visual
+  // (webm or static icon) so the drag ghost matches what'll actually
+  // land on the token. Falls through to text-only when the buff has
+  // neither — preserves backward compat for legacy text buffs.
+  const buffAny = buff as any;
+  const webmUrl = typeof buffAny.webmAsset === "string" && buffAny.webmAsset
+    ? `${location.origin}${import.meta.env.BASE_URL}${buffAny.webmAsset}` : "";
+  const visualHtml = webmUrl
+    ? `<video src="${escapeHtml(webmUrl)}" autoplay loop muted playsinline preload="auto"
+              style="width:22px;height:22px;object-fit:contain;vertical-align:middle;margin-right:5px;border-radius:3px;pointer-events:none"
+              aria-hidden="true"></video>`
+    : buffAny.iconAsset
+    ? `<img src="${escapeHtml(buffAny.iconAsset)}" alt=""
+            style="width:22px;height:22px;object-fit:contain;vertical-align:middle;margin-right:5px;border-radius:3px">`
+    : "";
+  cursorEl.innerHTML = `${visualHtml}${escapeHtml(stripEmoji(buff.name))}`;
 }
 cursorEl.style.left = "-1000px";
 cursorEl.style.top = "-1000px";

@@ -328,11 +328,26 @@ async function registerCreateStatusMenu(): Promise<void> {
         // system (STATUS_EFFECTS_ENABLED = false), so the renderer
         // ignored it and fell back to the text pill — that's the
         // "still text form" bug. iconAsset renders the image itself.
+        //
+        // 2026-05-18 — bake the SOURCE item's current scale +
+        // rotation into the new buff. User: "状态调色板开启时右键
+        // 物体以此创建状态时一次性的考虑该状态的缩放和旋转再写入".
+        // Both webmScale and rotation feed through buildWebmItem when
+        // the buff is later applied to a token; without these two
+        // lines, a buff made from a 2×-scaled source image renders at
+        // the wrong footprint and any pre-rotated source visual loses
+        // its orientation.
+        const srcScale = typeof item.scale?.x === "number" && item.scale.x > 0
+          ? item.scale.x : 1.0;
+        const srcRotation = typeof item.rotation === "number" && Number.isFinite(item.rotation)
+          ? item.rotation : 0;
         const buff: BuffDef = {
           id: `custom-${Date.now()}-${Math.floor(Math.random() * 1e4)}`,
           name: (item.name as string) || "新状态",
           color: "#ffffff",
           iconAsset: item.image.url as string,
+          ...(srcScale !== 1.0 ? { webmScale: srcScale } : {}),
+          ...(srcRotation !== 0 ? { rotation: srcRotation } : {}),
           ...(typeof item.image.mime === "string" && item.image.mime
             ? { iconMime: item.image.mime as string }
             : {}),

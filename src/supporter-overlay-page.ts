@@ -71,6 +71,37 @@ function supporterColor(name: string): string {
   return SUPPORTER_PALETTE[Math.abs(h) % SUPPORTER_PALETTE.length];
 }
 
+// 2026-05-18 — supporter avatar lookup (mirror of settings.ts). Names
+// in /shared/pics/ are deployed to public/supporter-avatars/. If a
+// supporter has a matching pic, placeSlot prepends a small round
+// `<img>` before the name. The map MUST stay in sync with the one in
+// src/settings.ts — both render the same supporter list.
+const SUPPORTER_AVATARS: Record<string, string> = {
+  "Dino":                       "supporter-avatars/Dino.jpg",
+  "St.Monk":                    "supporter-avatars/St_Monk.png",
+  "lingkkkkuang":               "supporter-avatars/lingkkkkuang.png",
+  "不周":                        "supporter-avatars/不周.png",
+  "凸守早苗":                    "supporter-avatars/凸守早苗.png",
+  "咖啡":                        "supporter-avatars/咖啡.png",
+  "姜川安.":                     "supporter-avatars/姜川安.jpg",
+  "折云":                        "supporter-avatars/折云.jpg",
+  "桌角剧团的囧神":              "supporter-avatars/桌角剧团的囧神.png",
+  "武御":                        "supporter-avatars/武御.png",
+  "蚀星ErosionStar":             "supporter-avatars/蚀星Erosionstar.png",
+  "跑冰风谷水群被抓的某位":      "supporter-avatars/跑冰风谷水群被抓的某位.png",
+  "鱼喵":                        "supporter-avatars/鱼喵.png",
+};
+
+function findSupporterAvatar(name: string): string | null {
+  const exact = SUPPORTER_AVATARS[name];
+  if (exact) return exact;
+  const norm = name.toLowerCase().replace(/[.\s]+$/, "");
+  for (const [k, v] of Object.entries(SUPPORTER_AVATARS)) {
+    if (k.toLowerCase().replace(/[.\s]+$/, "") === norm) return v;
+  }
+  return null;
+}
+
 // === Load supporter list ===========================================
 
 let supporters: Supporter[] = [];
@@ -255,7 +286,27 @@ function placeSlot(slot: Slot, s: Supporter): void {
   // tier still controls weight / size / glow via the class.
   slot.el.style.color = supporterColor(s.name);
   slot.el.style.opacity = "0";
-  slot.el.textContent = s.name;
+  // 2026-05-18 — when a supporter has a matching pic in
+  // /shared/pics/, prepend a small round image scaled to the name's
+  // computed font-size. Using innerHTML (vs textContent) so the
+  // child <img> survives; the name itself is escaped manually to
+  // dodge accidental HTML in supporter names. has-avatar enables
+  // the inline-flex baseline + gap rule in supporter-overlay.html.
+  const avatarUrl = findSupporterAvatar(s.name);
+  if (avatarUrl) {
+    slot.el.classList.add("has-avatar");
+    const safeName = s.name
+      .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    const src = assetUrl(avatarUrl);
+    const safeSrc = src.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+    slot.el.innerHTML =
+      `<img class="name-avatar" src="${safeSrc}" alt="" loading="lazy" decoding="async" ` +
+        `style="width:${fs}px;height:${fs}px">` +
+      `<span class="name-text">${safeName}</span>`;
+  } else {
+    slot.el.classList.remove("has-avatar");
+    slot.el.textContent = s.name;
+  }
   slot.el.style.left = "0px";
   slot.el.style.top = "0px";
 

@@ -392,6 +392,10 @@ interface WebmDescriptor {
   sceneDpi: number;
   /** zIndex slot — token.zIndex * STACK_MULT + SLOT_WEBM. */
   zIndex: number;
+  /** 2026-05-18 — degrees. From BuffDef.rotation; baked when the buff
+   *  was created via "以此创建状态" from a pre-rotated source image
+   *  so the buff retains that orientation when rendered on any token. */
+  rotation?: number;
 }
 
 interface TokenDescriptors {
@@ -473,6 +477,8 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
   const baseFootprint = Math.min(tokenW, tokenH);
 
   for (const b of buffs) {
+    const buffRotation = typeof b.rotation === "number" && Number.isFinite(b.rotation)
+      ? b.rotation : 0;
     if (b.webmAsset && renderMode !== "text") {
       const buffScale = typeof b.webmScale === "number" && b.webmScale > 0 ? b.webmScale : 1.0;
       const footprint = baseFootprint * buffScale;
@@ -493,6 +499,7 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
         // SLOT_WEBM (200) is above SLOT_LABEL (100) so WebMs draw over
         // any sibling curved-band label on the same token.
         zIndex: stackBase + SLOT_WEBM,
+        rotation: buffRotation,
       });
       continue;
     }
@@ -522,6 +529,7 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
         mime: typeof b.iconMime === "string" && b.iconMime ? b.iconMime : "image/png",
         sceneDpi,
         zIndex: stackBase + SLOT_WEBM,
+        rotation: buffRotation,
       });
       continue;
     }
@@ -681,7 +689,7 @@ function buildBgItem(token: Image, d: PillBgDescriptor): Item {
  *    - layer ATTACHMENT — above CHARACTER (the token sprite), below
  *      NOTE / TEXT; effects visibly overlay the token */
 function buildWebmItem(token: Image, d: WebmDescriptor): Item {
-  return buildImage(
+  const builder = buildImage(
     // 2026-05-14 (#2) — width/height + mime now come off the
     // descriptor. WebM buffs pass square 192 + "video/webm";
     // static-image buffs pass the image's real dims + real mime.
@@ -707,8 +715,11 @@ function buildWebmItem(token: Image, d: WebmDescriptor): Item {
     .disableAutoZIndex(true)
     .zIndex(d.zIndex)
     .disableAttachmentBehavior(["SCALE", "ROTATION"])
-    .metadata(meta(token.id, "bg", d.buffId, "default"))
-    .build();
+    .metadata(meta(token.id, "bg", d.buffId, "default"));
+  // 2026-05-18 — apply baked rotation (from "以此创建状态"). Skipped
+  // when 0 to keep the build minimal for the common case.
+  if (d.rotation) builder.rotation(d.rotation);
+  return builder.build();
 }
 
 function buildLabelItem(token: Image, d: LabelDescriptor): Item {

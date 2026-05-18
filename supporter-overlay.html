@@ -72,6 +72,29 @@ html,body{
   text-shadow:0 0 11px rgba(0,0,0,0.92),0 0 20px rgba(0,0,0,0.8),0 1px 3px rgba(0,0,0,0.98);
 }
 
+/* 2026-05-18 — supporter avatar (placed BEFORE the name when an
+ * /shared/pics/ match exists). Equal-height to the name's font-size
+ * so the chip stays visually balanced; inline-flex so the img + text
+ * baseline-align cleanly inside the absolute-positioned chip. */
+.name.has-avatar {
+  display:inline-flex;
+  align-items:center;
+  gap:0.35em;
+}
+.name-avatar {
+  border-radius:50%;
+  object-fit:cover;
+  flex-shrink:0;
+  /* Match the supporter's per-name colour (set inline on the parent)
+   * as a thin ring + add a soft dark halo so the avatar reads on the
+   * near-black backdrop without competing with the name's text glow. */
+  box-shadow:
+    0 0 0 1px currentColor,
+    0 0 6px rgba(0,0,0,0.7),
+    0 1px 2px rgba(0,0,0,0.9);
+  background:#111;
+}
+
 /* A subtle vignette around the popup hole so the centre is darker
  * than the surroundings — focuses attention on the settings card. */
 #hole-vignette{

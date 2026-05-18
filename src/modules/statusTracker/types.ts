@@ -117,6 +117,12 @@ export interface BuffDef {
    *  effect so multiple stacked buffs don't visually fight each
    *  other. */
   webmScale?: number;
+  /** 2026-05-18 — rotation in degrees applied to the buff's rendered
+   *  webm / icon item. Used by the "以此创建状态" flow to bake the
+   *  source token's pre-rotated orientation into the resulting buff.
+   *  Falls through as `.rotation()` on the OBR ImageBuilder when the
+   *  buff is later applied to a target token. */
+  rotation?: number;
   /** 2026-05 — explicit "effect turned OFF" marker for a BUILT-IN buff
    *  (one whose id is in DEFAULT_BUFFS). Built-in buffs ship with a
    *  default `webmAsset`; the catalog editor offers a 2-way 无 / 默认

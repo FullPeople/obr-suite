@@ -146,14 +146,25 @@ const LS_BUFF_CATALOG = "obr-suite/status/buff-catalog";
 // every retired id from BOTH the original 32 and the v2 76-list so
 // matching-untouched users get cleaned up regardless of which
 // version they previously migrated to.
-const DEFAULTS_MIGRATION_VERSION = 3;
+// v4: drop every retired id UNCONDITIONALLY (was: only when buff
+// state matched the original default signature). User: "原本的那
+// 32个旧buff需要删掉" — explicit removal even if the user
+// customised the buff with their own webm / color / name. The new
+// 12 defaults use `u_*` prefixed ids so they don't collide with any
+// retired id; user-created buffs that happen to use a colliding id
+// (rare) need to be re-added under a different id.
+const DEFAULTS_MIGRATION_VERSION = 4;
 const LS_DEFAULTS_VERSION = "obr-suite/status/defaults-version";
 
 /**
  * Merge the new DEFAULT_BUFFS into a user's existing catalog:
- *  - Any buff whose id is in DEFAULT_BUFF_RETIRED_IDS AND whose stored
- *    state matches the OLD default signature is REMOVED. User-customised
- *    entries (any field changed) are left untouched.
+ *  - Any buff whose id is in DEFAULT_BUFF_RETIRED_IDS is REMOVED
+ *    UNCONDITIONALLY (was: only when matching the old default
+ *    signature). 2026-05-18 v4 — user wants the 32 old built-in
+ *    buffs gone regardless of whether they tweaked the colour /
+ *    name / webm. The new defaults use `u_*` prefixed ids so they
+ *    don't collide with anything users may have legitimately
+ *    created themselves.
  *  - Any buff in DEFAULT_BUFFS not already present in the catalog
  *    (by id) is appended.
  * Returns the merged buff list + the original groupOrder, padded with
@@ -163,11 +174,12 @@ function migrateDefaultsInPlace(
   existing: BuffDef[],
   existingOrder: string[],
 ): { buffs: BuffDef[]; groupOrder: string[] } {
-  // Pass 1: drop retired-default entries that match the old signature.
-  const kept = existing.filter((b) => {
-    if (!DEFAULT_BUFF_RETIRED_IDS.has(b.id)) return true; // user-defined → keep
-    return !matchesOldDefault(b); // user-customised retired buff → keep
-  });
+  // Reference for tooling — matchesOldDefault is now informational
+  // only (the migration is no longer signature-gated) but the export
+  // is kept available for any future diagnostics.
+  void matchesOldDefault;
+  // Pass 1: drop every retired-default id.
+  const kept = existing.filter((b) => !DEFAULT_BUFF_RETIRED_IDS.has(b.id));
   // Pass 2: append new defaults that aren't already there (by id).
   const existingIds = new Set(kept.map((b) => b.id));
   for (const def of DEFAULT_BUFFS) {
@@ -177,9 +189,18 @@ function migrateDefaultsInPlace(
     }
   }
   // Pass 3: pad groupOrder with any new groups (preserves user's prior
-  // group ordering so they don't see their layout reshuffled).
-  const seenGroups = new Set(existingOrder);
-  const finalOrder = [...existingOrder];
+  // group ordering so they don't see their layout reshuffled). Also
+  // PRUNE groups that no longer have any buffs after the retirement.
+  const finalOrder: string[] = [];
+  const seenGroups = new Set<string>();
+  const usedGroups = new Set<string>();
+  for (const b of kept) if (b.group) usedGroups.add(b.group);
+  for (const g of existingOrder) {
+    if (usedGroups.has(g) && !seenGroups.has(g)) {
+      finalOrder.push(g);
+      seenGroups.add(g);
+    }
+  }
   for (const b of kept) {
     const g = b.group;
     if (g && !seenGroups.has(g)) {
@@ -305,6 +326,12 @@ function parseBuffArray(arr: any[]): BuffDef[] {
     const ws = (e as any).webmScale;
     if (typeof ws === "number" && Number.isFinite(ws) && ws > 0) {
       (def as any).webmScale = ws;
+    }
+    // 2026-05-18 — preserve rotation across save/load. Set by the
+    // "以此创建状态" flow when the source token was pre-rotated.
+    const rot = (e as any).rotation;
+    if (typeof rot === "number" && Number.isFinite(rot)) {
+      (def as any).rotation = rot;
     }
     // 2026-05 — webmOff: explicit "this built-in buff's effect is
     // turned off". Lets the re-seed below distinguish "user disabled
@@ -917,9 +944,22 @@ function renderGrid(): void {
     // 2026-05-14 (#2) — "以此创建状态" buffs carry a static `iconAsset`
     // image. Show it as a small thumbnail in the palette pill so the
     // user sees the actual icon, not just the name text.
-    const iconHtml = (b as any).iconAsset
-      ? `<img src="${escapeHtml((b as any).iconAsset)}" alt=""
-              style="width:18px;height:18px;object-fit:contain;vertical-align:middle;margin-right:5px;border-radius:3px">`
+    // 2026-05-18 — also show the WebM as a tiny inline preview when
+    // the buff has a `webmAsset`. <video> with autoplay+muted+loop
+    // gives users a glance at the actual effect before they apply it
+    // (instead of just the buff name). Same size as the icon
+    // thumbnail; falls through to the static icon for static-image
+    // buffs, then to no thumbnail for legacy text-only buffs.
+    const buffAny = b as any;
+    const webmUrl = typeof buffAny.webmAsset === "string" && buffAny.webmAsset
+      ? assetUrl(buffAny.webmAsset) : "";
+    const iconHtml = webmUrl
+      ? `<video src="${escapeHtml(webmUrl)}" autoplay loop muted playsinline preload="auto"
+                style="width:22px;height:22px;object-fit:contain;vertical-align:middle;margin-right:5px;border-radius:3px;pointer-events:none"
+                aria-hidden="true"></video>`
+      : buffAny.iconAsset
+      ? `<img src="${escapeHtml(buffAny.iconAsset)}" alt=""
+              style="width:22px;height:22px;object-fit:contain;vertical-align:middle;margin-right:5px;border-radius:3px">`
       : "";
     // 2026-05-10: pass the buff colour through `--bubble-bg` so the
     // jelly CSS can apply 80%-alpha + a glassy highlight overlay.
