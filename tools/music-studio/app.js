@@ -33,6 +33,7 @@ const addFileBtn  = $("#addFileBtn");
 const addUrlBtn   = $("#addUrlBtn");
 const hiddenFileInput = $("#hiddenFileInput");
 const exportAllBtn = $("#exportAllBtn");
+const loadDefaultsBtn = $("#loadDefaultsBtn");
 const pairBtn     = $("#pairBtn");
 
 // Editor modal
@@ -405,8 +406,18 @@ const PLAYING_IDS = () => new Set(Object.values(state.turntableTrack).filter(Boo
 
 function makeCard(t) {
   const playing = PLAYING_IDS().has(t.id);
+  // local-only = blob in IndexedDB without a URL alternative. Can't be
+  // shared over PeerJS (other browsers can't fetch a blob: URL), so we
+  // mark it yellow to make the limitation visible at a glance.
+  const localOnly = !!t.blob && !t.url;
   const card = document.createElement("div");
-  card.className = "lib-card" + (playing ? " is-playing" : "");
+  card.className = "lib-card"
+    + (playing ? " is-playing" : "")
+    + (localOnly ? " local-only" : "");
+  if (localOnly) {
+    card.title = "本地压缩文件 — 仅自己能听。"
+               + "要让 OBR 玩家也听到，请用「↓」下载 .opus 后上传到自己的空间，再用「+ 外链」加 URL。";
+  }
   card.draggable = true;
   card.dataset.id = t.id;
 
@@ -496,6 +507,13 @@ function makeCard(t) {
   actions.appendChild(del);
 
   card.appendChild(head); card.appendChild(meta); card.appendChild(tags); card.appendChild(actions);
+
+  if (localOnly) {
+    const ban = document.createElement("div");
+    ban.className = "local-banner";
+    ban.innerHTML = `<span class="ic">⚠</span><span>本地压缩文件，<b>无法分享给 OBR 玩家</b>。点「↓」下载后上传到自己空间再用「+ 外链」即可。</span>`;
+    card.appendChild(ban);
+  }
   return card;
 }
 
@@ -867,6 +885,59 @@ exportAllBtn.addEventListener("click", () => {
     return;
   }
   openShareCode(arr);
+});
+
+// ============ Default catalog import ============
+//
+// Pulls https://obr.dnd.center/music/manifest.json and adds every
+// track to the local library (skip ones already present by URL).
+// All entries are URL-backed so they're auto-shareable to OBR.
+const MANIFEST_URL = "https://obr.dnd.center/music/manifest.json";
+
+loadDefaultsBtn.addEventListener("click", async () => {
+  loadDefaultsBtn.disabled = true;
+  loadDefaultsBtn.textContent = "拉取中…";
+  try {
+    const r = await fetch(MANIFEST_URL, { cache: "no-cache" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    const tracks = Array.isArray(data?.tracks) ? data.tracks : [];
+    if (tracks.length === 0) {
+      toast("默认曲库还是空的（服务器那边还没生成 manifest）", "warn");
+      return;
+    }
+    // Dedup vs existing entries (skip ones with same URL).
+    const existing = new Set(state.lib.map((t) => t.url).filter(Boolean));
+    let added = 0, skipped = 0;
+    for (const t of tracks) {
+      if (!t.url) continue;
+      if (existing.has(t.url)) { skipped++; continue; }
+      await addTrack({
+        id:       crypto.randomUUID(),
+        name:     t.name || "默认曲目",
+        bus:      t.bus === "sfx" ? "sfx" : "bgm",
+        loop:     t.loop !== false,
+        volume:   1,
+        duration: typeof t.duration === "number" ? t.duration : 0,
+        bitrate:  typeof t.bitrate === "number" ? t.bitrate : 64,
+        bytes:    typeof t.bytes === "number" ? t.bytes : 0,
+        mime:     "audio/ogg; codecs=opus",
+        url:      t.url,
+        origName: t.name || t.url,
+        tags:     ["默认曲库"],
+        ts:       Date.now(),
+      });
+      added++;
+    }
+    toast(`默认曲库已导入：${added} 首加入，${skipped} 首已存在`, "ok");
+    await refreshLibrary();
+  } catch (e) {
+    console.error("default manifest fetch failed", e);
+    toast(`无法加载默认曲库：${e?.message || e}`, "error");
+  } finally {
+    loadDefaultsBtn.disabled = false;
+    loadDefaultsBtn.textContent = "⬇ 默认曲库";
+  }
 });
 
 // ============ Pairing (PeerJS WebRTC bridge to OBR plugin) ============

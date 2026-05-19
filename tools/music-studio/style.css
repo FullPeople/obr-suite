@@ -719,6 +719,59 @@ input:focus, textarea:focus { outline: none; }
   box-shadow: 0 0 0 1px rgba(74,214,199,0.30), var(--shadow-sm);
 }
 
+/* Local-only marker — blob entries in IndexedDB can't be shared over
+ * PeerJS (the other browser can't fetch the blob: URL). Yellow ring
+ * + corner ribbon + bus badge tinted to warn users they need to
+ * upload + replace with a URL to make the track shareable. */
+.lib-card.local-only {
+  border-color: rgba(255,214,107,0.45);
+  background: linear-gradient(135deg, rgba(255,214,107,0.05), var(--bg-2));
+}
+.lib-card.local-only:hover {
+  border-color: var(--yellow);
+  background: linear-gradient(135deg, rgba(255,214,107,0.10), var(--bg-3));
+}
+.lib-card.local-only.is-playing {
+  /* When local-only AND playing, accent wins for the border but keep
+   * the yellow tint so the local marker isn't lost. */
+  border-color: var(--accent);
+  background: linear-gradient(135deg, rgba(74,214,199,0.08), rgba(255,214,107,0.06), var(--bg-2));
+}
+
+.lib-card.local-only::after {
+  content: '本地';
+  position: absolute;
+  top: 8px; right: 8px;
+  padding: 1px 6px;
+  background: rgba(255,214,107,0.18);
+  border: 1px solid rgba(255,214,107,0.50);
+  border-radius: 3px;
+  color: var(--yellow);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.local-banner {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 4px 0 0;
+  padding: 6px 9px;
+  background: rgba(255,214,107,0.08);
+  border-left: 2px solid var(--yellow);
+  border-radius: 0 4px 4px 0;
+  font-size: 10.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.local-banner .ic {
+  flex-shrink: 0;
+  color: var(--yellow);
+  font-size: 13px;
+  line-height: 1;
+}
+
 .card-head-row {
   display: flex; gap: 8px; align-items: flex-start; min-width: 0;
 }
