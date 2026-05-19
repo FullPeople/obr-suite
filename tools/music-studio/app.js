@@ -803,7 +803,11 @@ function makeCard(t) {
     const warn = document.createElement("button");
     warn.className = "card-corner-btn warn";
     warn.textContent = "!";
-    warn.title = "本地压缩文件，无法分享给其他玩家。请使用在线直链。";
+    // Custom CSS tooltip (::after on hover, see style.css) — no native
+    // `title` because the native tooltip has a 0.5–1 s OS delay and
+    // can't be styled. aria-label keeps screen-reader access.
+    warn.dataset.tip = "本地压缩文件，无法分享给其他玩家。请使用在线直链。";
+    warn.setAttribute("aria-label", "本地压缩文件，无法分享给其他玩家");
     corner.appendChild(warn);
   }
   const del = document.createElement("button");

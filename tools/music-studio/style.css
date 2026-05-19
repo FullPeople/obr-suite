@@ -769,9 +769,23 @@ input:focus, textarea:focus { outline: none; }
      which library cards are already in their 常用 list. */
   box-shadow: inset 0 0 0 1px rgba(255,214,107,0.45);
 }
-.lib-card.local-only { border-color: rgba(255,214,107,0.40); }
-.lib-card.local-only:hover { border-color: var(--yellow); }
-.lib-card.local-only.is-playing { border-color: var(--accent); }
+/* Local-only (blob) cards — can't be shared with other players because
+ * their browsers can't fetch a blob: URL from another tab. Loud yellow
+ * border + slight yellow background tint so it's obvious at a glance
+ * which cards in the library are limited to local playback. */
+.lib-card.local-only {
+  border: 2px solid var(--yellow);
+  background: linear-gradient(135deg, rgba(255,214,107,0.08), var(--bg-2));
+  box-shadow: 0 0 0 1px rgba(255,214,107,0.18);
+}
+.lib-card.local-only:hover {
+  background: linear-gradient(135deg, rgba(255,214,107,0.14), var(--bg-3));
+  box-shadow: 0 0 0 1px rgba(255,214,107,0.32), var(--shadow-sm);
+}
+.lib-card.local-only.is-playing {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(74,214,199,0.30), 0 0 0 2px rgba(255,214,107,0.40);
+}
 
 .card-head-row {
   display: flex; align-items: center; gap: 5px;
@@ -812,8 +826,69 @@ input:focus, textarea:focus { outline: none; }
   transition: background .12s, color .12s, border-color .12s;
 }
 .card-corner-btn:hover { background: var(--bg-1); color: var(--text); border-color: var(--line-2); }
-.card-corner-btn.warn { color: var(--yellow); cursor: help; }
-.card-corner-btn.warn:hover { background: rgba(255,214,107,0.15); }
+.card-corner-btn.warn {
+  position: relative;
+  color: var(--yellow);
+  cursor: help;
+  /* Slight background + border so the icon stands out even before
+   * hover — pairs with the yellow card frame. */
+  background: rgba(255,214,107,0.12);
+  border-color: rgba(255,214,107,0.45);
+  font-weight: 700;
+}
+.card-corner-btn.warn:hover {
+  background: rgba(255,214,107,0.28);
+  border-color: var(--yellow);
+}
+
+/* Custom hover tooltip — replaces the native title attribute so we
+ * can style + reliably show it without the OS 0.5–1 s delay. The
+ * `data-tip` attribute carries the text. */
+.card-corner-btn.warn::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: -6px;
+  width: 220px;
+  padding: 9px 11px;
+  background: var(--bg-1);
+  border: 1px solid var(--yellow);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.55;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity .15s, transform .15s;
+  z-index: 200;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.45);
+}
+/* Small arrow pointing down from the tooltip to the icon. */
+.card-corner-btn.warn::before {
+  content: "";
+  position: absolute;
+  bottom: calc(100% + 2px);
+  right: 4px;
+  width: 0; height: 0;
+  border: 6px solid transparent;
+  border-top-color: var(--yellow);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity .15s, transform .15s;
+  z-index: 201;
+}
+.card-corner-btn.warn:hover::after,
+.card-corner-btn.warn:focus::after,
+.card-corner-btn.warn:hover::before,
+.card-corner-btn.warn:focus::before {
+  opacity: 1;
+  transform: translateY(0);
+}
 .card-corner-btn.danger:hover { background: rgba(255,107,107,0.15); color: var(--red); border-color: rgba(255,107,107,0.45); }
 .card-meta {
   display: flex; gap: 6px;
