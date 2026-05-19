@@ -1,5 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Vinyl record: outer disc + inner label + cardinal tick marks
+       so the icon reads as "music" even at OBR's 24-px sidebar size. -->
   <circle cx="12" cy="12" r="9"/>
   <circle cx="12" cy="12" r="3"/>
-  <path d="M12 3 v3 M21 12 h-3 M12 21 v-3 M3 12 h3"/>
+  <circle cx="12" cy="12" r="0.6" fill="white" stroke="none"/>
 </svg>

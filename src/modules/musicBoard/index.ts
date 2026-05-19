@@ -19,21 +19,38 @@ const POPOVER_W = 380;
 const POPOVER_H = 540;
 
 export async function setupMusicBoard(): Promise<void> {
-  // Engine lives in the background context — created once, survives
-  // popover open/close so audio + PeerJS connection persist.
-  await setupMusicEngine();
-
+  // 1) Register the tool button FIRST so user always sees the icon,
+  //    even if the engine setup blows up below. Filter explicitly to
+  //    show on all roles — without `filter` some OBR builds quietly
+  //    hide the icon depending on activation state.
   try {
     await OBR.tool.create({
       id: ACTION_ID,
-      icons: [{ icon: ICON_URL, label: "音乐板 (听)" }],
+      icons: [
+        {
+          icon: ICON_URL,
+          label: "音乐板 (听)",
+          filter: { roles: ["GM", "PLAYER"] },
+        },
+      ],
       onClick: () => {
         void openPopover();
         return false;
       },
     });
+    console.info("[music-board] tool registered:", ACTION_ID);
   } catch (e) {
-    console.warn("[music-board] tool.create failed", e);
+    console.error("[music-board] tool.create failed", e);
+  }
+
+  // 2) Engine lives in the background context — created once, survives
+  //    popover open/close so audio + PeerJS connection persist. Wrap
+  //    in try/catch so any failure here can't break the tool button.
+  try {
+    await setupMusicEngine();
+    console.info("[music-board] engine started");
+  } catch (e) {
+    console.error("[music-board] engine setup failed", e);
   }
 }
 
