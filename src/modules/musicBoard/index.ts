@@ -1,14 +1,18 @@
-/* Music board module — owns:
- *   • The background-resident engine (audio + PeerJS) — survives
- *     popover open/close cycles. See engine.ts.
- *   • The OBR tool button that opens the (thin viewer) popover.
+/* Music board module — registers the tool button. Audio + PeerJS
+ * live in the popover itself; the previous background-engine
+ * attempt failed because WebAudio contexts can only be resumed by
+ * a user gesture in the SAME document, and the background iframe
+ * has no UI to gesture against. (You'd hear silence even though the
+ * pipeline appeared connected.)
  *
- * Dev-only (gated in background.ts via STABLE_HIDES).
+ * Tradeoff: closing the popover stops music. The popover has a
+ * built-in "minimize" button that collapses the UI to a thin status
+ * strip while keeping the iframe alive — that's how the user keeps
+ * music running without the full panel in the way.
  */
 
 import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
-import { setupMusicEngine, teardownMusicEngine } from "./engine";
 
 const ACTION_ID  = "com.obr-suite/music-board";
 const POPOVER_ID = "com.obr-suite/music-board/popover";
@@ -17,22 +21,20 @@ const PAGE_URL   = assetUrl("music-board.html");
 
 const POPOVER_W = 380;
 const POPOVER_H = 540;
+// Right-edge inset large enough to clear OBR's right-side panels
+// (people list / scene settings). 120 px is conservative — leaves a
+// visible gap even when the right panel is collapsed.
+const RIGHT_INSET = 120;
 
 export async function setupMusicBoard(): Promise<void> {
-  // 1) Register the tool button FIRST so user always sees the icon,
-  //    even if the engine setup blows up below. Filter explicitly to
-  //    show on all roles — without `filter` some OBR builds quietly
-  //    hide the icon depending on activation state.
   try {
     await OBR.tool.create({
       id: ACTION_ID,
-      icons: [
-        {
-          icon: ICON_URL,
-          label: "音乐板 (听)",
-          filter: { roles: ["GM", "PLAYER"] },
-        },
-      ],
+      icons: [{
+        icon: ICON_URL,
+        label: "音乐板 (听)",
+        filter: { roles: ["GM", "PLAYER"] },
+      }],
       onClick: () => {
         void openPopover();
         return false;
@@ -41,16 +43,6 @@ export async function setupMusicBoard(): Promise<void> {
     console.info("[music-board] tool registered:", ACTION_ID);
   } catch (e) {
     console.error("[music-board] tool.create failed", e);
-  }
-
-  // 2) Engine lives in the background context — created once, survives
-  //    popover open/close so audio + PeerJS connection persist. Wrap
-  //    in try/catch so any failure here can't break the tool button.
-  try {
-    await setupMusicEngine();
-    console.info("[music-board] engine started");
-  } catch (e) {
-    console.error("[music-board] engine setup failed", e);
   }
 }
 
@@ -62,12 +54,9 @@ async function openPopover(): Promise<void> {
     popoverOpen = false;
     return;
   }
-
-  // Right-edge placement. OBR.viewport.getWidth() returns the scene
-  // canvas width which can be unexpectedly small in some setups (the
-  // user reported the popover covering the left toolbar). Defensive
-  // floor + a window.innerWidth fallback keeps the popover anchored
-  // to the right regardless.
+  // Defensive viewport: OBR.viewport.getWidth() can return 0/undefined
+  // in some setups (the popover-on-left-toolbar bug we hit earlier),
+  // so floor against window.innerWidth + 1024 sanity minimum.
   let vw = 0, vh = 0;
   try { vw = await OBR.viewport.getWidth(); } catch {}
   try { vh = await OBR.viewport.getHeight(); } catch {}
@@ -81,10 +70,9 @@ async function openPopover(): Promise<void> {
       width: POPOVER_W,
       height: Math.min(POPOVER_H, vh - 80),
       anchorReference: "POSITION",
-      // Place the anchor at the right edge with a small inset; the
-      // RIGHT/TOP transformOrigin means the popover's right edge
-      // aligns to this point, so it always sits on the right side.
-      anchorPosition: { left: vw - 16, top: 56 },
+      // Right edge of the popover sits RIGHT_INSET px from the right
+      // edge of the OBR viewport, clearing the right toolbar / panels.
+      anchorPosition: { left: vw - RIGHT_INSET, top: 56 },
       anchorOrigin:    { horizontal: "RIGHT", vertical: "TOP" },
       transformOrigin: { horizontal: "RIGHT", vertical: "TOP" },
       hidePaper: true,
@@ -102,5 +90,4 @@ export function teardownMusicBoard(): void {
     void OBR.popover.close(POPOVER_ID).catch(() => {});
     popoverOpen = false;
   }
-  teardownMusicEngine();
 }

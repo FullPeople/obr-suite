@@ -14,15 +14,54 @@
   --green:#5cd97c; --red:#ff6b6b; --yellow:#ffd66b;
 }
 html,body{
-  margin:0;height:100%;
-  background:
-    radial-gradient(circle at 10% 0%, rgba(74,214,199,0.05), transparent 50%),
-    var(--bg);
+  margin:0;height:100%;background:transparent;
   color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
   font-size:13px;line-height:1.5;
 }
-.app{padding:14px;display:flex;flex-direction:column;gap:12px;max-width:560px;margin:0 auto}
+.app{
+  padding:14px;display:flex;flex-direction:column;gap:12px;max-width:560px;margin:0 auto;
+  background:radial-gradient(circle at 10% 0%, rgba(74,214,199,0.05), transparent 50%), var(--bg);
+  border-radius:10px;
+  min-height:100%;
+}
+
+/* === minimize header === */
+.header-row{display:flex;align-items:center;gap:8px}
+.header-title{flex:1;font-size:13px;font-weight:600;color:var(--text-2);letter-spacing:0.3px}
+.icon-btn{
+  width:26px;height:26px;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:5px;
+  color:var(--text-3);
+  font-size:14px;line-height:1;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.icon-btn:hover{background:var(--bg-3);color:var(--text);border-color:var(--line-2)}
+
+/* === Minimized state === */
+.app.minimized{padding:8px 12px;min-height:auto;gap:0}
+.app.minimized > *:not(.mini-bar):not(.toast-stack){display:none}
+.app:not(.minimized) .mini-bar{display:none}
+.mini-bar{
+  display:flex;align-items:center;gap:8px;
+  background:var(--bg-2);
+  border:1px solid var(--line-2);
+  border-radius:6px;
+  padding:6px 10px;
+  font-size:12px;
+  cursor:pointer;
+}
+.mini-bar:hover{background:var(--bg-3)}
+.mini-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.mini-expand{
+  width:22px;height:22px;
+  background:var(--accent);color:#062018;
+  border:none;border-radius:4px;
+  font-size:12px;line-height:1;cursor:pointer;font-weight:700;
+}
+.mini-expand:hover{background:var(--accent-2)}
 
 /* === now playing card === */
 .np-card{
@@ -39,7 +78,6 @@ html,body{
   background:radial-gradient(circle at 15% 50%,rgba(74,214,199,0.12),transparent 60%);
   pointer-events:none;
 }
-
 .np-vinyl{
   width:80px;height:80px;border-radius:50%;
   position:relative;flex-shrink:0;
@@ -92,7 +130,6 @@ html,body{
 }
 .vol-slider::-moz-range-thumb{width:14px;height:14px;background:var(--accent);border-radius:50%;border:none;cursor:pointer}
 .vol-readout{font-family:ui-monospace,monospace;font-size:11px;color:var(--text-3);min-width:30px;text-align:right}
-
 .mute-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2);cursor:pointer;user-select:none}
 .mute-row input{accent-color:var(--accent)}
 
@@ -138,24 +175,9 @@ html,body{
 }
 .btn--primary:hover:not(:disabled){background:linear-gradient(180deg,#74ffea,var(--accent-2))}
 .pair-hint{margin-top:8px;font-size:11px;color:var(--text-3);line-height:1.6}
-.pair-hint code{
-  background:var(--bg-2);padding:1px 5px;border-radius:3px;
-  color:var(--accent);font-family:ui-monospace,monospace;font-size:10.5px;
-}
+.pair-hint code{background:var(--bg-2);padding:1px 5px;border-radius:3px;color:var(--accent);font-family:ui-monospace,monospace;font-size:10.5px}
 .pair-hint a{color:var(--accent);text-decoration:none}
 .pair-hint a:hover{text-decoration:underline}
-
-/* === empty === */
-.empty-state{
-  text-align:center;padding:30px 16px;color:var(--text-3);
-}
-.empty-state .empty-vinyl{
-  width:60px;height:60px;border-radius:50%;margin:0 auto 10px;
-  background:repeating-radial-gradient(circle,#1a1a1a 0px,#0a0a0a 1.2px,#0e0e0e 2.4px),radial-gradient(circle at 35% 35%,#2a2a2a 0%,#0a0a0a 70%);
-  box-shadow:inset 0 0 8px rgba(0,0,0,0.8);opacity:0.6;
-}
-.empty-state .empty-title{font-size:13px;color:var(--text-2);margin-bottom:4px}
-.empty-state .empty-hint{font-size:11.5px;line-height:1.7}
 
 /* === toast === */
 .toast-stack{position:fixed;bottom:14px;right:14px;z-index:50;display:flex;flex-direction:column;gap:5px;pointer-events:none}
@@ -168,6 +190,19 @@ html,body{
 </head>
 <body>
 <div class="app">
+
+  <!-- Header with minimize button -->
+  <div class="header-row">
+    <span class="header-title">音乐板</span>
+    <button class="icon-btn" id="minimizeBtn" title="收起到小条，保留音乐和配对">−</button>
+  </div>
+
+  <!-- Minimized bar (shown only when .app.minimized) -->
+  <div class="mini-bar" id="miniBar" title="点击展开">
+    <span class="mini-title" id="miniTitle">空闲</span>
+    <button class="mini-expand" id="miniExpand" title="展开">+</button>
+  </div>
+
   <!-- Now playing -->
   <div class="np-card" id="npCard">
     <div class="np-vinyl"></div>
@@ -181,7 +216,7 @@ html,body{
     </div>
   </div>
 
-  <!-- Volumes (per-client local) -->
+  <!-- Volumes -->
   <div class="vol-section">
     <div class="vol-row">
       <div class="lbl"><span class="badge badge--bgm">BGM</span></div>
@@ -199,10 +234,10 @@ html,body{
     </label>
   </div>
 
-  <!-- Pair section -->
+  <!-- Pair -->
   <div class="pair-section">
     <div class="pair-head">
-      <span class="pair-title">🔗 接入网页音乐板</span>
+      <span class="pair-title">接入网页音乐板</span>
       <span class="pair-status" id="pairStatus">未连接</span>
     </div>
     <div class="pair-controls">
@@ -211,8 +246,9 @@ html,body{
       <button class="btn" id="unpairBtn" style="display:none">断开</button>
     </div>
     <div class="pair-hint" id="pairHint">
-      在 <a href="https://obr.dnd.center/studio/music-studio/" target="_blank">obr.dnd.center/studio/music-studio/</a> 点「🔗 配对枭熊」拿到配对码，粘到这里。<br>
-      连接后网页里的所有播放/暂停操作会同步到 OBR，所有玩家都能听见。
+      在 <a href="https://obr.dnd.center/studio/music-studio/" target="_blank">obr.dnd.center/studio/music-studio/</a> 点「配对枭熊」拿到配对码，粘到这里。<br>
+      连接后网页里的所有播放/暂停操作会同步到 OBR scene metadata，所有<b>已打开本面板</b>的玩家都能听见同样的音乐。<br>
+      <b>提示</b>：关闭此弹窗会停止音乐 + 断开配对。要保留请点右上角「−」收起到小条。
     </div>
   </div>
 </div>
