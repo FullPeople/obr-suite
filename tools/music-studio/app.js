@@ -1,18 +1,24 @@
-/* Music Board controller — v3.
+/* Music Board controller — v4.
  *
- * Changes from v2:
- *   • Pair widget lives in topbar; code is a click-to-copy chip
- *     (no more alert() popups). On connect, send current playback
- *     state immediately so the plugin catches up to mid-game audio.
- *   • Library cards compacted: drag-only (no per-card play button),
- *     ⚠ + × in top corner instead of a row of action buttons.
- *     No more share-code concept anywhere.
- *   • Filter chips merged: single chip row mixes "全部 / BGM / SFX"
- *     with auto-discovered tags. Click to set the active filter.
- *   • SFX laid out as 2x2 grid right of BGM deck.
- *   • BGM history shows previous / next track names (not just < >).
- *   • New 待播放 queue strip below the deck row. Tracks dragged here
- *     play in order after the current BGM ends (when not single-loop).
+ * Changes from v3:
+ *   1. Default-catalog re-import now BACKFILLS tags onto existing
+ *      library entries (matched by URL) instead of skipping them.
+ *   2. BGM + SFX vinyls enlarged (CSS).
+ *   3. 待播放 queue → 常用 favorites: persistent custom list living
+ *      in the BGM corner overlay. Click any item to play immediately;
+ *      auto-pop-on-end is GONE — items persist until manually removed.
+ *   4. Library card highlight clears when BGM ends naturally.
+ *   5. (covered by #3)
+ *   6. While paired, window.beforeunload prompts the OS native confirm
+ *      dialog so the user doesn't accidentally drop the connection by
+ *      closing the tab.
+ *   7. WebAudio engine. Each turntable now routes through
+ *        MediaElementSource → fadeGain → (duckGain for BGM) → busGain → master
+ *      Master is a DynamicsCompressorNode acting as a limiter
+ *      (-3 dB / 20:1 / 1 ms attack / 50 ms release). BGM auto-ducks to
+ *      40 % whenever any SFX is playing; ramps back to 100 % when SFX
+ *      finish. Play / stop transitions use linear gain ramps so the
+ *      audio never clicks.
  */
 
 import { encodeOpus, estimateOpusBytes } from "./encoder.js";
@@ -40,13 +46,11 @@ const addUrlBtn   = $("#addUrlBtn");
 const hiddenFileInput = $("#hiddenFileInput");
 const loadDefaultsBtn = $("#loadDefaultsBtn");
 
-// Queue
-const queueStrip  = $("#queueStrip");
-const queueRail   = $("#queueRail");
-const queueCount  = $("#queueCount");
-const queueClearBtn = $("#queueClearBtn");
+const favorites      = $("#favorites");
+const favRail        = $("#favRail");
+const favCount       = $("#favCount");
+const favClearBtn    = $("#favClearBtn");
 
-// Pair widget
 const pairBtn       = $("#pairBtn");
 const pairCodeChip  = $("#pairCodeChip");
 const pairCodeValue = $("#pairCodeValue");
@@ -54,7 +58,6 @@ const pairCancelBtn = $("#pairCancelBtn");
 const pairLiveChip  = $("#pairLiveChip");
 const pairUnpairBtn = $("#pairUnpairBtn");
 
-// Editor modal
 const editorModal = $("#editorModal");
 const trackName   = $("#trackName");
 const trackMeta   = $("#trackMeta");
@@ -80,7 +83,6 @@ const encodeProg  = $("#encodeProg");
 const encodeFill  = $("#encodeFill");
 const encodeMsg   = $("#encodeMsg");
 
-// URL modal
 const urlModal   = $("#urlModal");
 const urlInput   = $("#urlInput");
 const urlName    = $("#urlName");
@@ -88,7 +90,6 @@ const urlBusSeg  = $("#urlBusSeg");
 const urlLoopChk = $("#urlLoopChk");
 const urlAddBtn  = $("#urlAddBtn");
 
-// Tag modal
 const tagModal   = $("#tagModal");
 const tagInput   = $("#tagInput");
 const tagSuggestions = $("#tagSuggestions");
@@ -106,34 +107,57 @@ const state = {
   },
   urlBus: "bgm",
   lib: [],
-  // Single active filter: { kind: "all"|"bus"|"tag", value? }
   filter: { kind: "all" },
   libSearchStr: "",
   volumes: { bgm: 0.8, sfx: 1.0 },
   turntableTrack: { "bgm": null, "sfx-0": null, "sfx-1": null, "sfx-2": null, "sfx-3": null },
-  bgmHistory: [],     // [{id}]
+  bgmHistory: [],
   bgmHistoryIdx: -1,
-  queue: [],          // [trackId] — FIFO; auto-pop on BGM end
+  favorites: [],          // [trackId] — persistent custom list
   tagEditId: null,
 };
 
-const LS_VOL   = "obr-music-board:volumes";
-const LS_QUEUE = "obr-music-board:queue";
+const LS_VOL  = "obr-music-board:volumes";
+const LS_FAVS = "obr-music-board:favorites";
 try {
   const v = JSON.parse(localStorage.getItem(LS_VOL) || "{}");
   if (typeof v.bgm === "number") state.volumes.bgm = v.bgm;
   if (typeof v.sfx === "number") state.volumes.sfx = v.sfx;
 } catch {}
 try {
-  const q = JSON.parse(localStorage.getItem(LS_QUEUE) || "[]");
-  if (Array.isArray(q)) state.queue = q.filter((x) => typeof x === "string");
+  // Migrate old "obr-music-board:queue" key → favorites (kept as a
+  // best-effort one-time conversion; safe to leave even after).
+  const oldQ = localStorage.getItem("obr-music-board:queue");
+  if (oldQ && !localStorage.getItem(LS_FAVS)) {
+    localStorage.setItem(LS_FAVS, oldQ);
+  }
+  const q = JSON.parse(localStorage.getItem(LS_FAVS) || "[]");
+  if (Array.isArray(q)) state.favorites = q.filter((x) => typeof x === "string");
 } catch {}
 function saveVolumes() { try { localStorage.setItem(LS_VOL, JSON.stringify(state.volumes)); } catch {} }
-function saveQueue()   { try { localStorage.setItem(LS_QUEUE, JSON.stringify(state.queue)); } catch {} }
+function saveFavs()    { try { localStorage.setItem(LS_FAVS, JSON.stringify(state.favorites)); } catch {} }
 
+// ============ WebAudio master ============
+// Single AudioContext shared by all turntables + editor preview. Lazy-
+// created on first user interaction so we don't trip the autoplay
+// policy block. Each turntable's HTMLAudioElement is routed through
+// its own node chain into MASTER_LIMITER → ctx.destination.
 let audioCtx = null;
+let MASTER_LIMITER = null;
 function getCtx() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    MASTER_LIMITER = audioCtx.createDynamicsCompressor();
+    // Limiter-ish settings — high ratio + low threshold + fast attack
+    // catch overlapping-SFX peaks without audible compression artifacts
+    // on regular content.
+    MASTER_LIMITER.threshold.value = -3;
+    MASTER_LIMITER.ratio.value = 20;
+    MASTER_LIMITER.attack.value = 0.001;
+    MASTER_LIMITER.release.value = 0.05;
+    MASTER_LIMITER.knee.value = 0;
+    MASTER_LIMITER.connect(audioCtx.destination);
+  }
   return audioCtx;
 }
 
@@ -185,7 +209,10 @@ function toast(text, kind = "") {
   }, 2600);
 }
 
-// ============ Turntable ============
+// ============ Turntable (WebAudio backed) ============
+const FADE_IN_MS  = 350;
+const FADE_OUT_MS = 280;
+
 class Turntable {
   constructor(el) {
     this.el = el;
@@ -211,9 +238,50 @@ class Turntable {
     this.audio.crossOrigin = "anonymous";
     this.track = null;
 
+    // WebAudio nodes — created on first play() since AudioContext
+    // can't be safely instantiated before a user gesture.
+    this.sourceNode = null;
+    this.fadeGain = null;
+    this.duckGain = null;   // BGM only
+    this.busGain = null;
+
     this._wire();
     this._tick = this._tick.bind(this);
     requestAnimationFrame(this._tick);
+  }
+
+  _ensureAudioGraph() {
+    if (this.sourceNode) return;
+    const ctx = getCtx();
+    this.sourceNode = ctx.createMediaElementSource(this.audio);
+    this.fadeGain = ctx.createGain();
+    this.fadeGain.gain.value = 0;          // start silent — we ramp in
+    this.busGain  = ctx.createGain();
+    this.busGain.gain.value = state.volumes[this.bus];
+    if (this.bus === "bgm") {
+      this.duckGain = ctx.createGain();
+      this.duckGain.gain.value = 1;
+      this.sourceNode.connect(this.fadeGain).connect(this.duckGain).connect(this.busGain).connect(MASTER_LIMITER);
+    } else {
+      this.sourceNode.connect(this.fadeGain).connect(this.busGain).connect(MASTER_LIMITER);
+    }
+    // HTMLAudioElement.volume is locked to 1 — gain stage handles all
+    // volume control so AudioContext suspended state still mutes correctly.
+    this.audio.volume = 1;
+  }
+
+  /** Linear-ramp the fadeGain to a target, returns a Promise that
+   *  resolves after the ramp completes. */
+  _ramp(target, ms) {
+    const ctx = getCtx();
+    const t   = ctx.currentTime;
+    const dt  = ms / 1000;
+    this.fadeGain.gain.cancelScheduledValues(t);
+    // Anchor at the current value so we ramp smoothly even mid-ramp.
+    const cur = this.fadeGain.gain.value;
+    this.fadeGain.gain.setValueAtTime(cur, t);
+    this.fadeGain.gain.linearRampToValueAtTime(target, t + dt);
+    return new Promise((r) => setTimeout(r, ms + 20));
   }
 
   _wire() {
@@ -240,19 +308,23 @@ class Turntable {
       });
     }
     this.audio.addEventListener("ended", () => {
+      // Loop is handled by HTMLAudioElement natively; we get this
+      // event only for non-loop tracks. Just clear all state.
       if (!this.audio.loop) {
-        // BGM specifically: try to pull the next track from the queue.
-        if (this.bus === "bgm" && state.queue.length > 0) {
-          const nextId = state.queue.shift();
-          saveQueue(); renderQueue();
-          const t = state.lib.find((x) => x.id === nextId);
-          if (t) { this.load(t, true); return; }
-        }
-        this._setSpinning(false); this._syncPlayUI();
+        this._setSpinning(false);
+        this._syncPlayUI();
+        // Clear card highlight in the library
+        this.track = null;
+        state.turntableTrack[this.slot] = null;
+        if (this.nameEl) this.nameEl.textContent = this.bus === "bgm" ? "-- 空闲 --" : "空";
+        if (this.bus === "bgm") this._updateHistoryButtons();
+        renderLibrary();
+        renderFavorites();
+        updateDucking();
       }
     });
 
-    // Drop target for library cards (existing flow) AND queue items (new).
+    // Drop target for library cards
     this.el.addEventListener("dragover", (e) => {
       if (e.dataTransfer.types.includes("application/x-obr-music-card")) {
         e.preventDefault();
@@ -281,25 +353,39 @@ class Turntable {
     requestAnimationFrame(this._tick);
   }
 
-  load(track, autoplay = true) {
+  async load(track, autoplay = true) {
+    // If we're currently playing, fade out the old source briefly
+    // before switching `.src` so the transition isn't a click.
+    if (this.track && !this.audio.paused && this.fadeGain) {
+      await this._ramp(0, FADE_OUT_MS);
+    }
     if (this.audio.src.startsWith("blob:")) URL.revokeObjectURL(this.audio.src);
     this.track = track;
     state.turntableTrack[this.slot] = track.id;
     if (this.nameEl) this.nameEl.textContent = track.name || "未命名";
     this.audio.src = track.url || URL.createObjectURL(track.blob);
     this.audio.loop = !!track.loop;
-    this._applyVolume();
     if (this.bus === "bgm") {
       this._pushHistory(track);
       this._updateHistoryButtons();
     }
     if (autoplay) {
-      this.audio.play().then(() => { this._setSpinning(true); this._syncPlayUI(); })
-        .catch((e) => toast("播放失败：" + (e?.message || e), "error"));
+      try {
+        await getCtx().resume();
+        this._ensureAudioGraph();
+        await this.audio.play();
+        this._applyVolume();
+        await this._ramp(1, FADE_IN_MS);
+        this._setSpinning(true);
+        this._syncPlayUI();
+        updateDucking();
+      } catch (e) {
+        toast("播放失败：" + (e?.message || e), "error");
+      }
     }
     renderLibrary();
+    renderFavorites();
 
-    // Broadcast to OBR if paired.
     if (this.bus === "bgm") {
       sendToObr({
         type: "bgm-load",
@@ -318,17 +404,37 @@ class Turntable {
   }
 
   _applyVolume() {
-    this.audio.volume = Math.max(0, Math.min(1, state.volumes[this.bus]));
+    if (!this.busGain) return;
+    const ctx = getCtx();
+    const t = ctx.currentTime;
+    this.busGain.gain.cancelScheduledValues(t);
+    this.busGain.gain.setValueAtTime(this.busGain.gain.value, t);
+    this.busGain.gain.linearRampToValueAtTime(state.volumes[this.bus], t + 0.12);
   }
 
-  togglePlay() {
+  async togglePlay() {
     if (!this.track) return;
     const wasPaused = this.audio.paused;
     if (wasPaused) {
-      getCtx().resume();
-      this.audio.play().then(() => { this._setSpinning(true); this._syncPlayUI(); });
+      try {
+        await getCtx().resume();
+        this._ensureAudioGraph();
+        await this.audio.play();
+        this._applyVolume();
+        await this._ramp(1, FADE_IN_MS);
+        this._setSpinning(true);
+        this._syncPlayUI();
+        updateDucking();
+      } catch (e) {
+        toast("播放失败：" + (e?.message || e), "error");
+      }
     } else {
-      this.audio.pause(); this._setSpinning(false); this._syncPlayUI();
+      // Fade out, THEN pause — so the gain ramp is audible.
+      await this._ramp(0, FADE_OUT_MS);
+      this.audio.pause();
+      this._setSpinning(false);
+      this._syncPlayUI();
+      updateDucking();
     }
     if (this.bus === "bgm") {
       sendToObr({
@@ -338,11 +444,14 @@ class Turntable {
     }
   }
 
-  stop() {
+  async stop() {
+    const wasBgm = this.bus === "bgm" && this.track;
+    if (this.fadeGain && !this.audio.paused) {
+      await this._ramp(0, FADE_OUT_MS);
+    }
     this.audio.pause(); this.audio.currentTime = 0;
     if (this.audio.src.startsWith("blob:")) URL.revokeObjectURL(this.audio.src);
     this.audio.removeAttribute("src"); this.audio.load();
-    const wasBgm = this.bus === "bgm" && this.track;
     this.track = null;
     state.turntableTrack[this.slot] = null;
     if (this.nameEl) this.nameEl.textContent = this.bus === "bgm" ? "-- 空闲 --" : "空";
@@ -352,6 +461,8 @@ class Turntable {
     if (this.fillEl) this.fillEl.style.width = "0%";
     if (this.bus === "bgm") this._updateHistoryButtons();
     renderLibrary();
+    renderFavorites();
+    updateDucking();
     if (wasBgm) sendToObr({ type: "bgm-stop" });
   }
 
@@ -397,22 +508,14 @@ class Turntable {
         const id = state.bgmHistory[state.bgmHistoryIdx - 1].id;
         const t = state.lib.find((x) => x.id === id);
         histPrevName.textContent = t ? trunc(t.name) : "上一首";
-      } else {
-        histPrevName.textContent = "无";
-      }
+      } else { histPrevName.textContent = "无"; }
     }
     if (histNextName) {
       if (hasNext) {
         const id = state.bgmHistory[state.bgmHistoryIdx + 1].id;
         const t = state.lib.find((x) => x.id === id);
         histNextName.textContent = t ? trunc(t.name) : "下一首";
-      } else if (state.queue.length > 0) {
-        // No forward history but queue has entries — preview the next queued.
-        const t = state.lib.find((x) => x.id === state.queue[0]);
-        histNextName.textContent = t ? `⏵ ${trunc(t.name)}` : "(队列)";
-      } else {
-        histNextName.textContent = "无";
-      }
+      } else { histNextName.textContent = "无"; }
     }
   }
 }
@@ -434,10 +537,31 @@ if (sfxVolSlider) {
   });
 }
 
+// ============ Auto-ducking ============
+// When ANY SFX pad is currently playing, the BGM duckGain ramps down
+// to 40 % over 400 ms. When all SFX stop, it ramps back to 100 % over
+// 800 ms. Pure client-side — no protocol changes.
+function updateDucking() {
+  const bgmTT = bgmDeckTT;
+  if (!bgmTT.duckGain) return;
+  const sfxActive = TURNTABLES.some((tt) =>
+    tt.bus === "sfx" && tt.track && !tt.audio.paused);
+  const ctx = getCtx();
+  const t = ctx.currentTime;
+  const cur = bgmTT.duckGain.gain.value;
+  bgmTT.duckGain.gain.cancelScheduledValues(t);
+  bgmTT.duckGain.gain.setValueAtTime(cur, t);
+  bgmTT.duckGain.gain.linearRampToValueAtTime(
+    sfxActive ? 0.4 : 1.0,
+    t + (sfxActive ? 0.4 : 0.8),
+  );
+}
+
 // ============ Library ============
 async function refreshLibrary() {
   state.lib = (await listTracks()).map((t) => ({ tags: [], ...t }));
   renderLibrary();
+  renderFavorites();
   bgmDeckTT._updateHistoryButtons();
 }
 function visibleTracks() {
@@ -460,7 +584,6 @@ function visibleTracks() {
 function renderLibrary() {
   libCount.textContent = state.lib.length;
   renderChipFilter();
-
   const arr = visibleTracks();
   libGrid.innerHTML = "";
   if (arr.length === 0) {
@@ -480,9 +603,6 @@ function renderLibrary() {
 }
 
 function renderChipFilter() {
-  // Collect tag counts (filtered by active bus if any, so counts stay
-  // meaningful per filter context — currently just global counts since
-  // single-select is simple enough).
   const tagCounts = new Map();
   let bgmN = 0, sfxN = 0;
   for (const t of state.lib) {
@@ -490,7 +610,6 @@ function renderChipFilter() {
     for (const g of (t.tags || [])) tagCounts.set(g, (tagCounts.get(g) || 0) + 1);
   }
   chipFilterRow.innerHTML = "";
-
   const mk = (label, klass, isOn, onClick, count) => {
     const chip = document.createElement("button");
     chip.className = "chip " + klass + (isOn ? " on" : "");
@@ -498,23 +617,18 @@ function renderChipFilter() {
     chip.addEventListener("click", onClick);
     return chip;
   };
-
   chipFilterRow.appendChild(mk("全部", "chip--all",
     state.filter.kind === "all",
     () => { state.filter = { kind: "all" }; renderLibrary(); },
     state.lib.length));
-
   chipFilterRow.appendChild(mk("BGM", "chip--bus chip--bgm",
     state.filter.kind === "bus" && state.filter.value === "bgm",
     () => { state.filter = { kind: "bus", value: "bgm" }; renderLibrary(); },
     bgmN));
-
   chipFilterRow.appendChild(mk("SFX", "chip--bus chip--sfx",
     state.filter.kind === "bus" && state.filter.value === "sfx",
     () => { state.filter = { kind: "bus", value: "sfx" }; renderLibrary(); },
     sfxN));
-
-  // Tag chips, sorted by count desc then name asc.
   const tags = [...tagCounts.entries()].sort((a, b) =>
     b[1] - a[1] || a[0].localeCompare(b[0], "zh"));
   for (const [name, n] of tags) {
@@ -559,6 +673,7 @@ function makeCard(t) {
       t.name = n;
       await updateTrack(t.id, { name: n });
       for (const tt of TURNTABLES) if (tt.track?.id === t.id && tt.nameEl) tt.nameEl.textContent = n;
+      renderFavorites();
     } else { name.textContent = t.name; }
   });
   name.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); name.blur(); } });
@@ -568,7 +683,6 @@ function makeCard(t) {
   bus.textContent = t.bus.toUpperCase();
   head.appendChild(name); head.appendChild(bus);
 
-  // Corner action icons (delete + optional warn). Tiny, hover for label.
   const corner = document.createElement("div");
   corner.className = "card-corner";
   if (localOnly) {
@@ -587,10 +701,9 @@ function makeCard(t) {
     if (!confirm(`删除「${t.name}」？`)) return;
     for (const tt of TURNTABLES) if (tt.track?.id === t.id) tt.stop();
     await deleteTrack(t.id);
-    // Remove from queue if present
-    if (state.queue.includes(t.id)) {
-      state.queue = state.queue.filter((id) => id !== t.id);
-      saveQueue(); renderQueue();
+    if (state.favorites.includes(t.id)) {
+      state.favorites = state.favorites.filter((id) => id !== t.id);
+      saveFavs();
     }
     await refreshLibrary();
   });
@@ -630,71 +743,73 @@ function playOnBestTarget(t) {
   else (findEmptySfx() || turntableFor("sfx-0")).load(t, true);
 }
 
-// ============ Queue ============
-function renderQueue() {
-  queueCount.textContent = state.queue.length;
-  queueRail.innerHTML = "";
-  if (state.queue.length === 0) {
+// ============ Favorites ============
+function renderFavorites() {
+  favCount.textContent = state.favorites.length;
+  favRail.innerHTML = "";
+  if (state.favorites.length === 0) {
     const e = document.createElement("div");
-    e.className = "queue-empty";
-    e.textContent = "拖卡片到这里加入待播放";
-    queueRail.appendChild(e);
+    e.className = "favorites-empty";
+    e.textContent = "拖卡片到这里收藏 · 点击即播";
+    favRail.appendChild(e);
     return;
   }
-  for (const id of state.queue) {
+  const playingIds = PLAYING_IDS();
+  for (const id of state.favorites) {
     const t = state.lib.find((x) => x.id === id);
     if (!t) continue;
+    const isPlaying = playingIds.has(id);
     const item = document.createElement("div");
-    item.className = "queue-item";
+    item.className = "fav-item" + (isPlaying ? " is-playing" : "");
+    item.title = isPlaying ? "正在播放，再点一次停止" : `点击播放: ${t.name}`;
+    item.addEventListener("click", (e) => {
+      if (e.target.closest(".fav-item-x")) return;
+      // Clicking a favorite plays it immediately on the BGM/SFX deck.
+      playOnBestTarget(t);
+    });
     const n = document.createElement("span");
-    n.className = "queue-item-name";
+    n.className = "fav-item-name";
     n.textContent = t.name;
-    n.title = t.name;
     const x = document.createElement("button");
-    x.className = "queue-item-x";
+    x.className = "fav-item-x";
     x.textContent = "×";
-    x.title = "从队列移除";
-    x.addEventListener("click", () => {
-      state.queue = state.queue.filter((q) => q !== id);
-      saveQueue(); renderQueue();
-      bgmDeckTT._updateHistoryButtons();
+    x.title = "从常用移除";
+    x.addEventListener("click", (e) => {
+      e.stopPropagation();
+      state.favorites = state.favorites.filter((q) => q !== id);
+      saveFavs(); renderFavorites();
     });
     item.appendChild(n); item.appendChild(x);
-    queueRail.appendChild(item);
+    favRail.appendChild(item);
   }
 }
-queueClearBtn.addEventListener("click", () => {
-  if (state.queue.length === 0) return;
-  state.queue = []; saveQueue(); renderQueue();
-  bgmDeckTT._updateHistoryButtons();
+favClearBtn.addEventListener("click", () => {
+  if (state.favorites.length === 0) return;
+  if (!confirm(`清空常用列表（${state.favorites.length} 首）？`)) return;
+  state.favorites = []; saveFavs(); renderFavorites();
 });
 
-// Drop target for the queue strip
-queueStrip.addEventListener("dragover", (e) => {
+// Drop target for the favorites panel
+favorites.addEventListener("dragover", (e) => {
   if (e.dataTransfer.types.includes("application/x-obr-music-card")) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
-    queueStrip.classList.add("drop-target");
+    favorites.classList.add("drop-target");
   }
 });
-queueStrip.addEventListener("dragleave", () => queueStrip.classList.remove("drop-target"));
-queueStrip.addEventListener("drop", (e) => {
+favorites.addEventListener("dragleave", () => favorites.classList.remove("drop-target"));
+favorites.addEventListener("drop", (e) => {
   e.preventDefault();
-  queueStrip.classList.remove("drop-target");
+  favorites.classList.remove("drop-target");
   const id = e.dataTransfer.getData("application/x-obr-music-card");
   if (!id) return;
   const t = state.lib.find((x) => x.id === id);
   if (!t) return;
-  if (t.bus !== "bgm") {
-    toast("待播放只接受 BGM 曲目", "warn");
+  if (state.favorites.includes(id)) {
+    toast("已在常用列表中", "warn");
     return;
   }
-  if (state.queue.includes(id)) {
-    toast("已在队列中", "warn");
-    return;
-  }
-  state.queue.push(id); saveQueue(); renderQueue();
-  bgmDeckTT._updateHistoryButtons();
+  state.favorites.push(id); saveFavs(); renderFavorites();
 });
 
 // ============ Library search ============
@@ -1022,6 +1137,15 @@ tagSaveBtn.addEventListener("click", async () => {
 });
 
 // ============ Default catalog ============
+//
+// On click: pull manifest, then for every track in it:
+//   • NEW  (URL not in library) → addTrack
+//   • EXISTING (URL match)      → UPDATE the entry's tags from the
+//                                 manifest, MERGING with any user-
+//                                 authored tags the user may have
+//                                 already added locally.
+// Fixes the case where the user imported the catalog BEFORE folder
+// tags landed — re-clicking now backfills them without duplicating.
 const MANIFEST_URL = "https://obr.dnd.center/music/manifest.json";
 
 loadDefaultsBtn.addEventListener("click", async () => {
@@ -1032,35 +1156,55 @@ loadDefaultsBtn.addEventListener("click", async () => {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     const tracks = Array.isArray(data?.tracks) ? data.tracks : [];
-    if (tracks.length === 0) {
-      toast("默认曲库还是空的", "warn"); return;
-    }
-    const existing = new Set(state.lib.map((t) => t.url).filter(Boolean));
-    let added = 0, skipped = 0;
+    if (tracks.length === 0) { toast("默认曲库还是空的", "warn"); return; }
+
+    // Index local lib by URL for O(1) match.
+    const byUrl = new Map();
+    for (const t of state.lib) if (t.url) byUrl.set(t.url, t);
+
+    let added = 0, updated = 0, unchanged = 0;
     for (const t of tracks) {
       if (!t.url) continue;
-      if (existing.has(t.url)) { skipped++; continue; }
-      const incoming = Array.isArray(t.tags) ? t.tags : [];
-      await addTrack({
-        id:       crypto.randomUUID(),
-        name:     t.name || "默认曲目",
-        bus:      t.bus === "sfx" ? "sfx" : "bgm",
-        loop:     t.loop !== false,
-        volume:   1,
-        duration: typeof t.duration === "number" ? t.duration : 0,
-        bitrate:  typeof t.bitrate === "number" ? t.bitrate : 64,
-        bytes:    typeof t.bytes === "number" ? t.bytes : 0,
-        mime:     "audio/ogg; codecs=opus",
-        url:      t.url,
-        origName: t.name || t.url,
-        // Server-provided category tags + a 默认 marker so users can
-        // pick out the prebuilt catalog separately.
-        tags:     incoming.length > 0 ? [...incoming, "默认"] : ["默认"],
-        ts:       Date.now(),
-      });
-      added++;
+      const incomingTags = Array.isArray(t.tags) ? t.tags : [];
+      const desiredTags = incomingTags.length > 0 ? [...incomingTags, "默认"] : ["默认"];
+      const existing = byUrl.get(t.url);
+      if (existing) {
+        // Merge: union desired with existing tags (preserve user adds).
+        const seen = new Set();
+        const merged = [];
+        for (const g of [...(existing.tags || []), ...desiredTags]) {
+          if (!seen.has(g)) { seen.add(g); merged.push(g); }
+        }
+        const sameTags = JSON.stringify(merged) === JSON.stringify(existing.tags || []);
+        if (!sameTags) {
+          await updateTrack(existing.id, { tags: merged });
+          updated++;
+        } else { unchanged++; }
+      } else {
+        await addTrack({
+          id:       crypto.randomUUID(),
+          name:     t.name || "默认曲目",
+          bus:      t.bus === "sfx" ? "sfx" : "bgm",
+          loop:     t.loop !== false,
+          volume:   1,
+          duration: typeof t.duration === "number" ? t.duration : 0,
+          bitrate:  typeof t.bitrate === "number" ? t.bitrate : 64,
+          bytes:    typeof t.bytes === "number" ? t.bytes : 0,
+          mime:     "audio/ogg; codecs=opus",
+          url:      t.url,
+          origName: t.name || t.url,
+          tags:     desiredTags,
+          ts:       Date.now(),
+        });
+        added++;
+      }
     }
-    toast(`默认曲库已导入：${added} 首加入，${skipped} 首已存在`, "ok");
+    const summary = [
+      added && `新增 ${added}`,
+      updated && `回填 ${updated}`,
+      unchanged && `${unchanged} 首已就绪`,
+    ].filter(Boolean).join(" · ");
+    toast(`默认曲库：${summary}`, "ok");
     await refreshLibrary();
   } catch (e) {
     console.error("default manifest fetch failed", e);
@@ -1074,8 +1218,6 @@ loadDefaultsBtn.addEventListener("click", async () => {
 // ============================================================
 // ====================== PAIRING (PeerJS) ====================
 // ============================================================
-// In-topbar pair widget. States cycle: idle → waiting → live → idle.
-// Code chip is click-to-copy. Live chip shows pulse + disconnect ×.
 
 const PEER_PREFIX = "obr-music-";
 let _peer = null;
@@ -1088,7 +1230,7 @@ function genPairCode() {
   for (let i = 0; i < 6; i++) c += chars[Math.floor(Math.random() * chars.length)];
   return c;
 }
-function setPairUi(state /* idle | waiting | live */) {
+function setPairUi(state) {
   pairBtn.classList.toggle("hidden", state !== "idle");
   pairCodeChip.classList.toggle("hidden", state !== "waiting");
   pairLiveChip.classList.toggle("hidden", state !== "live");
@@ -1101,7 +1243,6 @@ pairUnpairBtn.addEventListener("click", () => {
   if (confirm("确定断开与枭熊的连接？")) tearDownPair();
 });
 pairCodeChip.addEventListener("click", async (e) => {
-  // Don't copy when clicking the × button.
   if (e.target.closest(".pair-code-x")) return;
   try {
     await navigator.clipboard.writeText(_pairCode);
@@ -1127,7 +1268,6 @@ async function startPairing() {
       conn.on("open", () => {
         setPairUi("live");
         toast("枭熊已连接", "ok");
-        // *** Sync current state on connect — 解决"已经在播放但插件不知道"。
         broadcastCurrentState();
       });
       conn.on("close", () => {
@@ -1160,19 +1300,14 @@ function sendToObr(msg) {
   }
 }
 
-/** Send a snapshot of current playback so a fresh connection
- *  immediately catches up. Fixes #3: 已经在播放时配对后无声。 */
 function broadcastCurrentState() {
-  // Volumes first so subsequent loads honour them.
   sendToObr({ type: "volume", bus: "bgm", vol: state.volumes.bgm });
   sendToObr({ type: "volume", bus: "sfx", vol: state.volumes.sfx });
-  // BGM
   const bgm = turntableFor("bgm");
   if (bgm.track && bgm.track.url) {
     sendToObr({
       type: "bgm-load",
-      url:  bgm.track.url,
-      name: bgm.track.name,
+      url:  bgm.track.url, name: bgm.track.name,
       loop: !!bgm.track.loop,
       position: bgm.audio.currentTime || 0,
     });
@@ -1180,24 +1315,32 @@ function broadcastCurrentState() {
       sendToObr({ type: "bgm-pause", position: bgm.audio.currentTime || 0 });
     }
   }
-  // SFX — emit one sfx-add per currently-playing pad with a URL.
   for (const tt of TURNTABLES) {
     if (tt.bus !== "sfx" || !tt.track || !tt.track.url || tt.audio.paused) continue;
     sendToObr({
       type: "sfx-add",
       id: crypto.randomUUID(),
-      url: tt.track.url,
-      name: tt.track.name,
-      loop: !!tt.track.loop,
+      url: tt.track.url, name: tt.track.name, loop: !!tt.track.loop,
     });
   }
 }
 
+// ============ beforeunload guard ============
+// When the studio is paired with the枭熊 plugin, close/refresh of
+// this tab tears down the WebRTC channel, leaving the plugin (and
+// all OBR players) silently stuck at the last metadata snapshot.
+// Show the browser-native "Leave site?" confirm so the user has to
+// acknowledge before disconnecting.
+window.addEventListener("beforeunload", (e) => {
+  if (_peerConn && _peerConn.open) {
+    e.preventDefault();
+    e.returnValue = "已配对的枭熊插件会失去同步。确定离开？";
+    return e.returnValue;
+  }
+});
+
 // ============ Boot ============
-refreshLibrary().then(() => {
-  renderQueue();
-  bgmDeckTT._updateHistoryButtons();
-}).catch((e) => {
+refreshLibrary().catch((e) => {
   console.error("library load failed", e);
   toast("库加载失败：" + (e?.message || e), "error");
 });

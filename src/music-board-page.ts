@@ -99,21 +99,98 @@ sfxVolReadout.textContent = sfxVol.value;
 
 let currentState: MusicState = structuredClone(DEFAULT_STATE);
 
+// ---- WebAudio engine -------------------------------------------------
+//
+// Mirror of the studio's engine. Each <audio> goes through:
+//   MediaElementSource → fadeGain (300ms ramps) → (duckGain for BGM)
+//   → busGain (per-bus volume × per-client local volume) → limiter
+// All ramps use linearRampToValueAtTime so transitions are click-free.
+// Audio context is lazy — autoplay policy needs a user gesture to
+// resume, but since this page opens via a button click that's fine.
+
+let audioCtx: AudioContext | null = null;
+let masterLimiter: DynamicsCompressorNode | null = null;
+function getCtx(): AudioContext {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    masterLimiter = audioCtx.createDynamicsCompressor();
+    masterLimiter.threshold.value = -3;
+    masterLimiter.ratio.value = 20;
+    masterLimiter.attack.value = 0.001;
+    masterLimiter.release.value = 0.05;
+    masterLimiter.knee.value = 0;
+    masterLimiter.connect(audioCtx.destination);
+  }
+  return audioCtx;
+}
+
+interface AudioChain {
+  fadeGain: GainNode;
+  busGain:  GainNode;
+  duckGain?: GainNode;
+}
+const chainMap = new WeakMap<HTMLAudioElement, AudioChain>();
+
+function ensureChain(audio: HTMLAudioElement, bus: "bgm" | "sfx"): AudioChain {
+  let chain = chainMap.get(audio);
+  if (chain) return chain;
+  const ctx = getCtx();
+  const src = ctx.createMediaElementSource(audio);
+  const fadeGain = ctx.createGain();
+  fadeGain.gain.value = 0;
+  const busGain  = ctx.createGain();
+  busGain.gain.value  = busVolumeFor(bus);
+  audio.volume = 1;                 // gain stage handles volume
+  if (bus === "bgm") {
+    const duckGain = ctx.createGain();
+    duckGain.gain.value = 1;
+    src.connect(fadeGain).connect(duckGain).connect(busGain).connect(masterLimiter!);
+    chain = { fadeGain, busGain, duckGain };
+  } else {
+    src.connect(fadeGain).connect(busGain).connect(masterLimiter!);
+    chain = { fadeGain, busGain };
+  }
+  chainMap.set(audio, chain);
+  return chain;
+}
+
+function busVolumeFor(bus: "bgm" | "sfx"): number {
+  const localK = bus === "bgm" ? localVol.bgm : localVol.sfx;
+  const remote = bus === "bgm" ? currentState.bus.bgm : currentState.bus.sfx;
+  return Math.max(0, Math.min(1, remote * localK * (localVol.mute ? 0 : 1)));
+}
+function rampGain(g: GainNode, target: number, ms: number) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  g.gain.cancelScheduledValues(t);
+  g.gain.setValueAtTime(g.gain.value, t);
+  g.gain.linearRampToValueAtTime(target, t + ms / 1000);
+}
+
 const bgmAudio = new Audio();
 bgmAudio.preload = "auto";
 bgmAudio.crossOrigin = "anonymous";
 
-// SFX: id → Audio (so we don't double-fire when state ticks include
-// the same SFX twice).
 const sfxAudios = new Map<string, HTMLAudioElement>();
 
 function applyBgmVolume() {
-  const v = currentState.bus.bgm * localVol.bgm * (localVol.mute ? 0 : 1);
-  bgmAudio.volume = Math.max(0, Math.min(1, v));
+  const chain = chainMap.get(bgmAudio);
+  if (chain) rampGain(chain.busGain, busVolumeFor("bgm"), 120);
+  else bgmAudio.volume = busVolumeFor("bgm");  // pre-graph fallback
 }
 function applySfxVolume() {
-  const v = currentState.bus.sfx * localVol.sfx * (localVol.mute ? 0 : 1);
-  for (const a of sfxAudios.values()) a.volume = Math.max(0, Math.min(1, v));
+  const v = busVolumeFor("sfx");
+  for (const a of sfxAudios.values()) {
+    const chain = chainMap.get(a);
+    if (chain) rampGain(chain.busGain, v, 120);
+    else a.volume = v;
+  }
+}
+function updateDucking() {
+  const chain = chainMap.get(bgmAudio);
+  if (!chain?.duckGain) return;
+  const anySfx = [...sfxAudios.values()].some((a) => !a.paused);
+  rampGain(chain.duckGain, anySfx ? 0.4 : 1.0, anySfx ? 400 : 800);
 }
 
 bgmVol.addEventListener("input", () => {
@@ -184,27 +261,40 @@ setInterval(() => {
 let lastBgmKey = "";
 let lastSfxIds = new Set<string>();
 
+const FADE_IN_MS  = 350;
+const FADE_OUT_MS = 280;
+
 async function applyState(next: MusicState) {
   currentState = next;
   renderUI();
   applyBgmVolume();
   applySfxVolume();
 
-  // BGM diff
   const bgm = next.bgm;
   const key = bgm ? `${bgm.url}|${bgm.loop}` : "";
   if (key !== lastBgmKey) {
-    // Track changed (or cleared)
+    // Track changed (or cleared) — fade out current, swap, fade in.
+    const cur = chainMap.get(bgmAudio);
+    if (cur && !bgmAudio.paused) {
+      rampGain(cur.fadeGain, 0, FADE_OUT_MS);
+      await new Promise((r) => setTimeout(r, FADE_OUT_MS + 20));
+    }
     try { bgmAudio.pause(); } catch {}
     if (bgm) {
       bgmAudio.src = bgm.url;
       bgmAudio.loop = bgm.loop;
       bgmAudio.currentTime = Math.max(0, livePosition(bgm));
       if (!bgm.paused) {
-        await bgmAudio.play().catch(() => {
-          // Autoplay can be blocked until user interacts; show a hint.
+        try {
+          await getCtx().resume();
+          const chain = ensureChain(bgmAudio, "bgm");
+          rampGain(chain.fadeGain, 0, 0);
+          await bgmAudio.play();
+          rampGain(chain.fadeGain, 1, FADE_IN_MS);
+          updateDucking();
+        } catch {
           toast("浏览器拦截了自动播放，请点击页面任意位置允许", "warn");
-        });
+        }
       }
     } else {
       bgmAudio.removeAttribute("src");
@@ -212,14 +302,23 @@ async function applyState(next: MusicState) {
     }
     lastBgmKey = key;
   } else if (bgm) {
-    // Same track — sync play/pause + maybe correct drift
+    const chain = chainMap.get(bgmAudio);
     if (bgm.paused && !bgmAudio.paused) {
-      bgmAudio.pause();
+      if (chain) {
+        rampGain(chain.fadeGain, 0, FADE_OUT_MS);
+        setTimeout(() => { try { bgmAudio.pause(); } catch {} }, FADE_OUT_MS + 20);
+      } else { bgmAudio.pause(); }
     } else if (!bgm.paused && bgmAudio.paused) {
       bgmAudio.currentTime = livePosition(bgm);
-      await bgmAudio.play().catch(() => {});
+      try {
+        await getCtx().resume();
+        const c = ensureChain(bgmAudio, "bgm");
+        rampGain(c.fadeGain, 0, 0);
+        await bgmAudio.play();
+        rampGain(c.fadeGain, 1, FADE_IN_MS);
+        updateDucking();
+      } catch {}
     } else if (!bgm.paused) {
-      // Drift correction — only when more than 1.5s off
       const target = livePosition(bgm);
       if (Math.abs(bgmAudio.currentTime - target) > 1.5) {
         bgmAudio.currentTime = target;
@@ -229,26 +328,42 @@ async function applyState(next: MusicState) {
 
   // SFX diff
   const desired = new Set(next.sfx.map((s) => s.id));
-  // Stop SFX no longer in state
   for (const id of lastSfxIds) {
     if (!desired.has(id)) {
       const a = sfxAudios.get(id);
-      if (a) { try { a.pause(); } catch {} sfxAudios.delete(id); }
+      if (a) {
+        const c = chainMap.get(a);
+        if (c) {
+          rampGain(c.fadeGain, 0, FADE_OUT_MS);
+          setTimeout(() => { try { a.pause(); } catch {} sfxAudios.delete(id); updateDucking(); }, FADE_OUT_MS + 20);
+        } else {
+          try { a.pause(); } catch {}
+          sfxAudios.delete(id);
+        }
+      }
     }
   }
-  // Start new SFX
   for (const s of next.sfx) {
     if (!sfxAudios.has(s.id)) {
       const a = new Audio(s.url);
       a.preload = "auto";
       a.crossOrigin = "anonymous";
       a.loop = !!s.loop;
-      a.volume = next.bus.sfx * localVol.sfx * (localVol.mute ? 0 : 1);
       a.addEventListener("ended", () => {
-        if (!a.loop) sfxAudios.delete(s.id);
+        if (!a.loop) {
+          sfxAudios.delete(s.id);
+          updateDucking();
+        }
       });
       sfxAudios.set(s.id, a);
-      a.play().catch(() => {});
+      try {
+        await getCtx().resume();
+        const c = ensureChain(a, "sfx");
+        rampGain(c.fadeGain, 0, 0);
+        await a.play();
+        rampGain(c.fadeGain, 1, FADE_IN_MS);
+        updateDucking();
+      } catch {}
     }
   }
   lastSfxIds = desired;

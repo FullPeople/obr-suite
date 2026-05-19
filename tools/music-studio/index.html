@@ -103,6 +103,20 @@
           </div>
         </div>
       </div>
+
+      <!-- 常用区 — corner panel inside BGM box, dashed border, lightly
+           overlapping the deck content. Drag any BGM card in to pin it
+           for quick access. Click any chip to play immediately. -->
+      <div class="favorites" id="favorites">
+        <div class="favorites-head">
+          <span class="favorites-title">⭐ 常用</span>
+          <span class="favorites-count" id="favCount">0</span>
+          <button class="favorites-clear" id="favClearBtn" title="清空">×</button>
+        </div>
+        <div class="favorites-rail" id="favRail">
+          <div class="favorites-empty">拖卡片到这里收藏 · 点击即播</div>
+        </div>
+      </div>
     </div>
 
     <!-- SFX 2x2 grid -->
@@ -158,19 +172,6 @@
         <input type="range" class="vol-slider" min="0" max="100" value="100" id="sfxVolSlider">
         <span class="vol-readout" id="sfxVolReadout">100</span>
       </div>
-    </div>
-  </section>
-
-  <!-- ============ QUEUE STRIP ============ -->
-  <section class="queue-strip" id="queueStrip">
-    <div class="queue-head">
-      <span class="queue-title">⏵ 待播放</span>
-      <span class="queue-count" id="queueCount">0</span>
-      <span class="queue-hint">非单曲循环时，BGM 播完会顺序播下一首</span>
-      <button class="btn btn--ghost btn--xs" id="queueClearBtn">清空</button>
-    </div>
-    <div class="queue-rail" id="queueRail">
-      <div class="queue-empty">拖卡片到这里加入待播放</div>
     </div>
   </section>
 

@@ -171,16 +171,17 @@ input:focus, textarea:focus { outline: none; }
 /* ===== BGM hero ===== */
 .bgm-deck {
   display: grid;
-  grid-template-columns: 180px 1fr;
-  gap: 18px;
+  grid-template-columns: 240px 1fr;
+  gap: 22px;
   align-items: center;
-  padding: 18px 20px;
+  padding: 22px 24px 22px 24px;
   background: linear-gradient(135deg, var(--bg-2), var(--bg-1) 80%);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   position: relative;
   overflow: hidden;
   box-shadow: var(--shadow);
+  min-height: 240px;          /* taller card so the corner panel fits */
 }
 .bgm-deck::before {
   content: '';
@@ -197,7 +198,7 @@ input:focus, textarea:focus { outline: none; }
 
 .deck-vinyl-wrap {
   position: relative;
-  width: 150px; height: 150px;
+  width: 210px; height: 210px;
   justify-self: center;
 }
 
@@ -250,14 +251,14 @@ input:focus, textarea:focus { outline: none; }
 
 .deck-tonearm {
   position: absolute;
-  top: -6px; right: -16px;
-  width: 80px; height: 110px;
+  top: -8px; right: -22px;
+  width: 110px; height: 150px;
   pointer-events: none;
 }
-.arm-pivot { position: absolute; top: 8px; right: 8px; width: 13px; height: 13px; background: radial-gradient(circle, #5c6280, #2a2e40); border-radius: 50%; }
+.arm-pivot { position: absolute; top: 10px; right: 10px; width: 16px; height: 16px; background: radial-gradient(circle, #5c6280, #2a2e40); border-radius: 50%; }
 .arm-rod {
-  position: absolute; top: 14px; right: 14px;
-  width: 3.5px; height: 78px;
+  position: absolute; top: 18px; right: 18px;
+  width: 4px; height: 108px;
   background: linear-gradient(180deg, #888c9c, #5c6280);
   border-radius: 2px;
   transform-origin: top right;
@@ -265,12 +266,12 @@ input:focus, textarea:focus { outline: none; }
   transition: transform .55s cubic-bezier(.5,.1,.3,1.2);
 }
 .arm-rod .arm-head {
-  position: absolute; bottom: -5px; left: -3.5px;
-  width: 10px; height: 12px;
+  position: absolute; bottom: -6px; left: -4px;
+  width: 12px; height: 14px;
   background: linear-gradient(180deg, #3a3e4e, #1f232f);
   border-radius: 2px;
 }
-.arm-counter { position: absolute; top: 6px; right: -6px; width: 16px; height: 5px; background: linear-gradient(180deg, #5c6280, #3a3e4e); border-radius: 3px; }
+.arm-counter { position: absolute; top: 8px; right: -8px; width: 20px; height: 6px; background: linear-gradient(180deg, #5c6280, #3a3e4e); border-radius: 3px; }
 .bgm-deck.playing .arm-rod { transform: rotate(12deg); }
 
 .deck-drop-hint {
@@ -409,8 +410,11 @@ input:focus, textarea:focus { outline: none; }
   border-radius: var(--radius-lg);
 }
 .sfx-pad {
-  display: flex; flex-direction: column; gap: 5px;
-  padding: 8px;
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -428,29 +432,31 @@ input:focus, textarea:focus { outline: none; }
   box-shadow: 0 0 0 1px var(--sfx-color);
 }
 .pad-vinyl {
-  align-self: center;
-  width: 46px; height: 46px; border-radius: 50%;
+  width: 78px; height: 78px; border-radius: 50%;
   position: relative;
   background:
-    repeating-radial-gradient(circle, #1a1a1a 0px, #0a0a0a 1.1px, #0e0e0e 2.2px),
+    repeating-radial-gradient(circle, #1a1a1a 0px, #0a0a0a 1.2px, #0e0e0e 2.4px),
     radial-gradient(circle at 35% 35%, #2a2a2a 0%, #0a0a0a 70%);
-  box-shadow: inset 0 0 6px rgba(0,0,0,0.8);
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.85), 0 2px 5px rgba(0,0,0,0.4);
 }
 .pad-vinyl .vinyl-label {
-  inset: 32%;
+  inset: 30%;
   background: radial-gradient(circle, var(--sfx-color) 0%, #4a2870 100%);
 }
 .pad-vinyl::after {
   content: ''; position: absolute; top: 50%; left: 50%;
-  width: 2.5px; height: 2.5px;
-  margin: -1.25px 0 0 -1.25px;
+  width: 3.5px; height: 3.5px;
+  margin: -1.75px 0 0 -1.75px;
   background: #000; border-radius: 50%;
 }
 .sfx-pad.playing .pad-vinyl { animation: vinyl-spin 3.2s linear infinite; }
-.pad-meta { display: flex; flex-direction: column; gap: 2px; text-align: center; min-width: 0; }
-.pad-meta .badge { align-self: center; font-size: 9px; padding: 1px 6px; }
-.pad-name { font-size: 10.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pad-controls { display: flex; gap: 4px; justify-content: center; margin-top: auto; }
+.pad-meta {
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
+}
+.pad-meta .badge { align-self: flex-start; font-size: 9.5px; padding: 1px 7px; }
+.pad-name { font-size: 11.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pad-controls { display: flex; gap: 5px; margin-top: auto; }
 
 .sfx-vol-row {
   grid-column: 1 / -1;
@@ -508,70 +514,118 @@ input:focus, textarea:focus { outline: none; }
 .btn--play.is-playing .ico-pause { display: inline-block; }
 
 /* ============================================================
-   ===================== QUEUE STRIP ==========================
-   ============================================================ */
-.queue-strip {
-  padding: 10px 14px;
-  background: var(--bg-1);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+   ====== FAVORITES PANEL (BGM-corner overlay) ================
+   ============================================================
+   Positioned absolute inside .bgm-deck, anchored bottom-right,
+   slightly overlapping the deck content. Dashed border marks it
+   as a drop zone. Items are pill-stacks that overlap each other
+   horizontally so 4-5 entries still fit in the corner footprint.
+   Click any pill to immediately play that track on the BGM deck. */
+.favorites {
+  position: absolute;
+  right: 10px; bottom: 10px;
+  width: clamp(160px, 32%, 240px);
+  max-height: 138px;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 9px 6px;
+  background: rgba(10,12,20,0.65);
+  backdrop-filter: blur(4px);
+  border: 1.5px dashed rgba(255,255,255,0.18);
+  border-radius: 10px;
   transition: border-color .15s, background .15s;
+  z-index: 3;
+  pointer-events: auto;
 }
-.queue-strip.drop-target {
+.bgm-deck:hover .favorites { background: rgba(10,12,20,0.78); }
+.favorites.drop-target {
   border-color: var(--accent);
-  background: linear-gradient(135deg, rgba(74,214,199,0.06), var(--bg-1));
-  box-shadow: inset 0 0 0 1px rgba(74,214,199,0.30);
+  border-style: solid;
+  background: rgba(74,214,199,0.10);
+  box-shadow: 0 0 0 1px rgba(74,214,199,0.35);
 }
-.queue-head {
-  display: flex; align-items: center; gap: 10px;
-  font-size: 11.5px;
-  margin-bottom: 6px;
+.favorites-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10.5px;
+  color: var(--text-3);
 }
-.queue-title { font-weight: 600; color: var(--text); letter-spacing: 0.3px; }
-.queue-count {
+.favorites-title { font-weight: 600; color: var(--text-2); letter-spacing: 0.4px; }
+.favorites-count {
   display: inline-block;
-  padding: 1px 7px;
+  padding: 0 6px;
   background: var(--bg-3);
   color: var(--accent);
   border-radius: 999px;
-  font-size: 10.5px; font-weight: 600;
+  font-size: 9.5px; font-weight: 700;
+  margin-right: auto;
 }
-.queue-hint { color: var(--text-3); font-size: 10.5px; flex: 1; }
-.queue-rail {
-  display: flex; gap: 6px; flex-wrap: nowrap;
-  overflow-x: auto;
-  padding: 4px 2px;
-  min-height: 34px;
-}
-.queue-empty {
-  flex: 1;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-3); font-size: 11.5px;
-  padding: 4px;
-  font-style: italic;
-}
-.queue-item {
-  display: flex; align-items: center; gap: 6px;
-  padding: 4px 8px 4px 10px;
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  font-size: 11px;
-  white-space: nowrap;
-  max-width: 180px;
-  flex-shrink: 0;
-}
-.queue-item-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.queue-item-x {
+.favorites-clear {
   width: 16px; height: 16px;
   background: transparent; border: none;
-  color: var(--text-3); font-size: 13px; line-height: 1;
+  color: var(--text-3);
+  font-size: 14px; line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.favorites-clear:hover { background: rgba(255,107,107,0.20); color: var(--red); }
+.favorites-rail {
+  display: flex; flex-wrap: wrap; gap: 3px;
+  overflow-y: auto;
+  flex: 1;
+  padding: 1px;
+}
+.favorites-empty {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-style: italic;
+  padding: 6px 4px;
+  text-align: center;
+  line-height: 1.5;
+}
+.fav-item {
+  display: flex; align-items: center; gap: 4px;
+  padding: 3px 6px 3px 9px;
+  background: linear-gradient(180deg, var(--bg-3), var(--bg-2));
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  font-size: 10.5px;
+  white-space: nowrap;
+  max-width: 100%;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, transform .08s;
+  position: relative;
+}
+.fav-item:hover {
+  background: linear-gradient(180deg, var(--bg-4), var(--bg-3));
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+.fav-item.is-playing {
+  background: linear-gradient(180deg, var(--accent), #2da897);
+  border-color: var(--accent);
+  color: #062018;
+  font-weight: 600;
+}
+.fav-item-name {
+  overflow: hidden; text-overflow: ellipsis;
+  min-width: 0; max-width: 90px;
+}
+.fav-item-x {
+  width: 14px; height: 14px;
+  background: transparent; border: none;
+  color: var(--text-3); font-size: 11px; line-height: 1;
   cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%;
   flex-shrink: 0;
+  opacity: 0.6;
 }
-.queue-item-x:hover { background: rgba(255,107,107,0.20); color: var(--red); }
+.fav-item-x:hover { background: rgba(255,107,107,0.20); color: var(--red); opacity: 1; }
+.fav-item.is-playing .fav-item-x { color: #062018; opacity: 0.7; }
+.fav-item.is-playing .fav-item-x:hover { background: rgba(0,0,0,0.25); color: #062018; opacity: 1; }
 
 /* ============================================================
    ===================== LIBRARY ============================
@@ -1009,9 +1063,17 @@ input:focus, textarea:focus { outline: none; }
 }
 @media (max-width: 720px) {
   .page { padding: 10px; gap: 10px; }
-  .bgm-deck { grid-template-columns: 1fr; padding: 14px; gap: 12px; }
-  .deck-vinyl-wrap { width: 120px; height: 120px; }
+  .bgm-deck { grid-template-columns: 1fr; padding: 14px; gap: 12px; min-height: auto; }
+  .deck-vinyl-wrap { width: 140px; height: 140px; }
   .deck-tonearm { display: none; }
+  .favorites {
+    /* On phones the corner-overlay layout falls apart; promote
+       favorites to a normal flow block below the deck content. */
+    position: static;
+    width: 100%;
+    max-height: 180px;
+    margin-top: 6px;
+  }
   .lib-head input[type=search] { max-width: none; width: 100%; }
   .lib-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
   .topbar { padding: 8px 12px; gap: 10px; }
