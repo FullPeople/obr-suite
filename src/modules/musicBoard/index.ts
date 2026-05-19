@@ -26,9 +26,13 @@ import { assetUrl } from "../../asset-base";
 
 const POPOVER_ID = "com.obr-suite/music-board/popover";
 const PAGE_URL   = assetUrl("music-board.html");
-const META_KEY   = "com.obr-suite/music-board:state";
-const BC_TOGGLE  = "com.obr-suite/music-board:toggle";
-const BC_ACTIVE  = "com.obr-suite/music-board:state-active";
+// IMPORTANT: keep this metadata key SEPARATE from the music-state key
+// the popover writes. The popover overwrites its entire key on every
+// peer message; if we shared a key our `open` flag would be lost on
+// the first bgm-load and the popover would auto-close.
+const META_KEY_OPEN = "com.obr-suite/music-board:open";
+const BC_TOGGLE     = "com.obr-suite/music-board:toggle";
+const BC_ACTIVE     = "com.obr-suite/music-board:state-active";
 
 const POPOVER_W = 380;
 const POPOVER_H = 540;
@@ -62,14 +66,14 @@ export async function setupMusicBoard(): Promise<void> {
     // Initial pull — open if scene already says so (e.g. user joining
     // a session where the GM already opened music).
     const meta = await OBR.scene.getMetadata().catch(() => ({} as any));
-    const init = meta[META_KEY] as any;
+    const init = meta[META_KEY_OPEN] as any;
     await reactToOpenFlag(!!init?.open);
   } catch (e) {
     console.warn("[music-board] initial metadata read failed", e);
   }
   try {
     const u = OBR.scene.onMetadataChange((meta) => {
-      const cur = meta[META_KEY] as any;
+      const cur = meta[META_KEY_OPEN] as any;
       void reactToOpenFlag(!!cur?.open);
     });
     if (typeof u === "function") unsubs.push(u);
@@ -84,9 +88,9 @@ async function toggleRoomOpen(): Promise<void> {
   if (myRole !== "GM") return;
   try {
     const meta = await OBR.scene.getMetadata();
-    const cur = (meta[META_KEY] as any) || {};
-    const next = { ...cur, open: !cur.open, ts: Date.now() };
-    await OBR.scene.setMetadata({ [META_KEY]: next as any });
+    const cur = (meta[META_KEY_OPEN] as any) || {};
+    const next = { open: !cur.open, ts: Date.now() };
+    await OBR.scene.setMetadata({ [META_KEY_OPEN]: next as any });
   } catch (e) {
     console.warn("[music-board] toggle failed", e);
   }
