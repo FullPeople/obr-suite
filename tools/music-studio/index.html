@@ -15,185 +15,228 @@
 
 <header class="topbar">
   <div class="brand">
-    <svg class="brand-mark" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M5 11 V4 L13 3 V10"/>
-      <circle cx="4" cy="11.5" r="1.7"/>
-      <circle cx="12" cy="10.5" r="1.7"/>
+    <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>
     </svg>
     <span class="brand-name">OBR 音乐板</span>
   </div>
   <nav class="studio-tabs">
-    <a class="studio-tab" href="../monster-studio/index.html">
-      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6 L4 4 L6 6"/><path d="M10 6 L12 4 L14 6"/><path d="M4 8 Q8 12 12 8"/></svg>
-      <span>怪物</span>
-    </a>
-    <a class="studio-tab" href="../buff-studio/index.html">
-      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2 L8 14 M2 8 L14 8"/></svg>
-      <span>Buff</span>
-    </a>
-    <a class="studio-tab" href="../dice-studio/index.html">
-      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="10" height="10" rx="1.6"/></svg>
-      <span>骰子</span>
-    </a>
-    <a class="studio-tab active" href="./index.html">
-      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 11 V4 L13 3 V10"/><circle cx="4" cy="11.5" r="1.7"/><circle cx="12" cy="10.5" r="1.7"/></svg>
-      <span>音乐</span>
-    </a>
+    <a class="studio-tab" href="../monster-studio/index.html">怪物</a>
+    <a class="studio-tab" href="../buff-studio/index.html">Buff</a>
+    <a class="studio-tab" href="../dice-studio/index.html">骰子</a>
+    <a class="studio-tab active" href="./index.html">音乐</a>
   </nav>
   <div class="topbar-actions">
-    <button class="pill-link" id="settingsBtn">设置</button>
+    <button class="btn btn--ghost btn--sm" id="pairBtn" title="未来用：与枭熊插件建立 P2P 配对">🔗 配对枭熊</button>
   </div>
 </header>
 
 <main class="page">
 
-  <!-- ============ TURNTABLE BAR ============ -->
-  <section class="turntable-bar">
-    <!-- Big BGM turntable -->
-    <div class="turntable big" data-slot="bgm" data-bus="bgm">
-      <div class="vinyl-area">
-        <canvas class="vinyl-canvas"></canvas>
-        <div class="drop-hint">拖卡片到此播放</div>
+  <!-- ============ BGM HERO DECK ============ -->
+  <section class="bgm-deck" data-slot="bgm" data-bus="bgm">
+    <div class="deck-vinyl-wrap">
+      <div class="deck-vinyl" id="bgmVinyl">
+        <div class="vinyl-label"></div>
+        <div class="vinyl-hole"></div>
       </div>
-      <div class="tt-info">
-        <div class="tt-row tt-row-top">
-          <span class="tt-badge bgm">BGM</span>
-          <span class="tt-name">-- 空闲 --</span>
+      <div class="deck-tonearm" id="bgmTonearm">
+        <div class="arm-pivot"></div>
+        <div class="arm-rod"><div class="arm-head"></div></div>
+        <div class="arm-counter"></div>
+      </div>
+      <div class="deck-drop-hint">拖卡片到这里播放</div>
+    </div>
+
+    <div class="deck-info">
+      <div class="deck-tag">
+        <span class="badge badge--bgm">BGM</span>
+        <span class="deck-title" data-tt-name>-- 空闲 --</span>
+      </div>
+
+      <div class="deck-progress">
+        <span class="time time--cur" data-tt-cur>00:00</span>
+        <div class="bar" data-tt-bar><div class="bar-fill" data-tt-fill></div></div>
+        <span class="time time--dur" data-tt-dur>00:00</span>
+      </div>
+
+      <div class="deck-controls">
+        <button class="btn btn--icon" data-act="prev" title="上一首">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button class="btn btn--play btn--icon" data-act="play" title="播放/暂停">
+          <svg class="ico-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
+        </button>
+        <button class="btn btn--icon" data-act="stop" title="停止">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+        </button>
+        <button class="btn btn--icon" data-act="next" title="下一首">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg>
+        </button>
+
+        <div class="vol-group">
+          <svg class="vol-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9zM16 12c0-1.77-1-3.29-2.5-4.03v8.05c1.5-.73 2.5-2.25 2.5-4.02z"/></svg>
+          <input type="range" class="vol-slider" min="0" max="100" value="80" data-vol>
+          <span class="vol-readout" data-vol-readout>80</span>
         </div>
-        <div class="tt-row tt-progress">
-          <span class="tt-time tt-cur">00:00</span>
-          <div class="tt-bar"><div class="tt-fill"></div></div>
-          <span class="tt-time tt-dur">00:00</span>
-        </div>
-        <div class="tt-row tt-controls">
-          <button class="tt-btn" data-act="prev"  title="上一首">‹</button>
-          <button class="tt-btn tt-play" data-act="play"  title="播放/暂停">▶</button>
-          <button class="tt-btn" data-act="stop"  title="停止">■</button>
-          <button class="tt-btn" data-act="next"  title="下一首">›</button>
-          <div class="tt-volume">
-            <span>🔊</span>
-            <input type="range" class="tt-vol-slider" min="0" max="100" value="80">
-          </div>
-        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SFX ROW ============ -->
+  <section class="sfx-row">
+    <div class="sfx-pad" data-slot="sfx-0" data-bus="sfx">
+      <div class="pad-vinyl"><div class="vinyl-label"></div></div>
+      <div class="pad-meta">
+        <span class="badge badge--sfx">SFX 1</span>
+        <span class="pad-name" data-tt-name>空</span>
+      </div>
+      <div class="pad-controls">
+        <button class="btn btn--icon btn--xs btn--play" data-act="play" title="播放/暂停">
+          <svg class="ico-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
+        </button>
+        <button class="btn btn--icon btn--xs" data-act="stop" title="停止">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+        </button>
       </div>
     </div>
 
-    <!-- 4 small SFX turntables -->
-    <div class="turntable small" data-slot="sfx-0" data-bus="sfx">
-      <div class="vinyl-area"><canvas class="vinyl-canvas"></canvas><div class="drop-hint">SFX 1</div></div>
-      <div class="tt-info">
-        <div class="tt-row tt-row-top"><span class="tt-badge sfx">SFX 1</span></div>
-        <div class="tt-name">空</div>
-        <div class="tt-controls compact">
-          <button class="tt-btn tt-play" data-act="play">▶</button>
-          <button class="tt-btn" data-act="stop">■</button>
-        </div>
+    <div class="sfx-pad" data-slot="sfx-1" data-bus="sfx">
+      <div class="pad-vinyl"><div class="vinyl-label"></div></div>
+      <div class="pad-meta">
+        <span class="badge badge--sfx">SFX 2</span>
+        <span class="pad-name" data-tt-name>空</span>
+      </div>
+      <div class="pad-controls">
+        <button class="btn btn--icon btn--xs btn--play" data-act="play">
+          <svg class="ico-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
+        </button>
+        <button class="btn btn--icon btn--xs" data-act="stop">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+        </button>
       </div>
     </div>
-    <div class="turntable small" data-slot="sfx-1" data-bus="sfx">
-      <div class="vinyl-area"><canvas class="vinyl-canvas"></canvas><div class="drop-hint">SFX 2</div></div>
-      <div class="tt-info">
-        <div class="tt-row tt-row-top"><span class="tt-badge sfx">SFX 2</span></div>
-        <div class="tt-name">空</div>
-        <div class="tt-controls compact">
-          <button class="tt-btn tt-play" data-act="play">▶</button>
-          <button class="tt-btn" data-act="stop">■</button>
-        </div>
+
+    <div class="sfx-pad" data-slot="sfx-2" data-bus="sfx">
+      <div class="pad-vinyl"><div class="vinyl-label"></div></div>
+      <div class="pad-meta">
+        <span class="badge badge--sfx">SFX 3</span>
+        <span class="pad-name" data-tt-name>空</span>
+      </div>
+      <div class="pad-controls">
+        <button class="btn btn--icon btn--xs btn--play" data-act="play">
+          <svg class="ico-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
+        </button>
+        <button class="btn btn--icon btn--xs" data-act="stop">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+        </button>
       </div>
     </div>
-    <div class="turntable small" data-slot="sfx-2" data-bus="sfx">
-      <div class="vinyl-area"><canvas class="vinyl-canvas"></canvas><div class="drop-hint">SFX 3</div></div>
-      <div class="tt-info">
-        <div class="tt-row tt-row-top"><span class="tt-badge sfx">SFX 3</span></div>
-        <div class="tt-name">空</div>
-        <div class="tt-controls compact">
-          <button class="tt-btn tt-play" data-act="play">▶</button>
-          <button class="tt-btn" data-act="stop">■</button>
-        </div>
+
+    <div class="sfx-pad" data-slot="sfx-3" data-bus="sfx">
+      <div class="pad-vinyl"><div class="vinyl-label"></div></div>
+      <div class="pad-meta">
+        <span class="badge badge--sfx">SFX 4</span>
+        <span class="pad-name" data-tt-name>空</span>
+      </div>
+      <div class="pad-controls">
+        <button class="btn btn--icon btn--xs btn--play" data-act="play">
+          <svg class="ico-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
+        </button>
+        <button class="btn btn--icon btn--xs" data-act="stop">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+        </button>
       </div>
     </div>
-    <div class="turntable small" data-slot="sfx-3" data-bus="sfx">
-      <div class="vinyl-area"><canvas class="vinyl-canvas"></canvas><div class="drop-hint">SFX 4</div></div>
-      <div class="tt-info">
-        <div class="tt-row tt-row-top"><span class="tt-badge sfx">SFX 4</span></div>
-        <div class="tt-name">空</div>
-        <div class="tt-controls compact">
-          <button class="tt-btn tt-play" data-act="play">▶</button>
-          <button class="tt-btn" data-act="stop">■</button>
-        </div>
-      </div>
+
+    <div class="sfx-vol-group">
+      <svg class="vol-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9zM16 12c0-1.77-1-3.29-2.5-4.03v8.05c1.5-.73 2.5-2.25 2.5-4.02z"/></svg>
+      <input type="range" class="vol-slider" min="0" max="100" value="100" id="sfxVolSlider">
+      <span class="vol-readout" id="sfxVolReadout">100</span>
     </div>
   </section>
 
   <!-- ============ LIBRARY ============ -->
-  <section class="card library-card">
+  <section class="library">
     <header class="lib-head">
-      <h2>曲库 <span class="lib-count" id="libCount">0</span></h2>
-      <input type="search" id="libSearch" placeholder="搜索…" class="lib-search">
-      <div class="seg" id="libFilterSeg">
-        <button class="seg-opt on" data-flt="all">全部</button>
-        <button class="seg-opt"    data-flt="bgm">BGM</button>
-        <button class="seg-opt"    data-flt="sfx">SFX</button>
+      <div class="lib-title-row">
+        <h2>曲库 <span class="lib-count" id="libCount">0</span></h2>
+        <input type="search" id="libSearch" placeholder="🔍 搜索曲名 / 标签…">
       </div>
-      <button class="btn small" id="addUrlBtn" title="粘贴音频外链">+ 外链</button>
-      <button class="btn small primary" id="addFileBtn" title="选择本地文件">+ 文件</button>
-      <input type="file" id="hiddenFileInput" accept="audio/*" hidden multiple>
-      <button class="btn small ghost" id="exportAllBtn" title="把所有外链曲目打包成枭熊导入码">📋 导出码</button>
+      <div class="lib-actions-row">
+        <div class="seg" id="libFilterSeg">
+          <button class="seg-opt on" data-flt="all">全部</button>
+          <button class="seg-opt"    data-flt="bgm">BGM</button>
+          <button class="seg-opt"    data-flt="sfx">SFX</button>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn btn--ghost btn--sm" id="addUrlBtn">+ 外链</button>
+        <button class="btn btn--primary btn--sm" id="addFileBtn">+ 文件</button>
+        <input type="file" id="hiddenFileInput" accept="audio/*" hidden multiple>
+        <button class="btn btn--ghost btn--sm" id="exportAllBtn" title="导出所有外链曲目为枭熊导入码">📋 导出码</button>
+      </div>
     </header>
 
-    <!-- tag chip filter (dynamically populated) -->
     <div class="tag-chip-row" id="tagChipRow"></div>
 
-    <!-- the drop zone wraps the grid so audio files dropped ANYWHERE on the
-         library open the editor; cards inside the grid are themselves
-         drag-source for play-on-turntable. -->
     <div class="lib-drop-zone" id="libDropZone">
       <div class="lib-grid" id="libGrid">
         <div class="lib-empty">
-          <div class="empty-icon">♪</div>
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+          </div>
           <div class="empty-title">曲库是空的</div>
-          <div class="empty-hint">把音频文件拖到这里 → 自动打开编辑器；或点右上「+ 文件 / + 外链」</div>
+          <div class="empty-hint">把音频文件拖到这里 → 自动打开编辑器<br>或点右上「+ 文件 / + 外链」</div>
         </div>
       </div>
-      <div class="drop-overlay" id="dropOverlay">
+      <div class="drop-overlay">
         <div class="drop-overlay-inner">
-          <div class="drop-icon">＋</div>
-          <div>松开导入并编辑</div>
+          <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          <div>松开导入并打开编辑器</div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ============ EDITOR MODAL (file → trim → encode) ============ -->
+  <!-- ============ EDITOR MODAL ============ -->
   <div class="modal hidden" id="editorModal">
     <div class="modal-backdrop" data-close></div>
-    <div class="modal-card modal-card-wide">
+    <div class="modal-card modal-card--wide">
       <header class="modal-head">
         <h3>编辑曲目</h3>
         <button class="modal-close" data-close>×</button>
       </header>
       <div class="modal-body">
-        <div class="edit-head">
-          <input type="text" id="trackName" class="track-name" placeholder="曲目名称">
+        <div class="field-row">
+          <input type="text" id="trackName" class="input input--lg" placeholder="曲目名称">
           <span class="track-meta" id="trackMeta"></span>
         </div>
         <div class="waveform-wrap">
           <canvas id="waveform" class="waveform-canvas"></canvas>
-          <div class="trim-overlay" id="trimOverlay">
-            <div class="trim-mask trim-mask-left"  id="trimMaskL"></div>
-            <div class="trim-mask trim-mask-right" id="trimMaskR"></div>
-            <div class="trim-handle trim-handle-l" id="trimHandleL"><span></span></div>
-            <div class="trim-handle trim-handle-r" id="trimHandleR"><span></span></div>
+          <div class="trim-overlay">
+            <div class="trim-mask trim-mask--l" id="trimMaskL"></div>
+            <div class="trim-mask trim-mask--r" id="trimMaskR"></div>
+            <div class="trim-handle trim-handle--l" id="trimHandleL"><span></span></div>
+            <div class="trim-handle trim-handle--r" id="trimHandleR"><span></span></div>
             <div class="play-cursor" id="playCursor"></div>
           </div>
         </div>
         <div class="trim-readout">
-          <span><label>起点</label><input type="text" id="trimStartTxt" maxlength="9"></span>
-          <span><label>终点</label><input type="text" id="trimEndTxt"  maxlength="9"></span>
+          <label>起点 <input type="text" id="trimStartTxt" class="input input--time" maxlength="9"></label>
+          <label>终点 <input type="text" id="trimEndTxt" class="input input--time" maxlength="9"></label>
           <span class="trim-len">截取 <b id="trimLenTxt">--</b></span>
-          <button class="btn ghost small" id="resetTrimBtn">重置</button>
+          <button class="btn btn--ghost btn--xs" id="resetTrimBtn">重置</button>
         </div>
-        <div class="edit-controls">
+        <div class="control-group">
           <label class="ctrl">
             <span>码率</span>
             <div class="seg" id="bitrateSeg">
@@ -207,8 +250,8 @@
           <label class="ctrl">
             <span>声道</span>
             <div class="seg" id="channelSeg">
-              <button class="seg-opt on" data-ch="1">单声道</button>
-              <button class="seg-opt"    data-ch="2">立体声</button>
+              <button class="seg-opt on" data-ch="1">单</button>
+              <button class="seg-opt"    data-ch="2">立体</button>
             </div>
           </label>
           <label class="ctrl">
@@ -218,7 +261,7 @@
               <button class="seg-opt"    data-bus="sfx">SFX</button>
             </div>
           </label>
-          <label class="ctrl ctrl-check"><input type="checkbox" id="loopChk" checked><span>循环</span></label>
+          <label class="ctrl ctrl--check"><input type="checkbox" id="loopChk" checked><span>循环</span></label>
         </div>
         <div class="estimate">
           <span>预计大小 <b id="sizeEstimate">--</b></span>
@@ -226,7 +269,7 @@
         </div>
         <div class="action-row">
           <button class="btn" id="previewBtn">▶ 预览截取段</button>
-          <button class="btn primary" id="encodeBtn">压缩并加入库</button>
+          <button class="btn btn--primary" id="encodeBtn">压缩并加入库</button>
         </div>
         <div class="progress-row hidden" id="encodeProg">
           <div class="progress-track"><div class="progress-fill" id="encodeFill"></div></div>
@@ -236,7 +279,7 @@
     </div>
   </div>
 
-  <!-- ============ URL ADD MODAL ============ -->
+  <!-- ============ URL MODAL ============ -->
   <div class="modal hidden" id="urlModal">
     <div class="modal-backdrop" data-close></div>
     <div class="modal-card">
@@ -245,12 +288,12 @@
         <button class="modal-close" data-close>×</button>
       </header>
       <div class="modal-body">
-        <p class="hint">粘贴音频直链（.mp3/.ogg/.m4a 等）。外链不下载也不裁剪，浏览器直接 &lt;audio src&gt; 播放，所以同源策略允许的任何 URL 都行。</p>
-        <input type="url" id="urlInput" class="url-big" placeholder="https://…">
-        <div class="edit-controls" style="margin-top:12px">
+        <p class="hint">粘贴音频直链（.mp3/.ogg/.m4a 等）。浏览器直接 <code>&lt;audio src&gt;</code> 播放，所以同源策略允许的 URL 都行。</p>
+        <input type="url" id="urlInput" class="input input--lg" placeholder="https://…">
+        <div class="control-group" style="margin-top:12px">
           <label class="ctrl">
             <span>名称</span>
-            <input type="text" id="urlName" class="track-name" placeholder="自动从 URL 推断" style="min-width:160px">
+            <input type="text" id="urlName" class="input" placeholder="自动从 URL 推断">
           </label>
           <label class="ctrl">
             <span>归到</span>
@@ -259,17 +302,17 @@
               <button class="seg-opt"    data-bus="sfx">SFX</button>
             </div>
           </label>
-          <label class="ctrl ctrl-check"><input type="checkbox" id="urlLoopChk" checked><span>循环</span></label>
+          <label class="ctrl ctrl--check"><input type="checkbox" id="urlLoopChk" checked><span>循环</span></label>
         </div>
       </div>
       <footer class="modal-foot">
-        <button class="btn primary" id="urlAddBtn" disabled>添加到库</button>
-        <button class="btn ghost" data-close>取消</button>
+        <button class="btn btn--primary" id="urlAddBtn" disabled>添加到库</button>
+        <button class="btn btn--ghost" data-close>取消</button>
       </footer>
     </div>
   </div>
 
-  <!-- ============ TAG EDIT MODAL ============ -->
+  <!-- ============ TAG MODAL ============ -->
   <div class="modal hidden" id="tagModal">
     <div class="modal-backdrop" data-close></div>
     <div class="modal-card">
@@ -278,18 +321,18 @@
         <button class="modal-close" data-close>×</button>
       </header>
       <div class="modal-body">
-        <p class="hint">用空格 / 逗号 / 回车 分隔多个标签。常用：<code>战斗 探索 城镇 森林 Boss 紧张 安静</code> 等。</p>
-        <input type="text" id="tagInput" class="url-big" placeholder="紧张 战斗 Boss">
+        <p class="hint">空格 / 逗号 / 回车 分隔。常用：<code>战斗 探索 城镇 森林 Boss 紧张 安静</code></p>
+        <input type="text" id="tagInput" class="input input--lg" placeholder="紧张 战斗 Boss">
         <div class="tag-suggestions" id="tagSuggestions"></div>
       </div>
       <footer class="modal-foot">
-        <button class="btn primary" id="tagSaveBtn">保存</button>
-        <button class="btn ghost" data-close>取消</button>
+        <button class="btn btn--primary" id="tagSaveBtn">保存</button>
+        <button class="btn btn--ghost" data-close>取消</button>
       </footer>
     </div>
   </div>
 
-  <!-- ============ SHARE-CODE MODAL ============ -->
+  <!-- ============ SHARE MODAL ============ -->
   <div class="modal hidden" id="shareModal">
     <div class="modal-backdrop" data-close></div>
     <div class="modal-card">
@@ -298,13 +341,13 @@
         <button class="modal-close" data-close>×</button>
       </header>
       <div class="modal-body">
-        <p class="hint">把下面这段代码复制到枭熊的「音乐板 → 导入码」输入框里。</p>
+        <p class="hint">复制到枭熊的「音乐板 → 导入码」输入框。</p>
         <textarea id="shareCode" readonly></textarea>
         <div class="share-meta" id="shareMeta"></div>
       </div>
       <footer class="modal-foot">
-        <button class="btn primary" id="copyShareBtn">复制到剪贴板</button>
-        <button class="btn ghost" data-close>关闭</button>
+        <button class="btn btn--primary" id="copyShareBtn">复制到剪贴板</button>
+        <button class="btn btn--ghost" data-close>关闭</button>
       </footer>
     </div>
   </div>
