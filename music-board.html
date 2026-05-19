@@ -68,28 +68,6 @@ html,body{
 .np-title{font-size:15px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .np-time{font-family:ui-monospace,monospace;font-size:11px;color:var(--text-3)}
 
-/* === sfx row === */
-.sfx-list{display:flex;flex-wrap:wrap;gap:6px;min-height:34px}
-.sfx-chip{
-  display:inline-flex;align-items:center;gap:6px;
-  padding:5px 10px;
-  background:var(--bg-2);
-  border:1px solid var(--line);
-  border-radius:999px;
-  font-size:11.5px;color:var(--text-2);
-}
-.sfx-chip.active{
-  border-color:var(--sfx-color);
-  background:linear-gradient(135deg,rgba(193,132,255,0.12),var(--bg-2));
-  color:var(--text);
-}
-.sfx-chip .ico{
-  width:7px;height:7px;border-radius:50%;
-  background:var(--text-3);
-}
-.sfx-chip.active .ico{background:var(--sfx-color);box-shadow:0 0 4px var(--sfx-color);animation:pulse 1.4s ease-in-out infinite}
-.sfx-empty{color:var(--text-3);font-size:11.5px;padding:8px 0}
-
 /* === volumes === */
 .vol-section{
   padding:12px 14px;
@@ -201,11 +179,6 @@ html,body{
       <div class="np-title" id="npTitle">没有 BGM 在播放</div>
       <div class="np-time" id="npTime">--:-- / --:--</div>
     </div>
-  </div>
-
-  <!-- SFX list -->
-  <div class="sfx-list" id="sfxList">
-    <div class="sfx-empty">没有活跃音效</div>
   </div>
 
   <!-- Volumes (per-client local) -->

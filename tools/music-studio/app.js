@@ -1,18 +1,22 @@
-/* Music Board controller — v2 with CSS vinyl + new layout.
+/* Music Board controller — v3.
  *
- * The vinyl IS the css. We only toggle `.spinning` on the .deck-vinyl /
- * .sfx-pad.playing — CSS animation does the rotation, GPU-accelerated.
- *
- * Each turntable (BGM deck + 4 SFX pads) is wrapped by Turntable, which:
- *   - owns one HTMLAudioElement
- *   - listens for cards dragged onto it (via [application/x-obr-music-card])
- *   - listens for its own play/stop buttons
- *   - drives the vinyl class + the progress bar text/fill
+ * Changes from v2:
+ *   • Pair widget lives in topbar; code is a click-to-copy chip
+ *     (no more alert() popups). On connect, send current playback
+ *     state immediately so the plugin catches up to mid-game audio.
+ *   • Library cards compacted: drag-only (no per-card play button),
+ *     ⚠ + × in top corner instead of a row of action buttons.
+ *     No more share-code concept anywhere.
+ *   • Filter chips merged: single chip row mixes "全部 / BGM / SFX"
+ *     with auto-discovered tags. Click to set the active filter.
+ *   • SFX laid out as 2x2 grid right of BGM deck.
+ *   • BGM history shows previous / next track names (not just < >).
+ *   • New 待播放 queue strip below the deck row. Tracks dragged here
+ *     play in order after the current BGM ends (when not single-loop).
  */
 
 import { encodeOpus, estimateOpusBytes } from "./encoder.js";
 import { addTrack, updateTrack, deleteTrack, listTracks } from "./library.js";
-import { encodeShareCode } from "./share.js";
 
 const $  = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => Array.from(root.querySelectorAll(s));
@@ -23,18 +27,32 @@ const sfxPads     = $$(".sfx-pad");
 const sfxVolSlider = $("#sfxVolSlider");
 const sfxVolReadout = $("#sfxVolReadout");
 
+const histPrevName = $("#histPrevName");
+const histNextName = $("#histNextName");
+
 const libCount    = $("#libCount");
 const libSearch   = $("#libSearch");
-const libFilterSeg = $("#libFilterSeg");
 const libGrid     = $("#libGrid");
 const libDropZone = $("#libDropZone");
-const tagChipRow  = $("#tagChipRow");
+const chipFilterRow = $("#chipFilterRow");
 const addFileBtn  = $("#addFileBtn");
 const addUrlBtn   = $("#addUrlBtn");
 const hiddenFileInput = $("#hiddenFileInput");
-const exportAllBtn = $("#exportAllBtn");
 const loadDefaultsBtn = $("#loadDefaultsBtn");
-const pairBtn     = $("#pairBtn");
+
+// Queue
+const queueStrip  = $("#queueStrip");
+const queueRail   = $("#queueRail");
+const queueCount  = $("#queueCount");
+const queueClearBtn = $("#queueClearBtn");
+
+// Pair widget
+const pairBtn       = $("#pairBtn");
+const pairCodeChip  = $("#pairCodeChip");
+const pairCodeValue = $("#pairCodeValue");
+const pairCancelBtn = $("#pairCancelBtn");
+const pairLiveChip  = $("#pairLiveChip");
+const pairUnpairBtn = $("#pairUnpairBtn");
 
 // Editor modal
 const editorModal = $("#editorModal");
@@ -63,27 +81,20 @@ const encodeFill  = $("#encodeFill");
 const encodeMsg   = $("#encodeMsg");
 
 // URL modal
-const urlModal    = $("#urlModal");
-const urlInput    = $("#urlInput");
-const urlName     = $("#urlName");
-const urlBusSeg   = $("#urlBusSeg");
-const urlLoopChk  = $("#urlLoopChk");
-const urlAddBtn   = $("#urlAddBtn");
+const urlModal   = $("#urlModal");
+const urlInput   = $("#urlInput");
+const urlName    = $("#urlName");
+const urlBusSeg  = $("#urlBusSeg");
+const urlLoopChk = $("#urlLoopChk");
+const urlAddBtn  = $("#urlAddBtn");
 
 // Tag modal
-const tagModal    = $("#tagModal");
-const tagInput    = $("#tagInput");
+const tagModal   = $("#tagModal");
+const tagInput   = $("#tagInput");
 const tagSuggestions = $("#tagSuggestions");
-const tagSaveBtn  = $("#tagSaveBtn");
+const tagSaveBtn = $("#tagSaveBtn");
 
-// Share modal
-const shareModal  = $("#shareModal");
-const shareTitle  = $("#shareTitle");
-const shareCode   = $("#shareCode");
-const shareMeta   = $("#shareMeta");
-const copyShareBtn = $("#copyShareBtn");
-
-const toastStack  = $("#toastStack");
+const toastStack = $("#toastStack");
 
 // ============ State ============
 const state = {
@@ -94,21 +105,31 @@ const state = {
     preview: null,
   },
   urlBus: "bgm",
-  lib: [], libFilter: "all", libSearchStr: "",
-  activeTags: new Set(),
+  lib: [],
+  // Single active filter: { kind: "all"|"bus"|"tag", value? }
+  filter: { kind: "all" },
+  libSearchStr: "",
   volumes: { bgm: 0.8, sfx: 1.0 },
   turntableTrack: { "bgm": null, "sfx-0": null, "sfx-1": null, "sfx-2": null, "sfx-3": null },
-  bgmHistory: [], bgmHistoryIdx: -1,
+  bgmHistory: [],     // [{id}]
+  bgmHistoryIdx: -1,
+  queue: [],          // [trackId] — FIFO; auto-pop on BGM end
   tagEditId: null,
 };
 
-const LS_VOL = "obr-music-board:volumes";
+const LS_VOL   = "obr-music-board:volumes";
+const LS_QUEUE = "obr-music-board:queue";
 try {
   const v = JSON.parse(localStorage.getItem(LS_VOL) || "{}");
   if (typeof v.bgm === "number") state.volumes.bgm = v.bgm;
   if (typeof v.sfx === "number") state.volumes.sfx = v.sfx;
 } catch {}
+try {
+  const q = JSON.parse(localStorage.getItem(LS_QUEUE) || "[]");
+  if (Array.isArray(q)) state.queue = q.filter((x) => typeof x === "string");
+} catch {}
 function saveVolumes() { try { localStorage.setItem(LS_VOL, JSON.stringify(state.volumes)); } catch {} }
+function saveQueue()   { try { localStorage.setItem(LS_QUEUE, JSON.stringify(state.queue)); } catch {} }
 
 let audioCtx = null;
 function getCtx() {
@@ -147,6 +168,11 @@ function parseTime(str) {
   if (!Number.isFinite(m) || !Number.isFinite(rest)) return null;
   return m * 60 + rest;
 }
+function trunc(s, n = 14) {
+  if (!s) return "";
+  if (s.length <= n) return s;
+  return s.slice(0, n) + "…";
+}
 function toast(text, kind = "") {
   const el = document.createElement("div");
   el.className = "toast " + kind;
@@ -156,7 +182,7 @@ function toast(text, kind = "") {
     el.style.transition = "opacity .25s, transform .25s";
     el.style.opacity = "0"; el.style.transform = "translateY(6px)";
     setTimeout(() => el.remove(), 260);
-  }, 2400);
+  }, 2600);
 }
 
 // ============ Turntable ============
@@ -166,8 +192,6 @@ class Turntable {
     this.slot = el.dataset.slot;
     this.bus  = el.dataset.bus;
     this.isBig = el.classList.contains("bgm-deck");
-
-    // The element that gets the .spinning class for vinyl animation.
     this.spinTarget = this.isBig ? $(".deck-vinyl", el) : $(".pad-vinyl", el);
 
     this.nameEl  = $('[data-tt-name]', el);
@@ -175,7 +199,6 @@ class Turntable {
     this.durEl   = $('[data-tt-dur]', el);
     this.barEl   = $('[data-tt-bar]', el);
     this.fillEl  = $('[data-tt-fill]', el);
-
     this.playBtn = $('[data-act="play"]', el);
     this.stopBtn = $('[data-act="stop"]', el);
     this.prevBtn = $('[data-act="prev"]', el);
@@ -213,13 +236,23 @@ class Turntable {
         saveVolumes();
         if (this.volReadout) this.volReadout.textContent = this.volSlider.value;
         for (const tt of TURNTABLES) if (tt.bus === this.bus) tt._applyVolume();
+        sendToObr({ type: "volume", bus: this.bus, vol: state.volumes[this.bus] });
       });
     }
     this.audio.addEventListener("ended", () => {
-      if (!this.audio.loop) { this._setSpinning(false); this._syncPlayUI(); }
+      if (!this.audio.loop) {
+        // BGM specifically: try to pull the next track from the queue.
+        if (this.bus === "bgm" && state.queue.length > 0) {
+          const nextId = state.queue.shift();
+          saveQueue(); renderQueue();
+          const t = state.lib.find((x) => x.id === nextId);
+          if (t) { this.load(t, true); return; }
+        }
+        this._setSpinning(false); this._syncPlayUI();
+      }
     });
 
-    // Drop target for cards
+    // Drop target for library cards (existing flow) AND queue items (new).
     this.el.addEventListener("dragover", (e) => {
       if (e.dataTransfer.types.includes("application/x-obr-music-card")) {
         e.preventDefault();
@@ -256,12 +289,32 @@ class Turntable {
     this.audio.src = track.url || URL.createObjectURL(track.blob);
     this.audio.loop = !!track.loop;
     this._applyVolume();
-    if (this.bus === "bgm") this._pushHistory(track);
+    if (this.bus === "bgm") {
+      this._pushHistory(track);
+      this._updateHistoryButtons();
+    }
     if (autoplay) {
       this.audio.play().then(() => { this._setSpinning(true); this._syncPlayUI(); })
         .catch((e) => toast("播放失败：" + (e?.message || e), "error"));
     }
     renderLibrary();
+
+    // Broadcast to OBR if paired.
+    if (this.bus === "bgm") {
+      sendToObr({
+        type: "bgm-load",
+        url: track.url || "",
+        name: track.name, loop: !!track.loop, position: 0,
+      });
+      if (!track.url) toast("本地压缩文件无法分享给其他玩家。请使用在线直链。", "warn");
+    } else {
+      sendToObr({
+        type: "sfx-add",
+        id: crypto.randomUUID(),
+        url: track.url || "",
+        name: track.name, loop: !!track.loop,
+      });
+    }
   }
 
   _applyVolume() {
@@ -270,11 +323,18 @@ class Turntable {
 
   togglePlay() {
     if (!this.track) return;
-    if (this.audio.paused) {
+    const wasPaused = this.audio.paused;
+    if (wasPaused) {
       getCtx().resume();
       this.audio.play().then(() => { this._setSpinning(true); this._syncPlayUI(); });
     } else {
       this.audio.pause(); this._setSpinning(false); this._syncPlayUI();
+    }
+    if (this.bus === "bgm") {
+      sendToObr({
+        type: wasPaused ? "bgm-play" : "bgm-pause",
+        position: this.audio.currentTime,
+      });
     }
   }
 
@@ -282,6 +342,7 @@ class Turntable {
     this.audio.pause(); this.audio.currentTime = 0;
     if (this.audio.src.startsWith("blob:")) URL.revokeObjectURL(this.audio.src);
     this.audio.removeAttribute("src"); this.audio.load();
+    const wasBgm = this.bus === "bgm" && this.track;
     this.track = null;
     state.turntableTrack[this.slot] = null;
     if (this.nameEl) this.nameEl.textContent = this.bus === "bgm" ? "-- 空闲 --" : "空";
@@ -289,7 +350,9 @@ class Turntable {
     if (this.curEl)  this.curEl.textContent = "00:00";
     if (this.durEl)  this.durEl.textContent = "00:00";
     if (this.fillEl) this.fillEl.style.width = "0%";
+    if (this.bus === "bgm") this._updateHistoryButtons();
     renderLibrary();
+    if (wasBgm) sendToObr({ type: "bgm-stop" });
   }
 
   _setSpinning(s) {
@@ -310,32 +373,55 @@ class Turntable {
     h.push({ id: track.id });
     if (h.length > 50) h.shift();
     state.bgmHistoryIdx = h.length - 1;
-    this._updateHistButtons();
   }
   _historyPrev() {
     if (state.bgmHistoryIdx <= 0) return;
     state.bgmHistoryIdx--;
     const t = state.lib.find((x) => x.id === state.bgmHistory[state.bgmHistoryIdx].id);
     if (t) this.load(t, true);
-    this._updateHistButtons();
   }
   _historyNext() {
     if (state.bgmHistoryIdx >= state.bgmHistory.length - 1) return;
     state.bgmHistoryIdx++;
     const t = state.lib.find((x) => x.id === state.bgmHistory[state.bgmHistoryIdx].id);
     if (t) this.load(t, true);
-    this._updateHistButtons();
   }
-  _updateHistButtons() {
-    if (this.prevBtn) this.prevBtn.disabled = state.bgmHistoryIdx <= 0;
-    if (this.nextBtn) this.nextBtn.disabled = state.bgmHistoryIdx >= state.bgmHistory.length - 1;
+  _updateHistoryButtons() {
+    if (!this.isBig) return;
+    const hasPrev = state.bgmHistoryIdx > 0;
+    const hasNext = state.bgmHistoryIdx >= 0 && state.bgmHistoryIdx < state.bgmHistory.length - 1;
+    if (this.prevBtn) this.prevBtn.disabled = !hasPrev;
+    if (this.nextBtn) this.nextBtn.disabled = !hasNext;
+    if (histPrevName) {
+      if (hasPrev) {
+        const id = state.bgmHistory[state.bgmHistoryIdx - 1].id;
+        const t = state.lib.find((x) => x.id === id);
+        histPrevName.textContent = t ? trunc(t.name) : "上一首";
+      } else {
+        histPrevName.textContent = "无";
+      }
+    }
+    if (histNextName) {
+      if (hasNext) {
+        const id = state.bgmHistory[state.bgmHistoryIdx + 1].id;
+        const t = state.lib.find((x) => x.id === id);
+        histNextName.textContent = t ? trunc(t.name) : "下一首";
+      } else if (state.queue.length > 0) {
+        // No forward history but queue has entries — preview the next queued.
+        const t = state.lib.find((x) => x.id === state.queue[0]);
+        histNextName.textContent = t ? `⏵ ${trunc(t.name)}` : "(队列)";
+      } else {
+        histNextName.textContent = "无";
+      }
+    }
   }
 }
 const TURNTABLES = [new Turntable(bgmDeck), ...sfxPads.map((el) => new Turntable(el))];
 function turntableFor(slot) { return TURNTABLES.find((t) => t.slot === slot); }
 function findEmptySfx() { return TURNTABLES.find((t) => t.bus === "sfx" && !t.track); }
+const bgmDeckTT = turntableFor("bgm");
 
-// SFX shared volume slider (separate, since SFX pads don't each have one)
+// SFX shared volume slider
 if (sfxVolSlider) {
   sfxVolSlider.value = String(Math.round(state.volumes.sfx * 100));
   if (sfxVolReadout) sfxVolReadout.textContent = sfxVolSlider.value;
@@ -344,6 +430,7 @@ if (sfxVolSlider) {
     saveVolumes();
     if (sfxVolReadout) sfxVolReadout.textContent = sfxVolSlider.value;
     for (const tt of TURNTABLES) if (tt.bus === "sfx") tt._applyVolume();
+    sendToObr({ type: "volume", bus: "sfx", vol: state.volumes.sfx });
   });
 }
 
@@ -351,10 +438,15 @@ if (sfxVolSlider) {
 async function refreshLibrary() {
   state.lib = (await listTracks()).map((t) => ({ tags: [], ...t }));
   renderLibrary();
+  bgmDeckTT._updateHistoryButtons();
 }
 function visibleTracks() {
   let arr = state.lib;
-  if (state.libFilter !== "all") arr = arr.filter((t) => t.bus === state.libFilter);
+  if (state.filter.kind === "bus") {
+    arr = arr.filter((t) => t.bus === state.filter.value);
+  } else if (state.filter.kind === "tag") {
+    arr = arr.filter((t) => (t.tags || []).includes(state.filter.value));
+  }
   if (state.libSearchStr) {
     const q = state.libSearchStr.toLowerCase();
     arr = arr.filter((t) =>
@@ -363,27 +455,11 @@ function visibleTracks() {
       (t.tags || []).some((g) => g.toLowerCase().includes(q)),
     );
   }
-  if (state.activeTags.size > 0) {
-    arr = arr.filter((t) => (t.tags || []).some((g) => state.activeTags.has(g)));
-  }
   return arr;
 }
 function renderLibrary() {
   libCount.textContent = state.lib.length;
-
-  const allTags = new Set();
-  for (const t of state.lib) for (const g of (t.tags || [])) allTags.add(g);
-  tagChipRow.innerHTML = "";
-  for (const g of [...allTags].sort((a, b) => a.localeCompare(b, "zh"))) {
-    const chip = document.createElement("button");
-    chip.className = "tag-chip" + (state.activeTags.has(g) ? " on" : "");
-    chip.textContent = g;
-    chip.addEventListener("click", () => {
-      if (state.activeTags.has(g)) state.activeTags.delete(g); else state.activeTags.add(g);
-      renderLibrary();
-    });
-    tagChipRow.appendChild(chip);
-  }
+  renderChipFilter();
 
   const arr = visibleTracks();
   libGrid.innerHTML = "";
@@ -393,7 +469,7 @@ function renderLibrary() {
     if (state.lib.length === 0) {
       e.innerHTML = `<div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg></div>
         <div class="empty-title">曲库是空的</div>
-        <div class="empty-hint">把音频文件拖到这里 → 自动打开编辑器<br>或点右上「+ 文件 / + 外链」</div>`;
+        <div class="empty-hint">把音频文件拖到这里 → 自动打开编辑器<br>或点右上「+ 文件 / + 外链」<br>或点「⬇ 默认曲库」拉服务器自带的 154 首</div>`;
     } else {
       e.innerHTML = `<div class="empty-title">没有匹配的曲目</div>`;
     }
@@ -402,22 +478,62 @@ function renderLibrary() {
   }
   for (const t of arr) libGrid.appendChild(makeCard(t));
 }
+
+function renderChipFilter() {
+  // Collect tag counts (filtered by active bus if any, so counts stay
+  // meaningful per filter context — currently just global counts since
+  // single-select is simple enough).
+  const tagCounts = new Map();
+  let bgmN = 0, sfxN = 0;
+  for (const t of state.lib) {
+    if (t.bus === "bgm") bgmN++; else sfxN++;
+    for (const g of (t.tags || [])) tagCounts.set(g, (tagCounts.get(g) || 0) + 1);
+  }
+  chipFilterRow.innerHTML = "";
+
+  const mk = (label, klass, isOn, onClick, count) => {
+    const chip = document.createElement("button");
+    chip.className = "chip " + klass + (isOn ? " on" : "");
+    chip.innerHTML = `<span>${label}</span>` + (count != null ? `<span class="chip-count">${count}</span>` : "");
+    chip.addEventListener("click", onClick);
+    return chip;
+  };
+
+  chipFilterRow.appendChild(mk("全部", "chip--all",
+    state.filter.kind === "all",
+    () => { state.filter = { kind: "all" }; renderLibrary(); },
+    state.lib.length));
+
+  chipFilterRow.appendChild(mk("BGM", "chip--bus chip--bgm",
+    state.filter.kind === "bus" && state.filter.value === "bgm",
+    () => { state.filter = { kind: "bus", value: "bgm" }; renderLibrary(); },
+    bgmN));
+
+  chipFilterRow.appendChild(mk("SFX", "chip--bus chip--sfx",
+    state.filter.kind === "bus" && state.filter.value === "sfx",
+    () => { state.filter = { kind: "bus", value: "sfx" }; renderLibrary(); },
+    sfxN));
+
+  // Tag chips, sorted by count desc then name asc.
+  const tags = [...tagCounts.entries()].sort((a, b) =>
+    b[1] - a[1] || a[0].localeCompare(b[0], "zh"));
+  for (const [name, n] of tags) {
+    chipFilterRow.appendChild(mk(name, "chip--tag",
+      state.filter.kind === "tag" && state.filter.value === name,
+      () => { state.filter = { kind: "tag", value: name }; renderLibrary(); },
+      n));
+  }
+}
+
 const PLAYING_IDS = () => new Set(Object.values(state.turntableTrack).filter(Boolean));
 
 function makeCard(t) {
   const playing = PLAYING_IDS().has(t.id);
-  // local-only = blob in IndexedDB without a URL alternative. Can't be
-  // shared over PeerJS (other browsers can't fetch a blob: URL), so we
-  // mark it yellow to make the limitation visible at a glance.
   const localOnly = !!t.blob && !t.url;
   const card = document.createElement("div");
   card.className = "lib-card"
     + (playing ? " is-playing" : "")
     + (localOnly ? " local-only" : "");
-  if (localOnly) {
-    card.title = "本地压缩文件 — 仅自己能听。"
-               + "要让 OBR 玩家也听到，请用「↓」下载 .opus 后上传到自己的空间，再用「+ 外链」加 URL。";
-  }
   card.draggable = true;
   card.dataset.id = t.id;
 
@@ -448,9 +564,37 @@ function makeCard(t) {
   name.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); name.blur(); } });
   name.addEventListener("mousedown", (e) => e.stopPropagation());
   const bus = document.createElement("span");
-  bus.className = "card-bus " + (t.url ? "url" : t.bus);
-  bus.textContent = t.url ? "URL" : t.bus.toUpperCase();
+  bus.className = "card-bus " + t.bus;
+  bus.textContent = t.bus.toUpperCase();
   head.appendChild(name); head.appendChild(bus);
+
+  // Corner action icons (delete + optional warn). Tiny, hover for label.
+  const corner = document.createElement("div");
+  corner.className = "card-corner";
+  if (localOnly) {
+    const warn = document.createElement("button");
+    warn.className = "card-corner-btn warn";
+    warn.textContent = "⚠";
+    warn.title = "本地压缩文件，无法分享给其他玩家。请使用在线直链。";
+    corner.appendChild(warn);
+  }
+  const del = document.createElement("button");
+  del.className = "card-corner-btn danger";
+  del.textContent = "×";
+  del.title = "删除";
+  del.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (!confirm(`删除「${t.name}」？`)) return;
+    for (const tt of TURNTABLES) if (tt.track?.id === t.id) tt.stop();
+    await deleteTrack(t.id);
+    // Remove from queue if present
+    if (state.queue.includes(t.id)) {
+      state.queue = state.queue.filter((id) => id !== t.id);
+      saveQueue(); renderQueue();
+    }
+    await refreshLibrary();
+  });
+  corner.appendChild(del);
 
   const meta = document.createElement("div");
   meta.className = "card-meta";
@@ -468,52 +612,15 @@ function makeCard(t) {
     tags.appendChild(c);
   }
   const add = document.createElement("span");
-  add.className = "card-tag add-tag"; add.textContent = "+ 标签";
+  add.className = "card-tag add-tag"; add.textContent = "+";
+  add.title = "添加标签";
   add.addEventListener("click", (e) => { e.stopPropagation(); openTagModal(t); });
   tags.appendChild(add);
 
-  const actions = document.createElement("div");
-  actions.className = "card-actions";
-  const playBtn = document.createElement("button");
-  playBtn.className = "btn btn--xs btn--primary";
-  playBtn.textContent = playing ? "停止" : "播放";
-  playBtn.addEventListener("click", (e) => { e.stopPropagation(); playOnBestTarget(t); });
-  actions.appendChild(playBtn);
-  const shareBtn = document.createElement("button");
-  shareBtn.className = "btn btn--xs btn--ghost";
-  shareBtn.textContent = "码";
-  shareBtn.title = "生成枭熊导入码";
-  shareBtn.addEventListener("click", (e) => { e.stopPropagation(); openShareCode([t]); });
-  actions.appendChild(shareBtn);
-  if (t.blob) {
-    const dl = document.createElement("button");
-    dl.className = "btn btn--xs btn--ghost";
-    dl.textContent = "↓";
-    dl.title = "下载 .opus";
-    dl.addEventListener("click", (e) => { e.stopPropagation(); downloadTrack(t); });
-    actions.appendChild(dl);
-  }
-  const del = document.createElement("button");
-  del.className = "btn btn--xs btn--ghost btn--danger";
-  del.textContent = "×";
-  del.title = "删除";
-  del.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    if (!confirm(`删除「${t.name}」？`)) return;
-    for (const tt of TURNTABLES) if (tt.track?.id === t.id) tt.stop();
-    await deleteTrack(t.id);
-    await refreshLibrary();
-  });
-  actions.appendChild(del);
-
-  card.appendChild(head); card.appendChild(meta); card.appendChild(tags); card.appendChild(actions);
-
-  if (localOnly) {
-    const ban = document.createElement("div");
-    ban.className = "local-banner";
-    ban.innerHTML = `<span class="ic">⚠</span><span>本地压缩文件，<b>无法分享给 OBR 玩家</b>。点「↓」下载后上传到自己空间再用「+ 外链」即可。</span>`;
-    card.appendChild(ban);
-  }
+  card.appendChild(head);
+  card.appendChild(corner);
+  card.appendChild(meta);
+  card.appendChild(tags);
   return card;
 }
 
@@ -523,25 +630,77 @@ function playOnBestTarget(t) {
   else (findEmptySfx() || turntableFor("sfx-0")).load(t, true);
 }
 
-function downloadTrack(t) {
-  if (!t.blob) return;
-  const url = URL.createObjectURL(t.blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = (t.name || "audio").replace(/[\\/:*?"<>|]/g, "_") + ".opus";
-  document.body.appendChild(a); a.click();
-  setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 0);
+// ============ Queue ============
+function renderQueue() {
+  queueCount.textContent = state.queue.length;
+  queueRail.innerHTML = "";
+  if (state.queue.length === 0) {
+    const e = document.createElement("div");
+    e.className = "queue-empty";
+    e.textContent = "拖卡片到这里加入待播放";
+    queueRail.appendChild(e);
+    return;
+  }
+  for (const id of state.queue) {
+    const t = state.lib.find((x) => x.id === id);
+    if (!t) continue;
+    const item = document.createElement("div");
+    item.className = "queue-item";
+    const n = document.createElement("span");
+    n.className = "queue-item-name";
+    n.textContent = t.name;
+    n.title = t.name;
+    const x = document.createElement("button");
+    x.className = "queue-item-x";
+    x.textContent = "×";
+    x.title = "从队列移除";
+    x.addEventListener("click", () => {
+      state.queue = state.queue.filter((q) => q !== id);
+      saveQueue(); renderQueue();
+      bgmDeckTT._updateHistoryButtons();
+    });
+    item.appendChild(n); item.appendChild(x);
+    queueRail.appendChild(item);
+  }
 }
-
-// ============ Library filters ============
-libSearch.addEventListener("input", () => { state.libSearchStr = libSearch.value.trim(); renderLibrary(); });
-libFilterSeg.addEventListener("click", (e) => {
-  const b = e.target.closest(".seg-opt"); if (!b) return;
-  libFilterSeg.querySelectorAll(".seg-opt").forEach((x) => x.classList.remove("on"));
-  b.classList.add("on"); state.libFilter = b.dataset.flt; renderLibrary();
+queueClearBtn.addEventListener("click", () => {
+  if (state.queue.length === 0) return;
+  state.queue = []; saveQueue(); renderQueue();
+  bgmDeckTT._updateHistoryButtons();
 });
 
-// ============ Library drop zone (file drop → editor) ============
+// Drop target for the queue strip
+queueStrip.addEventListener("dragover", (e) => {
+  if (e.dataTransfer.types.includes("application/x-obr-music-card")) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    queueStrip.classList.add("drop-target");
+  }
+});
+queueStrip.addEventListener("dragleave", () => queueStrip.classList.remove("drop-target"));
+queueStrip.addEventListener("drop", (e) => {
+  e.preventDefault();
+  queueStrip.classList.remove("drop-target");
+  const id = e.dataTransfer.getData("application/x-obr-music-card");
+  if (!id) return;
+  const t = state.lib.find((x) => x.id === id);
+  if (!t) return;
+  if (t.bus !== "bgm") {
+    toast("待播放只接受 BGM 曲目", "warn");
+    return;
+  }
+  if (state.queue.includes(id)) {
+    toast("已在队列中", "warn");
+    return;
+  }
+  state.queue.push(id); saveQueue(); renderQueue();
+  bgmDeckTT._updateHistoryButtons();
+});
+
+// ============ Library search ============
+libSearch.addEventListener("input", () => { state.libSearchStr = libSearch.value.trim(); renderLibrary(); });
+
+// ============ File drop on library → editor ============
 let _dragDepth = 0;
 libDropZone.addEventListener("dragenter", (e) => {
   if (!e.dataTransfer.types.includes("Files")) return;
@@ -840,7 +999,7 @@ function openTagModal(track) {
   tagSuggestions.innerHTML = "";
   for (const g of [...all].filter((x) => !have.has(x)).sort((a, b) => a.localeCompare(b, "zh"))) {
     const chip = document.createElement("span");
-    chip.className = "tag-chip"; chip.textContent = "+ " + g;
+    chip.className = "chip"; chip.textContent = "+ " + g;
     chip.addEventListener("click", () => {
       const cur = tagInput.value.trim();
       tagInput.value = cur ? cur + " " + g : g;
@@ -862,36 +1021,7 @@ tagSaveBtn.addEventListener("click", async () => {
   await refreshLibrary();
 });
 
-// ============ Share ============
-function openShareCode(tracks) {
-  let code;
-  try { code = encodeShareCode(tracks); }
-  catch (e) { toast(e.message || "无法生成导入码", "error"); return; }
-  shareTitle.textContent = tracks.length > 1 ? `枭熊导入码（${tracks.length} 首）` : "枭熊导入码";
-  shareCode.value = code;
-  shareMeta.textContent = `${tracks.length} 首 · 编码长度 ${code.length} 字符`;
-  shareModal.classList.remove("hidden");
-  setTimeout(() => { shareCode.focus(); shareCode.select(); }, 30);
-}
-shareModal.addEventListener("click", (e) => { if (e.target.matches("[data-close]")) shareModal.classList.add("hidden"); });
-copyShareBtn.addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(shareCode.value); toast("已复制", "ok"); }
-  catch { shareCode.focus(); shareCode.select(); document.execCommand("copy"); toast("已尝试复制", "warn"); }
-});
-exportAllBtn.addEventListener("click", () => {
-  const arr = state.lib.filter((t) => t.url);
-  if (arr.length === 0) {
-    toast("库里没有可分享的外链曲目。本地压缩文件请先下载并上传到自己的空间。", "warn");
-    return;
-  }
-  openShareCode(arr);
-});
-
-// ============ Default catalog import ============
-//
-// Pulls https://obr.dnd.center/music/manifest.json and adds every
-// track to the local library (skip ones already present by URL).
-// All entries are URL-backed so they're auto-shareable to OBR.
+// ============ Default catalog ============
 const MANIFEST_URL = "https://obr.dnd.center/music/manifest.json";
 
 loadDefaultsBtn.addEventListener("click", async () => {
@@ -903,15 +1033,14 @@ loadDefaultsBtn.addEventListener("click", async () => {
     const data = await r.json();
     const tracks = Array.isArray(data?.tracks) ? data.tracks : [];
     if (tracks.length === 0) {
-      toast("默认曲库还是空的（服务器那边还没生成 manifest）", "warn");
-      return;
+      toast("默认曲库还是空的", "warn"); return;
     }
-    // Dedup vs existing entries (skip ones with same URL).
     const existing = new Set(state.lib.map((t) => t.url).filter(Boolean));
     let added = 0, skipped = 0;
     for (const t of tracks) {
       if (!t.url) continue;
       if (existing.has(t.url)) { skipped++; continue; }
+      const incoming = Array.isArray(t.tags) ? t.tags : [];
       await addTrack({
         id:       crypto.randomUUID(),
         name:     t.name || "默认曲目",
@@ -924,7 +1053,9 @@ loadDefaultsBtn.addEventListener("click", async () => {
         mime:     "audio/ogg; codecs=opus",
         url:      t.url,
         origName: t.name || t.url,
-        tags:     ["默认曲库"],
+        // Server-provided category tags + a 默认 marker so users can
+        // pick out the prebuilt catalog separately.
+        tags:     incoming.length > 0 ? [...incoming, "默认"] : ["默认"],
         ts:       Date.now(),
       });
       added++;
@@ -940,13 +1071,11 @@ loadDefaultsBtn.addEventListener("click", async () => {
   }
 });
 
-// ============ Pairing (PeerJS WebRTC bridge to OBR plugin) ============
-//
-// We're the "host" — the user picks "配对" → we generate a 6-char code,
-// register our peer id as "obr-music-XXXXXX" on PeerJS public signaling,
-// wait for the枭熊 plugin to connect by id. Once connected, every
-// playback control here fires a small message over the data channel.
-// Plugin translates to OBR scene metadata writes → all players sync.
+// ============================================================
+// ====================== PAIRING (PeerJS) ====================
+// ============================================================
+// In-topbar pair widget. States cycle: idle → waiting → live → idle.
+// Code chip is click-to-copy. Live chip shows pulse + disconnect ×.
 
 const PEER_PREFIX = "obr-music-";
 let _peer = null;
@@ -954,169 +1083,121 @@ let _peerConn = null;
 let _pairCode = "";
 
 function genPairCode() {
-  // 6-char code, no easily-confused chars (no 0/O/1/I/L)
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let c = "";
   for (let i = 0; i < 6; i++) c += chars[Math.floor(Math.random() * chars.length)];
   return c;
 }
-
-function setPairState(state /* "idle" | "waiting" | "live" | "error" */, msg) {
-  if (!pairBtn) return;
-  pairBtn.classList.remove("btn--primary", "btn--ghost");
-  switch (state) {
-    case "idle":
-      pairBtn.textContent = "🔗 配对枭熊";
-      pairBtn.classList.add("btn--ghost");
-      break;
-    case "waiting":
-      pairBtn.textContent = `等待 ${_pairCode}…`;
-      pairBtn.classList.add("btn--ghost");
-      pairBtn.style.color = "var(--accent-warm)";
-      break;
-    case "live":
-      pairBtn.textContent = "● 已连接";
-      pairBtn.classList.add("btn--ghost");
-      pairBtn.style.color = "var(--green)";
-      break;
-    case "error":
-      pairBtn.textContent = "✗ " + (msg || "失败");
-      pairBtn.classList.add("btn--ghost");
-      pairBtn.style.color = "var(--red)";
-      break;
-  }
+function setPairUi(state /* idle | waiting | live */) {
+  pairBtn.classList.toggle("hidden", state !== "idle");
+  pairCodeChip.classList.toggle("hidden", state !== "waiting");
+  pairLiveChip.classList.toggle("hidden", state !== "live");
+  if (state === "waiting") pairCodeValue.textContent = _pairCode;
 }
 
-async function startPairing() {
-  if (_peer) {
-    // Already paired or pairing — show the code and let user disconnect
-    if (_peerConn) {
-      const yes = confirm(`已连接到枭熊。断开连接？`);
-      if (yes) tearDownPair();
-      return;
-    } else {
-      // Waiting — show code again
-      alert(`配对码：${_pairCode}\n\n在枭熊插件的音乐板页面输入这个码。`);
-      return;
-    }
+pairBtn.addEventListener("click", () => void startPairing());
+pairCancelBtn.addEventListener("click", () => tearDownPair());
+pairUnpairBtn.addEventListener("click", () => {
+  if (confirm("确定断开与枭熊的连接？")) tearDownPair();
+});
+pairCodeChip.addEventListener("click", async (e) => {
+  // Don't copy when clicking the × button.
+  if (e.target.closest(".pair-code-x")) return;
+  try {
+    await navigator.clipboard.writeText(_pairCode);
+    toast(`配对码 ${_pairCode} 已复制`, "ok");
+  } catch {
+    toast(`配对码：${_pairCode}（手动复制）`, "warn");
   }
+});
+
+async function startPairing() {
+  if (_peer) return;
   try {
     const m = await import("https://esm.sh/peerjs@1.5.4");
     const Peer = m.default ?? m.Peer;
     _pairCode = genPairCode();
-    setPairState("waiting");
+    setPairUi("waiting");
     _peer = new Peer(PEER_PREFIX + _pairCode);
     _peer.on("open", () => {
-      // Code is registered — show it to the user
-      alert(`配对码：${_pairCode}\n\n在枭熊插件的「音乐板」页面输入这个码，点「连接」。\n本窗口保持打开。`);
+      toast(`配对码 ${_pairCode} 已就绪，等枭熊插件连接…`, "ok");
     });
     _peer.on("connection", (conn) => {
       _peerConn = conn;
       conn.on("open", () => {
-        setPairState("live");
-        toast("枭熊已连接 — 现在播放/暂停会同步到 OBR 所有玩家", "ok");
+        setPairUi("live");
+        toast("枭熊已连接", "ok");
+        // *** Sync current state on connect — 解决"已经在播放但插件不知道"。
+        broadcastCurrentState();
       });
       conn.on("close", () => {
         _peerConn = null;
-        setPairState("waiting");
-        toast("枭熊断开连接", "warn");
+        setPairUi("waiting");
+        toast("枭熊断开，回到等待", "warn");
       });
-      conn.on("error", (e) => toast("数据通道错误：" + (e?.message || e), "error"));
+      conn.on("error", (e) => toast("通道错误：" + (e?.message || e), "error"));
     });
     _peer.on("error", (e) => {
-      setPairState("error", e?.type || "");
       toast("配对失败：" + (e?.type || e?.message || e), "error");
-      _peer = null;
+      tearDownPair();
     });
   } catch (e) {
-    setPairState("error", "加载失败");
     toast("加载 PeerJS 失败：" + (e?.message || e), "error");
+    tearDownPair();
   }
 }
 
 function tearDownPair() {
   if (_peerConn) try { _peerConn.close(); } catch {}
   if (_peer) try { _peer.destroy(); } catch {}
-  _peer = null; _peerConn = null;
-  setPairState("idle");
+  _peer = null; _peerConn = null; _pairCode = "";
+  setPairUi("idle");
 }
 
-/** Send a message to枭熊 if we're paired. No-op when not. */
 function sendToObr(msg) {
   if (_peerConn && _peerConn.open) {
     try { _peerConn.send(msg); } catch (e) { console.warn("[pair] send failed", e); }
   }
 }
 
-if (pairBtn) {
-  pairBtn.addEventListener("click", () => void startPairing());
-  setPairState("idle");
-}
-
-// ============ Hook into turntable events to broadcast ============
-//
-// Monkey-patch Turntable.load / togglePlay / stop / volume change so
-// they also fire sendToObr() — keeps the OBR mirror state in sync.
-
-const origLoad = Turntable.prototype.load;
-Turntable.prototype.load = function (track, autoplay) {
-  origLoad.call(this, track, autoplay);
-  if (this.bus === "bgm") {
+/** Send a snapshot of current playback so a fresh connection
+ *  immediately catches up. Fixes #3: 已经在播放时配对后无声。 */
+function broadcastCurrentState() {
+  // Volumes first so subsequent loads honour them.
+  sendToObr({ type: "volume", bus: "bgm", vol: state.volumes.bgm });
+  sendToObr({ type: "volume", bus: "sfx", vol: state.volumes.sfx });
+  // BGM
+  const bgm = turntableFor("bgm");
+  if (bgm.track && bgm.track.url) {
     sendToObr({
       type: "bgm-load",
-      url: track.url || "",   // blob tracks can't be sent over PeerJS — only URL tracks sync
-      name: track.name,
-      loop: !!track.loop,
-      position: 0,
+      url:  bgm.track.url,
+      name: bgm.track.name,
+      loop: !!bgm.track.loop,
+      position: bgm.audio.currentTime || 0,
     });
-    if (!track.url) toast("本地压缩文件无法分享给 OBR（需要先有 URL）。试试外链曲目。", "warn");
-  } else {
-    // SFX — generate a one-shot id per play
+    if (bgm.audio.paused) {
+      sendToObr({ type: "bgm-pause", position: bgm.audio.currentTime || 0 });
+    }
+  }
+  // SFX — emit one sfx-add per currently-playing pad with a URL.
+  for (const tt of TURNTABLES) {
+    if (tt.bus !== "sfx" || !tt.track || !tt.track.url || tt.audio.paused) continue;
     sendToObr({
       type: "sfx-add",
       id: crypto.randomUUID(),
-      url: track.url || "",
-      name: track.name,
-      loop: !!track.loop,
+      url: tt.track.url,
+      name: tt.track.name,
+      loop: !!tt.track.loop,
     });
   }
-};
-
-const origTogglePlay = Turntable.prototype.togglePlay;
-Turntable.prototype.togglePlay = function () {
-  const wasPaused = this.audio.paused;
-  origTogglePlay.call(this);
-  if (this.bus !== "bgm" || !this.track) return;
-  if (wasPaused) {
-    sendToObr({ type: "bgm-play", position: this.audio.currentTime });
-  } else {
-    sendToObr({ type: "bgm-pause", position: this.audio.currentTime });
-  }
-};
-
-const origStop = Turntable.prototype.stop;
-Turntable.prototype.stop = function () {
-  const wasBgm = this.bus === "bgm" && this.track;
-  origStop.call(this);
-  if (wasBgm) sendToObr({ type: "bgm-stop" });
-};
-
-// Volume slider changes → broadcast
-for (const tt of TURNTABLES) {
-  if (tt.volSlider) {
-    tt.volSlider.addEventListener("change", () => {
-      sendToObr({ type: "volume", bus: tt.bus, vol: state.volumes[tt.bus] });
-    });
-  }
-}
-if (sfxVolSlider) {
-  sfxVolSlider.addEventListener("change", () => {
-    sendToObr({ type: "volume", bus: "sfx", vol: state.volumes.sfx });
-  });
 }
 
 // ============ Boot ============
-refreshLibrary().catch((e) => {
+refreshLibrary().then(() => {
+  renderQueue();
+  bgmDeckTT._updateHistoryButtons();
+}).catch((e) => {
   console.error("library load failed", e);
   toast("库加载失败：" + (e?.message || e), "error");
 });

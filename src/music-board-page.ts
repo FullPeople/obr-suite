@@ -63,7 +63,6 @@ const npCard      = $("#npCard");
 const npStatus    = $("#npStatus");
 const npTitle     = $("#npTitle");
 const npTime      = $("#npTime");
-const sfxList     = $("#sfxList");
 const bgmVol      = $("#bgmVol") as HTMLInputElement;
 const bgmVolReadout = $("#bgmVolReadout");
 const sfxVol      = $("#sfxVol") as HTMLInputElement;
@@ -160,22 +159,9 @@ function renderUI() {
     npTime.textContent = "--:-- / --:--";
   }
 
-  // SFX chip row
-  sfxList.innerHTML = "";
-  if (currentState.sfx.length === 0) {
-    const e = document.createElement("div");
-    e.className = "sfx-empty";
-    e.textContent = "没有活跃音效";
-    sfxList.appendChild(e);
-  } else {
-    for (const s of currentState.sfx) {
-      const chip = document.createElement("div");
-      chip.className = "sfx-chip active";
-      chip.innerHTML = `<span class="ico"></span><span></span>`;
-      (chip.lastElementChild as HTMLElement).textContent = s.name;
-      sfxList.appendChild(chip);
-    }
-  }
+  // SFX list intentionally not rendered — per user spec the plugin
+  // only shows the BGM status. SFX still plays locally (handled by
+  // applyState below) and the bus volume slider still affects it.
 }
 
 // Time ticker for BGM display.
