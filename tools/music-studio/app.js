@@ -558,8 +558,96 @@ function updateDucking() {
 }
 
 // ============ Library ============
+//
+// `refreshLibrary` runs an auto-dedup pass first. Heals the case where
+// users imported the default catalog multiple times before import
+// dedup was bulletproof (early rounds), AND prevents any future
+// double-add from leaving lingering duplicates around.
+//
+// Dedup rule: same URL → merge into the OLDEST entry (preserves user-
+// authored tags that built up over time), union all tags, repoint any
+// turntable / favorite / history reference pointing at the duplicates.
+
+function findDuplicatesByUrl(tracks) {
+  const byUrl = new Map();
+  for (const t of tracks) {
+    if (!t.url) continue;
+    if (!byUrl.has(t.url)) byUrl.set(t.url, []);
+    byUrl.get(t.url).push(t);
+  }
+  const deletes = [];
+  const tagUpdates = new Map();
+  const rewrite = new Map();   // dupId → primaryId
+  for (const [, group] of byUrl) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const primary = group[0];
+    // Union all tags across the group into the primary entry.
+    const tagSet = new Set();
+    for (const g of group) for (const tag of (g.tags || [])) tagSet.add(tag);
+    const merged = [...tagSet];
+    const sameTags = JSON.stringify(merged) === JSON.stringify(primary.tags || []);
+    if (!sameTags) tagUpdates.set(primary.id, merged);
+    for (const dup of group.slice(1)) {
+      deletes.push(dup.id);
+      rewrite.set(dup.id, primary.id);
+    }
+  }
+  return { deletes, tagUpdates, rewrite };
+}
+
 async function refreshLibrary() {
-  state.lib = (await listTracks()).map((t) => ({ tags: [], ...t }));
+  let raw = await listTracks();
+  const dups = findDuplicatesByUrl(raw);
+
+  if (dups.deletes.length > 0) {
+    // Apply IDB-side mutations (sequential so a failure mid-batch
+    // doesn't leave half-applied state).
+    for (const [primaryId, tags] of dups.tagUpdates) {
+      try { await updateTrack(primaryId, { tags }); } catch (e) { console.warn(e); }
+    }
+    for (const id of dups.deletes) {
+      try { await deleteTrack(id); } catch (e) { console.warn(e); }
+    }
+
+    // Repoint in-memory references so the user doesn't see stale UI
+    // (a turntable showing a "deleted" track, a favorite that points
+    // at a non-existent id, a history entry that no longer resolves).
+    for (const [dupId, primaryId] of dups.rewrite) {
+      // turntables: track id pointer + the live track object
+      for (const slot of Object.keys(state.turntableTrack)) {
+        if (state.turntableTrack[slot] === dupId) state.turntableTrack[slot] = primaryId;
+      }
+      for (const tt of TURNTABLES) {
+        if (tt.track?.id === dupId) {
+          tt.track = raw.find((x) => x.id === primaryId) || tt.track;
+        }
+      }
+      // favorites: rewrite, but if primary already present just drop the dup slot
+      const i = state.favorites.indexOf(dupId);
+      if (i >= 0) {
+        if (state.favorites.includes(primaryId)) state.favorites.splice(i, 1);
+        else state.favorites[i] = primaryId;
+      }
+      // BGM history rewrite
+      for (const h of state.bgmHistory) {
+        if (h.id === dupId) h.id = primaryId;
+      }
+    }
+    // Collapse adjacent identical history entries created by the rewrite
+    const ch = [];
+    for (const h of state.bgmHistory) {
+      if (ch.length === 0 || ch[ch.length - 1].id !== h.id) ch.push(h);
+    }
+    state.bgmHistory = ch;
+    if (state.bgmHistoryIdx >= ch.length) state.bgmHistoryIdx = ch.length - 1;
+    saveFavs();
+    toast(`库自动去重：移除 ${dups.deletes.length} 个同 URL 重复条目`, "ok");
+
+    raw = await listTracks();
+  }
+
+  state.lib = raw.map((t) => ({ tags: [], ...t }));
   renderLibrary();
   renderFavorites();
   bgmDeckTT._updateHistoryButtons();
