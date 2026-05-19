@@ -493,6 +493,47 @@ function startPublishTimer() {
   pubTimer = window.setInterval(() => publishState(), 500);
 }
 
+// ---- Loop-boundary fade ----------------------------------------------
+//
+// When a BGM track has loop=true, HTMLAudioElement's native looping
+// snaps the playhead back to 0 instantly — no audible gap, but also
+// no fade between the tail and the head. For a smooth "fade out at
+// end + fade in at start" effect we monitor currentTime on every
+// rAF and:
+//   • when remaining < FADE_OUT_MS → ramp fadeGain toward 0
+//   • when playhead wraps to ~0 and fadeGain was near 0 → ramp back
+//     up to 1 over FADE_IN_MS
+//
+// Only kicks in when bgmAudio.loop is true. The standard fade-in on
+// .load() and fade-out on .stop() handle the non-loop case.
+
+let loopFadeRAF = 0;
+function loopFadeTick() {
+  loopFadeRAF = requestAnimationFrame(loopFadeTick);
+  if (!bgmAudio.loop || bgmAudio.paused) return;
+  const d = bgmAudio.duration;
+  if (!Number.isFinite(d) || d <= 0) return;
+  const chain = chainMap.get(bgmAudio);
+  if (!chain) return;
+
+  const t = bgmAudio.currentTime;
+  const fadeOutSec = FADE_OUT_MS / 1000;
+  const fadeInGuardSec = 0.4;        // "just looped" detection window
+
+  if (t > d - fadeOutSec) {
+    // Tail — ensure we're ramping toward 0 (only schedule once per cycle).
+    if (chain.fadeGain.gain.value > 0.5) {
+      rampGain(chain.fadeGain, 0, Math.max(80, (d - t) * 1000));
+    }
+  } else if (t < fadeInGuardSec) {
+    // Head — if we previously ramped out, the gain is still near 0
+    // because the loop wrap happened. Ramp it back up.
+    if (chain.fadeGain.gain.value < 0.5) {
+      rampGain(chain.fadeGain, 1, FADE_IN_MS);
+    }
+  }
+}
+
 // ---- Command receiver ------------------------------------------------
 function handlePopoverCmd(data: any) {
   if (!data || typeof data !== "object") return;
@@ -549,12 +590,14 @@ export async function setupMusicEngine(): Promise<void> {
   }
 
   startPublishTimer();
+  if (!loopFadeRAF) loopFadeRAF = requestAnimationFrame(loopFadeTick);
   publishState();
 }
 
 export function teardownMusicEngine(): void {
   for (const fn of engineUnsubs.splice(0)) { try { fn(); } catch {} }
   if (pubTimer != null) { window.clearInterval(pubTimer); pubTimer = null; }
+  if (loopFadeRAF) { cancelAnimationFrame(loopFadeRAF); loopFadeRAF = 0; }
   // Stop any audio + tear down peer.
   try { bgmAudio.pause(); } catch {}
   for (const a of sfxAudios.values()) { try { a.pause(); } catch {} }

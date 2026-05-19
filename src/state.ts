@@ -202,11 +202,10 @@ export const DEFAULT_STATE: SuiteState = {
     // registered as a module in background.ts. modules/follow/ source
     // is kept on disk un-wired in case it's revived.
     follow: false,
-    // Music board — dev-only listener page that mirrors the studio
-    // web tool's playback into OBR scene metadata, so all players
-    // hear synchronised audio. Hidden in stable (STABLE_HIDES) until
-    // PeerJS pairing UX + default catalog land.
-    musicBoard: !STABLE_HIDES,
+    // Music board — promoted to stable 2026-05-19. Background-resident
+    // engine plays audio + maintains the PeerJS connection across
+    // popover open/close, so all players hear synchronised audio.
+    musicBoard: true,
   },
   dataVersion: "2024",
   allowPlayerMonsters: false,

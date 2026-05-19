@@ -343,6 +343,25 @@ class Turntable {
       if (this.durEl)  this.durEl.textContent  = fmtTime(this.audio.duration);
       if (this.fillEl) this.fillEl.style.width = (this.audio.currentTime / this.audio.duration * 100) + "%";
     }
+    // Loop-boundary fade: when looping, fade out the tail before the
+    // wrap and fade back in at the head. Only when fades are enabled
+    // and there's a real graph attached. Guarded against the standard
+    // play/pause/stop ramps by checking gain value transitions.
+    if (state.fadeEnabled && this.audio.loop && !this.audio.paused &&
+        this.fadeGain && Number.isFinite(this.audio.duration) && this.audio.duration > 0) {
+      const t = this.audio.currentTime;
+      const d = this.audio.duration;
+      const fadeOutSec = FADE_OUT_MS / 1000;
+      if (t > d - fadeOutSec) {
+        if (this.fadeGain.gain.value > 0.5) {
+          this._ramp(0, Math.max(80, (d - t) * 1000));
+        }
+      } else if (t < 0.4) {
+        if (this.fadeGain.gain.value < 0.5) {
+          this._ramp(1, FADE_IN_MS);
+        }
+      }
+    }
     requestAnimationFrame(this._tick);
   }
 

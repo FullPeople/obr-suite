@@ -2735,6 +2735,51 @@ const TABS: TabDef[] = [
     },
   },
   {
+    id: "musicBoard",
+    zh: `${ICONS.music} 音乐板`,
+    en: `${ICONS.music} Music Board`,
+    moduleId: "musicBoard",
+    body: {
+      zh: `<h3>音乐板</h3>
+<p>左侧栏「音乐板 (听)」工具点开一个弹窗，显示当前正在播放的 BGM、本地音量条、配对码输入。</p>
+<h4 style="margin-top:14px">怎么用</h4>
+<ol style="line-height:1.9">
+  <li>在 <a href="https://obr.dnd.center/studio/music-studio/" target="_blank" style="color:var(--accent)">obr.dnd.center/studio/music-studio/</a> 打开音乐板网页（一次性收藏即可）</li>
+  <li>网页点「配对枭熊」，得到一个 6 位配对码（点击复制）</li>
+  <li>OBR 这边左侧栏点「音乐板 (听)」按钮 → 在弹窗里粘配对码，点「连接」</li>
+  <li>之后网页上的所有操作（切歌 / 暂停 / 调音量）都会同步到 OBR，所有玩家的客户端会**各自本地拉流播放**同一首曲子</li>
+</ol>
+<h4 style="margin-top:10px">关键特性</h4>
+<ul>
+  <li><b>关闭弹窗不停音乐</b>：音频引擎住在 background 后台，弹窗只是显示器。关掉再开仍然连着、仍在播</li>
+  <li><b>WebAudio 引擎</b>：自动淡入淡出 / 单曲循环边界平滑 / SFX 响时 BGM 自动 ducking 到 40% / master limiter 防爆音</li>
+  <li><b>零服务器开销</b>：网页 ↔ 插件用 PeerJS WebRTC 直连 P2P，音频是各玩家浏览器本地从 URL 拉的，不走你的服务器</li>
+  <li><b>每人本地音量</b>：BGM/SFX 各自独立的音量条 + 静音，仅影响自己听到的</li>
+</ul>
+<h4 style="margin-top:10px">默认曲库</h4>
+<p>网页点「默认曲库」一键导入服务器自带的 154 首 BGM/SFX（约 108 MB，OPUS 64k mono 编码，按 17 个文件夹分类自动打 tag）。</p>
+<p style="color:var(--text-dim);font-size:11.5px">如果按钮没反应：刷新 OBR 房间，或在房间设置里把音乐板模块开关一次。</p>`,
+      en: `<h3>Music Board</h3>
+<p>The left-sidebar "Music Board (Listen)" tool opens a small popover showing the currently-playing BGM, per-client volume, and the pair-code input.</p>
+<h4 style="margin-top:14px">How to use</h4>
+<ol style="line-height:1.9">
+  <li>Open <a href="https://obr.dnd.center/studio/music-studio/" target="_blank" style="color:var(--accent)">obr.dnd.center/studio/music-studio/</a> (the music board web tool — bookmark it)</li>
+  <li>Click "配对枭熊" / "Pair OBR" to generate a 6-char code (click to copy)</li>
+  <li>In OBR, click the Music Board sidebar tool, paste the code, click Connect</li>
+  <li>All web-side actions (track switch, pause, volume) now sync to OBR; every player's client streams the same URL locally</li>
+</ol>
+<h4 style="margin-top:10px">Key features</h4>
+<ul>
+  <li><b>Closing the popover doesn't stop music</b>: the audio engine lives in the plugin background; the popover is just a viewer.</li>
+  <li><b>WebAudio engine</b>: auto fade-in/out (including across loop boundaries), SFX-triggered BGM ducking, master limiter</li>
+  <li><b>Zero server load</b>: PeerJS WebRTC P2P between web and plugin; audio is fetched per-client from the source URL</li>
+  <li><b>Per-client volume</b>: BGM/SFX sliders + mute, affect only your own audio</li>
+</ul>
+<h4 style="margin-top:10px">Default catalog</h4>
+<p>The web tool's "默认曲库" / "Default Catalog" button pulls 154 OPUS-encoded BGM/SFX tracks (~108 MB) from the server.</p>`,
+    },
+  },
+  {
     id: "worldPack",
     zh: `${ICONS.box} 世界包`,
     en: `${ICONS.box} World Pack`,

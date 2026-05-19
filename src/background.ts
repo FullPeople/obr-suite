@@ -595,19 +595,20 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   // Trickster + circle-image promoted from dev to stable on 2026-05-08.
   trickster: { setup: setupTrickster, teardown: teardownTrickster },
   circleImage: { setup: setupCircleImage, teardown: teardownCircleImage },
+  // Music board promoted to stable 2026-05-19 — studio web tool +
+  // default catalog + persistent background engine + settings panel
+  // entry are all in place. Anyone on either channel can use it.
+  musicBoard: {
+    setup: async () => { await setupMusicBoard(); },
+    teardown: async () => { teardownMusicBoard(); },
+  },
   // fullFog stays dev-only — door / window cutting still in design.
-  // musicBoard is dev-only until the studio web tool + default catalog
-  // are mature (PeerJS pairing + auto-sync to scene metadata).
   ...(STABLE_HIDES
     ? {}
     : {
         fullFog: {
           setup: async () => { await setupFullFog(); },
           teardown: async () => { await teardownFullFog(); },
-        },
-        musicBoard: {
-          setup: async () => { await setupMusicBoard(); },
-          teardown: async () => { teardownMusicBoard(); },
         },
         // 2026-05-14 — `follow` removed here per user request.
       }),

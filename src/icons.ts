@@ -40,6 +40,13 @@ export const ICONS = {
     `<line x1="6.5" y1="18.5" x2="9.5" y2="22"/>`,
     { sw: 1.6 }
   ),
+  // 🎵 — vinyl record + center label. Mirrors public/music-board-icon.svg.
+  // Used by the music board tool button and settings tab.
+  music: svg(
+    `<circle cx="12" cy="12" r="9"/>` +
+    `<circle cx="12" cy="12" r="3"/>`,
+    { sw: 1.6 }
+  ),
   // 👁️ — eye + light rings, fullFog plugin glyph. Mirrors
   // public/fullfog-icon.svg.
   eye: svg(
