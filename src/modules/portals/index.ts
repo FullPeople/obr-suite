@@ -1355,17 +1355,37 @@ function finiteNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function transformWallPoint(wall: Item, point: Point): Point {
-  const sx = finiteNumber((wall as any).scale?.x, 1);
-  const sy = finiteNumber((wall as any).scale?.y, 1);
-  const rotation = (finiteNumber((wall as any).rotation, 0) * Math.PI) / 180;
-  const cos = Math.cos(rotation);
-  const sin = Math.sin(rotation);
-  const x = point.x * sx;
-  const y = point.y * sy;
+/** The item's transform, resolved once so it isn't re-derived per
+ *  point. Every field is constant for the whole wall. */
+function wallTransform(wall: Item): {
+  sx: number;
+  sy: number;
+  cos: number;
+  sin: number;
+  px: number;
+  py: number;
+} {
+  const w = wall as any;
+  const rotation = (finiteNumber(w.rotation, 0) * Math.PI) / 180;
   return {
-    x: finiteNumber((wall as any).position?.x, 0) + x * cos - y * sin,
-    y: finiteNumber((wall as any).position?.y, 0) + x * sin + y * cos,
+    sx: finiteNumber(w.scale?.x, 1),
+    sy: finiteNumber(w.scale?.y, 1),
+    cos: Math.cos(rotation),
+    sin: Math.sin(rotation),
+    px: finiteNumber(w.position?.x, 0),
+    py: finiteNumber(w.position?.y, 0),
+  };
+}
+
+function applyWallTransform(
+  t: ReturnType<typeof wallTransform>,
+  point: Point,
+): Point {
+  const x = point.x * t.sx;
+  const y = point.y * t.sy;
+  return {
+    x: t.px + x * t.cos - y * t.sin,
+    y: t.py + x * t.sin + y * t.cos,
   };
 }
 
@@ -1383,9 +1403,14 @@ function collectWallSegments(items: Item[]): WallSegment[] {
   const segments: WallSegment[] = [];
   for (const item of items) {
     if (!isBlockingWallItem(item)) continue;
+    // Resolve the transform once per WALL, not once per point: the
+    // scale, rotation and position reads plus the cos/sin pair are
+    // identical for every point on the same item, and a traced map
+    // brings tens of thousands of points through here.
+    const t = wallTransform(item);
     const points = ((item as any).points as Point[])
       .filter((p) => Number.isFinite(p?.x) && Number.isFinite(p?.y))
-      .map((p) => transformWallPoint(item, p));
+      .map((p) => applyWallTransform(t, p));
     for (let i = 1; i < points.length; i++) {
       const a = points[i - 1];
       const b = points[i];

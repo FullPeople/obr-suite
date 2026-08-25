@@ -552,6 +552,19 @@ function roundedRectanglePoints(
 
   const arc = (cx: number, cy: number, fromAngle: number, toAngle: number): Vector2[] => {
     const out: Vector2[] = [];
+    // radius 0 (overhead mode) collapses every arc point onto the
+    // corner: `cx + Math.cos(a) * 0` is exactly `cx` for any finite
+    // angle. Skip the trig and emit the corner directly.
+    //
+    // The point COUNT is deliberately unchanged. Emitting 4 points
+    // instead of 44 would render the same — a zero-length segment draws
+    // nothing — but it would change the item's `points` array, and the
+    // bubble rebuild hash is computed over the geometry. Same numbers
+    // out, less work to get them.
+    if (radius === 0) {
+      for (let i = 0; i <= pointsInCorner; i++) out.push({ x: cx, y: cy });
+      return out;
+    }
     for (let i = 0; i <= pointsInCorner; i++) {
       const t = i / pointsInCorner;
       const a = fromAngle + (toAngle - fromAngle) * t;
