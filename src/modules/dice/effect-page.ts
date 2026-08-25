@@ -840,6 +840,17 @@ function frame(now: number): void {
   diceWrap.style.transform = `scale(${wrapScale})`;
   diceWrap.style.transformOrigin = "0 0";
 
+  // Frame constants. `getScaleXY` and `getAlpha` are pure functions of
+  // `elapsed` — which is computed once above and cannot change inside
+  // the loop — yet they were called once per die, and getScaleXY calls
+  // findArc on top of that. `getPos` and `getRotation` stay in the loop
+  // because they also take the per-die `anim`.
+  //
+  // Only meaningful during the bounce, but computing them
+  // unconditionally is cheaper than branching to decide whether to.
+  const frameScale = getScaleXY(elapsed);
+  const frameAlpha = getAlpha(elapsed);
+
   for (let i = 0; i < N_DICE; i++) {
     const el = diceEls[i];
     const anim = dieAnims[i];
@@ -880,9 +891,9 @@ function frame(now: number): void {
     if (elapsed < FLIGHT_MS) {
       // ── BOUNCING ── parabolic flight + spin + cartoon squash
       const pos = getPos(elapsed, anim);
-      const sc = getScaleXY(elapsed);
+      const sc = frameScale;
       const rot = getRotation(elapsed, anim);
-      const a = getAlpha(elapsed);
+      const a = frameAlpha;
       el.style.transform =
         `translate(${pos.x}px, ${pos.y}px) rotate(${rot}deg) scale(${sc.sx}, ${sc.sy})`;
       // Losers stay full-opacity through the bounce; only after rest
