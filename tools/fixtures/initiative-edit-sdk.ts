@@ -7,6 +7,8 @@ const player = { id: "me", role: "PLAYER", color: "#99ccff", name: "Me" };
 const makeItem = (id: string, owner: string) => ({ id, type: "IMAGE", name: id, visible: true, createdUserId: owner, position: { x: 0, y: 0 }, image: { url: "" }, metadata: { "com.initiative-tracker/data": { count: 15, active: id === "owned", rolled: true, ownerId: owner, tiebreak: id === "owned" ? 0.5 : 0.6 }, "com.initiative-tracker/dexMod": 3 } });
 export const mock = (window as any).editMock = {
   items: [makeItem("owned", "me"), makeItem("other", "other-player")] as any[], writes: [] as any[], reads: 0, holdAt: 0, pending: [] as Array<() => void>, failWrites: false, sceneReady: true,
+  lang: "en" as "en" | "zh", dice: [] as any[],
+  broadcast(name: string, data: any) { emit(name, { data }); },
   role(value: string) { player.role = value; emit("player", copy(player)); },
   setOwner(id: string, owner: string, publish = true) { const item = this.items.find(item => item.id === id); if (item) item.createdUserId = owner; if (publish) this.publish(); },
   publish() { emit("OBR_SCENE_ITEMS_EVENT_CHANGE", { items: copy(this.items) }); },
@@ -28,15 +30,15 @@ const bus = {
     return {};
   },
 };
-export const getLocalLang = () => "en";
-export const broadcastDiceRoll = async () => {};
+export const getLocalLang = () => mock.lang;
+export const broadcastDiceRoll = async (data: any) => { mock.dice.push(copy(data)); };
 export const isGlobalDarkRollEnabled = () => false;
 export const readFixedRoll = () => null;
 export const consumeFixedRoll = () => {};
 export const randIntInclusive = () => 1;
 export const sfxNextTurn = () => {};
 export default {
-  player: { getId: async () => player.id, getRole: async () => player.role, getColor: async () => player.color, onChange: (fn: any) => on("player", fn) },
+  player: { getId: async () => player.id, getName: async () => player.name, getRole: async () => player.role, getColor: async () => player.color, onChange: (fn: any) => on("player", fn) },
   party: { getPlayers: async () => [], onChange: (fn: any) => on("party", fn) },
   scene: { isReady: async () => mock.sceneReady, onReadyChange: (fn: any) => on("ready", fn), items: new SceneItemsApi(bus as any), getMetadata: async () => ({ "com.initiative-tracker/combat": { preparing: true, inCombat: false, round: 0 } }), onMetadataChange: (fn: any) => on("metadata", fn) },
   broadcast: { onMessage: (name: string, fn: any) => on(name, fn), sendMessage: async () => {} },

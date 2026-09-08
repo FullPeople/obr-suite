@@ -21,14 +21,25 @@ await build({ input: resolve("tools/fixtures/initiative-edit-entry.tsx"), platfo
   return code;
 } }], output: { file: join(out, "probe.js"), format: "iife" } });
 if (mutant && !mutated) throw Error("Mutation not applied");
-const server = createServer((request, response) => { if (request.url === "/probe.js") { response.setHeader("Content-Type", "text/javascript"); response.end(readFileSync(join(out, "probe.js"))); } else response.end('<div id="root"></div><script src="/probe.js"></script>'); });
+const server = createServer((request, response) => { if (request.url === "/probe.js") { response.setHeader("Content-Type", "text/javascript; charset=utf-8"); response.end(readFileSync(join(out, "probe.js"))); } else { response.setHeader("Content-Type", "text/html; charset=utf-8"); response.end('<meta charset="utf-8"><div id="root"></div><script src="/probe.js"></script>'); } });
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const browser = await chromium.launch({ headless: true, channel: "msedge" }), page = await browser.newPage();
 const errors = []; page.on("pageerror", error => errors.push(error.message));
 let passed = 0; const checks = [], check = (value, message) => { assert.ok(value, message); passed++; checks.push(message); };
 const idle = () => page.waitForTimeout(80);
 try {
-  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.editApi?.items.length === 2); await idle();
+  // Windows can allocate an ephemeral port blocked by Chromium (observed 6669).
+  // Rebind only that transport failure, without relaxing browser restrictions
+  // or retrying failed product assertions.
+  for (let attempt = 0; ; attempt++) {
+    try { await page.goto(`http://127.0.0.1:${server.address().port}`); break; }
+    catch (error) {
+      if (attempt >= 3 || !String(error).includes("ERR_UNSAFE_PORT")) throw error;
+      await new Promise(resolve => server.close(resolve));
+      await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    }
+  }
+  await page.waitForFunction(() => window.editApi?.items.length === 2).catch(error => { throw new Error(`${error.message}; page errors: ${errors.join("; ")}`); }); await idle();
   check(await page.evaluate(() => !window.editApi.canEdit(window.editApi.items.find(item => item.id === "other"))), "existing count permission denies the other player's token");
   await page.evaluate(() => window.editApi.updateModifier("other", 19)); await idle();
   const forbidden = await page.evaluate(() => window.editMock.writes);
@@ -85,7 +96,19 @@ try {
     await page.evaluate(() => { const m = window.editMock; m.holdAt = m.reads + 2; window.pendingEdit = window.editApi.updateModifier("owned", 34); }); await page.waitForFunction(() => window.editMock.pending.length === 1);
     await page.evaluate(() => { delete window.editMock.items[0].metadata["com.initiative-tracker/data"]; window.editMock.release(); }); await page.evaluate(() => window.pendingEdit); await idle();
     check(await page.evaluate(() => window.editMock.writes.length) === beforeRemoval, "removing initiative metadata before SDK callback cancels the modifier edit");
-    await page.evaluate(() => window.editMock.role("GM")); await idle(); const beforeUnmount = await page.evaluate(() => window.editMock.writes.length);
+    await page.evaluate(() => window.editMock.role("GM")); await idle();
+    for (const [lang, label] of [["en", "Initiative"], ["zh", "先攻"]]) {
+      await page.evaluate(async lang => { window.editMock.lang = lang; await window.editApi.rollInitiativeLocal("other", "normal"); }, lang);
+      const localDice = await page.evaluate(() => window.editMock.dice.at(-1));
+      check(localDice.label === label && localDice.itemId === "other" && localDice.rollerName === "Me" && localDice.dice[0].type === "d20", `actual local roll uses current ${lang} label without changing identity or dice structure`);
+      await page.evaluate(rollId => window.editMock.broadcast("com.obr-suite/dice-fade-start", { rollId }), localDice.rollId); await idle();
+      const beforeDicePlus = await page.evaluate(() => window.editMock.dice.length);
+      await page.evaluate(() => window.editMock.broadcast("com.initiative-tracker/roll-result", { rollId: "init-other-99", result: { totalValue: 17 } }));
+      await page.waitForFunction(before => window.editMock.dice.length === before + 1, beforeDicePlus);
+      const dicePlus = await page.evaluate(() => window.editMock.dice.at(-1));
+      check(dicePlus.label === label && dicePlus.itemId === "other" && dicePlus.rollerName === "Me" && dicePlus.dice[0].value === 17, `actual Dice+ listener uses current ${lang} label without changing result or identity`);
+    }
+    const beforeUnmount = await page.evaluate(() => window.editMock.writes.length);
     await page.evaluate(() => { const m = window.editMock; m.holdAt = m.reads + 2; window.pendingEdit = window.editApi.updateModifier("other", 35); }); await page.waitForFunction(() => window.editMock.pending.length === 1);
     await page.evaluate(() => { window.unmountProbe(); window.editMock.release(); }); await page.evaluate(() => window.pendingEdit); await idle();
     check(await page.evaluate(() => window.editMock.writes.length) === beforeUnmount, "unmounting the actual hook invalidates an in-flight numeric edit");

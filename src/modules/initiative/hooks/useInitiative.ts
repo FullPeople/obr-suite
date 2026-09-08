@@ -21,6 +21,7 @@ import {
 } from "../utils/constants";
 import { itemToInitiativeItem, getCombatState, genTiebreak } from "../utils/metadata";
 import { getLocalLang } from "../../../state";
+import { t } from "../utils/i18n";
 import { broadcastDiceRoll, isGlobalDarkRollEnabled } from "../../dice";
 import { readFixedRoll, consumeFixedRoll, randIntInclusive } from "../../dice/fixed-roll";
 
@@ -738,7 +739,7 @@ export function useInitiative() {
             dice: [{ type: "d20" as const, value: visual }],
             winnerIdx: 0,
             modifier: 0,
-            label: "先攻 / Initiative",
+            label: t(getLocalLang(), "initiative"),
             rollerId,
             rollerName,
           });
@@ -1039,7 +1040,7 @@ export function useInitiative() {
         }),
         winnerIdx,
         modifier: dexMod,
-        label: "先攻 / Initiative",
+        label: t(getLocalLang(), "initiative"),
         rollerId,
         rollerName,
         rollId,
