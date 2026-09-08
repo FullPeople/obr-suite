@@ -96,6 +96,16 @@ let roomId = "";
 let playerName = "anonymous";
 let myPlayerId = "";
 let isGM = false;
+let profileReady = false;
+let profileRequest = 0;
+let panelAlive = true;
+let sceneReady: boolean | undefined;
+let sceneEpoch = 0;
+let readinessRequest = 0;
+let metadataRequest = 0;
+let metadataLoaded = false;
+let cardReadRetry: (() => Promise<void>) | undefined;
+const panelSubscriptions: (() => void)[] = [];
 let cards: CardEntry[] = [];
 let current: View = { type: "empty" };
 let maximized = false;
@@ -221,34 +231,86 @@ async function toggleCardVisibility(id: string) {
   render();
 }
 
-async function readCardsFromScene(): Promise<CardEntry[]> {
-  try {
-    const meta = await OBR.scene.getMetadata();
-    const list = meta[SCENE_META_KEY];
-    if (Array.isArray(list)) return list as CardEntry[];
-  } catch {}
-  return [];
-}
-
 async function writeCardsToScene(list: CardEntry[]) {
   await OBR.scene.setMetadata({ [SCENE_META_KEY]: list });
 }
 
-async function refreshFromScene() {
-  cards = await readCardsFromScene();
-  // Clean up iframes for cards no longer in scene
-  for (const [id, frame] of cardIframes) {
-    if (!cards.find((c) => c.id === id)) {
-      frame.remove();
-      cardIframes.delete(id);
-    }
-  }
-  // If current card was deleted, fall back to empty
-  if (current.type === "card") {
-    const curId = current.id;
-    if (!cards.find((c) => c.id === curId)) current = { type: "empty" };
+function applyCardSnapshot(meta: Record<string, unknown>): void {
+  if (!panelAlive || sceneReady === false) return;
+  // Metadata events contain the complete current snapshot. Apply it now,
+  // without a second read that could finish after a newer event.
+  ++metadataRequest;
+  const list = meta[SCENE_META_KEY];
+  cards = Array.isArray(list) ? list.filter((card): card is CardEntry =>
+    !!card && typeof card === "object" && typeof card.id === "string") : [];
+  metadataLoaded = true;
+  if (cardReadRetry) {
+    cardReadRetry = undefined;
+    showError("");
   }
   render();
+}
+
+async function refreshFromScene(): Promise<void> {
+  if (!panelAlive || sceneReady === false) return;
+  const request = ++metadataRequest;
+  const epoch = sceneEpoch;
+  const valid = () => panelAlive && sceneReady !== false && epoch === sceneEpoch && request === metadataRequest;
+  try {
+    const meta = await OBR.scene.getMetadata();
+    if (valid()) applyCardSnapshot(meta);
+  } catch {
+    if (!valid()) return;
+    showCardReadError(refreshFromScene);
+  }
+}
+
+function showCardReadError(action: () => Promise<void>): void {
+  cardReadRetry = action;
+  showError(tt("ccPanelLoadFailed"));
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "link-local-btn";
+  retry.textContent = tt("ccPanelRetry");
+  retry.addEventListener("click", () => { void action(); });
+  errEl.append(" ", retry);
+  render();
+}
+
+async function readInitialSceneReadiness(): Promise<void> {
+  const request = ++readinessRequest;
+  const epoch = sceneEpoch;
+  const snapshot = metadataRequest;
+  // A newer scene event or metadata snapshot takes precedence over this
+  // initial query. A rejected query means unknown, not "scene closed".
+  const valid = () => panelAlive && epoch === sceneEpoch && request === readinessRequest && snapshot === metadataRequest;
+  try {
+    const ready = await OBR.scene.isReady();
+    if (valid()) changeSceneReadiness(ready, true);
+  } catch {
+    if (valid()) showCardReadError(readInitialSceneReadiness);
+  }
+}
+
+function changeSceneReadiness(ready: boolean, initial = false): void {
+  if (!panelAlive) return;
+  ++sceneEpoch;
+  ++metadataRequest;
+  sceneReady = ready;
+  if (cardReadRetry) { cardReadRetry = undefined; showError(""); }
+  if (initial && ready && metadataLoaded) {
+    // The first ready event confirms a snapshot already received during
+    // initialization. Keep that selection and its live iframe intact.
+    render();
+    return;
+  }
+  metadataLoaded = false;
+  cards = [];
+  if (!initial || !ready) current = { type: "empty" };
+  for (const frame of cardIframes.values()) frame.remove();
+  cardIframes.clear();
+  render();
+  if (ready) void refreshFromScene();
 }
 
 // 2026-05-26 — companion to uploadFile() for the "📋 粘贴 JSON" flow.
@@ -566,13 +628,20 @@ function ensureResourceIframe(def: ResourceDef): HTMLIFrameElement {
 }
 
 function render() {
+  if (!panelAlive) return;
   // Sidebar list — filter by visibility per requestor's role + id.
   // DM sees everything; players only see public + (owners they're in).
-  const visibleCards = cards.filter((c) => canSeeCard(c, isGM, myPlayerId));
+  const visibleCards = profileReady ? cards.filter((c) => canSeeCard(c, isGM, myPlayerId)) : [];
+  const visibleIds = new Set(visibleCards.map((card) => card.id));
+  // A revoked/deleted card must stop running, including while another card
+  // is selected. Merely hiding its iframe leaves its subscriptions alive.
+  for (const [id, frame] of cardIframes) {
+    if (!visibleIds.has(id)) { frame.remove(); cardIframes.delete(id); }
+  }
   // If the currently-active card was hidden by the DM and we're a
   // player, drop the view back to empty so the iframe doesn't keep
   // a stale reference visible.
-  if (current.type === "card") {
+  if (current.type === "card" && profileReady && metadataLoaded) {
     const currentId = current.id;
     if (!visibleCards.find((c) => c.id === currentId)) {
       current = { type: "empty" };
@@ -582,7 +651,8 @@ function render() {
   if (visibleCards.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-list";
-    empty.textContent = tt("ccPanelEmpty3");
+    empty.textContent = sceneReady === false ? tt("ccPanelOpenScene")
+      : cardReadRetry ? "" : !profileReady || !metadataLoaded ? tt("ccPanelLoading") : tt("ccPanelEmpty3");
     empty.style.whiteSpace = "pre-line";
     listEl.appendChild(empty);
   } else {
@@ -602,7 +672,7 @@ function render() {
       const sub = document.createElement("div");
       sub.className = "card-sub";
       const visLabel = isHidden
-        ? (v === "dm" ? "仅 DM 可见" : `仅 ${(c.owner_ids || []).length + 1} 人可见`)
+        ? tt(v === "dm" ? "ccPanelVisibilityDm" : "ccPanelVisibilityOwners")
         : "";
       sub.textContent = `${c.uploader} · ${timeAgo(c.uploaded_at)}` + (visLabel ? ` · ${visLabel}` : "");
 
@@ -613,9 +683,9 @@ function render() {
         const visBtn = document.createElement("button");
         visBtn.className = "card-vis";
         visBtn.textContent = isHidden ? "🔒" : "👁";
-        visBtn.title = isHidden
-          ? "仅 DM 可见 — 点击改为公开"
-          : "公开 — 点击改为仅 DM 可见";
+        visBtn.title = nextVisibilityLevel(v) === "public"
+          ? `${visLabel} — ${tt("ccPanelMakePublic")}`
+          : `${visLabel || tt("ccPanelVisibilityPublic")} — ${tt("ccPanelMakePrivate")}`;
         visBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
           await toggleCardVisibility(c.id);
@@ -662,7 +732,7 @@ function render() {
 
   // Viewer: ensure the target iframe exists, then toggle visibility
   if (curView.type === "card") {
-    const c = cards.find((x) => x.id === curView.id);
+    const c = visibleCards.find((x) => x.id === curView.id);
     if (c) ensureCardIframe(c);
   } else if (curView.type === "resource") {
     const def = RESOURCES.find((r) => r.slug === curView.slug);
@@ -677,11 +747,13 @@ function render() {
     f.style.display = show ? "block" : "none";
   });
 
-  const hasContent = current.type !== "empty";
+  const hasContent = current.type === "card" ? visibleIds.has(current.id) : current.type !== "empty";
   viewer.classList.toggle("is-empty", !hasContent);
   viewer.classList.toggle("has-content", hasContent);
   if (!hasContent) {
-    emptyText.textContent = cards.length > 0 ? tt("ccPanelEmpty") : tt("ccPanelNoCards");
+    emptyText.textContent = sceneReady === false ? tt("ccPanelOpenScene")
+      : cardReadRetry ? tt("ccPanelLoadFailed") : !profileReady || !metadataLoaded ? tt("ccPanelLoading")
+        : visibleCards.length > 0 ? tt("ccPanelEmpty") : tt("ccPanelNoCards");
   }
 }
 
@@ -867,41 +939,31 @@ function openPasteJsonPreview(): void {
   setTimeout(() => { ta.focus(); }, 50);
 }
 
-// Hide the 2014 / 2024 download template anchors when UI is English
-// (the xlsx templates are Chinese-悲灵-specific). The wrapper element
-// in cc-panel.html uses `display:contents` so anchors lay out the
-// same as before when shown.
-function syncLangVisibility(): void {
-  const row = document.getElementById("ccTplRow");
-  if (!row) return;
-  row.style.display = lang === "en" ? "none" : "contents";
-}
-
 // --- setup ---
-onLangChange((next) => {
+panelSubscriptions.push(onLangChange((next) => {
+  if (!panelAlive) return;
   lang = next;
   applyI18nDom(lang);
-  syncLangVisibility();
+  if (cardReadRetry) showCardReadError(cardReadRetry);
   render();
-});
+}));
 
-OBR.onReady(async () => {
+OBR.onReady(() => {
+  if (!panelAlive) return;
   applyI18nDom(lang);
-  syncLangVisibility();
   roomId = safeRoomId(OBR.room.id || "default");
-  try { playerName = (await OBR.player.getName()) || "anonymous"; } catch {}
-  try { myPlayerId = await OBR.player.getId(); } catch {}
-  try { isGM = (await OBR.player.getRole()) === "GM"; } catch {}
   // Watch for role / id changes (rare, but happens after disconnect-
   // reconnect or if the DM passes ownership). Re-render the list so
   // the visibility filter follows.
-  OBR.player.onChange(async (p) => {
-    const nextGM = p.role === "GM";
-    let changed = false;
-    if (nextGM !== isGM) { isGM = nextGM; changed = true; }
-    if (p.id && p.id !== myPlayerId) { myPlayerId = p.id; changed = true; }
-    if (changed) render();
-  });
+  panelSubscriptions.push(OBR.player.onChange((p) => {
+    if (!panelAlive) return;
+    ++profileRequest;
+    isGM = p.role === "GM";
+    myPlayerId = p.id || "";
+    playerName = p.name || "anonymous";
+    profileReady = true;
+    render();
+  }));
   // Resource column is visible to ALL players now (not just GM) — with only
   // 不全书 in the list it's lightweight enough to share. Pre-warm it so the
   // page is ready the moment anyone clicks the tab.
@@ -925,9 +987,9 @@ OBR.onReady(async () => {
 
   // Re-trigger maximize on broadcast (idempotent — useful if the user opens
   // the panel again while it's already alive somehow).
-  OBR.broadcast.onMessage("com.character-cards/panel-open", () => {
-    setMaximized(true);
-  });
+  panelSubscriptions.push(OBR.broadcast.onMessage("com.character-cards/panel-open", () => {
+    if (panelAlive) void setMaximized(true);
+  }));
 
   // Drag-drop on the right sidebar ONLY
   const sideEl = document.getElementById("side") as HTMLElement;
@@ -977,7 +1039,8 @@ OBR.onReady(async () => {
   // Listen for refresh broadcasts from other clients. When the DM (or
   // any other player) refreshes a linked card, we just bump our own
   // iframe's src with a cache-buster so the new index.html is fetched.
-  OBR.broadcast.onMessage(BC_CARD_UPDATED, (event) => {
+  panelSubscriptions.push(OBR.broadcast.onMessage(BC_CARD_UPDATED, (event) => {
+    if (!panelAlive) return;
     const data = event.data as { cardId?: string; url?: string } | undefined;
     if (!data?.cardId) return;
     const iframe = cardIframes.get(data.cardId);
@@ -985,7 +1048,7 @@ OBR.onReady(async () => {
     if (iframe && card) {
       iframe.src = buildCardIframeSrc(card, true);
     }
-  });
+  }));
 
   // Close via X button in the sidebar header, Esc, or clicking backdrop.
   closeBtn?.addEventListener("click", minimize);
@@ -1040,18 +1103,32 @@ OBR.onReady(async () => {
   window.addEventListener("pagehide", onPanelUnload);
   window.addEventListener("beforeunload", onPanelUnload);
 
-  // Initial load + react to scene metadata changes
-  await refreshFromScene();
-  OBR.scene.onMetadataChange((meta) => {
-    if (SCENE_META_KEY in meta) refreshFromScene();
+  // Subscribe before the initial reads so role/scene events can invalidate
+  // them even while one host request is slow.
+  panelSubscriptions.push(OBR.scene.onMetadataChange(applyCardSnapshot));
+  panelSubscriptions.push(OBR.scene.onReadyChange((ready) => changeSceneReadiness(ready, sceneReady === undefined)));
+  const profile = ++profileRequest;
+  void Promise.allSettled([OBR.player.getName(), OBR.player.getId(), OBR.player.getRole()]).then(([name, id, role]) => {
+    if (!panelAlive || profile !== profileRequest) return;
+    playerName = name.status === "fulfilled" ? name.value || "anonymous" : "anonymous";
+    myPlayerId = id.status === "fulfilled" ? id.value : "";
+    isGM = role.status === "fulfilled" && role.value === "GM";
+    profileReady = true;
+    render();
   });
-
-  // Validate restored activeCardId still exists; otherwise clear
-  if (current.type === "card") {
-    const curId = current.id;
-    if (!cards.find((c) => c.id === curId)) {
-      current = { type: "empty" };
-      render();
-    }
-  }
+  render();
+  void readInitialSceneReadiness();
 });
+
+function stopPanelReads(): void {
+  panelAlive = false;
+  ++profileRequest;
+  ++readinessRequest;
+  ++metadataRequest;
+  ++sceneEpoch;
+  for (const unsubscribe of panelSubscriptions.splice(0)) {
+    try { unsubscribe(); } catch {}
+  }
+}
+window.addEventListener("pagehide", stopPanelReads);
+window.addEventListener("beforeunload", stopPanelReads);

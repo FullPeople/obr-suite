@@ -389,7 +389,7 @@ const CHARCARD_DESC: BilingualHtml = {
   <li><b>武器属性</b>（轻型 / 灵巧 / 精通词条）也可点击 → 直接查搜索定义</li>
 </ul>
 <p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>📱 手机端</b>：全屏面板按钮被隐藏（小屏不可用 + 内存吃紧）。手机玩家仍可通过绑定 token 的小信息框查看。</p>`,
-  en: `<p><b>${ICONS.warning} Designed for the Chinese D&amp;D community's xlsx sheet (悲灵 v1.0.12). Generic English sheets will not parse.</b></p>
+  en: `<p>Use the suite's <b>2014 or 2024 XLSX template</b> below. These downloads currently contain Chinese content; full English sheets are being prepared.</p>
 <ul>
   <li>cluster's <b>Character Card Panel</b> / <kbd>CapsLock</kbd> opens the fullscreen view</li>
   <li><b>Drag</b> an xlsx onto the side panel / click 📁 to upload</li>
@@ -2425,12 +2425,12 @@ const TABS: TabDef[] = [
            </div>`
         : `<div class="dl-row">
              <a class="dl-btn" href="${tpl2014}"
-                download="DND5E-Character-Sheet-Belling-FullPeople-OwlbearAdapted.xlsx" target="_blank" rel="noopener">
-               ⬇ 5E2014 sheet (Belling · FullPeople · Owlbear-adapted)
+                download="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx" target="_blank" rel="noopener">
+               ⬇ 2014 sheet (Chinese)
              </a>
              <a class="dl-btn" href="${tpl2024}"
-                download="DND5R-Character-Sheet-Belling-FullPeople-OwlbearAdapted.xlsx" target="_blank" rel="noopener">
-               ⬇ 5E2024 sheet (Belling · FullPeople · Owlbear-adapted)
+                download="DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx" target="_blank" rel="noopener">
+               ⬇ 2024 sheet (Chinese)
              </a>
            </div>`;
       return `${desc}${btns}`;

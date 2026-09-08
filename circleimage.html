@@ -61,8 +61,8 @@ html,body{
   background:rgba(93,173,226,0.07);
 }
 #drop-zone .big{font-size:30px;color:var(--text-dim);line-height:1}
-#drop-zone .lbl{font-size:13px;color:var(--text)}
-#drop-zone .sub{font-size:11px;color:var(--text-dim)}
+#drop-zone .lbl{font-size:13px;color:var(--text);text-align:center;max-width:100%;padding:0 8px}
+#drop-zone .sub{font-size:11px;color:var(--text-dim);text-align:center;max-width:100%;padding:0 8px}
 #file-input{display:none}
 
 /* ---- editor (shown after an image is loaded) ---- */
@@ -91,10 +91,10 @@ html,body{
 .ctrl-row .lbl{
   font-size:10.5px;color:var(--text-dim);
   font-weight:700;text-transform:uppercase;letter-spacing:.4px;
-  flex-shrink:0;width:54px;
+  flex-shrink:0;width:82px;
 }
 .ctrl-row input[type=range]{
-  flex:1;height:24px;
+  flex:1;min-width:0;height:24px;
   accent-color:var(--accent);
 }
 .ctrl-row input[type=color]{
@@ -112,6 +112,7 @@ html,body{
 
 .btn-row{
   margin-top:auto;display:flex;gap:6px;justify-content:flex-end;
+  align-items:center;
   padding-top:12px;
   border-top:1px solid var(--border);flex-shrink:0;
 }
@@ -132,6 +133,7 @@ html,body{
 /* "添加到资源库" call-to-action — green so users see it as the
    "commit" action even though it's now a regular click button. */
 .btn.drag-handle{
+  min-width:0;flex:1;height:40px;white-space:normal;padding:5px 9px;
   background:rgba(46,204,113,0.18);
   border:1px solid rgba(46,204,113,0.5);
   color:#7eecaf;
@@ -217,21 +219,21 @@ html,body{
 <div class="card">
   <div class="hdr">
     <span class="ic">⊙</span>
-    <span class="ttl">图片处理</span>
-    <button class="x" id="btnClose" type="button">×</button>
+    <span class="ttl" data-image-text="title">图片处理</span>
+    <button class="x" id="btnClose" type="button" data-image-title="close" data-image-aria="close">×</button>
   </div>
   <div class="body">
     <!-- Mode tabs — switch between circle-crop and background-removal -->
     <div class="tab-strip">
-      <button class="tab on" data-mode="circle" type="button">圆形裁剪</button>
-      <button class="tab" data-mode="bgremove" type="button">白底黑底剔除</button>
+      <button class="tab on" data-mode="circle" type="button" data-image-text="circle">圆形裁剪</button>
+      <button class="tab" data-mode="bgremove" type="button" data-image-text="bgremove">白底黑底剔除</button>
     </div>
 
     <!-- Drop zone (initial empty state — shown for both modes) -->
     <div id="drop-zone" tabindex="0">
       <div class="big">＋</div>
-      <div class="lbl">拖入图片 / 点击选择 / Ctrl+V 粘贴</div>
-      <div class="sub">支持 JPG / PNG / WebP / SVG，最大 10 MB</div>
+      <div class="lbl" data-image-text="drop">拖入图片 / 点击选择 / Ctrl+V 粘贴</div>
+      <div class="sub" data-image-text="formats">支持 JPG / PNG / WebP / SVG，最大 10 MB</div>
       <input type="file" id="file-input" accept="image/*" />
     </div>
 
@@ -244,19 +246,19 @@ html,body{
       <!-- Circle-crop controls -->
       <div class="ctrls" id="ctrls-circle">
         <div class="ctrl-row">
-          <span class="lbl">大小</span>
-          <input type="range" id="size-slider" min="40" max="600" value="300" />
+          <span class="lbl" data-image-text="size">大小</span>
+          <input type="range" id="size-slider" min="40" max="600" value="300" data-image-aria="size" />
           <span class="val" id="size-val">300</span>
         </div>
         <div class="ctrl-row">
-          <span class="lbl">缩放</span>
-          <input type="range" id="zoom-slider" min="20" max="400" value="100" />
+          <span class="lbl" data-image-text="zoom">缩放</span>
+          <input type="range" id="zoom-slider" min="20" max="400" value="100" data-image-aria="zoom" />
           <span class="val" id="zoom-val">100%</span>
         </div>
         <div class="ctrl-row">
-          <span class="lbl">环颜色</span>
-          <input type="color" id="ring-color" value="#f5a623" />
-          <input type="range" id="ring-width" min="0" max="40" value="0" style="flex:1" />
+          <span class="lbl" data-image-text="ring">环颜色</span>
+          <input type="color" id="ring-color" value="#f5a623" data-image-aria="ringColor" />
+          <input type="range" id="ring-width" min="0" max="40" value="0" style="flex:1" data-image-aria="ringWidth" />
           <span class="val" id="ring-val">0</span>
         </div>
       </div>
@@ -264,27 +266,26 @@ html,body{
       <!-- Background-removal controls -->
       <div class="ctrls" id="ctrls-bgremove" hidden>
         <div class="ctrl-row" style="gap:6px">
-          <span class="lbl">背景</span>
-          <button class="bg-toggle on" data-kind="white" type="button">剔除白底</button>
-          <button class="bg-toggle" data-kind="black" type="button">剔除黑底</button>
+          <span class="lbl" data-image-text="background">背景</span>
+          <button class="bg-toggle on" data-kind="white" type="button" data-image-text="white">剔除白底</button>
+          <button class="bg-toggle" data-kind="black" type="button" data-image-text="black">剔除黑底</button>
         </div>
         <div class="ctrl-row">
-          <span class="lbl">容差</span>
-          <input type="range" id="bg-tolerance" min="0" max="120" value="40" />
+          <span class="lbl" data-image-text="tolerance">容差</span>
+          <input type="range" id="bg-tolerance" min="0" max="120" value="40" data-image-aria="tolerance" />
           <span class="val" id="bg-tolerance-val">40</span>
         </div>
         <div class="ctrl-row">
-          <span class="lbl">羽化</span>
-          <input type="range" id="bg-feather" min="0" max="40" value="8" />
+          <span class="lbl" data-image-text="feather">羽化</span>
+          <input type="range" id="bg-feather" min="0" max="40" value="8" data-image-aria="feather" />
           <span class="val" id="bg-feather-val">8</span>
         </div>
       </div>
     </div>
   </div>
   <div class="btn-row">
-    <button class="btn danger" id="btnReset" type="button">换图</button>
-    <span style="flex:1"></span>
-    <button class="btn drag-handle" id="btnDrag" type="button" title="把当前裁剪结果上传到 OBR 资源库；之后可从资源库拖到场景使用">⤴ 添加到资源库</button>
+    <button class="btn danger" id="btnReset" type="button" data-image-text="replace">换图</button>
+    <button class="btn drag-handle" id="btnDrag" type="button" data-image-title="uploadHelp" title="把当前裁剪结果上传到 OBR 资源库；之后可从资源库拖到场景使用">⤴ 添加到资源库</button>
   </div>
 </div>
 <script type="module" src="/src/modules/circleImage/popover-page.ts"></script>

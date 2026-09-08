@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>角色卡面板</title>
+<title data-i18n="ccPanelTitle">角色卡面板</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#eee}
@@ -104,10 +104,13 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
   display:flex;align-items:center;justify-content:center;
   color:#fff;font-size:16px;font-weight:600;z-index:20;
 }
+html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
 
-.side-head{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:space-between;gap:6px}
+.side-head{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.08);display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px}
 .side-head .title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;flex:1;min-width:0}
-.side-head .head-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.side-head .head-actions{display:contents}
+#ccTplRow{display:flex;flex-wrap:wrap;gap:4px;grid-column:1 / -1;grid-row:2}
+.side-head .close{grid-column:2;grid-row:1}
 .side-head .icon-btn{background:transparent;border:1px solid rgba(255,255,255,0.1);color:#aaa;cursor:pointer;font-size:11px;padding:3px 8px;font-family:inherit;border-radius:4px;line-height:1.3;text-decoration:none;display:inline-block}
 .side-head .icon-btn:hover{background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.25)}
 .side-head .icon-btn.off{color:#666;text-decoration:line-through;opacity:.7}
@@ -202,11 +205,9 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
              with one rule set. -->
         <!-- Relative hrefs so dev (/suite-dev/) and stable (/suite/)
              installs each download their own deploy's templates. -->
-        <!-- 2026-05-26 — wrapped in #ccTplRow so panel-page.ts can hide
-             the whole pair when UI language is English (the xlsx
-             templates are Chinese-悲灵-specific and not useful for EN
-             users). -->
-        <span id="ccTplRow" style="display:contents">
+        <!-- Keep both downloads available in either UI language. English
+             labels identify the current workbooks as Chinese content. -->
+        <span id="ccTplRow">
         <a
           class="icon-btn"
           href="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx"

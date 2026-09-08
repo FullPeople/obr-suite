@@ -28,6 +28,11 @@
 
 import OBR from "@owlbear-rodeo/sdk";
 import { PLUGIN_ID, POPOVER_ID } from "./types";
+import { getLocalLang, onLangChange } from "../../state";
+import { imageText, type ImageTextKey } from "./text";
+
+let lang = getLocalLang();
+const T = (key: ImageTextKey) => imageText(lang, key);
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 const $b = (id: string) => document.getElementById(id) as HTMLButtonElement;
@@ -126,11 +131,11 @@ new ResizeObserver(() => resizeCanvas()).observe(canvasWrap);
 
 function loadFromFile(file: File): void {
   if (!file.type.startsWith("image/")) {
-    alert("请选择图片文件（JPG / PNG / WebP / SVG）");
+    alert(T("fileType"));
     return;
   }
   if (file.size > 10 * 1024 * 1024) {
-    alert("图片大于 10 MB，太大了。先压缩一下吧。");
+    alert(T("fileSize"));
     return;
   }
   const reader = new FileReader();
@@ -151,10 +156,10 @@ function loadFromFile(file: File): void {
         draw();
       });
     };
-    img.onerror = () => alert("图片加载失败");
+    img.onerror = () => alert(T("imageFailed"));
     img.src = url;
   };
-  reader.onerror = () => alert("读取失败");
+  reader.onerror = () => alert(T("readFailed"));
   reader.readAsDataURL(file);
 }
 
@@ -526,7 +531,7 @@ OBR.onReady(() => { obrReady = true; resizeCanvas(); });
 async function uploadToLibrary(): Promise<void> {
   if (!srcImg) return;
   if (!obrReady) {
-    alert("OBR 还在初始化，稍后再试");
+    alert(T("notReady"));
     return;
   }
   setBtnState("uploading");
@@ -536,7 +541,7 @@ async function uploadToLibrary(): Promise<void> {
   } catch (err) {
     console.error("[circleImage/popover] bake failed", err);
     setBtnState("idle");
-    alert("生成图片失败：" + (err as Error).message);
+    alert(T("bakeFailed") + (err as Error).message);
     return;
   }
   if (!baked) {
@@ -547,8 +552,8 @@ async function uploadToLibrary(): Promise<void> {
   const half = { x: baked.width / 2, y: baked.height / 2 };
   const stamp = Date.now();
   const name = mode === "circle"
-    ? `圆形图片-${stamp}`
-    : `去底图片-${stamp}`;
+    ? `${T("circleName")}-${stamp}`
+    : `${T("bgremoveName")}-${stamp}`;
   console.log("[circleImage/popover] uploading", {
     mode,
     width: baked.width,
@@ -631,26 +636,29 @@ async function uploadToLibrary(): Promise<void> {
       detail = String(err);
     }
     setBtnState("idle");
-    alert("上传到资源库失败：" + detail);
+    alert(T("uploadFailed") + detail);
   }
 }
 
-function setBtnState(state: "idle" | "uploading" | "ok"): void {
+type ButtonState = "idle" | "uploading" | "ok";
+let buttonState: ButtonState = "idle";
+function setBtnState(state: ButtonState): void {
+  buttonState = state;
   switch (state) {
     case "idle":
       btnDrag.disabled = false;
-      btnDrag.textContent = "⤴ 添加到资源库";
+      btnDrag.textContent = T("upload");
       btnDrag.classList.remove("uploading", "ok");
       break;
     case "uploading":
       btnDrag.disabled = true;
-      btnDrag.textContent = "上传中…";
+      btnDrag.textContent = T("uploading");
       btnDrag.classList.add("uploading");
       btnDrag.classList.remove("ok");
       break;
     case "ok":
       btnDrag.disabled = false;
-      btnDrag.textContent = "✓ 已上传，从资源库拖入场景";
+      btnDrag.textContent = T("uploaded");
       btnDrag.classList.remove("uploading");
       btnDrag.classList.add("ok");
       break;
@@ -658,5 +666,24 @@ function setBtnState(state: "idle" | "uploading" | "ok"): void {
 }
 
 btnDrag.addEventListener("click", () => { void uploadToLibrary(); });
+
+function localize(): void {
+  document.documentElement.lang = lang;
+  document.title = T("title");
+  // Update only UI-owned text/attributes. Do not rebuild controls or canvas:
+  // image, pan, zoom, active mode, keyboard focus and upload state stay intact.
+  document.querySelectorAll<HTMLElement>("[data-image-text]").forEach((element) => {
+    element.textContent = T(element.dataset.imageText as ImageTextKey);
+  });
+  for (const [attribute, dataKey] of [["title", "imageTitle"], ["aria-label", "imageAria"]] as const) {
+    document.querySelectorAll<HTMLElement>(`[data-image-${attribute === "title" ? "title" : "aria"}]`).forEach((element) => {
+      element.setAttribute(attribute, T(element.dataset[dataKey] as ImageTextKey));
+    });
+  }
+  setBtnState(buttonState);
+}
+localize();
+const unsubscribeLanguage = onLangChange((next) => { lang = next; localize(); });
+window.addEventListener("pagehide", () => unsubscribeLanguage(), { once: true });
 
 void PLUGIN_ID;
