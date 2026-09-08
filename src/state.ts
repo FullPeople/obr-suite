@@ -76,6 +76,8 @@ export interface LibraryConfig {
    *  source code can be disabled in one library while still allowed
    *  in another. */
   disabledSources?: string[];
+  /** Content language used to prefer matching translations per client. */
+  language?: Language | "auto";
 }
 
 export interface SuiteState {
@@ -246,14 +248,9 @@ export const DEFAULT_STATE: SuiteState = {
     // registered as a module in background.ts. modules/follow/ source
     // is kept on disk un-wired in case it's revived.
     follow: false,
-    // Music board — RETIRED 2026-05-23 with project closure. The
-    // standalone web tool at obr.dnd.center/studio/music-studio/
-    // continues to work standalone; the in-plugin module (background-
-    // resident audio engine + PeerJS pairing + popover) is no longer
-    // wired into background.ts's modules registry, so this flag is
-    // hard-pinned OFF regardless of any stored room state. Settings
-    // entry remains and links to the studio website.
-    musicBoard: false,
+    // Shared music runs in the background; the panel is only a control.
+    // Explicit saved false remains respected when merging older rooms.
+    musicBoard: true,
     // Transform (变身 / polymorph) — right-click CHARACTER tokens to
     // pick a bestiary form, swap token art + monster metadata, and
     // revert from a per-token transform stack. Stable default ON.
@@ -317,6 +314,8 @@ function merge(partial: any): SuiteState {
           disabledSources: disabledSources && disabledSources.length > 0
             ? disabledSources
             : undefined,
+          language: lib.language === "zh" || lib.language === "en" || lib.language === "auto"
+            ? lib.language : undefined,
         });
       }
     }
@@ -420,6 +419,7 @@ function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
     const bDisabled = (lb.disabledSources ?? []).slice().sort().join(",");
     if (aDisabled !== bDisabled) return false;
     if ((la.indexPath ?? "") !== (lb.indexPath ?? "")) return false;
+    if (la.language !== lb.language) return false;
   }
   return true;
 }

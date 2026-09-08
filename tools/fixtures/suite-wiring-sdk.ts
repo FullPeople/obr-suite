@@ -2,12 +2,14 @@ import OBR, { fixture } from "./transitions-sdk";
 export * from "./transitions-sdk";
 export const isImage = (item: any) => item?.type === "IMAGE";
 const sdk: any = OBR;
+const settingsFixture = fixture as typeof fixture & { failSettingsWrite?: boolean };
 const metadataListeners = new Set<(metadata: any) => void>();
 const fogListeners = new Set<(fog: any) => void>();
 let filled = true;
 sdk.room = { id: "ui-audit-room", getMetadata: async () => ({}), setMetadata: async () => {}, onMetadataChange: () => () => {} };
 sdk.scene.onMetadataChange = (fn: (metadata: any) => void) => { metadataListeners.add(fn); return () => metadataListeners.delete(fn); };
 sdk.scene.setMetadata = async (metadata: any) => {
+  if (settingsFixture.failSettingsWrite) throw new Error("fixture settings unavailable");
   Object.assign(fixture.metadata, metadata);
   for (const fn of metadataListeners) fn(fixture.metadata);
 };

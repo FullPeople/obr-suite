@@ -50,9 +50,20 @@ try {
   await page.locator('[data-tab="transitions"]').click();
   await page.locator("#openTransitions").click();
   assert.ok(await page.evaluate(() => window.__transitionFixture.sent.some((message) => message.channel === "com.obr-suite/transitions/open" && message.destination === "LOCAL")));
-  for (const tab of ["transitions", "bossBar", "dynamicFog"]) {
+  for (const tab of ["transitions", "bossBar", "dynamicFog", "musicBoard"]) {
     await page.locator(`[data-tab="${tab}"]`).click(); await page.waitForTimeout(80);
     assert.equal(await page.locator(".tog[data-mod]").isDisabled(), role !== "GM");
+    if (tab === "musicBoard") {
+      await page.locator("#openMusicBoard").click();
+      assert.ok(await page.evaluate(() => window.__transitionFixture.sent.some((message) => message.channel === "com.obr-suite/music-board:toggle" && message.destination === "LOCAL")));
+      assert.equal(await page.locator("#content").innerText().then(text => /retired|已停止维护|退役下线/.test(text)), false);
+      if (role === "GM") {
+        await page.locator('.tog[data-mod="musicBoard"]').click();
+        await page.waitForFunction(() => document.querySelector("#openMusicBoard")?.disabled === true);
+        await page.locator('.tog[data-mod="musicBoard"]').click();
+        await page.waitForFunction(() => document.querySelector("#openMusicBoard")?.disabled === false);
+      }
+    }
     if (tab === "bossBar") {
       await page.locator('[data-boss-pref="visible"]').click();
       assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("obr-suite/boss-bar/preferences")).hidden), true);
@@ -70,6 +81,23 @@ try {
     }
     await page.screenshot({ path: join(shots, `${tab}-${role.toLowerCase()}-${lang}.png`) });
   }
+  await page.locator('[data-tab="libraries"]').click();
+  const language = page.locator('.lib-row select[data-field="language"]').first();
+  assert.equal(await language.inputValue(), "zh", "legacy Chinese preset language should be inferred");
+  assert.equal(await language.isDisabled(), role !== "GM");
+  if (role === "GM") {
+    await page.evaluate(() => { window.__transitionFixture.failSettingsWrite = true; });
+    await language.selectOption("en");
+    await page.waitForFunction(() => document.querySelector(".lib-language-status")?.textContent.length > 0);
+    assert.equal(await language.inputValue(), "zh", "failed language save must restore the persisted selection");
+    assert.equal(await language.isDisabled(), false, "failed language save must permit retry without reopening");
+    await page.evaluate(() => { window.__transitionFixture.failSettingsWrite = false; });
+    await language.selectOption("en");
+    await page.waitForFunction(() => window.__transitionFixture.metadata["com.obr-suite/state"]?.libraries?.[0]?.language === "en");
+    assert.equal(await language.inputValue(), "en");
+    assert.equal(await page.locator(".lib-language-status").first().innerText(), "");
+  }
+  await page.screenshot({ path: join(shots, `libraries-${role.toLowerCase()}-${lang}.png`) });
   await page.setViewportSize({ width: 380, height: 720 });
   await page.screenshot({ path: join(shots, `settings-narrow-${role.toLowerCase()}-${lang}.png`) });
   results.push({ mode: "settings", role, lang, errors, geometry: await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth, contentWidth: document.getElementById("content").getBoundingClientRect().width })) });
@@ -78,6 +106,8 @@ try {
   const rowErrors = []; row.on("pageerror", error => rowErrors.push(error.message));
   await row.addInitScript(({role,lang}) => { window.__transitionInitialRole = role; localStorage.setItem("obr-suite/lang", lang); }, {role,lang});
   await row.goto(`${base}/cluster-row`); await row.locator("#btnTransitions").waitFor(); await row.waitForTimeout(150);
+  await row.locator("#btnMusic").click();
+  assert.ok(await row.evaluate(() => window.__transitionFixture.sent.some((message) => message.channel === "com.obr-suite/music-board:toggle" && message.destination === "LOCAL")));
   await row.locator("#btnTransitions").click();
   assert.ok(await row.evaluate(() => window.__transitionFixture.sent.some((message) => message.channel === "com.obr-suite/transitions/open" && message.destination === "LOCAL")));
   for (const width of [960, 640, 380]) {
@@ -116,7 +146,7 @@ try {
  }
  writeFileSync(join(shots, "review.json"), JSON.stringify(results, null, 2));
  for (const result of results) assert.deepEqual(result.errors, [], `${result.mode}/${result.role}/${result.lang} browser errors`);
- console.log(`SUITE_WIRING_UI: 12 settings tab views + 12 quick-bar widths, both handle sides, scroll/hit targets and role controls PASS; ${shots}`);
+ console.log(`SUITE_WIRING_UI: 20 settings tab views + 12 quick-bar widths; music GM/player controls, library language save failure/retry, both handle sides and scroll/hit targets PASS; ${shots}`);
 } finally {
  await browser?.close(); await new Promise(done => server ? server.close(done) : done());
  if (dirname(resolve(out)) !== outputRoot) throw Error("Unexpected temporary output path"); rmSync(out, {recursive:true,force:true});

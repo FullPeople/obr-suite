@@ -142,4 +142,35 @@ assert.equal(writes.at(-1)[SCENE_KEY].enabled.bossBar, false);
 assert.equal(writes.at(-1)[SCENE_KEY].enabled.transitions, false);
 stopVisionChanges();
 console.log("PASS 9: shared vision fails closed for old/malformed rooms and toggles notify/persist with new module switches");
-console.log("9 settings freshness regressions passed");
+const library = { id: "test-library", name: "Custom", baseUrl: "https://example.com", enabled: true };
+for (const value of [undefined, "fr", 1, {}, null]) {
+  sdk.scene.getMetadata = async () => ({ [SCENE_KEY]: { libraries: [{ ...library, language: value }] } });
+  await refreshFromScene();
+  assert.equal(getState().libraries.find(lib => lib.id === library.id)?.language, undefined, "malformed/legacy language must stay unclassified");
+}
+let languageChanges = 0;
+const stopLanguageChanges = onStateChange(() => { languageChanges++; });
+for (const language of ["en", "zh", "auto"] as const) {
+  sdk.scene.getMetadata = async () => ({ [SCENE_KEY]: { libraries: [{ ...library, language }] } });
+  const before = languageChanges;
+  await refreshFromScene();
+  assert.equal(getState().libraries.find(lib => lib.id === library.id)?.language, language);
+  assert.equal(languageChanges, before + 1, "language-only changes must invalidate content consumers");
+  await refreshFromScene();
+  assert.equal(languageChanges, before + 1, "equal language must not trigger redundant content loads");
+}
+await setState({ libraries: [{ ...library, language: "en" }] });
+assert.equal(writes.at(-1)[SCENE_KEY].libraries.find((lib: any) => lib.id === library.id)?.language, "en");
+stopLanguageChanges();
+console.log("PASS 10: library languages validate, persist, invalidate consumers and skip unchanged refreshes");
+
+sdk.scene.getMetadata = async () => ({ [SCENE_KEY]: {} });
+await refreshFromScene();
+assert.equal(getState().enabled.musicBoard, true);
+sdk.scene.getMetadata = async () => ({ [SCENE_KEY]: { enabled: { musicBoard: false } } });
+await refreshFromScene();
+assert.equal(getState().enabled.musicBoard, false, "restoration must respect an explicitly saved module choice");
+await setState({ enabled: { musicBoard: true } as any });
+assert.equal(writes.at(-1)[SCENE_KEY].enabled.musicBoard, true);
+console.log("PASS 11: music starts enabled by default, preserves saved disable and can be restored explicitly");
+console.log("11 settings freshness regressions passed");

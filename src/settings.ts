@@ -47,6 +47,7 @@ import { repairLegacyBestiaryImages } from "./modules/bestiary/repair-legacy-ima
 import { SettingsContent } from "./utils/settingsContent";
 import { renderSettingsModuleStatus } from "./utils/settingsModuleStatus";
 import { renderFogSettings } from "./utils/fogSettingsView";
+import { getLibraryLanguage } from "./utils/contentLocale";
 import { getBossPreferences, setBossPreferences, BOSS_PREFERENCES_CHANGED, BOSS_PREFERENCES_KEY } from "./modules/bossBar/preferences";
 import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
 import {
@@ -1149,6 +1150,12 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
         <input class="lib-url" data-field="baseUrl" data-settings-draft="${escapeAttr(JSON.stringify([lib.id, "baseUrl"]))}" type="text" value="${escapeAttr(lib.baseUrl)}" ${editable ? "" : "readonly"} ${disable}
           placeholder="https://example.com">
       </div>
+      <label class="lib-row-language">${lang === "zh" ? "资料语言" : "Content language"}
+        <select data-field="language" ${disable} aria-label="${lang === "zh" ? "资料语言" : "Content language"}">
+          ${([['auto', lang === 'zh' ? '混合 / 未指定' : 'Mixed / unspecified'], ['zh', lang === 'zh' ? '中文' : 'Chinese'], ['en', lang === 'zh' ? '英文' : 'English']] as const).map(([value, label]) => `<option value="${value}" ${getLibraryLanguage(lib) === value ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+        <span role="status" class="lib-language-status"></span>
+      </label>
       <div class="lib-preview" hidden></div>
       <div class="lib-sources" hidden></div>
     </div>
@@ -1343,13 +1350,8 @@ function buildKindLabel(f: LocalFileMeta, lang: Language): string {
   return primary;
 }
 
-// One-click preset: the official 5etools ENGLISH source repo, served via
-// jsDelivr (which sends `Access-Control-Allow-Origin: *`). 5e.tools itself is
-// now behind a Cloudflare bot challenge that returns 403 to programmatic
-// fetch(), and never sent CORS headers anyway — so it cannot be used as a
-// library base directly. This mirror exposes the canonical 5etools layout
-// (search/index.json + data/bestiary/index.json + data/spells/... + items),
-// is pure English (no translation), and matches our fetch paths exactly.
+// Third-party English data mirror served through jsDelivr. The browser
+// fetches its public JSON endpoints rather than a challenged website page.
 const EN_5ETOOLS_BASE = "https://cdn.jsdelivr.net/gh/5etools-mirror-3/5etools-src@main";
 
 function renderLibrariesBody(lang: Language): string {
@@ -1358,9 +1360,8 @@ function renderLibrariesBody(lang: Language): string {
   const head = lang === "zh"
     ? `
       <div class="lib-warn">
-        ⚠ <b>数据格式按 5etools 规范适配。</b>当前内置库为 kiwee.top（5etools 中文镜像）。你可以添加自己的库（自托管 / 公开 URL）。库必须提供与 5etools 相同的 JSON 结构（<code>search/index.json</code> + <code>data/&lt;file&gt;.json</code>）。所有启用的库会在搜索/图鉴里合并显示。<br>
-        <b>要英文原版？</b>点下方绿色 <b>「+ 英文原版 (5etools)」</b> 一键添加。注意：<code>5e.tools</code> 官网现已被 Cloudflare 人机验证拦截、且从不发送跨域头，<b>无法直接当库地址连接</b>；此预设走 jsDelivr 官方镜像（自带跨域，纯英文）。<br>
-        <b>数据来源与协议：</b>内置库数据来自 5et 中文站 —— 代码主体与英文数据采用 MIT 协议，中文译文采用 CC BY-NC-SA 4.0 协议。使用其数据时请遵守协议并注明来源（署名 / 非商业 / 相同方式共享）。
+        <b>选择同桌使用的资料库。</b>内置中文库使用 kiwee.top；「+ 英文资料」添加经 jsDelivr 提供 JSON 的第三方 5etools 英文镜像。<br>
+        已启用的资料会合并显示，并优先使用与当前界面语言匹配的版本。没有对应译本时显示原文；自定义内容不会被自动翻译。
       </div>
       <div class="lib-studio">
         <span class="lib-studio-txt">不想手写 JSON？<b>Monster Studio</b> 是一个在线可视化怪物编辑器：导入 / 表单编辑 / 实时预览 / 导出。导出的 JSON 可直接「本地导入」或放进你的库。</span>
@@ -1369,9 +1370,8 @@ function renderLibrariesBody(lang: Language): string {
     `
     : `
       <div class="lib-warn">
-        ⚠ <b>Library data must follow the 5etools JSON schema.</b> The default built-in is kiwee.top (Chinese mirror). You can add custom libraries (self-hosted or public URLs) that expose the same shape (<code>search/index.json</code> + <code>data/&lt;file&gt;.json</code>). All enabled libraries are merged in search / bestiary results.<br>
-        <b>Need the English original?</b> Click the green <b>"+ English (5etools)"</b> button below. Note: <code>5e.tools</code> itself is now behind a Cloudflare bot challenge and never sends CORS headers, so it <b>cannot be used as a library URL directly</b>; this preset uses the official jsDelivr mirror (CORS-enabled, pure English).<br>
-        <b>Source &amp; license:</b> the built-in library's data comes from the 5etools CN site — the code base and English data are under MIT, Chinese translations under CC BY-NC-SA 4.0. Follow the license and attribute the source when using its data (attribution / non-commercial / share-alike).
+        <b>Choose the libraries for your table.</b> The built-in Chinese library uses kiwee.top. “+ English data” adds a third-party 5etools English mirror served as JSON through jsDelivr.<br>
+        Enabled libraries are combined, with versions matching your interface language preferred. When no translation is available, the original is shown. Custom content is not translated automatically.
       </div>
       <div class="lib-studio">
         <span class="lib-studio-txt">Don't want to hand-write JSON? <b>Monster Studio</b> is an online visual monster editor — import / form-edit / live preview / export. The exported JSON imports directly via "Local content" or drops into your library.</span>
@@ -1382,7 +1382,7 @@ function renderLibrariesBody(lang: Language): string {
   const hasEn = libs.some((l) => l.baseUrl?.replace(/\/+$/, "") === EN_5ETOOLS_BASE);
   const enBtn = hasEn
     ? ""
-    : `<button class="lib-add-en-btn" type="button" title="${lang === "zh" ? "一键添加 5etools 官方英文源（jsDelivr 镜像，自带跨域，纯英文）。注：5e.tools 官网已被 Cloudflare 拦截，无法直接连接。" : "One-click add the official 5etools English source (jsDelivr mirror, CORS-enabled, pure English). Note: 5e.tools itself is now Cloudflare-blocked and cannot be used directly."}">${lang === "zh" ? "+ 英文原版 (5etools)" : "+ English (5etools)"}</button>`;
+    : `<button class="lib-add-en-btn" type="button" title="${lang === "zh" ? "添加 5etools 第三方英文镜像" : "Add the third-party English 5etools mirror"}">${lang === "zh" ? "+ 英文资料" : "+ English data"}</button>`;
   const addBtn = isGM
     ? `<button class="lib-add-btn" type="button">${lang === "zh" ? "+ 添加库" : "+ Add library"}</button>${enBtn}`
     : `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>`;
@@ -1554,6 +1554,7 @@ function wireLibrariesBody(root: HTMLElement): void {
     const urlInp = row.querySelector<HTMLInputElement>('input[data-field="baseUrl"]');
     const enableBtn = row.querySelector<HTMLButtonElement>('button[data-field="enabled"]');
     const delBtn = row.querySelector<HTMLButtonElement>(".lib-del-btn");
+    const languageSelect = row.querySelector<HTMLSelectElement>('select[data-field="language"]');
 
     const commit = async (patch: Partial<LibraryConfig>) => {
       if (!isGM) return;
@@ -1575,6 +1576,21 @@ function wireLibrariesBody(root: HTMLElement): void {
     };
     nameInp?.addEventListener("change", () => { void saveField("name"); });
     urlInp?.addEventListener("change", () => { void saveField("baseUrl"); });
+    languageSelect?.addEventListener("change", async () => {
+      if (!isGM || languageSelect.disabled) return;
+      const language = languageSelect.value;
+      if (language !== "zh" && language !== "en" && language !== "auto") return;
+      const status = row.querySelector<HTMLElement>(".lib-language-status");
+      if (status) status.textContent = "";
+      languageSelect.disabled = true;
+      try { await commit({ language }); }
+      catch (error) {
+        console.warn("[settings] library language save failed", error);
+        const saved = getState().libraries.find(lib => lib.id === id);
+        if (saved) languageSelect.value = getLibraryLanguage(saved);
+        if (status) status.textContent = getLocalLang() === "zh" ? "未保存，请再次选择重试。" : "Not saved. Choose again to retry.";
+      } finally { languageSelect.disabled = !isGM; }
+    });
     enableBtn?.addEventListener("click", async () => {
       if (!isGM) return;
       const cur = getState().libraries.find((l) => l.id === id);
@@ -1582,7 +1598,7 @@ function wireLibrariesBody(root: HTMLElement): void {
     });
     delBtn?.addEventListener("click", async () => {
       if (!isGM) return;
-      if (!confirm("删除此库？这不会影响数据本身，只会从设置里移除。")) return;
+      if (!confirm(getLocalLang() === "zh" ? "删除此库？这不会影响数据本身，只会从设置里移除。" : "Remove this library from settings? Its source data will be kept.")) return;
       const next = (getState().libraries ?? []).filter((l) => l.id !== id);
       await setState({ libraries: next });
     });
@@ -1728,9 +1744,9 @@ function wireLibrariesBody(root: HTMLElement): void {
   // Add new library
   root.querySelector<HTMLButtonElement>(".lib-add-btn")?.addEventListener("click", async () => {
     if (!isGM) return;
-    const name = window.prompt("新库名称（任意）：", "我的自定义库");
+    const name = window.prompt(getLocalLang() === "zh" ? "新库名称：" : "Library name:", getLocalLang() === "zh" ? "我的自定义库" : "My library");
     if (!name) return;
-    const baseUrl = window.prompt("基础 URL（不带末尾 /）：", "https://example.com");
+    const baseUrl = window.prompt(getLocalLang() === "zh" ? "基础 URL（不带末尾 /）：" : "Base URL (without a trailing /):", "https://example.com");
     if (!baseUrl) return;
     const id = `custom-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
     const cur = getState().libraries ?? [];
@@ -1747,7 +1763,7 @@ function wireLibrariesBody(root: HTMLElement): void {
     await setState({ libraries: next });
   });
 
-  // One-click preset: add the official 5etools English source. Idempotent —
+  // One-click preset: add the third-party English data mirror. Idempotent —
   // bail if a library with this exact baseUrl already exists.
   root.querySelector<HTMLButtonElement>(".lib-add-en-btn")?.addEventListener("click", async () => {
     if (!isGM) return;
@@ -1760,6 +1776,7 @@ function wireLibrariesBody(root: HTMLElement): void {
         id: `en5e-${Date.now()}`,
         name: lang === "zh" ? "5etools 英文原版" : "5etools (English)",
         baseUrl: EN_5ETOOLS_BASE,
+        language: "en",
         enabled: true,
         builtin: false,
       },
@@ -3283,68 +3300,27 @@ const TABS: TabDef[] = [
     },
   },
   {
-    // 2026-05-23 — RETIRED with project closure. The in-plugin module
-    // (popover + background audio engine + PeerJS pairing) is no longer
-    // registered in background.ts's modules map, so the toggle has
-    // been dropped (no `moduleId` here). The entry is kept visible so
-    // users can still find the link to the standalone web tool, which
-    // continues to work on its own.
     id: "musicBoard",
+    moduleId: "musicBoard",
     zh: `${ICONS.music} 音乐板`,
     en: `${ICONS.music} Music Board`,
-    body: {
-      zh: `<div style="margin:4px 0 14px;padding:14px 16px;border-radius:10px;
-            background:linear-gradient(180deg, rgba(245,166,35,0.16), rgba(231,76,60,0.08));
-            border:1px solid rgba(245,166,35,0.55);font-size:13px;line-height:1.75">
-  <div style="color:#f5a623;font-weight:700;font-size:13.5px;margin-bottom:6px">插件内的音乐板已停止维护</div>
-  <div style="color:var(--text)">
-    <b>插件内嵌</b>的音乐板（侧栏图标 + 配对弹窗 + 后台音频引擎）已退役下线，不再随插件一起加载，也不会再消耗任何资源。<b>独立的网页版音乐板继续可用</b>，可作为一个普通网页播放器使用，不依赖本插件。
-  </div>
-</div>
-
-<h4 style="margin-top:14px">网页版音乐板（独立运行）</h4>
-<p>下面这个地址依然可以正常访问，<b>无需配对、无需插件</b>，浏览器打开即用：</p>
-<p style="margin:10px 0">
-  <a href="https://obr.dnd.center/studio/music-studio/" target="_blank" rel="noopener"
-     style="display:inline-block;padding:8px 14px;border-radius:8px;
-            background:linear-gradient(180deg, var(--accent), var(--accent-dim));
-            color:#fff;text-decoration:none;font-weight:600;font-size:13px">
-    🎵 打开网页版音乐板 →
-  </a>
-</p>
-<ul style="line-height:1.8;color:var(--text-dim);font-size:12px">
-  <li>整理 BGM / SFX 曲库（在线直链 + 本地文件均可）</li>
-  <li>WebAudio 引擎：淡入淡出、单曲循环边界平滑、SFX 自动 ducking</li>
-  <li>本地播放：开语音时可直接共享电脑音频给玩家，不再走 OBR 同步</li>
-  <li>原有「与插件配对让所有玩家同步」的功能不再可用；如需此能力请自行下载源码自行部署</li>
-</ul>
-<p style="color:var(--text-dim);font-size:11.5px;margin-top:10px">如确实希望恢复插件内嵌的同步功能，可在 GitHub 仓库自行编译部署（参考开源协议）。</p>`,
-      en: `<div style="margin:4px 0 14px;padding:14px 16px;border-radius:10px;
-            background:linear-gradient(180deg, rgba(245,166,35,0.16), rgba(231,76,60,0.08));
-            border:1px solid rgba(245,166,35,0.55);font-size:13px;line-height:1.7">
-  <div style="color:#f5a623;font-weight:700;font-size:13.5px;margin-bottom:6px">In-plugin Music Board is retired</div>
-  <div style="color:var(--text)">
-    With the project closure, the <b>in-plugin</b> music board (sidebar tool + pairing popover + background audio engine) is no longer wired in; it doesn't load and consumes no resources. The <b>standalone web tool</b> still works as a regular browser-side player, independent of this plugin.
-  </div>
-</div>
-
-<h4 style="margin-top:14px">Web Music Board (standalone)</h4>
-<p>The link below still works — <b>no pairing, no plugin needed</b>, just open it in a browser:</p>
-<p style="margin:10px 0">
-  <a href="https://obr.dnd.center/studio/music-studio/" target="_blank" rel="noopener"
-     style="display:inline-block;padding:8px 14px;border-radius:8px;
-            background:linear-gradient(180deg, var(--accent), var(--accent-dim));
-            color:#fff;text-decoration:none;font-weight:600;font-size:13px">
-    🎵 Open Web Music Board →
-  </a>
-</p>
-<ul style="line-height:1.8;color:var(--text-dim);font-size:12px">
-  <li>Organize BGM / SFX library (online links + local files)</li>
-  <li>WebAudio engine: fade in/out, seamless loop boundaries, SFX-triggered ducking</li>
-  <li>Local playback: share your computer audio over voice chat — no OBR sync needed</li>
-  <li>The "pair-with-plugin so all players hear sync'd audio" feature is no longer available; self-host from source if you need it</li>
-</ul>
-<p style="color:var(--text-dim);font-size:11.5px;margin-top:10px">If you really want the in-plugin sync back, you can self-build from the GitHub repo (follow the license terms).</p>`,
+    dynamicBody: (lang) => {
+      const zh = lang === "zh", enabled = getState().enabled.musicBoard;
+      return `
+        <p>${zh ? "和同桌玩家一起播放音乐。关闭或缩小控制面板后，音乐继续播放。" : "Play music with your table. Music continues when you close or minimize the controls."}</p>
+        <button id="openMusicBoard" class="layout-editor-btn" type="button" ${enabled ? "" : "disabled"}>${zh ? "打开音乐板" : "Open Music Board"}</button>
+        ${!enabled ? `<p class="role-notice">${zh ? (isGM ? "先打开本页的模块开关。" : "请 DM 打开音乐板模块。") : (isGM ? "Enable this module above first." : "Ask your GM to enable the Music Board module.")}</p>` : ""}
+        <p>${zh ? "首次使用时，每个人在音乐板点一次「启用声音」。默认全员可选曲、暂停和管理队列，DM 可改成仅 DM 控制。音量和静音只影响自己。" : "Each person clicks Enable sound on first use. Everyone can choose tracks, pause and manage the queue by default; the GM can limit shared controls to GMs. Volume and mute only affect you."}</p>
+        <details class="lib-tut"><summary>${zh ? "曲库与音乐工作室" : "Library and Music Studio"}</summary>
+          <p>${zh ? "可以直接添加音频网址、导入分享码或从默认曲库选曲。整理更大的曲库、裁剪或转换本地音频时，可使用音乐工作室并输入配对码。共享播放需要所有玩家都能访问的音频网址，本地文件需先托管。" : "Add an audio URL, import a share code or choose tracks from the default library. Use Music Studio to organize a larger library or trim and convert local audio, then connect with a pairing code. Shared playback needs audio URLs accessible to everyone; host local files before sharing."}</p>
+          <a href="https://obr.dnd.center/studio/music-studio/" target="_blank" rel="noopener">${zh ? "打开音乐工作室 ↗" : "Open Music Studio ↗"}</a>
+        </details>`;
+    },
+    afterRender: (root) => {
+      root.querySelector("#openMusicBoard")?.addEventListener("click", () => {
+        if (!getState().enabled.musicBoard) return;
+        void OBR.broadcast.sendMessage("com.obr-suite/music-board:toggle", {}, { destination: "LOCAL" });
+      });
     },
   },
   {

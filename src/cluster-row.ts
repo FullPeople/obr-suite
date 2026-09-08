@@ -148,12 +148,7 @@ function renderRow() {
       })
     );
   }
-  // 2026-05-23 — music board RETIRED with project closure. The button
-  // is hard-pinned off regardless of any stored `state.enabled.musicBoard`
-  // flag from older rooms (matches background.ts removing musicBoard from
-  // the modules registry). Click handler / state listeners below are left
-  // wired but become no-ops since #btnMusic never enters the DOM.
-  if (false) {
+  if (s.enabled.musicBoard) {
     parts.push(
       btnHTML({
         id: "btnMusic",

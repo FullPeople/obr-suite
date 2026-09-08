@@ -700,12 +700,7 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   // Trickster + circle-image promoted from dev to stable on 2026-05-08.
   trickster: { setup: setupTrickster, teardown: teardownTrickster },
   circleImage: { setup: setupCircleImage, teardown: teardownCircleImage },
-  // Music board — RETIRED 2026-05-23 with project closure. The in-
-  // plugin module is no longer registered here, so even if a room
-  // still has musicBoard:true in stored state, setupMusicBoard never
-  // runs and no popover / audio engine / PeerJS pairing starts. The
-  // web tool at obr.dnd.center/studio/music-studio/ still works
-  // standalone; the settings page links there.
+  musicBoard: { setup: setupMusicBoard, teardown: teardownMusicBoard },
   // 2026-08-25 — `fullFog` split into two independently switchable
   // modules. `fogEditor` is the right-click map tracer and has no
   // runtime; `dynamicFog` is the engine that turns FOG-layer drawings
