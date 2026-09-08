@@ -1,7 +1,7 @@
 """Prepare exact author inputs and regenerate integrated English spell displays.
 
 The build uses the two original cards, published reviewed body generators and
-five explicitly supplied author workbooks. No historical audit file is read.
+six explicitly supplied author workbooks. No historical audit file is read.
 Output stays in a fresh sibling audit directory, never the public templates.
 """
 from pathlib import Path
@@ -13,6 +13,7 @@ import spell_display_names as names
 import spell_display_labels as labels
 import spell_display_fields as fields
 import spell_display_mirrors as mirrors
+import spell_reference_fields as references
 
 if not __debug__:raise RuntimeError('Verification requires assertions; do not use -O')
 sys.dont_write_bytecode=True
@@ -20,7 +21,8 @@ REPO=body2014.REPO
 BASE=REPO.parent/'_audit/xlsx-spell-display'
 sha=lambda b:hashlib.sha256(b).hexdigest()
 PARTIAL='obr-xlsx-partial-text-candidate/v1'
-FINAL_PINS={'2014':'2d309ace76918f998609d81f61db14209884bbd138d5cee4ad6f591bd45944bb','2024':'de413faabdcf615cf9d33504bfd2dedc9ebd020de7369e3b4df4cd38c06d9e7f'}
+DISPLAY_PINS={'2014':'2d309ace76918f998609d81f61db14209884bbd138d5cee4ad6f591bd45944bb','2024':'de413faabdcf615cf9d33504bfd2dedc9ebd020de7369e3b4df4cd38c06d9e7f'}
+FINAL_PINS={'2014':'0525d863f26c9464cdf1b32464e5c9f72d28556d8783f17c8a7211e20fefca5b','2024':'9e27efda3e0bd31a53c867cda30088bcc77c11946528b934088fa0c6d502039b'}
 
 def require(ok,message):
     if not ok:raise ValueError(message)
@@ -36,7 +38,7 @@ def fresh_output(directory,prefix):
     return target
 
 def check_modules():
-    for module in (body2014,body2024,names,labels,fields,mirrors):
+    for module in (body2014,body2024,names,labels,fields,mirrors,references):
         require(Path(module.__file__).resolve().parent==REPO/'tools/xlsx-localization','Run the entry point from the selected repository')
     require(body2024.REPO==REPO,'Rule-set repositories differ')
 
@@ -86,6 +88,7 @@ def text_plans():
             projected.append({'version':e['version'],'id':e['id'],'cell':e['cell'],'target':e['target'],'target_sha256':e['target_sha256'],'formula':project(e['target'])})
     require(len(projected)==1331,'Mirror coverage')
     planners['mirrors']={'schema':'obr-body-formula-author/v1','entries':projected,'release_ready':False}
+    planners['references']=references.plan()
     require(glossary_path.read_bytes()==glossary,'Glossary changed during preparation')
     return planners
 
@@ -108,13 +111,13 @@ def exact_write(path,raw):
 
 def run(author_directory,directory=None):
     check_modules();out=fresh_output(directory,'display-candidate-')
-    progress('Checking the reviewed source and five author workbooks')
+    progress('Checking the reviewed source and six author workbooks')
     author_root=Path(author_directory).resolve()
-    author_paths={k:author_root/(k+'.xlsx') for k in ('body2014','body2024','labels','fields','mirrors')}
+    author_paths={k:author_root/(k+'.xlsx') for k in ('body2014','body2024','labels','fields','mirrors','references')}
     author_raw={k:p.read_bytes() for k,p in author_paths.items()}
     fresh_plans=text_plans()
     # Verify actual author values before creating any candidate directory.
-    for key in ('labels','fields'):body2014.authored_values(author_raw[key],fresh_plans[key]['entries'])
+    for key in ('labels','fields','references'):body2014.authored_values(author_raw[key],fresh_plans[key]['entries'])
     contexts={'2014':body2014.load_context(author_paths['body2014']),'2024':body2024.load_context(author_paths['body2024'])}
     mirror_author=mirrors.validate_author(author_paths['mirrors'],fresh_plans['mirrors'])
     out.mkdir(parents=True,exist_ok=False)
@@ -163,9 +166,11 @@ def run(author_directory,directory=None):
         field_delta={p for p in parts if parts[p]!=fp[p]};mirror_delta={p for p in parts if parts[p]!=mp[p]}
         require(not field_delta&mirror_delta,'Overlapping display modifications')
         final=body2014.write_zip(field_output,{p:mp[p] for p in mirror_delta})
-        require(sha(final)==FINAL_PINS[version],'Integrated output differs from the independently reviewed and native-tested candidate')
+        require(sha(final)==DISPLAY_PINS[version],'Integrated display seed differs from the independently reviewed candidate')
+        final,reference_evidence=references.apply(version,final,fresh_plans['references'])
+        require(sha(final)==FINAL_PINS[version],'Reference-field output differs from the independently reviewed and native-tested candidate')
         target=out/(version+'-SPELL-DISPLAY-INTEGRATED-NO-CACHE-NOT-FOR-UPLOAD.xlsx');exact_write(target,final)
-        reports[version]={'output':str(target),'sha256':sha(final),'field_preservation':field_evidence,'mirror_preservation':mirror_evidence}
+        reports[version]={'output':str(target),'sha256':sha(final),'field_preservation':field_evidence,'mirror_preservation':mirror_evidence,'reference_preservation':reference_evidence}
     require(text_plans()==fresh_plans,'Selected source or reviews changed during application')
     for k,path in author_paths.items():require(path.read_bytes()==author_raw[k],'Author file changed')
     result={'output':str(out),'upstream':upstream['output'],'body_reports':body_reports,'name_reports':name_reports,'label_reports':label_reports,'reports':reports,'author_hashes':{k:sha(v) for k,v in author_raw.items()},'native_recalculated_by_this_run':False,'native_evidence_equivalence':'Exact binary equality to the reviewed integrated candidate; native diagnostics are separate.','upload_ready':False,'release_ready':False}

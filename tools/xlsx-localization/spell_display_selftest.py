@@ -14,7 +14,7 @@ def require(ok,message):
 
 def mutate_author(source,target,key,tag,change):
     target.mkdir(exist_ok=False)
-    for name in ('body2014','body2024','labels','fields','mirrors'):
+    for name in ('body2014','body2024','labels','fields','mirrors','references'):
         shutil.copyfile(source/(name+'.xlsx'),target/(name+'.xlsx'))
     path=target/(key+'.xlsx')
     with zipfile.ZipFile(path) as z:
@@ -52,6 +52,7 @@ def main():
     needed.add('tools/xlsx-localization/glossary.json')
     needed.update(plans['body2014']['review_hashes']);needed.update(plans['body2024']['review_hashes'])
     needed.update(('tools/xlsx-localization/reviewed.jsonl','tools/xlsx-localization/reviews/spellbook-display-001.jsonl','tools/xlsx-localization/reviews/spell-fields-fgl-001.jsonl'))
+    needed.update('tools/xlsx-localization/reviews/'+name for name in package.references.REVIEWS)
     needed.update('public/'+package.body2014.planner.p.TEMPLATES[v] for v in ('2014','2024'))
     source=out/'source';source.mkdir()
     source_hashes={}
@@ -73,7 +74,7 @@ def main():
     prepared=json.loads(command('prepare',py+['--prepare']).splitlines()[-1]);plan_dir=Path(prepared['output'])
     for key,expected in plans.items():require(json.loads((plan_dir/(key+'.json')).read_bytes())==expected,'Isolated plan differs: '+key)
     authors=out/'authors'
-    command('marker',[args.node,args.marker,'--operation-kind','create','--expected-output-count','5','--output-format','xlsx'])
+    command('marker',[args.node,args.marker,'--operation-kind','create','--expected-output-count','6','--output-format','xlsx'])
     command('author',[args.node,'tools/xlsx-localization/author_display_targets.mjs',plan_dir,authors,args.artifact_runtime])
     built=json.loads(command('build',py+['--author-directory',authors]).splitlines()[-1])
     for v,record in built['reports'].items():require(sha(Path(record['output']).read_bytes())==record['sha256']==package.FINAL_PINS[v],'Actual final package differs')
@@ -92,8 +93,12 @@ def main():
     bad_out=source.parent/'_audit/xlsx-spell-display/display-candidate-bad-mirrors'
     command('reject-mirror-author',py+['--author-directory',bad_mirrors,'--output',bad_out],False,'Author formula mismatch')
     require(not bad_out.exists(),'Bad mirror input created a candidate')
+    bad_references=out/'bad-references';mutations.append(mutate_author(authors,bad_references,'references',b'v',lambda _:b'WRONG REFERENCE FIELD'))
+    bad_out=source.parent/'_audit/xlsx-spell-display/display-candidate-bad-references'
+    command('reject-reference-author',py+['--author-directory',bad_references,'--output',bad_out],False,'Authored target')
+    require(not bad_out.exists(),'Bad reference input created a candidate')
     for name,pin in source_hashes.items():require(sha((source/name).read_bytes())==pin,'Isolated source changed: '+name)
-    report={'commands':commands,'cliCalls':len(commands),'source':str(source),'sourceFiles':source_hashes,'output':built['output'],'reports':built['reports'],'authorHashes':built['author_hashes'],'mutations':mutations,'sourceUnchanged':True,'catalogRequired':False,'historicalAuditRequired':False,'actualNewAuthorExports':5,'nativeRecalculated':False,'releaseReady':False}
+    report={'commands':commands,'cliCalls':len(commands),'source':str(source),'sourceFiles':source_hashes,'output':built['output'],'reports':built['reports'],'authorHashes':built['author_hashes'],'mutations':mutations,'sourceUnchanged':True,'catalogRequired':False,'historicalAuditRequired':False,'actualNewAuthorExports':6,'nativeRecalculated':False,'releaseReady':False}
     package.write_json(out/'result.json',report)
     print(json.dumps({'output':str(out),'cliCalls':len(commands),'sourceFiles':len(source_hashes),'finalPackages':{v:r['sha256'] for v,r in built['reports'].items()},'passed':True},ensure_ascii=False))
 

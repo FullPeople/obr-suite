@@ -12,7 +12,7 @@ assert.ok(planDirectory && outputDirectory && artifactRuntime,
 const require = createRequire(import.meta.url);
 const artifactModule = require.resolve('@oai/artifact-tool', { paths: [path.resolve(artifactRuntime)] });
 const { Workbook, SpreadsheetFile } = await import(pathToFileURL(artifactModule).href);
-const keys = ['body2014', 'body2024', 'labels', 'fields', 'mirrors'];
+const keys = ['body2014', 'body2024', 'labels', 'fields', 'mirrors', 'references'];
 const root = path.resolve(planDirectory), output = path.resolve(outputDirectory);
 await assert.rejects(fs.access(output), { code: 'ENOENT' });
 const manifest = JSON.parse(await fs.readFile(path.join(root, 'manifest.json'), 'utf8'));
