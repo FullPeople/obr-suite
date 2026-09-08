@@ -125,3 +125,26 @@ preview evidence and native recalculation limits.
 The full download still requires all content, dependent formulas/dropdowns,
 importer compatibility, complete layout review and actual Excel/WPS recalculation
 and upload checks. See `docs/research/xlsx-localization-20260908.md` for evidence.
+
+## Plan spell identities and lookup migration
+
+```text
+python -B -X utf8 tools/xlsx-localization/spell_identity.py
+python -B -X utf8 tools/xlsx-localization/spell_identity_selftest.py
+python -B -X utf8 tools/xlsx-localization/spell_lookup_plan.py
+python -B -X utf8 tools/xlsx-localization/spell_lookup_plan_selftest.py
+```
+
+These read pinned originals and create JSON in new sibling audit directories.
+They preserve version, source fingerprint, original row and complete fields, and
+derive distinct human labels for duplicate English names. The lookup plan binds
+English choices directly to the original row, with shared positioning helpers
+and unchanged legacy VLOOKUP fallback. It plans 1,002 of 1,003 consumer formulas
+per workbook; the active-cell C3 expression is explicitly deferred.
+
+No workbook is written. The plans are static snapshots and do not implement
+future custom-slot edits, dropdown compaction, conditional formatting, import
+metadata or native recalculation. Identity JSON consistency checks are not
+authentication for foreign plans. The lookup CLI regenerates from the actual
+original instead. See `docs/research/xlsx-spell-identity-20260909.md` for actual
+source conflicts, the missing English label and the remaining complete-card work.
