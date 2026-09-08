@@ -51,6 +51,38 @@ results and remaining acceptance are in
 `docs/research/xlsx-spell-display-20260909.md` and
 `docs/research/xlsx-spell-reference-fields-20260909.md`.
 
+## Add the reviewed main-card captions
+
+The next display stage takes the two exact outputs of the spell-display build
+above. It adds 433 reviewed main-card labels and 21 original input messages.
+Long labels use readable short captions with 204 complete English input hints;
+only five narrow columns widen. Formula-dependent inputs remain unchanged.
+
+```text
+python -B -X utf8 tools/xlsx-localization/main_display_package.py --prepare
+node <spreadsheet-skill>/container_tools/mark_artifact_operation_started.mjs --operation-kind create --expected-output-count 2 --output-format xlsx
+node tools/xlsx-localization/author_main_targets.mjs <reported-plan-directory> <new-author-directory> <bundled-node-dependency-directory>
+python -B -X utf8 tools/xlsx-localization/main_display_package.py --input-2014 <2014-spell-display.xlsx> --input-2024 <2024-spell-display.xlsx> --author-directory <new-author-directory>
+```
+
+The separate label and caption author tables contain 1,632 and 1,820 cells,
+including headers. Every actual value is checked before any candidate directory
+is created. Run the entry point from the desired checkout; it derives its source
+root from that file. Explicit workbook inputs must match the reviewed upstream
+hashes. No historical audit path or generated catalog is read.
+
+`--output` must be a new child of sibling `_audit/xlsx-main-display`, prefixed
+`main-plan-` or `main-candidate-`. Originals, prior outputs, formula caches,
+drawings, comments and user values are not rewritten. Existing shared strings
+and styles remain intact; selected captions use appended strings and styles.
+
+The two final files reproduce the actual Calc/PDF-checked main-card layout.
+This is partial English and remains `NO-CACHE-NOT-FOR-UPLOAD`. The 90 deferred
+main-card locations include lookup keys and editable defaults; other workbook
+content, Excel/WPS interaction, saving and upload still need work. Exact native
+validation qualifications are in
+`docs/research/xlsx-main-display-20260909.md`.
+
 ## Rebuild and check
 
 From the repository root, using Python 3.11 or newer:
