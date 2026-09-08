@@ -254,3 +254,31 @@ still has no formula caches and is not a public English download or upload-ready
 card. Actual Calc diagnostics identified separate bibliography, raw-name and
 multiline-reference issues; the body-only increment does not repair them. Scope
 and evidence are in `docs/research/xlsx-spell-bodies-20260909.md`.
+
+## Generate the 2024 reviewed spell-body copy
+
+```text
+python -B -X utf8 tools/xlsx-localization/spell_bodies_2024_plan.py --repo <checkout>
+node author_targets.mjs <reported-plan-path> <new-authored-targets.xlsx>
+python -B -X utf8 tools/xlsx-localization/spell_bodies_2024_package.py --repo <checkout> --authored-targets <new-authored-targets.xlsx>
+```
+
+Use the same separate authoring runtime and operation marker described above.
+This version applies 809 descriptions and preserves 36 rich cells with 300 runs.
+The original rich structure is read directly from the pinned workbook; only
+selected source/review records are bound. No generated catalog or historical
+audit inventory is required. The package reads all 3,240 authored A:D cells and
+rebuilds the upstream main-list copy from the originals.
+
+Exclusive output directories are under sibling `_audit/xlsx-spell-bodies-2024`,
+prefixed `spell-bodies-2024-plan-` or `spell-bodies-2024-candidate-`.
+
+```text
+python -B -X utf8 tools/xlsx-localization/spell_bodies_2024_selftest.py --node <bundled-node> --node-modules <bundled-node-modules> --artifact-marker <spreadsheet-skill>/container_tools/mark_artifact_operation_started.mjs
+```
+
+The selftest authors a new target table and generates the candidate from a small
+source copy, including checks that unrelated catalog/review changes do not affect
+the selected plan. This still produces an uncalculated engineering workbook.
+See `docs/research/xlsx-spell-bodies-2024-20260909.md` for preservation, actual
+Calc findings and remaining English-card work.
