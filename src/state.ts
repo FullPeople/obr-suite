@@ -31,6 +31,7 @@ export type ModuleId =
   | "hpBar"
   | "bossBar"
   | "transitions"
+  | "threeDragonAnte"
   | "metadataInspector"
   | "fullFog"
   | "fogEditor"
@@ -205,6 +206,7 @@ export const DEFAULT_STATE: SuiteState = {
     hpBar: true,
     bossBar: true,
     transitions: true,
+    threeDragonAnte: true,
     // DM-only inspection tool. Default ON in all channels; useful for
     // field debugging token / scene / room metadata.
     metadataInspector: true,

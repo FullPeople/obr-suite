@@ -1,0 +1,13 @@
+import {mountTableUI} from "../src/modules/threeDragonAnte/ui";
+import {CARDS,createGame,projectSeat,projectPublic} from "../src/modules/threeDragonAnte/rules";
+import type {TableView,TableCommand} from "../src/modules/threeDragonAnte/protocol";
+import {localViewParts} from "../src/modules/threeDragonAnte/local-view";
+const w=window as unknown as Record<string,any>;
+w.localViewParts=localViewParts;
+const state=createGame({id:"game",seed:42,seats:[{id:"s0",name:"Alice <script>"},{id:"s1",name:"Bob"}]});
+const table={version:1 as const,id:"table",hostPlayerId:"p0",hostConnectionId:"conn",hostName:"Alice",stage:"playing" as const,seats:[{playerId:"p0",seatId:"s0",name:"Alice"},{playerId:"p1",seatId:"s1",name:"Bob"}],revision:1};
+w.commands=[];w.base={table,selfPlayerId:"p0",isHost:true,connected:true,pending:false,game:projectSeat(state,"s0")} satisfies TableView;
+w.publicGame=projectPublic(state);w.otherHand=[...state.seats[1].hand];w.cardIds=CARDS.map(c=>c.id);w.cards=CARDS;
+w.ui=mountTableUI(document.getElementById("table-app")!,{language:"en",send:(command:TableCommand)=>{w.commands.push(command);},id:()=>`ui-action-${w.commands.length+1}`});
+w.set=(view:TableView)=>w.ui.update(view);
+w.choice=(code:string,min=1,max=1)=>{const v=structuredClone(w.base);v.game.phase="choice";v.game.choice={id:`choice-${code}`,seatId:"s0",code};v.game.actions=[{kind:"choose",choice:{id:`choice-${code}`,seatId:"s0",code,min,max,beneficiarySeatId:"s1",sourceCardId:"brass-sultan",options:[{id:"c1",cardId:"gold-13"},{id:"c2",cardId:"black-9"},{id:"s1",seatId:"s1"},{id:"skip",code:"SKIP_POWER"}]}}];return v;};

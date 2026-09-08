@@ -141,8 +141,8 @@ export default defineConfig(({ command }) => ({
         "fullfog-light-edit": resolve(__dirname, "fullfog-light-edit.html"),
         "hp-bar": resolve(__dirname, "hp-bar.html"),
         "boss-bar": resolve(__dirname, "boss-bar.html"),
-        // 2026-05-19 — music board (dev-only via STABLE_HIDES; module
-        // registration is gated in background.ts).
+        "three-dragon-ante": resolve(__dirname, "three-dragon-ante.html"),
+        // Shared music controls; playback lives in the background module.
         "music-board": resolve(__dirname, "music-board.html"),
       },
     },

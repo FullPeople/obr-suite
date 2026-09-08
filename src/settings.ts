@@ -50,6 +50,7 @@ import { renderFogSettings } from "./utils/fogSettingsView";
 import { getLibraryLanguage } from "./utils/contentLocale";
 import { getBossPreferences, setBossPreferences, BOSS_PREFERENCES_CHANGED, BOSS_PREFERENCES_KEY } from "./modules/bossBar/preferences";
 import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
+import { TABLE_OPEN } from "./modules/threeDragonAnte/protocol";
 import {
   BC_MODULE_STATUS_QUERY, BC_MODULE_STATUS, BC_MODULE_RETRY,
   type ModuleLifecycleSnapshot,
@@ -3320,6 +3321,24 @@ const TABS: TabDef[] = [
       root.querySelector("#openMusicBoard")?.addEventListener("click", () => {
         if (!getState().enabled.musicBoard) return;
         void OBR.broadcast.sendMessage("com.obr-suite/music-board:toggle", {}, { destination: "LOCAL" });
+      });
+    },
+  },
+  {
+    id: "threeDragonAnte",
+    moduleId: "threeDragonAnte",
+    zh: `${ICONS.box} 三龙牌`,
+    en: `${ICONS.box} Three-Dragon Ante`,
+    dynamicBody: (lang) => `<p>${lang === "zh"
+      ? "2–6 人的三龙牌 Legendary Edition 基础版。任意玩家创建牌桌，其余玩家点击加入，主持人开始发牌。也可直接使用常用栏的「三龙牌」按钮。"
+      : "Three-Dragon Ante, Legendary Edition base game for 2–6 players. Anyone can create a table; other players join and the host starts the game. You can also use Three-Dragon Ante on the quick bar."}</p>
+      <button id="openThreeDragon" class="layout-editor-btn" type="button" ${getState().enabled.threeDragonAnte ? "" : "disabled"}>${lang === "zh" ? "打开牌桌" : "Open card table"}</button>
+      <p class="meta">${lang === "zh"
+        ? "关闭窗口不会离席。牌局保存在主持人的浏览器；主持人离线时暂停，在原浏览器返回后可继续。清除浏览器数据或换设备无法恢复旧牌局。"
+        : "Closing the window keeps your seat. The host's browser saves the game. Play pauses while the host is offline and resumes when they return in that browser. Clearing browser data or changing devices prevents recovery."}</p>`,
+    afterRender: (root) => {
+      root.querySelector("#openThreeDragon")?.addEventListener("click", () => {
+        if (getState().enabled.threeDragonAnte) void OBR.broadcast.sendMessage(TABLE_OPEN, {}, { destination: "LOCAL" });
       });
     },
   },
