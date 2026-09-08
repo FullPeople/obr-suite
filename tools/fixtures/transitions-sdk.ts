@@ -11,7 +11,9 @@ export const fixture = {
   peers: [{ id: "gm", connectionId: "gm-connection", role: "GM", name: "Mira" }, { id: "player", connectionId: "player-connection", role: "PLAYER", name: "Alex" }],
   sent: [] as Array<{ channel: string; data: any; destination: string }>,
   opened: [] as any[], closed: [] as string[], items: new Map<string, any>(),
-  portal: { id: "portal-one", locked: false, visible: true, text: { plainText: "Gate" }, metadata: {
+  portal: { id: "portal-one", type: "IMAGE", locked: false, visible: true, position: {x: 0, y: 0}, scale: {x: 1, y: 1},
+    image: {url: "https://obr.dnd.center/suite/portal-icon.svg", width: 64, height: 64, mime: "image/svg+xml"},
+    grid: {dpi: 64, offset: {x: 32, y: 32}}, text: { plainText: "Gate" }, metadata: {
     "com.obr-suite/portals/data": { name: "Gate", tag: "001", radius: 70, effect: "fade" },
   } } as any,
   add: null as null | (() => Promise<void>), update: null as null | (() => Promise<void>), open: null as null | (() => Promise<void>),
@@ -31,6 +33,7 @@ export const fixture = {
 };
 const OBR = {
   onReady(fn: () => void) { queueMicrotask(fn); },
+  room: {id: "transition-test-room"},
   player: {
     getRole: async () => fixture.roleRead ? fixture.roleRead() : fixture.role, getId: async () => fixture.playerId, getConnectionId: async () => fixture.connectionId,
     onChange: (fn: () => void) => listen("player", fn),
@@ -43,6 +46,7 @@ const OBR = {
     setMetadata: async (data: any) => { Object.assign(fixture.metadata, data); },
     items: {
       getItems: async () => [fixture.portal],
+      onChange: (fn: (items: any[]) => void) => listen("items", fn),
       updateItems: async (_ids: string[], update: (items: any[]) => void) => { update([fixture.portal]); },
     },
     local: {

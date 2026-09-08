@@ -25,6 +25,7 @@ try {
         if (id === "../../state" && /\/modules\/(transitions|portals)\//.test(importer?.replaceAll("\\", "/") ?? "")) return resolve("tools/fixtures/transitions-state.ts");
       },
       transform(code, id) {
+        if (id.replaceAll("\\", "/").endsWith('/asset-base.ts')) return code.replaceAll('import.meta.env.BASE_URL', '"/"');
         if (id.replaceAll("\\", "/").endsWith(`/${name}-page.ts`)) return code.replace('import "./style.css";', "");
       },
     }], output: { file: join(out, `${name}.js`), format: "esm" } });
@@ -92,7 +93,7 @@ try {
   await expired.close();
   for (const lang of ["zh", "en"]) {
     const page = await browser.newPage({ viewport: { width: 380, height: 540 } });
-    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("pageerror", (error) => { errors.push(error.message); console.error("PORTAL_BROWSER", error.message); });
     await page.addInitScript((lang) => { window.__transitionInitialLang = lang; }, lang);
     await page.goto(`${base}/portal?id=portal-one`);
     await page.waitForFunction(() => document.getElementById("portal-effect")?.value === "fade");

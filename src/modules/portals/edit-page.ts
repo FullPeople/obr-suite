@@ -14,6 +14,7 @@ import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
 import { bindPanelDrag } from "../../utils/panelDrag";
 import { PANEL_IDS } from "../../utils/panelLayout";
+import { mountPortalAppearance } from "./appearance-control";
 
 let lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -73,6 +74,7 @@ effectRow.className = "row";
 effectRow.innerHTML = `<span class="lbl" id="effect-label"></span><select id="portal-effect" style="width:100%;height:30px;border:1px solid var(--border);border-radius:5px;background:var(--bg-strong);color:var(--text);padding:0 8px;font:inherit"></select>`;
 document.querySelector(".body")?.append(effectRow);
 const effectSelect = document.getElementById("portal-effect") as HTMLSelectElement;
+let appearance: ReturnType<typeof mountPortalAppearance> | undefined;
 function renderEffectLabel() {
   const selected = normalizePortalEffect(effectSelect.value);
   $("effect-label").textContent = lang === "zh" ? "进入此门时的转场" : "Transition when entering this portal";
@@ -358,6 +360,7 @@ async function autoSave() {
 }
 
 async function cancel() {
+  appearance?.dispose();
   cancelled = true;
   if (isNew) {
     // Drag-draw cancelled — remove the just-created portal entirely.
@@ -385,6 +388,7 @@ async function cancel() {
 }
 
 async function closeSelf() {
+  appearance?.dispose();
   // Auto-save on close (X click, Esc, etc.) — but only if Cancel
   // hasn't already taken over the close path.
   if (!cancelled) await autoSave();
@@ -401,6 +405,7 @@ async function closeSelf() {
 // Re-render labels + title when the user flips language in Settings.
 function reapplyI18n() {
   renderEffectLabel();
+  appearance?.setLanguage(lang);
   applyI18nDom(lang);
   if (titleEl) {
     titleEl.textContent = isNew ? tt("portalNew") : tt("portalEdit");
@@ -415,6 +420,8 @@ onLangChange((next) => {
 });
 
 OBR.onReady(async () => {
+  const body = document.querySelector<HTMLElement>(".body");
+  if (body) appearance = mountPortalAppearance(body, portalId, lang);
   applyI18nDom(lang);
   renderChips();
   setupAddForms();

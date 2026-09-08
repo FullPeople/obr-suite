@@ -17,6 +17,7 @@ import {
   resolvePortalEffect,
 } from "./types";
 import { prefersReducedMotion } from "../transitions/protocol";
+import { needsPortalIconMigration, migratePortalIconDraft } from "./appearance";
 // NOT `../../i18n`. This module is on background.ts's boot path, and
 // that file is one ~600-key object literal indexed dynamically, so
 // importing it for three strings put all 46 kB of it in front of every
@@ -1672,33 +1673,15 @@ async function teleport(
 async function migrateLegacyPortals(): Promise<void> {
   try {
     const items = await OBR.scene.items.getItems(isPortal);
-    const stale = items.filter((it: any) => {
-      const w = it?.image?.width;
-      const h = it?.image?.height;
-      const u = it?.image?.url;
-      const sizeWrong =
-        (typeof w === "number" && w !== ICON_SIZE) ||
-        (typeof h === "number" && h !== ICON_SIZE);
-      // URL is broken if it isn't absolute (relative paths 404 inside
-      // OBR) OR it references a different /suite*/ path than the one
-      // this build is serving (e.g. portals created on the buggy dev
-      // build pointed at /suite-dev/ even from stable). Force-rewrite
-      // both cases to the current ASSET_BASE.
-      const urlWrong =
-        typeof u === "string" &&
-        (!/^https?:\/\//i.test(u) || u !== ICON_URL);
-      return sizeWrong || urlWrong;
-    });
+    const stale = items.filter(it => needsPortalIconMigration(it, ICON_URL));
     if (stale.length === 0) return;
     await OBR.scene.items.updateItems(
       stale.map((it: any) => it.id),
       (drafts: any[]) => {
         for (const d of drafts) {
-          if (d.image) {
-            d.image.width = ICON_SIZE;
-            d.image.height = ICON_SIZE;
-            d.image.url = ICON_URL;
-          }
+          // Recheck inside the actual write: a picker may have replaced this
+          // old bundled image while the update was in flight.
+          migratePortalIconDraft(d, ICON_URL);
         }
       },
     );
