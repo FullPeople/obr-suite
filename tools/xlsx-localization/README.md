@@ -192,3 +192,31 @@ engineering copies and are not ready for upload. The integration selftest keeps
 its successful minimal source copy intact; deliberate rejection inputs use a
 separate directory. It checks package reproduction and output boundaries, not
 native Excel/WPS interaction or formula performance.
+
+## Generate the main-card spell dropdown copies
+
+```text
+python -B -X utf8 tools/xlsx-localization/spell_main_lists_plan.py
+python -B -X utf8 tools/xlsx-localization/spell_main_lists_package.py
+python -B -X utf8 tools/xlsx-localization/spell_main_lists_selftest.py
+```
+
+The separate increment connects the main card's existing known/prepared spell
+inputs to bounded lists. It preserves all F/K producer formulas and the original
+input coverage. Existing compact output is reused; only the 2014 known list needs
+an additional compaction. Duplicates and order remain, and empty lists retain a
+one-cell range. It adds 402 / 2 hidden helper formulas and changes only 3 / 2 data
+validation formula texts, without changing their error behavior or attributes.
+
+`--repo` selects the checkout. New plan and workbook directories must be exclusive
+children of sibling `_audit/xlsx-spell-main-lists`, with `main-lists-plan-*` and
+`main-lists-candidate-*` prefixes respectively. The package generator rebuilds the
+published spell-selection input from the actual originals, then regenerates and
+applies the main-card plan. No historical seed or external JSON plan is loaded.
+Both entrypoints reject Python optimization mode, which would disable assertions
+in the pinned verification core.
+
+The actual copies preserve all previous cells, styles and unrelated package parts.
+Their finite-model and package checks do not establish native dropdown operation,
+recalculation cost, full English content, save/reopen or upload. See
+`docs/research/xlsx-spell-main-lists-20260909.md` for the exact scope and evidence.
