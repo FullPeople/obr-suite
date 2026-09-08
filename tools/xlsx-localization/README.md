@@ -5,6 +5,49 @@ directory contains reproducible inventories, located translations, and the
 adapter used to preserve their native workbook structure. It does not yet supply
 a complete English download.
 
+## Generate the integrated spell-display copies
+
+The latest display entry point rebuilds both cards from the repository originals
+and selected formal reviews, through the existing identity, dropdown and body
+generators. It includes canonical display names, the corrected 2014 sourcebook
+column, spellbook labels, 3,993 F/G/L fields, and 1,331 hidden body formulas that
+retain paragraphs in Calc. No historical audit directory or saved seed is needed.
+
+From the repository root, using Python 3.11 or newer:
+
+```text
+python -B -X utf8 tools/xlsx-localization/spell_display_package.py --prepare
+node <spreadsheet-skill>/container_tools/mark_artifact_operation_started.mjs --operation-kind create --expected-output-count 5 --output-format xlsx
+node tools/xlsx-localization/author_display_targets.mjs <reported-plan-directory> <new-author-directory> <bundled-node-dependency-directory>
+python -B -X utf8 tools/xlsx-localization/spell_display_package.py --author-directory <new-author-directory>
+```
+
+The author directory's parent must exist. The Node dependency directory is the
+bundled runtime root containing `node_modules`, with `@oai/artifact-tool` installed;
+it is not a new app dependency. The author script creates five separate XLSX
+tables, never imports a card, and validates all written values and body formulas.
+The package adapter rechecks actual author files against freshly verified source
+and reviews before building. A full offline reconstruction takes several minutes.
+
+`--repo` selects another checkout containing the same pinned inputs. `--output`
+must be a new child of its sibling `_audit/xlsx-spell-display`, prefixed
+`display-plan-` or `display-candidate-` for the respective mode. Originals and old
+outputs are never overwritten. These tools reject Python optimization mode.
+
+The reproducibility and input-guard check creates its own isolated source copy
+and five new author files:
+
+```text
+python -B -X utf8 tools/xlsx-localization/spell_display_selftest.py --node <bundled-node-executable> --artifact-runtime <bundled-node-dependency-directory> --marker <spreadsheet-skill>/container_tools/mark_artifact_operation_started.mjs
+```
+
+It checks the actual final package bytes against the independently reviewed,
+natively computed engineering copies. This does not repeat native calculation.
+The files remain partial English, without formula caches, and marked
+`NO-CACHE-NOT-FOR-UPLOAD`; they are not public downloads. Full scope, actual Calc
+results and remaining acceptance are in
+`docs/research/xlsx-spell-display-20260909.md`.
+
 ## Rebuild and check
 
 From the repository root, using Python 3.11 or newer:
