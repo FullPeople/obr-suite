@@ -2,6 +2,7 @@ import {rulePrompt, RULE_PROMPTS} from "./rules/prompts";
 export type TableLanguage="zh"|"en";
 const TEXT:Record<string,readonly [string,string]>={
  title:["三龙牌","Three-Dragon Ante"],edition:["传奇版 · 基础盒","Legendary Edition · Base box"],close:["关闭窗口","Close window"],
+ backToMap:["返回地图","Back to map"],minimize:["缩小牌桌","Minimize table"],expand:["展开牌桌","Expand table"],inspectCard:["查看卡牌","Inspect card"],closePreview:["关闭卡牌预览","Close card preview"],inspectHint:["悬停或点 i 查看能力","Hover or tap i to read powers"],
  create:["创建牌桌","Create table"],join:["加入牌桌","Join table"],leave:["离开座位","Leave seat"],start:["开始游戏","Start game"],
  newGame:["准备新局","Prepare new game"],retry:["重新连接","Reconnect"],waiting:["等待其他玩家","Waiting for other players"],
  lobby:["2–6 人即可开始，每局随机使用 10 张特殊牌。","Start with 2–6 players. Each game uses 10 random special cards."],
