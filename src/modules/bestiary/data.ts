@@ -1,4 +1,5 @@
 import { Monster, ParsedMonster, MonsterEdition } from "./types";
+import { fetchContentJson, mapWithConcurrency, createContentIdleDeadline } from "../../utils/contentRequests";
 import { getAllLocalMonsters, initLocalContent } from "../../utils/localContent";
 
 // "2014" = strictly PHB + MM (the original core books). "2024" = strictly
@@ -205,15 +206,34 @@ function parseMon(m: any): ParsedMonster | null {
 let cachedMonsters: ParsedMonster[] | null = null;
 let loadingPromise: Promise<ParsedMonster[]> | null = null;
 const rawBySlug = new Map<string, any>();
+let loadGeneration = 0;
+let activeLoadController: AbortController | null = null;
+export interface MonsterLoadProgress {
+  loadedFiles: number;
+  failedFiles: number;
+  preview: ParsedMonster[];
+}
+let lastLoadProgress: MonsterLoadProgress = { loadedFiles: 0, failedFiles: 0, preview: [] };
+const progressListeners = new Set<(progress: MonsterLoadProgress) => void>();
+function reportProgress(progress: MonsterLoadProgress) {
+  lastLoadProgress = progress;
+  for (const listener of progressListeners) {
+    try { listener(progress); } catch (error) { console.warn("[bestiary] progress listener failed", error); }
+  }
+}
 
 /** Drop the cached monster list so the next loadAllMonsters() pulls
  *  fresh data. Called when the user imports / removes local content
  *  via the settings panel — the bestiary module subscribes to the
  *  BC_LOCAL_CONTENT_CHANGED broadcast and forwards it here. */
 export function clearMonsterCache(): void {
+  loadGeneration++;
+  activeLoadController?.abort();
+  activeLoadController = null;
   cachedMonsters = null;
   loadingPromise = null;
   rawBySlug.clear();
+  lastLoadProgress = { loadedFiles: 0, failedFiles: 0, preview: [] };
 }
 
 // slug uniquely identifies a monster across sources: "MM::Goblin"
@@ -313,101 +333,153 @@ function resolveCopy(m: any, bySlug: Map<string, any>, stack: Set<string>): any 
   return merged;
 }
 
-export async function loadAllMonsters(): Promise<ParsedMonster[]> {
-  if (cachedMonsters) return cachedMonsters;
-  if (loadingPromise) return loadingPromise;
+/** An inherited monster is only usable after its entire parent chain arrived. */
+function hasCompleteCopy(m: any, lookup: Map<string, any>, stack: Set<string>): boolean {
+  if (!m?._copy) return true;
+  for (const name of [m._copy.ENG_name, m._copy.name]) {
+    if (typeof name !== "string" || !name) continue;
+    const slug = makeSlug(m._copy.source, name);
+    const parent = lookup.get(slug);
+    if (!parent) continue;
+    if (stack.has(slug)) return false;
+    stack.add(slug);
+    const ready = hasCompleteCopy(parent, lookup, stack);
+    stack.delete(slug);
+    return ready;
+  }
+  return false;
+}
 
-  loadingPromise = (async () => {
-    // 2026-05-10 — warm the IDB-backed local-content cache before
-    // we read getAllLocalMonsters() below. Idempotent.
+export async function loadAllMonsters(
+  onProgress?: (progress: MonsterLoadProgress) => void,
+): Promise<ParsedMonster[]> {
+  if (onProgress) {
+    progressListeners.add(onProgress);
+    onProgress(lastLoadProgress);
+  }
+  try {
+    if (cachedMonsters) return cachedMonsters;
+    if (!loadingPromise) {
+      const generation = loadGeneration;
+      const controller = new AbortController();
+      activeLoadController = controller;
+      const pending = performMonsterLoad(generation, controller.signal);
+      loadingPromise = pending;
+      void pending.finally(() => {
+        if (loadingPromise === pending) loadingPromise = null;
+        if (activeLoadController === controller) activeLoadController = null;
+      }).catch(() => {});
+    }
+    return await loadingPromise;
+  } finally {
+    if (onProgress) progressListeners.delete(onProgress);
+  }
+}
+
+async function performMonsterLoad(generation: number, signal: AbortSignal): Promise<ParsedMonster[]> {
     await initLocalContent();
-    // Fetch from EVERY enabled library and merge. Libraries may
-    // disagree on which sources they ship (custom Cloudflare libs
-    // typically only have a handful of homebrew monsters); merging
-    // by makeSlug() naturally dedupes so the canonical 5etools
-    // monster wins for shared sources, and homebrew slugs from a
-    // custom library appear alongside.
+    if (generation !== loadGeneration) return [];
     const bases = getEnabledLibraryBases();
-    const perLibraryMonsters = await Promise.all(
-      bases.map(async (base) => {
-        // Try the canonical 5etools layout first: a `bestiary/index.json`
-        // mapping `bestiary-<SOURCE>.json` → SOURCE. If that's missing
-        // (most user-hosted homebrew sites don't ship one), fall back
-        // to the search index — extract every c=1 (monster) entry's
-        // source code and synthesise the file list ourselves.
-        try {
-          const indexRes = await fetch(`${base}/data/bestiary/index.json`, { cache: "no-cache" });
-          if (indexRes.ok) {
-            const index = await indexRes.json() as Record<string, string>;
-            const files = Object.entries(index);
-            const results = await Promise.all(
-              files.map(async ([, filename]) => {
-                try {
-                  // No HTTP-cache so updates to library JSON show up
-                  // on the next loadAllMonsters() call (after the
-                  // user toggles libraries / re-opens the panel).
-                  const res = await fetch(`${base}/data/bestiary/${filename}`, { cache: "no-cache" });
-                  if (!res.ok) return [] as Monster[];
-                  const data = await res.json();
-                  return (data.monster || []) as Monster[];
-                } catch (e) {
-                  console.warn(`[obr-suite/bestiary] failed to load ${base}/data/bestiary/${filename}`, e);
-                  return [] as Monster[];
-                }
-              })
-            );
-            return results.flat();
-          }
-        } catch {}
-        // Fallback: read search/index.json, pick monster sources, fetch
-        // each `bestiary-<SOURCE>.json`. Lets a self-hosted homebrew
-        // library that only ships search/index.json + one bestiary file
-        // still appear in the bestiary panel.
-        try {
-          const idxRes = await fetch(`${base}/search/index.json`, { cache: "no-cache" });
-          if (!idxRes.ok) return [] as Monster[];
-          const idx = await idxRes.json() as { x?: any[] };
-          const xs = Array.isArray(idx.x) ? idx.x : [];
-          const monsterSources = new Set<string>();
-          for (const e of xs) {
-            if (!e || e.c !== 1) continue;
-            const s = typeof e.s === "string" ? e.s : null;
-            if (s) monsterSources.add(s);
-          }
-          if (monsterSources.size === 0) return [] as Monster[];
-          // Try each source under multiple case variants — GitHub
-          // Pages is case-sensitive but homebrew authors often use
-          // uppercase filenames while kiwee uses lowercase. We try
-          // them all and use whichever 200s.
-          const results = await Promise.all(
-            Array.from(monsterSources).map(async (src) => {
-              const cases = new Set<string>([src, src.toLowerCase(), src.toUpperCase()]);
-              for (const c of cases) {
-                try {
-                  const res = await fetch(`${base}/data/bestiary/bestiary-${c}.json`, { cache: "no-cache" });
-                  if (!res.ok) continue;
-                  const data = await res.json();
-                  const arr = (data.monster || []) as Monster[];
-                  return arr;
-                } catch {}
-              }
-              console.warn(
-                `[obr-suite/bestiary] no working case variant for ${base}/data/bestiary/bestiary-${src}.json`,
-              );
-              return [] as Monster[];
-            })
-          );
-          return results.flat();
-        } catch (e) {
-          console.warn(`[obr-suite/bestiary] failed to derive bestiary list from ${base}`, e);
-          return [] as Monster[];
-        }
-      })
-    );
-    // Imported local-content monsters get folded in alongside any
-    // URL-based libraries.
+    const blacklist = getUnionDisabledSources();
     const localMonsters = getAllLocalMonsters() as Monster[];
-    const rawAll = [...perLibraryMonsters.flat(), ...localMonsters];
+    const perLibraryMonsters: Monster[][][] = bases.map(() => []);
+    const failed = new Set<string>();
+    let loadedFiles = 0;
+    let lastPreviewAt = 0;
+    function publish(force = false) {
+      if (generation !== loadGeneration) return;
+      if (!force && Date.now() - lastPreviewAt < 200) return;
+      lastPreviewAt = Date.now();
+      // Preview rows are read-only until the complete, ordered inheritance
+      // merge below. Incomplete _copy records must never be spawned.
+      const preview = [...perLibraryMonsters.flat(2), ...localMonsters]
+        .filter((m: any) => m && !m._copy)
+        .map(parseMon)
+        .filter((m): m is ParsedMonster => m !== null && !blacklist.has(m.source.trim().toLowerCase()));
+      const seen = new Set<string>();
+      reportProgress({ loadedFiles, failedFiles: failed.size, preview: preview.filter((m) => {
+        const key = `${m.source.trim().toUpperCase()}::${m.engName.trim().toLowerCase()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }) });
+    }
+    publish(true);
+    await Promise.all(bases.map(async (base, libraryIndex) => {
+      // This is an inactivity deadline, not a total time budget: large healthy
+      // libraries must finish even when their total load takes over 30 seconds.
+      const sourceDeadline = createContentIdleDeadline(30_000, signal);
+      const request = (path: string) => fetchContentJson(`${base}/${path}`, { cache: "no-cache", signal: sourceDeadline.signal });
+      const recordFailure = (path: string, error: unknown) => {
+        if (signal.aborted) return;
+        const key = sourceDeadline.signal.aborted ? `${base}/timeout` : `${base}/${path}`;
+        if (failed.has(key)) return;
+        failed.add(key);
+        console.warn("[obr-suite/bestiary] content unavailable", { base, path, error });
+      };
+      try {
+        if (signal.aborted) return;
+        let files: string[] | null = null;
+        try {
+          const response = await request("data/bestiary/index.json");
+          if (response.ok) {
+            const index = await response.json();
+            if (!index || typeof index !== "object" || Array.isArray(index)) throw new Error("Invalid bestiary index");
+            files = Object.values(index).filter((name): name is string => typeof name === "string");
+            sourceDeadline.progress();
+          } else if (response.status !== 404) recordFailure("data/bestiary/index.json", `HTTP ${response.status}`);
+        } catch (error) { recordFailure("data/bestiary/index.json", error); }
+        if (files !== null) {
+          await mapWithConcurrency(files, 2, async (filename, fileIndex) => {
+            try {
+              const response = await request(`data/bestiary/${filename}`);
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              const data = await response.json();
+              if (!Array.isArray(data.monster)) throw new Error("Invalid monster list");
+              perLibraryMonsters[libraryIndex][fileIndex] = data.monster;
+              loadedFiles++;
+              sourceDeadline.progress();
+            } catch (error) { recordFailure(`data/bestiary/${filename}`, error); }
+            publish();
+          });
+        } else {
+          const response = await request("search/index.json");
+          if (!response.ok) throw new Error(`Search index HTTP ${response.status}`);
+          const index = await response.json();
+          if (!Array.isArray(index.x)) throw new Error("Invalid search index");
+          sourceDeadline.progress();
+          const sources = [...new Set<string>((Array.isArray(index.x) ? index.x : [])
+            .filter((entry: any) => entry?.c === 1 && typeof entry.s === "string")
+            .map((entry: any) => entry.s))];
+          await mapWithConcurrency(sources, 2, async (source, fileIndex) => {
+            for (const variant of new Set([source, source.toLowerCase(), source.toUpperCase()])) {
+              try {
+                const response = await request(`data/bestiary/bestiary-${variant}.json`);
+                if (!response.ok) continue;
+                const data = await response.json();
+                if (!Array.isArray(data.monster)) throw new Error("Invalid monster list");
+                perLibraryMonsters[libraryIndex][fileIndex] = data.monster;
+                loadedFiles++;
+                sourceDeadline.progress();
+                publish();
+                return;
+              } catch (error) {
+                if (sourceDeadline.signal.aborted) break;
+              }
+            }
+            recordFailure(`data/bestiary/bestiary-${source}.json`, "No available case variant");
+            publish();
+          });
+        }
+      } catch (error) { recordFailure("index", error); }
+      finally {
+        sourceDeadline.dispose();
+        publish(true);
+      }
+    }));
+    if (generation !== loadGeneration) return [];
+    const rawAll = [...perLibraryMonsters.flat(2), ...localMonsters];
+    const resolvedBySlug = new Map<string, any>();
     // Build slug → raw lookup so spawn/info can read full monster data
     // (abilities, actions, etc.) without re-fetching. Index by BOTH
     // ENG_name and name (zh) so `_copy` lookups succeed regardless of
@@ -416,29 +488,35 @@ export async function loadAllMonsters(): Promise<ParsedMonster[]> {
     for (const m of rawAll) {
       if (m && m.name) {
         const eng = m.ENG_name;
-        if (eng) rawBySlug.set(makeSlug(m.source, eng), m);
+        if (eng) resolvedBySlug.set(makeSlug(m.source, eng), m);
         if (!eng || eng !== m.name) {
           // Don't overwrite an existing English-keyed entry with the
           // zh slug — but DO add the zh slug for child _copy resolution.
           const zhSlug = makeSlug(m.source, m.name);
-          if (!rawBySlug.has(zhSlug)) rawBySlug.set(zhSlug, m);
+          if (!resolvedBySlug.has(zhSlug)) resolvedBySlug.set(zhSlug, m);
         }
       }
     }
     // Resolve 5etools _copy inheritance so entries like BGDIA::Zariel
     // (which only have diffs vs. MTF::Zariel) get full stats / actions.
-    for (const [slug, m] of rawBySlug) {
+    for (const [slug, m] of resolvedBySlug) {
       if (m && m._copy) {
-        rawBySlug.set(slug, resolveCopy(m, rawBySlug, new Set()));
+        if (!hasCompleteCopy(m, resolvedBySlug, new Set())) {
+          failed.add(`copy:${slug}`);
+          console.warn("[bestiary] skipped incomplete inherited monster", { slug, parent: m._copy });
+          resolvedBySlug.delete(slug);
+          continue;
+        }
+        resolvedBySlug.set(slug, resolveCopy(m, resolvedBySlug, new Set()));
       }
     }
-    // Dedupe via identity Set — rawBySlug now keys some monsters
+    // Dedupe via identity Set — resolvedBySlug now keys some monsters
     // under both their English and Chinese slugs (so `_copy` resolves
     // either way). Iterating values() would emit duplicates without
     // this guard.
     const seenRaw = new Set<any>();
     const uniqueRaw: any[] = [];
-    for (const m of rawBySlug.values()) {
+    for (const m of resolvedBySlug.values()) {
       if (seenRaw.has(m)) continue;
       seenRaw.add(m);
       uniqueRaw.push(m);
@@ -468,7 +546,6 @@ export async function loadAllMonsters(): Promise<ParsedMonster[]> {
     // disabledSources list. Lets the user disable e.g.
     // BOOKOFEBONTIDES from showing up in the bestiary panel even
     // though the kiwee partnered library still ships it.
-    const blacklist = getUnionDisabledSources();
     if (blacklist.size > 0) {
       all = all.filter((m) => {
         const src = (m.source || "").trim().toLowerCase();
@@ -483,11 +560,13 @@ export async function loadAllMonsters(): Promise<ParsedMonster[]> {
       return a.name.localeCompare(b.name);
     });
 
-    cachedMonsters = all;
-    return all;
-  })();
 
-  return loadingPromise;
+    if (generation !== loadGeneration) return [];
+    rawBySlug.clear();
+    for (const [slug, monster] of resolvedBySlug) rawBySlug.set(slug, monster);
+    cachedMonsters = all;
+    reportProgress({ loadedFiles, failedFiles: failed.size, preview: all });
+    return all;
 }
 
 function parseCR(cr: string): number {

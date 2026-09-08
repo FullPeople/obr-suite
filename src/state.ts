@@ -422,8 +422,42 @@ function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
 // scene's own metadata. The flag rides along with the state, so once
 // enabled in any scene it propagates to all.
 const ROOM_STATE_KEY = "com.obr-suite/state-room";
+// Reads may complete out of order, especially during a scene switch. Never
+// apply an old scene response (or mirror it into the newly loaded scene).
+let refreshRevision = 0;
+let sceneGeneration = 0;
+const refreshListeners = new Set<() => void>();
+const refreshFailureListeners = new Set<(error: unknown) => void>();
+
+/** Signals an authoritative read or acknowledged local write, including when
+ * values did not change. Superseded reads do not signal readiness. */
+export function onStateRefreshed(fn: () => void): () => void {
+  refreshListeners.add(fn);
+  return () => refreshListeners.delete(fn);
+}
+
+export function onStateRefreshFailed(fn: (error: unknown) => void): () => void {
+  refreshFailureListeners.add(fn);
+  return () => refreshFailureListeners.delete(fn);
+}
+
+function failedRefresh(revision: number, error: unknown): SuiteState {
+  if (revision === refreshRevision) {
+    for (const fn of refreshFailureListeners) {
+      try { fn(error); } catch (listenerError) { console.warn("[obr-suite/state] refresh failure listener failed", listenerError); }
+    }
+  }
+  return cached;
+}
+
+function notifyStateRefreshed(): void {
+  for (const fn of refreshListeners) {
+    try { fn(); } catch (error) { console.warn("[obr-suite/state] refresh listener failed", error); }
+  }
+}
 
 export async function refreshFromScene(): Promise<SuiteState> {
+  const revision = ++refreshRevision;
   let next: SuiteState;
   try {
     // Cross-scene sync: prefer room mirror when active.
@@ -432,6 +466,7 @@ export async function refreshFromScene(): Promise<SuiteState> {
         OBR.room.getMetadata(),
         OBR.scene.getMetadata(),
       ]);
+      if (revision !== refreshRevision) return cached;
       const fromRoom = roomMeta[ROOM_STATE_KEY] as any;
       if (fromRoom && fromRoom.crossSceneSyncSettings) {
         next = merge(fromRoom);
@@ -453,24 +488,27 @@ export async function refreshFromScene(): Promise<SuiteState> {
     } catch {
       try {
         const meta = await OBR.scene.getMetadata();
+        if (revision !== refreshRevision) return cached;
         next = merge(meta[SCENE_KEY]);
-      } catch {
-        next = DEFAULT_STATE;
+      } catch (error) {
+        return failedRefresh(revision, error);
       }
     }
-  } catch {
-    next = DEFAULT_STATE;
+  } catch (error) {
+    return failedRefresh(revision, error);
   }
   // OBR.scene.onMetadataChange fires for ANY scene metadata write (bestiary
   // spawn list, character cards list, initiative combat state, etc.) — not
   // just suite state writes. Diff before notifying so unrelated metadata
   // changes don't cascade to listeners (e.g. waking the search panel
   // every time a monster is spawned).
+  if (revision !== refreshRevision) return cached;
   const changed = !suiteStateEqual(cached, next);
   cached = next;
   if (changed) {
     for (const fn of listeners) fn(cached);
   }
+  if (revision === refreshRevision) notifyStateRefreshed();
   return cached;
 }
 
@@ -496,7 +534,13 @@ export async function setState(partial: Partial<SuiteState>): Promise<void> {
 
   if (suiteStateEqual(prev, next)) return;
 
+  const writeScene = sceneGeneration;
+  ++refreshRevision;
   await OBR.scene.setMetadata({ [SCENE_KEY]: next });
+  // The SDK write is already sent and cannot be cancelled, but its late
+  // acknowledgement must not invalidate new reads or publish the old state.
+  if (writeScene !== sceneGeneration) return;
+  const appliedRevision = ++refreshRevision;
   lastSceneStateJson = JSON.stringify(next);
   cached = next;
 
@@ -506,17 +550,21 @@ export async function setState(partial: Partial<SuiteState>): Promise<void> {
   try {
     if (next.crossSceneSyncSettings) {
       await OBR.room.setMetadata({ [ROOM_STATE_KEY]: next });
+      if (writeScene !== sceneGeneration) return;
       lastRoomStateJson = JSON.stringify(next);
     } else if (prev.crossSceneSyncSettings) {
       // Was on, now off — clear so scene-loads stop seeing it.
       await OBR.room.setMetadata({ [ROOM_STATE_KEY]: undefined });
+      if (writeScene !== sceneGeneration) return;
       lastRoomStateJson = JSON.stringify(null);
     }
   } catch (e) {
     console.warn("[obr-suite/state] room mirror write failed", e);
   }
 
+  if (writeScene !== sceneGeneration) return;
   for (const fn of listeners) fn(cached);
+  if (appliedRevision === refreshRevision) notifyStateRefreshed();
   // Explicit broadcast for cross-iframe sync. OBR.scene.onMetadataChange
   // SHOULD fire in all iframes when scene metadata changes, but in
   // practice some iframes miss the event (timing or layer issues). The
@@ -549,6 +597,11 @@ let lastRoomStateJson = "";
 export function startSceneSync() {
   if (sceneSyncStarted) return;
   sceneSyncStarted = true;
+  OBR.scene.onReadyChange(() => {
+    ++sceneGeneration;
+    ++refreshRevision;
+    lastSceneStateJson = "";
+  });
   void refreshFromScene().then((s) => {
     lastSceneStateJson = JSON.stringify(s);
   });

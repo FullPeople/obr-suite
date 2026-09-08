@@ -4,7 +4,8 @@ import OBR from "@owlbear-rodeo/sdk";
 import { installDebugOverlay } from "../../utils/debugOverlay";
 import { installPanelZoom } from "../../utils/panelZoom";
 import { ParsedMonster, MonsterEdition } from "./types";
-import { loadAllMonsters, searchMonsters, getRawMonster, makeSlug } from "./data";
+import { loadAllMonsters, clearMonsterCache, searchMonsters, getRawMonster, makeSlug } from "./data";
+import { BC_LOCAL_CONTENT_CHANGED, forceReloadLocalContent } from "../../utils/localContent";
 import { spawnMonster } from "./spawn";
 import { t } from "../../i18n";
 import { getLocalLang, onLangChange, startSceneSync, refreshFromScene, getState, setState, onStateChange } from "../../state";
@@ -282,6 +283,11 @@ function App() {
   // every panel reopen.
   const [sourceFilter, setSourceFilter] = useState(() => readLS("sourceFilter", ""));
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(true);
+  const [loadedFiles, setLoadedFiles] = useState(0);
+  const [failedFiles, setFailedFiles] = useState(0);
+  const [loadError, setLoadError] = useState(false);
+  const retryLoadRef = useRef<() => void>(() => {});
   const [role, setRole] = useState<"GM" | "PLAYER">("PLAYER");
   const [playerId, setPlayerId] = useState("");
   // Edition gate now flows from suite scene metadata (via dataVersion).
@@ -386,32 +392,6 @@ function App() {
     return unsub;
   }, []);
 
-  // Refetch monster data when the library configuration changes
-  // (add / delete / edit URL / enable / disable). Without this the
-  // panel keeps showing the old set even though `index.ts` has
-  // already invalidated the underlying cache. Per user spec:
-  // "删除和修改库时也要删除数据" — the panel reflects deletion
-  // immediately rather than the next time the panel reopens.
-  useEffect(() => {
-    let lastLibSig = JSON.stringify(
-      (getState().libraries || []).map((l) => `${l.id}|${l.enabled}|${l.baseUrl}`),
-    );
-    const unsub = onStateChange(() => {
-      const sig = JSON.stringify(
-        (getState().libraries || []).map((l) => `${l.id}|${l.enabled}|${l.baseUrl}`),
-      );
-      if (sig === lastLibSig) return;
-      lastLibSig = sig;
-      setLoading(true);
-      loadAllMonsters()
-        .then((all) => {
-          setMonsters(all);
-          setLoading(false);
-        })
-        .catch(() => setLoading(false));
-    });
-    return unsub;
-  }, []);
   const inputRef = useRef<HTMLInputElement>(null);
   // Mirror of `monsters` for closures that need the latest list (e.g.
   // the BC_MONSTER_DROP handler — it can't use the state value
@@ -427,40 +407,85 @@ function App() {
   }, []);
 
   useEffect(() => {
-    OBR.player.getRole().then(setRole);
-    OBR.player.getId().then(setPlayerId).catch(() => {});
-    readSuiteDataVersion().then(setDataVersion);
-    const unsub = onStateChange((s) => setDataVersion(s.dataVersion));
-
-    // Pull suite state (scene metadata → suite cache) BEFORE
-    // loadAllMonsters so getEnabledLibraryBases() inside data.ts
-    // sees the user's custom library list. Without this prime the
-    // panel iframe reads DEFAULT_STATE (just kiwee) and homebrew
-    // monsters from URL libraries silently disappear.
-    startSceneSync();
-    refreshFromScene()
-      .catch(() => undefined)
-      .then(() => loadAllMonsters())
-      .then((all) => {
+    let alive = true;
+    let requestId = 0;
+    let primed = false;
+    const librarySignature = () => JSON.stringify((getState().libraries || []).map((library) => [
+      library.id, library.enabled, library.baseUrl, library.indexPath,
+      [...(library.disabledSources ?? [])].sort(),
+    ]));
+    let lastSignature = librarySignature();
+    const load = (reset = false) => {
+      const id = ++requestId;
+      if (reset) clearMonsterCache();
+      loadingRef.current = true;
+      setLoading(true);
+      setLoadError(false);
+      setFailedFiles(0);
+      setLoadedFiles(0);
+      if (reset) setMonsters([]);
+      void loadAllMonsters((progress) => {
+        if (!alive || id !== requestId) return;
+        setMonsters(progress.preview);
+        setLoadedFiles(progress.loadedFiles);
+        setFailedFiles(progress.failedFiles);
+      }).then((all) => {
+        if (!alive || id !== requestId) return;
         setMonsters(all);
+        loadingRef.current = false;
         setLoading(false);
-        // 2026-05-10: heal-pass for the scene-meta `monsters` table.
-        // Past versions of the bestiary spawn / bind paths could
-        // leave a token with a `slug` metadata reference whose entry
-        // never made it into the scene-shared `monsters` table —
-        // typically because `getRawMonster(slug)` returned null at
-        // spawn time (rawBySlug not yet hydrated) so
-        // `ensureSharedMonsterData` early-returned. Symptom: group
-        // saves / group initiative skips that token because
-        // `buildSelectedMonster` requires `table[slug]` to exist.
-        //
-        // Now that loadAllMonsters has resolved, rawBySlug is full.
-        // Walk every scene token with a bestiary slug, look up its
-        // raw record locally, and fill any missing table entries in
-        // a single batched setMetadata write.
+        // Shared stats only use the final inheritance-resolved snapshot.
         void healSceneMonsterTable();
+      }).catch((error) => {
+        if (!alive || id !== requestId) return;
+        console.warn("[bestiary] list load failed", error);
+        // Preview rows have not passed the final inheritance merge.
+        loadingRef.current = true;
+        setLoading(false);
+        setLoadError(true);
       });
-    return unsub;
+    };
+    retryLoadRef.current = () => load(true);
+    const unsubState = onStateChange((state) => {
+      setDataVersion(state.dataVersion);
+      if (!primed) return;
+      const signature = librarySignature();
+      if (signature !== lastSignature) {
+        lastSignature = signature;
+        load(true);
+      }
+    });
+    const unsubContent = OBR.broadcast.onMessage(BC_LOCAL_CONTENT_CHANGED, () => {
+      // Stop old UI results immediately; IDB hydration can finish later.
+      requestId++;
+      loadingRef.current = true;
+      setLoading(true);
+      void forceReloadLocalContent().then(() => {
+        if (alive) load(true);
+      }).catch((error) => {
+        console.warn("[bestiary] local content refresh failed", error);
+        if (alive) { setLoading(false); setLoadError(true); }
+      });
+    });
+    void OBR.player.getRole().then((value) => { if (alive) setRole(value); });
+    void OBR.player.getId().then((value) => { if (alive) setPlayerId(value); }).catch(() => {});
+    void readSuiteDataVersion().then((value) => { if (alive) setDataVersion(value); });
+    startSceneSync();
+    void refreshFromScene().catch((error) => {
+      console.warn("[bestiary] initial library settings read failed", error);
+    }).then(() => {
+      if (!alive) return;
+      primed = true;
+      lastSignature = librarySignature();
+      load();
+    });
+    return () => {
+      alive = false;
+      requestId++;
+      unsubState();
+      unsubContent();
+      retryLoadRef.current = () => {};
+    };
   }, []);
 
   const editions = dvToEditionSet(dataVersion);
@@ -564,6 +589,7 @@ function App() {
   // from the suite Settings panel (dataVersion in scene metadata).
 
   const handleSpawn = useCallback(async (mon: ParsedMonster) => {
+    if (loadingRef.current) return;
     if (TRANSFORM_TARGET_ITEM_ID) {
       // 变身 mode — hand the monster's token image + size to the
       // transform module (it snapshots the token, swaps, and closes
@@ -640,6 +666,7 @@ function App() {
   useEffect(() => {
     if (PICKER_TARGET_ITEM_IDS.length > 0 || TRANSFORM_TARGET_ITEM_ID) return;
     const unsub = OBR.broadcast.onMessage(BC_MONSTER_DROP, async (event) => {
+      if (loadingRef.current) return;
       const data = event.data as
         | { slug?: string; sceneX?: number; sceneY?: number }
         | undefined;
@@ -944,7 +971,9 @@ function App() {
         </div>
         <div class="header-row">
           <span class="count">
-            {loading ? t(lang, "bestiaryLoading") : `${filtered.length} / ${visibleMonsters.length}`}
+            {loading
+              ? `${t(lang, "bestiaryLoading")} · ${lang === "zh" ? `已读取 ${loadedFiles} 份资料` : `${loadedFiles} files read`}`
+              : `${filtered.length} / ${visibleMonsters.length}`}
           </span>
           {visibleMonsters.length > 0 && (
           <div class="source-filter-wrap">
@@ -1017,11 +1046,24 @@ function App() {
           </button>
         </div>
       </div>
-      <div class="list">
+      {(failedFiles > 0 || loadError) && (
+        <div role="status" style={{ padding: "6px 12px", fontSize: "12px" }}>
+          {lang === "zh" ? "部分资料未能加载。" : "Some content could not be loaded. "}
+          <button type="button" disabled={loading} onClick={() => retryLoadRef.current()}>
+            {lang === "zh" ? "重试" : "Retry"}
+          </button>
+        </div>
+      )}
+      {loading && monsters.length > 0 && (
+        <div role="status" style={{ padding: "6px 12px", fontSize: "12px" }}>
+          {lang === "zh" ? "可先筛选浏览，资料准备完成后即可使用。" : "Browse and filter while the remaining details are prepared."}
+        </div>
+      )}
+      <div class="list" aria-busy={loading}>
         {filtered.map((mon) => (
-          <MonsterCard key={`${mon.source}-${mon.engName}`} monster={mon} onSpawn={handleSpawn} />
+          <MonsterCard key={`${mon.source}-${mon.engName}`} monster={mon} onSpawn={handleSpawn} disabled={loading || loadError} />
         ))}
-        {!loading && filtered.length === 0 && (
+        {!loading && !loadError && filtered.length === 0 && (
           <div class="empty">{t(lang, "bestiaryNoMatch")}</div>
         )}
       </div>
@@ -1073,9 +1115,11 @@ async function startMonsterDrag(monster: ParsedMonster, e: PointerEvent): Promis
 function MonsterCard({
   monster,
   onSpawn,
+  disabled,
 }: {
   monster: ParsedMonster;
   onSpawn: (m: ParsedMonster) => void;
+  disabled: boolean;
 }) {
   const [imgErr, setImgErr] = useState(false);
 
@@ -1093,7 +1137,7 @@ function MonsterCard({
   // before → spawn at viewport center. Drag past threshold: we
   // suppress the trailing click so we don't double-spawn.
   const onPointerDown = useCallback((e: PointerEvent) => {
-    if (e.button !== 0) return;
+    if (disabled || e.button !== 0) return;
     const cardEl = e.currentTarget as HTMLElement;
     const pointerId = e.pointerId;
     try { cardEl.setPointerCapture(pointerId); } catch {}
@@ -1148,10 +1192,10 @@ function MonsterCard({
     cardEl.addEventListener("pointermove", onMove);
     cardEl.addEventListener("pointerup", onUp);
     cardEl.addEventListener("pointercancel", onUp);
-  }, [monster]);
+  }, [monster, disabled]);
 
   return (
-    <div class="card" onPointerDown={onPointerDown} onClick={() => onSpawn(monster)}>
+    <div class="card" aria-disabled={disabled} onPointerDown={onPointerDown} onClick={() => { if (!disabled) onSpawn(monster); }}>
       <div class="card-left">
         {!imgErr && monster.tokenUrl ? (
           <img

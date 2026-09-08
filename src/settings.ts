@@ -44,6 +44,12 @@ import {
 } from "./utils/localContent";
 import { repairLegacyHiddenBubbles } from "./modules/bubbles";
 import { repairLegacyBestiaryImages } from "./modules/bestiary/repair-legacy-images";
+import { SettingsContent } from "./utils/settingsContent";
+import { renderSettingsModuleStatus } from "./utils/settingsModuleStatus";
+import {
+  BC_MODULE_STATUS_QUERY, BC_MODULE_STATUS, BC_MODULE_RETRY,
+  type ModuleLifecycleSnapshot,
+} from "./utils/moduleLifecycleProtocol";
 
 // Merged Settings + About panel.
 //
@@ -91,8 +97,8 @@ interface TabDef {
 
 let activeTab = "support";
 let isGM = false;
-// True while the bestiary legacy-image repair is running. renderContent()
-// rebuilds the tab's innerHTML on any state change, which would otherwise
+// True while the bestiary legacy-image repair is running. A relevant refresh
+// can rebuild the tab's innerHTML, which would otherwise
 // resurrect an enabled idle button mid-repair (the handler's disabled flag
 // only lives on the detached old node) and allow a concurrent second run.
 let bestiaryImageRepairInFlight = false;
@@ -823,9 +829,8 @@ My content follows:
 
 // Both templates are module constants and `escapeAttr` is pure, so the
 // escaped form can never differ between renders. Escaping them inline
-// meant re-scanning ~9 kB of prompt text on every render of the
-// libraries tab — and renderContent() rebuilds the tab's innerHTML on
-// any state change, not just on open.
+// meant re-scanning ~9 kB of prompt text on every render comparison of
+// the libraries tab, not just on open.
 const AI_PROMPT_TEMPLATE_ESC: Record<Language, string> = {
   zh: escapeAttr(AI_PROMPT_TEMPLATE.zh),
   en: escapeAttr(AI_PROMPT_TEMPLATE.en),
@@ -1122,8 +1127,8 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
     : `📚 Sources${disabledCount > 0 ? ` (${disabledCount} off)` : ""}`;
   return `
     <div class="lib-row" data-lib-id="${escapeAttr(lib.id)}">
-      <div class="lib-row-head">
-        <input class="lib-name" data-field="name" type="text" value="${escapeAttr(lib.name)}" ${editable ? "" : "readonly"} ${disable}>
+      <div class="lib-row-head" data-settings-line>
+        <input class="lib-name" data-field="name" data-settings-draft="${escapeAttr(JSON.stringify([lib.id, "name"]))}" type="text" value="${escapeAttr(lib.name)}" ${editable ? "" : "readonly"} ${disable}>
         ${builtinLock}
         <button class="tog ${lib.enabled ? "on" : ""}" data-field="enabled" type="button" ${disable}
           aria-pressed="${lib.enabled}" title="${lang === "zh" ? "启用 / 禁用此库" : "Enable / disable"}"></button>
@@ -1136,9 +1141,9 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
             : ""
         }
       </div>
-      <div class="lib-row-url">
+      <div class="lib-row-url" data-settings-line>
         <span class="lib-row-label">URL:</span>
-        <input class="lib-url" data-field="baseUrl" type="text" value="${escapeAttr(lib.baseUrl)}" ${editable ? "" : "readonly"} ${disable}
+        <input class="lib-url" data-field="baseUrl" data-settings-draft="${escapeAttr(JSON.stringify([lib.id, "baseUrl"]))}" type="text" value="${escapeAttr(lib.baseUrl)}" ${editable ? "" : "readonly"} ${disable}
           placeholder="https://example.com">
       </div>
       <div class="lib-preview" hidden></div>
@@ -1209,8 +1214,8 @@ function renderRemoteSubsBlock(lang: Language): string {
       <p class="lib-local-desc">Paste the <b>raw URL</b> of a single-file 5etools-shape JSON (e.g. a GitHub raw link or jsDelivr mirror). The suite downloads it and <b>re-fetches</b> on every session boot so author updates flow to your table automatically. Each client caches independently. On fetch failure the previous cached content is kept and the row shows the error.</p>
     `;
   const inputRow = isGM ? `
-    <div class="lib-local-actions" style="gap:6px;flex-wrap:wrap">
-      <input class="lib-sub-input" type="url" placeholder="${lang === "zh" ? "https://example.com/homebrew.json" : "https://example.com/homebrew.json"}" style="flex:1 1 240px;min-width:180px;padding:4px 6px">
+    <div class="lib-local-actions" data-settings-line style="gap:6px;flex-wrap:wrap">
+      <input class="lib-sub-input" data-settings-draft="subscription-url" data-settings-local type="url" placeholder="${lang === "zh" ? "https://example.com/homebrew.json" : "https://example.com/homebrew.json"}" style="flex:1 1 240px;min-width:180px;padding:4px 6px">
       <button class="lib-sub-add" type="button">${lang === "zh" ? "+ 添加订阅" : "+ Add subscription"}</button>
       <button class="lib-sub-kiwee" type="button" title="${lang === "zh" ? "从 homebrew.kiwee.top 拉取中文社区精选自制内容索引（约 26 个包），逐一加入订阅。已经订阅的会跳过。" : "Pull the curated Chinese-community homebrew index from homebrew.kiwee.top (~26 packs) and subscribe to each. Already-subscribed URLs are skipped."}">${lang === "zh" ? "+ kiwee 推荐自制" : "+ kiwee curated"}</button>
       ${subs.length > 0 ? `<button class="lib-sub-refresh-all" type="button">${lang === "zh" ? "🔄 刷新全部" : "🔄 Refresh all"}</button>` : ""}
@@ -1552,10 +1557,21 @@ function wireLibrariesBody(root: HTMLElement): void {
       const next = (getState().libraries ?? []).map((l) => (l.id === id ? { ...l, ...patch } : l));
       await setState({ libraries: next });
     };
-    nameInp?.addEventListener("change", () => commit({ name: nameInp.value.trim() || id }));
-    urlInp?.addEventListener("change", () =>
-      commit({ baseUrl: urlInp.value.trim().replace(/\/+$/, "") })
-    );
+    const saveField = async (field: "name" | "baseUrl") => {
+      const key = JSON.stringify([id, field]);
+      const input = settingsContent.field(key);
+      if (!isGM || !input || input.disabled || input.readOnly) return;
+      input.value = field === "name" ? input.value.trim() || id : input.value.trim().replace(/\/+$/, "");
+      settingsContent.clearNote(key);
+      try {
+        await commit({ [field]: input.value });
+      } catch (error) {
+        console.warn("[settings] library field save failed", error);
+        settingsContent.showSaveError(key, () => { void saveField(field); });
+      }
+    };
+    nameInp?.addEventListener("change", () => { void saveField("name"); });
+    urlInp?.addEventListener("change", () => { void saveField("baseUrl"); });
     enableBtn?.addEventListener("click", async () => {
       if (!isGM) return;
       const cur = getState().libraries.find((l) => l.id === id);
@@ -2769,13 +2785,13 @@ const TABS: TabDef[] = [
                  style="flex:1 1 auto;align-self:center;max-width:160px"/>
           <span data-key="bubblesScaleVal" style="flex:0 0 50px;text-align:right;color:#9aa0b3;font-size:11px;font-variant-numeric:tabular-nums">${bubbleScale.toFixed(2)}×</span>
         </div>
-        <div class="row">
+        <div class="row" data-settings-line>
           <div class="lbl">
             ${offsetLbl}
             <div class="desc"><em>${offsetDesc}</em></div>
           </div>
           <input type="number" step="1" value="${offset}"
-                 data-key="bubblesVerticalOffset"
+                 data-key="bubblesVerticalOffset" data-settings-draft="bubblesVerticalOffset"
                  ${(offsetByText || !isGM) ? "disabled" : ""}
                  style="flex:0 0 80px;align-self:center;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:3px 6px;color:#fff;font:inherit;text-align:right${(offsetByText || !isGM) ? ";opacity:0.45" : ""}"/>
           <span style="flex:0 0 28px;text-align:right;color:#9aa0b3;font-size:11px">px</span>
@@ -2824,13 +2840,13 @@ const TABS: TabDef[] = [
                   ${isGM ? "" : "disabled"}
                   aria-pressed="${bubbleAutoScaleText ? "true" : "false"}"></button>
         </div>
-        <div class="row">
+        <div class="row" data-settings-line>
           <div class="lbl">
             ${thresholdLbl}
             <div class="desc"><em>${thresholdDesc}</em></div>
           </div>
           <input type="number" min="0" max="100" step="5" value="${threshold}"
-                 data-key="bubblesPlayerThreshold"
+                 data-key="bubblesPlayerThreshold" data-settings-draft="bubblesPlayerThreshold"
                  ${isGM ? "" : "disabled"}
                  style="flex:0 0 80px;align-self:center;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:3px 6px;color:#fff;font:inherit;text-align:right"/>
           <span style="flex:0 0 28px;text-align:right;color:#9aa0b3;font-size:11px">%</span>
@@ -3277,8 +3293,8 @@ const TABS: TabDef[] = [
             paint(await OBR.scene.fog.getFilled());
           })
           .catch(() => {});
-        // renderContent() replaces contentEl's innerHTML on every state
-        // change, so this listener is dropped with the node it was
+        // A relevant settings refresh can replace contentEl's innerHTML,
+        // so this listener is dropped with the node it was
         // attached for; unsubscribe when the button leaves the DOM.
         let unsubscribe: (() => void) | null = null;
         try {
@@ -3618,6 +3634,9 @@ const topBarEl = document.getElementById("topBar") as HTMLElement;
 const contentEl = document.getElementById("content") as HTMLElement;
 const langZhEl = document.getElementById("langZh") as HTMLButtonElement;
 const langEnEl = document.getElementById("langEn") as HTMLButtonElement;
+const settingsContent = new SettingsContent(contentEl);
+let topBarMarkup = "";
+const moduleStatuses = new Map<string, ModuleLifecycleSnapshot>();
 
 let lang: Language = "zh";
 
@@ -3665,7 +3684,7 @@ function renderContent() {
   const s = getState();
 
   // ---- Top bar (title + per-plugin toggle if applicable) ----
-  let topBar = `<h2>${lang === "zh" ? tab.zh : tab.en}</h2>`;
+  let topBar = `<h2>${lang === "zh" ? tab.zh : tab.en}</h2><span id="moduleStatus" role="status" style="flex:1;min-width:0;font-size:12px;color:var(--text-dim)"></span>`;
   if (tab.moduleId) {
     const on = !!s.enabled[tab.moduleId];
     topBar += `<button class="tog ${
@@ -3678,15 +3697,19 @@ function renderContent() {
       lang === "zh" ? "" : ""
     }</span>`;
   }
-  topBarEl.innerHTML = topBar;
-  topBarEl
-    .querySelector<HTMLButtonElement>(".tog[data-mod]")
-    ?.addEventListener("click", async () => {
-      if (!isGM) return;
-      const id = tab.moduleId as ModuleId;
-      const cur = getState().enabled[id];
-      await setState({ enabled: { [id]: !cur } as any });
-    });
+  if (topBarMarkup !== topBar) {
+    topBarMarkup = topBar;
+    topBarEl.innerHTML = topBar;
+    topBarEl
+      .querySelector<HTMLButtonElement>(".tog[data-mod]")
+      ?.addEventListener("click", async () => {
+        if (!isGM) return;
+        const id = tab.moduleId as ModuleId;
+        const cur = getState().enabled[id];
+        await setState({ enabled: { [id]: !cur } as any });
+      });
+  }
+  renderModuleStatus();
 
   // ---- Body ----
   // 2026-05-04 fix: render BOTH `body` and `dynamicBody` when both
@@ -3698,8 +3721,20 @@ function renderContent() {
   const parts: string[] = [];
   if (tab.body) parts.push(tab.body[lang] || "");
   if (tab.dynamicBody) parts.push(tab.dynamicBody(lang, isGM) || "");
-  contentEl.innerHTML = parts.join("");
-  if (tab.afterRender) tab.afterRender(contentEl, isGM);
+  settingsContent.render({
+    scope: tab.id, html: parts.join(""), language: lang, editable: isGM,
+    afterRender: () => tab.afterRender?.(contentEl, isGM),
+  });
+}
+
+function renderModuleStatus(): void {
+  const slot = topBarEl.querySelector<HTMLElement>("#moduleStatus");
+  if (!slot) return;
+  const id = findTab(activeTab).moduleId;
+  renderSettingsModuleStatus(slot, id ? moduleStatuses.get(id) : undefined, lang,
+    async (moduleId) => {
+      await OBR.broadcast.sendMessage(BC_MODULE_RETRY, { id: moduleId }, { destination: "LOCAL" });
+    });
 }
 
 function setLang(l: Language) {
@@ -3724,6 +3759,17 @@ langEnEl.addEventListener("click", () => {
 });
 
 OBR.onReady(async () => {
+  OBR.broadcast.onMessage(BC_MODULE_STATUS, (event) => {
+    const modules = (event.data as { modules?: ModuleLifecycleSnapshot[] } | null)?.modules;
+    if (!Array.isArray(modules)) return;
+    moduleStatuses.clear();
+    for (const snapshot of modules) {
+      if (snapshot && typeof snapshot.id === "string") moduleStatuses.set(snapshot.id, snapshot);
+    }
+    renderModuleStatus();
+  });
+  void OBR.broadcast.sendMessage(BC_MODULE_STATUS_QUERY, {}, { destination: "LOCAL" })
+    .catch((error) => console.warn("[settings] module status query failed", error));
   try {
     isGM = (await OBR.player.getRole()) === "GM";
   } catch (e) {
@@ -3784,9 +3830,9 @@ OBR.onReady(async () => {
       if (activeTab === "bubbles") renderContent();
     }
   });
-  // Re-render content (including the per-tab toggles + dynamic body) on
-  // any suite state change. Language changes are handled separately so the
-  // panel reflects another iframe (e.g. cluster) toggling lang.
+  // Compare rendered settings, not the whole suite state: unrelated changes
+  // keep existing DOM and async controls alive. Relevant changes still refresh
+  // immediately, preserving keyed drafts while showing current saved values.
   onStateChange(() => renderContent());
   onLangChange((l) => setLang(l));
   setLang(getLocalLang());

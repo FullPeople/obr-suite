@@ -1,5 +1,7 @@
 import OBR from "@owlbear-rodeo/sdk";
-import { startSceneSync, getState, onStateChange, getLocalLang } from "./state";
+import { startSceneSync, refreshFromScene, getState, onStateChange, onStateRefreshed, onStateRefreshFailed, getLocalLang } from "./state";
+import { ModuleLifecycle, SceneModuleCoordinator, type ModuleHooks } from "./utils/moduleLifecycle";
+import { BC_MODULE_STATUS, BC_MODULE_STATUS_QUERY, BC_MODULE_RETRY } from "./utils/moduleLifecycleProtocol";
 import { setupTimeStop, teardownTimeStop } from "./modules/timeStop";
 import { setupFocus, teardownFocus } from "./modules/focus";
 import { setupSearch, teardownSearch } from "./modules/search";
@@ -661,7 +663,6 @@ OBR.onReady(() => {
 // flips ON, teardown() when it flips OFF. Modules register OBR listeners
 // (context menu, broadcast, popover, etc.) at setup and clean up at
 // teardown. The shell is responsible for state-based dispatching.
-type ModuleHooks = { setup: () => Promise<void>; teardown: () => Promise<void> };
 
 // Module setup order matters — OBR's popover layer warms up after the
 // first few popovers are opened, and the LAST popover to be opened
@@ -724,70 +725,32 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   },
 };
 
-// Module lifecycle states: "off" (not running), "starting" (setup in
-// flight), "on" (setup completed), "stopping" (teardown in flight).
-// Tracking the in-flight states prevents concurrent syncModules calls
-// from issuing duplicate setup() invocations on the same module — which
-// is what was causing search.setup to be retried 4 times when scene
-// metadata changes fired in rapid succession during initial load.
-type ModuleState = "off" | "starting" | "on" | "stopping";
-const moduleStatus = new Map<string, ModuleState>();
-
-async function syncModules(onlyIds?: Set<string>) {
-  const state = getState();
-  for (const [id, hooks] of Object.entries(modules)) {
-    if (!hooks) continue;
-    if (onlyIds && !onlyIds.has(id)) continue;
-    const wantOn = !!state.enabled[id as keyof typeof state.enabled];
-    const status = moduleStatus.get(id) ?? "off";
-    if (wantOn && status === "off") {
-      moduleStatus.set(id, "starting");
-      try {
-        await hooks.setup();
-        moduleStatus.set(id, "on");
-      } catch (e) {
-        // Mark as "on" anyway — the module's own setup catches its own
-        // errors normally; if something escapes here we don't want an
-        // infinite retry loop. The user can manually toggle in Settings.
-        console.error(`[obr-suite] ${id} setup escaped:`, e);
-        moduleStatus.set(id, "on");
-      }
-    } else if (!wantOn && status === "on") {
-      moduleStatus.set(id, "stopping");
-      try {
-        await hooks.teardown();
-      } catch (e) {
-        console.error(`[obr-suite] ${id} teardown escaped:`, e);
-      }
-      moduleStatus.set(id, "off");
-    }
-    // status "starting" or "stopping" → another syncModules is already
-    // handling this module; let it finish.
-  }
-}
-
-let lastEnabledSnapshot: Record<string, boolean> | null = null;
-function changedEnabledIds(): Set<string> | undefined {
-  const enabled = getState().enabled as Record<string, boolean>;
-  if (!lastEnabledSnapshot) {
-    lastEnabledSnapshot = { ...enabled };
-    return undefined;
-  }
-  const changed = new Set<string>();
-  for (const id of Object.keys(enabled)) {
-    if (enabled[id] !== lastEnabledSnapshot[id]) changed.add(id);
-  }
-  lastEnabledSnapshot = { ...enabled };
-  return changed.size > 0 ? changed : new Set<string>();
+const lifecycle = new ModuleLifecycle(modules, {
+  onChange: (modules) => {
+    if (OBR.isReady) void OBR.broadcast.sendMessage(
+      BC_MODULE_STATUS, { modules }, { destination: "LOCAL" },
+    ).catch(() => {});
+  },
+  onError: (id, operation, error) => console.error(`[obr-suite] ${id} ${operation} failed:`, error),
+});
+// Modules retain their scene listeners across switches. Only registration
+// work waits until scene settings arrive; desired changes are never skipped.
+void lifecycle.setPaused(true);
+function syncModules() {
+  return lifecycle.setDesired(getState().enabled);
 }
 
 OBR.onReady(async () => {
   // Sync state, then open cluster + activate all enabled modules.
   startSceneSync();
-  onStateChange(() => {
-    const changed = changedEnabledIds();
-    if (changed && changed.size === 0) return;
-    void syncModules(changed);
+  onStateChange(() => { void syncModules(); });
+  OBR.broadcast.onMessage(BC_MODULE_STATUS_QUERY, () => {
+    void OBR.broadcast.sendMessage(BC_MODULE_STATUS,
+      { modules: lifecycle.snapshot() }, { destination: "LOCAL" }).catch(() => {});
+  });
+  OBR.broadcast.onMessage(BC_MODULE_RETRY, (event) => {
+    const id = (event.data as { id?: unknown } | undefined)?.id;
+    if (typeof id === "string") void lifecycle.retry(id);
   });
 
   // Mobile-presence: every client listens; phones additionally
@@ -844,30 +807,22 @@ OBR.onReady(async () => {
   // its enable flag lives in state.enabled.metadataInspector and is
   // toggled in Settings → 元数据检查.)
 
-  const showIfReady = async () => {
-    try {
-      if (await OBR.scene.isReady()) {
-        await openCluster();
-        changedEnabledIds();
-        await syncModules();
-        void announceMobilePresence();
-        // Announcement no longer opens automatically; the cluster-row
-        // megaphone button remains the manual entry point.
-      } else {
-        await closeCluster();
-      }
-    } catch {}
-  };
-  await showIfReady();
-  OBR.scene.onReadyChange(async (ready) => {
-    if (ready) {
-      await openCluster();
-      await syncModules();
-      void announceMobilePresence();
-      // Announcement no longer opens automatically; the cluster-row
-      // megaphone button remains the manual entry point.
-    } else {
-      await closeCluster();
-    }
+  const sceneCoordinator = new SceneModuleCoordinator({
+    lifecycle, syncModules, refreshSettings: refreshFromScene,
+    openCluster, closeCluster, onReady: announceMobilePresence,
+    onError: (operation, error) => console.warn(`[obr-suite] scene ${operation} failed`, error),
+    onSettingsUnavailable: () => {
+      const message = getLocalLang() === "zh"
+        ? "场景设置读取失败，已暂停新功能启动。稍后重新打开场景可重试。"
+        : "Scene settings could not be loaded. New module startup is paused. Reopen the scene later to retry.";
+      void OBR.notification.show(message, "ERROR").catch(error => console.warn("[obr-suite] settings failure notice failed", error));
+    },
   });
+  onStateRefreshed(() => sceneCoordinator.settingsRefreshed());
+  onStateRefreshFailed(error => sceneCoordinator.settingsFailed(error));
+  // Subscribe before the initial read so a rapid scene switch is not missed.
+  OBR.scene.onReadyChange(ready => { sceneCoordinator.handleReady(ready); });
+  const initialRevision = sceneCoordinator.revision;
+  const ready = await OBR.scene.isReady().catch(() => false);
+  if (initialRevision === sceneCoordinator.revision) sceneCoordinator.handleReady(ready);
 });

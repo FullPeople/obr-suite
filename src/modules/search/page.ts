@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { fetchContentJson, createContentRequestGuard } from "../../utils/contentRequests";
 import {
   startSceneSync,
   getState,
@@ -272,15 +273,21 @@ function sourceLabel(code: string): string {
 let indexCache: IndexFile | null = null;
 let indexLoading: Promise<IndexFile> | null = null;
 let booksLoading: Promise<void> | null = null;
+const previewRequests = createContentRequestGuard();
+let contentGeneration = 0;
+let indexRetryAt = Infinity;
 
 async function loadIndex(): Promise<IndexFile> {
-  if (indexCache) return indexCache;
+  if (indexCache && Date.now() < indexRetryAt) return indexCache;
   if (indexLoading) return indexLoading;
+  const generation = contentGeneration;
+  let incomplete = false;
   indexLoading = (async () => {
     // 2026-05-10 — warm the IDB-backed local-content cache before we
     // call getLocalContentSignature() / getLocalIndexFile() below.
     // Idempotent.
     await initLocalContent();
+    if (generation !== contentGeneration) throw new DOMException("Content changed", "AbortError");
     // Cache key is keyed on the active library set + local-content
     // signature so switching libraries OR adding/removing local
     // imports both invalidate the cached merged index.
@@ -298,6 +305,7 @@ async function loadIndex(): Promise<IndexFile> {
         const parsed = JSON.parse(raw) as { ts: number; data: IndexFile };
         if (Date.now() - parsed.ts < CACHE_TTL_MS && parsed.data?.x?.length) {
           indexCache = parsed.data;
+          indexRetryAt = Infinity;
           buildSourceMap(indexCache);
           return indexCache;
         }
@@ -309,15 +317,20 @@ async function loadIndex(): Promise<IndexFile> {
     const perLibrary = await Promise.all(
       sources.map(async (cfg) => {
         try {
-          const res = await fetch(`${cfg.base}/${cfg.indexPath}`, { cache: "no-cache" });
-          if (!res.ok) return null;
-          return { idx: (await res.json()) as IndexFile, cfg };
+          const res = await fetchContentJson(`${cfg.base}/${cfg.indexPath}`, { cache: "no-cache" });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const idx = await res.json() as IndexFile;
+          if (!Array.isArray(idx.x)) throw new Error("Invalid search index");
+          return { idx, cfg };
         } catch (e) {
+          incomplete = true;
           console.warn(`[obr-suite/search] index fetch failed for ${cfg.base}/${cfg.indexPath}`, e);
           return null;
         }
       })
     );
+    if (generation !== contentGeneration) throw new DOMException("Content changed", "AbortError");
+    indexRetryAt = incomplete ? Date.now() + 15_000 : Infinity;
     const valid = perLibrary.filter(
       (x): x is { idx: IndexFile; cfg: typeof sources[number] } =>
         !!x && Array.isArray(x.idx.x),
@@ -430,7 +443,7 @@ async function loadIndex(): Promise<IndexFile> {
     try {
       for (const base of sources.map((s) => s.base)) {
         try {
-          const r = await fetch(`${base}/data/items-base.json`, { cache: "no-cache" });
+          const r = await fetchContentJson(`${base}/data/items-base.json`, { cache: "no-cache" });
           if (!r.ok) continue;
           const j = await r.json();
           const arr = (j.itemProperty ?? []) as any[];
@@ -455,14 +468,16 @@ async function loadIndex(): Promise<IndexFile> {
         } catch {}
       }
     } catch {}
+    if (generation !== contentGeneration) throw new DOMException("Content changed", "AbortError");
     indexCache = merged;
     buildSourceMap(indexCache);
     try {
-      localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: merged }));
+      if (!incomplete) localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: merged }));
     } catch {}
     return merged;
   })();
-  try { return await indexLoading; } finally { indexLoading = null; }
+  const pending = indexLoading;
+  try { return await pending; } finally { if (indexLoading === pending) indexLoading = null; }
 }
 
 /**
@@ -529,7 +544,7 @@ async function loadBooks(): Promise<void> {
       }
     } catch {}
     try {
-      const res = await fetch(booksUrl(getLocalLang()), { cache: "no-cache" });
+      const res = await fetchContentJson(booksUrl(getLocalLang()), { cache: "no-cache" });
       if (!res.ok) return;
       const data = await res.json();
       const map: Record<string, string> = {};
@@ -547,9 +562,13 @@ async function loadBooks(): Promise<void> {
           JSON.stringify({ ts: Date.now(), data: map })
         );
       } catch {}
-    } catch {}
+    } catch (error) {
+      console.warn("[search] book names unavailable", { url: booksUrl(getLocalLang()), error });
+    }
   })();
-  return booksLoading;
+  const pending = booksLoading;
+  try { return await pending; }
+  finally { if (booksLoading === pending) booksLoading = null; }
 }
 
 // --- Filter & search ---
@@ -633,6 +652,23 @@ const dataPending = new Map<string, Promise<DataEntry[]>>();
 // `renderPreviewFor`'s empty-state UI to surface a specific-and-
 // actionable workaround message instead of the generic "数据尚未同步").
 const loggedMissingSources = new Set<string>();
+const unavailableSources = new Set<string>();
+
+function invalidateSearchContent() {
+  contentGeneration++;
+  previewRequests.invalidate();
+  indexCache = null;
+  indexLoading = null;
+  indexRetryAt = Infinity;
+  dataCache.clear();
+  dataPending.clear();
+  classPoolCache.clear();
+  classPoolPending.clear();
+  itemsBaseCache.clear();
+  itemsBasePending.clear();
+  loggedMissingSources.clear();
+  unavailableSources.clear();
+}
 
 /** True if a previous fetch attempt for (cat.data.key, sourceCode)
  *  returned 404 from every (base × case-variant) combination. The
@@ -673,11 +709,12 @@ async function loadCategoryData(
     return loadItemsBaseSubarray(cat.data.itemsBaseKey);
   }
 
+  const generation = contentGeneration;
   const srcOriginal = srcCode(entry.s);
   const src = srcOriginal.toLowerCase();
   // Cache key must include the data key (not just c+src) so
   // race-vs-subrace lookups don't collide.
-  const ck = `${dataCacheKey(entry.c, src)}:${cat.data.key}`;
+  const ck = `${generation}:${dataCacheKey(entry.c, src)}:${cat.data.key}`;
   const cached = dataCache.get(ck);
   if (cached) return cached;
   const pending = dataPending.get(ck);
@@ -718,28 +755,40 @@ async function loadCategoryData(
     // survives. Built-in kiwee will typically have most entries;
     // custom hosts contribute their homebrew without overwriting.
     let okCount = 0;
+    let unavailable = false;
     const responses = await Promise.all(
       bases.flatMap((base) =>
         [...candidatePaths].map(async (path) => {
           try {
-            const res = await fetch(`${base}/data/${path}`, { cache: "no-cache" });
-            if (!res.ok) return null;
+            const res = await fetchContentJson(`${base}/data/${path}`, { cache: "no-cache" });
+            if (!res.ok) {
+              if (res.status !== 404) throw new Error(`HTTP ${res.status}`);
+              return null;
+            }
             okCount++;
             const json = await res.json();
-            return (json[cat.data!.key] ?? []) as DataEntry[];
-          } catch {
+            const entries = json[cat.data!.key] ?? [];
+            if (!Array.isArray(entries)) throw new Error("Invalid detail list");
+            return entries as DataEntry[];
+          } catch (error) {
+            unavailable = true;
+            console.warn("[search] detail source unavailable", { base, path, error });
             return null;
           }
         }),
       ),
     );
-    // If EVERY (base × case-variant) combination returned 404 / network
-    // error, the data for this source is unreachable from any of the
+    // If EVERY (base × case-variant) combination returned 404, the data
+    // for this source is absent from every one of the
     // user's configured libraries. Log ONCE per source so the user can
     // open DevTools and immediately see which library is the culprit
     // (typically a third-party homebrew extension whose author renamed
     // or removed files on the mirror). Suggest the workaround inline.
-    if (okCount === 0) {
+    if (generation !== contentGeneration) return [];
+    const availabilityKey = `${cat.data!.key}|${srcOriginal}`;
+    if (unavailable) unavailableSources.add(availabilityKey);
+    else unavailableSources.delete(availabilityKey);
+    if (okCount === 0 && !unavailable && bases.length > 0) {
       const probeKey = `${cat.data!.key}|${srcOriginal}`;
       if (!loggedMissingSources.has(probeKey)) {
         loggedMissingSources.add(probeKey);
@@ -761,9 +810,9 @@ async function loadCategoryData(
         merged.push(e);
       }
     }
-    dataCache.set(ck, merged);
+    if (!unavailable) dataCache.set(ck, merged);
     return merged;
-  })().finally(() => { dataPending.delete(ck); });
+  })().finally(() => { if (dataPending.get(ck) === p) dataPending.delete(ck); });
   dataPending.set(ck, p);
   return p;
 }
@@ -776,31 +825,44 @@ async function loadCategoryData(
 const classPoolCache = new Map<string, DataEntry[]>();
 const classPoolPending = new Map<string, Promise<DataEntry[]>>();
 async function loadAllClassData(key: string): Promise<DataEntry[]> {
-  const cached = classPoolCache.get(key);
+  const generation = contentGeneration;
+  const cacheKey = `${generation}:${key}`;
+  const cached = classPoolCache.get(cacheKey);
   if (cached) return cached;
-  const pending = classPoolPending.get(key);
+  const pending = classPoolPending.get(cacheKey);
   if (pending) return pending;
   const bases = getEnabledLibraryBases();
   const p = (async () => {
     const merged: DataEntry[] = [];
     const seen = new Set<string>();
+    let unavailable = false;
     for (const base of bases) {
       let index: Record<string, string> | null = null;
       try {
-        const res = await fetch(`${base}/data/class/index.json`, { cache: "no-cache" });
+        const res = await fetchContentJson(`${base}/data/class/index.json`, { cache: "no-cache" });
         if (res.ok) index = await res.json();
-      } catch {}
+        else if (res.status !== 404) throw new Error(`HTTP ${res.status}`);
+      } catch (error) {
+        unavailable = true;
+        console.warn("[search] class index unavailable", { base, error });
+      }
       if (!index) continue;
       const filenames = Object.values(index);
       // Fetch all class files for this library in parallel.
       const arrays = await Promise.all(
         filenames.map(async (fn) => {
           try {
-            const r = await fetch(`${base}/data/class/${fn}`, { cache: "no-cache" });
-            if (!r.ok) return null;
+            const r = await fetchContentJson(`${base}/data/class/${fn}`, { cache: "no-cache" });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
             const j = await r.json();
-            return (j[key] ?? []) as DataEntry[];
-          } catch { return null; }
+            const entries = j[key] ?? [];
+            if (!Array.isArray(entries)) throw new Error("Invalid class list");
+            return entries as DataEntry[];
+          } catch (error) {
+            unavailable = true;
+            console.warn("[search] class file unavailable", { base, fn, error });
+            return null;
+          }
         }),
       );
       for (const arr of arrays) {
@@ -817,10 +879,10 @@ async function loadAllClassData(key: string): Promise<DataEntry[]> {
         }
       }
     }
-    classPoolCache.set(key, merged);
+    if (generation === contentGeneration && merged.length > 0 && !unavailable) classPoolCache.set(cacheKey, merged);
     return merged;
-  })().finally(() => { classPoolPending.delete(key); });
-  classPoolPending.set(key, p);
+  })().finally(() => { if (classPoolPending.get(cacheKey) === p) classPoolPending.delete(cacheKey); });
+  classPoolPending.set(cacheKey, p);
   return p;
 }
 
@@ -832,20 +894,27 @@ async function loadAllClassData(key: string): Promise<DataEntry[]> {
 const itemsBaseCache = new Map<string, DataEntry[]>();
 const itemsBasePending = new Map<string, Promise<DataEntry[]>>();
 async function loadItemsBaseSubarray(key: string): Promise<DataEntry[]> {
-  const cached = itemsBaseCache.get(key);
+  const generation = contentGeneration;
+  const cacheKey = `${generation}:${key}`;
+  const cached = itemsBaseCache.get(cacheKey);
   if (cached) return cached;
-  const pending = itemsBasePending.get(key);
+  const pending = itemsBasePending.get(cacheKey);
   if (pending) return pending;
   const bases = getEnabledLibraryBases();
   const p = (async () => {
     const merged: DataEntry[] = [];
     const seen = new Set<string>();
+    let unavailable = false;
     for (const base of bases) {
       try {
-        const r = await fetch(`${base}/data/items-base.json`, { cache: "no-cache" });
-        if (!r.ok) continue;
+        const r = await fetchContentJson(`${base}/data/items-base.json`, { cache: "no-cache" });
+        if (!r.ok) {
+          if (r.status === 404) continue;
+          throw new Error(`HTTP ${r.status}`);
+        }
         const j = await r.json();
         const arr = (j[key] ?? []) as DataEntry[];
+        if (!Array.isArray(arr)) throw new Error("Invalid item properties");
         for (const e of arr) {
           // itemProperty entries are nested: each has `entries[]` whose
           // first item carries `name` (CN) + `ENG_name` (EN). Hoist
@@ -865,12 +934,15 @@ async function loadItemsBaseSubarray(key: string): Promise<DataEntry[]> {
           seen.add(k);
           merged.push(top);
         }
-      } catch {}
+      } catch (error) {
+        unavailable = true;
+        console.warn("[search] item properties unavailable", { base, error });
+      }
     }
-    itemsBaseCache.set(key, merged);
+    if (generation === contentGeneration && merged.length > 0 && !unavailable) itemsBaseCache.set(cacheKey, merged);
     return merged;
-  })().finally(() => { itemsBasePending.delete(key); });
-  itemsBasePending.set(key, p);
+  })().finally(() => { if (itemsBasePending.get(cacheKey) === p) itemsBasePending.delete(cacheKey); });
+  itemsBasePending.set(cacheKey, p);
   return p;
 }
 
@@ -1774,6 +1846,7 @@ function renderResults(hits: Entry[], q: string) {
 }
 
 function renderPreviewIdle() {
+  previewRequests.invalidate();
   previewEl.innerHTML = `<div class="prev-empty">悬停或点击词条查看详情<br><span class="prev-empty-sub">Esc 关闭 · ↑↓ 选择</span></div>`;
 }
 
@@ -1852,12 +1925,12 @@ async function sendMissingReport(
 }
 
 async function renderPreviewFor(entry: Entry) {
+  const isCurrent = previewRequests.next();
   const cat = categoryInfo(entry.c);
   const display = entry.cn || entry.n;
   const code = srcCode(entry.s).toUpperCase();
   const page = entry.p ? ` · p.${entry.p}` : "";
 
-  await loadBooks();
   const srcDisplay = sourceLabel(code);
 
   previewEl.innerHTML = `
@@ -1877,6 +1950,12 @@ async function renderPreviewFor(entry: Entry) {
     <div class="prev-body" id="prev-body"><div class="prev-loading">加载中…</div></div>
   `;
   const bodyEl = previewEl.querySelector("#prev-body") as HTMLDivElement;
+  const metaEl = previewEl.querySelector(".prev-meta") as HTMLDivElement;
+  // Source names are optional decoration. Paint the usable shell first.
+  void loadBooks().then(() => {
+    if (!isCurrent() || !metaEl.isConnected) return;
+    metaEl.textContent = `${cat.label} · ${sourceLabel(code)}${page}`;
+  });
   // Wire the "未显示？汇报" button. POST the search entry to the
   // character-cards Flask service (it logs to a JSONL file the
   // maintainer reviews). Single-shot per click, with a small toast on
@@ -1892,10 +1971,16 @@ async function renderPreviewFor(entry: Entry) {
   }
 
   let data: DataEntry | null = null;
-  try { data = await findEntryData(entry); } catch {}
-  if (!pinnedEntry && lastHoverEntry && lastHoverEntry.id !== entry.id) return;
+  try { data = await findEntryData(entry); }
+  catch (error) { console.warn("[search] preview load failed", { entry: entry.n, source: code, error }); }
+  if (!isCurrent() || !bodyEl.isConnected) return;
 
   if (!data) {
+    if (unavailableSources.has(`${cat.data?.key}|${srcCode(entry.s)}`)) {
+      bodyEl.innerHTML = `<div class="prev-empty">${getLocalLang() === "zh" ? "暂时无法读取此资料。" : "This content is temporarily unavailable."}<br><button type="button" class="prev-retry">${getLocalLang() === "zh" ? "重试" : "Retry"}</button></div>`;
+      bodyEl.querySelector(".prev-retry")?.addEventListener("click", () => { void renderPreviewFor(entry); });
+      return;
+    }
     // If we've previously detected that this source's data files are
     // entirely missing from every enabled library (the all-404 path
     // in loadCategoryData also recorded a probeKey), show a more
@@ -1940,15 +2025,17 @@ async function renderPreviewFor(entry: Entry) {
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function runSearch(q: string) {
+  const generation = contentGeneration;
   if (!indexCache) renderHint("加载索引中…（首次约 1 秒）");
   let idx: IndexFile;
   try { idx = await loadIndex(); }
   catch (e) {
+    if (generation !== contentGeneration) return;
     renderHint("索引加载失败：" + ((e as Error).message ?? "网络错误"), true);
     return;
   }
   const currentQ = inputEl.value.trim();
-  if (currentQ !== q) return;
+  if (currentQ !== q || generation !== contentGeneration) return;
   const s = getState();
   const hits = search(q, idx, {
     dataVersion: s.dataVersion,
@@ -2027,11 +2114,10 @@ OBR.onReady(() => {
   // iframe (manual import OR URL subscription refresh) wouldn't be
   // visible here until the user reloads the whole page.
   OBR.broadcast.onMessage(BC_LOCAL_CONTENT_CHANGED, () => {
+    invalidateSearchContent();
     void forceReloadLocalContent().then(() => {
-      indexCache = null;
-      dataCache.clear();
-      dataPending.clear();
-    });
+      invalidateSearchContent();
+    }).catch((error) => console.warn("[search] local content refresh failed", error));
   });
 });
 
@@ -2170,9 +2256,7 @@ OBR.onReady(async () => {
     const sig = libSig();
     if (sig !== lastLibSig) {
       lastLibSig = sig;
-      indexCache = null;
-      dataCache.clear();
-      dataPending.clear();
+      invalidateSearchContent();
       // Reload the index in the background so the next user input
       // doesn't stall on a fetch. If the input is already populated,
       // re-run the filter once the new index lands.
