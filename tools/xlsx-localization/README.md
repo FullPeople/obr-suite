@@ -147,4 +147,48 @@ future custom-slot edits, dropdown compaction, conditional formatting, import
 metadata or native recalculation. Identity JSON consistency checks are not
 authentication for foreign plans. The lookup CLI regenerates from the actual
 original instead. See `docs/research/xlsx-spell-identity-20260909.md` for actual
-source conflicts, the missing English label and the remaining complete-card work.
+source conflicts, the precisely reviewed N337 display correction, and remaining
+complete-card work. The identity/lookup tools themselves remain plan-only;
+selection and package application are separate increments.
+
+## Plan the explicit spell selector
+
+```text
+python -B -X utf8 tools/xlsx-localization/spell_selection_plan.py --output <new-audit-directory>
+python -B -X utf8 tools/xlsx-localization/spell_selection_plan_selftest.py --output <new-audit-result.json>
+```
+
+The selection plan replaces the original active-cell/F9 C3 expression with an
+explicit input. Its protected C3:R6 merge keeps all 64 existing cells and visual
+styles; nine dedicated style clones unlock just this input. The existing 200
+spellbook inputs share a compact list with C3. All 50 original custom slots are
+included dynamically, with distinct human labels and literal wildcard handling.
+A separate 2024 AJ2 alignment clone keeps the translated color legend on one line.
+
+Plans regenerate the pinned originals and identity/lookup dependencies. The
+packager must match exact source cells, styles and validation nodes before
+applying them. Main-card F/K lists, name-specific conditional formatting, body
+translations and importer identity remain separate work. Native selection,
+recalculation and layout are not established by the finite formula model.
+See `docs/research/xlsx-spell-selection-20260909.md` for the engineering copy scope.
+
+## Generate the spell-selection engineering copies
+
+```text
+python -B -X utf8 tools/xlsx-localization/spell_package.py
+python -B -X utf8 tools/xlsx-localization/spell_package_selftest.py
+```
+
+The packager creates a new `spell-candidate-*` directory under the repository's
+sibling `_audit/xlsx-spell-package`. `--repo` selects another checkout containing
+the same pinned tools and original files; `--output` must stay inside that audit
+root and must be a new directory. It rebuilds AV1 and shield seeds from the actual
+originals, then applies the regenerated lookup and selection plans. No historical
+audit script or saved seed is required, and no external plan JSON is accepted.
+
+The new helper sheets, names, input validation and style clones are registered
+without altering unrelated data. Both final files explicitly remain uncalculated
+engineering copies and are not ready for upload. The integration selftest keeps
+its successful minimal source copy intact; deliberate rejection inputs use a
+separate directory. It checks package reproduction and output boundaries, not
+native Excel/WPS interaction or formula performance.

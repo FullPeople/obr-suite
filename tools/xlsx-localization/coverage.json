@@ -9,9 +9,9 @@
     "context_records": 25922,
     "occurrences": 28648,
     "seed_records": 7029,
-    "reviewed_records": 2054,
-    "missing_records": 16839,
-    "missing_characters": 867483,
+    "reviewed_records": 2097,
+    "missing_records": 16796,
+    "missing_characters": 864603,
     "long_missing_records": 2803,
     "long_missing_characters": 670515,
     "by_kind": {
@@ -27,7 +27,7 @@
       "xml_attribute": 113
     },
     "seed_methods": {
-      "context_reviewed": 2054,
+      "context_reviewed": 2097,
       "exact_glossary": 4463,
       "existing_english_column": 1330,
       "number_unit": 1236
@@ -38,9 +38,9 @@
       "context_records": 9933,
       "occurrences": 11223,
       "seed_records": 2818,
-      "reviewed_records": 886,
-      "missing_records": 6229,
-      "missing_characters": 276020,
+      "reviewed_records": 929,
+      "missing_records": 6186,
+      "missing_characters": 273140,
       "long_missing_records": 886,
       "long_missing_characters": 201329,
       "by_kind": {
@@ -56,7 +56,7 @@
         "xml_attribute": 56
       },
       "seed_methods": {
-        "context_reviewed": 886,
+        "context_reviewed": 929,
         "exact_glossary": 1781,
         "existing_english_column": 521,
         "number_unit": 516

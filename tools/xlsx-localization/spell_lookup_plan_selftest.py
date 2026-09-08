@@ -113,6 +113,8 @@ def main():
         check(version + " explicit incomplete package status", not plan["workbookWritten"] and not plan["nativeCalculated"] and not plan["releaseReady"] and len(plan["remaining"]) == 8)
         # Finite row/column model only. Formula execution is an independent gate.
         cases = [("Air Bubble", 211 if version == "2014" else 290), ("", 0), ("unknown spell", 0), ("*", 0), ("Air Bubble ", 0)]
+        if version == "2014":
+            cases += [("Summon Elemental", 337)]
         if version == "2024":
             cases += [("Holy Word", 73), ("Divine Word", 719), ("Sanctum of the Flock (Level 3)", 452), ("Sanctum of the Flock (Level 5)", 646), ("Sanctum of the Flock", 0)]
         for name, expected in cases:

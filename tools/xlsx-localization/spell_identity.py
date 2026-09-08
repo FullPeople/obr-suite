@@ -33,6 +33,14 @@ LAYOUTS = {
 }
 NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 RNS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+# A reviewed display-only correction for one exact source row. This is not a
+# rule for stripping Chinese characters from arbitrary names or custom spells.
+DISPLAY_NAME_OVERRIDES = {
+    "5E2014:spell:94444fda4206d579125418b0007b89c414b86c27d6b98655f81f3f1ce65e8fe6:337": {
+        "original": "术Summon Elemental", "display": "Summon Elemental",
+        "fieldsSha256": "ce023aeb71dd8e6bd09261b489735feee79f2b62870ed5706b2c548e0fb3ac89",
+    },
+}
 
 
 class Rejected(ValueError):
@@ -92,6 +100,14 @@ def assign_displays(rows):
             continue
         raw = row["original"]["N"]
         base = raw.strip() if isinstance(raw, str) else ""
+        override = DISPLAY_NAME_OVERRIDES.get(row.get("identity"))
+        if override is not None:
+            require(raw == override["original"], "Reviewed display name source drift")
+            require(row.get("fieldsSha256") == override["fieldsSha256"]
+                    and sha(canonical(row["fields"])) == override["fieldsSha256"], "Reviewed display name fields drift")
+            base = override["display"]
+            diagnostics.append({"code": "REVIEWED_DISPLAY_NAME_OVERRIDE", "rows": [row["row"]],
+                                "original": raw, "displayBase": base, "originalFieldsUnchanged": True})
         row["display"]["baseName"] = base or None
         if any("\u3400" <= c <= "\u9fff" for c in base):
             row["display"]["status"] = "rejected"
@@ -102,7 +118,7 @@ def assign_displays(rows):
             row["display"]["status"] = "rejected"
             diagnostics.append({"code": "UNSUPPORTED_DISPLAY_NAME", "rows": [row["row"]]})
             continue
-        if raw != base:
+        if override is None and raw != base:
             diagnostics.append({"code": "DISPLAY_OUTER_WHITESPACE_TRIMMED", "rows": [row["row"]], "original": raw, "displayBase": base})
         candidates[key(base)].append(row)
     for matching in by_a.values():

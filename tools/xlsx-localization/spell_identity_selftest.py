@@ -72,7 +72,7 @@ def main():
         check(version + " fifty custom slots keep thirteen mirrors and no invented active text", sum(r["kind"] == "custom-slot" for r in plan["rows"]) == 50 and all(
             len(r["customMirrors"]) == 13 and not r["active"] and r["display"]["label"] is None
             for r in plan["rows"] if r["kind"] == "custom-slot"))
-        check(version + " all English labels unique and separate from A keys", len({r["display"]["label"].casefold() for r in plan["rows"] if r["display"]["label"]}) == (521 if version == "2014" else 809)
+        check(version + " all English labels unique and separate from A keys", len({r["display"]["label"].casefold() for r in plan["rows"] if r["display"]["label"]}) == (522 if version == "2014" else 809)
               and not ({r["display"]["label"].casefold() for r in plan["rows"] if r["display"]["label"]} & {r["original"]["A"].casefold() for r in plan["rows"] if r["active"]}))
         acid = s.resolve_input(plan, "ACID SPLASH")
         check(version + " English and Chinese Acid Splash retain same full fields", acid["row"] == 3 and acid["fields"] == s.resolve_input(plan, "酸液飞溅")["fields"] == plan["rows"][0]["fields"])
@@ -84,7 +84,15 @@ def main():
         check(version + " custom level mirror records both name gate and level input", len(next(m for m in custom["customMirrors"] if m["column"] == "B")["sources"]) == 2)
     newer = plans["2024"]
     malformed = plans["2014"]["rows"][337 - 3]
-    check("2014 malformed source N retained without inventing corrected English", malformed["original"]["N"] == "术Summon Elemental" and malformed["display"]["label"] is None and malformed["display"]["status"] == "rejected" and s.resolve_id(plans["2014"], malformed["identity"])["original"]["N"] == "术Summon Elemental" and s.resolve_input(plans["2014"], "Summon Elemental") == {"status": "unknown"})
+    check("reviewed N337 display correction retains full original fields", malformed["original"]["N"] == "术Summon Elemental" and malformed["display"]["label"] == "Summon Elemental" and s.resolve_id(plans["2014"], malformed["identity"])["original"]["N"] == "术Summon Elemental" and s.resolve_input(plans["2014"], "Summon Elemental")["fields"] == malformed["fields"])
+    check("N337 display correction explicitly diagnosed without whitespace mislabel", [x for x in plans["2014"]["diagnostics"] if 337 in x["rows"]] == [{"code": "REVIEWED_DISPLAY_NAME_OVERRIDE", "rows": [337], "original": "术Summon Elemental", "displayBase": "Summon Elemental", "originalFieldsUnchanged": True}])
+    changed = deepcopy(malformed); changed["original"]["N"] = "术Another Spell"
+    rejects("display correction cannot apply to changed source name", lambda: s.assign_displays([changed]), "Reviewed display name source drift")
+    changed = deepcopy(malformed); changed["fields"]["B"]["value"] = "5"; changed["fieldsSha256"] = s.sha(s.canonical(changed["fields"]))
+    rejects("display correction cannot apply to changed complete row", lambda: s.assign_displays([changed]), "Reviewed display name fields drift")
+    changed = deepcopy(malformed); changed["identity"] = "another-source:337"
+    s.assign_displays([changed])
+    check("display correction never strips a similar unreviewed name", changed["display"]["label"] is None and changed["display"]["status"] == "rejected")
     holy, divine = [s.resolve_input(newer, name) for name in ("Holy Word", "Divine Word")]
     check("duplicate A, unique English names select distinct real M", holy["row"] == 73 and divine["row"] == 719 and holy["original"]["A"] == divine["original"]["A"] == "圣言术" and holy["fields"]["M"]["value"] != divine["fields"]["M"]["value"])
     legacy = s.resolve_input(newer, "圣言术")
