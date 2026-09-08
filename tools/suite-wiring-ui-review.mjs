@@ -50,9 +50,19 @@ try {
   await page.locator('[data-tab="transitions"]').click();
   await page.locator("#openTransitions").click();
   assert.ok(await page.evaluate(() => window.__transitionFixture.sent.some((message) => message.channel === "com.obr-suite/transitions/open" && message.destination === "LOCAL")));
-  for (const tab of ["transitions", "bossBar", "dynamicFog", "musicBoard", "threeDragonAnte"]) {
+  for (const tab of ["transitions", "bossBar", "dynamicFog", "musicBoard", "threeDragonAnte", "sharedPointer"]) {
     await page.locator(`[data-tab="${tab}"]`).click(); await page.waitForTimeout(80);
     assert.equal(await page.locator(".tog[data-mod]").isDisabled(), role !== "GM");
+    if (tab === "sharedPointer") {
+      await page.locator("#activateSharedPointer").click();
+      assert.ok(await page.evaluate(() => window.__transitionFixture.sent.some(message => message.channel === "com.obr-suite/shared-pointer/activate" && message.destination === "LOCAL")));
+      if (role === "GM") {
+        await page.locator('.tog[data-mod="sharedPointer"]').click();
+        await page.waitForFunction(() => document.querySelector("#activateSharedPointer")?.disabled === true);
+        await page.locator('.tog[data-mod="sharedPointer"]').click();
+        await page.waitForFunction(() => document.querySelector("#activateSharedPointer")?.disabled === false);
+      }
+    }
     if (tab === "threeDragonAnte") {
       await page.locator("#openThreeDragon").click();
       assert.ok(await page.evaluate(() => window.__transitionFixture.sent.some(message => message.channel === "com.obr-suite/three-dragon-ante/open" && message.destination === "LOCAL")));
@@ -122,6 +132,8 @@ try {
   assert.ok(await row.evaluate(() => window.__transitionFixture.sent.some((message) => message.channel === "com.obr-suite/transitions/open" && message.destination === "LOCAL")));
   await row.locator("#btnThreeDragon").click();
   assert.ok(await row.evaluate(() => window.__transitionFixture.sent.some(message => message.channel === "com.obr-suite/three-dragon-ante/open" && message.destination === "LOCAL")));
+  await row.locator("#btnSharedPointer").click();
+  assert.ok(await row.evaluate(() => window.__transitionFixture.sent.some(message => message.channel === "com.obr-suite/shared-pointer/activate" && message.destination === "LOCAL")));
   for (const width of [960, 640, 380]) {
     await row.setViewportSize({ width, height: 56 });
     const geometry = await row.evaluate(() => ({ naturalWidth: document.getElementById("row").scrollWidth,
@@ -158,7 +170,7 @@ try {
  }
  writeFileSync(join(shots, "review.json"), JSON.stringify(results, null, 2));
  for (const result of results) assert.deepEqual(result.errors, [], `${result.mode}/${result.role}/${result.lang} browser errors`);
- console.log(`SUITE_WIRING_UI: 24 settings tab views + 12 quick-bar widths; card table/music GM/player controls, library language save failure/retry, both handle sides and scroll/hit targets PASS; ${shots}`);
+ console.log(`SUITE_WIRING_UI: 28 settings tab views + 12 quick-bar widths; pointer/card table/music GM/player controls, library language save failure/retry, both handle sides and scroll/hit targets PASS; ${shots}`);
 } finally {
  await browser?.close(); await new Promise(done => server ? server.close(done) : done());
  if (dirname(resolve(out)) !== outputRoot) throw Error("Unexpected temporary output path"); rmSync(out, {recursive:true,force:true});

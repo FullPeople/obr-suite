@@ -32,6 +32,7 @@ export type ModuleId =
   | "bossBar"
   | "transitions"
   | "threeDragonAnte"
+  | "sharedPointer"
   | "metadataInspector"
   | "fullFog"
   | "fogEditor"
@@ -207,6 +208,8 @@ export const DEFAULT_STATE: SuiteState = {
     bossBar: true,
     transitions: true,
     threeDragonAnte: true,
+    // Available to everyone; positions are shared only while using its tool.
+    sharedPointer: true,
     // DM-only inspection tool. Default ON in all channels; useful for
     // field debugging token / scene / room metadata.
     metadataInspector: true,

@@ -51,6 +51,7 @@ import { getLibraryLanguage } from "./utils/contentLocale";
 import { getBossPreferences, setBossPreferences, BOSS_PREFERENCES_CHANGED, BOSS_PREFERENCES_KEY } from "./modules/bossBar/preferences";
 import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
 import { TABLE_OPEN } from "./modules/threeDragonAnte/protocol";
+import { POINTER_ACTIVATE } from "./modules/sharedPointer/protocol";
 import {
   BC_MODULE_STATUS_QUERY, BC_MODULE_STATUS, BC_MODULE_RETRY,
   type ModuleLifecycleSnapshot,
@@ -2668,6 +2669,26 @@ const TABS: TabDef[] = [
           btn.classList.toggle("on", next);
           btn.setAttribute("aria-pressed", String(next));
         });
+    },
+  },
+  {
+    id: "sharedPointer",
+    zh: `${ICONS.sparkles} 共享指针`,
+    en: `${ICONS.sparkles} Shared pointer`,
+    moduleId: "sharedPointer",
+    dynamicBody: (lang) => `<h3>${lang === "zh" ? "给同桌玩家指示位置" : "Point something out to your table"}</h3>
+      <p>${lang === "zh" ? "选择共享指针后，移动鼠标即可向同桌显示你的名字和位置。停留后指针会自动隐藏，切换工具即可结束。" : "Select the shared pointer and move to show your name and position to your table. Pause to hide it, or switch tools to stop."}</p>
+      <button id="activateSharedPointer" class="layout-editor-btn" type="button" ${getState().enabled.sharedPointer ? "" : "disabled"}>${lang === "zh" ? "使用共享指针" : "Use shared pointer"}</button>
+      <p class="meta">${lang === "zh" ? "仅在指示工具中共享位置。也可使用画布工具栏或常用栏中的同名按钮。新场景首次使用时需要一位 DM 在线。" : "Position sharing is active only in the pointer tool. You can also select it from the canvas toolbar or quick bar. A GM must be online to initialize a new scene."}</p>`,
+    afterRender: (root) => {
+      root.querySelector<HTMLButtonElement>("#activateSharedPointer")?.addEventListener("click", async () => {
+        if (!getState().enabled.sharedPointer) return;
+        try { await OBR.broadcast.sendMessage(POINTER_ACTIVATE, {}, { destination: "LOCAL" }); }
+        catch (error) {
+          console.warn("[settings] shared pointer activation failed", error);
+          void OBR.notification.show(getLocalLang() === "zh" ? "共享指针暂时无法打开，请重试。" : "Could not activate the shared pointer. Please try again.", "ERROR");
+        }
+      });
     },
   },
   {

@@ -25,6 +25,7 @@ import { setupHpBar, teardownHpBar } from "./modules/hpBar";
 import { setupBossBar, teardownBossBar } from "./modules/bossBar";
 import { setupTransitions, teardownTransitions } from "./modules/transitions";
 import { setupThreeDragonAnte, teardownThreeDragonAnte } from "./modules/threeDragonAnte";
+import { setupSharedPointer, teardownSharedPointer } from "./modules/sharedPointer";
 import { setupMetadataInspector, teardownMetadataInspector } from "./modules/metadata-inspector";
 import {
   setupDynamicFog,
@@ -692,6 +693,7 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   bossBar: { setup: setupBossBar, teardown: teardownBossBar },
   transitions: { setup: setupTransitions, teardown: teardownTransitions },
   threeDragonAnte: { setup: setupThreeDragonAnte, teardown: teardownThreeDragonAnte },
+  sharedPointer: { setup: setupSharedPointer, teardown: teardownSharedPointer },
   metadataInspector: {
     setup: async () => { await setupMetadataInspector(); },
     teardown: async () => { teardownMetadataInspector(); },

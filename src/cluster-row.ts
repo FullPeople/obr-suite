@@ -16,6 +16,7 @@ import { PANEL_IDS } from "./utils/panelLayout";
 import { installDebugOverlay } from "./utils/debugOverlay";
 import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
 import { TABLE_OPEN } from "./modules/threeDragonAnte/protocol";
+import { POINTER_ACTIVATE } from "./modules/sharedPointer/protocol";
 
 // Cluster ROW iframe — only rendered while the user has the trigger
 // toggled on. Holds the actual action buttons. The row popover is
@@ -168,6 +169,10 @@ function renderRow() {
     id: "btnThreeDragon", labelHtml: lang === "zh" ? "三龙牌" : "Three-Dragon Ante",
     title: lang === "zh" ? "打开多人牌桌" : "Open the multiplayer card table",
   }));
+  if (s.enabled.sharedPointer) parts.push(btnHTML({
+    id: "btnSharedPointer", labelHtml: lang === "zh" ? "共享指针" : "Share pointer",
+    title: lang === "zh" ? "仅在指示工具中共享位置；停留后自动隐藏" : "Share your position in the pointer tool; pause to hide",
+  }));
   if (s.enabled.transitions) {
     parts.push(btnHTML({
       id: "btnTransitions",
@@ -257,6 +262,10 @@ function renderRow() {
   document.getElementById("btnThreeDragon")?.addEventListener("click", () => {
     void OBR.broadcast.sendMessage(TABLE_OPEN, {}, { destination: "LOCAL" })
       .catch(error => console.warn("[obr-suite] open card table failed", error));
+  });
+  document.getElementById("btnSharedPointer")?.addEventListener("click", () => {
+    void OBR.broadcast.sendMessage(POINTER_ACTIVATE, {}, { destination: "LOCAL" })
+      .catch(error => console.warn("[obr-suite] shared pointer activation failed", error));
   });
   document.getElementById("btnTransitions")?.addEventListener("click", () => {
     void OBR.broadcast.sendMessage(BC_TRANSITIONS_OPEN, {}, { destination: "LOCAL" })

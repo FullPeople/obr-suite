@@ -333,10 +333,11 @@ function readSceneOverheadMode(meta: Record<string, unknown>): boolean {
 // the now-DM-synced fields, seed the scene metadata from them so a
 // table that's mid-campaign doesn't lose the GM's tuning. GM-only
 // (only the GM can write scene metadata); runs once on setup.
-async function migrateLocalBubbleSettings(): Promise<void> {
+async function migrateLocalBubbleSettings(shouldApply: () => boolean): Promise<void> {
   if (role !== "GM") return;
   try {
     const meta = await OBR.scene.getMetadata();
+    if (!shouldApply() || role !== "GM") return;
     const existing = meta[SCENE_BUBBLES_SETTINGS_KEY] as Record<string, unknown> | undefined;
     // Already has the new fields → nothing to migrate.
     if (existing && "verticalOffset" in existing) return;
@@ -458,8 +459,9 @@ async function syncTokenTextFontSize(
   items: Item[],
   sceneDpi: number,
   autoScale: boolean,
+  shouldApply: () => boolean,
 ): Promise<void> {
-  if (!autoScale) return;
+  if (!autoScale || !shouldApply()) return;
   const targetIds: string[] = [];
   const targetSize = new Map<string, number>();
   for (const it of items) {
@@ -478,6 +480,7 @@ async function syncTokenTextFontSize(
   if (!targetIds.length) return;
   try {
     await OBR.scene.items.updateItems(targetIds, (drafts) => {
+      if (!shouldApply()) return;
       for (const d of drafts) {
         const want = targetSize.get(d.id);
         if (want == null) continue;
@@ -742,23 +745,30 @@ half4 main(float2 coord) {
 interface BubbleEntry {
   ids: string[];                  // every local item id we own for this token
   shimmerIds: string[];           // every shader Effect we own (timer ticks iTime on these)
-  /** Rebuild trigger — combines structure + value + flip + intrinsic
-   *  geometry into one string. Rebuilt = full delete + add. Things
-   *  NOT included here (parent.position, parent.scale magnitude,
-   *  parent.rotation) are handled by OBR's attachment inheritance
-   *  at draw time, so a sync that finds no rebuildHash change can
-   *  skip everything. */
+  /** Structure, values, rendered dimensions and token-relative anchors.
+   *  Plain translation is handled by POSITION inheritance without rebuilding.
+   *  SCALE and ROTATION remain disabled; committed geometry changes must be
+   *  represented here, including changes that preserve bar width/height. */
   rebuildHash: string;
   data: BubbleData;
   statsVisible: boolean;
 }
 const entries = new Map<string, BubbleEntry>();
 
+interface BubbleSession {
+  initialized: boolean;
+  ready: boolean;
+  sceneRevision: number;
+  roleRevision: number;
+  queuedSync: boolean;
+  readyTimer: ReturnType<typeof setTimeout> | null;
+}
+let session: BubbleSession | null = null;
+
 let role: "GM" | "PLAYER" = "PLAYER";
 let myPlayerId = "";  // own id — used to detect token ownership for full-bar override
 let unsubs: Array<() => void> = [];
-let inSync = false;
-let queuedSync = false;
+let syncOwner: BubbleSession | null = null;
 let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 // Scene DPI cached at setup + on grid changes so the bounds-poll
 // doesn't have to await `OBR.scene.grid.getDpi()` every frame.
@@ -808,6 +818,8 @@ function stopAnimationTimer(): void {
 
 let scheduleSyncCount = 0;
 function scheduleSync(): void {
+  const own = session;
+  if (!own?.initialized || !own.ready) return;
   scheduleSyncCount++;
   if (pendingTimer) return;
   // Debounce reduced from 60 → 16 ms (one frame). The original 60 ms
@@ -818,7 +830,7 @@ function scheduleSync(): void {
   // bubbles bar above the token.
   pendingTimer = setTimeout(() => {
     pendingTimer = null;
-    syncBubbles().catch((e) => console.warn("[obr-suite/bubbles] sync failed", e));
+    if (session === own) syncBubbles().catch((e) => console.warn("[obr-suite/bubbles] sync failed", e));
   }, 16);
 }
 
@@ -1125,6 +1137,15 @@ function computeLayout(
     sceneDpi, data, userScale, verticalOffset, offsetByText, autoScaleText,
     flipX, flipY, overheadMode,
   );
+}
+
+function layoutAnchorSignature(layout: BarLayout, tokenPosition: Vector2): string {
+  // Absolute position changes already propagate through POSITION inheritance.
+  // Relative anchors also capture height-only resizing and off-centre image
+  // rotation/flips when the bar's rendered dimensions remain unchanged.
+  return [layout.barOrigin, layout.acCenter].map((point) => point
+    ? `${(point.x - tokenPosition.x).toFixed(2)},${(point.y - tokenPosition.y).toFixed(2)}`
+    : "_").join("|");
 }
 
 function geometryKey(L: BarLayout, has: { hp: boolean; ac: boolean; temp: boolean }): string {
@@ -1603,11 +1624,17 @@ async function patchGeometry(patches: Array<{ entry: BubbleEntry; w: Wanted }>):
 }
 
 async function syncBubbles(): Promise<void> {
-  if (inSync) {
-    queuedSync = true;
+  const own = session;
+  if (!own?.initialized || !own.ready) return;
+  if (syncOwner === own) {
+    own.queuedSync = true;
     return;
   }
-  inSync = true;
+  const sceneRevision = own.sceneRevision;
+  const roleRevision = own.roleRevision;
+  const current = () => session === own && own.ready && own.initialized
+    && own.sceneRevision === sceneRevision && own.roleRevision === roleRevision;
+  syncOwner = own;
   try {
     if (!readEnabled()) {
       await clearAll();
@@ -1617,12 +1644,18 @@ async function syncBubbles(): Promise<void> {
     let allItems: Item[];
     try { allItems = await OBR.scene.items.getItems(); }
     catch { return; }
+    if (!current()) return;
 
     // Refresh cachedSceneDpi opportunistically every sync — most of the
     // time the value is stable, but a scene with a non-default grid
     // can change it. The bounds-poll reads from `cachedSceneDpi`
     // without awaiting, so this keeps it warm.
-    try { cachedSceneDpi = await OBR.scene.grid.getDpi(); } catch {}
+    try {
+      const dpi = await OBR.scene.grid.getDpi();
+      if (!current()) return;
+      cachedSceneDpi = dpi;
+    } catch {}
+    if (!current()) return;
     const sceneDpi = cachedSceneDpi;
 
     const userScale = readUserScale();
@@ -1639,8 +1672,10 @@ async function syncBubbles(): Promise<void> {
     // waiting for the next metadata-change event.
     try {
       const meta = await OBR.scene.getMetadata();
+      if (!current()) return;
       cachedCombatActive = readCombatActive(meta);
     } catch {}
+    if (!current()) return;
     const isGM = role === "GM";
 
     // Sync OBR-native plainText font size on every character/mount
@@ -1649,7 +1684,7 @@ async function syncBubbles(): Promise<void> {
     // separate pass + has dedupe baked in (we only `updateItems`
     // tokens whose fontSize is currently wrong).
     if (isGM) {
-      void syncTokenTextFontSize(allItems, sceneDpi, autoScaleText);
+      void syncTokenTextFontSize(allItems, sceneDpi, autoScaleText, () => current() && role === "GM");
     }
 
     const wanted = new Map<string, Wanted>();
@@ -1701,15 +1736,9 @@ async function syncBubbles(): Promise<void> {
         ac: viewMode === "silhouette" ? false : (d.ac != null),
         temp: effectiveData.tempHp > 0 && effectiveData.maxHp > 0,
       };
-      // rebuildHash combines every variable that requires items to
-      // be torn down + rebuilt: structure (which items exist),
-      // values (HP / AC / temp numbers), flip signs (negative scale
-      // compensation), and intrinsic dimensions (native bar width
-      // depends on token native size + userScale, can change if
-      // image swaps). Variables NOT in this hash — parent.position,
-      // parent.scale magnitude, parent.rotation — are handled by
-      // OBR's attachment inheritance at draw time, so a sync that
-      // sees an unchanged rebuildHash can do absolutely nothing.
+      // SCALE/ROTATION inheritance is disabled. Rebuild when committed
+      // rendered geometry or token-relative anchors change, while keeping
+      // ordinary POSITION-only movement free of local writes.
       const rebuildHash = [
         structureHash(effectiveData),
         viewMode,
@@ -1717,6 +1746,7 @@ async function syncBubbles(): Promise<void> {
         layout.barWidth.toFixed(2),
         layout.barHeight.toFixed(2),
         layout.diameter.toFixed(2),
+        layoutAnchorSignature(layout, it.position),
         has.hp, has.ac, has.temp,
         // Toggling these changes the bake position; without them in
         // the hash, the user wouldn't see the toggle take effect
@@ -1765,18 +1795,18 @@ async function syncBubbles(): Promise<void> {
         console.warn("[obr-suite/bubbles] delete orphans failed", err),
       );
     }
+    if (!current()) return;
 
-    // 2026-05-09 rewrite: full rebuild whenever rebuildHash changes;
-    // otherwise nothing — OBR's attachment inheritance handles every
-    // visible difference (move / scale / rotation drag) at draw time
-    // without us touching the items. Position changes never enter
-    // rebuildHash, so a token drag commits flow through here as
-    // total no-ops. Earlier patchGeometry path raced OBR's drag-time
+    // Rebuild only changed committed geometry/data. Plain position changes
+    // remain no-ops here and use native POSITION inheritance. This does not
+    // observe or correct the host's temporary drag/resize rendering state.
+    // Earlier patchGeometry path raced OBR's drag-time
     // snapshot, causing bubbles to flash their CREATION value during
     // scale gestures — the snapshot was taken at drag start and our
     // partial-update text changes never made it in.
     const toAdd: any[] = [];
     const toDelete: string[] = [];
+    const nextEntries = new Map<string, BubbleEntry>();
 
     for (const [tokId, w] of wanted) {
       const existing = entries.get(tokId);
@@ -1807,7 +1837,7 @@ async function syncBubbles(): Promise<void> {
         newIds.push(acShield.id, acText.id);
       }
 
-      entries.set(tokId, {
+      nextEntries.set(tokId, {
         ids: newIds,
         shimmerIds,
         rebuildHash: w.rebuildHash,
@@ -1822,15 +1852,26 @@ async function syncBubbles(): Promise<void> {
     // in insertion order so the new ones sit on top, hiding the
     // about-to-be-deleted old ones.
     if (toAdd.length) {
-      await OBR.scene.local.addItems(toAdd).catch((err) =>
-        console.warn("[obr-suite/bubbles] addItems failed", err),
-      );
+      try { await OBR.scene.local.addItems(toAdd); }
+      catch (err) {
+        console.warn("[obr-suite/bubbles] addItems failed", err);
+        return; // Keep the prior cache/visuals; retry only on a future real event.
+      }
+      if (!current()) {
+        // SDK writes already dispatched cannot be cancelled. Remove only IDs
+        // created by this stale run; a later session owns different IDs.
+        await OBR.scene.local.deleteItems(toAdd.map((it) => it.id)).catch(() => {});
+        return;
+      }
     }
+    if (!current()) return;
+    for (const [id, entry] of nextEntries) entries.set(id, entry);
     if (toDelete.length) {
       await OBR.scene.local.deleteItems(toDelete).catch((err) =>
         console.warn("[obr-suite/bubbles] delete-for-rebuild failed", err),
       );
     }
+    if (!current()) return;
     // Shimmer animation timer — currently the shimmer Effect builder
     // is commented out, so this is a no-op. Kept so flipping the
     // shimmer back on doesn't require re-wiring the timer plumbing.
@@ -1839,9 +1880,9 @@ async function syncBubbles(): Promise<void> {
     if (anyShimmer) ensureAnimationTimer();
     else stopAnimationTimer();
   } finally {
-    inSync = false;
-    if (queuedSync) {
-      queuedSync = false;
+    if (syncOwner === own) syncOwner = null;
+    if (session === own && own.queuedSync) {
+      own.queuedSync = false;
       scheduleSync();
     }
   }
@@ -1863,7 +1904,10 @@ async function clearAll(): Promise<void> {
  *  token's bar drifts out of position (typically caused by an
  *  intermediate parent transform we missed). 2026-05-11. */
 async function resetTokenBubble(tokenId: string): Promise<void> {
-  if (!tokenId) return;
+  const own = session;
+  const sceneRevision = own?.sceneRevision;
+  const current = () => !!own && session === own && own.ready && own.sceneRevision === sceneRevision;
+  if (!tokenId || !current()) return;
   // 1. Drop the in-memory entry so the next sync treats this token
   //    as never-rendered (full create path) instead of patching.
   const e = entries.get(tokenId);
@@ -1877,6 +1921,7 @@ async function resetTokenBubble(tokenId: string): Promise<void> {
       const meta = (it.metadata as any) ?? {};
       return meta[BUBBLE_OWNER_KEY] === tokenId;
     });
+    if (!current()) return;
     if (owned.length > 0) {
       await OBR.scene.local.deleteItems(owned.map((i) => i.id));
     }
@@ -1885,7 +1930,7 @@ async function resetTokenBubble(tokenId: string): Promise<void> {
   }
   // 3. Trigger a fresh sync. scheduleSync coalesces nearby calls so
   //    rapid resets don't queue redundant work.
-  scheduleSync();
+  if (current()) scheduleSync();
 }
 
 
@@ -1897,12 +1942,13 @@ async function resetTokenBubble(tokenId: string): Promise<void> {
  *
  *  Safe to call any time; matches by metadata key, not ID, so it
  *  catches items the in-memory `entries` map doesn't know about. */
-async function sweepStaleBubbleItems(): Promise<void> {
+async function sweepStaleBubbleItems(shouldApply: () => boolean): Promise<void> {
   try {
     const all = await OBR.scene.local.getItems((it) => {
       const meta = (it.metadata as any) ?? {};
       return !!meta[BUBBLE_OWNER_KEY];
     });
+    if (!shouldApply()) return;
     if (all.length > 0) {
       await OBR.scene.local.deleteItems(all.map((i) => i.id));
     }
@@ -1912,31 +1958,78 @@ async function sweepStaleBubbleItems(): Promise<void> {
 // --- Module lifecycle --------------------------------------------------
 
 export async function setupBubbles(): Promise<void> {
-  try { role = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch {}
-  try { myPlayerId = await OBR.player.getId(); } catch {}
-  try { cachedSceneDpi = await OBR.scene.grid.getDpi(); } catch {}
-  // Watch role + id changes so they take effect mid-session.
-  unsubs.push(
-    OBR.player.onChange((p) => {
-      let changed = false;
-      const nextRole = (p.role as "GM" | "PLAYER") || role;
-      if (nextRole !== role) { role = nextRole; changed = true; }
-      if (p.id && p.id !== myPlayerId) { myPlayerId = p.id; changed = true; }
-      if (changed) scheduleSync();
-    }),
-  );
-
+  const own: BubbleSession = { initialized: false, ready: false, sceneRevision: 0, roleRevision: 0, queuedSync: false, readyTimer: null };
+  session = own;
+  role = "PLAYER";
+  myPlayerId = "";
+  const active = () => session === own;
+  // Subscribe before initial reads: a newer role event must also invalidate
+  // a pending snapshot when it happens to equal the safe default above.
+  unsubs.push(OBR.player.onChange((p) => {
+    if (!active()) return;
+    let changed = false;
+    const nextRole = (p.role as "GM" | "PLAYER") || role;
+    if (nextRole !== role) { role = nextRole; changed = true; }
+    if (p.id && p.id !== myPlayerId) { myPlayerId = p.id; changed = true; }
+    if (changed || !own.initialized) own.roleRevision++;
+    if (changed) scheduleSync();
+  }));
+  unsubs.push(OBR.scene.onReadyChange((ready) => {
+    if (!active()) return;
+    const revision = ++own.sceneRevision;
+    own.ready = false;
+    if (own.readyTimer) clearTimeout(own.readyTimer);
+    own.readyTimer = null;
+    void clearAll();
+    if (!ready) return;
+    // Preserve the existing scene-load settling delay. It is a one-shot scene
+    // boundary, never a geometry polling/retry loop.
+    own.readyTimer = setTimeout(() => {
+      own.readyTimer = null;
+      const current = () => active() && own.sceneRevision === revision;
+      if (!current()) return;
+      void sweepStaleBubbleItems(current).then(() => {
+        if (!current()) return;
+        own.ready = true;
+        scheduleSync();
+      });
+    }, 250);
+  }));
+  const initialSceneRevision = own.sceneRevision;
+  try {
+    const ready = await OBR.scene.isReady();
+    if (!active()) return;
+    if (own.sceneRevision === initialSceneRevision) own.ready = ready;
+  } catch {}
+  if (!active()) return;
+  const initialRoleRevision = own.roleRevision;
+  try {
+    const next = await OBR.player.getRole();
+    if (!active()) return;
+    if (own.roleRevision === initialRoleRevision) role = next as "GM" | "PLAYER";
+  } catch {}
+  if (!active()) return;
+  const initialIdRevision = own.roleRevision;
+  try {
+    const next = await OBR.player.getId();
+    if (!active()) return;
+    if (own.roleRevision === initialIdRevision) myPlayerId = next;
+  } catch {}
+  if (!active()) return;
+  try { const next = await OBR.scene.grid.getDpi(); if (!active()) return; cachedSceneDpi = next; } catch {}
+  if (!active()) return;
   // Refresh DPI cache when the grid changes so the bounds-poll's
   // synchronous read is never stale.
   try {
     unsubs.push(OBR.scene.grid.onChange((g) => {
+      if (!active()) return;
       cachedSceneDpi = g.dpi;
       scheduleSync();
     }));
   } catch {}
 
   unsubs.push(OBR.scene.items.onChange(() => {
-    scheduleSync();
+    if (active()) scheduleSync();
   }));
 
   // 2026-05-14 (#4) — `storage` listener now only watches the
@@ -1944,28 +2037,33 @@ export async function setupBubbles(): Promise<void> {
   // offsetByText / overheadMode moved to scene metadata and are
   // picked up by the onMetadataChange handler below instead.
   const onStorage = (e: StorageEvent) => {
+    if (!active()) return;
     if (e.key === LS_BUBBLES_ENABLED || e.key === LS_BUBBLES_SCALE) {
-      void clearAll().then(() => syncBubbles().catch(() => {}));
+      void clearAll().then(() => { if (active()) void syncBubbles().catch(() => {}); });
     }
   };
   window.addEventListener("storage", onStorage);
   unsubs.push(() => window.removeEventListener("storage", onStorage));
 
   // One-shot: seed scene metadata from any legacy local settings.
-  await migrateLocalBubbleSettings();
+  await migrateLocalBubbleSettings(() => active() && own.ready);
+  if (!active()) return;
 
   try {
     const meta = await OBR.scene.getMetadata();
+    if (!active()) return;
     cachedPlayerThreshold = readScenePlayerThreshold(meta as Record<string, unknown>);
     cachedAutoScaleText = readSceneAutoScaleText(meta as Record<string, unknown>);
     cachedVerticalOffset = readSceneVerticalOffset(meta as Record<string, unknown>);
     cachedOffsetByText = readSceneOffsetByText(meta as Record<string, unknown>);
     cachedOverheadMode = readSceneOverheadMode(meta as Record<string, unknown>);
   } catch {}
+  if (!active()) return;
 
   // Combat state and synced bubble settings changes.
   unsubs.push(
     OBR.scene.onMetadataChange((meta) => {
+      if (!active()) return;
       const next = readCombatActive(meta);
       const nextThreshold = readScenePlayerThreshold(meta as Record<string, unknown>);
       const nextAutoScale = readSceneAutoScaleText(meta as Record<string, unknown>);
@@ -2002,24 +2100,6 @@ export async function setupBubbles(): Promise<void> {
     }),
   );
 
-  // Scene-ready re-sync. Catches the "initial load race" where a
-  // scene's items arrive in `items.onChange` BEFORE their
-  // `image.scale` has finished propagating (default 1.0 at first emit).
-  // Under the new local-frame layout, scale doesn't affect the baked
-  // geometry — the renderer adds it at draw time — so this race is
-  // mostly cosmetic now. We still force a fresh sync so a scene swap
-  // gets a clean slate.
-  unsubs.push(
-    OBR.scene.onReadyChange(async (ready) => {
-      if (!ready) return;
-      setTimeout(() => {
-        void sweepStaleBubbleItems().then(() => {
-          void clearAll().then(() => { void syncBubbles(); });
-        });
-      }, 250);
-    }),
-  );
-
   // 2026-05-10: bubble-guard select-tool mode removed. The custom
   // canvasDragMode under Select fundamentally can't beat OBR's native
   // drag latency (the bus round-trip stacks up), so users were
@@ -2032,6 +2112,7 @@ export async function setupBubbles(): Promise<void> {
   // Sweep any legacy guard mode left over from a previous install so
   // its pointerdown handler doesn't keep half-intercepting Select.
   try { await OBR.tool.removeMode(LEGACY_GUARD_MODE_ID); } catch {}
+  if (!active()) return;
 
   // 2026-05-11 — listen for "reset this token's bubble" broadcasts
   // from the hp-bar popover's reset button. Wipes the cached entry +
@@ -2040,6 +2121,7 @@ export async function setupBubbles(): Promise<void> {
   // its anchor (typically because we mis-patched a transform).
   unsubs.push(
     OBR.broadcast.onMessage("com.obr-suite/bubbles-reset-token", async (event) => {
+      if (!active()) return;
       const data = event.data as { tokenId?: string } | undefined;
       const id = data?.tokenId;
       if (typeof id === "string" && id) {
@@ -2052,7 +2134,10 @@ export async function setupBubbles(): Promise<void> {
   // (different scheme, different layout) get wiped before we build
   // fresh. The wipe is keyed off `BUBBLE_OWNER_KEY` metadata, not the
   // in-memory `entries` map, so it catches orphans we never tracked.
-  await sweepStaleBubbleItems();
+  const initialSweepRevision = own.sceneRevision;
+  if (own.ready) await sweepStaleBubbleItems(() => active() && own.sceneRevision === initialSweepRevision);
+  if (!active()) return;
+  own.initialized = true;
   void syncBubbles();
 }
 
@@ -2071,6 +2156,9 @@ export async function setupBubbles(): Promise<void> {
 const LEGACY_GUARD_MODE_ID = "com.obr-suite/bubbles/guard-mode";
 
 export async function teardownBubbles(): Promise<void> {
+  const old = session;
+  session = null;
+  if (old?.readyTimer) clearTimeout(old.readyTimer);
   for (const u of unsubs.splice(0)) u();
   if (pendingTimer) {
     clearTimeout(pendingTimer);
