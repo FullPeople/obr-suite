@@ -1,4 +1,4 @@
-import OBR from "@owlbear-rodeo/sdk";
+import OBR, { type Item } from "@owlbear-rodeo/sdk";
 import { getLocalLang } from "../../state";
 import { assetUrl } from "../../asset-base";
 import { onViewportResize } from "../../utils/viewportAnchor";
@@ -41,10 +41,8 @@ registerPanelBbox(PANEL_IDS.ccInfo, async () => {
 // Character Cards module — migrated from the standalone plugin.
 //
 // Components:
-//   1. Main panel popover — 64×64 floating button at bottom-right that
-//      opens into a fullscreen panel via internal popover.setWidth/Height.
-//      The cluster's "角色卡界面按钮" broadcasts a panel-open event the
-//      iframe listens for to maximize.
+//   1. Main panel — sized modal opened by the toolbar or a local
+//      panel-open message.
 //   2. Info popover — small floating preview that opens above the main
 //      button when a bound character token is selected. DM + players see
 //      it (subject to the auto-info localStorage toggle, which the
@@ -95,7 +93,6 @@ const SERVER_ORIGIN = "https://obr.dnd.center";
 // tool. Replaces the old suite-cluster "角色卡界面" button.
 const CC_TOOL_ID = "com.obr-suite/cc-panel-tool";
 
-const POPOVER_BOX = 64;
 const BOTTOM_OFFSET = 160;
 const RIGHT_OFFSET = 12;
 const INFO_WIDTH = 320;
@@ -109,16 +106,8 @@ const INFO_HEIGHT = 260;
 const INFO_GAP = 8;
 
 const unsubs: Array<() => void> = [];
-// 2026-05-21 (audit) — module-scope so teardown can cancel it; a
-// pending debounce could otherwise fire post-teardown and reopen a
-// ghost cc-info popover.
-let selectionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let infoPopoverOpen = false;
 let currentInfoCard: string | null = null;
-// Last itemId passed to openInfoPopoverFor — needed so the viewport-
-// resize handler can re-issue the popover with the same URL (different
-// URL would force OBR to reload the iframe).
-let currentInfoItemId: string | null = null;
 // Panel open-state is tracked in localStorage (shared across this
 // client's same-origin iframes), NOT a cached boolean. The panel
 // iframe clears the key on EVERY close path — including OBR's
@@ -132,6 +121,44 @@ function isPanelOpen(): boolean {
 }
 let ccMyId = "";
 let ccRole: "GM" | "PLAYER" = "PLAYER";
+let ccConnectionId = "";
+let active = false, sceneReady = false, generation = 0, sceneGeneration = 0, selectionGeneration = 0;
+let playerRevision = 0, metadataRevision = 0;
+let selectedIds: string[] = [];
+interface CardEntry { id: string; visibility?: string; owner_ids?: string[] }
+interface InfoTarget { cardId: string; roomId: string; itemId: string | null }
+let cards = new Map<string, CardEntry>();
+const observedItems = new Map<string, Item>();
+let desiredInfo: InfoTarget | null = null, reanchorInfo = false, openedInfoUrl = "";
+let infoQueue: Promise<void> | null = null, infoRequested = false;
+let mainQueue: Promise<void> | null = null, mainRequested = false, desiredMain = false;
+const refreshes = new Map<string, AbortController>();
+const INFO_READY_MSG = `${PLUGIN_ID}/info-ready`;
+const PIN_CHANGED_MSG = "com.obr-suite/cc-info-pin-changed";
+const current = (run: number, scene: number) => active && sceneReady && generation === run && sceneGeneration === scene;
+const localEvent = (sender: string) => active && !!ccConnectionId && sender === ccConnectionId;
+function setCards(metadata: Record<string, unknown>): void {
+  const list = metadata[SCENE_META_KEY];
+  cards = new Map(Array.isArray(list) ? list.filter((entry: any) => entry && typeof entry.id === "string").map((entry: CardEntry) => [entry.id, entry]) : []);
+}
+function mayShow(item: Item | undefined, cardId: string): boolean {
+  const entry = cards.get(cardId);
+  if (!item || item.metadata[BIND_META] !== cardId || !entry) return false;
+  if (ccRole === "GM") return true;
+  const owners = Array.isArray(entry.owner_ids) ? entry.owner_ids : [];
+  if (entry.visibility === "dm" || entry.visibility === "owners" && !owners.includes(ccMyId) ||
+      entry.visibility && !["public", "owners"].includes(entry.visibility)) return false;
+  const owns = owners.length ? owners.includes(ccMyId) : item.createdUserId === ccMyId;
+  const bubbles = (item.metadata[BUBBLES_META_KEY] ?? item.metadata[EXTERNAL_BUBBLES_META_KEY]) as { locked?: unknown } | undefined;
+  return owns || bubbles?.locked === false && typeof item.createdUserId === "string" && !!item.createdUserId;
+}
+function itemPermissionSignature(item: Item | undefined): string {
+  const bubbles = (item?.metadata[BUBBLES_META_KEY] ?? item?.metadata[EXTERNAL_BUBBLES_META_KEY]) as { locked?: unknown } | undefined;
+  return JSON.stringify([item?.id, item?.createdUserId, item?.metadata[BIND_META], bubbles?.locked]);
+}
+function revokeInvalidInfo(): void {
+  if (desiredInfo?.itemId && !mayShow(observedItems.get(desiredInfo.itemId), desiredInfo.cardId)) void closeInfoPopover();
+}
 
 function isAutoInfoEnabled(): boolean {
   try {
@@ -162,7 +189,8 @@ function isAutoInfoEnabled(): boolean {
 // iframe matches Paper exactly and nothing scrolls.
 const PANEL_SIDE_GAP = 64;
 const MUI_DIALOG_MARGIN = 64;
-async function openMainPopover() {
+async function performOpenMain() {
+  const run = generation, scene = sceneGeneration;
   try {
     let vw = 1280;
     let vh = 800;
@@ -172,6 +200,7 @@ async function openMainPopover() {
         OBR.viewport.getHeight(),
       ]);
     } catch { /* viewport read failed — fall back to sane defaults */ }
+    if (!current(run, scene) || !desiredMain) return;
     // 2026-05-16 — width already shrinks by PANEL_SIDE_GAP * 2 = 128,
     // which is wider than MUI's 64 horizontal margin so the side
     // toolbar stays visible AND the width fits MUI's max. Height
@@ -191,24 +220,40 @@ async function openMainPopover() {
   }
 }
 
-async function closeMainPopover() {
-  try { await OBR.modal.close(PANEL_MODAL_ID); } catch {}
-  try { localStorage.removeItem(PANEL_OPEN_KEY); } catch {}
+function syncMainPanel(): Promise<void> {
+  mainRequested = true;
+  if (mainQueue) return mainQueue;
+  mainQueue = (async () => {
+    while (true) {
+      mainRequested = false;
+      if (!active || !sceneReady || !desiredMain) {
+        if (!isPanelOpen()) return;
+        try { await OBR.modal.close(PANEL_MODAL_ID); } catch { return; }
+        try { localStorage.removeItem(PANEL_OPEN_KEY); } catch {}
+        continue;
+      }
+      if (isPanelOpen()) return;
+      await performOpenMain();
+      if (active && sceneReady && desiredMain && !isPanelOpen()) return;
+    }
+  })().finally(() => { mainQueue = null; if (mainRequested) void syncMainPanel(); });
+  return mainQueue;
 }
-
+async function openMainPopover() { if (!active || !sceneReady) return; desiredMain = true; await syncMainPanel(); }
+async function closeMainPopover() { desiredMain = false; await syncMainPanel(); }
 async function toggleMainPanel() {
-  if (isPanelOpen()) await closeMainPopover();
-  else await openMainPopover();
+  if (!active || !sceneReady) return;
+  desiredMain = mainQueue ? !desiredMain : !isPanelOpen(); await syncMainPanel();
 }
 
 async function openInfoPopoverFor(cardId: string, roomId: string, itemId: string | null) {
-  if (infoPopoverOpen) return;
-  currentInfoItemId = itemId;
+  const run = generation, scene = sceneGeneration, target = desiredInfo;
   try {
     const [vw, vh] = await Promise.all([
       OBR.viewport.getWidth(),
       OBR.viewport.getHeight(),
     ]);
+    if (!current(run, scene) || desiredInfo !== target || !target) return;
     const buttonTop = vh - (BOTTOM_OFFSET + 48 + 8);
     // `desiredBottom` is the screen-y the popover SHOULD bottom-out at
     // (the inset above the action button). With BOTTOM anchor we passed
@@ -220,6 +265,7 @@ async function openInfoPopoverFor(cardId: string, roomId: string, itemId: string
     const sizeOverride = getPanelSize(PANEL_IDS.ccInfo);
     const w = sizeOverride?.width ?? INFO_WIDTH;
     const h = sizeOverride?.height ?? INFO_HEIGHT;
+    openedInfoUrl ||= `${INFO_URL}?cardId=${encodeURIComponent(cardId)}&roomId=${encodeURIComponent(roomId)}${itemParam}`;
     // 2026-05-16 — switched to TOP-anchored vertical alignment so the
     // popover's TOP edge stays fixed when info-page.ts auto-shrinks it
     // via OBR.popover.setHeight (e.g. when switching tabs to a shorter
@@ -231,9 +277,7 @@ async function openInfoPopoverFor(cardId: string, roomId: string, itemId: string
     // bottom move up instead.
     await OBR.popover.open({
       id: INFO_POPOVER_ID,
-      url: `${INFO_URL}?cardId=${encodeURIComponent(cardId)}&roomId=${encodeURIComponent(
-        roomId
-      )}${itemParam}`,
+      url: openedInfoUrl,
       width: w,
       height: h,
       anchorReference: "POSITION",
@@ -253,39 +297,44 @@ async function openInfoPopoverFor(cardId: string, roomId: string, itemId: string
 }
 
 async function closeInfoPopover() {
-  try { await OBR.popover.close(INFO_POPOVER_ID); } catch {}
-  infoPopoverOpen = false;
-  currentInfoCard = null;
-  currentInfoItemId = null;
+  desiredInfo = null; currentInfoCard = null;
+  await syncInfoPanel();
 }
 
 async function showInfoFor(cardId: string, itemId: string | null = null) {
-  if (currentInfoCard === cardId && infoPopoverOpen) {
-    // Even if the same card stays open, the bound token might've
-    // changed (different token with same card binding selected).
-    // Re-broadcast so info-page updates its rollable target.
-    try {
-      await OBR.broadcast.sendMessage(
-        INFO_SHOW_MSG,
-        { cardId, roomId: OBR.room.id || "default", itemId },
-        { destination: "LOCAL" }
-      );
-    } catch {}
-    return;
-  }
-  const roomId = OBR.room.id || "default";
-  if (!infoPopoverOpen) {
-    await openInfoPopoverFor(cardId, roomId, itemId);
-  } else {
-    try {
-      await OBR.broadcast.sendMessage(
-        INFO_SHOW_MSG,
-        { cardId, roomId, itemId },
-        { destination: "LOCAL" }
-      );
-    } catch {}
-  }
+  if (!active || !sceneReady || !itemId || !mayShow(observedItems.get(itemId), cardId)) return;
+  if (desiredInfo?.cardId === cardId && desiredInfo.itemId === itemId && infoPopoverOpen) return;
+  desiredInfo = { cardId, roomId: OBR.room.id || "default", itemId };
   currentInfoCard = cardId;
+  await syncInfoPanel(); await sendInfoTarget();
+}
+async function sendInfoTarget() {
+  const target = desiredInfo;
+  if (!active || !sceneReady || !infoPopoverOpen || !target?.itemId || !mayShow(observedItems.get(target.itemId), target.cardId)) return;
+  try { await OBR.broadcast.sendMessage(INFO_SHOW_MSG, { ...target }, { destination: "LOCAL" }); } catch {}
+}
+function syncInfoPanel(): Promise<void> {
+  infoRequested = true;
+  if (infoQueue) return infoQueue;
+  infoQueue = (async () => {
+    while (true) {
+      infoRequested = false;
+      if (!active || !sceneReady || !desiredInfo) {
+        if (!infoPopoverOpen) { openedInfoUrl = ""; return; }
+        try { await OBR.popover.close(INFO_POPOVER_ID); } catch { return; }
+        infoPopoverOpen = false; openedInfoUrl = "";
+        continue;
+      }
+      if (infoPopoverOpen && !reanchorInfo) return;
+      reanchorInfo = false;
+      const target = desiredInfo;
+      await openInfoPopoverFor(target.cardId, target.roomId, target.itemId);
+      if (desiredInfo !== target) continue;
+      if (!infoPopoverOpen) return;
+      await sendInfoTarget();
+    }
+  })().finally(() => { infoQueue = null; if (infoRequested) void syncInfoPanel(); });
+  return infoQueue;
 }
 
 async function hideInfo() {
@@ -303,17 +352,12 @@ function isCcInfoPinned(): boolean {
   try { return localStorage.getItem(LS_CC_INFO_PINNED) === "1"; } catch { return false; }
 }
 
-async function getSceneCardIds(): Promise<Set<string>> {
-  try {
-    const meta = await OBR.scene.getMetadata();
-    const list = meta[SCENE_META_KEY];
-    if (Array.isArray(list))
-      return new Set(list.map((c: any) => c.id).filter(Boolean));
-  } catch {}
-  return new Set();
-}
-
-async function handleSelection(selection: string[] | undefined) {
+async function handleSelection(selection: string[] | undefined, snapshot?: Item | null) {
+  selectedIds = [...(selection ?? [])];
+  const request = ++selectionGeneration, run = generation, scene = sceneGeneration;
+  const valid = () => current(run, scene) && selectionGeneration === request;
+  if (!valid()) return;
+  revokeInvalidInfo();
   if (!isAutoInfoEnabled()) {
     if (currentInfoCard) await hideInfo();
     return;
@@ -322,83 +366,52 @@ async function handleSelection(selection: string[] | undefined) {
     if (currentInfoCard) await hideInfo();
     return;
   }
-  let boundId: string | null = null;
-  let ownsItem = false;
-  let hasAnyPlayerOwner = false;
-  let locked = true; // default locked
-  let item: any = null;
+  let item: Item | undefined;
   const itemId = selection[0];
   try {
-    const items = await OBR.scene.items.getItems(selection);
-    item = items[0] ?? null;
-    const m = item?.metadata?.[BIND_META];
-    if (typeof m === "string") boundId = m;
-    const createdUserId = (item as any)?.createdUserId;
-    if (item && createdUserId === ccMyId) ownsItem = true;
-    if (typeof createdUserId === "string" && createdUserId.length > 0) hasAnyPlayerOwner = true;
-    // Check bubbles lock state
-    const bubblesMeta = item?.metadata?.[BUBBLES_META_KEY] ?? item?.metadata?.[EXTERNAL_BUBBLES_META_KEY];
-    if (bubblesMeta && typeof bubblesMeta === "object" && "locked" in bubblesMeta) {
-      locked = !!bubblesMeta.locked;
-    }
-  } catch {}
-  // 2026-05-12 — transient-read guard (mirror of bestiary/index.ts).
-  // OBR can fire items.onChange mid-write with a transient empty
-  // read OR a partial-metadata read missing the bound card id; without
-  // this guard we'd hideInfo → reopen on the next onChange →
-  // user-visible popover flicker on every resource-tracker click.
-  // The outer items.onChange already debounces 30 ms so most multi-
-  // firings collapse, but this is a belt-and-suspenders backstop.
-  if (currentInfoCard && currentInfoItemId === itemId && (!item || !boundId)) {
-    return;
-  }
+    item = snapshot === undefined ? (await OBR.scene.items.getItems([itemId]))[0] : snapshot ?? undefined;
+  } catch { return; }
+  if (!valid()) return;
+  if (item) observedItems.set(itemId, item); else observedItems.delete(itemId);
+  for (const id of observedItems.keys()) if (id !== itemId && id !== desiredInfo?.itemId) observedItems.delete(id);
+  const boundId = item?.metadata[BIND_META];
   if (!boundId) {
+    if (desiredInfo?.itemId === itemId) await closeInfoPopover();
+    else if (currentInfoCard) await hideInfo();
+    return;
+  }
+  if (typeof boundId !== "string" || !mayShow(item, boundId)) {
+    if (desiredInfo?.itemId === itemId) await closeInfoPopover();
     if (currentInfoCard) await hideInfo();
     return;
   }
-  const known = await getSceneCardIds();
-  if (!known.has(boundId)) {
-    if (currentInfoCard) await hideInfo();
-    return;
-  }
-  const canShow = ccRole === "GM" || ownsItem || (!locked && hasAnyPlayerOwner);
-  if (!canShow) {
-    if (currentInfoCard) await hideInfo();
-    return;
-  }
-  if (currentInfoCard === boundId) {
-    // Same card, but the selected token may differ — refresh the
-    // info-page's bound-token for quick-rolls.
-    await showInfoFor(boundId, selection[0] ?? null);
-    return;
-  }
-  await showInfoFor(boundId, selection[0] ?? null);
+  await showInfoFor(boundId, itemId);
 }
 
 // 2026-05-14 — fetch the minimal card stats we need to push to bound
 // tokens after a refresh / import / save. Server URL pattern mirrors
 // `bind-page.ts`. Returns null on any failure (network, parse, missing
 // fields) so callers can early-return without writing stale data.
-async function fetchCardSnapshot(cardId: string): Promise<{
+async function fetchCardSnapshot(cardId: string, room: string, signal: AbortSignal): Promise<{
   maxHp: number | null;
   ac: number | null;
   initBonus: number | null;
 } | null> {
   try {
-    const roomId = (OBR.room?.id || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const roomId = room.replace(/[^a-zA-Z0-9_-]/g, "_");
     const url = `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data.json`;
     // cache:'no-store' so multi-edit roundtrips don't see the previous
     // version sitting in HTTP cache. The data.json is small (typically
     // < 50 KB) so the per-edit fetch is cheap.
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, { cache: "no-store", signal });
     if (!res.ok) return null;
     const d = await res.json();
     const cs = d?.core_stats || {};
     const hp = cs.hp || {};
     return {
-      maxHp: typeof hp.max === "number" ? hp.max : null,
-      ac: typeof cs.ac === "number" ? cs.ac : null,
-      initBonus: typeof cs.initiative === "number" ? cs.initiative : null,
+      maxHp: typeof hp.max === "number" && Number.isFinite(hp.max) ? hp.max : null,
+      ac: typeof cs.ac === "number" && Number.isFinite(cs.ac) ? cs.ac : null,
+      initBonus: typeof cs.initiative === "number" && Number.isFinite(cs.initiative) ? cs.initiative : null,
     };
   } catch {
     return null;
@@ -412,21 +425,26 @@ async function fetchCardSnapshot(cardId: string): Promise<{
 // it; players run their own copies of this listener but bail at the
 // role gate so we don't fight over the same writes.
 async function propagateCardRefresh(cardId: string): Promise<void> {
-  if (ccRole !== "GM") return;
-  const snap = await fetchCardSnapshot(cardId);
-  if (!snap) return;
+  if (!active || !sceneReady || ccRole !== "GM" || !cards.has(cardId)) return;
+  const run = generation, scene = sceneGeneration, room = OBR.room.id || "default";
+  const abort = new AbortController(); refreshes.get(cardId)?.abort(); refreshes.set(cardId, abort);
+  const finish = () => { if (refreshes.get(cardId) === abort) refreshes.delete(cardId); };
+  const valid = () => current(run, scene) && ccRole === "GM" && (OBR.room.id || "default") === room && refreshes.get(cardId) === abort && !abort.signal.aborted && cards.has(cardId);
+  const snap = await fetchCardSnapshot(cardId, room, abort.signal);
+  if (!snap || !valid()) { finish(); return; }
   // No-op if nothing meaningful to push (server returned a parseable
   // but empty data.json — avoids spurious metadata churn).
-  if (snap.maxHp == null && snap.ac == null && snap.initBonus == null) return;
+  if (snap.maxHp == null && snap.ac == null && snap.initBonus == null) { finish(); return; }
   try {
     const boundTokens = await OBR.scene.items.getItems(
       (it: any) =>
         (it.metadata as Record<string, unknown> | undefined)?.[BIND_META] === cardId,
     );
-    if (boundTokens.length === 0) return;
+    if (!valid() || boundTokens.length === 0) return;
     const ids = boundTokens.map((it: any) => it.id);
     await OBR.scene.items.updateItems(ids, (drafts: any[]) => {
       for (const d of drafts) {
+        if (!valid() || d.metadata[BIND_META] !== cardId) continue;
         // Bubbles seed: merge new max/ac into whichever shape already
         // exists on the token (suite key takes priority, fall through
         // to legacy Stat-Bubbles external key). Preserves all other
@@ -440,7 +458,7 @@ async function propagateCardRefresh(cardId: string): Promise<void> {
         if (!("temporary health" in next)) next["temporary health"] = 0;
         d.metadata[BUBBLES_META_KEY] = next;
         if (d.metadata[EXTERNAL_BUBBLES_META_KEY] != null) {
-          d.metadata[EXTERNAL_BUBBLES_META_KEY] = next;
+          d.metadata[EXTERNAL_BUBBLES_META_KEY] = { ...ext, ...next };
         }
         if (snap.initBonus != null) {
           d.metadata[INIT_DEXMOD_META] = snap.initBonus;
@@ -449,203 +467,139 @@ async function propagateCardRefresh(cardId: string): Promise<void> {
     });
   } catch (e) {
     console.warn("[obr-suite/character-cards] propagateCardRefresh failed", e);
-  }
+  } finally { finish(); }
+}
+
+async function refreshSceneState(): Promise<void> {
+  const run = generation, scene = sceneGeneration, metaVersion = metadataRevision, selectionVersion = selectionGeneration;
+  try {
+    const [metadata, selection] = await Promise.all([OBR.scene.getMetadata(), OBR.player.getSelection()]);
+    if (!current(run, scene)) return;
+    if (metadataRevision === metaVersion) setCards(metadata);
+    if (selectionGeneration === selectionVersion) await handleSelection(selection);
+    else await handleSelection(selectedIds, observedItems.get(selectedIds[0]));
+  } catch { /* A later ready/metadata/selection event can retry unavailable state. */ }
 }
 
 export async function setupCharacterCards(): Promise<void> {
+  if (active) return;
+  active = true; const run = ++generation;
+  sceneReady = false; ccRole = "PLAYER"; ccMyId = ""; ccConnectionId = "";
+  const alive = () => active && generation === run;
   const en = getLocalLang() === "en";
-  try {
-    const p = await OBR.player.getRole();
-    ccRole = (p as "GM" | "PLAYER") || "PLAYER";
-    ccMyId = await OBR.player.getId();
-  } catch {}
-
-  // The main panel opens/closes on broadcast from the cluster button or
-  // from the Shift keyboard shortcut registered below.
+  const roleVersion = playerRevision, readyVersion = sceneGeneration;
   unsubs.push(
-    OBR.broadcast.onMessage("com.character-cards/panel-open", async () => {
-      await openMainPopover();
-    })
+    OBR.player.onChange(player => {
+      if (!alive()) return;
+      playerRevision++;
+      ccRole = player.role === "GM" ? "GM" : "PLAYER";
+      if (ccRole !== "GM") { for (const abort of refreshes.values()) abort.abort(); refreshes.clear(); }
+      ccMyId = player.id;
+      if (player.connectionId) ccConnectionId = player.connectionId;
+      revokeInvalidInfo();
+      void handleSelection(player.selection).catch(() => {});
+    }),
+    OBR.scene.onReadyChange(ready => {
+      if (!alive()) return;
+      sceneGeneration++; selectionGeneration++; metadataRevision++; sceneReady = ready;
+      for (const abort of refreshes.values()) abort.abort();
+      refreshes.clear(); cards.clear(); observedItems.clear();
+      void closeInfoPopover(); void closeMainPopover();
+      void OBR.modal.close(BIND_MODAL_ID).catch(() => {});
+      if (ready) void refreshSceneState();
+    }),
+    OBR.scene.onMetadataChange(metadata => {
+      if (!alive() || !sceneReady) return;
+      metadataRevision++; setCards(metadata); revokeInvalidInfo();
+      void handleSelection(selectedIds, observedItems.get(selectedIds[0])).catch(() => {});
+    }),
+    OBR.scene.items.onChange(items => {
+      if (!alive() || !sceneReady) return;
+      const selected = selectedIds.length === 1 ? selectedIds[0] : null;
+      const interested = new Set([selected, desiredInfo?.itemId].filter((id): id is string => !!id));
+      let changed = false;
+      for (const id of interested) {
+        const before = observedItems.get(id), next = items.find(item => item.id === id);
+        if (itemPermissionSignature(before) !== itemPermissionSignature(next)) changed = true;
+        if (next) observedItems.set(id, next); else observedItems.delete(id);
+      }
+      if (!changed) return;
+      revokeInvalidInfo();
+      void handleSelection(selectedIds, selected ? observedItems.get(selected) ?? null : null).catch(() => {});
+    }),
+    OBR.broadcast.onMessage("com.character-cards/panel-open", event => { if (alive() && localEvent(event.connectionId)) void openMainPopover(); }),
+    OBR.broadcast.onMessage("com.obr-suite/cc-shortcut-toggle", event => { if (alive() && localEvent(event.connectionId)) void toggleMainPanel(); }),
+    OBR.broadcast.onMessage(TOGGLE_MSG, event => { if (alive() && localEvent(event.connectionId)) void handleSelection(selectedIds, observedItems.get(selectedIds[0])); }),
+    OBR.broadcast.onMessage(PIN_CHANGED_MSG, event => { if (alive() && localEvent(event.connectionId)) { revokeInvalidInfo(); void handleSelection(selectedIds, observedItems.get(selectedIds[0])); } }),
+    OBR.broadcast.onMessage(INFO_READY_MSG, event => { if (alive() && localEvent(event.connectionId)) void sendInfoTarget(); }),
+    OBR.broadcast.onMessage(BC_CARD_UPDATED, event => {
+      if (!alive() || !sceneReady) return;
+      const data = event.data as { cardId?: unknown; roomId?: unknown } | undefined;
+      if (typeof data?.cardId !== "string" || !data.cardId || data.cardId.length > 160 ||
+          data.roomId !== undefined && data.roomId !== (OBR.room.id || "default")) return;
+      // Remote refresh notifications are intentional. They carry no trusted
+      // stats/URL: the GM reads this room's server snapshot and rechecks binding.
+      void propagateCardRefresh(data.cardId);
+    }),
   );
 
-  // 角色卡界面 — a standalone TOOL in OBR's toolbar (its own top-level
-  // icon, not an action nested under Select/etc.). `onClick` returns
-  // false so the tool is never actually "selected" — the active tool
-  // stays whatever it was; clicking just toggles the panel like a
-  // button. CapsLock triggers it too. Replaces the cluster button.
+  try {
+    const [role, id, connection, ready] = await Promise.all([OBR.player.getRole(), OBR.player.getId(), OBR.player.getConnectionId(), OBR.scene.isReady()]);
+    if (!alive()) return;
+    if (roleVersion === playerRevision) { ccRole = role === "GM" ? "GM" : "PLAYER"; ccMyId = id; ccConnectionId = connection; }
+    if (readyVersion === sceneGeneration) sceneReady = ready;
+  } catch { if (!alive()) return; }
+
   try {
     await OBR.tool.create({
-      id: CC_TOOL_ID,
-      shortcut: "CapsLock",
-      icons: [
-        {
-          icon: ICON_URL,
-          label: en ? "Character sheet" : "角色卡界面",
-        },
-      ],
-      onClick: async () => {
-        await toggleMainPanel();
-        return false; // don't switch the active tool — act as a button
+      id: CC_TOOL_ID, shortcut: "CapsLock",
+      icons: [{ icon: ICON_URL, label: en ? "Character sheet" : "角色卡界面" }],
+      onClick: async () => { if (alive()) await toggleMainPanel(); return false; },
+    });
+    if (!alive()) { await OBR.tool.remove(CC_TOOL_ID); return; }
+    await OBR.contextMenu.create({
+      id: CTX_BIND,
+      icons: [{ icon: ICON_URL, label: en ? "Bind character card" : "绑定角色卡",
+        filter: { roles: ["GM"], every: [{ key: "type", value: "IMAGE" }, { key: "layer", value: "CHARACTER" }], max: 1 } }],
+      onClick: async context => {
+        if (!alive() || !sceneReady || ccRole !== "GM" || context.items.length !== 1) return;
+        const id = context.items[0]?.id, scene = sceneGeneration;
+        if (!id) return;
+        try {
+          const [role, items] = await Promise.all([OBR.player.getRole(), OBR.scene.items.getItems([id])]);
+          if (!current(run, scene) || ccRole !== "GM" || role !== "GM" || items[0]?.type !== "IMAGE" || items[0]?.layer !== "CHARACTER") return;
+          await OBR.modal.open({ id: BIND_MODAL_ID, url: BIND_URL + "?itemId=" + encodeURIComponent(id), width: 360, height: 480 });
+          if (!current(run, scene) || ccRole !== "GM") await OBR.modal.close(BIND_MODAL_ID);
+        } catch (error) { if (alive()) console.warn("[character-cards] bind entry failed", error); }
       },
     });
-  } catch (e) {
-    console.error("[obr-suite/character-cards] create tool failed", e);
-  }
+    if (!alive()) { await OBR.contextMenu.remove(CTX_BIND); return; }
+  } catch (error) { if (alive()) console.warn("[character-cards] entry registration failed", error); }
 
-  // CapsLock from inside the panel iframe also toggles (panel listens
-  // for window keydown and broadcasts).
-  unsubs.push(
-    OBR.broadcast.onMessage("com.obr-suite/cc-shortcut-toggle", () => {
-      toggleMainPanel();
-    })
-  );
-
-  // Close the panel + info popover if scene unloads.
-  unsubs.push(
-    OBR.scene.onReadyChange(async (ready) => {
-      if (!ready) {
-        await closeMainPopover();
-        await closeInfoPopover();
-      }
-    })
-  );
-
-  // Right-click context menu (GM only) to bind a card. Restricted to
-  // CHARACTER-layer tokens — non-character props can't be bound to
-  // a character card (2026-05-10).
-  await OBR.contextMenu.create({
-    id: CTX_BIND,
-    icons: [
-      {
-        icon: ICON_URL,
-        label: en ? "Bind character card" : "绑定角色卡",
-        filter: {
-          roles: ["GM"],
-          every: [
-            { key: "type", value: "IMAGE" },
-            { key: "layer", value: "CHARACTER" },
-          ],
-          max: 1,
-        },
-      },
-    ],
-    onClick: async (context) => {
-      const id = context.items[0]?.id;
-      if (!id) return;
-      try {
-        await OBR.modal.open({
-          id: BIND_MODAL_ID,
-          url: `${BIND_URL}?itemId=${encodeURIComponent(id)}`,
-          width: 360,
-          height: 480,
-        });
-      } catch (e) {
-        console.error("[obr-suite/character-cards] open bind modal failed", e);
-      }
-    },
-  });
-
-  // Selection-based info popover.
-  unsubs.push(
-    OBR.player.onChange(async (player) => {
-      try { await handleSelection(player.selection); } catch {}
-    })
-  );
-  try {
-    const sel = await OBR.player.getSelection();
-    await handleSelection(sel);
-  } catch {}
-
-  // Auto-info toggle changes (cluster's popup toggle writes to the same
-  // localStorage key + sends the same broadcast).
-  unsubs.push(
-    OBR.broadcast.onMessage(TOGGLE_MSG, async () => {
-      try {
-        const sel = await OBR.player.getSelection();
-        await handleSelection(sel);
-      } catch {}
-    })
-  );
-
-  // 2026-05-14 — propagate refreshed card stats to bound tokens. Fires
-  // on every BC_CARD_UPDATED, which panel-page broadcasts after xlsx
-  // upload / xlsx refresh, and fullscreen-page broadcasts after JSON
-  // import. Both sources now send LOCAL+REMOTE so the originating
-  // client (often the GM) ALSO propagates — without LOCAL, only
-  // remote viewers would see the new stats, and the DM would still
-  // need to re-bind.
-  unsubs.push(
-    OBR.broadcast.onMessage(BC_CARD_UPDATED, async (event) => {
-      const data = event.data as { cardId?: string } | undefined;
-      if (!data?.cardId) return;
-      await propagateCardRefresh(data.cardId);
-    }),
-  );
-
-  // Hide info if the bound card was deleted from scene metadata, or its
-  // host token was removed.
-  unsubs.push(
-    OBR.scene.onMetadataChange(async (meta) => {
-      if (!currentInfoCard) return;
-      if (!("com.character-cards/list" in meta)) return;
-      const known = await getSceneCardIds();
-      if (!known.has(currentInfoCard)) await hideInfo();
-    })
-  );
-  // 2026-05-13 — debounced items.onChange. Mirror of bestiary/index.ts
-  // (see comment there). OBR fires onChange multiple times per
-  // updateItems with mid-draft empty / partial reads; debouncing
-  // 30 ms collapses them so handleSelection only sees the final
-  // committed state. Prevents the resource-panel flicker on every
-  // resource-tracker click.
-  unsubs.push(
-    OBR.scene.items.onChange(() => {
-      if (!currentInfoCard) return;
-      if (selectionDebounceTimer) clearTimeout(selectionDebounceTimer);
-      selectionDebounceTimer = setTimeout(async () => {
-        selectionDebounceTimer = null;
-        try {
-          const sel = await OBR.player.getSelection();
-          await handleSelection(sel);
-        } catch {}
-      }, 30);
-    })
-  );
-
-  // Re-anchor the info popover on browser resize. The popover anchors at
-  // bottom-right, so a window resize visibly drifts it. Re-open with the
-  // same URL (cardId + itemId) so OBR updates position without reloading
-  // the iframe.
-  const reanchorInfoPopover = async () => {
-    if (!infoPopoverOpen || !currentInfoCard) return;
-    const roomId = OBR.room.id || "default";
-    // openInfoPopoverFor short-circuits when infoPopoverOpen is true,
-    // so flip the flag and let it run the open path.
-    infoPopoverOpen = false;
-    await openInfoPopoverFor(currentInfoCard, roomId, currentInfoItemId);
+  const reanchor = () => {
+    if (!alive() || !sceneReady || !desiredInfo || !infoPopoverOpen) return;
+    reanchorInfo = true; void syncInfoPanel();
   };
-  unsubs.push(onViewportResize(reanchorInfoPopover));
-
-  // Drag-end + reset → recompute anchor with new offset.
-  unsubs.push(
-    OBR.broadcast.onMessage(BC_PANEL_DRAG_END, async (event) => {
+  if (!alive()) return;
+  unsubs.push(onViewportResize(reanchor),
+    OBR.broadcast.onMessage(BC_PANEL_DRAG_END, event => {
+      if (!localEvent(event.connectionId)) return;
       const payload = event.data as DragEndPayload | undefined;
-      if (payload?.panelId !== PANEL_IDS.ccInfo) return;
-      await reanchorInfoPopover();
+      if (payload?.panelId === PANEL_IDS.ccInfo) reanchor();
     }),
+    OBR.broadcast.onMessage(BC_PANEL_RESET, event => { if (localEvent(event.connectionId)) reanchor(); }),
   );
-  unsubs.push(
-    OBR.broadcast.onMessage(BC_PANEL_RESET, async () => {
-      await reanchorInfoPopover();
-    }),
-  );
+  if (sceneReady) await refreshSceneState();
 }
 
 export async function teardownCharacterCards(): Promise<void> {
-  if (selectionDebounceTimer) { clearTimeout(selectionDebounceTimer); selectionDebounceTimer = null; }
-  await closeMainPopover();
-  await closeInfoPopover();
+  active = false; sceneReady = false; generation++; sceneGeneration++; selectionGeneration++; metadataRevision++;
+  for (const abort of refreshes.values()) abort.abort();
+  refreshes.clear();
+  for (const off of unsubs.splice(0)) off();
+  await Promise.all([closeMainPopover(), closeInfoPopover()]);
+  try { await OBR.modal.close(BIND_MODAL_ID); } catch {}
   try { await OBR.contextMenu.remove(CTX_BIND); } catch {}
   try { await OBR.tool.remove(CC_TOOL_ID); } catch {}
-  for (const u of unsubs.splice(0)) u();
+  cards.clear(); observedItems.clear(); selectedIds = []; ccConnectionId = "";
 }
