@@ -259,14 +259,24 @@ export async function reconcileUploadedCardShieldState(params: {
   roomId: string;
   cardId: string;
   xlsx: Blob | ArrayBuffer | Uint8Array;
+  signal?: AbortSignal;
+  isCurrent?: () => boolean;
 }): Promise<boolean> {
+  const assertCurrent = () => {
+    if (params.signal?.aborted || params.isCurrent?.() === false)
+      throw new DOMException("Character card operation stopped", "AbortError");
+  };
+  assertCurrent();
   const equipped = await readShieldEquippedFromXlsx(params.xlsx);
+  assertCurrent();
   if (equipped == null) return false;
 
   const dataUrl = `https://obr.dnd.center/characters/${encodeURIComponent(params.roomId)}/${encodeURIComponent(params.cardId)}/data.json`;
-  const res = await fetch(dataUrl, { cache: "no-cache" });
+  const res = await fetch(dataUrl, { cache: "no-cache", signal: params.signal });
+  assertCurrent();
   if (!res.ok) throw new Error(`fetch data.json failed: HTTP ${res.status}`);
   const data = await res.json();
+  assertCurrent();
   const cur = readBooleanFlag(data?.combat?.shield?.equipped);
   if (cur === equipped) return false;
 
@@ -283,9 +293,11 @@ export async function reconcileUploadedCardShieldState(params: {
   const putUrl = `${params.apiBase}/${encodeURIComponent(params.roomId)}/${encodeURIComponent(params.cardId)}/data`;
   const put = await fetch(putUrl, {
     method: "PUT",
+    signal: params.signal,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(next),
   });
+  assertCurrent();
   if (!put.ok) {
     const body = await put.text();
     throw new Error(`save corrected shield state failed: HTTP ${put.status} ${body.slice(0, 120)}`);

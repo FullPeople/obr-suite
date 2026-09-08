@@ -1,0 +1,220 @@
+--- a/parser.py
++++ b/parser.py
+@@ -602,62 +602,146 @@
+     return (None, None)
+ 
+ 
+-def _select_layout(wb, template_version: str | None) -> dict[str, Any]:
++# Approved worksheet titles. Resolve once per import; no source cells, enum
++# values, formulas or shared layout constants are rewritten here.
++_COMMON_SHEET_ALIASES = {
++    "main": ("主要", "Main"),
++    "spell_db": ("法术大全", "Spell Compendium"),
++    "inventory": ("背包", "Inventory"),
++    "equipment": ("装备", "Equipment"),
++    "data": ("数据表", "Data"),
++    "areas": ("圆形效应范围", "Areas of Effect"),
++    "export": ("网页导入", "Web Import", "骰娘导入"),
++    "classes": ("职业", "Classes"),
++    "familiars": ("魔宠", "Familiars"),
++    "allies": ("盟友与魔宠", "Allies and Familiars"),
++    "spellbook": ("法术书", "Spellbook"),
++    "changelog": ("更新", "Changelog"),
++}
++_PROFILE_SHEET_ALIASES = {
++    "2014": {
++        "person": ("背景", "Background"),
++        "background_db": ("背景数据", "Background Data"),
++        "species": ("种族", "Races"),
++        "strongholds": ("据点", "Strongholds"),
++        "additional_spells": ("额外法术", "Additional Spells"),
++    },
++    "2024": {
++        # Origin is the reviewed title; Origins was the audit's earlier alias.
++        "person": ("起源", "Origin", "Origins"),
++        "background_db": ("背景", "Background Data"),
++        "species": ("种族", "Species"),
++        "strongholds": ("据点", "Bastions"),
++        "feats": ("专长与据点", "Feats and Bastions"),
++        "adjustments": ("自定义调整栏", "Custom Adjustments"),
++    },
++}
++
++
++def _sheet_name(wb, role: str, aliases: tuple[str, ...], *, required=False) -> str | None:
++    names = {name.casefold() for name in aliases}
++    found = [name for name in wb.sheetnames if name.casefold() in names]
++    if len(found) > 1:
++        raise ValueError(f"Ambiguous worksheet role {role}: {', '.join(found)}")
++    if not found and required:
++        raise ValueError(f"Missing required worksheet {role}: {' / '.join(aliases)}")
++    return found[0] if found else None
++
++
++def _layout_ruleset(main) -> str | None:
++    """Use version evidence without changing the existing JSON output contract.
++
++    Legacy flat/custom AV1 JSON is still an optional overlay, not a template
++    marker. Only the already recognised obr-suite schema supplies evidence.
+     """
+-    挑选布局表。**优先看 sheet 结构** —— 比 A1 字符串可靠得多,因为用户
+-    可能基于 v1.0.12 模板修改但保留了老的 A1 字符串,或反之亦然。
+-    判定规则:
+-      - 有 "起源" sheet 视为标准 v1.0.12 (新版,2024 规则)
+-      - 仅有 "背景" sheet (无 "起源") 但其余 sheet 跟 v1.0.12 对得上
+-        视为 5E2014 模板 (悲灵 v3.5.x): 内部 cell 布局跟 v1.0.12
+-        完全一致,只是 sheet 命名沿用旧约定—— "背景" sheet 同时承担
+-        个人背景 (v1.0.12 把它拆出去叫 "起源")。这是用户明确要求的
+-        "采取和 v1.0.12 相同的识别规则",我们克隆 v1.0.12 布局并把
+-        person 字段重定向到 "背景"。
+-      - 都不命中 → 老版 v1.0.0 兜底。
+-    A1 版本号只用于辅助区分 (例如未来再有 v1.1.x 时)。
++    evidence = set()
++    for col in range(5, 15):
++        value = _cell(main, f"{chr(64 + col)}2")
++        evidence.update(re.findall(r"(?<![A-Za-z0-9])5E[0-9]{4}(?![A-Za-z0-9])", str(value or "")))
++    raw = _cell(main, "AV1")
++    try:
++        embedded = json.loads(raw) if isinstance(raw, str) else None
++    except (ValueError, TypeError):
++        embedded = None
++    if isinstance(embedded, dict) and embedded.get("schema") == "obr-suite-card/v1":
++        meta = embedded.get("meta")
++        marker = meta.get("ruleset") if isinstance(meta, dict) else None
++        if marker is not None:
++            if marker not in ("5E2014", "5E2024"):
++                raise ValueError("Unsupported AV1 template ruleset")
++            evidence.add(marker)
++    if evidence - {"5E2014", "5E2024"}:
++        raise ValueError("Unsupported template ruleset marker")
++    if len(evidence) > 1:
++        raise ValueError("Conflicting template ruleset markers")
++    return next(iter(evidence), None)
++
++
++def _select_layout(wb, template_version: str | None = None) -> dict[str, Any]:
++    """Resolve a supported layout and all worksheet roles once per import.
++
++    Current cards require a ruleset marker plus the modern sheet signature.
++    Explicit legacy v1.0.0 / v1.0.11 / v1.0.12 titles retain their coordinate
++    paths. A Main title alone, unknown version or ambiguous bilingual role
++    never falls through to guessed legacy coordinates. Mixed languages are
++    fine when every role is unique and the version semantics agree.
+     """
+-    sheets = set(wb.sheetnames)
+-
+-    # 标准 v1.0.12 (新版): "起源" 个人背景 + "背景" 词典 两张分开
+-    if "起源" in sheets:
+-        return LAYOUT_V1_0_12
+-
+-    # 5E2014 (悲灵 v3.5.x) 兜底: 沿用 v1.0.12 的 cell 布局,只把
+-    # person sheet 改回 "背景"。判定条件: 有 v1.0.12 的标志性 sheet
+-    # 组合 ("主要" + "背景" + 至少一个 v1.0.12 新增 sheet 名) 但无
+-    # "起源"。这样既识别 v3.5.x 又不会误把残缺的 v1.0.0 模板拖进新
+-    # 布局——v1.0.0 缺这些标志性 sheet。
+-    #
+-    # 2026-05-16 — original marker set required "骰娘导入" but the
+-    # current 5E template renamed it to "网页导入". Accept either
+-    # one (kept 骰娘导入 for backward compat with any in-the-wild
+-    # older test files); the rest of the marker set stays the same.
+-    v1012_core_markers = {"装备", "数据表", "圆形效应范围"}
+-    v1012_export_markers = {"骰娘导入", "网页导入"}
+-    has_v1012_markers = (
+-        v1012_core_markers.issubset(sheets)
+-        and bool(sheets & v1012_export_markers)
+-    )
+-    if "主要" in sheets and "背景" in sheets and has_v1012_markers:
+-        # deepcopy via JSON round-trip — layout is pure data (strings /
+-        # ints / nested dicts), no lambdas, so this is safe + simpler
+-        # than importing copy just for one site.
+-        layout: dict[str, Any] = json.loads(json.dumps(LAYOUT_V1_0_12))
+-        layout["sheets"]["person"] = "背景"
+-        layout["version_label"] = "v1.0.12-2014mode"
+-        return layout
+-
+-    # 退而求其次: 按版本号判断
+-    if template_version:
+-        m = re.match(r"v(\d+)\.(\d+)\.(\d+)", template_version)
+-        if m:
+-            major, minor, patch = map(int, m.groups())
+-            if (major, minor, patch) >= (1, 0, 11):
+-                return LAYOUT_V1_0_12
+-
+-    # 老版兜底
+-    return LAYOUT_V1_0_0
++    resolved = {
++        role: _sheet_name(wb, role, aliases, required=role == "main")
++        for role, aliases in _COMMON_SHEET_ALIASES.items()
++    }
++    main = wb[resolved["main"]]
++    if template_version is None:
++        _, template_version = _parse_template_version(_cell(main, "A1"))
++    ruleset = _layout_ruleset(main)
++    origin = _sheet_name(wb, "person_2024", _PROFILE_SHEET_ALIASES["2024"]["person"])
++    modern_signature = all(resolved[role] for role in ("equipment", "data", "areas", "export"))
++    legacy_modern = template_version in ("v1.0.11", "v1.0.12")
++    modern = modern_signature or bool(origin) or legacy_modern
++
++    if modern:
++        if not ruleset and not legacy_modern:
++            raise ValueError("Missing supported template version/ruleset evidence")
++        profile = "2024" if (ruleset == "5E2024" or (not ruleset and origin)) else "2014"
++        if profile == "2014" and origin:
++            raise ValueError("2014 layout cannot contain an Origin worksheet")
++        base = LAYOUT_V1_0_12
++        label = "v1.0.12" if profile == "2024" else "v1.0.12-2014mode"
++    elif template_version == "v1.0.0" and ruleset != "5E2024":
++        profile, base, label = "2014", LAYOUT_V1_0_0, "v1.0.0"
++    else:
++        raise ValueError("Unsupported or incomplete character-card worksheet layout")
++
++    # The same Chinese title means different things in the two rule versions.
++    # Do not silently treat a 2014 personal page as a 2024 background database.
++    forbidden = ("Background", "背景数据") if profile == "2024" else ("起源", "Origin", "Origins")
++    if any(name.casefold() in {value.casefold() for value in forbidden} for name in wb.sheetnames):
++        raise ValueError(f"Worksheet names conflict with the {profile} layout")
++
++    aliases = {**_COMMON_SHEET_ALIASES, **_PROFILE_SHEET_ALIASES[profile]}
++    required = {"main", "person", "spell_db"}
++    if modern and not legacy_modern:
++        # These published cards depend on their own dictionaries and inventory.
++        # Missing pages must not quietly erase spell text or backpack contents.
++        required.update(("equipment", "data", "areas", "export", "inventory", "background_db"))
++    for role, names in _PROFILE_SHEET_ALIASES[profile].items():
++        if role in ("species", "strongholds"):
++            # Recognise the other version's reserved title as a conflict too;
++            # e.g. Species + Races must not silently leave one sheet unused.
++            all_names = tuple(dict.fromkeys(alias for entry in _PROFILE_SHEET_ALIASES.values() for alias in entry[role]))
++            resolved[role] = _sheet_name(wb, role, all_names)
++            if resolved[role] and resolved[role].casefold() not in {name.casefold() for name in names}:
++                raise ValueError(f"Worksheet {resolved[role]} conflicts with the {profile} layout")
++        else:
++            resolved[role] = origin if role == "person" and profile == "2024" else _sheet_name(wb, role, names)
++    for role in sorted(required):
++        if resolved.get(role) is None:
++            raise ValueError(f"Missing required worksheet {role}: {' / '.join(aliases[role])}")
++
++    layout = dict(base)
++    layout["version_label"] = label
++    layout["sheets"] = {**base["sheets"], **{role: name for role, name in resolved.items() if name is not None}}
++    return layout
+ 
+ 
+ # ---------------------------------------------------------------------------
+@@ -1468,12 +1552,11 @@
+     xlsx_path = Path(xlsx_path)
+     wb = load_workbook(xlsx_path, data_only=True)
+ 
+-    # 先用 v1.0.0 主要 sheet 名读 A1,然后再决定布局
+-    main_default = wb["主要"] if "主要" in wb.sheetnames else None
+-    title = _cell(main_default, "A1") if main_default else None
++    # Resolve versioned worksheet roles before reading any coordinate layout.
++    # Consumers below all use this import's actual names (Chinese or English).
++    L = _select_layout(wb)
++    title = _cell(wb[L["sheets"]["main"]], "A1")
+     template_name, template_version = _parse_template_version(title)
+-
+-    L = _select_layout(wb, template_version)
+ 
+     classes, total_level = parse_classes(wb, L)
+ 

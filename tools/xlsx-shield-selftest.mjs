@@ -120,6 +120,37 @@ try {
     const expected=structuredClone(initial);expected.combat.shield.equipped=true;check(JSON.stringify(JSON.parse(corrected.calls[1].body))===JSON.stringify(expected),'AC and all author data preserved; only equipped changes');
     check(corrected.calls[1].url==='https://api.invalid/cards/room%20%2F%E4%B8%80/card%20%2F%E4%BA%8C/data','reconciliation preserves URL path encoding');
     const same=await reconcile(pack(en),expected);check(!same.result&&same.calls.length===1,'already matching flag does not write');
+    // Panel lifecycle cancellation must reach the real XLSX adapter, including
+    // after ZIP parsing or a slow response body. An already dispatched PUT is
+    // not treated as remotely undone; this only blocks later work/acknowledgement.
+    for (const stage of ['before-parse','during-parse','after-get','after-json','after-put','signal-before-parse']) {
+      const stopped=await page.evaluate(async({base64,initial,stage})=>{
+        const controller=new AbortController(),calls=[];let current=true,readCount=0;
+        if(stage==='before-parse')current=false;
+        if(stage==='signal-before-parse')controller.abort();
+        window.fetch=async(url,options={})=>{
+          const method=options.method||'GET';calls.push({method,hasSignal:options.signal===controller.signal});
+          if(stage==='after-get'&&method==='GET')current=false;
+          if(stage==='after-put'&&method==='PUT')current=false;
+          return {ok:true,json:async()=>{if(stage==='after-json')current=false;return initial;}};
+        };
+        // A Blob read is genuinely asynchronous: invalidate while the adapter
+        // awaits its bytes, instead of swapping the reconciliation function.
+        let bytes=Uint8Array.from(atob(base64),c=>c.charCodeAt(0));
+        if(stage==='during-parse') {
+          const blob=new Blob([bytes]);const original=blob.arrayBuffer.bind(blob);
+          blob.arrayBuffer=async()=>{readCount++;const data=await original();current=false;return data;};bytes=blob;
+        }
+        try {
+          await shield.reconcileUploadedCardShieldState({apiBase:'https://api.invalid/cards',roomId:'r',cardId:'c',xlsx:bytes,
+            signal:controller.signal,isCurrent:()=>current});
+          return {error:null,calls,readCount};
+        } catch(error) {return {error:error.name,calls,readCount};}
+      },{base64:pack(en).toString('base64'),initial,stage});
+      const wanted=stage==='after-put'?2:['after-get','after-json'].includes(stage)?1:0;
+      check(stopped.error==='AbortError'&&stopped.calls.length===wanted,`${index}: ${stage} stops at the lifecycle boundary`);
+      check(stopped.calls.every(call=>call.hasSignal)&&(!stage.includes('during')||stopped.readCount===1),`${index}: ${stage} uses caller signal and real parse`);
+    }
     const legacyUnknown=new Map(en);textCell(legacyUnknown,'AS40','Maybe');const legacySync=await reconcile(pack(legacyUnknown),expected);
     check(legacySync.result&&legacySync.calls.length===2&&JSON.parse(legacySync.calls[1].body).combat.shield.equipped===false,'unknown ordinary text still follows legacy false correction, distinct from invalid cells');
     const unknown=new Map(original);textCell(unknown,'AL39','Other');const skipped=await reconcile(pack(unknown),initial);check(!skipped.result&&skipped.calls.length===0,'unknown layout never fetches or modifies uploaded card');

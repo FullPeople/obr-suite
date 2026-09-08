@@ -99,6 +99,7 @@ let isGM = false;
 let profileReady = false;
 let profileRequest = 0;
 let panelAlive = true;
+let panelClosing = false;
 let sceneReady: boolean | undefined;
 let sceneEpoch = 0;
 let readinessRequest = 0;
@@ -106,6 +107,19 @@ let metadataRequest = 0;
 let metadataLoaded = false;
 let cardReadRetry: (() => Promise<void>) | undefined;
 const panelSubscriptions: (() => void)[] = [];
+interface PanelWrite {
+  epoch: number;
+  room: string;
+  player: string;
+  gm: boolean;
+  cardId?: string;
+  kind: "upload" | "refresh" | "delete" | "visibility";
+  controller: AbortController;
+  metadataDispatched: boolean;
+  uploading: boolean;
+}
+const panelWrites = new Set<PanelWrite>();
+let metadataWriteQueue: Promise<unknown> = Promise.resolve();
 let cards: CardEntry[] = [];
 let current: View = { type: "empty" };
 let maximized = false;
@@ -182,10 +196,19 @@ async function setMaximized(next: boolean) {
       // the root of the click-twice-to-reopen bug.
       try { localStorage.removeItem(PANEL_OPEN_KEY); } catch {}
       await OBR.modal.close(PANEL_MODAL_ID);
+      stopPanelReads();
       return;
     }
   } catch (e) {
     console.error("[character-cards] setMaximized failed", e);
+    if (panelAlive && panelClosing) {
+      panelClosing = false;
+      maximized = true;
+      document.body.classList.add("maximized");
+      try { localStorage.setItem(PANEL_OPEN_KEY, "1"); } catch {}
+      showError(tt("ccPanelCloseFailed"));
+      render();
+    }
   }
   saveState();
 }
@@ -216,23 +239,122 @@ function showStatus(msg: string) {
 }
 
 function minimize() {
+  if (!panelAlive || panelClosing) return;
+  panelClosing = true;
+  cancelPanelWrites();
+  render();
   saveState();
   setMaximized(false);
 }
 
 async function toggleCardVisibility(id: string) {
-  if (!isGM) return;
-  const next = cards.map((c) => {
-    if (c.id !== id) return c;
-    return { ...c, visibility: nextVisibilityLevel(c.visibility) };
-  });
-  cards = next;
-  await writeCardsToScene(next);
+  const op = beginPanelWrite("visibility", id);
+  if (!op) return;
+  // Capture the intended destination, so a second local click or an intervening
+  // update cannot turn a request to hide a card into a request to publish it.
+  const visibility = nextVisibilityLevel(cards.find(c => c.id === id)?.visibility);
+  try {
+    await mutateCardsInScene(op, list => list.map(c => c.id === id ? { ...c, visibility } : c));
+  } catch (error) { showWriteError(op, error); }
+  finally { finishPanelWrite(op); }
+}
+
+function writeIsCurrent(op: PanelWrite, list = cards): boolean {
+  if (!panelAlive || panelClosing || op.controller.signal.aborted || !profileReady || !metadataLoaded
+      || sceneReady !== true || op.epoch !== sceneEpoch || op.room !== roomId
+      || op.player !== myPlayerId || op.gm !== isGM) return false;
+  if (op.kind === "visibility" && !isGM) return false;
+  if (!op.cardId) return true;
+  const card = list.find(c => c.id === op.cardId);
+  return card ? canSeeCard(card, isGM, myPlayerId)
+    : op.kind === "delete" && op.metadataDispatched;
+}
+
+function assertWriteCurrent(op: PanelWrite, list = cards): void {
+  if (!writeIsCurrent(op, list)) throw new DOMException(tt("ccPanelWriteCancelled"), "AbortError");
+}
+
+function beginPanelWrite(kind: PanelWrite["kind"], cardId?: string): PanelWrite | undefined {
+  const op: PanelWrite = { epoch: sceneEpoch, room: roomId, player: myPlayerId,
+    gm: isGM, cardId, kind, controller: new AbortController(), metadataDispatched: false, uploading: false };
+  if (!writeIsCurrent(op)) {
+    if (panelAlive) showError(tt("ccPanelWriteUnavailable"));
+    return;
+  }
+  // A file picker is part of the operation. Do not open another picker or
+  // start a conflicting refresh/delete for that same card while it is pending.
+  if ([...panelWrites].some(p => !p.controller.signal.aborted &&
+      (cardId ? p.cardId === cardId : p.kind === "upload"))) return;
+  panelWrites.add(op);
+  render();
+  return op;
+}
+
+function finishPanelWrite(op: PanelWrite): void {
+  panelWrites.delete(op);
   render();
 }
 
-async function writeCardsToScene(list: CardEntry[]) {
-  await OBR.scene.setMetadata({ [SCENE_META_KEY]: list });
+function cancelPanelWrites(resetQueue = false): void {
+  for (const op of panelWrites) op.controller.abort();
+  panelWrites.clear();
+  // Keep same-scene writes serialized even if identity changes or closing
+  // fails. Only a new scene/lifetime may bypass the old scene's pending ACK.
+  if (resetQueue) metadataWriteQueue = Promise.resolve();
+}
+
+function showWriteError(op: PanelWrite, error: unknown, key: Parameters<typeof t>[1] = "ccPanelWriteFailed"): void {
+  if (!writeIsCurrent(op)) return;
+  showError(`${tt(key)}: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+function cardList(meta: Record<string, unknown>): CardEntry[] {
+  const list = meta[SCENE_META_KEY];
+  return Array.isArray(list) ? list.filter((card): card is CardEntry =>
+    !!card && typeof card === "object" && typeof card.id === "string") : [];
+}
+
+async function readWriteCards(op: PanelWrite): Promise<CardEntry[]> {
+  assertWriteCurrent(op);
+  const beforeRead = metadataRequest;
+  const meta = await OBR.scene.getMetadata();
+  assertWriteCurrent(op);
+  // A complete event received during this read takes precedence over a
+  // captured response. Check discovery permission against the latest list.
+  if (beforeRead === metadataRequest) applyCardSnapshot(meta);
+  const latest = cards;
+  assertWriteCurrent(op, latest);
+  return latest;
+}
+
+function mutateCardsInScene(op: PanelWrite, transform: (list: CardEntry[]) => CardEntry[]): Promise<void> {
+  const run = async () => {
+    const latest = await readWriteCards(op);
+    assertWriteCurrent(op, latest);
+    const next = transform(latest);
+    const beforeWrite = metadataRequest;
+    op.metadataDispatched = true;
+    await OBR.scene.setMetadata({ [SCENE_META_KEY]: next });
+    assertWriteCurrent(op);
+    // The host may deliver events before acknowledging this write. Never put
+    // an old proposal back over an event, especially after a scene change.
+    if (beforeWrite === metadataRequest) applyCardSnapshot({ [SCENE_META_KEY]: next });
+  };
+  const result = metadataWriteQueue.then(run);
+  metadataWriteQueue = result.catch(() => {});
+  return result;
+}
+
+function broadcastCardUpdate(op: PanelWrite, card: CardEntry): void {
+  if (!writeIsCurrent(op)) return;
+  // The service entry URL can end in index.html. Derive the canonical data
+  // address instead of concatenating onto that URL; full-sheet listeners
+  // deliberately reject relative or unrelated data URLs.
+  const payload = { cardId: card.id, roomId: op.room,
+    url: `https://obr.dnd.center/characters/${encodeURIComponent(op.room)}/${encodeURIComponent(card.id)}/data.json` };
+  for (const destination of ["LOCAL", "REMOTE"] as const) {
+    void OBR.broadcast.sendMessage(BC_CARD_UPDATED, payload, { destination }).catch(() => {});
+  }
 }
 
 function applyCardSnapshot(meta: Record<string, unknown>): void {
@@ -240,11 +362,10 @@ function applyCardSnapshot(meta: Record<string, unknown>): void {
   // Metadata events contain the complete current snapshot. Apply it now,
   // without a second read that could finish after a newer event.
   ++metadataRequest;
-  const list = meta[SCENE_META_KEY];
-  cards = Array.isArray(list) ? list.filter((card): card is CardEntry =>
-    !!card && typeof card === "object" && typeof card.id === "string") : [];
+  cards = cardList(meta);
   metadataLoaded = true;
-  if (cardReadRetry) {
+  for (const op of panelWrites) if (!writeIsCurrent(op)) op.controller.abort();
+  if (cardReadRetry && (cardReadRetry !== readInitialSceneReadiness || sceneReady !== undefined)) {
     cardReadRetry = undefined;
     showError("");
   }
@@ -283,17 +404,26 @@ async function readInitialSceneReadiness(): Promise<void> {
   const snapshot = metadataRequest;
   // A newer scene event or metadata snapshot takes precedence over this
   // initial query. A rejected query means unknown, not "scene closed".
-  const valid = () => panelAlive && epoch === sceneEpoch && request === readinessRequest && snapshot === metadataRequest;
+  const sameScene = () => panelAlive && epoch === sceneEpoch && request === readinessRequest;
+  const valid = () => sameScene() && snapshot === metadataRequest;
   try {
     const ready = await OBR.scene.isReady();
     if (valid()) changeSceneReadiness(ready, true);
+    else if (sameScene() && sceneReady === undefined && metadataLoaded) {
+      // Early metadata may already have restored a card before isReady replies.
+      // Confirm this same scene without discarding its snapshot or iframe;
+      // otherwise the read UI works but all write buttons stay disabled forever.
+      if (ready) changeSceneReadiness(true, true);
+      else showCardReadError(readInitialSceneReadiness);
+    }
   } catch {
-    if (valid()) showCardReadError(readInitialSceneReadiness);
+    if (valid() || (sameScene() && sceneReady === undefined)) showCardReadError(readInitialSceneReadiness);
   }
 }
 
 function changeSceneReadiness(ready: boolean, initial = false): void {
   if (!panelAlive) return;
+  cancelPanelWrites(true);
   ++sceneEpoch;
   ++metadataRequest;
   sceneReady = ready;
@@ -313,100 +443,65 @@ function changeSceneReadiness(ready: boolean, initial = false): void {
   if (ready) void refreshFromScene();
 }
 
-// 2026-05-26 — companion to uploadFile() for the "📋 粘贴 JSON" flow.
-// Same shape as uploadFile but POSTs a JSON body to the server's
-// /create-from-json endpoint (server.py:create_character_from_json),
-// then follows the same post-upload bookkeeping: scene-metadata
-// write, BC_CARD_UPDATED broadcast, card-list re-render, focus the
-// new card. Throws on failure so the paste-modal can surface the
-// error string back to the user without losing their textarea
-// content.
-async function uploadJsonAsCard(parsed: unknown): Promise<void> {
-  showError("");
-  const sideEl = document.getElementById("side");
-  sideEl?.classList.add("busy");
-  try {
-    const u = encodeURIComponent(playerName);
-    const r = await fetch(`${API_BASE}/create-from-json?room=${roomId}&uploader=${u}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: parsed }),
-    });
-    if (!r.ok) {
-      const err = await r.text();
-      throw new Error(err || `HTTP ${r.status}`);
-    }
-    const entry = (await r.json()) as CardEntry;
-    try {
-      // Mirror uploadFile: broadcast so bound tokens + other clients
-      // refresh. LOCAL also so this client's background propagates
-      // immediately (no stale-state until manual rebind).
-      const payload = { cardId: entry.id, url: `${entry.url}data.json` };
-      OBR.broadcast.sendMessage(BC_CARD_UPDATED, payload, { destination: "LOCAL" });
-      OBR.broadcast.sendMessage(BC_CARD_UPDATED, payload, { destination: "REMOTE" });
-    } catch {}
-    const updated = [entry, ...cards];
-    await writeCardsToScene(updated);
-    cards = updated;
-    current = { type: "card", id: entry.id };
-    showStatus(`${ICONS.check} ${tt("ccPanelUploaded")}: ${escapeHtml(entry.name)}`);
-    render();
-  } finally {
-    sideEl?.classList.remove("busy");
-  }
+async function acceptUploadedCard(op: PanelWrite, entry: CardEntry): Promise<void> {
+  assertWriteCurrent(op);
+  await mutateCardsInScene(op, list => [entry, ...list.filter(c => c.id !== entry.id)]);
+  assertWriteCurrent(op);
+  // Another client may have removed or restricted the entry before our ACK.
+  const installed = cards.find(c => c.id === entry.id);
+  if (!installed || !canSeeCard(installed, isGM, myPlayerId)) return;
+  broadcastCardUpdate(op, installed);
+  current = { type: "card", id: installed.id };
+  showStatus(`${ICONS.check} ${tt("ccPanelUploaded")}: ${escapeHtml(installed.name)}`);
+  render();
 }
 
-async function uploadFile(file: File) {
+async function uploadJsonAsCard(parsed: unknown, op: PanelWrite): Promise<void> {
+  assertWriteCurrent(op);
   showError("");
-  const sideEl = document.getElementById("side");
-  sideEl?.classList.add("busy");
+  op.uploading = true;
+  render();
+  const u = encodeURIComponent(playerName);
+  const response = await fetch(`${API_BASE}/create-from-json?room=${op.room}&uploader=${u}`, {
+    method: "POST", signal: op.controller.signal,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data: parsed }),
+  });
+  assertWriteCurrent(op);
+  if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+  const entry = await response.json() as CardEntry;
+  await acceptUploadedCard(op, entry);
+}
+
+async function reconcileCardShield(op: PanelWrite, entry: CardEntry, file: File): Promise<void> {
+  assertWriteCurrent(op);
   try {
-    const fd = new FormData();
-    fd.append("file", file);
-    const u = encodeURIComponent(playerName);
-    const r = await fetch(`${API_BASE}/upload?room=${roomId}&uploader=${u}`, {
-      method: "POST",
-      body: fd,
-    });
-    if (!r.ok) {
-      const err = await r.text();
-      throw new Error(err || `HTTP ${r.status}`);
-    }
-    const entry = (await r.json()) as CardEntry;
-    try {
-      const corrected = await reconcileUploadedCardShieldState({
-        apiBase: API_BASE,
-        roomId,
-        cardId: entry.id,
-        xlsx: file,
-      });
-      if (corrected) {
-        try {
-          // 2026-05-14 — LOCAL+REMOTE so this client's background
-          // also propagates the new stats to bound tokens. Without
-          // LOCAL, the uploader sees stale HP/AC on the canvas until
-          // they re-bind manually.
-          const payload = { cardId: entry.id, url: `${entry.url}data.json` };
-          OBR.broadcast.sendMessage(BC_CARD_UPDATED, payload, { destination: "LOCAL" });
-          OBR.broadcast.sendMessage(BC_CARD_UPDATED, payload, { destination: "REMOTE" });
-        } catch {}
-      }
-    } catch (e) {
-      console.warn("[cc-panel] shield equipped reconcile after upload failed", e);
-    }
-    const updated = [entry, ...cards];
-    await writeCardsToScene(updated);
-    cards = updated;
-    current = { type: "card", id: entry.id };
-    showStatus(`${ICONS.check} ${tt("ccPanelUploaded")}: ${escapeHtml(entry.name)}`);
-    render();
-  } catch (e: any) {
-    showError(
-      `${tt("ccPanelUploadFailed")}: ${e?.message || e}\n${tt("ccPanelUploadHint")}`,
-    );
-  } finally {
-    sideEl?.classList.remove("busy");
+    await reconcileUploadedCardShieldState({ apiBase: API_BASE, roomId: op.room,
+      cardId: entry.id, xlsx: file, signal: op.controller.signal,
+      isCurrent: () => writeIsCurrent(op) });
+  } catch (error) {
+    assertWriteCurrent(op);
+    console.warn("[cc-panel] shield equipped reconciliation failed", error);
   }
+  assertWriteCurrent(op);
+}
+
+async function uploadFile(file: File, op: PanelWrite): Promise<void> {
+  assertWriteCurrent(op);
+  showError("");
+  op.uploading = true;
+  render();
+  const fd = new FormData();
+  fd.append("file", file);
+  const u = encodeURIComponent(playerName);
+  const response = await fetch(`${API_BASE}/upload?room=${op.room}&uploader=${u}`, {
+    method: "POST", body: fd, signal: op.controller.signal,
+  });
+  assertWriteCurrent(op);
+  if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+  const entry = await response.json() as CardEntry;
+  await reconcileCardShield(op, entry, file);
+  await acceptUploadedCard(op, entry);
 }
 
 // Open a native file picker dialog. Returns the chosen File or null
@@ -458,97 +553,85 @@ function pickXlsxFiles(): Promise<File[]> {
 // each uploadFile() is awaited (the side-panel busy spinner stays up
 // for the whole batch).
 async function linkLocalFile(): Promise<void> {
-  const files = await pickXlsxFiles();
-  if (files.length === 0) return;
-  await uploadFilesBatch(files);
-}
-
-// Upload an array of xlsx files in series. Stops on the first failure
-// so the user can see WHICH file broke and why (the side-panel error
-// banner already surfaces messages from uploadFile).
-async function uploadFilesBatch(files: File[]): Promise<void> {
-  for (const f of files) {
-    if (!f.name.toLowerCase().endsWith(".xlsx")) {
-      showError(`${tt("ccPanelOnlyXlsx")} (跳过 ${f.name})`);
-      continue;
-    }
-    await uploadFile(f);
-  }
-}
-
-// Refresh a card by re-picking the xlsx from disk. Cross-origin
-// iframes can't persist a FileSystemFileHandle, so the user has to
-// confirm the file each time — but the browser remembers the last
-// folder, so it's still a 2-click flow (pick + open).
-async function refreshCardFromPicker(card: CardEntry): Promise<void> {
-  const file = await pickXlsxFile();
-  if (!file) return;
-  if (!file.name.toLowerCase().endsWith(".xlsx")) {
-    showError(tt("ccPanelOnlyXlsx"));
-    return;
-  }
-  const row = document.querySelector<HTMLElement>(`.card[data-id="${card.id}"]`);
-  const btn = row?.querySelector<HTMLButtonElement>(".card-refresh");
-  btn?.classList.add("spinning");
+  const op = beginPanelWrite("upload");
+  if (!op) return;
   try {
+    const files = await pickXlsxFiles();
+    assertWriteCurrent(op);
+    await uploadFilesBatch(files, op);
+  } catch (error) { showWriteError(op, error, "ccPanelUploadFailed"); }
+  finally { finishPanelWrite(op); }
+}
+
+// The entire batch belongs to its initiating scene, including the picker.
+// Stop after any failed upload; a later file must not silently start in a new scene.
+async function uploadFilesBatch(files: File[], op: PanelWrite): Promise<void> {
+  for (const file of files) {
+    assertWriteCurrent(op);
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      throw new Error(`${tt("ccPanelOnlyXlsx")}: ${file.name}`);
+    }
+    await uploadFile(file, op);
+  }
+}
+
+async function refreshCardFromPicker(card: CardEntry): Promise<void> {
+  const op = beginPanelWrite("refresh", card.id);
+  if (!op) return;
+  try {
+    const file = await pickXlsxFile();
+    assertWriteCurrent(op);
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".xlsx")) throw new Error(tt("ccPanelOnlyXlsx"));
+    // Refresh overwrites server content. Re-read the target after the native
+    // picker, before sending that request, even if its metadata event is late.
+    await readWriteCards(op);
+    assertWriteCurrent(op);
     const fd = new FormData();
     fd.append("file", file);
-    const r = await fetch(
-      `${API_BASE}/refresh?room=${roomId}&card=${encodeURIComponent(card.id)}`,
-      { method: "POST", body: fd },
+    const response = await fetch(
+      `${API_BASE}/refresh?room=${op.room}&card=${encodeURIComponent(card.id)}`,
+      { method: "POST", body: fd, signal: op.controller.signal },
     );
-    if (!r.ok) throw new Error((await r.text()) || `HTTP ${r.status}`);
-    const updated = (await r.json()) as CardEntry;
-    try {
-      const corrected = await reconcileUploadedCardShieldState({
-        apiBase: API_BASE,
-        roomId,
-        cardId: updated.id,
-        xlsx: file,
-      });
-      if (corrected) {
-        try {
-          // 2026-05-14 — see same LOCAL+REMOTE comment in uploadFile.
-          const reconcilePayload = { cardId: updated.id, url: `${updated.url}data.json` };
-          OBR.broadcast.sendMessage(BC_CARD_UPDATED, reconcilePayload, { destination: "LOCAL" });
-          OBR.broadcast.sendMessage(BC_CARD_UPDATED, reconcilePayload, { destination: "REMOTE" });
-        } catch {}
-      }
-    } catch (e) {
-      console.warn("[cc-panel] shield equipped reconcile after refresh failed", e);
-    }
-    cards = cards.map((c) => (c.id === updated.id ? { ...c, ...updated } : c));
-    await writeCardsToScene(cards);
+    assertWriteCurrent(op);
+    if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+    const updated = await response.json() as CardEntry;
+    assertWriteCurrent(op);
+    if (updated.id !== card.id) throw new Error(tt("ccPanelWriteFailed"));
+    await reconcileCardShield(op, updated, file);
+    await mutateCardsInScene(op, list => list.map(c => c.id === card.id ? {
+      ...c, name: updated.name, url: updated.url,
+      uploader: updated.uploader, uploaded_at: updated.uploaded_at,
+      // Visibility and owners belong to current scene metadata, not the service response.
+    } : c));
+    assertWriteCurrent(op);
+    const installed = cards.find(c => c.id === card.id);
+    if (!installed) return;
     const iframe = cardIframes.get(card.id);
-    if (iframe) {
-      iframe.src = buildCardIframeSrc(card, true);
-    }
-    try {
-      // 2026-05-14 — LOCAL+REMOTE so this client's background propagates
-      // the refresh to bound tokens. Without LOCAL the refresher's own
-      // canvas still shows stale HP/AC until they re-bind manually.
-      const refreshPayload = { cardId: card.id, url: updated.url };
-      OBR.broadcast.sendMessage(BC_CARD_UPDATED, refreshPayload, { destination: "LOCAL" });
-      OBR.broadcast.sendMessage(BC_CARD_UPDATED, refreshPayload, { destination: "REMOTE" });
-    } catch {}
-    showStatus(`${ICONS.check} ${tt("ccPanelRefreshed")}: ${escapeHtml(updated.name)}`);
+    if (iframe) iframe.src = buildCardIframeSrc(installed, true);
+    broadcastCardUpdate(op, installed);
+    showStatus(`${ICONS.check} ${tt("ccPanelRefreshed")}: ${escapeHtml(installed.name)}`);
     render();
-  } catch (e: any) {
-    showError(`${tt("ccPanelRefreshFailed")}: ${e?.message || e}`);
-  } finally {
-    btn?.classList.remove("spinning");
-  }
+  } catch (error) { showWriteError(op, error, "ccPanelRefreshFailed"); }
+  finally { finishPanelWrite(op); }
 }
 
 async function deleteCard(id: string) {
-  const updated = cards.filter((c) => c.id !== id);
-  await writeCardsToScene(updated);
-  cards = updated;
-  const f = cardIframes.get(id);
-  if (f) { f.remove(); cardIframes.delete(id); }
-  if (current.type === "card" && current.id === id) current = { type: "empty" };
-  render();
-  try { await fetch(`${API_BASE}/${roomId}/${id}`, { method: "DELETE" }); } catch {}
+  const op = beginPanelWrite("delete", id);
+  if (!op) return;
+  try {
+    await mutateCardsInScene(op, list => list.filter(c => c.id !== id));
+    assertWriteCurrent(op);
+    // Do not remove a server card that has been re-added while the ACK was pending.
+    if ((await readWriteCards(op)).some(c => c.id === id)) return;
+    assertWriteCurrent(op);
+    const response = await fetch(`${API_BASE}/${encodeURIComponent(op.room)}/${encodeURIComponent(id)}`, {
+      method: "DELETE", signal: op.controller.signal,
+    });
+    assertWriteCurrent(op);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  } catch (error) { showWriteError(op, error); }
+  finally { finishPanelWrite(op); }
 }
 
 function selectCard(id: string) {
@@ -629,6 +712,14 @@ function ensureResourceIframe(def: ResourceDef): HTMLIFrameElement {
 
 function render() {
   if (!panelAlive) return;
+  const activeWrites = [...panelWrites].filter(op => !op.controller.signal.aborted);
+  const canWrite = !panelClosing && profileReady && metadataLoaded && sceneReady === true;
+  const uploading = activeWrites.some(op => op.kind === "upload");
+  document.getElementById("side")?.classList.toggle("busy", activeWrites.some(op => op.uploading));
+  for (const id of ["btnLinkLocal", "btnPasteJson"]) {
+    const button = document.getElementById(id) as HTMLButtonElement | null;
+    if (button) button.disabled = !canWrite || uploading;
+  }
   // Sidebar list — filter by visibility per requestor's role + id.
   // DM sees everything; players only see public + (owners they're in).
   const visibleCards = profileReady ? cards.filter((c) => canSeeCard(c, isGM, myPlayerId)) : [];
@@ -663,6 +754,7 @@ function render() {
       const isHidden = v !== "public";  // DM-only flag for visual dim
       card.className = "card" + (isActive ? " active" : "") + (isHidden ? " is-hidden" : "");
       card.dataset.id = c.id;
+      const changing = activeWrites.some(op => op.cardId === c.id);
       card.addEventListener("click", () => selectCard(c.id));
 
       const name = document.createElement("div");
@@ -682,6 +774,7 @@ function render() {
       if (isGM) {
         const visBtn = document.createElement("button");
         visBtn.className = "card-vis";
+        visBtn.disabled = !canWrite || changing;
         visBtn.textContent = isHidden ? "🔒" : "👁";
         visBtn.title = nextVisibilityLevel(v) === "public"
           ? `${visLabel} — ${tt("ccPanelMakePublic")}`
@@ -698,6 +791,8 @@ function render() {
       // xlsx; the server overwrites the existing card's data.
       const refresh = document.createElement("button");
       refresh.className = "card-refresh";
+      refresh.disabled = !canWrite || changing;
+      refresh.classList.toggle("spinning", activeWrites.some(op => op.kind === "refresh" && op.cardId === c.id));
       refresh.textContent = "↻";
       refresh.title = tt("ccPanelRefreshTitle");
       refresh.addEventListener("click", async (e) => {
@@ -708,6 +803,7 @@ function render() {
 
       const del = document.createElement("button");
       del.className = "card-del";
+      del.disabled = !canWrite || changing;
       del.textContent = "×";
       del.title = tt("ccPanelDeleteTitle");
       del.addEventListener("click", async (e) => {
@@ -793,14 +889,8 @@ function timeAgo(isoZ: string): string {
   } catch { return ""; }
 }
 
-// 2026-05-26 — preview-mode entry points (under 选择文件):
-//   • 查看示例: fetch /cc-example-card.json, stash it in localStorage,
-//     open cc-fullscreen.html?preview=sample in an OBR modal.
-//   • 粘贴 JSON: open a paste-textarea modal first, validate, stash
-//     in localStorage, open cc-fullscreen.html?preview=paste.
-// The fullscreen page detects ?preview= and renders read-only (no
-// edit / refresh / import-JSON buttons) + a "中文示例" badge. Nothing
-// is persisted to the server.
+// The example opens a read-only preview. Pasted JSON uses the separate
+// creation dialog below and persists only after its explicit Create action.
 const PREVIEW_MODAL_ID = "com.obr-suite/cc-preview";
 const PREVIEW_LS_KEY = "obr-suite/cc-preview-payload";
 
@@ -847,11 +937,12 @@ async function openSamplePreview(): Promise<void> {
 }
 
 function openPasteJsonPreview(): void {
-  // Build the paste modal inline (no extra HTML file needed). It sits
-  // on top of the panel as an absolute overlay; the Apply button
-  // validates the JSON, then routes to openPreviewModal("paste").
   const existing = document.getElementById("ccPasteOverlay");
-  if (existing) { existing.remove(); }
+  if (existing) { existing.querySelector("textarea")?.focus(); return; }
+  const openedInScene = sceneEpoch;
+  const openedBy = myPlayerId;
+  const openedAsGM = isGM;
+  let pending: PanelWrite | undefined;
   const overlay = document.createElement("div");
   overlay.id = "ccPasteOverlay";
   overlay.style.cssText =
@@ -890,18 +981,31 @@ function openPasteJsonPreview(): void {
   btnApply.style.cssText =
     "padding:7px 14px;border-radius:6px;background:linear-gradient(180deg,#5dade2,#3b8fc5);" +
     "color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer";
-  const close = () => { overlay.remove(); };
+  const close = () => {
+    pending?.controller.abort();
+    if (pending) finishPanelWrite(pending);
+    overlay.remove();
+    document.removeEventListener("keydown", onEsc);
+    window.removeEventListener("pagehide", close);
+    window.removeEventListener("beforeunload", close);
+  };
   btnCancel.addEventListener("click", close);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
-  document.addEventListener("keydown", function onEsc(e) {
+  function onEsc(e: KeyboardEvent) {
     if (e.key === "Escape" && document.body.contains(overlay)) {
       e.preventDefault();
       close();
-      document.removeEventListener("keydown", onEsc);
     }
-  });
+  }
+  document.addEventListener("keydown", onEsc);
+  window.addEventListener("pagehide", close);
+  window.addEventListener("beforeunload", close);
   btnApply.addEventListener("click", async () => {
     errBox.textContent = "";
+    if (openedInScene !== sceneEpoch || openedBy !== myPlayerId || openedAsGM !== isGM) {
+      errBox.textContent = tt("ccPanelWriteCancelled");
+      return;
+    }
     const raw = ta.value.trim();
     if (!raw) { errBox.textContent = tt("ccPasteJsonInvalid"); return; }
     let parsed: any;
@@ -922,12 +1026,22 @@ function openPasteJsonPreview(): void {
     // payload without losing what they pasted.
     btnApply.disabled = true;
     btnApply.textContent = tt("ccPasteJsonApplying");
+    const op = beginPanelWrite("upload");
+    if (!op) {
+      btnApply.disabled = false;
+      btnApply.textContent = tt("ccPasteJsonApply");
+      return;
+    }
+    pending = op;
     try {
-      await uploadJsonAsCard(parsed);
+      await uploadJsonAsCard(parsed, op);
       close();
     } catch (e: any) {
-      errBox.textContent = `${tt("ccPanelUploadFailed")}: ${e?.message || e}`;
+      if (panelAlive && overlay.isConnected) errBox.textContent = writeIsCurrent(op)
+        ? `${tt("ccPanelUploadFailed")}: ${e?.message || e}` : tt("ccPanelWriteCancelled");
     } finally {
+      finishPanelWrite(op);
+      pending = undefined;
       btnApply.disabled = false;
       btnApply.textContent = tt("ccPasteJsonApply");
     }
@@ -957,6 +1071,7 @@ OBR.onReady(() => {
   // the visibility filter follows.
   panelSubscriptions.push(OBR.player.onChange((p) => {
     if (!panelAlive) return;
+    if ((p.role === "GM") !== isGM || (p.id || "") !== myPlayerId) cancelPanelWrites();
     ++profileRequest;
     isGM = p.role === "GM";
     myPlayerId = p.id || "";
@@ -1009,12 +1124,13 @@ OBR.onReady(() => {
   sideEl.addEventListener("drop", async (e) => {
     e.preventDefault();
     sideEl.classList.remove("drag-over");
-    // 2026-05-10: drop accepts multiple xlsx files; uploadFilesBatch
-    // sequences them and surfaces per-file errors without aborting
-    // the whole batch on one bad file.
     const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
     if (files.length === 0) return;
-    await uploadFilesBatch(files);
+    const op = beginPanelWrite("upload");
+    if (!op) return;
+    try { await uploadFilesBatch(files, op); }
+    catch (error) { showWriteError(op, error, "ccPanelUploadFailed"); }
+    finally { finishPanelWrite(op); }
   });
 
   document.addEventListener("dragover", (e) => { e.preventDefault(); });
@@ -1041,8 +1157,8 @@ OBR.onReady(() => {
   // iframe's src with a cache-buster so the new index.html is fetched.
   panelSubscriptions.push(OBR.broadcast.onMessage(BC_CARD_UPDATED, (event) => {
     if (!panelAlive) return;
-    const data = event.data as { cardId?: string; url?: string } | undefined;
-    if (!data?.cardId) return;
+    const data = event.data as { cardId?: string; roomId?: string; url?: string } | undefined;
+    if (!data?.cardId || (data.roomId !== undefined && data.roomId !== roomId)) return;
     const iframe = cardIframes.get(data.cardId);
     const card = cards.find((c) => c.id === data.cardId);
     if (iframe && card) {
@@ -1063,6 +1179,7 @@ OBR.onReady(() => {
   document.addEventListener("keydown", (e) => {
     if (!maximized) return;
     if (e.key === "Escape") {
+      if (document.getElementById("ccPasteOverlay")) return;
       e.preventDefault();
       minimize();
       return;
@@ -1122,6 +1239,7 @@ OBR.onReady(() => {
 
 function stopPanelReads(): void {
   panelAlive = false;
+  cancelPanelWrites(true);
   ++profileRequest;
   ++readinessRequest;
   ++metadataRequest;
