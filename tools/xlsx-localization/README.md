@@ -99,6 +99,29 @@ The copies preserve existing content and the original AS41 export semantics.
 They are not English templates and have not been opened or recalculated in
 Excel/WPS. See `docs/research/xlsx-export-package-20260908.md` for scope and evidence.
 
+## Package the shield input migration
+
+```text
+python -B -X utf8 tools/xlsx-localization/shield_package.py
+python -B -X utf8 tools/xlsx-localization/selftest_shield_package.py
+```
+
+This additional adapter starts from pinned originals through the unchanged AV1
+packager, checks the generated seed bytes, then migrates only the AS40 shield
+input, its validation and three dependent formulas. It accepts Chinese yes/no
+alongside English Yes/No and exports the real AS40 as the existing equipped string.
+A dedicated alignment style keeps Yes/No on one line without changing the shared
+style, font, row height, column widths or other cells. Existing style nodes stay
+byte exact; the appended index and count use the actual old node count.
+
+Outputs use exclusive `shield-candidate-*` directories under the same sibling
+audit root. Worksheet formula caches are removed so old values are not presented
+as newly calculated results; external-link caches remain unchanged. The report
+and filenames mark the copies as not natively recalculated and not ready for
+upload. No source workbook, public download or prior audit file is overwritten.
+See `docs/research/xlsx-shield-workbook-20260908.md` for the whitelist, tests,
+preview evidence and native recalculation limits.
+
 The full download still requires all content, dependent formulas/dropdowns,
 importer compatibility, complete layout review and actual Excel/WPS recalculation
 and upload checks. See `docs/research/xlsx-localization-20260908.md` for evidence.
