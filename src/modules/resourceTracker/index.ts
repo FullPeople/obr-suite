@@ -74,6 +74,21 @@ function sessionCurrent(value: EditSession): boolean {
 }
 function localMessage(message: { connectionId: string }) { return enabled && !!connectionId && message.connectionId === connectionId; }
 
+let startup: Promise<void> | undefined;
+let toolReady = false, toolTouched = false, toolOwner = 0, toolLabel: string | undefined;
+let toolSerial = Promise.resolve();
+function queueTool(work: () => Promise<void>): Promise<void> {
+  const result = toolSerial.then(work);
+  toolSerial = result.catch(() => {}); // Keep ordering after failure; the caller still sees rejection.
+  return result;
+}
+async function removeOwnedTool(owner: number): Promise<void> {
+  if (!toolTouched || toolOwner !== owner) return;
+  await OBR.tool.remove(PANEL_TOOL_ID);
+  toolTouched = false; toolLabel = undefined;
+}
+const reportEntryError = (error: unknown) => console.warn("[resources] native entry failed", error);
+
 let toastOpen = false;
 let toastSerial: Promise<void> = Promise.resolve();
 function isPanelOpen(): boolean {
@@ -117,42 +132,64 @@ function closeToastOverlay(): Promise<void> {
 
 // --- DM stats panel ---
 
-async function openResourcePanel(): Promise<void> {
-  if (!enabled || role !== "GM" || !sceneReady) return;
-  const own = lifecycle, scene = sceneRevision, actor = roleRevision;
-  try {
-    let vw = 1280;
-    let vh = 800;
-    try {
-      [vw, vh] = await Promise.all([
-        OBR.viewport.getWidth(),
-        OBR.viewport.getHeight(),
-      ]);
-    } catch { /* viewport read failed — fall back to sane defaults */ }
-    if (!enabled || own !== lifecycle || scene !== sceneRevision || actor !== roleRevision || role !== "GM") return;
-    await OBR.modal.open({
-      id: PANEL_MODAL_ID,
-      url: PANEL_URL,
-      width: Math.max(360, Math.round(vw) - PANEL_SIDE_GAP * 2),
-      height: Math.max(240, Math.round(vh) - MUI_DIALOG_MARGIN),
-      hideBackdrop: true, // no dark overlay → side gaps stay interactive
-      hidePaper: true,
-    });
-    if (!enabled || own !== lifecycle || scene !== sceneRevision || actor !== roleRevision) { await OBR.modal.close(PANEL_MODAL_ID); return; }
-    try { localStorage.setItem(PANEL_OPEN_KEY, "1"); } catch {}
-  } catch (e) {
-    console.error("[obr-suite/resources] openResourcePanel failed", e);
-  }
+interface PanelContext { lifetime: number; scene: number; actor: number; open: boolean }
+let panelIntent: PanelContext | undefined;
+let panelOwner: PanelContext | undefined;
+let panelTouched = false, panelOpenUnconfirmed = false;
+let panelSerial = Promise.resolve();
+function queuePanel(work: () => Promise<void>): Promise<void> {
+  const result = panelSerial.then(work);
+  panelSerial = result.catch(() => {});
+  return result;
 }
-
-async function closeResourcePanel(): Promise<void> {
-  try { await OBR.modal.close(PANEL_MODAL_ID); } catch {}
+function panelCurrent(value: PanelContext) {
+  return enabled && sceneReady && role === "GM" && value.lifetime === lifecycle && value.scene === sceneRevision && value.actor === roleRevision;
+}
+async function closeOwnedPanel(): Promise<void> {
+  if (!panelTouched && !isPanelOpen()) return;
+  await OBR.modal.close(PANEL_MODAL_ID);
+  panelTouched = false; panelOpenUnconfirmed = false; panelOwner = undefined;
   try { localStorage.removeItem(PANEL_OPEN_KEY); } catch {}
 }
-
-async function toggleResourcePanel(): Promise<void> {
-  if (isPanelOpen()) await closeResourcePanel();
-  else await openResourcePanel();
+async function openResourcePanel(target: PanelContext): Promise<void> {
+  const current = () => panelCurrent(target) && panelIntent === target;
+  if (!current()) return;
+  if (panelTouched && (panelOpenUnconfirmed || (panelOwner && !panelCurrent(panelOwner)))) await closeOwnedPanel();
+  if (!current() || isPanelOpen()) return;
+  let vw = 1280, vh = 800;
+  try { [vw, vh] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]); }
+  catch { /* viewport read failed — retain the original bounded fallback */ }
+  if (!current()) return;
+  panelTouched = true; panelOpenUnconfirmed = true; panelOwner = target;
+  try {
+    await OBR.modal.open({ id: PANEL_MODAL_ID, url: PANEL_URL,
+      width: Math.max(360, Math.round(vw) - PANEL_SIDE_GAP * 2),
+      height: Math.max(240, Math.round(vh) - MUI_DIALOG_MARGIN),
+      hideBackdrop: true, hidePaper: true });
+  } catch (error) {
+    // The host may have applied an open even when its acknowledgement failed.
+    await closeOwnedPanel();
+    throw error;
+  }
+  panelOpenUnconfirmed = false;
+  if (!current()) { await closeOwnedPanel(); return; }
+  try { localStorage.setItem(PANEL_OPEN_KEY, "1"); } catch {}
+}
+function closeResourcePanel(): Promise<void> {
+  panelIntent = undefined;
+  return queuePanel(closeOwnedPanel);
+}
+function toggleResourcePanel(): Promise<void> {
+  if (!enabled || !sceneReady || role !== "GM") return Promise.resolve();
+  const open = panelIntent && panelCurrent(panelIntent) ? !panelIntent.open : !isPanelOpen();
+  const target: PanelContext = { lifetime: lifecycle, scene: sceneRevision, actor: roleRevision, open };
+  panelIntent = target;
+  return queuePanel(async () => {
+    try {
+      if (!panelCurrent(target) || panelIntent !== target) return;
+      if (target.open) await openResourcePanel(target); else await closeOwnedPanel();
+    } finally { if (panelIntent === target) panelIntent = undefined; }
+  });
 }
 
 interface OpenPayload {
@@ -203,54 +240,81 @@ async function applyEditorMessage(message: {connectionId: string; data: unknown}
   } finally { target.saving = false; }
 }
 
-async function syncTool() {
-  const own = lifecycle, actor = roleRevision;
-  try {
-    await OBR.tool.remove(PANEL_TOOL_ID);
-    if (!enabled || own !== lifecycle || actor !== roleRevision || role !== "GM") return;
-    await OBR.tool.create({ id: PANEL_TOOL_ID, icons: [{icon:PANEL_ICON_URL,label:getLocalLang() === "en" ? "Resource tracker" : "资源追踪"}],
-      onClick: async () => { await toggleResourcePanel(); return false; } });
-    if (!enabled || own !== lifecycle || actor !== roleRevision) await OBR.tool.remove(PANEL_TOOL_ID);
-  } catch (error) { console.warn("[resources] tracker tool update failed", error); }
+function syncTool(): Promise<void> {
+  const own = lifecycle;
+  return queueTool(async () => {
+    if (!enabled || !toolReady || own !== lifecycle || role !== "GM") return;
+    // A rejected removal still owns the ID. Retry it before a new lifetime can
+    // register; locale updates within one lifetime use only same-ID create.
+    if (toolTouched && toolOwner !== own) await removeOwnedTool(toolOwner);
+    if (!enabled || own !== lifecycle || role !== "GM") return;
+    const label = getLocalLang() === "en" ? "Resource tracker" : "资源追踪";
+    if (toolTouched && toolOwner === own && toolLabel === label) return;
+    toolTouched = true; toolOwner = own;
+    // A rejected reply can still follow a host-side label change.
+    toolLabel = undefined;
+    await OBR.tool.create({ id: PANEL_TOOL_ID, icons: [{ icon: PANEL_ICON_URL, label, filter: { roles: ["GM"] } }],
+      onClick: async () => {
+        if (!enabled || own !== lifecycle || role !== "GM") return false;
+        try { await toggleResourcePanel(); } catch (error) { reportEntryError(error); }
+        return false;
+      } });
+    toolLabel = label;
+  });
 }
 
 export async function setupResourceTracker(): Promise<void> {
-  if (enabled) return;
-  enabled = true; const own = ++lifecycle;
-  unsubs.push(OBR.player.onChange((player) => {
-    const next = player.role === "GM" ? "GM" : "PLAYER";
-    if (role === next) return;
-    roleRevision++; role = next; void closeModal(); void syncTool();
-    if (role !== "GM") void closeResourcePanel();
-  }));
-  unsubs.push(OBR.scene.onReadyChange((ready) => {
-    sceneRevision++; sceneReady = ready;
-    void closeModal();
-    if (ready) void openToastOverlay(); else { void closeToastOverlay(); void closeResourcePanel(); }
-  }));
-  unsubs.push(onLangChange(() => { void syncTool(); }));
-  const actor = roleRevision, scene = sceneRevision;
-  const [initialRole, initialConnection, initialReady] = await Promise.all([
-    OBR.player.getRole().catch(() => "PLAYER"), OBR.player.getConnectionId().catch(() => ""), OBR.scene.isReady().catch(() => false),
-  ]);
-  if (!enabled || own !== lifecycle) return;
-  if (actor === roleRevision) role = initialRole === "GM" ? "GM" : "PLAYER";
-  if (scene === sceneRevision) sceneReady = initialReady;
-  connectionId = initialConnection;
-  unsubs.push(OBR.broadcast.onMessage(BC_OPEN_EDIT, (message) => { if (localMessage(message)) void openModal(message.data as OpenPayload); }));
-  unsubs.push(OBR.broadcast.onMessage(BC_SAVE, (message) => { void applyEditorMessage(message, false); }));
-  unsubs.push(OBR.broadcast.onMessage(BC_DELETE, (message) => { void applyEditorMessage(message, true); }));
-  unsubs.push(OBR.broadcast.onMessage(BC_CANCEL, (message) => {
-    if (localMessage(message) && editor && (message.data as any)?.session === editor.session) void closeModal();
-  }));
-  await syncTool();
-  if (enabled && own === lifecycle && sceneReady) await openToastOverlay();
+  if (enabled) return startup;
+  enabled = true; toolReady = false; const own = ++lifecycle;
+  startup = (async () => {
+    let roleObserved = false;
+    unsubs.push(OBR.player.onChange((player) => {
+      if (!enabled || own !== lifecycle) return;
+      // Even an unchanged role event is newer than the initial read, but must
+      // not invalidate an editor just because the player's name/color changed.
+      roleObserved = true;
+      const next = player.role === "GM" ? "GM" : "PLAYER";
+      if (role === next) return;
+      roleRevision++; role = next; void closeModal(); void syncTool().catch(reportEntryError);
+      if (role !== "GM") void closeResourcePanel().catch(reportEntryError);
+    }));
+    unsubs.push(OBR.scene.onReadyChange((ready) => {
+      if (!enabled || own !== lifecycle) return;
+      sceneRevision++; sceneReady = ready;
+      void closeModal();
+      if (ready) void openToastOverlay(); else { void closeToastOverlay(); void closeResourcePanel().catch(reportEntryError); }
+    }));
+    unsubs.push(onLangChange(() => { if (enabled && own === lifecycle) void syncTool().catch(reportEntryError); }));
+    const actor = roleRevision, scene = sceneRevision;
+    const [initialRole, initialConnection, initialReady] = await Promise.all([
+      OBR.player.getRole(), OBR.player.getConnectionId(), OBR.scene.isReady(),
+    ]);
+    if (!enabled || own !== lifecycle) return;
+    if (!roleObserved && actor === roleRevision) role = initialRole === "GM" ? "GM" : "PLAYER";
+    if (scene === sceneRevision) sceneReady = initialReady;
+    connectionId = initialConnection;
+    if (!connectionId) throw new Error("[resources] missing local connection ID");
+    toolReady = true;
+    unsubs.push(OBR.broadcast.onMessage(BC_OPEN_EDIT, (message) => { if (localMessage(message)) void openModal(message.data as OpenPayload); }));
+    unsubs.push(OBR.broadcast.onMessage(BC_SAVE, (message) => { void applyEditorMessage(message, false); }));
+    unsubs.push(OBR.broadcast.onMessage(BC_DELETE, (message) => { void applyEditorMessage(message, true); }));
+    unsubs.push(OBR.broadcast.onMessage(BC_CANCEL, (message) => {
+      if (localMessage(message) && editor && (message.data as any)?.session === editor.session) void closeModal();
+    }));
+    await syncTool();
+    if (enabled && own === lifecycle && sceneReady) await openToastOverlay();
+  })();
+  return startup;
 }
 
 export async function teardownResourceTracker(): Promise<void> {
-  enabled = false; lifecycle++; sceneRevision++; roleRevision++; connectionId = "";
+  enabled = false; toolReady = false; lifecycle++; sceneRevision++; roleRevision++; connectionId = "";
   invalidateEditor();
   for (const unsubscribe of unsubs.splice(0)) { try { unsubscribe(); } catch {} }
-  await closeModal(); await closeToastOverlay(); await closeResourcePanel();
-  try { await OBR.tool.remove(PANEL_TOOL_ID); } catch {}
+  // Queue removal now, before any await can let a new lifetime register the ID.
+  const owner = toolOwner;
+  const nativeCleanup = queueTool(() => removeOwnedTool(owner));
+  const results = await Promise.allSettled([nativeCleanup, closeResourcePanel(), closeModal(), closeToastOverlay()]);
+  const failed = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failed.length) throw new AggregateError(failed.map(result => result.reason), "[resources] native entry cleanup failed");
 }
