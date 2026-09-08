@@ -21,6 +21,8 @@ https://obr.dnd.center/suite/manifest.json
 | <img src="docs/icons/translate.svg" width="14" align="center" /> 中文 | [README.zh.md](./README.zh.md) |
 | <img src="docs/icons/translate.svg" width="14" align="center" /> English | [README.en.md](./README.en.md) |
 
+Verified running versions as of 2026-09-08: stable **1.2.2**, dev **1.0.148-dev**. See the [source and deployment baseline](./docs/DEPLOYMENT_BASELINE_20260908.md) for reproduced build fingerprints and the distinction between installed and unreleased changes.
+
 ---
 
 ## License
