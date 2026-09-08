@@ -74,6 +74,31 @@ change. `verify_candidate.py` checks native structure and original errors but ne
 claims release readiness. The 2024 source already has an 8,663-character AV1
 formula, above Excel's limit, and this text-only step preserves that issue.
 
+## Package the AV1 formula plan
+
+```text
+python -X utf8 tools/xlsx-localization/export_package.py
+python -X utf8 tools/xlsx-localization/export_package_selftest.py
+```
+
+The first command creates fresh timestamped engineering copies under the
+repository's sibling `_audit/xlsx-export-package` directory and prints both output
+paths. An explicit `--output-dir` must remain inside that audit root. Existing
+files and public originals are never overwritten. The selftest creates its own
+fresh inputs/outputs; it does not depend on an earlier manual generation.
+
+This separate adapter replaces only AV1's formula and appends a hidden Export
+worksheet, with required relationships, content type, sheet inventory and bounded
+recalculation flags. It verifies every original cell and unrelated part, retains
+the old AV1 cache only after exact reference-model agreement, and writes no helper
+caches. Plans are regenerated from the pinned source and checked for cycles,
+missing helpers, invalid references, tampering and budgets. The generator pin
+normalizes Git LF/CRLF before both hashing and compiling the same text.
+
+The copies preserve existing content and the original AS41 export semantics.
+They are not English templates and have not been opened or recalculated in
+Excel/WPS. See `docs/research/xlsx-export-package-20260908.md` for scope and evidence.
+
 The full download still requires all content, dependent formulas/dropdowns,
 importer compatibility, complete layout review and actual Excel/WPS recalculation
 and upload checks. See `docs/research/xlsx-localization-20260908.md` for evidence.

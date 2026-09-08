@@ -9,11 +9,11 @@
     "context_records": 25922,
     "occurrences": 28648,
     "seed_records": 7029,
-    "reviewed_records": 1521,
-    "missing_records": 17372,
-    "missing_characters": 1034605,
-    "long_missing_records": 3336,
-    "long_missing_characters": 837637,
+    "reviewed_records": 1681,
+    "missing_records": 17212,
+    "missing_characters": 991354,
+    "long_missing_records": 3176,
+    "long_missing_characters": 794386,
     "by_kind": {
       "cell_text": 24418,
       "comment": 67,
@@ -27,7 +27,7 @@
       "xml_attribute": 113
     },
     "seed_methods": {
-      "context_reviewed": 1521,
+      "context_reviewed": 1681,
       "exact_glossary": 4463,
       "existing_english_column": 1330,
       "number_unit": 1236
@@ -38,11 +38,11 @@
       "context_records": 9933,
       "occurrences": 11223,
       "seed_records": 2818,
-      "reviewed_records": 672,
-      "missing_records": 6443,
-      "missing_characters": 355845,
-      "long_missing_records": 1100,
-      "long_missing_characters": 281154,
+      "reviewed_records": 735,
+      "missing_records": 6380,
+      "missing_characters": 334215,
+      "long_missing_records": 1037,
+      "long_missing_characters": 259524,
       "by_kind": {
         "cell_text": 9450,
         "comment": 33,
@@ -56,7 +56,7 @@
         "xml_attribute": 56
       },
       "seed_methods": {
-        "context_reviewed": 672,
+        "context_reviewed": 735,
         "exact_glossary": 1781,
         "existing_english_column": 521,
         "number_unit": 516
@@ -66,11 +66,11 @@
       "context_records": 15989,
       "occurrences": 17425,
       "seed_records": 4211,
-      "reviewed_records": 849,
-      "missing_records": 10929,
-      "missing_characters": 678760,
-      "long_missing_records": 2236,
-      "long_missing_characters": 556483,
+      "reviewed_records": 946,
+      "missing_records": 10832,
+      "missing_characters": 657139,
+      "long_missing_records": 2139,
+      "long_missing_characters": 534862,
       "by_kind": {
         "cell_text": 14968,
         "comment": 34,
@@ -83,7 +83,7 @@
         "xml_attribute": 57
       },
       "seed_methods": {
-        "context_reviewed": 849,
+        "context_reviewed": 946,
         "exact_glossary": 2682,
         "existing_english_column": 809,
         "number_unit": 720
