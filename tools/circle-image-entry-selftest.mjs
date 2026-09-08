@@ -32,21 +32,35 @@ const mutants = {
   "remote-close": [' || event.connectionId !== own.connectionId', ''],
   "late-width": ['if (!shouldOpen()) return;\n  own.windowNonce = crypto.randomUUID();', 'own.windowNonce = crypto.randomUUID();'],
 };
+const expectedFailures = {
+  "swallowed-lifecycle": "Missing expected rejection.",
+  "forget-retired": "teardown removes owned entries/windows and both session subscriptions",
+  "no-locale": "live English label timed out",
+  "remove-for-label": "language updates never unregister, activate, select, change mode or overwrite tool metadata",
+  "stale-label-cache": "revert after lost locale reply timed out",
+  "stale-role": "a later player event supersedes a slow initial GM role reply",
+  "old-window-close": "other-player and wrong-window close requests cannot close the current editor",
+  "remote-close": "other-player and wrong-window close requests cannot close the current editor",
+  "late-width": "late viewport reply after teardown does not dispatch an unauthorized editor open",
+};
 let mutationApplied = false;
 await build({ input: "circle-entry-probe", platform: "node", plugins: [{ name: "native-host-boundary", resolveId(id) {
   if (id === "circle-entry-probe") return "\0entry";
   if (id === "@owlbear-rodeo/sdk" || /(^|\/)state$/.test(id)) return host;
 }, load(id) { if (id === "\0entry") return `export * from ${JSON.stringify(source)}; export {fixture} from ${JSON.stringify(host)}; export {ModuleLifecycle} from ${JSON.stringify(resolve(repo, "src/utils/moduleLifecycle.ts"))};`; }, transform(code, id) {
-  code = code.replaceAll("import.meta.env.BASE_URL", '"/"');
+  code = code.replaceAll("\r\n", "\n").replaceAll("import.meta.env.BASE_URL", '"/"');
   if (mutation && id.replaceAll("\\", "/").endsWith("/circleImage/index.ts")) {
     const [before, after] = mutants[mutation] ?? [];
-    assert.ok(before && code.includes(before), `mutation anchor missing: ${mutation}`);
+    if (!before || code.split(before).length !== 2) throw new Error(`mutation anchor missing or ambiguous: ${mutation}`);
     mutationApplied = true; code = code.replace(before, after);
     if (mutation === 'old-window-close') code = code.replace('if (!isCurrent(own) || request.windowNonce !== own.windowNonce) return;', 'if (!isCurrent(own)) return;');
   }
   return code;
 } }], output: { file: join(out, "probe.mjs"), format: "esm" } });
-if (mutation) assert.ok(mutationApplied);
+if (mutation) {
+  if (!mutationApplied) throw new Error(`mutation was not applied: ${mutation}`);
+  process.stderr.write(`OBR_MUTATION_READY ${mutation}\n`);
+}
 const { setupCircleImage: setup, teardownCircleImage: teardown, fixture: f, ModuleLifecycle } = await import(pathToFileURL(join(out, "probe.mjs")).href);
 const TOOL = "com.obr-suite/circleimage/tool", POPOVER = "com.obr-suite/circleimage/editor";
 const ZH = "圆形图片 / 去底", EN = "Circle crop / Remove background";
@@ -230,8 +244,11 @@ const mutationResults = [];
 if (process.argv.includes("--verify-mutations")) {
   for (const name of Object.keys(mutants)) {
     const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), "--repo", repo, `--mutation=${name}`], { encoding: "utf8", timeout: 25000, windowsHide: true });
-    assert.ok(child.status !== 0 && !child.error && /AssertionError/.test(child.stderr), `mutation was not caught: ${name}\n${child.stdout}\n${child.stderr}`);
-    mutationResults.push({ name, caught: true, failure: child.stderr.match(/AssertionError[^\n]*: ([^\n]+)/)?.[1] ?? child.stderr.slice(-300) });
+    const failure = child.stderr.match(/^AssertionError(?: \[ERR_ASSERTION\])?: ([^\r\n]+)/m)?.[1];
+    const ready = child.stderr.split(/\r?\n/).includes(`OBR_MUTATION_READY ${name}`);
+    assert.ok(child.status !== 0 && !child.error && ready && !/Build failed|mutation anchor|mutation was not applied/.test(child.stderr) && failure === expectedFailures[name], `mutation was not caught by its expected runtime assertion: ${name}\n${child.stdout}\n${child.stderr}`);
+    writeFileSync(join(out, `mutation-${name}.log`), child.stdout + child.stderr);
+    mutationResults.push({ name, caught: true, buildSucceeded: true, appliedExactlyOnce: true, failure });
   }
 }
 writeFileSync(join(out, "result.json"), JSON.stringify({ passed: checks.length, checks, mutationResults, warnings, sourceHash, sdkVersion: JSON.parse(readFileSync(resolve(repo, "node_modules/@owlbear-rodeo/sdk/package.json"), "utf8")).version, actualSDK: ["ToolApi", "PopoverApi", "PlayerApi", "ViewportApi", "BroadcastApi"], controlledBoundary: "host message bus and local language store", realOwlbearUat: false }, null, 2));
