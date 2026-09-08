@@ -23,6 +23,8 @@ https://obr.dnd.center/suite/manifest.json
 
 Verified running versions as of 2026-09-08: stable **1.2.2**, dev **1.0.148-dev**. See the [source and deployment baseline](./docs/DEPLOYMENT_BASELINE_20260908.md) for reproduced build fingerprints and the distinction between installed and unreleased changes.
 
+The [product review and roadmap](./docs/PRODUCT_REVIEW_20260908.md) covers loading and interface improvements, party vision, Boss bars, Three-Dragon Ante, English localization, music, player pointers, transitions, and longer-term research. Proposed features are explicitly marked as unimplemented.
+
 ---
 
 ## License
