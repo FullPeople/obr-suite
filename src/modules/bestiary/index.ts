@@ -12,8 +12,9 @@ import {
   type DragEndPayload,
 } from "../../utils/panelLayout";
 import { BC_LOCAL_CONTENT_CHANGED, forceReloadLocalContent } from "../../utils/localContent";
+import { contentConfigurationKey } from "../../utils/contentLocale";
 import { clearMonsterCache, loadAllMonsters, getRawMonster } from "./data";
-import { onStateChange, getState, getLocalLang } from "../../state";
+import { onStateChange, onLangChange, getState, getLocalLang } from "../../state";
 import { createCanvasDragMode } from "../../utils/canvasDragMode";
 
 // Per-client language for context-menu / tool labels, read once at
@@ -416,12 +417,9 @@ export async function setupBestiary(): Promise<void> {
   // added/removed OR a per-source blacklist toggled in settings.
   // Signature includes baseUrl + disabledSources so both kinds of
   // mutation invalidate.
-  const libSig = () => JSON.stringify(
-    (getState().libraries || [])
-      .filter((l) => l.enabled)
-      .map((l) => `${l.baseUrl}|${(l.disabledSources ?? []).slice().sort().join(",")}`),
-  );
+  const libSig = () => contentConfigurationKey(getState().libraries ?? [], getLocalLang());
   let lastLibSig = libSig();
+  unsubs.push(onLangChange(() => { lastLibSig = libSig(); clearMonsterCache(); }));
   unsubs.push(
     onStateChange(() => {
       const sig = libSig();

@@ -27,7 +27,7 @@ const mutations = [
   { name: "source deadline ignores progress", file: "utils/contentRequests.ts", from: "if (timer !== undefined) clearTimeout(timer);", to: "/* no deadline renewal */" },
   { name: "file merge follows response order", file: "utils/contentRequests.ts", from: "result[index] = await fn(items[index], index);", to: "result.push(await fn(items[index], index));" },
   { name: "preview leaks unresolved copies", file: "modules/bestiary/data.ts", from: ".filter((m: any) => m && !m._copy)", to: ".filter((m: any) => !!m)" },
-  { name: "missing copy parent becomes zero-stat unit", file: "modules/bestiary/data.ts", from: "if (!hasCompleteCopy(m, resolvedBySlug, new Set()))", to: "if (false)" },
+  { name: "missing copy parent becomes zero-stat unit", file: "modules/bestiary/data.ts", from: "if (!complete)", to: "if (false)" },
   { name: "healthy library cut off at fixed source deadline", file: "modules/bestiary/data.ts", from: "sourceDeadline.progress();", to: "/* fixed total deadline */" },
   { name: "result cap removed", file: "modules/bestiary/data.ts", from: ".slice(0, 200)", to: ".slice(0)" },
 ];

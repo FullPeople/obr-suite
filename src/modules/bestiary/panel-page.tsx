@@ -4,6 +4,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import { installDebugOverlay } from "../../utils/debugOverlay";
 import { installPanelZoom } from "../../utils/panelZoom";
 import { ParsedMonster, MonsterEdition } from "./types";
+import { contentConfigurationKey } from "../../utils/contentLocale";
 import { loadAllMonsters, clearMonsterCache, searchMonsters, getRawMonster, makeSlug } from "./data";
 import { BC_LOCAL_CONTENT_CHANGED, forceReloadLocalContent } from "../../utils/localContent";
 import { spawnMonster } from "./spawn";
@@ -410,10 +411,7 @@ function App() {
     let alive = true;
     let requestId = 0;
     let primed = false;
-    const librarySignature = () => JSON.stringify((getState().libraries || []).map((library) => [
-      library.id, library.enabled, library.baseUrl, library.indexPath,
-      [...(library.disabledSources ?? [])].sort(),
-    ]));
+    const librarySignature = () => contentConfigurationKey(getState().libraries ?? [], getLocalLang());
     let lastSignature = librarySignature();
     const load = (reset = false) => {
       const id = ++requestId;
@@ -455,6 +453,11 @@ function App() {
         load(true);
       }
     });
+    const unsubLanguage = onLangChange(() => {
+      if (!primed) return;
+      lastSignature = librarySignature();
+      load(true);
+    });
     const unsubContent = OBR.broadcast.onMessage(BC_LOCAL_CONTENT_CHANGED, () => {
       // Stop old UI results immediately; IDB hydration can finish later.
       requestId++;
@@ -483,6 +486,7 @@ function App() {
       alive = false;
       requestId++;
       unsubState();
+      unsubLanguage();
       unsubContent();
       retryLoadRef.current = () => {};
     };
@@ -1092,7 +1096,7 @@ async function startMonsterDrag(monster: ParsedMonster, e: PointerEvent): Promis
       OBR.scene.grid.getDpi().catch(() => 150),
       OBR.viewport.getScale().catch(() => 1),
     ]);
-    const sz = (monster.size || "M").toUpperCase();
+    const sz = (monster.sizeCode || monster.size || "M").toUpperCase();
     const cellScale = SIZE_CELL_SCALE[sz] ?? 1;
     ghostSize = Math.max(36, Math.min(360, dpi * vpScale * cellScale));
   } catch {}
@@ -1214,7 +1218,8 @@ function MonsterCard({
       </div>
       <div class="card-info">
         <div class="card-name">{monster.name}</div>
-        <div class="card-sub">{monster.engName}</div>
+        {monster.engName !== monster.name && <div class="card-sub">{monster.engName}</div>}
+        {monster.contentLanguage && monster.contentLanguage !== "auto" && monster.contentLanguage !== _lang && <div class="card-sub">{_lang === "en" ? "Original: Chinese" : "原文：英语"}</div>}
         <div class="card-tags">
           <span class="tag">{monster.size}</span>
           <span class="tag">{monster.type}</span>
