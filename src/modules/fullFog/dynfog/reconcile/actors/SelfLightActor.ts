@@ -15,7 +15,7 @@ export class SelfLightActor extends Actor {
   readonly parentId: string;
   private light: string;
   private parentVisible: boolean;
-  allowed = true;
+  allowed = false;
 
   constructor(reconciler: Reconciler, parent: Item) {
     super(reconciler);
@@ -23,10 +23,15 @@ export class SelfLightActor extends Actor {
     this.parentVisible = parent.visible;
     const item = this.buildSelfLight(parent);
     this.light = item.id;
+    this.reconciler.patcher.protectItem(this.light, item => {
+      if (isLight(item)) item.visible = this.parentVisible && this.allowed;
+    });
     this.reconciler.patcher.addItems(item);
   }
 
   delete(): void {
+    this.allowed = false;
+    this.reconciler.patcher.restrictItems(this.light);
     this.reconciler.patcher.deleteItems(this.light);
   }
 
@@ -37,6 +42,7 @@ export class SelfLightActor extends Actor {
 
   setAllowed(allowed: boolean): void {
     if (this.allowed === allowed) return;
+    if (this.allowed && !allowed) this.reconciler.patcher.restrictItems(this.light);
     this.allowed = allowed;
     this.applyVisibility();
   }

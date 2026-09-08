@@ -46,6 +46,9 @@ import { repairLegacyHiddenBubbles } from "./modules/bubbles";
 import { repairLegacyBestiaryImages } from "./modules/bestiary/repair-legacy-images";
 import { SettingsContent } from "./utils/settingsContent";
 import { renderSettingsModuleStatus } from "./utils/settingsModuleStatus";
+import { renderFogSettings } from "./utils/fogSettingsView";
+import { getBossPreferences, setBossPreferences, BOSS_PREFERENCES_CHANGED, BOSS_PREFERENCES_KEY } from "./modules/bossBar/preferences";
+import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
 import {
   BC_MODULE_STATUS_QUERY, BC_MODULE_STATUS, BC_MODULE_RETRY,
   type ModuleLifecycleSnapshot,
@@ -2613,10 +2616,10 @@ const TABS: TabDef[] = [
         } catch {}
         return true;
       })();
-      const lbl = lang === "zh" ? "传送眨眼特效" : "Teleport Blink Effect";
+      const lbl = lang === "zh" ? "默认传送眨眼特效" : "Default teleport blink";
       const desc = lang === "zh"
-        ? "本机偏好。开启后传送瞬间播放闭眼/睁眼动画，闭眼时刻执行实际传送，因此略慢；关闭则直接平滑过场。"
-        : "Per-client preference. When on, picking a destination plays a close-eye / open-eye animation with the actual teleport happening at the closed moment — slightly slower. Off = immediate smooth pan.";
+        ? "本机偏好，供设置为「使用默认」的传送门使用。DM 可在每扇传送门的编辑窗口中单独选择无特效、眨眼或淡入淡出。"
+        : "Your preference for portals set to Use default. The GM can choose no effect, blink or fade separately in each portal's editor.";
       return `
         <h3>${lang === "zh" ? "选项" : "Options"}</h3>
         <div class="row">
@@ -2650,6 +2653,29 @@ const TABS: TabDef[] = [
     },
   },
   {
+    id: "transitions",
+    zh: `${ICONS.sparkles} 转场`,
+    en: `${ICONS.sparkles} Transitions`,
+    moduleId: "transitions",
+    dynamicBody: (lang, gm) => `<h3>${lang === "zh" ? "休息与场景提示" : "Rest and scene cues"}</h3>
+      <p>${lang === "zh"
+        ? "打开转场面板，一键呈现短休、长休或自定义提示。也可直接使用常用栏的「转场」按钮。"
+        : "Open the transition panel for short rests, long rests or a custom message. The quick bar also has a Transitions button."}</p>
+      <button id="openTransitions" class="layout-editor-btn" type="button" ${getState().enabled.transitions ? "" : "disabled"}>${lang === "zh" ? "打开转场面板" : "Open transition panel"}</button>
+      <p class="meta">${lang === "zh"
+        ? (gm ? "可选择全部玩家或指定玩家；预览只显示在自己的屏幕。转场不会修改角色卡的生命值或资源。" : "玩家可以在自己的屏幕预览。面向其他玩家的转场由 DM 发起，不会修改角色卡的生命值或资源。")
+        : (gm ? "Choose everyone or selected players; previews appear only on your screen. Cues do not change character HP or resources." : "Players can preview on their own screen. The GM sends cues to other players. Cues do not change character HP or resources.")}</p>`,
+    afterRender: (root) => {
+      root.querySelector<HTMLButtonElement>("#openTransitions")?.addEventListener("click", async () => {
+        try { await OBR.broadcast.sendMessage(BC_TRANSITIONS_OPEN, {}, { destination: "LOCAL" }); }
+        catch (error) {
+          console.warn("[settings] opening transitions failed", error);
+          void OBR.notification.show(lang === "zh" ? "转场面板暂时无法打开，请重试。" : "Could not open transitions. Please try again.", "ERROR");
+        }
+      });
+    },
+  },
+  {
     id: "trickster",
     zh: `${ICONS.trickster} 捣蛋鬼在哪？`,
     en: `${ICONS.trickster} Trickster Marker`,
@@ -2676,6 +2702,42 @@ const TABS: TabDef[] = [
     en: `${ICONS.follow} Follow`,
     moduleId: "follow",
     body: FOLLOW_DESC,
+  },
+  {
+    id: "bossBar",
+    zh: `${ICONS.heart} Boss 血条`,
+    en: `${ICONS.heart} Boss Health`,
+    moduleId: "bossBar",
+    dynamicBody: (lang) => {
+      const zh = lang === "zh";
+      const prefs = getBossPreferences();
+      const row = (key: string, label: string, on: boolean) => `<div class="row"><div class="lbl">${label}</div><button class="tog ${on ? "on" : ""}" data-boss-pref="${key}" type="button" aria-label="${label}" aria-pressed="${on}"></button></div>`;
+      return `<h3>${zh ? "个人显示" : "Your display"}</h3>
+        ${row("visible", zh ? "显示 Boss 血条" : "Show Boss health bars", !prefs.hidden)}
+        ${row("reducedMotion", zh ? "减少血条动画" : "Reduce health bar motion", prefs.reducedMotion)}
+        <p>${zh ? "关闭血条右上角的 × 只影响自己，可在此重新显示。最多同时显示三条，默认仅显示血量比例。" : "Closing a bar with × hides it only for you; restore it here. Up to three bars appear, showing health percentage by default."}</p>
+        <details><summary>${zh ? "DM 使用帮助" : "GM setup"}</summary><p>${zh
+          ? "右键有生命值的角色单位 →「显示为 Boss」。在「Boss 显示选项」中设置阶段名称、分段和具体数值。血条是公开的战斗提示：迷雾遮挡不会自动隐藏它；隐藏单位或选择「隐藏 Boss 血条」可移除。"
+          : "Right-click a character token with HP → Show as Boss. Boss display options set the phase name, segments and exact numbers. Bars are public encounter cues: fog does not hide them automatically. Hide the token or choose Hide Boss bar to remove one."}</p></details>`;
+    },
+    afterRender: (root) => {
+      root.querySelectorAll<HTMLButtonElement>("[data-boss-pref]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          const prefs = getBossPreferences();
+          try {
+            await setBossPreferences(button.dataset.bossPref === "visible"
+              ? { hidden: !prefs.hidden } : { reducedMotion: !prefs.reducedMotion });
+          } catch (error) {
+            console.warn("[settings] Boss preference update failed", error);
+            void OBR.notification.show(lang === "zh" ? "Boss 显示设置未能同步，请重试。" : "Could not sync Boss display settings. Please try again.", "ERROR");
+          } finally {
+            button.disabled = false;
+            if (activeTab === "bossBar") renderContent();
+          }
+        });
+      });
+    },
   },
   {
     id: "bubbles",
@@ -3150,127 +3212,7 @@ const TABS: TabDef[] = [
     zh: `${ICONS.eye} 动态迷雾`,
     en: `${ICONS.eye} Dynamic Fog`,
     moduleId: "dynamicFog",
-    dynamicBody: (lang) => {
-      const s = getState();
-      const zh = lang === "zh";
-      return `
-        <h3>${zh ? "动态迷雾（墙 / 门 / 窗 / 光源）" : "Dynamic Fog (walls · doors · windows · lights)"}</h3>
-        <p>${
-          zh
-            ? "迷雾工具画出的<b>任何</b> FOG 图层图形（矩形 / 圆 / 曲线 / 直线 / Path），以及迷雾编辑器自动描出的轮廓，都会在每个客户端生成原生 <b>Wall</b>，用来遮挡视线。选中 OBR 的迷雾工具后可以看到四个新模式："
-            : "<b>Every</b> FOG-layer shape the fog tool draws (rectangle / circle / curve / line / path), plus the outline the fog editor traces, becomes native <b>Wall</b> items on each client and blocks vision. Selecting Owlbear's fog tool reveals four new modes:"
-        }</p>
-        <ul>
-          <li><b>${zh ? "直线墙" : "Line"}</b>${zh ? "：拖出一段直墙，方便在上面挂门窗。" : ": drag a straight wall segment to hang openings on."}</li>
-          <li><b>${zh ? "门（快捷键 O）" : "Door (shortcut O)"}</b>${
-            zh
-              ? "：沿墙拖动即可挖出一道门。默认<span style=\"color:#ff4d4d\">红色 = 关闭</span>（挡视线），点击切换为<span style=\"color:#85ff66\">绿色 = 打开</span>。Alt+点击或双击删除。"
-              : ": drag along a wall to carve a door. <span style=\"color:#ff4d4d\">Red = closed</span> (blocks vision); click to open (<span style=\"color:#85ff66\">green</span>). Alt-click or double-click deletes."
-          }</li>
-          <li><b>${zh ? "窗户（快捷键 I）" : "Window (shortcut I)"}</b>${
-            zh
-              ? "：同样的拖动方式。窗户<b>无论开关都能看见外面</b> —— 关着是<span style=\"color:#5dade2\">玻璃（青色）</span>，开着是<span style=\"color:#66ffd9\">敞开（蓝绿）</span>，两种状态挖出的洞完全一样。开 / 关表达的是「能不能<b>钻过去</b>」。"
-              : ": same gesture. A window is see-through in BOTH states — <span style=\"color:#5dade2\">glazed (cyan)</span> when shut, <span style=\"color:#66ffd9\">open (aqua)</span> when swung out, and the hole it cuts is identical either way. The toggle says whether a creature can <b>pass</b>, not whether you can see."
-          }</li>
-          <li><b>${zh ? "密门（快捷键 U）" : "Secret door (shortcut U)"}</b>${
-            zh
-              ? "：视线上和普通门完全一样，但<b>玩家端不会生成任何指示器</b>，玩家也无法开关它（DM 端会二次校验，伪造广播同样无效）。DM 看到的是<span style=\"color:#b06bff\">紫色虚线</span>。"
-              : ": identical to a door for vision, but <b>no indicator is ever built on a player's client</b> and a player cannot operate one (the GM re-checks, so a hand-rolled broadcast fails too). The GM sees a <span style=\"color:#b06bff\">dashed purple</span> marker."
-          }</li>
-        </ul>
-        <p style="color:var(--text-dim);font-size:11.5px">${
-          zh
-            ? "注：OBR 的墙只影响<b>视线</b>，不影响<b>移动</b>，所以「关着的窗爬不过去」这一半在引擎层面无法强制，只能靠指示器颜色 / 图标传达、由桌面约定。密门的元数据存在共享场景里（OBR 没有仅 DM 可读的存储），玩家翻元数据理论上能发现它 —— 但游戏画面里没有任何可见痕迹。"
-            : "Note: Owlbear walls affect VISION only, never movement, so the \"you can't climb through a shut window\" half can't be enforced by the engine — the indicator's colour and icon carry it and the table honours it. Secret-door metadata lives in the shared scene (Owlbear has no GM-only storage), so a player digging through raw metadata could find one — but nothing in the rendered game gives it away."
-        }</p>
-        <div style="margin-top:12px;padding:10px 12px;border-radius:6px;border:1px solid #7a5c12;background:rgba(245,166,35,.09)">
-          <div style="color:#f5a623;font-weight:600;font-size:12.5px;margin-bottom:4px">${
-            zh ? "⚠ 请关闭官方 Dynamic Fog 扩展" : "⚠ Turn off the official Dynamic Fog extension"
-          }</div>
-          <p style="margin:0;font-size:11.5px;line-height:1.65;color:var(--text-dim)">${
-            zh
-              ? "本套件<b>已经完整包含</b>官方 <b>Dynamic Fog</b> 的全部功能（墙、门、光源），并在此之上多做了三件官方没有的事：<b>窗户</b>（开关都能看穿）、<b>玩家可开关的门</b>、以及<b>玩家看不见的密门</b>。<br>两个同时开着不会报错，但两边都会从同一批迷雾图形推导墙和光，<b>每面墙、每盏灯都会建两遍</b>，白白翻倍开销。<br>官方扩展里已经画好的<b>门会自动继承</b>过来，关掉它不会丢；<b>光源需要重新添加一次</b>。"
-              : "This suite <b>already contains everything</b> the official <b>Dynamic Fog</b> does — walls, doors, lights — and adds three things it doesn't have: <b>windows</b> (see-through open or shut), <b>doors players can work themselves</b>, and <b>secret doors players never see</b>.<br>Running both is not an error, but both derive walls and lights from the same fog shapes, so <b>every wall and every light is built twice</b> for nothing.<br>Doors you already drew with the official extension are <b>imported automatically</b>, so turning it off won't lose them; <b>lights need adding again</b>."
-          }</p>
-        </div>
-        <p style="color:var(--text-dim);font-size:11.5px;margin-top:10px">${
-          zh
-            ? "⚠ 同理，<b>测试版和稳定版也不要装在同一个房间</b>：两者现在共用同一套场景元数据与工具 id，同时装会互相覆盖设置、并把墙和光建两遍。"
-            : "⚠ For the same reason, <b>don't install the dev and stable channels in one room</b>: they now share one set of scene metadata and tool ids, so they would overwrite each other's settings and build every wall and light twice."
-        }</p>
-
-        <h4 style="margin-top:12px">${zh ? "光源" : "Lights"}</h4>
-        <p>${
-          zh
-            ? "右键任意图片或圆形 → <b>添加光源</b>，再右键 → <b>光源设置</b> 调整照明范围 / 角度（全向或锥形）/ 边缘（硬或柔）/ 类型（主光源或次光源）。锥形光源会额外获得一圈自照明，持灯人不会站在自己的暗区里。光源由原生引擎渲染，会被墙遮挡、能穿过打开的门窗。"
-            : "Right-click any image or circle → <b>Add Light</b>, then right-click → <b>Light Settings</b> for range / angle (full or cone) / edge (hard or soft) / type (primary or secondary). Cone lights get a small self light so the bearer isn't standing in their own dark spot. Lights are rendered by Owlbear's own engine, so walls clip them and open doors let them through."
-        }</p>
-        <p>${
-          zh
-            ? "光源设置面板刻意和官方 dynamic-fog 的一模一样：<b>照明范围 / 角度 / 边缘 / 类型</b>，外加旋转与移除。唯一的加法不额外占位 —— 类型里多了第三个选项<b>环境光</b>：这盏灯对所有人永远可见、不参与下面的遮挡判定，用于墙上的火把、天光这类固定照明。"
-            : "The Light Settings panel is deliberately identical to the official dynamic-fog one: <b>Range / Angle / Edge / Type</b>, plus Rotate and Remove. The single addition costs no extra field — Type carries a third option, <b>Ambient</b>: always visible to everyone and exempt from the occlusion rule below, for fixed lighting like wall sconces or daylight."
-        }</p>
-
-        <h3 style="margin-top:14px">${zh ? "选项" : "Options"}</h3>
-        <div class="row">
-          <div class="lbl">
-            ${zh ? "整张地图铺满迷雾" : "Fill The Map With Fog"}
-            <div class="desc">${
-              zh
-                ? "这是 <b>OBR 场景本身</b>的开关（等同于迷雾工具里的「填充」），不是套件设置。<b>没打开它，墙和光源都不会有任何可见效果</b> —— 玩家本来就能看到整张图，也就无所谓「被墙挡住」。如果你觉得「灯光和墙壁不识别」，先检查这里。"
-                : "This is an <b>Owlbear scene</b> setting (the fog tool's Fill option), not a suite one. <b>With it off, walls and lights have no visible effect at all</b> — players can already see the whole map, so there is nothing for a wall to block. Check this first if lighting and walls seem to be ignored."
-            }</div>
-          </div>
-          <button class="tog" data-key="fogFilled" type="button" ${isGM ? "" : "disabled"} aria-pressed="false"></button>
-        </div>
-        <div class="row">
-          <div class="lbl">
-            ${zh ? "玩家可开关门窗" : "Players Can Work Doors"}
-            <div class="desc">${
-              zh
-                ? "默认开启。仅 DM 可设。开启后玩家会看到门窗指示线，<b>门</b>还会带一个可点的按钮，配合工具栏的「开关门窗」工具一点就开关；指示器画在迷雾<b>下方</b>，没探索到的区域不会提前泄露门的位置。关闭后玩家既看不到指示器也没有该工具，门只能由 DM 操作。<br><b>窗户只有线、没有按钮</b>：窗户开着关着都能看穿，玩家去点它不会有任何可见变化，所以按钮只留给 DM。<b>密门永远不受这个开关影响</b>，玩家在任何情况下都看不到、开不了。"
-                : "On by default. DM-only setting. When on, players see the door and window indicator lines, and <b>doors</b> also get a clickable button that the toolbar's toggle tool works. Indicators render BELOW the fog, so undiscovered doors don't leak the floor plan. When off, players get neither the indicators nor the tool and only the DM can work the doors.<br><b>Windows get a line but no button</b>: a window is see-through whether it is shut or open, so a player clicking one would see nothing change — the shutters stay a DM control. <b>Secret doors ignore this switch entirely</b> — players never see or operate one under any setting."
-            }</div>
-          </div>
-          <button class="tog ${
-            s.fogPlayerDoors ? "on" : ""
-          }" data-key="fogPlayerDoors" type="button" ${isGM ? "" : "disabled"} aria-pressed="${
-            s.fogPlayerDoors
-          }"></button>
-        </div>
-        <div class="row">
-          <div class="lbl">
-            ${zh ? "始终显示门窗指示器（DM）" : "Always Show Indicators (DM)"}
-            <div class="desc">${
-              zh
-                ? "默认关闭。开启后即使没有选中迷雾工具，DM 也能一直看到门窗指示器（上游 dynamic-fog 只在选中迷雾工具时显示）。"
-                : "Off by default. When on, the DM keeps seeing door/window indicators even without the fog tool selected (upstream dynamic-fog only shows them with the fog tool active)."
-            }</div>
-          </div>
-          <button class="tog ${
-            s.fogDoorOverlayAlways ? "on" : ""
-          }" data-key="fogDoorOverlayAlways" type="button" ${isGM ? "" : "disabled"} aria-pressed="${
-            s.fogDoorOverlayAlways
-          }"></button>
-        </div>
-        <div class="row">
-          <div class="lbl">
-            ${zh ? "光源遮挡（玩家看不见别人的灯）" : "Light Occlusion"}
-            <div class="desc">${
-              zh
-                ? "默认开启。玩家<b>不拥有</b>的光源（DM 放的 NPC 火把等）默认不可见；只有当玩家自己某盏灯到那盏灯之间<b>没有墙阻挡</b>时，它才会亮起来。只看有没有墙、不看距离 —— 空旷野地上的远处火堆是看得见的。判定不传递：一串火把会随着你逐个获得视线依次点亮。标记为<b>环境光</b>的光源不受影响，DM 永远看到全部。<br>⚠ 副作用：身上一盏灯都没有的玩家，除环境光外什么光源都看不到。固定照明记得勾「环境光」。"
-                : "On by default. Lights a player does NOT own (the DM's NPC torches and so on) are hidden; one becomes visible only when a straight line from one of that player's own lights reaches it <b>without crossing a wall</b>. Walls only — distance is not part of it, so a distant campfire across open ground is visible. It is not transitive: a row of torches lights up one at a time as you gain line of sight to each. Lights flagged <b>Ambient</b> are exempt, and the DM is never occluded.<br>⚠ Side effect: a player carrying no light of their own sees no lights except ambient ones. Flag fixed lighting as Ambient."
-            }</div>
-          </div>
-          <button class="tog ${
-            s.fogLightOcclusion ? "on" : ""
-          }" data-key="fogLightOcclusion" type="button" ${isGM ? "" : "disabled"} aria-pressed="${
-            s.fogLightOcclusion
-          }"></button>
-        </div>
-        ${!isGM ? `<p class="role-notice">${zh ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
-      `;
-    },
+    dynamicBody: (lang, gm) => renderFogSettings(getState(), lang, gm, !STABLE_HIDES),
     afterRender: (root) => {
       // "Fill the map with fog" reads/writes the OBR SCENE, not suite
       // state, so it can't be rendered synchronously with the rest.
@@ -3324,7 +3266,8 @@ const TABS: TabDef[] = [
         key:
           | "fogPlayerDoors"
           | "fogDoorOverlayAlways"
-          | "fogLightOcclusion",
+          | "fogLightOcclusion"
+          | "fogShareVision",
       ) => {
         root
           .querySelector<HTMLButtonElement>(`.tog[data-key="${key}"]`)
@@ -3336,6 +3279,7 @@ const TABS: TabDef[] = [
       bind("fogPlayerDoors");
       bind("fogDoorOverlayAlways");
       bind("fogLightOcclusion");
+      bind("fogShareVision");
     },
   },
   {
@@ -3614,17 +3558,9 @@ const TABS: TabDef[] = [
   },
 ];
 
-// Stable channel hides modules still in dev; dev keeps them visible.
-// 2026-05-14 — `follow` is hidden EVERYWHERE (retired from the dev
-// build per user request).
-// 2026-08-25 — `fullFog` split into `fogEditor` + `dynamicFog`. The
-// EDITOR ships in both channels (it has since 2026-05-26); the ENGINE
-// tab is dev-only for now, matching the `authoring` gate in
-// modules/fullFog/index.ts. The engine still RUNS on stable — only its
-// settings tab and its authoring tools are withheld there.
-const HIDDEN_TAB_IDS = new Set<string>(
-  STABLE_HIDES ? ["dynamicFog", "follow"] : ["follow"],
-);
+// Basic vision/light controls ship in both channels. Only extra opening
+// authoring remains dev-gated. Follow stays hidden pending feasibility work.
+const HIDDEN_TAB_IDS = new Set<string>(["follow"]);
 const VISIBLE_TABS = TABS.filter((t) => !HIDDEN_TAB_IDS.has(t.id));
 
 // --- DOM refs ---
@@ -3759,6 +3695,11 @@ langEnEl.addEventListener("click", () => {
 });
 
 OBR.onReady(async () => {
+  const refreshBossPreferences = () => { if (activeTab === "bossBar") renderContent(); };
+  OBR.broadcast.onMessage(BOSS_PREFERENCES_CHANGED, refreshBossPreferences);
+  window.addEventListener("storage", (event) => {
+    if (event.key === BOSS_PREFERENCES_KEY || event.key === null) refreshBossPreferences();
+  });
   OBR.broadcast.onMessage(BC_MODULE_STATUS, (event) => {
     const modules = (event.data as { modules?: ModuleLifecycleSnapshot[] } | null)?.modules;
     if (!Array.isArray(modules)) return;

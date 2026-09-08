@@ -14,7 +14,9 @@ import {
   CREATE_PREFS_KEY,
   CreatePrefs,
   PortalMeta,
+  resolvePortalEffect,
 } from "./types";
+import { prefersReducedMotion } from "../transitions/protocol";
 // NOT `../../i18n`. This module is on background.ts's boot path, and
 // that file is one ~600-key object literal indexed dynamically, so
 // importing it for three strings put all 46 kB of it in front of every
@@ -160,6 +162,8 @@ let destPopoverSafetyTimer: ReturnType<typeof setTimeout> | null = null;
 // modal is up we behave like the popover is up (no new portal entries
 // fire) so a teleport in flight can't be interrupted by another drag.
 let blinkModalOpen = false;
+let portalEffectEpoch = 0;
+let portalEffectController: AbortController | null = null;
 // Payload latched at destination-pick time. The blink modal asks for
 // it via BROADCAST_BLINK_PROCEED at the apex of the close animation.
 let pendingTeleport: { destPortalId: string; tokenIds: string[]; entryId?: string } | null = null;
@@ -1849,6 +1853,9 @@ export async function setupPortals(): Promise<void> {
   // (moduleStatus stays "on"), so the module re-baselines itself.
   unsubs.push(
     OBR.scene.onReadyChange((ready) => {
+      portalEffectEpoch++;
+      portalEffectController?.abort();
+      portalEffectController = null;
       if (ready) {
         void rebuildDragBaseline("scene-ready");
       } else {
@@ -1920,12 +1927,34 @@ export async function setupPortals(): Promise<void> {
         | { destPortalId: string; tokenIds: string[]; entryId?: string }
         | undefined;
       if (!data) return;
-      // entryId is log-context only — an older popover payload without
-      // it must never block the teleport.
+      // Old popovers without entryId retain the legacy global effect.
       const entryId = typeof data.entryId === "string" ? data.entryId : undefined;
+      const generation = portalEffectEpoch;
       await closeDestinationPopover();
-      if (readBlinkEnabled()) {
+      let effect: unknown = "inherit";
+      if (entryId) {
+        try { effect = (await OBR.scene.items.getItems([entryId]))[0]?.metadata[PORTAL_KEY]; }
+        catch { /* Missing source metadata retains the legacy global fallback. */ }
+      }
+      if (generation !== portalEffectEpoch) return;
+      const selection = resolvePortalEffect((effect as PortalMeta | undefined)?.effect, readBlinkEnabled(), prefersReducedMotion());
+      if (selection === "inherit") {
         await openBlinkAndTeleport(data.destPortalId, data.tokenIds, entryId);
+      } else if (selection === "blink" || selection === "fade") {
+        portalEffectController?.abort();
+        const controller = new AbortController();
+        portalEffectController = controller;
+        try {
+          const { playScreenTransition } = await import("../transitions/screen-effect");
+          if (controller.signal.aborted || generation !== portalEffectEpoch) return;
+          await playScreenTransition(selection, 1_200, controller.signal);
+        } catch (error) {
+          // Loading an optional visual must never strand a valid teleport.
+          console.warn("[portals] screen transition unavailable", error);
+        }
+        if (controller.signal.aborted || generation !== portalEffectEpoch) return;
+        await teleport(data.destPortalId, data.tokenIds, true, entryId);
+        for (const id of data.tokenIds) movedByMeIds.delete(id);
       } else {
         // Blink disabled — direct teleport with the smooth animateTo
         // camera move (instantCamera=false) so the user still sees a
@@ -2059,6 +2088,7 @@ export async function setupPortals(): Promise<void> {
               showName: cur.showName,
               visible: cur.visible,
               locked: cur.locked,
+              effect: cur.effect,
             };
           }
         });
@@ -2123,6 +2153,9 @@ export async function setupPortals(): Promise<void> {
 }
 
 export async function teardownPortals(): Promise<void> {
+  portalEffectEpoch++;
+  portalEffectController?.abort();
+  portalEffectController = null;
   await closeEditPopover();
   await closeDestinationPopover();
   await closeBlinkModal();

@@ -117,4 +117,29 @@ assert.equal(failedReads, 1);
 assert.equal(invalidReadiness, 0, "failed read incorrectly released the new-scene startup gate");
 stopFailures(); stopReadiness();
 console.log("PASS 8: failed reads preserve cache, report failure and never signal scene readiness");
-console.log("8 settings freshness regressions passed");
+
+// Old rooms and malformed values must never accidentally grant party vision.
+sdk.room.getMetadata = async () => ({});
+sdk.scene.setMetadata = async (data) => { writes.push(data); };
+for (const value of [undefined, false, "true", 1, {}]) {
+  sdk.scene.getMetadata = async () => ({ [SCENE_KEY]: { fogShareVision: value } });
+  await refreshFromScene();
+  assert.equal(getState().fogShareVision, false);
+  assert.equal(getState().enabled.bossBar, true);
+  assert.equal(getState().enabled.transitions, true);
+}
+let visionChanges = 0;
+const stopVisionChanges = onStateChange(() => { visionChanges++; });
+sdk.scene.getMetadata = async () => ({ [SCENE_KEY]: { fogShareVision: true } });
+await refreshFromScene();
+assert.equal(getState().fogShareVision, true);
+assert.equal(visionChanges, 1, "vision-only metadata change did not notify the fog engine");
+await setState({ fogShareVision: false, enabled: { bossBar: false, transitions: false } as any });
+assert.equal(getState().fogShareVision, false);
+assert.equal(visionChanges, 2);
+assert.equal(writes.at(-1)[SCENE_KEY].fogShareVision, false);
+assert.equal(writes.at(-1)[SCENE_KEY].enabled.bossBar, false);
+assert.equal(writes.at(-1)[SCENE_KEY].enabled.transitions, false);
+stopVisionChanges();
+console.log("PASS 9: shared vision fails closed for old/malformed rooms and toggles notify/persist with new module switches");
+console.log("9 settings freshness regressions passed");

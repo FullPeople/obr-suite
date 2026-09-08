@@ -148,8 +148,9 @@ function currentOptions(): DynfogOptions {
     playerOpenings: state.fogPlayerDoors,
     alwaysShowOverlay: state.fogDoorOverlayAlways,
     lightOcclusion: state.fogLightOcclusion,
+    shareVision: state.fogShareVision,
     // The authoring surface (light menu, fog-tool modes, indicators,
-    // player toggle tool, occlusion) is dev-channel only
+    // player toggle tool) is dev-channel only
     // for now; the wall engine runs everywhere because the stable fog
     // editor's output is worthless without it.
     authoring: !STABLE_HIDES,

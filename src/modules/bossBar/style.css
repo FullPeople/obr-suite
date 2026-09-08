@@ -1,0 +1,45 @@
+:root { color-scheme: dark; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; color: #ffefd5; }
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; min-width: 0; background: transparent !important; overflow: hidden; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+[hidden] { display: none !important; }
+#bossBars { padding: 2px 22px 2px 8px; }
+.boss { height: 42px; margin: 0; position: relative; filter: drop-shadow(0 2px 3px #000a); }
+.boss:first-child:last-child { height: 56px; padding-top: 4px; }
+.bossHeader { display: flex; align-items: baseline; justify-content: center; gap: 9px; min-width: 0; height: 21px; }
+.bossName { margin: 0; max-width: 80%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Georgia, "Microsoft YaHei", serif; font-weight: 600; font-size: 15px; line-height: 21px; letter-spacing: .08em; color: #fff0d3; text-shadow: 0 1px 3px #000, 0 0 4px #000; }
+.bossPhase { max-width: 32%; font-size: 10px; color: #f0c790; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-shadow: 0 1px 3px #000; }
+.track { position: relative; height: 13px; margin: 2px 5px 0; padding: 2px; background: #1c1215ee; border: 1px solid #d6af6d; border-radius: 2px; box-shadow: 0 0 0 1px #241d19, inset 0 1px 4px #000b; }
+.track::before, .track::after { content: ""; position: absolute; top: 2px; width: 6px; height: 6px; background: #d6af6d; border: 1px solid #fde2ac; transform: rotate(45deg); }
+.track::before { left: -5px; } .track::after { right: -5px; }
+.well { position: relative; height: 7px; overflow: hidden; }
+.fill, .trail { position: absolute; inset: 0 auto 0 0; width: 0; }
+.fill { background: linear-gradient(90deg, #762632, #c03e43 55%, #e16250); box-shadow: inset 0 1px #ff9c755c; transition: width 140ms ease-out; }
+.trail { background: #f0bd70; transition: width 420ms ease-out; }
+.divider { position: absolute; top: 0; bottom: 0; width: 2px; background: #281719d9; box-shadow: 1px 0 #f1cf793b; }
+.numbers { position: absolute; inset: -1px 0; text-align: center; color: #fff6e8; font-size: 10px; font-weight: 700; line-height: 13px; text-shadow: 0 1px 2px #000, 1px 0 1px #000; }
+.defeated .fill { background: #4c4242; }
+.defeated .bossName { color: #cebaa2; }
+#localHide { position: absolute; right: 0; top: 4px; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; color: #ddcaa4; background: #201921b8; font-size: 17px; line-height: 18px; opacity: .58; }
+#localHide:hover, #localHide:focus-visible { opacity: 1; outline: 1px solid #e4c68b; }
+.reduceMotion .fill, .reduceMotion .trail { transition: none; }
+@media (prefers-reduced-motion: reduce) { .fill, .trail { transition: none; } }
+@media (max-width: 360px) { .bossName { font-size: 13px; letter-spacing: .02em; } .bossPhase { font-size: 9px; } .bossHeader { gap: 5px; } }
+body.config { padding: 12px 14px; background: #211d23 !important; }
+#bossOptions header { display: flex; align-items: center; justify-content: space-between; }
+#bossOptions header strong { font-size: 15px; }
+#closeOptions { border: 0; color: #d8cfc2; background: transparent; font-size: 21px; padding: 0 3px; }
+#targetName { margin: 5px 0 12px; font-size: 12px; color: #d3b989; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+fieldset { border: 0; padding: 0; margin: 0; }
+fieldset label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; margin-bottom: 10px; }
+fieldset .checkbox { flex-direction: row; align-items: center; gap: 7px; }
+fieldset .segmentRow { flex-direction: row; align-items: center; justify-content: space-between; }
+input[type="text"], select { width: 100%; min-width: 0; border: 1px solid #6d5b49; border-radius: 5px; padding: 5px 7px; background: #151216; color: #fff0d3; }
+input[type="checkbox"] { accent-color: #d6ad6b; margin: 0; }
+select { width: 120px; }
+footer { display: flex; align-items: center; justify-content: space-between; }
+#save { border: 1px solid #ceab6a; border-radius: 5px; background: #5f3d2d; color: #fff0d3; padding: 5px 19px; }
+#saveStatus { font-size: 11px; color: #edbd81; }
+#hpHint { margin: 10px 0 0; font-size: 10px; line-height: 1.5; color: #b4a799; }
+:disabled { opacity: .55; cursor: default; }

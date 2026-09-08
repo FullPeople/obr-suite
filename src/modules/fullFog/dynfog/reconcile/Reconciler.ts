@@ -25,13 +25,24 @@ export class Reconciler {
    *  wall + light actors to be up to date before it can decide which
    *  lights this client may see. */
   private afterHooks: Array<() => void> = [];
+  private ready = false;
+  private disposed = false;
+  private generation = 0;
+  private readRevision = 0;
 
   patcher: Patcher = new Patcher();
 
   constructor() {
-    OBR.scene.isReady().then(this.handleSceneReady).catch(() => {});
+    const generation = this.generation;
+    OBR.scene.isReady().then(ready => {
+      if (!this.disposed && generation === this.generation) this.handleSceneReady(ready);
+    }).catch(() => {});
     this.subscriptions.push(
-      OBR.scene.items.onChange(this.reconcile),
+      OBR.scene.items.onChange(items => {
+        if (!this.ready || this.disposed) return;
+        this.readRevision++;
+        this.reconcile(items);
+      }),
       OBR.scene.onReadyChange(this.handleSceneReady),
     );
   }
@@ -45,7 +56,12 @@ export class Reconciler {
     };
   }
 
-  delete() {
+  async delete(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.generation++;
+    this.readRevision++;
+    this.patcher.invalidate();
     for (const unsubscribe of this.subscriptions) {
       try {
         unsubscribe();
@@ -56,32 +72,44 @@ export class Reconciler {
     for (const reactor of this.reactors) reactor.delete();
     this.reactors = [];
     this.prevItems.clear();
-    void this.patcher.submitChanges();
+    this.currentItems.clear();
+    await this.patcher.submitChanges();
+    this.patcher.setReady(false);
   }
 
   private handleSceneReady = (ready: boolean) => {
+    if (this.disposed) return;
+    // Repeated ready notifications belong to the same local scene. Throwing
+    // away its actor ids here would orphan still-visible local children.
+    if (ready && this.ready) return;
+    this.generation++;
+    this.readRevision++;
+    this.ready = ready;
+    for (const reactor of this.reactors) reactor.delete();
+    this.prevItems.clear();
+    this.currentItems.clear();
     this.patcher.setReady(ready);
     if (ready) {
-      OBR.scene.items
-        .getItems()
-        .then(this.reconcile)
-        .catch(() => {});
-    } else {
-      // Scene swap wipes the local scene — drop every actor so the
-      // next ready rebuilds from scratch.
-      for (const reactor of this.reactors) reactor.delete();
-      this.prevItems.clear();
-      void this.patcher.submitChanges();
+      this.readItems(false);
     }
   };
 
   private reconcile = (items: Item[]) => {
+    if (!this.ready || this.disposed) return;
     this.currentItems.clear();
     for (const item of items) this.currentItems.set(item.id, item);
 
     for (const reactor of this.reactors) {
       this.processReactor(reactor, items);
     }
+    this.runAfterHooks();
+    void this.patcher.submitChanges();
+
+    this.prevItems.clear();
+    for (const item of items) this.prevItems.set(item.id, item);
+  };
+
+  private runAfterHooks(): void {
     for (const hook of this.afterHooks) {
       try {
         hook();
@@ -89,34 +117,50 @@ export class Reconciler {
         console.warn("[dynfog] after-reconcile hook failed", e);
       }
     }
-    void this.patcher.submitChanges();
+  }
 
-    this.prevItems.clear();
-    for (const item of items) this.prevItems.set(item.id, item);
-  };
+  /** Ownership and sharing changes need only new access verdicts, not a
+   * destroy/recreate of every wall and light or another scene snapshot. */
+  refreshAccess(): void {
+    if (!this.ready || this.disposed) return;
+    this.runAfterHooks();
+    void this.patcher.submitChanges();
+  }
 
   /** Look up any item in the snapshot currently being reconciled. */
   getItem(id: string | undefined): Item | null {
     if (!id) return null;
-    return this.currentItems.get(id) ?? this.prevItems.get(id) ?? null;
+    // Missing in the current snapshot means removed, not an invitation to
+    // reuse the previous owner's/ancestor's permission for one more pass.
+    return this.currentItems.get(id) ?? null;
   }
 
   /** Force a full re-run against the current shared scene. Used when
    *  something outside the item stream changes what reactors should
    *  produce (role change, player-doors setting, grid dpi). */
   refresh() {
+    this.readItems(true);
+  }
+
+  private readItems(rebuild: boolean): void {
+    if (!this.ready || this.disposed) return;
+    const generation = this.generation;
+    const revision = ++this.readRevision;
     OBR.scene.items
       .getItems()
       .then((items) => {
-        // Treat everything as new so reactors rebuild their children.
-        this.prevItems.clear();
-        for (const reactor of this.reactors) reactor.delete();
+        if (this.disposed || !this.ready || generation !== this.generation || revision !== this.readRevision) return;
+        if (rebuild) {
+          this.prevItems.clear();
+          for (const reactor of this.reactors) reactor.delete();
+        }
         this.reconcile(items);
       })
       .catch(() => {});
   }
 
   register(...reactors: Reactor[]) {
+    if (this.disposed) return;
     this.reactors.push(...reactors);
     for (const reactor of reactors) {
       const added: Item[] = [];
@@ -125,7 +169,7 @@ export class Reconciler {
       }
       reactor.process(added, [], []);
     }
-    void this.patcher.submitChanges();
+    this.refreshAccess();
   }
 
   unregister(...reactors: Reactor[]) {

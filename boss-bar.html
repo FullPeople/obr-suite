@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Boss</title>
+  </head>
+  <body>
+    <main id="bossBars" aria-live="polite"></main>
+    <button id="localHide" type="button" hidden>×</button>
+    <form id="bossOptions" hidden>
+      <header><strong id="optionsTitle"></strong><button id="closeOptions" type="button">×</button></header>
+      <p id="targetName"></p>
+      <fieldset id="optionsFields" disabled>
+        <label class="checkbox"><input id="exact" type="checkbox" /><span id="exactLabel"></span></label>
+        <label><span id="phaseLabel"></span><input id="phase" type="text" maxlength="48" autocomplete="off" /></label>
+        <label class="segmentRow"><span id="segmentsLabel"></span><select id="segments"><option value="1"></option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>
+        <footer><span id="saveStatus" role="status"></span><button id="save" type="submit"></button></footer>
+      </fieldset>
+      <p id="hpHint"></p>
+    </form>
+    <script type="module" src="/src/modules/bossBar/page.ts"></script>
+  </body>
+</html>

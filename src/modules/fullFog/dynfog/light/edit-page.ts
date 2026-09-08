@@ -1,9 +1,8 @@
 // Light settings — runs INSIDE the right-click context menu via
 // `contextMenu.create({ embed: { url, height } })`.
 //
-// Control set matches upstream dynamic-fog's Menu.tsx one-for-one:
-// Range / Angle / Edge / Type, then Rotate / Remove. Anyone who has
-// used the official extension already knows this panel.
+// Basic light controls plus one optional ownership override. Automatic
+// ownership uses bound cards first, then ordinary player-created tokens.
 //
 // One addition, and it does not cost a field: AMBIENT rides in the Type
 // group as a third option. It is ours rather than upstream's, and it is
@@ -20,6 +19,7 @@ import OBR, { type GridScale, type Item } from "@owlbear-rodeo/sdk";
 import { getLocalLang } from "../../../../state";
 import { LIGHT_KEY } from "../ids";
 import { isPlainObject } from "../meta";
+import { VISION_KEY, readVisionOwnership, type VisionOwnership } from "./visionPolicy";
 import {
   ANGLE_CONE_INNER,
   ANGLE_CONE_OUTER,
@@ -52,6 +52,20 @@ const edgeEl = document.getElementById("edge") as HTMLDivElement;
 const typeEl = document.getElementById("type") as HTMLDivElement;
 const rotateBtn = document.getElementById("btn-rotate") as HTMLButtonElement;
 const removeBtn = document.getElementById("btn-remove") as HTMLButtonElement;
+const visionField = document.createElement("label");
+visionField.className = "field";
+visionField.style.cssText = "display:block;margin-top:8px;font-size:11px";
+const visionLabel = document.createElement("span");
+visionLabel.textContent = en ? "Vision owner" : "视野归属";
+const visionOwner = document.createElement("select");
+visionOwner.style.cssText = "display:block;width:100%;margin-top:4px;padding:4px;background:#1e2230;color:#eee;border:1px solid #50566a;border-radius:4px";
+visionOwner.title = en ? "Overrides card ownership. Hidden tokens never provide vision. Public party sources require shared vision." : "可覆盖角色卡归属。隐藏单位不提供视野；队伍公用来源需开启共享视野。";
+visionField.append(visionLabel, visionOwner);
+const visionError = document.createElement("span");
+visionError.style.cssText = "display:block;color:#f0b8a0;font-size:10px;margin-top:3px";
+visionError.setAttribute("role", "status");
+visionField.append(visionError);
+panelEl.querySelector(".actions")?.before(visionField);
 
 let gridDpi = 150;
 let gridScale: GridScale | null = null;
@@ -60,6 +74,11 @@ let values: Required<LightConfig> | null = null;
 /** True while we're repainting the UI from scene data — stops the
  *  input handlers from echoing that back as a write. */
 let syncing = false;
+let currentRole: "GM" | "PLAYER" = "PLAYER";
+let loadRevision = 0;
+let sceneRevision = 0;
+let savedVisionOwner = "auto";
+let visionWriteRevision = 0;
 
 function setStatus(text: string | null): void {
   if (text) {
@@ -120,9 +139,11 @@ function paint(config: Required<LightConfig>): void {
  *  from the panel) keeps a multi-selection with different ranges from
  *  being flattened by a single toggle press. */
 async function patch(update: Partial<LightConfig>): Promise<void> {
-  if (targetIds.length === 0) return;
+  if (targetIds.length === 0 || currentRole !== "GM") return;
+  const scene = sceneRevision;
   try {
     await OBR.scene.items.updateItems(targetIds, (items) => {
+      if (scene !== sceneRevision || currentRole !== "GM") return;
       for (const item of items) {
         const metadata = item.metadata as Record<string, unknown>;
         const current = metadata[LIGHT_KEY];
@@ -139,12 +160,17 @@ async function patch(update: Partial<LightConfig>): Promise<void> {
 }
 
 async function load(): Promise<void> {
+  const revision = ++loadRevision;
+  const scene = sceneRevision;
+  // Old controls must not write onto the newly selected target while its
+  // ownership/role read is pending.
+  targetIds = [];
   let selection: string[] = [];
   try {
     selection = (await OBR.player.getSelection()) ?? [];
   } catch {}
-  targetIds = selection;
-  if (targetIds.length === 0) {
+  if (revision !== loadRevision || scene !== sceneRevision) return;
+  if (selection.length === 0) {
     setStatus(en ? "No token selected." : "未选中目标。");
     return;
   }
@@ -158,20 +184,81 @@ async function load(): Promise<void> {
 
   let items: Item[] = [];
   try {
-    items = await OBR.scene.items.getItems(targetIds);
+    items = await OBR.scene.items.getItems(selection);
   } catch {}
+  const [role, players] = await Promise.all([
+    OBR.player.getRole().catch(() => "PLAYER" as const),
+    OBR.party.getPlayers().catch(() => []),
+  ]);
+  if (revision !== loadRevision || scene !== sceneRevision) return;
+  currentRole = role;
   const withLight = items.find((item) => LIGHT_KEY in item.metadata);
   if (!withLight) {
     setStatus(en ? "This token has no light." : "该目标没有光源。");
     return;
   }
+  targetIds = selection;
   const config =
     normaliseLightConfig(
       (withLight.metadata as Record<string, unknown>)[LIGHT_KEY],
     ) ?? {};
   setStatus(null);
   paint(withDefaults(config, gridDpi));
+  visionOwner.replaceChildren();
+  const option = (value: string, text: string) => {
+    const el = document.createElement("option"); el.value = value; el.textContent = text; visionOwner.append(el);
+  };
+  option("auto", en ? "Automatic (card / player token)" : "自动（角色卡 / 玩家单位）");
+  option("team", en ? "Public party source (when shared)" : "队伍公用（开启共享时）");
+  option("gm", en ? "GM only" : "仅主持人");
+  for (const player of players.filter(player => player.role === "PLAYER")) option(`owner:${player.id}`, player.name);
+  const own = readVisionOwnership(withLight.metadata[VISION_KEY]);
+  let selected = own.mode;
+  if (own.mode === "owners") {
+    selected = "owners";
+    if (own.ownerIds.length === 1) {
+      const value = `owner:${own.ownerIds[0]}`;
+      if (![...visionOwner.options].some(option => option.value === value)) option(value, en ? "Assigned player (offline)" : "已指定的玩家（离线）");
+      visionOwner.value = value;
+    } else {
+      option("owners", en ? `${own.ownerIds.length} assigned players` : `已指定 ${own.ownerIds.length} 位玩家`);
+      visionOwner.value = "owners";
+    }
+  } else visionOwner.value = selected;
+  savedVisionOwner = visionOwner.value;
+  visionError.textContent = "";
+  for (const control of panelEl.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>("input, button, select")) control.disabled = currentRole !== "GM";
 }
+
+visionOwner.addEventListener("change", async () => {
+  if (syncing || currentRole !== "GM" || !targetIds.length) return;
+  const value = visionOwner.value;
+  if (value === "owners") return;
+  const ownership: VisionOwnership = value.startsWith("owner:")
+    ? { mode: "owners", ownerIds: [value.slice(6)] }
+    : { mode: value === "team" ? "team" : value === "gm" ? "gm" : "auto", ownerIds: [] };
+  const scene = sceneRevision;
+  const targets = [...targetIds];
+  const revision = ++visionWriteRevision;
+  try {
+    await OBR.scene.items.updateItems(targets, items => {
+      if (scene !== sceneRevision || currentRole !== "GM" || revision !== visionWriteRevision) return;
+      for (const item of items) {
+        if (ownership.mode === "auto") delete item.metadata[VISION_KEY];
+        else item.metadata[VISION_KEY] = ownership;
+      }
+    });
+    if (scene === sceneRevision && revision === visionWriteRevision && JSON.stringify(targets) === JSON.stringify(targetIds)) {
+      savedVisionOwner = value;
+      visionError.textContent = "";
+    }
+  } catch (error) {
+    console.warn("[dynfog/light-edit] vision owner update failed", error);
+    if (scene !== sceneRevision || revision !== visionWriteRevision || JSON.stringify(targets) !== JSON.stringify(targetIds)) return;
+    visionOwner.value = savedVisionOwner;
+    visionError.textContent = en ? "Not saved. Choose the owner again to retry." : "保存失败，请再次选择归属重试。";
+  }
+});
 
 // --- input wiring -----------------------------------------------------------
 
@@ -254,9 +341,11 @@ rotateBtn.addEventListener("click", () => {
 });
 
 removeBtn.addEventListener("click", async () => {
-  if (targetIds.length === 0) return;
+  if (targetIds.length === 0 || currentRole !== "GM") return;
+  const scene = sceneRevision;
   try {
     await OBR.scene.items.updateItems(targetIds, (items) => {
+      if (scene !== sceneRevision || currentRole !== "GM") return;
       for (const item of items) {
         delete (item.metadata as Record<string, unknown>)[LIGHT_KEY];
       }
@@ -268,9 +357,15 @@ removeBtn.addEventListener("click", async () => {
 });
 
 OBR.onReady(async () => {
-  await load();
+  OBR.scene.onReadyChange(ready => {
+    sceneRevision++; loadRevision++; targetIds = [];
+    if (ready) void load();
+    else setStatus(en ? "No scene open." : "未打开场景。");
+  });
   try {
-    OBR.player.onChange(() => {
+    OBR.player.onChange(player => {
+      currentRole = player.role;
+      for (const control of panelEl.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>("input, button, select")) control.disabled = currentRole !== "GM";
       void load();
     });
   } catch {}
@@ -282,4 +377,6 @@ OBR.onReady(async () => {
       void load();
     });
   } catch {}
+  OBR.party.onChange(() => { if (document.activeElement !== visionOwner) void load(); });
+  await load();
 });

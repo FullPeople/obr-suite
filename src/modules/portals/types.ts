@@ -6,6 +6,15 @@ export const PORTAL_KEY = `${PLUGIN_ID}/data`;
 // LocalStorage key holding the user's name + tag presets.
 export const PRESETS_KEY = `${PLUGIN_ID}/presets`;
 export const CREATE_PREFS_KEY = `${PLUGIN_ID}/create-prefs`;
+export type PortalEffect = "inherit" | "off" | "blink" | "fade";
+export function normalizePortalEffect(value: unknown): PortalEffect {
+  return value === "off" || value === "blink" || value === "fade" ? value : "inherit";
+}
+export function resolvePortalEffect(value: unknown, globalEnabled: boolean, reducedMotion: boolean): PortalEffect {
+  if (reducedMotion) return "off";
+  const effect = normalizePortalEffect(value);
+  return effect === "inherit" ? (globalEnabled ? "inherit" : "off") : effect;
+}
 
 export interface PortalMeta {
   name: string;
@@ -21,6 +30,8 @@ export interface PortalMeta {
   visible?: boolean;
   // Persisted lock state for the portal.
   locked?: boolean;
+  /** Entry portal's screen transition; absent preserves the client's old global blink setting. */
+  effect?: PortalEffect;
 }
 
 export interface Presets {

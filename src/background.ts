@@ -22,6 +22,8 @@ import { setupResourceTracker, teardownResourceTracker } from "./modules/resourc
 import { setupBubbles, teardownBubbles } from "./modules/bubbles";
 import { setupStatusTracker, teardownStatusTracker } from "./modules/statusTracker";
 import { setupHpBar, teardownHpBar } from "./modules/hpBar";
+import { setupBossBar, teardownBossBar } from "./modules/bossBar";
+import { setupTransitions, teardownTransitions } from "./modules/transitions";
 import { setupMetadataInspector, teardownMetadataInspector } from "./modules/metadata-inspector";
 import {
   setupDynamicFog,
@@ -488,9 +490,13 @@ OBR.onReady(() => {
   OBR.broadcast.onMessage("com.obr-suite/cluster-row-width", async (event) => {
     const data = event.data as { width?: number } | undefined;
     if (!clusterRowIsOpen) return;
-    if (typeof data?.width !== "number") return;
-    const w = Math.max(120, Math.min(960, Math.round(data.width)));
-    try { await OBR.popover.setWidth(CLUSTER_ROW_POPOVER_ID, w); } catch {}
+    if (typeof data?.width !== "number" || !Number.isFinite(data.width)) return;
+    try {
+      const viewportWidth = await OBR.viewport.getWidth();
+      if (!clusterRowIsOpen) return;
+      const w = Math.max(120, Math.min(960, viewportWidth - 24, Math.round(data.width)));
+      await OBR.popover.setWidth(CLUSTER_ROW_POPOVER_ID, w);
+    } catch {}
   });
 
   // Settings panel asked us to open the layout-editor modal. We
@@ -682,6 +688,8 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   portals: { setup: setupPortals, teardown: teardownPortals },
   bubbles: { setup: setupBubbles, teardown: teardownBubbles },
   hpBar: { setup: setupHpBar, teardown: teardownHpBar },
+  bossBar: { setup: setupBossBar, teardown: teardownBossBar },
+  transitions: { setup: setupTransitions, teardown: teardownTransitions },
   metadataInspector: {
     setup: async () => { await setupMetadataInspector(); },
     teardown: async () => { teardownMetadataInspector(); },

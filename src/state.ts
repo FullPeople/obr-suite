@@ -29,6 +29,8 @@ export type ModuleId =
   | "statusTracker"
   | "resourceTracker"
   | "hpBar"
+  | "bossBar"
+  | "transitions"
   | "metadataInspector"
   | "fullFog"
   | "fogEditor"
@@ -146,6 +148,8 @@ export interface SuiteState {
   // Lights flagged "ambient" in Light Settings are always visible, for
   // fixed room lighting. GMs are never occluded. Default ON.
   fogLightOcclusion: boolean;
+  /** Share authorized player vision sources with the party. */
+  fogShareVision: boolean;
   libraries: LibraryConfig[];
 }
 
@@ -197,6 +201,8 @@ export const DEFAULT_STATE: SuiteState = {
     // bestiary binding, no character-card binding). Right-click
     // menu adds / removes the per-token flag. Default ON.
     hpBar: true,
+    bossBar: true,
+    transitions: true,
     // DM-only inspection tool. Default ON in all channels; useful for
     // field debugging token / scene / room metadata.
     metadataInspector: true,
@@ -267,6 +273,7 @@ export const DEFAULT_STATE: SuiteState = {
   fogPlayerDoors: true,
   fogDoorOverlayAlways: false,
   fogLightOcclusion: true,
+  fogShareVision: false,
   libraries: DEFAULT_LIBRARIES,
 };
 
@@ -372,7 +379,8 @@ function merge(partial: any): SuiteState {
       partial.fogDoorOverlayAlways ?? DEFAULT_STATE.fogDoorOverlayAlways,
     fogLightOcclusion:
       partial.fogLightOcclusion ?? DEFAULT_STATE.fogLightOcclusion,
-      libraries,
+    fogShareVision: partial.fogShareVision === true,
+    libraries,
   };
 }
 
@@ -393,6 +401,7 @@ function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
   if (a.fogPlayerDoors !== b.fogPlayerDoors) return false;
   if (a.fogDoorOverlayAlways !== b.fogDoorOverlayAlways) return false;
   if (a.fogLightOcclusion !== b.fogLightOcclusion) return false;
+  if (a.fogShareVision !== b.fogShareVision) return false;
   for (const k of Object.keys(a.enabled) as ModuleId[]) {
     if (a.enabled[k] !== b.enabled[k]) return false;
   }

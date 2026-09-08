@@ -14,6 +14,7 @@ import { assetUrl } from "./asset-base";
 import { bindPanelDrag, applyDragSide, watchDragSide } from "./utils/panelDrag";
 import { PANEL_IDS } from "./utils/panelLayout";
 import { installDebugOverlay } from "./utils/debugOverlay";
+import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
 
 // Cluster ROW iframe — only rendered while the user has the trigger
 // toggled on. Holds the actual action buttons. The row popover is
@@ -101,7 +102,8 @@ function reportNaturalWidth() {
   if (!wrap || !row) return;
   // Sum: drag-grip (incl. its own margins) + row content. Add 16px
   // padding so the popover frame doesn't crowd the buttons.
-  let w = row.offsetWidth + 16;
+  let w = row.scrollWidth + 16;
+  row.classList.toggle("is-overflowing", row.scrollWidth > row.clientWidth + 1);
   if (grip) w += grip.offsetWidth + 12;
   // Clamp so absurd lang strings don't grow the popover wider than
   // the viewport (background also clamps).
@@ -123,6 +125,7 @@ function reportNaturalWidth() {
 function renderRow() {
   const s = getState();
   const lang = getLocalLang();
+  rowEl.setAttribute("aria-label", lang === "zh" ? "常用工具，窄屏时可横向滚动" : "Quick tools; scroll horizontally in narrow windows");
 
   const parts: string[] = [];
 
@@ -165,6 +168,13 @@ function renderRow() {
   // auto-info. Dice-history toggle moved out: it has its own dedicated
   // trigger button at the bottom-right.
   const popupBtns: string[] = [];
+  if (s.enabled.transitions) {
+    parts.push(btnHTML({
+      id: "btnTransitions",
+      labelHtml: lang === "zh" ? "转场" : "Transitions",
+      title: lang === "zh" ? "短休、长休与文字演出" : "Short rest, long rest and custom titles",
+    }));
+  }
   // Bestiary popup toggle — visible to ALL roles now (was GM-only).
   // Players can also see the monster info popover when they own a
   // bestiary-bound token, so they need their own auto-popup control.
@@ -244,6 +254,10 @@ function renderRow() {
   document.getElementById("btnTimeStop")?.addEventListener("click", onTimeStop);
   document.getElementById("btnFocus")?.addEventListener("click", onFocus);
   document.getElementById("btnMusic")?.addEventListener("click", onMusic);
+  document.getElementById("btnTransitions")?.addEventListener("click", () => {
+    void OBR.broadcast.sendMessage(BC_TRANSITIONS_OPEN, {}, { destination: "LOCAL" })
+      .catch(error => console.warn("[obr-suite] open transitions failed", error));
+  });
   document
     .getElementById("btnBestiaryPopup")
     ?.addEventListener("click", onBestiaryPopup);
@@ -419,6 +433,13 @@ function installSupporterOverlayCloseListener(): void {
 }
 
 OBR.onReady(async () => {
+  window.addEventListener("resize", reportNaturalWidth);
+  rowEl.addEventListener("wheel", (event) => {
+    if (rowEl.scrollWidth <= rowEl.clientWidth + 1 || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rowEl.clientWidth : 1;
+    rowEl.scrollLeft += event.deltaY * unit;
+    event.preventDefault();
+  }, { passive: false });
   installDebugOverlay();
   installSupporterOverlayCloseListener();
   OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {

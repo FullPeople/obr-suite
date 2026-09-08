@@ -9,14 +9,9 @@
 // gated on role; the toggle tool is registered for players too when the
 // GM allows it.
 //
-// Three tiers, easy to get wrong:
-//   every channel   walls, lights, self lights — scene CONTENT. Missing
-//                   any of these makes a lit scene unviewable.
-//   authoring only  tools, context menus, indicators, the player toggle
-//                   channel and occlusion — things a GM
-//                   configures, and a channel with no settings tab for
-//                   them should not silently get them.
-//   GM only         the fog-tool modes and the light context menu.
+// Every channel derives walls/lights and applies the same vision policy.
+// GM light controls are available on both channels. Extra geometry tools,
+// indicators and player opening controls are authoring-channel features.
 
 import OBR from "@owlbear-rodeo/sdk";
 import { Reconciler } from "./reconcile/Reconciler";
@@ -47,6 +42,12 @@ import {
   setLightOcclusionEnabled,
   setPlayerOpeningsEnabled,
   setSceneDpi,
+  setShareVisionEnabled,
+  setRole,
+  setPlayerId,
+  setVisionParty,
+  setVisionCards,
+  clearSceneVision,
 } from "./runtime";
 
 export interface DynfogOptions {
@@ -57,8 +58,10 @@ export interface DynfogOptions {
   /** Hide other people's lights unless a wall-free sight line reaches
    *  them from one of your own. See `light/occlusion.ts`. */
   lightOcclusion: boolean;
+  /** Union authorized party revealing sources; never all scene lights. */
+  shareVision: boolean;
   /**
-   * Register the AUTHORING surface — light context menu, the fog-tool
+   * Register the AUTHORING surface — the fog-tool
    * line/door/window modes, the indicator overlays and the player
    * toggle tool.
    *
@@ -76,29 +79,44 @@ let started = false;
 let authoring = false;
 const subscriptions: Array<() => void> = [];
 let gmToolsRegistered = false;
+let lightMenuRegistered = false;
+let toolQueue = Promise.resolve();
 let toggleToolWanted = false;
+let lifetime = 0;
+let sceneEpoch = 0;
 
 async function syncGmTools(): Promise<void> {
-  const want = authoring && isGM();
-  if (want && !gmToolsRegistered) {
-    gmToolsRegistered = true;
-    try {
-      await createLightMenu();
-      await createLineMode();
-      if (reconciler) {
-        await createOpeningMode(reconciler, "door");
-        await createOpeningMode(reconciler, "window");
-        await createOpeningMode(reconciler, "secret");
+  toolQueue = toolQueue.catch(() => {}).then(async () => {
+    const wantLightMenu = started && isGM();
+    if (wantLightMenu !== lightMenuRegistered) {
+      if (wantLightMenu) {
+        // Mark before awaiting so teardown also cleans up a partial creation.
+        lightMenuRegistered = true;
+        await createLightMenu();
       }
-    } catch (e) {
-      console.warn("[dynfog] GM tool registration failed", e);
+      else await removeLightMenu();
+      lightMenuRegistered = wantLightMenu;
     }
-  } else if (!want && gmToolsRegistered) {
-    gmToolsRegistered = false;
-    await removeLightMenu();
-    await removeLineMode();
-    await removeOpeningModes();
-  }
+    const want = started && authoring && isGM();
+    if (want && !gmToolsRegistered) {
+      gmToolsRegistered = true;
+      try {
+        await createLineMode();
+        if (reconciler) {
+          await createOpeningMode(reconciler, "door");
+          await createOpeningMode(reconciler, "window");
+          await createOpeningMode(reconciler, "secret");
+        }
+      } catch (e) {
+        console.warn("[dynfog] GM tool registration failed", e);
+      }
+    } else if (!want && gmToolsRegistered) {
+      gmToolsRegistered = false;
+      await removeLineMode();
+      await removeOpeningModes();
+    }
+  });
+  return toolQueue;
 }
 
 async function syncToggleTool(): Promise<void> {
@@ -118,13 +136,13 @@ export async function applyDynfogSettings(
   authoring = options.authoring;
   const a = setPlayerOpeningsEnabled(options.playerOpenings);
   const b = setAlwaysShowOverlay(options.alwaysShowOverlay);
-  // Occlusion changes what the reactors should be PRODUCING, not just
-  // how it looks, so it needs a full refresh rather than an overlay
-  // resync — turning it off has to re-allow every light it had hidden.
+  // Re-evaluate access without rebuilding the unchanged wall geometry.
   const c = setLightOcclusionEnabled(options.lightOcclusion);
+  const d = setShareVisionEnabled(options.shareVision);
+  if (c || d) reconciler?.refreshAccess();
   await syncGmTools();
   await syncToggleTool();
-  if ((a || b || c) && reconciler && authoring) {
+  if ((a || b) && reconciler && authoring) {
     syncOverlays(reconciler);
     reconciler.refresh();
   }
@@ -136,12 +154,50 @@ export async function setupDynfog(options: DynfogOptions): Promise<void> {
     return;
   }
   started = true;
+  const generation = ++lifetime;
   authoring = options.authoring;
 
   setPlayerOpeningsEnabled(options.playerOpenings);
   setAlwaysShowOverlay(options.alwaysShowOverlay);
   setLightOcclusionEnabled(options.lightOcclusion);
+  setShareVisionEnabled(options.shareVision);
+  clearSceneVision();
+  setRole("PLAYER");
+  setPlayerId("");
+  setVisionParty([]);
+
+  // Subscribe before reads: late setup/old-scene responses must not restore
+  // ownership which a newer scene, role or card metadata event revoked.
+  subscriptions.push(OBR.party.onChange(players => {
+    if (!started || generation !== lifetime || !setVisionParty(players)) return;
+    reconciler?.refreshAccess();
+  }));
+  subscriptions.push(OBR.scene.onMetadataChange(metadata => {
+    if (!started || generation !== lifetime || !setVisionCards(metadata)) return;
+    reconciler?.refreshAccess();
+  }));
+  subscriptions.push(OBR.player.onChange(player => {
+    if (!started || generation !== lifetime) return;
+    const roleChanged = setRole(player.role);
+    const idChanged = setPlayerId(player.id);
+    if (!roleChanged && !idChanged) return;
+    reconciler?.refreshAccess();
+    void syncGmTools().catch(error => console.warn("[dynfog] role tools failed", error));
+    void syncToggleTool();
+    if (reconciler && authoring) syncOverlays(reconciler);
+  }));
+  subscriptions.push(OBR.scene.onReadyChange(ready => {
+    const epoch = ++sceneEpoch;
+    clearSceneVision();
+    if (!ready) return;
+    void refreshRuntime().then(() => {
+      if (!started || generation !== lifetime || epoch !== sceneEpoch) return;
+      reconciler?.refreshAccess();
+      if (reconciler && authoring) syncOverlays(reconciler);
+    });
+  }));
   await refreshRuntime();
+  if (!started || generation !== lifetime) return;
 
   reconciler = new Reconciler();
   reconciler.register(new OpeningReactor(reconciler));
@@ -152,16 +208,9 @@ export async function setupDynfog(options: DynfogOptions): Promise<void> {
   // stable-channel player blind in any scene a dev-channel GM lit.
   reconciler.register(new LightReactor(reconciler));
   reconciler.register(new SelfLightReactor(reconciler));
+  occlusion = new LightOcclusion(reconciler);
+  subscriptions.push(reconciler.onAfterReconcile(() => occlusion?.run()));
   if (authoring) {
-    // Occlusion CHANGES what light does rather than providing it, so it
-    // stays on the authoring side: a channel without the settings tab
-    // to configure it should get plain upstream behaviour. It runs
-    // after every reactor has settled, so it reads the walls and the
-    // light positions from the SAME pass.
-    occlusion = new LightOcclusion(reconciler);
-    subscriptions.push(
-      reconciler.onAfterReconcile(() => occlusion?.run()),
-    );
     await initOverlay(reconciler);
     startToggleListener();
   }
@@ -177,41 +226,14 @@ export async function setupDynfog(options: DynfogOptions): Promise<void> {
     );
   } catch {}
 
-  // A player promoted to GM mid-session needs the GM tools, and their
-  // overlay has to move from DRAWING to CONTROL.
-  try {
-    subscriptions.push(
-      OBR.player.onChange(() => {
-        void (async () => {
-          const changed = await refreshRuntime();
-          if (!changed) return;
-          await syncGmTools();
-          await syncToggleTool();
-          if (reconciler) {
-            if (authoring) syncOverlays(reconciler);
-            reconciler.refresh();
-          }
-        })();
-      }),
-    );
-  } catch {}
-
-  try {
-    subscriptions.push(
-      OBR.scene.onReadyChange((ready) => {
-        if (!ready) return;
-        void (async () => {
-          await refreshRuntime();
-          if (reconciler && authoring) syncOverlays(reconciler);
-        })();
-      }),
-    );
-  } catch {}
 }
 
 export async function teardownDynfog(): Promise<void> {
   if (!started) return;
   started = false;
+  lifetime++;
+  sceneEpoch++;
+  clearSceneVision();
 
   for (const unsubscribe of subscriptions.splice(0)) {
     try {
@@ -222,9 +244,13 @@ export async function teardownDynfog(): Promise<void> {
   stopToggleListener();
   await removeToggleTool();
   toggleToolWanted = false;
+  await toolQueue.catch(() => {});
+  if (lightMenuRegistered) {
+    lightMenuRegistered = false;
+    await removeLightMenu();
+  }
   if (gmToolsRegistered) {
     gmToolsRegistered = false;
-    await removeLightMenu();
     await removeLineMode();
     await removeOpeningModes();
   }
@@ -234,7 +260,7 @@ export async function teardownDynfog(): Promise<void> {
 
   if (reconciler) {
     teardownOverlay(reconciler);
-    reconciler.delete();
+    await reconciler.delete();
     reconciler = null;
   }
 }

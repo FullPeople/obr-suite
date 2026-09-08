@@ -37,9 +37,15 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   /* Width tracks content exactly so the gap between row and the
      drag handle stays constant even when flex-direction flips. */
   width:max-content;
-  flex-shrink:0;
+  flex-shrink:1;min-width:0;max-width:100%;
+  overflow-x:auto;overflow-y:hidden;
+  scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.35) transparent;
 }
-.row > *{pointer-events:auto}
+.row > *{pointer-events:auto;flex-shrink:0}
+.row.is-overflowing{pointer-events:auto}
+.row::-webkit-scrollbar{height:5px}
+.row::-webkit-scrollbar-thumb{background:rgba(255,255,255,.35);border-radius:3px}
+.row:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
 
 /* ===== Popup-toggle group =====
    Solid frame, vertical 悬浮窗 label inside (one char per line). */
@@ -180,7 +186,7 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
       <circle cx="2" cy="12" r="1" fill="currentColor"/><circle cx="6" cy="12" r="1" fill="currentColor"/>
     </svg>
   </span>
-  <div class="row" id="row"></div>
+  <div class="row" id="row" tabindex="0" aria-label="常用工具"></div>
 </div>
 <script type="module" src="/src/cluster-row.ts"></script>
 </body>
