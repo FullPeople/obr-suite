@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "preact/compat";
-import OBR from "@owlbear-rodeo/sdk";
+import OBR, { type Item } from "@owlbear-rodeo/sdk";
 import { InitiativeItem, CombatState, TurnChangePayload } from "../types";
 import {
   METADATA_KEY,
@@ -224,6 +224,14 @@ export function useInitiative() {
   const isGMRef = useRef(false);
   const allItemsRef = useRef<InitiativeItem[]>([]);
   const playerIdRef = useRef("");
+  const editScope = useRef({ alive: false, ready: false, generation: 0 });
+  useEffect(() => {
+    const scope = editScope.current;
+    scope.alive = true; const generation = ++scope.generation;
+    const off = OBR.scene.onReadyChange(ready => { scope.generation++; scope.ready = ready; });
+    OBR.scene.isReady().then(ready => { if (scope.alive && generation === scope.generation) scope.ready = ready; }).catch(() => {});
+    return () => { scope.alive = false; scope.ready = false; scope.generation++; off(); };
+  }, []);
   // Optimistic active-id: updated eagerly when the GM clicks next/prev so
   // rapid clicks chain correctly even before the scene refresh arrives.
   const optimisticActiveIdRef = useRef<string | null>(null);
@@ -862,21 +870,32 @@ export function useInitiative() {
     return !!playerId && item.ownerId === playerId;
   }, [isGM, playerId]);
 
-  const updateCount = useCallback(async (itemId: string, count: number) => {
-    const item = allItemsRef.current.find((i) => i.id === itemId);
-    if (!item) return;
-    const pid = playerIdRef.current;
-    if (!isGMRef.current && (!pid || item.ownerId !== pid)) {
-      // Toast removed — UI already disables the inputs for non-owner players.
-      return;
-    }
+  // Both numeric editors follow the existing count rule: GM or current owner.
+  // The SDK obtains a second item snapshot before running the Immer callback;
+  // validate that snapshot as well, since ownership may change after preflight.
+  const updateEditableValue = useCallback(async (itemId: string, value: number, field: "count" | "modifier") => {
+    const scope = editScope.current, generation = scope.generation;
+    const valid = () => scope.alive && scope.ready && scope.generation === generation;
+    if (!valid() || !Number.isFinite(value)) return;
+    const [pid, role, targets, ready] = await Promise.all([OBR.player.getId(), OBR.player.getRole(), OBR.scene.items.getItems([itemId]), OBR.scene.isReady()]);
+    const allowed = (item: Item) => {
+      const data = item.metadata[METADATA_KEY] as { ownerId?: string } | undefined;
+      if (item.id !== itemId || !data || typeof data !== "object" || Array.isArray(data)) return false;
+      const owner = item.createdUserId || data.ownerId || "";
+      return (role === "GM" && isGMRef.current) || (!!pid && pid === owner);
+    };
+    if (!ready || !valid() || !targets.some(allowed)) return;
     await OBR.scene.items.updateItems([itemId], (drafts) => {
+      if (!valid()) return;
       for (const d of drafts) {
+        if (!allowed(d)) continue;
         const existing = d.metadata[METADATA_KEY] as any;
-        d.metadata[METADATA_KEY] = { ...existing, count };
+        if (field === "count") d.metadata[METADATA_KEY] = { ...existing, count: value };
+        else d.metadata["com.initiative-tracker/dexMod"] = value;
       }
     });
   }, []);
+  const updateCount = useCallback((itemId: string, count: number) => updateEditableValue(itemId, count, "count"), [updateEditableValue]);
 
   // 2026-05-14 (#5 fix) — write BOTH count and tiebreak in one scene
   // update. Reorder mode needs this: positioning a card precisely
@@ -897,13 +916,7 @@ export function useInitiative() {
     [],
   );
 
-  const updateModifier = useCallback(async (itemId: string, mod: number) => {
-    await OBR.scene.items.updateItems([itemId], (drafts) => {
-      for (const d of drafts) {
-        d.metadata["com.initiative-tracker/dexMod"] = mod;
-      }
-    });
-  }, []);
+  const updateModifier = useCallback((itemId: string, mod: number) => updateEditableValue(itemId, mod, "modifier"), [updateEditableValue]);
 
   const rollInitiativeLocal = useCallback(async (itemId: string, type: RollType) => {
     // §9 — DM fixed initiative d20 (checklist: 单角色先攻 劣势/普通/优势).

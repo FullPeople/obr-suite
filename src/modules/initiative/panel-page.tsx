@@ -670,7 +670,7 @@ function App() {
   if (!expanded) {
     return (
       <div className={`app-pill ${stateClass} ${transitioning ? "transitioning" : ""}`}>
-        <button className="pill-btn" onClick={toggleExpanded} title="展开先攻面板">
+        <button className="pill-btn" onClick={toggleExpanded} title={t(lang, "expandPanel")}>
           <span className="icon" dangerouslySetInnerHTML={{ __html: ICONS.swords }} />
           {combatState.inCombat && (
             <span className="pill-round">R{combatState.round}</span>
@@ -679,7 +679,7 @@ function App() {
             <span className="pill-round">{t(lang, "preparing")}</span>
           )}
         </button>
-        <div ref={dragHandleRef} className="drag-handle" title="拖动 / Drag" aria-label="拖动面板">
+        <div ref={dragHandleRef} className="drag-handle" title={t(lang, "dragPanel")} aria-label={t(lang, "dragPanel")}>
           {dragHandleSvg}
         </div>
       </div>
@@ -696,8 +696,8 @@ function App() {
             <button
               className="collapse-btn"
               onClick={toggleExpanded}
-              title="折叠"
-              aria-label="折叠"
+              title={t(lang, "collapsePanel")}
+              aria-label={t(lang, "collapsePanel")}
             >
               {/* Chevron-down "V" — panel will collapse downward into the pill */}
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
@@ -748,7 +748,7 @@ function App() {
             {/* Drag grip — last child of the cluster so it sits at the
                 visual far-right of the controls row, opposite the
                 collapse-btn on the left. */}
-            <div ref={dragHandleRef} className="drag-handle" title="拖动 / Drag" aria-label="拖动面板">
+            <div ref={dragHandleRef} className="drag-handle" title={t(lang, "dragPanel")} aria-label={t(lang, "dragPanel")}>
               {dragHandleSvg}
             </div>
           </div>
@@ -774,7 +774,7 @@ function App() {
             onUpdateModifier={updateModifier}
             onRoll={handleRoll}
             onEndTurn={requestEndTurn}
-            endTurnLabel={t(lang, "endTurn") || "结束回合"}
+            endTurnLabel={t(lang, "endTurn")}
             lang={lang}
             reorderMode={isGM && reorderMode}
             pickedId={pickedId}
@@ -789,8 +789,11 @@ function App() {
 }
 
 function PluginGate() {
+  const [lang, setLang] = useState<Lang>(() => getLocalLang());
   const [ready, setReady] = useState(false);
   const [sceneReady, setSceneReady] = useState(false);
+  useEffect(() => onLangChange(setLang), []);
+  useEffect(() => { document.documentElement.lang = lang; document.title = t(lang, "initiative"); }, [lang]);
 
   useEffect(() => {
     OBR.onReady(() => {
@@ -805,7 +808,7 @@ function PluginGate() {
   if (!ready || !sceneReady) {
     return (
       <div className="app-container">
-        <div className="loading-state">加载中...</div>
+        <div className="loading-state">{t(lang, "loading")}</div>
       </div>
     );
   }

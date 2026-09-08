@@ -36,6 +36,8 @@ import {
   textColorFor,
 } from "./modules/statusTracker/types";
 import { getTokenCircleSpec } from "./modules/statusTracker/circles";
+import { getLocalLang, onLangChange } from "./state";
+import { statusName, statusText } from "./modules/statusTracker/localization";
 
 const MODAL_ID = `${PLUGIN_ID}/capture`;
 const BC_DRAG_END = `${PLUGIN_ID}/drag-end`;
@@ -102,22 +104,24 @@ function escapeHtml(s: string): string {
 }
 
 // Cursor ghost setup — solid color matching the dragged buff.
+function refreshCursorLanguage(): void {
+document.documentElement.lang = getLocalLang(); document.title = statusText(getLocalLang(), "capture");
 if (kind === "clear") {
   cursorEl.classList.add("eraser");
-  cursorEl.innerHTML = `${CURSOR_SVG_CROSS}清除全部 buff`;
+  cursorEl.innerHTML = CURSOR_SVG_CROSS + statusText(getLocalLang(), "clear");
 } else if (kind === "manage") {
   // Reuse the warning-orange "manage" cue from the palette pill so
   // the user sees a consistent visual for "you're about to manage
   // this token". CSS class added below in style overrides.
   cursorEl.classList.add("manage");
-  cursorEl.innerHTML = `${CURSOR_SVG_WRENCH}管理 buff`;
+  cursorEl.innerHTML = CURSOR_SVG_WRENCH + statusText(getLocalLang(), "manage");
 } else if (kind === "preset") {
   // Preset chip cursor — green-accent pill matching the palette's
   // .preset-chip family. The right-side count badge mirrors the chip
   // so the user keeps seeing "战斗起始 (3)" while dragging.
   cursorEl.classList.add("preset");
   cursorEl.innerHTML =
-    `${escapeHtml(presetName || "预设")}` +
+    `${escapeHtml(presetName || statusText(getLocalLang(), "preset"))}` +
     (presetCount > 0 ? `<span style="margin-left:5px;font-size:9.5px;opacity:0.75">×${presetCount}</span>` : "");
 } else if (buff) {
   // Set the buff colour as a CSS variable so the stylesheet's
@@ -132,8 +136,12 @@ if (kind === "clear") {
   // to opaque black and breaks the cursor pill's transparency. Plain
   // text ghost is fine — the palette's hover-preview pane shows the
   // actual buff visual when the user pauses on a pill.
-  cursorEl.innerHTML = escapeHtml(stripEmoji(buff.name));
+  cursorEl.innerHTML = escapeHtml(stripEmoji(statusName(buff, getLocalLang())));
 }
+}
+refreshCursorLanguage();
+const offLanguage = onLangChange(refreshCursorLanguage);
+window.addEventListener("pagehide", offLanguage, { once: true });
 cursorEl.style.left = "-1000px";
 cursorEl.style.top = "-1000px";
 
