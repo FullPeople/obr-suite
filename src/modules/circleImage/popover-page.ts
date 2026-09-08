@@ -30,6 +30,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import { PLUGIN_ID, POPOVER_ID } from "./types";
 import { getLocalLang, onLangChange } from "../../state";
 import { imageText, type ImageTextKey } from "./text";
+import { WINDOW_QUERY, WINDOW_CLOSE, WINDOW_CLOSE_RESULT, isWindowNonce, readWindowMessage } from "./window-protocol";
 
 let lang = getLocalLang();
 const T = (key: ImageTextKey) => imageText(lang, key);
@@ -514,7 +515,78 @@ function resetEditor(): void {
 }
 
 btnReset.addEventListener("click", () => resetEditor());
-btnClose.addEventListener("click", () => { void OBR.popover.close(POPOVER_ID); });
+// Managed windows let the background close and update its state atomically.
+// A successful close may destroy this iframe before its acknowledgement arrives.
+const queryNonce = new URLSearchParams(location.search).get(WINDOW_QUERY);
+const windowNonce = isWindowNonce(queryNonce) ? queryNonce : undefined;
+let closeAlive = true;
+let closeRequest: string | undefined;
+let closeTimer: ReturnType<typeof setTimeout> | undefined;
+let closeError = false;
+let closeConnection: string | undefined;
+let unsubscribeClose = () => {};
+const closeNotice = document.createElement("p");
+closeNotice.hidden = true;
+closeNotice.setAttribute("role", "alert");
+const closeHeader = btnClose.closest<HTMLElement>(".hdr");
+const closeTitle = closeHeader?.querySelector<HTMLElement>(".ttl");
+// Reuse the title's space while reporting failure. An overlay below the
+// header covers the mode tabs; a new flow row changes the cropped pixels.
+closeNotice.style.cssText = "position:absolute;top:0;left:22px;right:30px;z-index:2;margin:0;color:#ffb5b5;font-size:11px;line-height:18px;pointer-events:none";
+if (closeHeader) { closeHeader.style.position = "relative"; closeHeader.append(closeNotice); }
+function localizeClose(): void {
+  closeNotice.textContent = lang === "en" ? "Could not close the editor. Click Close to retry." : "未能关闭编辑页，请再次点击关闭重试。";
+  closeNotice.hidden = !closeError;
+  if (closeTitle) closeTitle.style.visibility = closeError ? "hidden" : "";
+}
+function failedClose(request: string): void {
+  if (!closeAlive || closeRequest !== request) return;
+  clearTimeout(closeTimer);
+  closeRequest = undefined;
+  closeError = true;
+  btnClose.disabled = false;
+  localizeClose();
+}
+btnClose.addEventListener("click", () => {
+  if (!closeAlive || closeRequest) return;
+  const requestId = crypto.randomUUID();
+  closeRequest = requestId;
+  closeError = false;
+  localizeClose();
+  btnClose.disabled = true;
+  // A lost message/reply leaves this same button available for a bounded retry.
+  closeTimer = setTimeout(() => failedClose(requestId), 5000);
+  void (async () => {
+    if (windowNonce && !closeConnection) {
+      const connectionId = await OBR.player.getConnectionId();
+      if (!closeAlive || closeRequest !== requestId) return;
+      if (!connectionId) throw new Error("Missing local connection ID");
+      closeConnection = connectionId;
+      unsubscribeClose = OBR.broadcast.onMessage(WINDOW_CLOSE_RESULT, event => {
+        const response = readWindowMessage(event.data);
+        if (event.connectionId === closeConnection && response?.windowNonce === windowNonce
+          && response?.status === "error") failedClose(response.requestId);
+      });
+    }
+    if (!closeAlive || closeRequest !== requestId) return;
+    if (windowNonce) await OBR.broadcast.sendMessage(WINDOW_CLOSE, { windowNonce, requestId }, { destination: "LOCAL" });
+    else await OBR.popover.close(POPOVER_ID); // Older/direct editor URLs remain usable.
+  })().catch(() => failedClose(requestId));
+});
+if (windowNonce) {
+  btnClose.disabled = true;
+  OBR.onReady(() => {
+    if (!closeAlive) return;
+    btnClose.disabled = false;
+
+  });
+}
+window.addEventListener("pagehide", () => {
+  closeAlive = false;
+  clearTimeout(closeTimer);
+  closeRequest = undefined;
+  unsubscribeClose();
+}, { once: true });
 
 // --- Upload to OBR asset library ------------------------------------------
 //
@@ -681,6 +753,7 @@ function localize(): void {
     });
   }
   setBtnState(buttonState);
+  localizeClose();
 }
 localize();
 const unsubscribeLanguage = onLangChange((next) => { lang = next; localize(); });

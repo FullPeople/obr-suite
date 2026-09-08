@@ -9,11 +9,11 @@
     "context_records": 25922,
     "occurrences": 28648,
     "seed_records": 7029,
-    "reviewed_records": 1421,
-    "missing_records": 17472,
-    "missing_characters": 1056312,
-    "long_missing_records": 3436,
-    "long_missing_characters": 859344,
+    "reviewed_records": 1521,
+    "missing_records": 17372,
+    "missing_characters": 1034605,
+    "long_missing_records": 3336,
+    "long_missing_characters": 837637,
     "by_kind": {
       "cell_text": 24418,
       "comment": 67,
@@ -27,7 +27,7 @@
       "xml_attribute": 113
     },
     "seed_methods": {
-      "context_reviewed": 1421,
+      "context_reviewed": 1521,
       "exact_glossary": 4463,
       "existing_english_column": 1330,
       "number_unit": 1236
@@ -66,11 +66,11 @@
       "context_records": 15989,
       "occurrences": 17425,
       "seed_records": 4211,
-      "reviewed_records": 749,
-      "missing_records": 11029,
-      "missing_characters": 700467,
-      "long_missing_records": 2336,
-      "long_missing_characters": 578190,
+      "reviewed_records": 849,
+      "missing_records": 10929,
+      "missing_characters": 678760,
+      "long_missing_records": 2236,
+      "long_missing_characters": 556483,
       "by_kind": {
         "cell_text": 14968,
         "comment": 34,
@@ -83,7 +83,7 @@
         "xml_attribute": 57
       },
       "seed_methods": {
-        "context_reviewed": 749,
+        "context_reviewed": 849,
         "exact_glossary": 2682,
         "existing_english_column": 809,
         "number_unit": 720
