@@ -220,3 +220,37 @@ The actual copies preserve all previous cells, styles and unrelated package part
 Their finite-model and package checks do not establish native dropdown operation,
 recalculation cost, full English content, save/reopen or upload. See
 `docs/research/xlsx-spell-main-lists-20260909.md` for the exact scope and evidence.
+
+## Generate the 2014 reviewed spell-body copy
+
+```text
+python -B -X utf8 tools/xlsx-localization/spell_bodies_plan.py --repo <checkout>
+node author_targets.mjs <reported-plan-path> <new-authored-targets.xlsx>
+python -B -X utf8 tools/xlsx-localization/spell_bodies_package.py --repo <checkout> --authored-targets <new-authored-targets.xlsx>
+```
+
+Run the unchanged `author_targets.mjs` from a new local runtime directory with
+access to the bundled Node dependencies. Follow the spreadsheet skill's operation
+marker requirement before authoring. The separate target XLSX contains an A:D
+table; the packager checks all 2,092 cells against a freshly generated plan.
+
+The package rebuilds the published main-list pipeline from both pinned originals,
+then applies 522 reviewed 2014 descriptions only. It appends shared-string clones
+and preserves M209's four rich runs, other cells, original spell keys, styles,
+custom slots and unrelated package parts. No old audit plan, authored workbook
+or historical candidate is required. New output directories must be exclusive
+children of sibling `_audit/xlsx-spell-bodies`, prefixed `spell-bodies-plan-` or
+`spell-bodies-candidate-`. Both entrypoints reject Python optimization mode.
+
+The complete isolated authoring/package check is available as:
+
+```text
+python -B -X utf8 tools/xlsx-localization/spell_bodies_selftest.py --node <bundled-node> --node-modules <bundled-node-modules> --artifact-marker <spreadsheet-skill>/container_tools/mark_artifact_operation_started.mjs
+```
+
+It creates new source copies and authoring outputs, invokes the operation marker,
+and keeps the local dependency junction off shared drives. The resulting workbook
+still has no formula caches and is not a public English download or upload-ready
+card. Actual Calc diagnostics identified separate bibliography, raw-name and
+multiline-reference issues; the body-only increment does not repair them. Scope
+and evidence are in `docs/research/xlsx-spell-bodies-20260909.md`.
