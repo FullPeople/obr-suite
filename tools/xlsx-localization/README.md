@@ -5,6 +5,26 @@ directory contains reproducible inventories, located translations, and the
 adapter used to preserve their native workbook structure. It does not yet supply
 a complete English download.
 
+## Generate English feet units
+
+```text
+python -B -X utf8 tools/xlsx-localization/number_format_package.py --input-2014 <remaining-main-2014.xlsx> --input-2024 <remaining-main-2024.xlsx> --prepare
+node <spreadsheet-skill>/container_tools/mark_artifact_operation_started.mjs --operation-kind create --expected-output-count 1 --output-format xlsx
+node tools/xlsx-localization/author_number_format_targets.mjs <reported-plan.json> <new-authored-targets.xlsx> <bundled-node-dependency-directory>
+python -B -X utf8 tools/xlsx-localization/number_format_package.py --input-2014 <remaining-main-2014.xlsx> --input-2024 <remaining-main-2024.xlsx> --authored-targets <new-authored-targets.xlsx>
+```
+
+Requires `382cce1b… / c86f98a3…`. Only number format 176 changes from a Chinese
+feet suffix to `0" ft."`. Its complete user set is checked: four merged inputs
+per workbook, covering main darkvision/speed and two companion speed fields.
+All values, formulas, input rules and geometry stay intact. The two located
+reviews and complete 12-cell author table are verified before output. New
+`format-plan-` / `format-candidate-` directories belong under sibling
+`_audit/xlsx-number-formats`; optimization mode is rejected. Native verification
+covers nine input cases per version, exact exports and actual unit display.
+No saved cache or public download is produced. See
+`docs/research/xlsx-number-formats-20260909.md`.
+
 ## Generate the remaining English main-card fields
 
 ```text
