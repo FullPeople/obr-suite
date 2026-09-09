@@ -12,8 +12,10 @@ const styles = { name: 'no-css', resolveId(id) { if (id.endsWith('.css')) return
 await build({ input: resolve(base, 'tutorial.ts'), plugins: [styles], output: { file: entry, format: 'esm' }, logLevel: 'silent' });
 await build({ input: resolve(base, 'rules/index.ts'), output: { file: join(out, 'engine.mjs'), format: 'esm' }, logLevel: 'silent' });
 await build({ input: resolve(base, 'stage/types.ts'), output: { file: join(out, 'timing.mjs'), format: 'esm' }, logLevel: 'silent' });
+await build({ input: resolve(base, 'power-sequence.ts'), output: { file: join(out, 'power.mjs'), format: 'esm' }, logLevel: 'silent' });
 const t = await import(pathToFileURL(entry).href), engine = await import(pathToFileURL(join(out, 'engine.mjs')).href);
 const { REVEAL_PRESENTATION_MS } = await import(pathToFileURL(join(out, 'timing.mjs')).href);
+const { POWER_PRESENTATION_MS, powerEvents } = await import(pathToFileURL(join(out, 'power.mjs')).href);
 let checks = 0;
 const check = (name, run) => { run(); checks++; console.log(`PASS ${name}`); };
 function step(s, lesson) { const move = t.tutorialMove(s, lesson, `test:${s.revision}`); assert.ok(move, 'legal next action'); const r = engine.applyAction(s, move); assert.ok(r.ok, JSON.stringify(r)); return r.state; }
@@ -97,7 +99,7 @@ try {
   await page.goto('http://localhost/');
   await page.clock.install({time:new Date('2026-09-09T00:00:00Z')});await page.clock.pauseAt(new Date('2026-09-09T00:00:01Z'));
   await page.evaluate(()=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type==='webgl'||type==='webgl2'?null:original.call(this,type,...args)}});
-  await page.setContent(`<style>${readFileSync(join(base,'style.css'),'utf8')}\n${readFileSync(join(base,'tutorial.css'),'utf8')}\n${readFileSync(join(base,'stage-ui.css'),'utf8')}</style><button id="real-table">Real table</button><div id="practice"></div>`);
+  await page.setContent(`<style>${readFileSync(join(base,'style.css'),'utf8')}\n${readFileSync(join(base,'tutorial.css'),'utf8')}\n${readFileSync(join(base,'stage-ui.css'),'utf8')}\n${readFileSync(join(base,'power-presentation.css'),'utf8')}</style><button id="real-table">Real table</button><div id="practice"></div>`);
   await page.addScriptTag({type:'module',content:readFileSync(entry,'utf8').replace(/export\s*\{[^}]*\};?\s*$/,'')+'\nwindow.mountTutorial=mountTutorial;'});
   await page.waitForFunction(()=>typeof window.mountTutorial==='function');
   await page.evaluate(()=>{document.querySelector('#real-table').focus();window.__tutorialViews=[];window.closedCount=0;window.handle=window.mountTutorial(document.querySelector('#practice'),'en',()=>window.closedCount++);});
@@ -111,7 +113,7 @@ try {
   await page.locator('#hand button[data-card="gold-13"]').focus();await page.keyboard.press('Space');await page.keyboard.press('Enter');assert.match(await page.locator('.tutorial-result').innerText(),/does not trigger/);browserChecks++;
   const oldGame=await page.locator('.tda-tutorial').getAttribute('data-revision');await page.evaluate(()=>window.handle.setLanguage('zh'));assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),oldGame);assert.match(await page.locator('.tutorial-result').innerText(),/不发动能力/);browserChecks++;
   await page.locator('.tutorial-restart').click();await page.locator('#hand button[data-card="black-3"]').focus();await page.keyboard.press('Space');await page.evaluate(()=>window.handle.setLanguage('en'));assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),'0');await page.keyboard.press('Enter');assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),'1');browserChecks++;
-  assert.equal(await page.locator('.tutorial-step').count(),0);await page.clock.runFor(999);assert.equal(await revision(),'1');await page.clock.runFor(1);assert.equal(await revision(),'2');browserChecks++;
+  assert.equal(await page.locator('.tutorial-step').count(),0);await page.clock.runFor(POWER_PRESENTATION_MS+999);assert.equal(await revision(),'1','Reduced motion still gives the complete power explanation and one-second thought');await page.clock.runFor(1);assert.equal(await revision(),'2');browserChecks++;
   assert.equal(await page.locator('.tda-tutorial #tutorial:visible,.tda-tutorial #language:visible,.tda-tutorial #display-mode:visible,.tda-tutorial #close:visible').count(),0);browserChecks++;
   await page.screenshot({path:join(out,'tutorial-wide.png')});
   await page.locator('.tutorial-chapter').selectOption('game');
@@ -132,10 +134,11 @@ try {
   await page.locator('.tutorial-restart').click();await page.clock.runFor(1500);await page.locator('.tutorial-restart').click();await page.clock.runFor(1999);assert.equal(await revision(),'0','Old reset timer cannot enter the new game');await page.clock.runFor(1);assert.equal(await revision(),'1');
   await page.locator('.tutorial-undo').click();await page.clock.runFor(1999);assert.equal(await revision(),'0','Undo invalidates the old action and gets a fresh bot delay');await page.clock.runFor(1);assert.equal(await revision(),'1');browserChecks++;
   await page.locator('.tutorial-restart').click();
-  const automatic={antes:0,plays:0,choices:0,humanChoices:0};let completeSteps=0;
+  const automatic={antes:0,plays:0,choices:0,humanChoices:0};let completeSteps=0,previousPublic=null;
   while((await latest()).game.phase!=='ended'&&completeSteps++<100){
-    const v=await latest(),own=v.game.actions[0],beforeRevision=v.game.revision;
+    const v=await latest(),own=v.game.actions[0],beforeRevision=v.game.revision,powerDelay=powerEvents(previousPublic,v.game).length*POWER_PRESENTATION_MS;
     if(own){
+      if(powerDelay)await page.clock.runFor(powerDelay);
       if(own.kind==='choose'){
         await page.clock.runFor(1500);assert.equal(Number(await revision()),beforeRevision,'Bots never decide a user-owned choice');
         const available=own.choice.options.filter(o=>o.id!=='skip'),count=Math.max(own.choice.min,Math.min(1,own.choice.max));
@@ -147,11 +150,12 @@ try {
       }
     }else{
       const firstEmber=v.game.phase==='ante'&&v.game.gambit===1&&!v.game.seats.find(s=>s.id==='ember').committed;
-      const delay=firstEmber?2000:1000;
+      const delay=firstEmber?2000:1000+powerDelay;
       await page.clock.runFor(delay-1);assert.equal(Number(await revision()),beforeRevision,'One bot thinks for its full delay before acting');await page.clock.runFor(1);
       if(v.game.phase==='choice')automatic.choices++;else if(v.game.phase==='ante')automatic.antes++;else automatic.plays++;
     }
     assert.equal(Number(await revision()),beforeRevision+1,'Exactly one real rule action resolves per user submission or bot timer');
+    previousPublic=v.game;
   }
   assert.equal((await latest()).game.phase,'ended');assert.ok(automatic.choices>=1&&automatic.humanChoices>=1);assert.equal(completeSteps,35);
   assert.match(await page.locator('.tutorial-suggestion').innerText(),/game is complete/);assert.equal(await page.locator('.tutorial-step').count(),0);browserChecks++;
@@ -164,7 +168,12 @@ try {
   await page.clock.runFor(REVEAL_PRESENTATION_MS);assert.equal(await revision(),'3','Reveal completes before the next bot starts its one-second thought');await page.clock.runFor(999);assert.equal(await revision(),'3');await page.clock.runFor(1);assert.equal(await revision(),'4');browserChecks++;
   await page.emulateMedia({reducedMotion:'reduce'});await page.locator('.tutorial-restart').click();await playOwn('red-10');await page.clock.runFor(2000);assert.equal(await revision(),'3');
   await page.clock.runFor(999);assert.equal(await revision(),'3');await page.clock.runFor(1);assert.equal(await revision(),'4','Reduced motion skips only presentation, not the one-second thought');browserChecks++;
-  await page.setViewportSize({width:390,height:844});await page.locator('.tutorial-chapter').selectOption('mortal');await page.locator('.tutorial-lesson').selectOption('kobold');await playOwn('kobold');
+  await page.locator('.tutorial-lesson').selectOption('powers');
+  await page.evaluate(ms=>{window.__normalTimeout=window.setTimeout;window.setTimeout=(fn,delay,...args)=>window.__normalTimeout(fn,delay===ms?delay*2:delay,...args);},POWER_PRESENTATION_MS);
+  await playOwn('black-3');await page.evaluate(()=>window.setTimeout=window.__normalTimeout);
+  await page.clock.runFor(POWER_PRESENTATION_MS+1000);assert.equal(await revision(),'1','A still-busy actual power presentation blocks the bot after its nominal deadline');assert.equal(await page.locator('.power-overlay').isVisible(),true,'Real presentation CSS keeps the current explanation visible');
+  await page.clock.runFor(POWER_PRESENTATION_MS-1001);assert.equal(await revision(),'1');await page.clock.runFor(1);assert.equal(await revision(),'2','Bot resumes only after the actual presentation callback clears busy');browserChecks++;
+  await page.setViewportSize({width:390,height:844});await page.locator('.tutorial-chapter').selectOption('mortal');await page.locator('.tutorial-lesson').selectOption('kobold');await playOwn('kobold');await page.clock.runFor(POWER_PRESENTATION_MS);
   await page.locator('#confirm-action').scrollIntoViewIfNeeded();await page.locator('#confirm-action').click();assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),'2');
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));browserChecks++;
   await page.screenshot({path:join(out,'tutorial-narrow.png')});
@@ -198,5 +207,5 @@ try {
     if(mutant.dom){await page.evaluate(()=>{window.mutantHandle.destroy();document.querySelector('#practice').replaceChildren();});await page.emulateMedia({reducedMotion:'reduce'});}
     assert.ok(killed,`survived: ${mutant.name}`);mutations++;console.log(`KILL ${mutant.name}`);
   }
-  writeFileSync(join(out,'result.json'),JSON.stringify({engineChecks:checks,browserChecks,mutations,automaticFullGame:{steps:completeSteps,...automatic},revealPresentationMs:REVEAL_PRESENTATION_MS,timing:'Actual Chrome DOM/engine and Playwright controlled browser clock. Scheduled bot actions are real; no manual opponent buttons. Visibility event is simulated; shared reveal interval checked with and without reduced motion, not a WebGL animation review. No native Owlbear/network.',evidence:out,nativeOwlbear:false},null,2));console.log(`${browserChecks} actual browser checks and ${mutations} runtime-assertion mutations passed. Evidence: ${out}`);
+  writeFileSync(join(out,'result.json'),JSON.stringify({engineChecks:checks,browserChecks,mutations,automaticFullGame:{steps:completeSteps,...automatic},revealPresentationMs:REVEAL_PRESENTATION_MS,powerPresentationMs:POWER_PRESENTATION_MS,timing:'Actual Chrome DOM/engine and Playwright controlled browser clock. Scheduled bot actions are real; no manual opponent buttons. Visibility event is simulated; shared reveal interval checked with and without reduced motion, plus full power explanation intervals, not a WebGL animation review. No native Owlbear/network.',evidence:out,nativeOwlbear:false},null,2));console.log(`${browserChecks} actual browser checks and ${mutations} runtime-assertion mutations passed. Evidence: ${out}`);
 }finally{await browser.close();}

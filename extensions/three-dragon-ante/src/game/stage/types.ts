@@ -14,6 +14,8 @@ export interface StageModel {
   connected?: boolean;
   reducedMotion?: boolean;
   selectedCardIds?: readonly string[];
+  /** Public effect sources only; an ID never reveals a private card by itself. */
+  activeEffectCardIds?: readonly string[];
   /** Provided by the UI only while that own-seat action is legal and unlocked. */
   legalDropZone?: null | "ante" | "flight";
   /** Set false on reconnect/snapshot replacement. Gaps and new games also snap. */

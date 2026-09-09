@@ -12,7 +12,7 @@ export function projectPublic(s:GameState):PublicView {
     activeSeatId:s.pending?.seatId??(s.stage==="play"?s.seats[s.active].id:null),waitingSeatIds:waiting,
     ante:s.ante.map(id=>copy(card(id))),anteOrigins:(s.anteOrigins??[]).filter(origin=>s.ante.includes(origin.cardId)&&s.seats.some(seat=>seat.id===origin.seatId)).map(origin=>({...origin})),discard:s.discard.map(id=>copy(card(id))),deckCount:s.deck.length,
     revealed:s.revealed.map(id=>copy(card(id))),events:copy(s.events),
-    choice:s.pending?{id:s.pending.id,seatId:s.pending.seatId,code:s.pending.code}:null,
+    choice:s.pending?{id:s.pending.id,seatId:s.pending.seatId,code:s.pending.code,...(s.pending.sourceCardId?{sourceCardId:s.pending.sourceCardId}:{}),...(s.pending.beneficiarySeatId?{beneficiarySeatId:s.pending.beneficiarySeatId}:{})}:null,
     lastGambit:copy(s.lastGambit),winners:[...s.winners],issue:s.issue,effects:s.effects.map(e=>({kind:e.kind,seatId:s.seats[e.seat].id,sourceCardId:e.source})),
   };
 }

@@ -12,7 +12,7 @@ export interface ChoiceOption { id:string; code?:string; cardId?:string; seatId?
 export interface Choice { id:string; seatId:string; code:string; options:ChoiceOption[]; min:number; max:number; sourceCardId?:string; beneficiarySeatId?:string }
 export interface Pending extends Choice { task:Task }
 export type Task = { kind:string; seat:number; source?:string; family?:string; ids?:string[]; target?:number; amount?:number; mode?:string; flag?:boolean; index?:number };
-export interface PublicEvent { code:string; seatId?:string; targetSeatId?:string; cardIds?:string[]; amount?:number }
+export interface PublicEvent { code:string; seatId?:string; targetSeatId?:string; cardIds?:string[]; amount?:number; effectFamily?:string }
 export interface GambitResult { number:number; winners:string[]; reason:string; strengths:Record<string,number>; stakes:number }
 export interface AcceptedAction { fingerprint:string; revision:number }
 export interface GameState {
@@ -36,7 +36,7 @@ export interface PublicView {
   gambit:number; round:number; leaderSeatId:string|null; activeSeatId:string|null; waitingSeatIds:string[];
   ante:Card[]; discard:Card[]; deckCount:number; revealed:Card[]; events:PublicEvent[];
   anteOrigins?:{seatId:string;cardId:string}[];
-  choice:{id:string;seatId:string;code:string}|null; lastGambit:GambitResult|null; winners:string[]; issue:string|null;
+  choice:{id:string;seatId:string;code:string;sourceCardId?:string;beneficiarySeatId?:string}|null; lastGambit:GambitResult|null; winners:string[]; issue:string|null;
   effects:{kind:EffectKind;seatId:string;sourceCardId:string}[];
 }
 export interface SeatView extends PublicView { selfSeatId:string; hand:Card[]; committedAnte:Card|null; actions:EligibleAction[] }

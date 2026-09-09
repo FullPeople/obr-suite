@@ -40,7 +40,12 @@ try{
    check('ante includes tied-highest price and highest-untied leader example',(await page.locator('.tda-guide-results').innerText()).includes('including tied highest')&&(await page.locator('.tda-guide-tip').innerText()).includes('9, 9, 6'));
    check('public antes have an explicit lifetime',(await page.locator('.tda-guide-caption').innerText()).includes('until taken by an effect or the gambit ends'));
   }
-  if(i===2)check('turn instructions retain ability conditions and no voluntary pass or buy',(await page.locator('.tda-guide-description').innerText()).includes('no greater than')&&(await page.locator('.tda-guide-tip').innerText()).includes('cannot pass or buy'));
+  if(i===2){
+   const body=await page.locator('.tda-guide-description').innerText(),examples=await page.locator('.tda-guide-results').innerText(),tip=await page.locator('.tda-guide-tip').innerText();
+   check('turn compares this round cards and triggers the acting player own card',body.includes('your right-hand player played this round')&&body.includes('Equal or lower strength triggers your card')&&body.includes('not your whole flights')&&body.includes('does not trigger your opponent’s card again'));
+   check('turn shows equal lower and higher examples without discarding an untriggered card',examples.includes('strength 5 or 7 card triggers its own power')&&examples.includes('strength 9 card normally does not trigger')&&examples.includes('still stays in your flight'));
+   check('turn names decision actor and limits compulsory purchases',tip.includes('not always the player who just played')&&tip.includes('cannot pass or buy')&&tip.includes('only 1 hand card')&&tip.includes('no hand cards after powers finish')&&tip.includes('until you hold 4 cards'));
+  }
   if(i===3)check('scoring distinguishes gambit from game end',(await page.locator('.tda-guide-description').innerText()).includes('everyone plays another round')&&(await page.locator('.tda-guide-tip').innerText()).includes('If anyone now has no gold'));
   await page.screenshot({path:join(shots,'en-'+(i+1)+'-1440.png')});
   if(i<3)await page.locator('.tda-guide-next').click();
@@ -55,6 +60,8 @@ try{
  await page.keyboard.press('ArrowLeft');check('keyboard back returns to first page',await page.locator('dialog').getAttribute('data-step')==='0');
  check('Chinese first page has requested exact title and flow',await page.locator('h1').innerText()==='三龙牌'&&(await page.locator('.tda-guide-description').innerText()).startsWith('和多名玩家一起打牌。')&&(await page.locator('.tda-guide-flow li').allTextContents()).join('>')==='暗置放牌>同时翻出>结算效果>轮流出牌>循环直到轮次结束');
  await page.locator('.tda-guide-progress button').nth(2).click();check('progress navigation selects intended page',await page.locator('dialog').getAttribute('data-step')==='2');
+ check('Chinese trigger explanation names whose card acts and compares individual cards',(await page.locator('.tda-guide-description').innerText()).includes('就发动你这张牌的能力')&&(await page.locator('.tda-guide-description').innerText()).includes('不是双方整副牌阵')&&(await page.locator('.tda-guide-description').innerText()).includes('不会因此再次发动对方的牌'));
+ check('Chinese turn examples retain lower equal and higher outcomes',(await page.locator('.tda-guide-results').innerText()).includes('5 点或 7 点')&&(await page.locator('.tda-guide-results').innerText()).includes('出 9 点时通常不发动能力'));
  await page.keyboard.press('Escape');check('Escape closes once and restores launch focus',await page.evaluate(()=>calls.close===1&&!document.querySelector('dialog')&&document.activeElement.id==='open'));
  await page.evaluate(()=>makeGuide('en'));for(let i=0;i<18;i++){await page.keyboard.press('Tab');check('native focus trap '+i,await page.evaluate(()=>!!document.activeElement?.closest('dialog')));}
  await page.locator('.tda-guide-skip').click();check('Take a seat closes with no practice or rules action',await page.evaluate(()=>calls.close===2&&calls.practice===1&&!document.querySelector('dialog')));
@@ -74,7 +81,8 @@ try{
    const afterGlossary=await page.locator('.tda-guide-glossary').boundingBox();
    const brand=await page.locator('.tda-guide-brand').boundingBox();
    check(lang+' '+width+' page '+i+' glossary stays at top right while body scrolls',!!brand&&!!beforeGlossary&&!!afterGlossary&&beforeGlossary.y===afterGlossary.y&&afterGlossary.x>=brand.x+brand.width&&afterGlossary.y+afterGlossary.height<=height&&await page.locator('.tda-guide-glossary').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
-   check(lang+' '+width+' page '+i+' complete rule text is scroll reachable',await page.locator('.tda-guide-tip').evaluate(e=>{const r=e.getBoundingClientRect(),b=document.querySelector('.tda-guide-body').getBoundingClientRect();return r.bottom<=b.bottom+1&&r.top>=b.top-1;}));
+   check(lang+' '+width+' page '+i+' complete rule text is scroll reachable',await page.locator('.tda-guide-tip').evaluate(e=>{const text=e.firstChild,range=document.createRange();range.setStart(text,text.length-1);range.setEnd(text,text.length);const r=range.getBoundingClientRect(),b=document.querySelector('.tda-guide-body').getBoundingClientRect();return r.height>0&&r.bottom<=b.bottom+1&&r.top>=b.top-1&&getComputedStyle(e).webkitLineClamp==='none';}));
+   if(i===3)check(lang+' '+width+' end flow spells out two cards from deck and ten-card limit',(await page.locator('.tda-guide-tip').innerText()).includes(lang==='zh'?'从牌堆里抽 2 张牌加入手牌':'draws 2 cards from the deck into their hand')&&(await page.locator('.tda-guide-tip').innerText()).includes(lang==='zh'?'满 10 张就停止':'stopping at 10'));
    await page.locator('.tda-guide-body').evaluate(e=>e.scrollTop=0);
    await page.screenshot({path:join(shots,lang+'-'+(i+1)+'-'+width+'.png')});
   }

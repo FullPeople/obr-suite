@@ -10,13 +10,16 @@ import {tableText, type TableLanguage} from "./text";
 import {mountTableStage, type StageHandle, type StageHit} from "./stage";
 import {mountDragController, type DropIntent, type DragContext} from "./interaction/drag-controller";
 import type {GameAction} from "./rules/types";
+import {activePowerCards,freshPublicEvents,powerEvents} from "./power-sequence";
+import {mountPowerPresentation} from "./power-presentation";
+import {mountTableAudio} from "./audio";
 import "./stage-ui.css";
 
 export interface TableUIDeps {send(command:TableUICommand):void|Promise<void>;language:TableLanguage;mode?:TableDisplayMode;gesture?(value:HandGesture):void;id?():string}
 /** This surface receives projections only. It never imports or constructs host state. */
 export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  let view:TableView|null=null,lang=deps.language,sending=false,destroyed=false,selectionKey="",selected=new Set<string>(),resetKey="",localMessage="";
- let pendingDraft:TableUIDraft|null=null,touched=false,previewId="",previewPinned=false;
+ let pendingDraft:TableUIDraft|null=null,touched=false,previewId="",previewPinned=false,pinnedPreviewId="";
  let hoveredHand = "", gestureTimer: ReturnType<typeof setTimeout> | undefined, gestureSequence = Date.now(), lastGesture = "";
  const gestures = new Map<string, { value: HandGesture; timer: ReturnType<typeof setTimeout> }>();
  const motion = new Set<Animation>();
@@ -30,10 +33,13 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  let domGhost:HTMLElement|null=null;
  let bannerEvent:PublicEvent|null=null,bannerTimer:ReturnType<typeof setTimeout>|undefined;
  let revealPhase:"placing"|"revealing"|"price"|"payment"|"discard"|null=null;
+ let power:ReturnType<typeof mountPowerPresentation>|null=null,sound:ReturnType<typeof mountTableAudio>|null=null;
+ let updating=false,syncingStage=false,stageView:PublicView|SeatView|null=null,presentationBase:TableView|null=null,anteSoundKey="";
+ const deferredSounds=new Map<"draw"|"flip"|"coin",string>();
  let pendingAction:{actionId:string;tableId:string;gameId:string;revision:number;cardId?:string;zone?:"ante"|"flight";action:GameAction;retryable:boolean}|null=null;
  const reduced=matchMedia("(prefers-reduced-motion: reduce)");
  root.className="table-shell";root.dataset.mode=deps.mode??"full";
- root.innerHTML=`<header class="table-header"><div class="table-brand"><span class="brand-mark" aria-hidden="true">◈</span><div><h1 id="title"></h1><p id="edition" class="muted"></p></div></div><div class="window-controls"><button id="tutorial" type="button"></button><button id="language" class="quiet" type="button"></button><button id="display-mode" class="quiet" type="button"></button><button id="close" class="quiet" type="button"></button></div></header>
+ root.innerHTML=`<header class="table-header"><div class="table-brand"><span class="brand-mark" aria-hidden="true">◈</span><div><h1 id="title"></h1><p id="edition" class="muted"></p></div></div><div class="window-controls"><button id="tutorial" type="button"></button><button id="sound-toggle" class="quiet" type="button" aria-pressed="true"></button><button id="language" class="quiet" type="button"></button><button id="display-mode" class="quiet" type="button"></button><button id="close" class="quiet" type="button"></button></div></header>
  <div id="toolbar" class="toolbar"></div>
  <div id="board-scroll" class="board-scroll"><div id="table-banner" class="table-banner" role="status" aria-live="polite" hidden><p id="waiting-banner"></p><p id="effect-banner"></p></div><section id="lobby"></section><div id="stage-host" hidden><canvas id="table-stage" tabindex="0" role="application" aria-describedby="stage-keyboard"></canvas><div id="stage-summary"></div><p id="stage-keyboard" aria-live="polite"></p></div><div id="arena" class="arena">
  <section id="players" class="players"></section>
@@ -51,13 +57,19 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  const privateGame=():SeatView|null=>view?.game&&"selfSeatId" in view.game?view.game as SeatView:null;
  const receiptCompatible=()=>view?.actionReceiptVersion===1;
  const busy=()=>sending||!!view?.pending||!!pendingAction;
- const locked=()=>busy()||!receiptCompatible()||!view?.connected||!!view?.message&&["hostOffline","recoveryMissing","protocolMismatch","privateSync"].includes(view.message);
+ const locked=()=>busy()||!!power?.busy||!!revealPhase||suspended||!receiptCompatible()||!view?.connected||!!view?.message&&["hostOffline","recoveryMissing","protocolMismatch","privateSync"].includes(view.message);
  const node=(tag:string,text?:string,className?:string)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(className)e.className=className;return e;};
  function section(id:string,signature:unknown,build:(host:HTMLElement)=>void){const value=JSON.stringify([lang,signature]);if(signatures.get(id)===value)return;signatures.set(id,value);const host=el(id);host.replaceChildren();build(host);}
  function button(label:string,fn:()=>void,disabled=false,className=""){const b=document.createElement("button");b.type="button";b.textContent=label;b.disabled=disabled;b.className=className;b.addEventListener("click",fn);return b;}
  const emblem=dragonEngraving;
- function preview(value:Card,pinned=false){previewId=value.id;previewPinned=pinned;const host=el("preview-content");host.replaceChildren();host.append(node("span",`${value.strength}`,"preview-strength"),node("h2",cardName(value.id,lang)),node("p",t(value.alignment),"card-kind"),node("p",cardHint(value.family,lang),"preview-hint"));el("card-preview").hidden=false;el("card-preview").dataset.pinned=String(pinned);el("card-preview").dataset.color=value.color??value.alignment;}
- function hidePreview(){previewId="";previewPinned=false;el("card-preview").hidden=true;}
+ function preview(value:Card,pinned=false){
+  previewId=value.id;previewPinned=pinned;if(pinned)pinnedPreviewId=value.id;
+  const panel=el("card-preview"),host=el("preview-content"),key=`${value.id}:${lang}:${pinned}`;
+  if(host.dataset.content!==key){host.dataset.content=key;host.replaceChildren();host.append(node("span",`${value.strength}`,"preview-strength"),node("h2",cardName(value.id,lang)),node("p",t(value.alignment),"card-kind"),node("p",cardHint(value.family,lang),"preview-hint"));if(!pinned)host.append(node("small",lang==="zh"?"点击卡牌可固定说明并滚动查看。":"Click the card to pin and scroll through its description.","preview-help"));panel.scrollTop=0;}
+  panel.hidden=false;panel.dataset.pinned=String(pinned);panel.dataset.color=value.color??value.alignment;
+ }
+ function hidePreview(){previewId="";previewPinned=false;pinnedPreviewId="";el("card-preview").hidden=true;}
+ function leavePreview(){if(pinnedPreviewId){const saved=pinnedPreviewId;inspectCard(saved,true);if(previewId===saved)return;}hidePreview();}
  function cardNode(value:Card,optionId?:string):HTMLElement{
   const wrap=node("div",undefined,"card-wrap");wrap.dataset.color=value.color??value.alignment;
   const box=optionId===undefined?node("div"):button("",()=>toggle(optionId));box.className="card";box.dataset.alignment=value.alignment;box.dataset.card=value.id;
@@ -65,9 +77,9 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   box.append(node("span",String(value.strength),"card-strength"),art,node("strong",cardName(value.id,lang)),node("span",t(value.alignment),"card-kind"),node("span",cardHint(value.family,lang),"card-hint"));
   box.setAttribute("aria-label",`${cardName(value.id,lang)} · ${value.strength}. ${cardHint(value.family,lang)}`);
   if(optionId===undefined){box.tabIndex=0;box.setAttribute("role","button");box.addEventListener("click",()=>preview(value,true));box.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();preview(value,true);}});}
-  box.addEventListener("pointerenter",event=>{if(event.pointerType!=="touch"&&!previewPinned)preview(value);});
-  box.addEventListener("pointerleave",()=>{if(!previewPinned&&previewId===value.id)hidePreview();});
-  box.addEventListener("focus",()=>{if(!previewPinned)preview(value);});box.addEventListener("blur",()=>{if(!previewPinned)hidePreview();});
+  box.addEventListener("pointerenter",event=>{if(event.pointerType!=="touch")preview(value);});
+  box.addEventListener("pointerleave",()=>{if(!previewPinned&&previewId===value.id)leavePreview();});
+  box.addEventListener("focus",()=>preview(value));box.addEventListener("blur",()=>{if(!previewPinned)leavePreview();});
   box.addEventListener("pointerdown",event=>{if(event.pointerType==="touch"&&!box.closest(".choices"))preview(value,true);});
   if(optionId!==undefined){box.dataset.option=optionId;box.setAttribute("aria-pressed",String(selected.has(optionId)));}
   const inspect=button("i",()=>preview(value,true),false,"inspect-card");inspect.setAttribute("aria-label",`${t("inspectCard")}: ${cardName(value.id,lang)}`);inspect.title=t("inspectCard");wrap.append(box,inspect);return wrap;
@@ -76,9 +88,16 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  function action():EligibleAction|undefined{return privateGame()?.actions[0];}
  function eligibleIds():string[]{const a=action();return !a?[]:a.kind==="choose"?a.choice.options.map(o=>o.id):a.cardIds;}
  function dragContext():DragContext|null{const own=privateGame(),a=action();return own&&view?.table?{tableId:view.table.id,gameId:own.id,seatId:own.selfSeatId,revision:own.revision,kind:a&&a.kind!=="choose"?a.kind:null,legalCardIds:a&&a.kind!=="choose"?a.cardIds:[],locked:locked()||suspended,scopeId}:null;}
- function inspectCard(id:string,pinned:boolean){const own=privateGame(),g=view?.game,a=action();const visible=[...(own?.hand??[]),...(own?.committedAnte?[own.committedAnte]:[]),...(g?.ante??[]),...(g?.discard??[]),...(g?.revealed??[]),...(g?.seats.flatMap(s=>s.flight.map(f=>f.card))??[]),...(a?.kind==="choose"?a.choice.options.filter(o=>o.cardId).map(o=>card(o.cardId!)):[])].find(c=>c.id===id);if(visible)preview(visible,pinned);}
+ function visibleCards(){const own=privateGame(),g=view?.game,a=action(),display=stageView;return [...(own?.hand??[]),...(own?.committedAnte?[own.committedAnte]:[]),...(g?.ante??[]),...(g?.discard??[]),...(g?.revealed??[]),...(g?.seats.flatMap(s=>s.flight.map(f=>f.card))??[]),...(display?.ante??[]),...(display?.discard??[]),...(display?.seats.flatMap(s=>s.flight.map(f=>f.card))??[]),...(a?.kind==="choose"?a.choice.options.filter(o=>o.cardId).map(o=>card(o.cardId!)):[])];}
+ function inspectCard(id:string,pinned:boolean){const value=visibleCards().find(c=>c.id===id);if(value){preview(value,pinned);return;}
+  // A public reveal can still be animating after the following snapshot moved
+  // that card elsewhere. Hits only expose face-up cards; the public log proves
+  // its identity without inspecting anyone's hidden hand or private choices.
+  if(view?.game?.events.some(event=>event.cardIds?.includes(id)))try{preview(card(id),pinned);}catch{}
+ }
  function legalDropZone(){const a=action();return !locked()&&!suspended&&a&&a.kind!=="choose"&&a.cardIds.length?(a.kind==="ante"?"ante":"flight"):null;}
- function syncStage(){if(!stage)return;stage.update({view:view?.game??null,language:lang,connected:!!view?.connected,reducedMotion:reduced.matches,legalDropZone:legalDropZone(),selectedCardIds:[...selected,...(hoveredHand?[hoveredHand]:[])],...(resetStage?{animate:false}:{})});resetStage=false;}
+ function effectCardIds(){return [...activePowerCards(view?.game),...(power?.current?[power.current.cardId]:[])];}
+ function syncStage(){if(!stage||syncingStage)return;syncingStage=true;try{if(!power?.busy)stageView=view?.game??null;stage.update({view:stageView,language:lang,connected:!!view?.connected,reducedMotion:reduced.matches,legalDropZone:legalDropZone(),activeEffectCardIds:effectCardIds(),selectedCardIds:[...selected,...(hoveredHand?[hoveredHand]:[])],...(resetStage?{animate:false}:{})});resetStage=false;}finally{syncingStage=false;}}
  function clearDomDrag(){domGhost?.remove();domGhost=null;for(const c of root.querySelectorAll<HTMLElement>(".dom-dragging"))c.classList.remove("dom-dragging");}
  function stageCancel(){keyboardHeld=false;keyboardContext=null;pointerCard="";stage?.setDrag(null);clearDomDrag();publishGesture();}
  function pointerLift(cardId:string){if(pointerCard!==cardId){pointerCard=cardId;publishGesture();}}
@@ -131,6 +150,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   publishGesture();
   syncStage();
   for(const zone of root.querySelectorAll<HTMLElement>("[data-drop-zone]"))zone.classList.toggle("is-legal-drop",zone.dataset.dropSeat===privateGame()?.selfSeatId&&zone.dataset.dropZone===legalDropZone());
+  const glowing=new Set(effectCardIds());for(const wrap of root.querySelectorAll<HTMLElement>(".card-wrap"))wrap.classList.toggle("power-active",!!wrap.closest(".flight,.dom-drop-slot,#antes")&&glowing.has(wrap.querySelector<HTMLElement>("[data-card]")?.dataset.card??""));
   const confirm=root.querySelector<HTMLButtonElement>("#confirm-action");if(confirm)confirm.disabled=locked()||selected.size<min||selected.size>max;
   const count=root.querySelector("#selection-count");if(count)count.textContent=`${t("selection")}: ${selected.size} · ${t("chooseRange")}: ${min===max?min:`${min}–${max}`}`;
  }
@@ -158,6 +178,26 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   }host.append(options);
  }
  function clearBannerEvent(){if(bannerTimer)clearTimeout(bannerTimer);bannerTimer=undefined;bannerEvent=null;}
+ function soundControls(){const enabled=sound?.enabled??true;el("sound-toggle").textContent=lang==="zh"?(enabled?"音效：开":"音效：关"):(enabled?"Sound: on":"Sound: off");el("sound-toggle").setAttribute("aria-pressed",String(enabled));}
+ function playUpdateSounds(previous:TableView|null){
+  const before=previous?.game,after=view?.game;if(!before||!after||before.id!==after.id||!previous?.connected||!view?.connected||after.revision!==before.revision+1||suspended||document.hidden)return;
+  const fresh=freshPublicEvents(before,after),key=`${view.table?.id}:${after.id}:${after.revision}`;
+  const ante=fresh.some(event=>event.code==="ANTE_REVEALED");
+  if(ante){anteSoundKey=key;if(!stageAvailable||reduced.matches)sound?.play('flip',key);}
+  else if(fresh.some(event=>["CARD_PLAYED","FLIGHT_REPLACED","CARD_REVEALED","CARDS_REVEALED"].includes(event.code)))sound?.play('flip',key);
+  const kinds:Array<'draw'|'coin'>=[];
+  if(after.deckCount<before.deckCount||fresh.some(event=>event.code==="DECK_RESHUFFLED"))kinds.push('draw');
+  if((!ante||!stageAvailable||reduced.matches)&&(after.stakes!==before.stakes||after.hole!==before.hole||after.seats.some(seat=>seat.gold!==before.seats.find(old=>old.id===seat.id)?.gold)))kinds.push('coin');
+  for(const kind of kinds)if(power?.busy)deferredSounds.set(kind,key);else sound?.play(kind,key);
+ }
+ function clearPresentation(){presentationBase=null;deferredSounds.clear();anteSoundKey="";power?.clear();}
+ function presentationChanged(){
+  root.dataset.powerActive=String(!!power?.busy);
+  if(updating||destroyed)return;
+  const previous=!power?.busy?presentationBase:null;if(!power?.busy)presentationBase=null;
+  render();
+  if(!power?.busy){if(previous)animateChanges(previous);for(const [kind,key] of deferredSounds)sound?.play(kind,key);deferredSounds.clear();}
+ }
  function receiveBannerEvent(previous:TableView|null){
   const old=previous?.game,next=view?.game;
   if(!old||!next||old.id!==next.id||next.revision<old.revision){clearBannerEvent();return;}
@@ -175,11 +215,12 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   const game=view?.game,own=privateGame();let waiting="",effect="";
   const names=game?.waitingSeatIds.map(id=>id===own?.selfSeatId?t("you"):seatName(id)).join(lang==="zh"?"、":", ")??"";
   if(game?.phase==="ante"&&names)waiting=lang==="zh"?`等待${names}选择下注牌…`:`Waiting for ${names} to choose ante cards…`;
-  else if(game?.phase==="choice"&&game.choice){waiting=lang==="zh"?`等待${names}选择：${rulePrompt(game.choice.code,lang)}`:`Waiting for ${names}: ${rulePrompt(game.choice.code,lang)}`;}
+  else if(game?.phase==="choice"&&game.choice){const actor=game.choice.beneficiarySeatId??game.choice.seatId,actorName=actor===own?.selfSeatId?t("you"):seatName(actor),source=game.choice.sourceCardId?` · ${cardName(game.choice.sourceCardId,lang)}`:"";waiting=lang==="zh"?`${actorName}正在触发效果${source} · 等待${names}选择`:`${actorName} is resolving a power${source} · Waiting for ${names} to choose`;}
   else if(game?.phase==="play"&&names)waiting=lang==="zh"?`等待${names}出牌中…`:`Waiting for ${names} to play…`;
   else if(game?.phase==="ended")waiting=`${t("winners")}: ${game.winners.map(seatName).join(", ")}`;
   if(revealPhase)waiting=lang==="zh"?({placing:"所有人已提交下注牌…",revealing:"同时翻开下注牌…",price:"点数最高的下注牌已标出…",payment:"结算下注金币…",discard:"下注牌全部并列，弃牌后重新选择…"}[revealPhase]):({placing:"All ante cards are committed…",revealing:"Revealing all ante cards…",price:"The highest ante cards are highlighted…",payment:"Paying gold into the stakes…",discard:"All antes are tied. Discard them and choose again…"}[revealPhase]);
-  if(bannerEvent){const e=bannerEvent;effect=[seatName(e.seatId),t(e.code),...(e.cardIds??[]).map(id=>cardName(id,lang)),e.amount===undefined?"":`${e.amount} ${t("gold")}`].filter(Boolean).join(" · ");if(e.code==="POWER_TRIGGERED"&&e.cardIds?.[0])effect+=`：${cardHint(card(e.cardIds[0]).family,lang)}`;}
+  if(power?.current)waiting=lang==="zh"?`${seatName(power.current.seatId)}正在触发效果…`:`${seatName(power.current.seatId)} is resolving a power…`;
+  if(bannerEvent){const e=bannerEvent;effect=[seatName(e.seatId),t(e.code),...(e.cardIds??[]).map(id=>cardName(id,lang)),e.amount===undefined?"":`${e.amount} ${t("gold")}`].filter(Boolean).join(" · ");}
   el("waiting-banner").textContent=waiting;el("waiting-banner").hidden=!waiting;el("effect-banner").textContent=effect;el("effect-banner").hidden=!effect;el("table-banner").hidden=!waiting&&!effect;
  }
  function render(){if(destroyed)return;
@@ -190,7 +231,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   document.documentElement.lang=lang==="en"?"en":"zh-CN";document.title=t("title");
   root.dataset.phase=game?.phase??"lobby";root.dataset.players=String(game?.seats.length??0);
   for(const [id,code] of [["title","title"],["edition","edition"],["log-title","history"],["help-title","help"],["help-text","helpText"],["rules-link","rules"],["reset-title","resetTitle"],["reset-body","resetBody"],["cancel-reset","cancel"],["confirm-reset","confirmReset"]])el(id).textContent=t(code);
-  el("tutorial").textContent = lang === "en" ? "How to play" : "如何游玩"; el("language").textContent = lang === "en" ? "中文" : "English";
+  el("tutorial").textContent = lang === "en" ? "How to play" : "如何游玩"; el("language").textContent = lang === "en" ? "中文" : "English";soundControls();root.dataset.powerActive=String(!!power?.busy);
   el("close").setAttribute("aria-label",t("close"));el("close").title=t("close");el("close").textContent=t("backToMap");el("display-mode").textContent=t(deps.mode==="compact"?"expand":"minimize");el("close-preview").setAttribute("aria-label",t("closePreview"));
   const message=view&&!receiptCompatible()?(lang==="zh"?"牌桌后台仍是旧版。请完整刷新枭熊页面后再出牌；现在仍可观看或返回地图。":"The table background is an older version. Fully refresh the Owlbear page before playing. You can still watch or return to the map."):pendingAction?.retryable?(lang==="zh"?"尚未确认这次操作，请重试原操作。":"This action is not confirmed. Retry the same action."):localMessage?(rulePrompt(localMessage,lang)!==localMessage?rulePrompt(localMessage,lang):t(localMessage)):view?.message?tableText(view.message,lang):busy()?t("sending"):!view||!view.connected?t("connecting"):"";
   el("status").textContent=message;el("status").hidden=!message;el("status").classList.toggle("error",!!view?.message&&!['connecting','privateSync'].includes(view.message));
@@ -208,7 +249,6 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   section("lobby",[table,view?.selfPlayerId,view?.isHost,!!game],host=>{
    if(!table){host.append(node("p",t("noTable")));return;}
    if(!game){host.append(node("p",t(table.stage==="playing"?"privateSync":"lobby")));const seats=node("div",undefined,"seat-chips");for(const seat of table.seats)seats.append(node("span",`${seat.name}${seat.playerId===view?.selfPlayerId?` (${t("you")})`:""}${seat.playerId===table.hostPlayerId?` · ${t("host")}`:""}`));host.append(seats);if(table.stage==="lobby")host.append(node("p",t(table.seats.length<2?"needPlayers":view?.isHost?"lobby":"seated"),"muted"));}
-   else if(!own)host.append(node("p",t(table.stage==="playing"?"watch":"spectator"),"muted"));
   });
   section("summary",game&&[game.gambit,game.round,game.stakes,game.hole],host=>{if(!game)return;for(const [code,value] of [["gambit",game.gambit],["round",game.round],["stakes",game.stakes],["hole",game.hole]]){const chip=node("span",undefined,`counter ${code}`);chip.append(node("small",t(String(code))),node("strong",String(value)));host.append(chip);}});
   section("deck-pile",game?.deckCount,host=>{if(!game)return;const back=node("div",undefined,"card-back deck-back");back.setAttribute("aria-hidden","true");back.textContent="◈";host.append(back,node("span",`${t("deck")} · ${game.deckCount}`));});
@@ -250,7 +290,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   el("stage-keyboard").textContent=keyboardText();
   el("stage-summary").textContent=game?`${t("gambit")} ${game.gambit} · ${t("round")} ${game.round} · ${t("stakes")} ${game.stakes} · ${t("hole")} ${game.hole}`:"";
   root.dataset.pendingAction=pendingAction?"true":"false";syncSelection();dragController?.refresh();domDragController?.refresh();
-  if(previewId){const visible=[...(own?.hand??[]),...(own?.committedAnte?[own.committedAnte]:[]),...(game?.ante??[]),...(game?.revealed??[]),...(game?.discard??[]),...(game?.seats.flatMap(seat=>seat.flight.map(value=>value.card))??[]),...(a?.kind==="choose"?a.choice.options.filter(option=>option.cardId).map(option=>card(option.cardId!)):[])].find(value=>value.id===previewId);if(visible)preview(visible,previewPinned);else hidePreview();}
+  if(previewId){const visible=visibleCards().find(value=>value.id===previewId);if(visible)preview(visible,previewPinned);else hidePreview();}
   restoreDraft(); layoutFan(); paintGestures();
   if(el<HTMLDialogElement>("reset-dialog").open&&resetKey!==`${table?.id}:${game?.id}`)el<HTMLDialogElement>("reset-dialog").close();
  }
@@ -264,7 +304,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  function language(value:TableLanguage){
   const active=document.activeElement instanceof HTMLElement&&root.contains(document.activeElement)?document.activeElement:null;
   const option=active?.dataset.option,cardId=active?.dataset.card;
-  lang=value;render();
+  lang=value;power?.language(value);render();
   if(active&&!active.isConnected&&(option||cardId)){
    const replacement=[...root.querySelectorAll<HTMLElement>("[data-option],[data-card]")].find(node=>option?node.dataset.option===option:node.dataset.card===cardId);
    replacement?.focus({preventScroll:true});
@@ -314,18 +354,32 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   const cardEl=element.closest<HTMLElement>("[data-card]"),slot=element.closest<HTMLElement>("[data-drop-zone]");
   if(cardEl){const hand=!!cardEl.closest("#hand");return{kind:hand?"hand":"card",cardId:cardEl.dataset.card!,zone:hand?"hand":slot?.dataset.dropZone==="flight"?"flight":"ante",...(hand?{seatId:privateGame()?.selfSeatId}:slot?{seatId:slot.dataset.dropSeat}:{})};}
   return slot?{kind:"zone",zone:slot.dataset.dropZone as "ante"|"flight",seatId:slot.dataset.dropSeat}:null;};
- const hover=(id:string|null)=>{const next=privateGame()?.hand.some(c=>c.id===id)?id??"":"";if(next!==hoveredHand){hoveredHand=next;publishGesture();syncStage();}if(id&&!previewPinned&&previewId!==id)inspectCard(id,false);else if(!id&&!previewPinned)hidePreview();};
+ const hover=(id:string|null)=>{const next=privateGame()?.hand.some(c=>c.id===id)?id??"":"";if(next!==hoveredHand){hoveredHand=next;publishGesture();syncStage();}if(id&&previewId!==id)inspectCard(id,false);else if(!id&&!previewPinned)leavePreview();};
  const ports={context:dragContext,drop,cancel:stageCancel,inspect:inspectCard,hover};
- stage=mountTableStage(el<HTMLCanvasElement>("table-stage"),{onRevealPhase:phase=>{revealPhase=phase;if(!destroyed)renderBanner();},onQuality:quality=>{stageAvailable=quality.webgl;root.dataset.renderer=stageAvailable?"webgl":"dom";if(stageReady&&!destroyed)render();}});stageReady=true;
+ power=mountPowerPresentation(root,{language:lang,seatName:id=>id===privateGame()?.selfSeatId?t("you"):seatName(id),onChange:presentationChanged});
+ sound=mountTableAudio(root,{onEnabledChange:()=>{if(!destroyed)soundControls();}});
+ el("sound-toggle").addEventListener("click",()=>{sound?.setEnabled(!sound.enabled);soundControls();});
+ stage=mountTableStage(el<HTMLCanvasElement>("table-stage"),{onRevealPhase:phase=>{revealPhase=phase;if(!destroyed){renderBanner();if(anteSoundKey&&phase==="revealing")sound?.play('flip',anteSoundKey);if(anteSoundKey&&phase==="payment")sound?.play('coin',anteSoundKey);syncSelection();}},onQuality:quality=>{stageAvailable=quality.webgl;root.dataset.renderer=stageAvailable?"webgl":"dom";if(stageReady&&!destroyed)render();}});stageReady=true;
  dragController=mountDragController(el("table-stage"),{...ports,hitTest:(x,y)=>stageAvailable?stage?.hitTest(x,y)??null:null,drag:value=>{if(value)pointerLift(value.cardId);stage?.setDrag(value);}});
  domDragController=mountDragController(root,{...ports,hover:id=>{if(!stageAvailable)hover(id);},hitTest:domHit,drag:value=>{if(!value)return;pointerLift(value.cardId);const item=[...root.querySelectorAll<HTMLElement>("#hand [data-card]")].find(c=>c.dataset.card===value.cardId);if(item){item.classList.add("dom-dragging");if(!domGhost){domGhost=item.cloneNode(true) as HTMLElement;domGhost.classList.remove("dom-dragging");domGhost.classList.add("dom-drag-ghost");domGhost.setAttribute("aria-hidden","true");domGhost.removeAttribute("tabindex");document.body.append(domGhost);}domGhost.style.left=`${value.x-65}px`;domGhost.style.top=`${value.y-90}px`;}}});
  const motionPreference=()=>{syncStage();};reduced.addEventListener("change",motionPreference);
- const cancelKeyboard=()=>{if(keyboardHeld)stageCancel();},hideKeyboard=()=>{if(document.hidden)cancelKeyboard();};
+ const cancelKeyboard=()=>{if(keyboardHeld)stageCancel();},hideKeyboard=()=>{if(document.hidden){cancelKeyboard();clearPresentation();sound?.suspend();}else if(!suspended){sound?.resume();render();}};
  root.addEventListener("pointerdown",cancelKeyboard,true);window.addEventListener("blur",cancelKeyboard);document.addEventListener("visibilitychange",hideKeyboard);
- render();return {update(value:TableView){const previous=view;view=value;sending=false;localMessage="";receiveBannerEvent(previous);applyReceipt();render();animateChanges(previous);},gesture(seatId:string,value:unknown){if(destroyed)return;if(value===null){stage?.gesture(seatId,null);const entry=gestures.get(seatId);if(entry)clearTimeout(entry.timer);gestures.delete(seatId);paintGestures();return;}const gesture=readHandGesture(value);if(!gesture||seatId===privateGame()?.selfSeatId)return;const old=gestures.get(seatId);if(old&&gesture.sequence<=old.value.sequence)return;stage?.gesture(seatId,gesture);if(old)clearTimeout(old.timer);gestures.set(seatId,{value:gesture,timer:setTimeout(()=>{gestures.delete(seatId);paintGestures();},30000)});paintGestures();},language,restore(value:unknown){if(!touched)pendingDraft=readUIDraft(value);restoreDraft();},draft,
+ render();return {update(value:TableView){if(destroyed)return;const previous=view;updating=true;try{
+  const oldSelf=previous?.game&&"selfSeatId" in previous.game?previous.game.selfSeatId:null,newSelf=value.game&&"selfSeatId" in value.game?value.game.selfSeatId:null;
+  const same=previous?.table?.id===value.table?.id&&previous?.game?.id===value.game?.id&&oldSelf===newSelf;
+  const live=!!previous?.connected&&value.connected&&same&&!suspended&&!document.hidden;
+  const adjacent=!!previous?.game&&!!value.game&&value.game.revision===previous.game.revision+1;
+  view=value;sending=false;localMessage="";
+  if(!live||!same||!!previous?.game&&!!value.game&&(value.game.revision<previous.game.revision||value.game.revision>previous.game.revision+1))clearPresentation();
+  const cues=live&&adjacent?powerEvents(previous?.game,value.game):[];
+  if(cues.length){if(!power?.busy)presentationBase=previous;power?.enqueue(cues);}
+  receiveBannerEvent(previous);applyReceipt();render();playUpdateSounds(previous);if(!power?.busy)animateChanges(previous);
+ }finally{updating=false;}},gesture(seatId:string,value:unknown){if(destroyed)return;if(value===null){stage?.gesture(seatId,null);const entry=gestures.get(seatId);if(entry)clearTimeout(entry.timer);gestures.delete(seatId);paintGestures();return;}const gesture=readHandGesture(value);if(!gesture||seatId===privateGame()?.selfSeatId)return;const old=gestures.get(seatId);if(old&&gesture.sequence<=old.value.sequence)return;stage?.gesture(seatId,gesture);if(old)clearTimeout(old.timer);gestures.set(seatId,{value:gesture,timer:setTimeout(()=>{gestures.delete(seatId);paintGestures();},30000)});paintGestures();},language,restore(value:unknown){if(!touched)pendingDraft=readUIDraft(value);restoreDraft();},draft,
  waitingForReceipt:()=>!!pendingAction,
+ presentationBusy:()=>!!power?.busy||!!revealPhase,
  getAnchor(zone:"hand"|"ownAnte"|"ownFlight"|"stakes"){const own=privateGame();const query=zone==="hand"?{cardId:own?.hand[0]?.id}:zone==="stakes"?{zone:"stakes" as const}:{zone:zone==="ownAnte"?"ante" as const:"flight" as const,seatId:own?.selfSeatId};const point=stageAvailable?stage?.getAnchor(query):null;if(point?.visible)return new DOMRect(point.x-10,point.y-10,20,20);if(!stageAvailable){const target=zone==="hand"?root.querySelector("#hand [data-card]"):zone==="stakes"?root.querySelector(".counter.stakes"):root.querySelector(`.seat.self [data-drop-zone="${zone==="ownAnte"?"ante":"flight"}"]`);return target?.getBoundingClientRect()??null;}return null;},
- suspend(){suspended=true;stageCancel();hoveredHand="";if(gestureTimer)clearTimeout(gestureTimer);gestureTimer=undefined;lastGesture="";dragController?.cancel();domDragController?.cancel();stage?.suspend();},resume(){suspended=false;stage?.resume();syncSelection();},
- failed(){sending=false;localMessage="requestFailed";if(pendingAction)pendingAction.retryable=true;if(view)view={...view,pending:false,connected:false};render();},
- destroy(){if(destroyed)return;destroyed=true;pendingAction=null;clearBannerEvent();clearDomDrag();dragController?.destroy();domDragController?.destroy();stage?.destroy();reduced.removeEventListener("change",motionPreference);root.removeEventListener("pointerdown",cancelKeyboard,true);window.removeEventListener("blur",cancelKeyboard);document.removeEventListener("visibilitychange",hideKeyboard);resize.disconnect();if(gestureTimer)clearTimeout(gestureTimer);for(const entry of gestures.values())clearTimeout(entry.timer);for(const a of motion)a.cancel();root.removeEventListener("keydown",keydown);el<HTMLDialogElement>("reset-dialog").close();root.replaceChildren();}};
+ suspend(){suspended=true;sound?.suspend();clearPresentation();stageCancel();hoveredHand="";if(gestureTimer)clearTimeout(gestureTimer);gestureTimer=undefined;lastGesture="";dragController?.cancel();domDragController?.cancel();stage?.suspend();},resume(){suspended=false;sound?.resume();stage?.resume();syncSelection();},
+ failed(){sending=false;localMessage="requestFailed";if(pendingAction)pendingAction.retryable=true;if(view)view={...view,pending:false,connected:false};clearPresentation();render();},
+ destroy(){if(destroyed)return;destroyed=true;pendingAction=null;power?.destroy();sound?.destroy();deferredSounds.clear();clearBannerEvent();clearDomDrag();dragController?.destroy();domDragController?.destroy();stage?.destroy();reduced.removeEventListener("change",motionPreference);root.removeEventListener("pointerdown",cancelKeyboard,true);window.removeEventListener("blur",cancelKeyboard);document.removeEventListener("visibilitychange",hideKeyboard);resize.disconnect();if(gestureTimer)clearTimeout(gestureTimer);for(const entry of gestures.values())clearTimeout(entry.timer);for(const a of motion)a.cancel();root.removeEventListener("keydown",keydown);el<HTMLDialogElement>("reset-dialog").close();root.replaceChildren();}};
 }

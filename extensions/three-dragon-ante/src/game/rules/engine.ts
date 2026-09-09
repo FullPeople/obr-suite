@@ -156,6 +156,7 @@ function award(s:GameState,reason:string,rng?:RandomSource){
 function executePower(s:GameState,t:Task,rng?:RandomSource){
   const seat=t.seat,source=t.source!,family=t.family!,self=s.seats[seat],strength=card(source).strength;
   event(s,"POWER_TRIGGERED",seat,[source]);
+  if(family!==card(source).family)s.events[s.events.length-1].effectFamily=family;
   const opponents=around(s,seat);
   switch(family){
     case "black":steal(s,seat,3);break;
@@ -169,7 +170,7 @@ function executePower(s:GameState,t:Task,rng?:RandomSource){
     }
     case "bronze":case "bronze-warlord":
       if(family==="bronze-warlord")effect(s,"warlord",seat,source);
-      addFront(s,{kind:"bronze",seat,ids:[],amount:Math.min(2,s.ante.length)});break;
+      addFront(s,{kind:"bronze",seat,source,ids:[],amount:Math.min(2,s.ante.length)});break;
     case "copper":{const next=replaceFromDeck(s,source,rng);if(next)power(s,seat,next);break;}
     case "copper-trickster":choose(s,seat,"REPLACE_OTHER_FLIGHT_CARD",choiceCards(self.flight.filter(f=>f.cardId!==source).map(f=>f.cardId)),{...t,kind:"trickster"});break;
     case "chromatic-wyrmling":case "metallic-wyrmling":{
@@ -229,7 +230,7 @@ function runTask(s:GameState,t:Task,rng?:RandomSource){
       if(self.hand.length>=10||!t.amount)return;
       const remaining=s.ante.filter(id=>!t.ids!.includes(id));
       if(t.ids!.length<t.amount&&remaining.length){const low=Math.min(...remaining.map(id=>card(id).strength));choose(s,seat,"LOWEST_ANTE_CARD",choiceCards(remaining.filter(id=>card(id).strength===low)),t);}
-      else if(self.hand.length+t.ids!.length>10)choose(s,seat,"KEEP_ONE_ANTE_CARD",choiceCards(t.ids!),{kind:"bronze-keep",seat,ids:t.ids});
+      else if(self.hand.length+t.ids!.length>10)choose(s,seat,"KEEP_ONE_ANTE_CARD",choiceCards(t.ids!),{...t,kind:"bronze-keep",ids:t.ids});
       else {for(const id of t.ids!){s.ante.splice(s.ante.indexOf(id),1);self.hand.push(id);}}break;
     }
     case "seer":{

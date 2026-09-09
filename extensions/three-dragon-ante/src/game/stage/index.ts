@@ -8,7 +8,7 @@ import type { StageAnchorQuery, StageHandle, StageHit, StageModel, StageOptions,
 import { REVEAL_PRESENTATION_MS, type RevealPhase } from "./types";
 export type * from "./types";
 
-interface Visual { group: THREE.Group; front: THREE.Mesh; faceKey: string; placement: CardPlacement }
+interface Visual { group: THREE.Group; body: THREE.Mesh; front: THREE.Mesh; back: THREE.Mesh; effectGlow: THREE.Mesh; faceKey: string; placement: CardPlacement }
 interface Motion { object: THREE.Object3D; start: number; duration: number; from: Pose; to: Pose; arc: number; flip: boolean; bounce: boolean; done?: () => void }
 interface RevealData { gameId: string; gambit: number; cards: { placement: CardPlacement; from: Pose }[]; allTied: boolean; payments: { seatId: string; amount: number }[] }
 interface RevealCue { data: RevealData; start: number; cards: Visual[]; labels: THREE.Mesh[]; highlights: THREE.Mesh[]; flipped: boolean; paid: boolean }
@@ -62,6 +62,8 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   const activeZoneMaterial = standard("#e7c781", { transparent: true, opacity: .23, depthWrite: false });
   const priceGlowGeo = geo(new THREE.PlaneGeometry(W * 1.11, H * 1.08));
   const priceGlowMat = mat(new THREE.MeshBasicMaterial({ color: "#ffdb76", transparent: true, opacity: .85, depthWrite: false, toneMapped: false }));
+  const effectGlowGeo = geo(new THREE.PlaneGeometry(W * 1.16, H * 1.11));
+  const effectGlowMat = mat(new THREE.MeshBasicMaterial({ color: "#ffd67b", transparent: true, opacity: .7, depthWrite: false, toneMapped: false }));
   const coinGeo = geo(new THREE.CylinderGeometry(.16, .16, .038, 20));
   const goldMat = standard("#d5a34d", { metalness: .78, roughness: .3 });
   const silverMat = standard("#b6bcc2", { metalness: .82, roughness: .3 });
@@ -154,13 +156,26 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     const body = mesh(cardBody, edgeMat, group); body.castShadow = true; body.receiveShadow = true;
     const front = mesh(cardPlane, backMat, group); front.rotation.x = -Math.PI / 2; front.position.y = THICKNESS / 2 + .001; front.receiveShadow = true;
     const back = mesh(cardPlane, backMat, group); back.rotation.x = Math.PI / 2; back.position.y = -THICKNESS / 2 - .001;
-    return { group, front, faceKey: "back", placement };
+    const effectGlow = mesh(effectGlowGeo, effectGlowMat, group); effectGlow.rotation.x = -Math.PI / 2; effectGlow.position.y = .011; effectGlow.visible = false;
+    return { group, body, front, back, effectGlow, faceKey: "back", placement };
+  }
+  function syncEffectGlows() {
+    const active = new Set(model.activeEffectCardIds ?? []), view = model.view;
+    const publicIds = new Set(view ? [...view.ante, ...view.discard, ...view.revealed, ...view.seats.flatMap(seat => seat.flight.map(entry => entry.card))].map(value => value.id) : []);
+    for (const visual of [...visuals.values(), ...(revealCue?.cards ?? [])]) {
+      const id = visual.placement.cardId;
+      // Temporary reveal faces are from a new, already public ANTE_REVEALED
+      // event. Never turn an active ID into private face or texture knowledge.
+      const publicFace = !!id && (publicIds.has(id) || !!revealCue?.cards.includes(visual));
+      visual.effectGlow.visible = publicFace && visual.faceKey !== "back" && active.has(id!);
+    }
   }
   function presentationVisibility() {
     const active = revealCue?.data;
     for (const visual of visuals.values()) visual.group.visible = !active || visual.placement.key === pending?.cardId || visual.placement.key === drag?.cardId ||
       !(active.cards.some(card => card.placement.cardId === visual.placement.cardId) || visual.placement.zone === "ante" && active.cards.some(card => card.placement.seatId === visual.placement.seatId));
     for (const visual of revealCue?.cards ?? []) visual.group.visible = visual.placement.cardId !== pending?.cardId && visual.placement.cardId !== drag?.cardId;
+    syncEffectGlows();
   }
   function startReveal(data: RevealData) {
     if (destroyed || hidden() || model.reducedMotion) return;
@@ -186,6 +201,7 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     if (!cue.flipped && elapsed >= PLACE_MS) {
       cue.flipped = true; notifyReveal("revealing");
       for (const visual of cue.cards) { const material = face(visual.placement); visual.front.material = material.material; visual.faceKey = material.key; move(visual.group, visual.placement.pose, true, 0, true, undefined, FLIP_MS); }
+      syncEffectGlows();
     }
     const flashing = elapsed - PLACE_MS - FLIP_MS;
     // Two finite flashes of the actual maximum (including every tied maximum).
@@ -386,13 +402,13 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     pointer.set((x - rect.left) / rect.width * 2 - 1, -(y - rect.top) / rect.height * 2 + 1); camera.updateMatrixWorld(); scene.updateMatrixWorld(true); ray.setFromCamera(pointer, camera); return true; };
   function anchor(query: StageAnchorQuery) {
     let target: THREE.Object3D | undefined;
-    if (query.cardId) target = visuals.get(query.cardId)?.group;
+    const visual = query.cardId ? revealCue?.cards.find(value => value.group.visible && value.placement.cardId === query.cardId) ?? visuals.get(query.cardId) : undefined;
+    if (query.cardId) target = visual?.group;
     else if (query.zone === "stakes" && !query.seatId) target = stakesAnchor;
     else target = zoneGroup.children.find(child => { const hit = child.userData.hit as StageHit | undefined; return !!hit && hit.zone === query.zone && hit.seatId === query.seatId; });
     if (!target || destroyed) return null; scene.updateMatrixWorld(true); camera.updateMatrixWorld();
     // Anchor a fanned hand at its exposed strength corner, not at a center that
     // the next physical card can cover. Every card remains an actual ray target.
-    const visual = query.cardId ? visuals.get(query.cardId) : undefined;
     const point = visual?.placement.zone === "hand" ? target.localToWorld(new THREE.Vector3(-W * .34, .03, -H * .34)) : target.getWorldPosition(new THREE.Vector3());
     const projected = point.project(camera), rect = canvas.getBoundingClientRect();
     return { x: rect.left + (projected.x + 1) * rect.width / 2, y: rect.top + (1 - projected.y) * rect.height / 2, visible: Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1 && projected.z >= -1 && projected.z <= 1 };
@@ -419,8 +435,34 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     },
     hitTest(x, y) {
       if (destroyed || hidden() || !setRay(x, y)) return null;
-      const intersections = ray.intersectObjects([...visuals.values()].filter(v => v.group.visible && v.placement.key !== drag?.cardId && v.placement.key !== pending?.cardId).map(v => v.group).concat([zoneGroup]), true);
-      for (const hit of intersections) { let object: THREE.Object3D | null = hit.object; while (object) { if (object.userData.hit) return { ...object.userData.hit } as StageHit; object = object.parent; } }
+      // Inspecting is independent of action permission and pending ACKs. The
+      // actively dragged mesh alone is omitted so it cannot cover a drop slot.
+      const targets = [...visuals.values(), ...(revealCue?.cards ?? [])].filter(v => v.group.visible && v.placement.key !== drag?.cardId);
+      const byGroup = new Map(targets.map(visual => [visual.group, visual]));
+      const intersections = ray.intersectObjects(targets.map(v => v.group).concat([zoneGroup]), true);
+      for (const hit of intersections) {
+        let object: THREE.Object3D | null = hit.object;
+        let visual: Visual | undefined, visible = true;
+        // Decorative outline lines have a generous raycast tolerance. They
+        // must not inherit the region's hit and occlude a nearby card face.
+        const zone = hit.object.userData.hit as StageHit | undefined;
+        while (object) {
+          if (!object.visible) { visible = false; break; }
+          visual ??= byGroup.get(object as THREE.Group);
+          object = object.parent;
+        }
+        if (!visible) continue;
+        if (visual) {
+          // Glow/border planes are not card surfaces or invisible drop targets.
+          if (hit.object !== visual.front && hit.object !== visual.body && hit.object !== visual.back) continue;
+          const placement = visual.placement, seatId = placement.seatId ? { seatId: placement.seatId } : {};
+          const ownAnte = model.view && "selfSeatId" in model.view && placement.seatId === model.view.selfSeatId && placement.cardId === (model.view as SeatView).committedAnte?.id;
+          if (placement.cardId && (hit.object === visual.front && visual.faceKey !== "back" || ownAnte))
+            return { kind: placement.zone === "hand" ? "hand" : "card", cardId: placement.cardId, zone: placement.zone, ...seatId };
+          return { kind: "zone", zone: placement.zone, ...seatId };
+        }
+        if (zone) return { ...zone };
+      }
       return null;
     },
     getAnchor: anchor,

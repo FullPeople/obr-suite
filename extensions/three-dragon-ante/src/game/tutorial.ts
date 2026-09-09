@@ -5,6 +5,7 @@ import { tableText, type TableLanguage } from './text';
 import { mountTableUI } from './ui';
 import type { TableView, ActionReceipt } from './protocol';
 import { REVEAL_PRESENTATION_MS } from './stage/types';
+import { POWER_PRESENTATION_MS, powerEvents } from './power-sequence';
 import './tutorial.css';
 
 type Words = readonly [string, string];
@@ -14,7 +15,7 @@ const w = (value: Words, lang: TableLanguage) => value[lang === 'zh' ? 0 : 1];
 const seats = [{ id: 'you', name: 'You' }, { id: 'ember', name: 'Ember' }, { id: 'jade', name: 'Jade' }];
 export const tutorialLessons: readonly TutorialLesson[] = [
   { id: 'game', chapter: 'game', title: ['从发牌打完一整局', 'A complete game, from the deal'], explanation: ['三人各有 30 金币和 6 张手牌。先暗置一张下注，最高的点数决定每人的付款；最高且不并列的玩家领出。通常出三轮牌，再结算轮局。有人在轮局结算后金币为零，整局才结束。你可以自由选择自己的牌。对手会自动行动。', 'Three players start with 30 gold and six cards each. Secretly ante one card: the highest strength sets everyone’s payment, and the highest untied player leads. A gambit normally lasts three rounds. The game ends when someone has no gold after a gambit is settled. Choose your own legal moves. Opponents act automatically.'] },
-  { id: 'powers', chapter: 'basics', title: ['弱牌为什么有用', 'Why weaker cards help'], firstCard: 'black-3', explanation: ['右邻刚出了 5 点白龙。试出 3 点黑龙，会发动取奖池的能力；退一步改出 13 点金龙，则不发动。每轮第一个出牌者不受这个比较限制，相同点数也能发动。', 'Your right neighbor just played a strength-5 White Dragon. Play Black 3 to trigger its power; undo and try Gold 13 to see a stronger card not trigger. Equal strength also triggers. The first player of each round triggers without this comparison.'] },
+  { id: 'powers', chapter: 'basics', title: ['我的牌什么时候发动能力', 'When does my card use its power?'], firstCard: 'black-3', explanation: ['如果你是本轮第一个出牌的人，你这次出的牌会发动能力。否则，看右边玩家在本轮刚出的那张牌：你这张牌的点数比它低，或与它相同，你这张牌才会发动能力；比它高就不发动。比较的是这两张牌，牌阵总点数不参与。这里右边玩家出了 5 点白龙。你出 3 点黑龙，发动的是你这张黑龙的能力，从奖池拿金币；退回一步改出 13 点金龙，你这张金龙的抓牌能力就不会发动。', 'If you play first this round, the card you play uses its power. Otherwise, look at the card the player on your right just played this round. If your new card has a lower or equal strength, your card uses its power. If yours is stronger, it does not. Compare those two cards, without adding up either flight. Here, the player on your right played White 5. Play Black 3: your Black Dragon takes gold from the stakes. Undo and play Gold 13 instead: your Gold Dragon does not use its draw power.'] },
   { id: 'color', chapter: 'basics', title: ['同色牌阵', 'A color flight'], firstCard: 'white-6', explanation: ['已有 1、2 点白龙。出第三条白龙，先结算它的能力，再获得同色组合：每位对手支付中间点数，即 2 金币。同一颜色在本轮局只奖励一次。', 'White 1 and White 2 are already in your flight. Play a third White Dragon: resolve its power first, then collect the middle strength, 2 gold, from every opponent. Each color rewards only once per gambit.'] },
   { id: 'strength', chapter: 'basics', title: ['同点数牌阵', 'A strength flight'], firstCard: 'gold-6', explanation: ['已有两张 6 点牌。出 6 点金龙，先抓牌，再从奖池取 6 金币，并从明牌区选最多两张加入手牌；手牌上限仍为 10。若取空奖池，会立即结束轮局。', 'Two strength-6 cards are already in your flight. Play Gold 6: draw first, then take 6 from stakes and choose up to two ante cards for your hand, still respecting the ten-card limit. Emptying stakes ends the gambit immediately.'] },
   { id: 'ante-tie', chapter: 'basics', title: ['最高下注并列', 'Tied highest antes'], firstCard: 'red-10', explanation: ['按建议选择下注牌，依次是 10、10、9。所有人仍付 10 金币，但 9 点的玩家领出，因为两张 10 并列。下注牌在所有人提交前不会向其他座位公开。', 'The suggested antes are 10, 10, and 9. Everyone pays 10, but the player with 9 leads because the two 10s tie. Antes remain secret until everyone has committed.'] },
@@ -126,7 +127,10 @@ export function tutorialObservation(before: GameState, after: GameState, move: G
     if (value.code === 'CARD_PLAYED') continue;
     lines.push([value.seatId ? seatName(value.seatId, lang) : '', tableText(value.code, lang), value.amount === undefined ? '' : String(value.amount), value.targetSeatId ? `→ ${seatName(value.targetSeatId, lang)}` : '', ...(value.cardIds ?? []).map(id => `${cardName(id, lang)} (${card(id).strength})`)].filter(Boolean).join(' · '));
   }
-  if (move.kind === 'play' && !events.some(e => e.code === 'POWER_TRIGGERED' && e.cardIds?.includes(move.cardId!))) lines.push(w(['这张牌比右邻本轮出的牌更强，且不是领出或大法师加成，因此不发动能力。', 'This card is stronger than the right neighbor’s card this round, with neither the lead nor Archmage benefit, so its power does not trigger.'], lang));
+  if (move.kind === 'play' && !events.some(e => e.code === 'POWER_TRIGGERED' && e.cardIds?.includes(move.cardId!))) lines.push(w([
+    `${seatName(move.seatId, lang)}这次出的「${cardName(move.cardId!, lang)}」点数更高。这次不是本轮第一个出牌，也没有大法师效果，所以这张牌不发动能力。`,
+    `${seatName(move.seatId, lang)} played ${cardName(move.cardId!, lang)}, which is stronger than the card on the right. This is not the first play of the round, and no Archmage effect applies, so this card does not trigger its power.`,
+  ], lang));
   before.seats.forEach((seat, i) => { const next = after.seats[i]; const changes: string[] = [];
     for (const [code, old, value] of [['gold', seat.gold, next.gold], ['debt', seat.debt, next.debt], ['handCount', seat.hand.length, next.hand.length]] as const) if (old !== value) changes.push(`${tableText(code, lang)} ${old} → ${value}`);
     if (changes.length) lines.push(`${seatName(seat.id, lang)}: ${changes.join(' · ')}`);
@@ -179,7 +183,8 @@ export function mountTutorial(parent: HTMLElement, initialLanguage: TableLanguag
     const actor = game.seats.find(seat => seat.id !== 'you' && projectSeat(game, seat.id).actions.length);
     // Authority already advanced. Only pace the next opponent after this reveal.
     const revealDelay = last?.move.kind === 'ante' && last.before.stage === 'ante' && last.after.stage === 'play' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? REVEAL_PRESENTATION_MS : 0;
-    return actor ? { key: `${game.revision}:${actor.id}`, seatId: actor.id, delay: 1000 + revealDelay } : null;
+    const powerDelay = last ? powerEvents(projectSeat(last.before, 'you'), projectSeat(last.after, 'you')).length * POWER_PRESENTATION_MS : 0;
+    return actor ? { key: `${game.revision}:${actor.id}`, seatId: actor.id, delay: 1000 + revealDelay + powerDelay } : null;
   }
   function scheduleBot() {
     const plan = botPlan(), key = plan && `${generation}:${game.id}:${plan.key}`;
@@ -191,6 +196,9 @@ export function mountTutorial(parent: HTMLElement, initialLanguage: TableLanguag
       if (scheduled !== current || current.generation !== generation || current.gameId !== game.id || destroyed) return;
       botTimer = undefined;
       if (paused()) { current.remaining = 0; return; }
+      // A delayed presentation callback may outlive its nominal duration.
+      // Recheck only while it is busy; the same scoped timer is cancelled on hide/reset.
+      if (table.presentationBusy()) { current.remaining = 50; scheduleBot(); return; }
       scheduled = null;
       const move = tutorialMove(game, lessonId, `lesson:${generation}:${++serial}`, current.seatId);
       if (move) take(move, false); else scheduleBot();
