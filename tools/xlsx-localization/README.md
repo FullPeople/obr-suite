@@ -5,6 +5,31 @@ directory contains reproducible inventories, located translations, and the
 adapter used to preserve their native workbook structure. It does not yet supply
 a complete English download.
 
+## Generate the English ability-input increment
+
+```text
+python -B -X utf8 tools/xlsx-localization/main_ability_package.py --input-2014 <main-toggle-2014.xlsx> --input-2024 <main-toggle-2024.xlsx> --prepare
+node <spreadsheet-skill>/container_tools/mark_artifact_operation_started.mjs --operation-kind create --expected-output-count 1 --output-format xlsx
+node tools/xlsx-localization/author_ability_targets.mjs <reported-plan.json> <new-authored-targets.xlsx> <bundled-node-dependency-directory>
+python -B -X utf8 tools/xlsx-localization/main_ability_package.py --input-2014 <main-toggle-2014.xlsx> --input-2024 <main-toggle-2024.xlsx> --authored-targets <new-authored-targets.xlsx>
+```
+
+This increment requires the pinned main-toggle pair `1c21afed… / 133a58fe…`.
+It translates the spell ability and top-three-weapon override inputs and their
+dropdowns, preserving original Chinese lookup keys and previous invalid-input
+behavior. Two input styles and the N/AC column widths are adjusted so long English
+names remain readable. Existing styles are preserved; only two appended styles
+are selected. No original card is imported into the authoring library.
+
+The explicit inputs, original cards, formal reviews and complete 84-cell author
+table are verified before creating a candidate. Output directories must be new
+children of sibling `_audit/xlsx-main-ability-inputs`, with `ability-plan-` or
+`ability-candidate-` prefixes. Python optimization mode is rejected. Native Calc
+checks cover 24 cases per version and the four long input values; they do not
+establish Excel/WPS, save/reopen, upload or full-card English completion. Parser
+compatibility is delivered separately in `tools/server-patches/ability-inputs-20260909`.
+See `docs/research/xlsx-main-ability-inputs-20260909.md` for evidence and limitations.
+
 ## Generate the integrated spell-display copies
 
 The latest display entry point rebuilds both cards from the repository originals

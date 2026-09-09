@@ -1,0 +1,15 @@
+--- a/parser.py
++++ b/parser.py
+@@ -1142,7 +1142,11 @@
+     # 找 DC/atk 对应的行
+     abil_to_row = M["spell_ability_to_row"]
+     default_row = list(abil_to_row.values())[-1]   # 最后一个 (魅力)
+-    active_row = abil_to_row.get(active_abil or "", default_row)
++    ability_key = active_abil or ""
++    if ability_key not in abil_to_row:
++        ability_key = {"intelligence": "智力", "wisdom": "感知", "charisma": "魅力"}.get(
++            ability_key.casefold(), ability_key)
++    active_row = abil_to_row.get(ability_key, default_row)
+     dc_col = M["spell_dc_col"]
+     atk_col = M["spell_atk_col"]
+     dc = _int(_cell(main, f"{dc_col}{active_row}"))
