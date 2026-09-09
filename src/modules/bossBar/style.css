@@ -4,7 +4,9 @@ html, body { margin: 0; width: 100%; min-width: 0; background: transparent !impo
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 [hidden] { display: none !important; }
-#bossBars { padding: 2px 22px 2px 8px; }
+#bossBars { padding: 2px 8px; }
+body.display { width: 100vw; height: 100vh; pointer-events: none; }
+.display #bossBars { position: fixed; }
 .boss { height: 42px; margin: 0; position: relative; filter: drop-shadow(0 2px 3px #000a); }
 .boss:first-child:last-child { height: 56px; padding-top: 4px; }
 .bossHeader { display: flex; align-items: baseline; justify-content: center; gap: 9px; min-width: 0; height: 21px; }
@@ -21,8 +23,6 @@ button { cursor: pointer; }
 .numbers { position: absolute; inset: -1px 0; text-align: center; color: #fff6e8; font-size: 10px; font-weight: 700; line-height: 13px; text-shadow: 0 1px 2px #000, 1px 0 1px #000; }
 .defeated .fill { background: #4c4242; }
 .defeated .bossName { color: #cebaa2; }
-#localHide { position: absolute; right: 0; top: 4px; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; color: #ddcaa4; background: #201921b8; font-size: 17px; line-height: 18px; opacity: .58; }
-#localHide:hover, #localHide:focus-visible { opacity: 1; outline: 1px solid #e4c68b; }
 .reduceMotion .fill, .reduceMotion .trail { transition: none; }
 @media (prefers-reduced-motion: reduce) { .fill, .trail { transition: none; } }
 @media (max-width: 360px) { .bossName { font-size: 13px; letter-spacing: .02em; } .bossPhase { font-size: 9px; } .bossHeader { gap: 5px; } }

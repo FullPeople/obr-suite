@@ -1,6 +1,6 @@
-import type { ControllerPlatform, TableMember } from "../../src/modules/threeDragonAnte/controller-platform";
-import type { ControllerStorage } from "../../src/modules/threeDragonAnte/controller";
-import type { SavedTable } from "../../src/modules/threeDragonAnte/store";
+import type { ControllerPlatform, TableMember } from "../../extensions/three-dragon-ante/src/game/controller-platform";
+import type { ControllerStorage } from "../../extensions/three-dragon-ante/src/game/controller";
+import type { SavedTable } from "../../extensions/three-dragon-ante/src/game/store";
 
 export const pause = (ms: number) => new Promise<void>(done => setTimeout(done, ms));
 export async function until(check: () => boolean, label: string, ms = 4000): Promise<void> {

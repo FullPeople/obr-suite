@@ -11,9 +11,9 @@ const { chromium } = require(process.env.PLAYWRIGHT_PACKAGE ?? "C:/Users/admin/.
 const parent = resolve(tmpdir()), out = mkdtempSync(join(parent, "three-dragon-storage-"));
 let server, browser;
 try {
-  const source = `import { TableStore } from ${JSON.stringify(resolve("src/modules/threeDragonAnte/store.ts").replaceAll("\\", "/"))};
-    import { createGame, projectPublic, projectSeat } from ${JSON.stringify(resolve("src/modules/threeDragonAnte/rules/index.ts").replaceAll("\\", "/"))};
-    import { packPublic, packSeat, unpackPublic, unpackSeat } from ${JSON.stringify(resolve("src/modules/threeDragonAnte/wire.ts").replaceAll("\\", "/"))};
+  const source = `import { TableStore } from ${JSON.stringify(resolve("extensions/three-dragon-ante/src/game/store.ts").replaceAll("\\", "/"))};
+    import { createGame, projectPublic, projectSeat } from ${JSON.stringify(resolve("extensions/three-dragon-ante/src/game/rules/index.ts").replaceAll("\\", "/"))};
+    import { packPublic, packSeat, unpackPublic, unpackSeat } from ${JSON.stringify(resolve("extensions/three-dragon-ante/src/game/wire.ts").replaceAll("\\", "/"))};
     window.tableTest = {TableStore,createGame,projectPublic,projectSeat,packPublic,packSeat,unpackPublic,unpackSeat};`;
   await build({input:"virtual:test",platform:"browser",plugins:[{name:"entry",resolveId(id){if(id==="virtual:test")return "\0entry";},load(id){if(id==="\0entry")return source;}}],output:{file:join(out,"test.js"),format:"esm"}});
   server = createServer((request,response)=>{response.setHeader("Content-Type",request.url==="/test.js"?"application/javascript":"text/html");response.end(request.url==="/test.js"?readFileSync(join(out,"test.js")):'<!doctype html><script type="module" src="/test.js"></script>');});

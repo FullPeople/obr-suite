@@ -8,7 +8,9 @@ export const SCENE_KEY = `${TRANSITIONS_ID}/scene-key`;
 export const REDUCED_MOTION_KEY = `${TRANSITIONS_ID}/reduced-motion`;
 export const CONTROL_ID = `${TRANSITIONS_ID}/control`;
 export const DISPLAY_ID = `${TRANSITIONS_ID}/display`;
-export const TRANSITION_TTL_MS = 6_000;
+// Includes the longer night-to-dawn sequence and a small iframe startup margin.
+export const TRANSITION_TTL_MS = 12_000;
+export const transitionDuration = (kind: TransitionKind, reduced = false) => reduced ? 3_400 : kind === "long" ? 8_800 : kind === "short" ? 6_000 : 5_800;
 export type TransitionKind = "short" | "long" | "text";
 export interface TransitionEvent {
   version: 1;

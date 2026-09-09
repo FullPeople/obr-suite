@@ -35,7 +35,7 @@ let browser, passed = 0;
 const check = (actual, label) => { assert.ok(actual, label); passed++; };
 async function open(seed = {}, width = 380, height = 540) {
   const page = await browser.newPage({ viewport: { width, height } });
-  await page.addInitScript(seed => { window.portalSeed = seed; }, seed); await page.goto(`${base}/portal-edit.html?id=portal`);
+  await page.addInitScript(seed => { window.portalSeed = seed; }, seed); await page.goto(`${base}/portal-edit.html?id=portal&instance=fixture-instance`);
   await page.waitForSelector(".portal-art-pick"); return page;
 }
 async function select(page, images = [picked]) {
@@ -117,6 +117,13 @@ try {
   await reopened.setViewportSize({ width: 380, height: 540 }); await reopened.screenshot({ path: join(out, "portal-editor.png") });
   await reopened.evaluate(() => window.dispatchEvent(new Event("pagehide")));
   check(await reopened.evaluate(() => [...window.portalMock.listeners.values()].every(group => group.size === 0)), "appearance lifecycle releases all SDK subscriptions"); await reopened.close();
+  const closeRetry=await open();await closeRetry.waitForFunction(()=>!document.querySelector('.portal-art-pick').disabled);
+  await closeRetry.evaluate(()=>{window.portalMock.failBroadcast=true;});await closeRetry.locator('#btn-save').click();await closeRetry.locator('[role="alert"]').waitFor();
+  check((await closeRetry.locator('[role="alert"]').textContent()).includes('Could not close'), 'failed local close message leaves visible same-page retry');
+  await closeRetry.evaluate(()=>{window.portalMock.failBroadcast=false;});await closeRetry.locator('#btn-save').click();
+  await closeRetry.waitForFunction(()=>window.portalMock.messages.some(v=>v.channel==='com.obr-suite/portals/edit-close'));
+  assert.deepEqual(await closeRetry.evaluate(()=>window.portalMock.messages.find(v=>v.channel==='com.obr-suite/portals/edit-close')), {channel:'com.obr-suite/portals/edit-close',data:{id:'portal',instance:'fixture-instance'},destination:'LOCAL'});passed++;
+  check(await closeRetry.evaluate(()=>window.portalMock.nativeCloses.length)===0,'editor iframe never directly closes a newer native window');await closeRetry.close();
   console.log(`Portal appearance: ${passed} assertions passed in Edge ${browser.version()}; native library and SDK endpoints simulated, not Owlbear UAT`);
   console.log(`Visual/artifacts: ${out}`);
 } finally { await browser?.close(); await new Promise(done => server.close(done)); }

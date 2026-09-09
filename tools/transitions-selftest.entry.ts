@@ -152,4 +152,14 @@ await test("rest dismissal and transitions teardown preserve a newer portal effe
   await stopScreenTransition("portal"); await playing; await fixture.flush();
   assert.equal(fixture.items.size, 0); assert.equal(fixture.listenerCount(), 0);
 });
+await test("failed native modal close stays observable for teardown retry", async () => {
+  await setupTransitions();
+  const value = event(); await fixture.emit(BC_TRANSITIONS_PLAY, value, "gm-connection");
+  fixture.close = async () => { throw Error("host refused close"); };
+  await fixture.emit(BC_TRANSITIONS_DISMISS, { id: value.id });
+  await assert.rejects(teardownTransitions(), /host refused close/);
+  fixture.close = null;
+  await teardownTransitions();
+  assert.ok(fixture.closed.includes(`${DISPLAY_ID}/${value.id}`));
+});
 console.log(`TRANSITIONS_SELFTEST ${passed}/${passed}`);

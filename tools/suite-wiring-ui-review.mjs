@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PACKAGE ?? "C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright");
 const outputRoot = resolve(tmpdir());
 const out = mkdtempSync(join(outputRoot, "suite-wiring-ui-"));
-const shots = resolve("../_audit/2026-09-08/wiring-ui"); mkdirSync(shots, { recursive: true });
+const shots = resolve(process.env.SUITE_WIRING_SCREENSHOT_DIR ?? "../_audit/2026-09-09/wiring-ui"); mkdirSync(shots, { recursive: true });
 let browser, server;
 try {
  for (const name of ["settings", "cluster-row"]) await build({ input: resolve(`src/${name}.ts`), platform: "browser", plugins: [{
@@ -22,7 +22,7 @@ try {
     if (id === "./modules/bubbles" && importer?.replaceAll("\\", "/").endsWith("/src/settings.ts")) return "\0unused-repair";
   },
   load(id) { if (id === "\0unused-repair") return "export async function repairLegacyHiddenBubbles() { return 0; }"; },
-  transform(code, id) { if (id.replaceAll("\\", "/").endsWith("/src/asset-base.ts")) return code.replaceAll("import.meta.env.BASE_URL", '"/"'); },
+  transform(code) { if (code.includes("import.meta.env.BASE_URL")) return code.replaceAll("import.meta.env.BASE_URL", '"/"'); },
  }], output: { dir: out, entryFileNames: `${name}.js`, format: "esm" } });
  server = createServer((request, response) => {
   const path = new URL(request.url, "http://localhost").pathname;
@@ -46,32 +46,19 @@ try {
   const errors = []; page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(({role,lang}) => { window.__transitionInitialRole = role; localStorage.setItem("obr-suite/lang", lang); }, {role,lang});
   await page.goto(`${base}/settings`);
-  await page.locator('[data-tab="transitions"]').waitFor();
-  await page.locator('[data-tab="transitions"]').click();
-  await page.locator("#openTransitions").click();
-  assert.ok(await page.evaluate(() => window.__transitionFixture.sent.some((message) => message.channel === "com.obr-suite/transitions/open" && message.destination === "LOCAL")));
-  for (const tab of ["transitions", "bossBar", "dynamicFog", "musicBoard", "threeDragonAnte", "sharedPointer"]) {
+  await page.locator('[data-tab="bossBar"]').waitFor();
+  assert.equal(await page.locator('[data-tab="transitions"]').count(), role === "GM" ? 1 : 0);
+  assert.equal(await page.locator('[data-tab="sharedPointer"]').count(), 0);
+  if(role === "GM") {
+    await page.locator('[data-tab="transitions"]').click(); await page.locator("#openTransitions").click();
+    assert.ok(await page.evaluate(() => window.__transitionFixture.sent.some((message) => message.channel === "com.obr-suite/transitions/open" && message.destination === "LOCAL")));
+  }
+  for (const tab of [...(role === "GM" ? ["transitions"] : []), "bossBar", "dynamicFog", "musicBoard", "threeDragonAnte"]) {
     await page.locator(`[data-tab="${tab}"]`).click(); await page.waitForTimeout(80);
-    assert.equal(await page.locator(".tog[data-mod]").isDisabled(), role !== "GM");
-    if (tab === "sharedPointer") {
-      await page.locator("#activateSharedPointer").click();
-      assert.ok(await page.evaluate(() => window.__transitionFixture.sent.some(message => message.channel === "com.obr-suite/shared-pointer/activate" && message.destination === "LOCAL")));
-      if (role === "GM") {
-        await page.locator('.tog[data-mod="sharedPointer"]').click();
-        await page.waitForFunction(() => document.querySelector("#activateSharedPointer")?.disabled === true);
-        await page.locator('.tog[data-mod="sharedPointer"]').click();
-        await page.waitForFunction(() => document.querySelector("#activateSharedPointer")?.disabled === false);
-      }
-    }
+    if (tab !== "threeDragonAnte") assert.equal(await page.locator(".tog[data-mod]").isDisabled(), role !== "GM");
     if (tab === "threeDragonAnte") {
-      await page.locator("#openThreeDragon").click();
-      assert.ok(await page.evaluate(() => window.__transitionFixture.sent.some(message => message.channel === "com.obr-suite/three-dragon-ante/open" && message.destination === "LOCAL")));
-      if (role === "GM") {
-        await page.locator('.tog[data-mod="threeDragonAnte"]').click();
-        await page.waitForFunction(() => document.querySelector("#openThreeDragon")?.disabled === true);
-        await page.locator('.tog[data-mod="threeDragonAnte"]').click();
-        await page.waitForFunction(() => document.querySelector("#openThreeDragon")?.disabled === false);
-      }
+      assert.equal(await page.locator(".tog[data-mod],#openThreeDragon").count(), 0);
+      assert.equal(await page.locator('#content a[href$="/three-dragon-ante/manifest.json"]').count(), 1);
     }
     if (tab === "musicBoard") {
       await page.locator("#openMusicBoard").click();
@@ -85,10 +72,11 @@ try {
       }
     }
     if (tab === "bossBar") {
-      await page.locator('[data-boss-pref="visible"]').click();
-      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("obr-suite/boss-bar/preferences")).hidden), true);
+      assert.equal(await page.locator('[data-boss-pref="visible"]').count(), 0);
       await page.locator('[data-boss-pref="reducedMotion"]').click();
       assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("obr-suite/boss-bar/preferences")).reducedMotion), true);
+      await page.locator('#boss-bottom-inset').fill('200'); await page.locator('#boss-bottom-inset').press('Tab');
+      await page.waitForFunction(()=>JSON.parse(localStorage.getItem("obr-suite/boss-bar/preferences")).bottomInset===200);
     }
     if (tab === "dynamicFog") {
       assert.equal(await page.locator('[data-key="fogFilled"]').getAttribute("aria-pressed"), "true");
@@ -125,15 +113,18 @@ try {
   const row = await browser.newPage({ viewport: { width: 960, height: 56 } });
   const rowErrors = []; row.on("pageerror", error => rowErrors.push(error.message));
   await row.addInitScript(({role,lang}) => { window.__transitionInitialRole = role; localStorage.setItem("obr-suite/lang", lang); }, {role,lang});
-  await row.goto(`${base}/cluster-row`); await row.locator("#btnTransitions").waitFor(); await row.waitForTimeout(150);
+  await row.goto(`${base}/cluster-row`); await row.locator("#btnMusic").waitFor(); await row.waitForTimeout(150);
   await row.locator("#btnMusic").click();
   assert.ok(await row.evaluate(() => window.__transitionFixture.sent.some((message) => message.channel === "com.obr-suite/music-board:toggle" && message.destination === "LOCAL")));
-  await row.locator("#btnTransitions").click();
-  assert.ok(await row.evaluate(() => window.__transitionFixture.sent.some((message) => message.channel === "com.obr-suite/transitions/open" && message.destination === "LOCAL")));
-  await row.locator("#btnThreeDragon").click();
-  assert.ok(await row.evaluate(() => window.__transitionFixture.sent.some(message => message.channel === "com.obr-suite/three-dragon-ante/open" && message.destination === "LOCAL")));
-  await row.locator("#btnSharedPointer").click();
-  assert.ok(await row.evaluate(() => window.__transitionFixture.sent.some(message => message.channel === "com.obr-suite/shared-pointer/activate" && message.destination === "LOCAL")));
+  assert.equal(await row.locator("#btnTransitions").count(), role === "GM" ? 1 : 0);
+  assert.equal(await row.locator("#btnThreeDragon,#btnSharedPointer").count(),0);
+  if(role === "GM") {
+    await row.locator("#btnTransitions").click();
+    assert.ok(await row.evaluate(() => window.__transitionFixture.sent.some((message) => message.channel === "com.obr-suite/transitions/open" && message.destination === "LOCAL")));
+  }
+  for (const selector of ["#btnBestiaryPopup", "#btnCharCardPopup"]) {
+    assert.ok(await row.locator(selector).evaluate(el=>el.classList.contains("on")),"unset auto-popup preference defaults to enabled");
+  }
   for (const width of [960, 640, 380]) {
     await row.setViewportSize({ width, height: 56 });
     const geometry = await row.evaluate(() => ({ naturalWidth: document.getElementById("row").scrollWidth,
@@ -158,7 +149,7 @@ try {
       assert.deepEqual(reachability.inaccessible, [], `${role}/${lang}/${width}/${side}: buttons cannot be reached by scrolling`);
       assert.ok(reachability.naturalWidth >= geometry.naturalWidth - 1, "scrolling must not collapse natural width measurement");
     }
-    if (width === 380 && !(role === "PLAYER" && lang === "zh")) {
+    if (width === 380 && geometry.naturalWidth > width) {
       await row.locator("#row").hover();
       await row.mouse.wheel(0, 140);
       await row.waitForFunction(() => document.getElementById("row").scrollLeft > 0);
@@ -170,7 +161,7 @@ try {
  }
  writeFileSync(join(shots, "review.json"), JSON.stringify(results, null, 2));
  for (const result of results) assert.deepEqual(result.errors, [], `${result.mode}/${result.role}/${result.lang} browser errors`);
- console.log(`SUITE_WIRING_UI: 28 settings tab views + 12 quick-bar widths; pointer/card table/music GM/player controls, library language save failure/retry, both handle sides and scroll/hit targets PASS; ${shots}`);
+ console.log(`SUITE_WIRING_UI: 22 settings tab views + 12 quick-bar widths; GM-only transitions, separate TDA install link, no pointer/runtime TDA entry, default previews, Boss personal settings, music/library retry and scroll/hit targets PASS; ${shots}`);
 } finally {
  await browser?.close(); await new Promise(done => server ? server.close(done) : done());
  if (dirname(resolve(out)) !== outputRoot) throw Error("Unexpected temporary output path"); rmSync(out, {recursive:true,force:true});

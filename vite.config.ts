@@ -141,7 +141,6 @@ export default defineConfig(({ command }) => ({
         "fullfog-light-edit": resolve(__dirname, "fullfog-light-edit.html"),
         "hp-bar": resolve(__dirname, "hp-bar.html"),
         "boss-bar": resolve(__dirname, "boss-bar.html"),
-        "three-dragon-ante": resolve(__dirname, "three-dragon-ante.html"),
         // Shared music controls; playback lives in the background module.
         "music-board": resolve(__dirname, "music-board.html"),
       },

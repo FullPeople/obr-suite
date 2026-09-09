@@ -1,6 +1,8 @@
 import OBR, { type Image } from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
-import { applyPortalImage, defaultPortalImage, isPortalImage, readLibraryImage } from "./appearance";
+import { applyPortalImage, isPortalImage, readLibraryImage } from "./appearance";
+
+import { resolveDefaultPortalImage } from "./default-image";
 
 /** A native library picker; no asset enumeration, upload, or additional service. */
 export function mountPortalAppearance(parent: HTMLElement, portalId: string, initialLanguage: string) {
@@ -51,7 +53,7 @@ export function mountPortalAppearance(parent: HTMLElement, portalId: string, ini
     const request = epoch, valid = () => allowed() && request === epoch;
     try {
       // Keep this call directly in the click path: the host opens its own picker.
-      const selected = fromLibrary ? (await OBR.assets.downloadImages(false))[0]?.image : defaultPortalImage(defaultUrl);
+      const selected = fromLibrary ? (await OBR.assets.downloadImages(false))[0]?.image : await resolveDefaultPortalImage();
       if (!valid() || !selected) return; // Native picker cancellation is a no-op.
       const image = readLibraryImage(selected);
       if (!image) { status = "invalid"; return; }

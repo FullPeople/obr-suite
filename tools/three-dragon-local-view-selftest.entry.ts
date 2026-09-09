@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { applyAction, createGame, eligibleActions, projectSeat } from "../src/modules/threeDragonAnte/rules";
-import { localViewParts, LocalViewReceiver } from "../src/modules/threeDragonAnte/local-view";
-import type { TableView } from "../src/modules/threeDragonAnte/protocol";
+import { applyAction, createGame, eligibleActions, projectSeat } from "../extensions/three-dragon-ante/src/game/rules";
+import { localViewParts, LocalViewReceiver } from "../extensions/three-dragon-ante/src/game/local-view";
+import type { TableView } from "../extensions/three-dragon-ante/src/game/protocol";
 let largest = 0, largestView!: TableView, steps = 0;
 const serializable = (value: unknown) => JSON.parse(JSON.stringify(value));
 for (let seed = 1; seed <= 6; seed++) {

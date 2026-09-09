@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:three-dragon": "tsc -p extensions/three-dragon-ante/tsconfig.json && vite build --config extensions/three-dragon-ante/vite.config.ts"
   },
   "dependencies": {
     "@owlbear-rodeo/sdk": "^3.1.0",

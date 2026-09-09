@@ -1,8 +1,8 @@
-import {mountTableUI} from "../src/modules/threeDragonAnte/ui";
-import {CARDS,createGame,projectSeat,projectPublic,applyAction,eligibleActions} from "../src/modules/threeDragonAnte/rules";
-import type {TableView} from "../src/modules/threeDragonAnte/protocol";
-import type {TableUICommand,TableDisplayMode} from "../src/modules/threeDragonAnte/ui-command";
-import {localViewParts} from "../src/modules/threeDragonAnte/local-view";
+import {mountTableUI} from "../extensions/three-dragon-ante/src/game/ui";
+import {CARDS,createGame,projectSeat,projectPublic,applyAction,eligibleActions} from "../extensions/three-dragon-ante/src/game/rules";
+import type {TableView} from "../extensions/three-dragon-ante/src/game/protocol";
+import type {TableUICommand,TableDisplayMode} from "../extensions/three-dragon-ante/src/game/ui-command";
+import {localViewParts} from "../extensions/three-dragon-ante/src/game/local-view";
 const w=window as unknown as Record<string,any>;
 w.localViewParts=localViewParts;
 const state=createGame({id:"game",seed:42,seats:[{id:"s0",name:"Alice <script>"},{id:"s1",name:"Bob"}]});

@@ -12,7 +12,7 @@ export interface Bgm { track: Track; playbackId: string; position: number; start
 export interface Sfx { id: string; track: Track; at: number; expiresAt: number }
 export interface MusicSession { version: 2; revision: number; author: string; allowPlayers: boolean; tracks: Track[]; queue: string[];
   bgm: Bgm | null; sfx: Sfx[]; bus: { bgm: number; sfx: number }; recent: string[]; ts: number }
-export interface MusicOp { type: string; track?: unknown; tracks?: unknown[]; id?: string; position?: number; duration?: number; value?: boolean; volume?: number; bus?: "bgm" | "sfx"; playbackId?: string }
+export interface MusicOp { type: string; track?: unknown; tracks?: unknown[]; id?: string; position?: number; duration?: number; value?: boolean; volume?: number; bus?: "bgm" | "sfx"; playbackId?: string; expectedPlaybackId?: string; paused?: boolean }
 export const finite = (value: unknown, fallback = 0) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
 export const unit = (value: unknown, fallback = 1) => Math.max(0, Math.min(1, finite(value, fallback)));
 export function emptySession(): MusicSession { return { version: 2, revision: 0, author: "", allowPlayers: true, tracks: [], queue: [], bgm: null, sfx: [], bus: { bgm: .8, sfx: 1 }, recent: [], ts: 0 }; }
@@ -60,10 +60,12 @@ export function migrateLegacy(value: unknown): MusicSession {
   out.bus = { bgm: unit(raw.bus?.bgm, .8), sfx: unit(raw.bus?.sfx, 1) }; return out;
 }
 export function reduceMusic(state: MusicSession, op: MusicOp, commandId: string, now = Date.now()): MusicSession {
+  if (["pause", "resume", "seek", "loop", "stop"].includes(op.type) && typeof op.expectedPlaybackId === "string"
+    && op.expectedPlaybackId !== (state.bgm?.playbackId || "")) throw new Error("stalePlayback");
   const next = structuredClone(state);
   next.sfx = next.sfx.filter(sfx => sfx.track.loop || sfx.expiresAt > now);
   const requireTrack = () => { const track = op.track ? trackFrom(op.track) : next.tracks.find(track => track.id === op.id); if (!track) throw new Error("invalidTrack"); return track; };
-  const play = (track: Track) => { next.bgm = { track: { ...track, bus: "bgm" }, playbackId: commandId, position: Math.max(0, finite(op.position)), startedAt: now, paused: false }; };
+  const play = (track: Track) => { next.bgm = { track: { ...track, bus: "bgm" }, playbackId: commandId, position: Math.max(0, finite(op.position)), startedAt: now, paused: op.paused === true }; };
   switch (op.type) {
     case "add": {
       const tracks = (op.tracks || [op.track]).map(trackFrom); if (tracks.some(track => !track)) throw new Error("invalidTrack");

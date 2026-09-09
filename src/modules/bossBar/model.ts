@@ -1,13 +1,17 @@
 import type { Item } from "@owlbear-rodeo/sdk";
 import { BUBBLES_META_KEY, EXTERNAL_BUBBLES_META_KEY, type BubblesData } from "../../utils/statEdit";
+import { quantiseRatio } from "../bubbles/display-policy";
 
 export const BOSS_KEY = "com.obr-suite/boss-bar/config";
 export const BOSS_STATE = "com.obr-suite/boss-bar/state";
 export const BOSS_READY = "com.obr-suite/boss-bar/ready";
+export const BOSS_PRESENTED = "com.obr-suite/boss-bar/presented";
 export const MAX_BOSSES = 3;
 export interface BossConfig { enabled: boolean; exact: boolean; phase: string; segments: number; order: number }
 export interface PublicBoss { id: string; name: string; ratio: number; phase: string; segments: number; numbers?: { hp: number; max: number } }
-export interface BossState { session: string; version: number; bosses: PublicBoss[]; replay?: string }
+export interface BossObstacle { left: number; top: number; width: number; height: number }
+export interface BossState { session: string; version: number; bosses: PublicBoss[]; replay?: string; obstacles?: BossObstacle[] }
+export interface BossViewer { role: string; playerId: string; threshold: number }
 
 export function bossConfig(item: Item): BossConfig {
   const value = item.metadata[BOSS_KEY] as Partial<BossConfig> | null;
@@ -32,15 +36,21 @@ export function eligibleBoss(item: Item): boolean {
 
 /** Produces only public presentation data. No current/max HP leaves this
  * projection unless the DM explicitly enabled exact numbers on this token. */
-export function publicBosses(items: Item[]): PublicBoss[] {
+export function publicBosses(items: Item[], viewer?: BossViewer): PublicBoss[] {
   return items.filter(item => bossConfig(item).enabled && eligibleBoss(item))
     .sort((a, b) => bossConfig(a).order - bossConfig(b).order || a.id.localeCompare(b.id))
     .slice(0, MAX_BOSSES).map(item => {
       const config = bossConfig(item), stats = bossStats(item);
       const hp = Math.max(0, stats.health!), max = stats["max health"]!;
       const named = item.metadata["com.owlbear-rodeo-bubbles-extension/name"];
-      const name = (typeof named === "string" && named.trim() ? named : item.name).trim().slice(0, 120);
-      return { id: item.id, name, ratio: Math.max(0, Math.min(1, hp / max)), phase: config.phase, segments: config.segments,
+      // Native Accessibility name is item.name; image.text is the optional
+      // painted token label. Keep legacy metadata only as an empty-name fallback.
+      const name = (item.name?.trim() || (typeof named === "string" ? named.trim() : "")).slice(0, 120);
+      const rawRatio = Math.max(0, Math.min(1, hp / max));
+      const locked = stats.locked === undefined ? true : !!stats.locked;
+      const quantised = viewer && viewer.role !== "GM" && locked && item.createdUserId !== viewer.playerId;
+      const ratio = quantised ? quantiseRatio(rawRatio, viewer.threshold) : rawRatio;
+      return { id: item.id, name, ratio, phase: config.phase, segments: config.segments,
         ...(config.exact ? { numbers: { hp, max } } : {}) };
     });
 }

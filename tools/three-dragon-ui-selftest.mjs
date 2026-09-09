@@ -11,7 +11,7 @@ try{
  browser=await chromium.launch({headless:true,executablePath:"C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"});
  for(const language of ["en","zh"]){
   const page=await browser.newPage({viewport:{width:390,height:780}});
-  await page.setContent('<main id="table-app"></main>');await page.addStyleTag({content:readFileSync("src/modules/threeDragonAnte/style.css","utf8")});await page.addScriptTag({path:file});
+  await page.setContent('<main id="table-app"></main>');await page.addStyleTag({content:readFileSync("extensions/three-dragon-ante/src/game/style.css","utf8")});await page.addScriptTag({path:file});
   baseView=await page.evaluate(()=>window.base);
   await page.evaluate(lang=>window.ui.language(lang),language);
   await page.evaluate(()=>window.ui.failed());check((await page.locator("#status").textContent()).includes(language==="en"?"No result":"未收到"),`${language}: no initial view gives visible same-page retry`);
@@ -70,9 +70,9 @@ try{
   check(await page.evaluate(n=>window.commands.length===n+1&&window.commands.at(-1).type==="close",beforeClose),`${language}: close sends no leave command`);
   await page.close();
  }
- const shell=join(out,"page.js");await build({input:resolve("src/modules/threeDragonAnte/page.ts"),plugins:[{
-  name:"table-shell-sdk",resolveId(id){if(id==="@owlbear-rodeo/sdk")return "\0table-sdk";if(id==="../../state")return "\0table-lang";if(id.endsWith(".css"))return "\0table-css";},
-  load(id){if(id==="\0table-css")return "";if(id==="\0table-lang")return 'export const getLocalLang=()=>"en";export const onLangChange=()=>()=>{};';if(id==="\0table-sdk")return 'const m=window.tableSDK;export default {player:{getConnectionId:async()=>"local-connection"},onReady:fn=>{void fn()},broadcast:{onMessage:(topic,fn)=>{m.handler=fn;(m.handlers??={})[topic]=fn;return ()=>{m.unsubscribed=true;delete m.handlers[topic]}},sendMessage:async(topic,data,options)=>{m.sent.push({topic,data,options})}}};';},
+ const shell=join(out,"page.js");await build({input:resolve("extensions/three-dragon-ante/src/game/page.ts"),plugins:[{
+  name:"table-shell-sdk",resolveId(id){if(id==="@owlbear-rodeo/sdk")return "\0table-sdk";if(id==="../locale")return "\0table-lang";if(id.endsWith(".css"))return "\0table-css";},
+  load(id){if(id==="\0table-css")return "";if(id==="\0table-lang")return 'export const getLocalLang=()=>"en";export const onLangChange=()=>()=>{};export const setLocalLang=()=>{};';if(id==="\0table-sdk")return 'const m=window.tableSDK;export default {player:{getConnectionId:async()=>"local-connection"},onReady:fn=>{void fn()},broadcast:{onMessage:(topic,fn)=>{m.handler=fn;(m.handlers??={})[topic]=fn;return ()=>{m.unsubscribed=true;delete m.handlers[topic]}},sendMessage:async(topic,data,options)=>{m.sent.push({topic,data,options})}}};';},
  }],output:{file:shell,format:"iife"}});
  const page=await browser.newPage();await page.route('http://localhost/table',route=>route.fulfill({contentType:'text/html',body:'<main id="table-app"></main>'}));await page.goto('http://localhost/table');
  await page.evaluate(()=>{window.tableSDK={sent:[],unsubscribed:false};const original=window.setTimeout;window.setTimeout=(fn,delay,...args)=>{if(delay===12000){window.tableSDK.timeout=fn;return 9981;}return original(fn,delay,...args);};});
@@ -86,7 +86,7 @@ try{
    for(let part=total-1;part>=0;part--)window.tableSDK.handler({connectionId:sender,data:{version:1,clientId,sequence,part,total,payload:encoded.slice(part*10000,(part+1)*10000)}});
  },{view,sequence,sender});
  await deliver(baseView,1);check(await page.locator("#hand .card").count()===6,"shell accepts own-connection projection");
- const restore=async(sender,instance)=>page.evaluate(({sender,instance})=>{const ready=window.tableSDK.sent[0].data,game=window.testProjection.game;window.tableSDK.handlers['com.obr-suite/three-dragon-ante/ui-restore']({connectionId:sender,data:{clientId:ready.clientId,instance,draft:{tableId:window.testProjection.table.id,gameId:game.id,selectionKey:game.id+':'+game.gambit+':'+game.round+':ante:',selected:[game.actions[0].cardIds[0]],boardScroll:0,handScroll:0,open:[]}}});},{sender,instance});
+ const restore=async(sender,instance)=>page.evaluate(({sender,instance})=>{const ready=window.tableSDK.sent[0].data,game=window.testProjection.game;window.tableSDK.handlers['com.fullpeople/three-dragon-ante/ui-restore']({connectionId:sender,data:{clientId:ready.clientId,instance,draft:{tableId:window.testProjection.table.id,gameId:game.id,selectionKey:game.id+':'+game.gambit+':'+game.round+':ante:',selected:[game.actions[0].cardIds[0]],boardScroll:0,handScroll:0,open:[]}}});},{sender,instance});
  await page.evaluate(value=>window.testProjection=value,baseView);
  await restore('remote-attacker','');check(await page.locator('#hand [aria-pressed=true]').count()===0,'shell rejects remote UI draft restore');
  await restore('local-connection','old-instance');check(await page.locator('#hand [aria-pressed=true]').count()===0,'shell rejects UI draft from a prior window instance');

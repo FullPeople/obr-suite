@@ -1,3 +1,4 @@
+import { setPanelOpen } from "../../utils/panelObstacles";
 // Status Tracker — module lifecycle.
 //
 // Three OBR windows participate:
@@ -167,13 +168,14 @@ async function openPalette(): Promise<void> {
       hidePaper: true,
       disableClickAway: true,
     });
+    setPanelOpen("status-palette", true);
   } catch (e) {
     console.warn("[status] open palette failed", e);
   }
 }
 
 async function closePalette(): Promise<void> {
-  try { await OBR.popover.close(POPOVER_PALETTE); } catch {}
+  try { await OBR.popover.close(POPOVER_PALETTE); setPanelOpen("status-palette", false); } catch {}
 }
 
 async function openCapture(payload: {
@@ -1218,7 +1220,7 @@ export async function setupStatusTracker(): Promise<void> {
       if (data?.panelId !== PANEL_IDS.statusPalette) return;
       if (!active) return;
       // Close + reopen at new anchor (OBR popover has no setAnchor).
-      try { await OBR.popover.close(POPOVER_PALETTE); } catch {}
+      await closePalette();
       await openPalette();
     }),
   );
@@ -1226,7 +1228,7 @@ export async function setupStatusTracker(): Promise<void> {
   unsubs.push(
     OBR.broadcast.onMessage(BC_PANEL_RESET, async () => {
       if (!active) return;
-      try { await OBR.popover.close(POPOVER_PALETTE); } catch {}
+      await closePalette();
       await openPalette();
     }),
   );

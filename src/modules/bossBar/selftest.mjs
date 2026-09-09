@@ -20,16 +20,17 @@ function environment() {
   const listeners = new Map(), storage = new Map();
   const listen = (key, fn) => { if (!listeners.has(key)) listeners.set(key, new Set()); listeners.get(key).add(fn); return () => listeners.get(key).delete(fn); };
   const env = { items: [token("A")], role: "GM", ready: true, reads: 0, opens: [], closes: [], messages: [], writes: [], menus: new Map(), notifications: [],
-    readGate: null, writeGate: null, openGate: null, emit: (key, value) => { for (const fn of [...(listeners.get(key) ?? [])]) void fn(value); } };
+    metadata: {}, readGate: null, writeGate: null, openGate: null, emit: (key, value) => { for (const fn of [...(listeners.get(key) ?? [])]) void fn(value); } };
   globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
   globalThis.window = { addEventListener: (key, fn) => listen(`window:${key}`, fn), removeEventListener: (key, fn) => listeners.get(`window:${key}`)?.delete(fn) };
   globalThis.__BOSS_SDK__ = {
-    player: { getRole: async () => env.role, onChange: fn => listen("role", fn) },
-    scene: { isReady: async () => env.ready, onReadyChange: fn => listen("scene", fn), items: {
+    player: { getRole: async () => env.role, getId: async () => "gm", onChange: fn => listen("role", fn) },
+    scene: { getMetadata: async () => structuredClone(env.metadata ?? {}), onMetadataChange: fn => listen("metadata", fn), isReady: async () => env.ready, onReadyChange: fn => listen("scene", fn), items: {
       getItems: async ids => { env.reads++; const copy = structuredClone(env.items.filter(item => !ids || ids.includes(item.id))); const gate = env.readGate; if (gate) await gate.promise; return copy; },
       onChange: fn => listen("items", fn), updateItems: async (ids, fn) => { env.writes.push(ids); if (env.writeGate) await env.writeGate.promise;
         const drafts = structuredClone(env.items.filter(item => ids.includes(item.id))); fn(drafts); for (const draft of drafts) env.items[env.items.findIndex(item => item.id === draft.id)] = draft; env.snapshot(); } } },
     broadcast: { onMessage: (key, fn) => listen(key, fn), sendMessage: async (key, data) => { env.messages.push({ key, data: structuredClone(data) }); env.emit(key, { data }); } },
+    modal: { open: async value => { env.opens.push(value); if (env.openGate) await env.openGate.promise; }, close: async id => { env.closes.push(id); } },
     viewport: { getWidth: async () => 1280 }, popover: { open: async value => { env.opens.push(value); if (env.openGate) await env.openGate.promise; },
       close: async id => { env.closes.push(id); }, setHeight: async () => {} },
     contextMenu: { create: async menu => { env.menus.set(menu.id, menu); }, remove: async id => { env.menus.delete(id); } },
@@ -57,7 +58,8 @@ async function bundle(entry, mutation) {
       if (id === "mock:asset") return "export const assetUrl=x=>x;";
       if (id === "mock:viewport") return "export const onViewportResize=()=>()=>{};";
       if (id === "mock:css") return "";
-      if (mutation && id.replaceAll("\\", "/").endsWith(mutation.file)) { const text = readFileSync(id, "utf8").replaceAll("\r\n", "\n"); assert.ok(text.includes(mutation.from), mutation.name); changed = true; return text.replace(mutation.from, mutation.to); }
+      if (id.replaceAll("\\", "/").endsWith("/bossBar/index.ts") && !mutation) return readFileSync(id,"utf8")+'\nexport {bossReplacesHealthBar as testReplacement} from "./suppression";';
+      if (mutation && id.replaceAll("\\", "/").endsWith(mutation.file)) { const text = readFileSync(id, "utf8").replaceAll("\r\n", "\n"); assert.equal(text.split(mutation.from).length-1,1,`unique mutation anchor: ${mutation.name}`); changed = true; return text.replace(mutation.from, mutation.to); }
     },
   }] });
   const file = join(out, `${entry}-${serial++}.mjs`);
@@ -73,8 +75,19 @@ async function controllerTest(file) {
   env.items[0].visible = false; env.snapshot(); env.readGate.resolve(); env.readGate = null;
   await boot; await settle(); assert.equal(env.opens.length, 0, "late initial read must not reveal hidden Boss");
   env.items[0].visible = true; env.snapshot(); await settle();
-  assert.equal(env.opens.length, 1); assert.equal(env.opens[0].height, 60); assert.equal(env.opens[0].width, 600);
+  assert.equal(env.opens.length, 1);
+  assert.deepEqual({fullScreen:env.opens[0].fullScreen,hidePaper:env.opens[0].hidePaper,hideBackdrop:env.opens[0].hideBackdrop,disablePointerEvents:env.opens[0].disablePointerEvents},{fullScreen:true,hidePaper:true,hideBackdrop:true,disablePointerEvents:true}, "host input must pass through the modal");
   assert.equal(env.lastState().bosses[0].ratio, .8); assert.equal("numbers" in env.lastState().bosses[0], false, "default payload must omit HP numbers");
+  if (module.testReplacement) {
+    const value=env.lastState();
+    assert.equal(module.testReplacement("A"),false,"wait for actual page presentation");
+    env.emit("com.obr-suite/boss-bar/presented",{data:{session:value.session,version:value.version,ids:["A"]}});
+    assert.equal(module.testReplacement("A"),true);
+    env.emit("com.obr-suite/boss-bar/presented",{data:{session:"stale",version:value.version,ids:[]}});
+    assert.equal(module.testReplacement("A"),true,"stale page cannot restore ordinary HP");
+    env.emit("com.obr-suite/boss-bar/presented",{data:{session:value.session,version:value.version,ids:[]}});
+    assert.equal(module.testReplacement("A"),false,"no free display area restores ordinary HP");
+  }
   const reads = env.reads, messages = env.messages.length;
   for (let i = 0; i < 100; i++) { env.items[0].position.x++; env.items[0].metadata.unrelated = i; env.snapshot(); }
   await settle(); assert.equal(env.reads, reads); assert.equal(env.messages.length, messages); assert.equal(env.writes.length, 0);
@@ -83,8 +96,8 @@ async function controllerTest(file) {
   env.items[0].metadata[KEY].exact = true; env.snapshot(); await settle(); assert.deepEqual(env.lastState().bosses[0].numbers, { hp: 36, max: 100 });
   env.emit(READY, { data: { session: env.lastState().session, requestId: "late-page" } }); await settle();
   assert.equal(env.lastState().replay, "late-page", "late/reloaded page receives authoritative replay");
-  await module.setBossPreferences({ hidden: true }); await settle(); assert.ok(env.closes.includes("com.obr-suite/boss-bar/overlay"));
-  const beforeRestore = env.opens.length; await module.setBossPreferences({ hidden: false }); await settle(); assert.equal(env.opens.length, beforeRestore + 1);
+  const beforeHide = env.opens.length; await module.setBossPreferences({ hidden: true }); await settle();
+  assert.equal(env.opens.length, beforeHide); assert.equal(env.closes.length, 0, "legacy local hide must not close Boss");
   env.items = [token("A"), token("B"), token("C"), token("D", 10, { [KEY]: { enabled: false } })]; env.snapshot(); await settle();
   const beforeCap = env.writes.length; env.menus.get("com.obr-suite/boss-bar/show").onClick({ items: [env.items[3]] }); await settle();
   assert.equal(env.writes.length, beforeCap); assert.equal(env.notifications.length, 1, "fourth Boss rejected with feedback");
@@ -120,6 +133,16 @@ async function modelTest(file) {
   const own = token("own", 22, { [EXT]: { health: 99, "max health": 100 } }); assert.equal(publicBosses([own])[0].ratio, .22);
   const bound = token("bound", 50, { "com.character-cards/boundCardId": "card", "com.bestiary/slug": "dragon" }); assert.equal(publicBosses([bound])[0].ratio, .5);
   assert.equal(publicBosses([token("zero", 0)])[0].ratio, 0);
+  const native=token("Native Accessibility",36,{"com.owlbear-rodeo-bubbles-extension/name":"Old metadata"});
+  assert.equal(publicBosses([native])[0].name,"Native Accessibility");
+  native.name=" "; assert.equal(publicBosses([native])[0].name,"Old metadata");
+  const player={role:"PLAYER",playerId:"player",threshold:25};
+  for(const [hp,ratio] of [[100,1],[76,1],[75,.75],[51,.75],[50,.5],[1,.25],[0,0]]) assert.equal(publicBosses([token("locked",hp)],player)[0].ratio,ratio);
+  assert.equal(publicBosses([token("locked",36)],{...player,threshold:0})[0].ratio,.36);
+  assert.equal(publicBosses([token("locked",36)],{...player,threshold:100})[0].ratio,1);
+  assert.equal(publicBosses([token("locked",36)],{...player,role:"GM"})[0].ratio,.36);
+  assert.equal(publicBosses([token("locked",36)],{...player,playerId:"gm"})[0].ratio,.36);
+  assert.equal(publicBosses([token("unlocked",36,{[HP]:{health:36,"max health":100,locked:false}})],player)[0].ratio,.36);
 }
 
 // Runs inside Chromium before the actual page module loads.
@@ -132,7 +155,7 @@ function browserMock() {
     deliver: (bosses, version, extra = {}) => { env.emit("com.obr-suite/boss-bar/state", { data: { session: "test", version, bosses,
       replay: env.messages.filter(message => message.key === "com.obr-suite/boss-bar/ready").at(-1)?.data.requestId, ...extra } }); } };
   window.__BOSS_SDK__ = {
-    onReady: fn => { queueMicrotask(fn); }, player: { getRole: async () => env.role, onChange: fn => on("role", fn) },
+    onReady: fn => { queueMicrotask(fn); }, player: { getRole: async () => env.role, getId: async () => "gm", onChange: fn => on("role", fn) },
     scene: { isReady: async () => env.ready, onReadyChange: fn => on("scene", fn), items: { getItems: async ids => structuredClone(env.items.filter(item => ids.includes(item.id))),
       onChange: fn => on("items", fn), updateItems: async (ids, fn) => { env.writes.push(ids); if (env.deferredWrite) await env.deferredWrite;
         const drafts = structuredClone(env.items.filter(item => ids.includes(item.id))); fn(drafts); for (const draft of drafts) env.items[env.items.findIndex(item => item.id === draft.id)] = draft; } } },
@@ -146,10 +169,11 @@ async function browserTest(pageFile) {
   const { chromium } = await import(pathToFileURL(join(runtime, "index.mjs")).href);
   const css = readFileSync(join(root, "src/modules/bossBar/style.css"), "utf8");
   const html = readFileSync(join(root, "boss-bar.html"), "utf8").replace('<script type="module" src="/src/modules/bossBar/page.ts"></script>', '<script type="module" src="/page.js"></script>').replace("</head>", `<style>${css}</style></head>`);
-  const server = createServer((request, response) => { response.setHeader("content-type", request.url === "/page.js" ? "text/javascript" : "text/html"); response.end(request.url === "/page.js" ? readFileSync(pageFile) : html); });
+  const hostHtml = '<!doctype html><html><body style="margin:0"><button id="map" style="position:fixed;inset:0;width:100vw;height:100vh" onclick="window.mapClicks=(window.mapClicks||0)+1">Map input</button><button id="other" style="position:fixed;left:30px;top:30px" onclick="window.otherClicks=(window.otherClicks||0)+1">Other component</button><iframe id="overlay" src="/?session=test" style="position:fixed;inset:0;width:100vw;height:100vh;border:0;background:transparent;pointer-events:none"></iframe><script>window.wheels=0;document.addEventListener("wheel",()=>window.wheels++);</script></body></html>';
+  const server = createServer((request, response) => { response.setHeader("content-type", request.url === "/page.js" ? "text/javascript" : "text/html"); response.end(request.url === "/page.js" ? readFileSync(pageFile) : request.url === "/host" ? hostHtml : html); });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve)); const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ executablePath: process.env.BOSS_CHROME || "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
-  const context = await browser.newContext({ viewport: { width: 600, height: 60 }, deviceScaleFactor: 2 });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 });
   const page = await context.newPage(), errors = []; page.on("pageerror", error => errors.push(String(error)));
   await page.addInitScript(browserMock);
   const sample = { id: "A", name: "烬冠古龙 · 阿兹瑞恩", ratio: .72, phase: "第二阶段 · 灰烬王座", segments: 3 };
@@ -158,6 +182,7 @@ async function browserTest(pageFile) {
     assert.equal(await page.locator(".boss").count(), 0, "page starts blank until authoritative replay");
     await page.evaluate(sample => testBoss.deliver([sample], 1), sample);
     await page.locator(".bossName").waitFor(); assert.equal(await page.locator(".bossName").textContent(), sample.name); assert.equal(await page.locator(".numbers").textContent(), "");
+    assert.equal(await page.locator("body").evaluate(node=>getComputedStyle(node).backgroundColor),"rgba(0, 0, 0, 0)","display background is transparent");
     await page.screenshot({ path: join(out, "boss-single-zh.png"), omitBackground: true });
     const damage = await page.evaluate(sample => { testBoss.deliver([{ ...sample, ratio: .35 }], 2, { replay: undefined });
       return [document.querySelector(".fill").style.width, document.querySelector(".trail").style.width]; }, sample);
@@ -168,14 +193,14 @@ async function browserTest(pageFile) {
     await page.evaluate(() => { window.mutationCount = 0; new MutationObserver(changes => window.mutationCount += changes.length).observe(document.getElementById("bossBars"), { subtree: true, childList: true, attributes: true, characterData: true }); });
     await page.evaluate(sample => { for (let i = 0; i < 100; i++) testBoss.deliver([{ ...sample, ratio: .35 }], 3 + i, { replay: undefined }); }, sample);
     assert.equal(await page.evaluate(() => window.mutationCount), 0, "identical public updates must not repaint");
-    await page.setViewportSize({ width: 600, height: 144 });
+    await page.setViewportSize({ width: 1280, height: 720 });
     await page.evaluate(sample => testBoss.deliver([sample, { ...sample, id: "B", name: "The Hollow Sovereign", ratio: .48, phase: "Phase II", numbers: { hp: 144, max: 300 }, segments: 4 },
       { ...sample, id: "C", name: "不眠守门人", ratio: 0, phase: "", segments: 1 }], 103, { replay: undefined }), sample);
     assert.equal(await page.locator(".boss").count(), 3);
-    assert.ok(await page.locator("#bossBars").evaluate(node => node.getBoundingClientRect().bottom <= 144));
+    assert.ok(await page.locator("#bossBars").evaluate(node => node.getBoundingClientRect().bottom <= 616));
     await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished)));
     await page.screenshot({ path: join(out, "boss-three-zh-en.png"), omitBackground: true });
-    await page.setViewportSize({ width: 288, height: 144 }); await page.screenshot({ path: join(out, "boss-narrow.png"), omitBackground: true });
+    await page.setViewportSize({ width: 288, height: 720 }); await page.screenshot({ path: join(out, "boss-narrow.png"), omitBackground: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 288, "narrow layout must not overflow");
     await page.evaluate(() => { testBoss.ready = false; testBoss.emit("scene", false); }); assert.equal(await page.locator(".boss").count(), 0);
     await page.evaluate(sample => { testBoss.ready = true; testBoss.emit("scene", true); testBoss.deliver([sample], 104, { replay: undefined }); }, sample);
@@ -183,7 +208,9 @@ async function browserTest(pageFile) {
     await page.evaluate(sample => testBoss.deliver([sample], 105), sample); assert.equal(await page.locator(".boss").count(), 1);
     await page.evaluate(() => { testBoss.role = "PLAYER"; testBoss.emit("role", { role: "PLAYER" }); }); assert.equal(await page.locator(".boss").count(), 0);
     await page.evaluate(sample => testBoss.deliver([sample], 105), sample); assert.equal(await page.locator(".boss").count(), 1);
-    await page.locator("#localHide").click(); assert.equal(await page.locator(".boss").count(), 0);
+    assert.equal(await page.locator("#localHide").count(),0,"display has no close button");
+    await page.evaluate(()=>{localStorage.setItem("obr-suite/boss-bar/preferences",JSON.stringify({hidden:true}));testBoss.emit("com.obr-suite/boss-bar/preferences-changed",{});});
+    assert.equal(await page.locator(".boss").count(),1,"legacy hidden preference is ignored");
     await page.evaluate(() => { localStorage.setItem("obr-suite/boss-bar/preferences", JSON.stringify({ hidden: false, reducedMotion: true })); testBoss.emit("com.obr-suite/boss-bar/preferences-changed", {}); });
     await page.evaluate(sample => testBoss.deliver([{ ...sample, ratio: .2 }], 106, { replay: undefined }), sample);
     assert.equal(await page.locator(".trail").evaluate(node => node.style.width), "20%");
@@ -209,6 +236,24 @@ async function browserTest(pageFile) {
     await page.locator("#save").click(); await page.waitForFunction(() => document.getElementById("saveStatus").textContent === "Saved");
     assert.deepEqual(await page.evaluate(key => testBoss.items[0].metadata[key], KEY), { enabled: true, exact: true, phase: "The Last Ember", segments: 3, order: 1 });
     assert.deepEqual(await page.evaluate(key => testBoss.items[0].metadata[key], HP), { health: 80, "max health": 100 });
+    await page.setViewportSize({width:1280,height:720});
+    await page.goto(`${base}/host`);
+    const child=page.frames().find(frame=>frame!==page.mainFrame());
+    await child.waitForFunction(()=>testBoss.messages.some(message=>message.key.endsWith("/ready")));
+    await child.evaluate(sample=>testBoss.deliver([sample],1),sample);
+    const rect=await child.locator(".boss").boundingBox();
+    assert.ok(rect&&rect.y>=480&&rect.y+rect.height<=616,"bottom-center baseline clearance");
+    await page.mouse.click(rect.x+rect.width/2,rect.y+25);
+    await page.mouse.wheel(0,130);await page.locator("#other").click();
+    await page.waitForFunction(()=>window.wheels>0);
+    assert.equal(await page.evaluate(()=>window.mapClicks),1,"host pass-through iframe allows map click beneath artwork");
+    assert.equal(await page.evaluate(()=>window.otherClicks),1,"host pass-through iframe allows other component click");
+    await child.evaluate(sample=>testBoss.deliver([sample],2,{obstacles:[{left:200,top:480,width:880,height:240}]}),sample);
+    const moved=await child.locator(".boss").boundingBox();assert.ok(moved.y+moved.height<=468,"artwork clears supplied actual panel bounds");
+    await child.evaluate(sample=>testBoss.deliver([sample],3,{obstacles:[{left:0,top:0,width:1280,height:720}]}),sample);
+    assert.equal(await child.locator("#bossBars").isVisible(),false);
+    const reported=await child.evaluate(()=>testBoss.messages.filter(message=>message.key.endsWith("/presented")).at(-1).data.ids);
+    assert.deepEqual(reported,[],"fully obstructed artwork releases ordinary HP");
     assert.deepEqual(errors, []);
   } finally { await context.close(); await browser.close(); await new Promise(resolve => server.close(resolve)); }
 }
@@ -220,10 +265,14 @@ try {
     { name: "visibility", file: "bossBar/model.ts", from: 'item.visible === true && !stats.hide', to: 'true' },
     { name: "numeric-leak", file: "bossBar/model.ts", from: '...(config.exact ? { numbers:', to: '...(true ? { numbers:' },
     { name: "draft-role", file: "bossBar/index.ts", from: 'if (!current()) return;\n      for (const item of drafts)', to: 'for (const item of drafts)' },
+    { name: "host-pointer", file: "bossBar/index.ts", from: 'disablePointerEvents: true', to: 'disablePointerEvents: false' },
   ];
-  for (const mutation of mutations) { let failed = false; try { await controllerTest(await bundle("index", mutation)); } catch (error) { if (error.code !== "ERR_ASSERTION") throw error; failed = true; } assert.ok(failed, `surviving mutation: ${mutation.name}`); }
+  for (const mutation of mutations) { const file = await bundle("index", mutation); let failed = false; try { await controllerTest(file); } catch (error) { if (error.code !== "ERR_ASSERTION") throw error; failed = true; } assert.ok(failed, `surviving mutation: ${mutation.name}`); }
+  const thresholdMutation={name:"threshold",file:"bossBar/model.ts",from:'quantised ? quantiseRatio(rawRatio, viewer.threshold) : rawRatio',to:'rawRatio'};
+  const thresholdFile=await bundle("model",thresholdMutation);
+  await assert.rejects(modelTest(thresholdFile),error=>error.code==="ERR_ASSERTION","player threshold bypass must be detected");
   await browserTest(await bundle("page"));
-  console.log(`Boss selftest PASS: late join/read, visibility/deletion, legacy HP, stable iframe, 100 idle events, permissions, teardown, 4/4 mutations; Chromium DOM/layout/animation/config race PASS. Screenshots: ${out}`);
+  console.log(`Boss selftest PASS: late join/read, visibility/deletion, legacy HP, stable iframe, 100 idle events, permissions, teardown, 6/6 applied mutations; Chromium DOM/layout/animation/config race and bounded host-iframe click/wheel checks PASS. Screenshots: ${out}`);
   // Screenshots intentionally remain outside the source tree for visual review.
   for (let i = 0; i < serial; i++) for (const entry of ["index", "model", "page"]) { const file = join(out, `${entry}-${i}.mjs`); if (existsSync(file)) rmSync(file); }
 } catch (error) {

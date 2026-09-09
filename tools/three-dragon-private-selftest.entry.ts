@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createPrivateIdentity, PrivateLink } from "../src/modules/threeDragonAnte/private-channel";
+import { createPrivateIdentity, PrivateLink } from "../extensions/three-dragon-ante/src/game/private-channel";
 const host = await createPrivateIdentity(), alice = await createPrivateIdentity(), bob = await createPrivateIdentity();
 const context = { roomId: "room-one", tableId: "table-one", sessionId: "handshake-one", localConnectionId: "host", remoteConnectionId: "alice" };
 const sender = await PrivateLink.create(context, host, alice.hello);

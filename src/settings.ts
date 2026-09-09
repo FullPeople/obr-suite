@@ -1,3 +1,4 @@
+import { mountPortalDefault } from "./modules/portals/default-image";
 import OBR from "@owlbear-rodeo/sdk";
 import {
   startSceneSync,
@@ -50,8 +51,6 @@ import { renderFogSettings } from "./utils/fogSettingsView";
 import { getLibraryLanguage } from "./utils/contentLocale";
 import { getBossPreferences, setBossPreferences, BOSS_PREFERENCES_CHANGED, BOSS_PREFERENCES_KEY } from "./modules/bossBar/preferences";
 import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
-import { TABLE_OPEN } from "./modules/threeDragonAnte/protocol";
-import { POINTER_ACTIVATE } from "./modules/sharedPointer/protocol";
 import {
   BC_MODULE_STATUS_QUERY, BC_MODULE_STATUS, BC_MODULE_RETRY,
   type ModuleLifecycleSnapshot,
@@ -2650,10 +2649,13 @@ const TABS: TabDef[] = [
             blinkOn ? "on" : ""
           }" data-key="portalBlinkEnabled" type="button" aria-pressed="${blinkOn}"></button>
         </div>
+        <div id="portal-default-host"></div>
         ${PORTALS_DESC[lang]}
       `;
     },
     afterRender: (root) => {
+      const defaultHost = root.querySelector<HTMLElement>("#portal-default-host");
+      if (defaultHost && isGM) mountPortalDefault(defaultHost, lang);
       root
         .querySelector<HTMLButtonElement>('.tog[data-key="portalBlinkEnabled"]')
         ?.addEventListener("click", (e) => {
@@ -2669,26 +2671,6 @@ const TABS: TabDef[] = [
           btn.classList.toggle("on", next);
           btn.setAttribute("aria-pressed", String(next));
         });
-    },
-  },
-  {
-    id: "sharedPointer",
-    zh: `${ICONS.sparkles} 共享指针`,
-    en: `${ICONS.sparkles} Shared pointer`,
-    moduleId: "sharedPointer",
-    dynamicBody: (lang) => `<h3>${lang === "zh" ? "给同桌玩家指示位置" : "Point something out to your table"}</h3>
-      <p>${lang === "zh" ? "选择共享指针后，移动鼠标即可向同桌显示你的名字和位置。停留后指针会自动隐藏，切换工具即可结束。" : "Select the shared pointer and move to show your name and position to your table. Pause to hide it, or switch tools to stop."}</p>
-      <button id="activateSharedPointer" class="layout-editor-btn" type="button" ${getState().enabled.sharedPointer ? "" : "disabled"}>${lang === "zh" ? "使用共享指针" : "Use shared pointer"}</button>
-      <p class="meta">${lang === "zh" ? "仅在指示工具中共享位置。也可使用画布工具栏或常用栏中的同名按钮。新场景首次使用时需要一位 DM 在线。" : "Position sharing is active only in the pointer tool. You can also select it from the canvas toolbar or quick bar. A GM must be online to initialize a new scene."}</p>`,
-    afterRender: (root) => {
-      root.querySelector<HTMLButtonElement>("#activateSharedPointer")?.addEventListener("click", async () => {
-        if (!getState().enabled.sharedPointer) return;
-        try { await OBR.broadcast.sendMessage(POINTER_ACTIVATE, {}, { destination: "LOCAL" }); }
-        catch (error) {
-          console.warn("[settings] shared pointer activation failed", error);
-          void OBR.notification.show(getLocalLang() === "zh" ? "共享指针暂时无法打开，请重试。" : "Could not activate the shared pointer. Please try again.", "ERROR");
-        }
-      });
     },
   },
   {
@@ -2752,21 +2734,27 @@ const TABS: TabDef[] = [
       const prefs = getBossPreferences();
       const row = (key: string, label: string, on: boolean) => `<div class="row"><div class="lbl">${label}</div><button class="tog ${on ? "on" : ""}" data-boss-pref="${key}" type="button" aria-label="${label}" aria-pressed="${on}"></button></div>`;
       return `<h3>${zh ? "个人显示" : "Your display"}</h3>
-        ${row("visible", zh ? "显示 Boss 血条" : "Show Boss health bars", !prefs.hidden)}
         ${row("reducedMotion", zh ? "减少血条动画" : "Reduce health bar motion", prefs.reducedMotion)}
-        <p>${zh ? "关闭血条右上角的 × 只影响自己，可在此重新显示。最多同时显示三条，默认仅显示血量比例。" : "Closing a bar with × hides it only for you; restore it here. Up to three bars appear, showing health percentage by default."}</p>
+        <label class="row"><span>${zh ? "距离底部" : "Bottom spacing"}</span><input id="boss-bottom-inset" type="number" min="88" max="360" step="8" value="${prefs.bottomInset}" style="width:84px"> px</label>
+        <p>${zh ? "透明血条显示在下方居中，自动避让本插件的已打开面板，鼠标可直接穿过。显示阈值沿用普通血条设置；开启后隐藏该单位的普通生命值条。关闭请右键该单位。" : "Transparent, click-through bars sit at the bottom center and avoid open suite panels. They follow normal health-bar thresholds and replace that token’s normal HP bar. Disable a bar from its token’s context menu."}</p>
         <details><summary>${zh ? "DM 使用帮助" : "GM setup"}</summary><p>${zh
-          ? "右键有生命值的角色单位 →「显示为 Boss」。在「Boss 显示选项」中设置阶段名称、分段和具体数值。血条是公开的战斗提示：迷雾遮挡不会自动隐藏它；隐藏单位或选择「隐藏 Boss 血条」可移除。"
-          : "Right-click a character token with HP → Show as Boss. Boss display options set the phase name, segments and exact numbers. Bars are public encounter cues: fog does not hide them automatically. Hide the token or choose Hide Boss bar to remove one."}</p></details>`;
+          ? "右键有生命值的角色单位 →「显示为 Boss」。名称优先使用 Accessibility 设置。在「Boss 显示选项」中设置阶段名称、分段和具体数值；选择「隐藏 Boss 血条」可关闭。"
+          : "Right-click a character token with HP → Show as Boss. The Accessibility name takes precedence. Boss display options set the phase, segments and exact values; choose Hide Boss bar to disable it."}</p></details>`;
     },
     afterRender: (root) => {
+      root.querySelector<HTMLInputElement>("#boss-bottom-inset")?.addEventListener("change", async event => {
+        const input = event.currentTarget as HTMLInputElement, value = Number(input.value);
+        if (!Number.isFinite(value)) return;
+        input.value = String(Math.max(88, Math.min(360, value)));
+        try { await setBossPreferences({ bottomInset: Number(input.value) }); }
+        catch { void OBR.notification.show(lang === "zh" ? "显示位置未能保存，请重试。" : "Could not save the position. Please retry.", "ERROR"); }
+      });
       root.querySelectorAll<HTMLButtonElement>("[data-boss-pref]").forEach((button) => {
         button.addEventListener("click", async () => {
           button.disabled = true;
           const prefs = getBossPreferences();
           try {
-            await setBossPreferences(button.dataset.bossPref === "visible"
-              ? { hidden: !prefs.hidden } : { reducedMotion: !prefs.reducedMotion });
+            await setBossPreferences({ reducedMotion: !prefs.reducedMotion });
           } catch (error) {
             console.warn("[settings] Boss preference update failed", error);
             void OBR.notification.show(lang === "zh" ? "Boss 显示设置未能同步，请重试。" : "Could not sync Boss display settings. Please try again.", "ERROR");
@@ -3347,20 +3335,16 @@ const TABS: TabDef[] = [
   },
   {
     id: "threeDragonAnte",
-    moduleId: "threeDragonAnte",
     zh: `${ICONS.box} 三龙牌`,
     en: `${ICONS.box} Three-Dragon Ante`,
-    dynamicBody: (lang) => `<p>${lang === "zh"
-      ? "2–6 人的三龙牌 Legendary Edition 基础版。任意玩家创建牌桌，其余玩家点击加入，主持人开始发牌。也可直接使用常用栏的「三龙牌」按钮。"
-      : "Three-Dragon Ante, Legendary Edition base game for 2–6 players. Anyone can create a table; other players join and the host starts the game. You can also use Three-Dragon Ante on the quick bar."}</p>
-      <button id="openThreeDragon" class="layout-editor-btn" type="button" ${getState().enabled.threeDragonAnte ? "" : "disabled"}>${lang === "zh" ? "打开牌桌" : "Open card table"}</button>
-      <p class="meta">${lang === "zh"
-        ? "关闭窗口不会离席。牌局保存在主持人的浏览器；主持人离线时暂停，在原浏览器返回后可继续。清除浏览器数据或换设备无法恢复旧牌局。"
-        : "Closing the window keeps your seat. The host's browser saves the game. Play pauses while the host is offline and resumes when they return in that browser. Clearing browser data or changing devices prevents recovery."}</p>`,
-    afterRender: (root) => {
-      root.querySelector("#openThreeDragon")?.addEventListener("click", () => {
-        if (getState().enabled.threeDragonAnte) void OBR.broadcast.sendMessage(TABLE_OPEN, {}, { destination: "LOCAL" });
-      });
+    dynamicBody: (lang) => {
+      const en = lang === "en";
+      const url = `https://obr.dnd.center/three-dragon-ante${import.meta.env.BASE_URL.includes("suite-dev") ? "-dev" : ""}/manifest.json`;
+      return `<h3>${en ? "A separate card table" : "独立的酒馆牌桌"}</h3>
+        <p>${en ? "Install Three-Dragon Ante in this room when your table wants to play. It has its own entry and does not need Full Suite to stay open." : "想打牌时，由 DM 将三龙牌安装到房间。它有自己的入口，无需依赖套件窗口。"}</p>
+        <a class="layout-editor-btn" href="${url}" target="_blank" rel="noopener">${en ? "Three-Dragon Ante extension address" : "三龙牌插件地址"}</a>
+        <p><code>${url}</code></p>
+        <p>${en ? "Legendary Edition base game for 2–6 players, with a guided practice table. Uses Owlbear room messages; the host browser runs and saves the game." : "Legendary Edition 基础版，2–6 人，含新手实战引导。通过枭熊房间消息联网，主持人的浏览器运行和保存牌局。"}</p>`;
     },
   },
   {
@@ -3592,8 +3576,11 @@ const moduleStatuses = new Map<string, ModuleLifecycleSnapshot>();
 
 let lang: Language = "zh";
 
+function availableTabs(): TabDef[] {
+  return VISIBLE_TABS.filter(tab => isGM || tab.id !== "transitions");
+}
 function findTab(id: string): TabDef {
-  return VISIBLE_TABS.find((t) => t.id === id) ?? VISIBLE_TABS[0];
+  return availableTabs().find((t) => t.id === id) ?? availableTabs()[0];
 }
 
 
@@ -3615,7 +3602,8 @@ function broadcastOverlayVisibility(visible: boolean): void {
 }
 
 function renderTabs() {
-  tabsEl.innerHTML = VISIBLE_TABS.map((tab) => {
+  if (!availableTabs().some(tab => tab.id === activeTab)) activeTab = availableTabs()[0].id;
+  tabsEl.innerHTML = availableTabs().map((tab) => {
     const text = lang === "zh" ? tab.zh : tab.en;
     return `<button class="tab ${
       activeTab === tab.id ? "on" : ""

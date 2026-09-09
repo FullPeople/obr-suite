@@ -53,6 +53,7 @@ function writeCreatePrefs() {
 
 const params = new URLSearchParams(location.search);
 const portalId = params.get("id") ?? "";
+const editorInstance = params.get("instance") ?? "";
 const isNew = params.get("isNew") === "1";
 
 const EDIT_POPOVER_ID = `${PLUGIN_ID}/edit-popover`;
@@ -388,22 +389,36 @@ async function cancel() {
 }
 
 async function closeSelf() {
+  if (closing) return;
+  closing = true;
+  closeFailed = false; renderCloseError();
   appearance?.dispose();
   // Auto-save on close (X click, Esc, etc.) — but only if Cancel
   // hasn't already taken over the close path.
-  if (!cancelled) await autoSave();
   try {
+    if (!cancelled) await autoSave();
+    if (!editorInstance) throw Error("Missing editor instance");
     await OBR.broadcast.sendMessage(
       BROADCAST_EDIT_CLOSE,
-      {},
+      { id: portalId, instance: editorInstance },
       { destination: "LOCAL" },
     );
-  } catch {}
-  try { await OBR.popover.close(EDIT_POPOVER_ID); } catch {}
+  } catch (error) {
+    console.warn("[obr-suite/portals] close request failed", error);
+    closeFailed = true; renderCloseError();
+  } finally { closing = false; }
+}
+let closing = false, closeFailed = false;
+let closeError: HTMLParagraphElement | undefined;
+function renderCloseError() {
+  if (!closeFailed) { closeError?.remove(); closeError = undefined; return; }
+  if (!closeError) { closeError = document.createElement("p"); closeError.setAttribute("role", "alert"); document.querySelector(".body")?.append(closeError); }
+  closeError.textContent = lang === "en" ? "Could not close the editor. Please try again." : "编辑窗口暂时无法关闭，请重试。";
 }
 
 // Re-render labels + title when the user flips language in Settings.
 function reapplyI18n() {
+  renderCloseError();
   renderEffectLabel();
   appearance?.setLanguage(lang);
   applyI18nDom(lang);

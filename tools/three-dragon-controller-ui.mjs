@@ -11,7 +11,7 @@ const out = mkdtempSync(join(tmpdir(), "three-dragon-controller-ui-")), file = j
 await build({ input: resolve("tools/three-dragon-controller-ui.entry.ts"), platform: "browser", output: { file, format: "esm", codeSplitting: false } });
 const server = createServer((request, response) => {
   response.setHeader("Content-Type", request.url === "/integration.js" ? "application/javascript" : request.url === "/style.css" ? "text/css" : "text/html");
-  response.end(request.url === "/integration.js" ? readFileSync(file) : request.url === "/style.css" ? readFileSync("src/modules/threeDragonAnte/style.css") :
+  response.end(request.url === "/integration.js" ? readFileSync(file) : request.url === "/style.css" ? readFileSync("extensions/three-dragon-ante/src/game/style.css") :
     '<!doctype html><link rel="stylesheet" href="/style.css"><main id="host"></main><hr><main id="alice"></main><script type="module" src="/integration.js"></script>');
 });
 await new Promise(done => server.listen(0, "127.0.0.1", done));

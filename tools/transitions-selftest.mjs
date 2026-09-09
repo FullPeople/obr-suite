@@ -14,7 +14,7 @@ const mutations = [
   { name: "let players broadcast to everyone", file: "index.ts", from: ' || role !== "GM"', to: "" },
   { name: "capture pointers with the screen effect", file: "screen-effect.ts", from: ".disableHit(true)", to: ".disableHit(false)" },
   { name: "leave effects behind after cleanup", file: "screen-effect.ts", from: "void OBR.scene.local.deleteItems([effect.id]).catch(() => {});", to: "void Promise.resolve();" },
-  { name: "close a newer popover after an old open resolves", file: "index.ts", from: "await OBR.popover.close(popoverId);", to: "await OBR.popover.close(`${DISPLAY_ID}/${displayId}`);" },
+  { name: "close a newer modal after an old open resolves", file: "index.ts", from: "await closeNative(popoverId);", to: "await closeNative(`${DISPLAY_ID}/${displayId}`);" },
   { name: "rest closure cancels a newer portal effect", file: "index.ts", from: "await stopScreenTransition(closingId);", to: "await stopScreenTransition();" },
   { name: "ignore a role revocation while reading role", file: "index.ts", from: "revision !== roleRevision", to: "false" },
 ];

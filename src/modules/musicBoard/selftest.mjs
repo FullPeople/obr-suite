@@ -65,6 +65,12 @@ async function roomTest(mutation) {
     const count = pool.writes.length; await player.submit({ type: "queue", id: "one" }, "queue-one"); assert.equal(pool.writes.length, count, "retransmitted command id must not enqueue twice");
     await player.submit({ type: "next" }); const playing = host.state.bgm.playbackId;
     assert.equal(host.state.bgm.track.id, "one"); assert.deepEqual(host.state.queue, ["two"]);
+    if (!mutation) {
+      const beforeStale = pool.writes.length;
+      for (const type of ["pause", "resume", "seek", "loop", "stop"])
+        await assert.rejects(player.submit({ type, expectedPlaybackId: "previous-track", position: 20, value: true }), /stalePlayback/);
+      assert.equal(pool.writes.length, beforeStale, "a delayed Studio action must not affect the replacement track");
+    }
     await assert.rejects(other.submit({ type: "duration", playbackId: playing, duration: 88 }), /permission/);
     await host.submit({ type: "duration", playbackId: playing, duration: 88 }); assert.equal(player.state.bgm.track.duration, 88);
     const beforeOldDeadline = pool.writes.length;
@@ -141,8 +147,35 @@ async function peerTest() {
   assert.equal(studioOperation({ type: "bgm-load", url: "blob:private-file" }), null);
   assert.deepEqual(studioOperation({ type: "bgm-pause", position: 23 }), { type: "pause", position: 23 });
 }
+async function modernPeerTest() {
+  const { StudioPeer } = await bundle("peer"), { emptySession, reduceMusic } = await bundle("model");
+  const { StudioRoomSync } = await import(pathToFileURL(resolve("tools/music-studio/room-sync.js")).href);
+  class Emitter { handlers = new Map(); sent = []; on(k,f) { if(!this.handlers.has(k))this.handlers.set(k,[]);this.handlers.get(k).push(f); } emit(k,v) { for(const f of this.handlers.get(k)||[])f(v); } send(m) { this.sent.push(m); } close(){} }
+  const peers=[];class Peer extends Emitter { constructor(){super();this.connection=new Emitter();peers.push(this);}connect(){return this.connection;}destroy(){} }
+  const calls=[],blocked=gate();const bridge=new StudioPeer((op,id)=>{calls.push({op,id});return blocked.promise;},()=>{},async()=>Peer);
+  const state=reduceMusic(emptySession(),{type:"play",track:track("one"),position:19,paused:true},"first",1000);
+  assert.equal(state.bgm.paused,true,"fresh-room Studio bootstrap can load paused atomically");
+  bridge.publish(state);await bridge.connect("ABCDEF",true);peers[0].emit('open');const c=peers[0].connection;c.emit('open');c.emit('data',{type:'studio-ready',protocol:2});
+  const snapshot=c.sent.at(-1);assert.equal(snapshot.type,'room-state');assert.equal(snapshot.state.bgm.position,19);assert.equal(snapshot.adoptStudio,false);assert.equal(bridge.status,'connected');
+  const msg={type:'studio-command',sessionId:snapshot.sessionId,requestId:'studio-action',command:{type:'bgm-pause',expectedPlaybackId:'first'}};
+  c.emit('data',msg);c.emit('data',msg);await settle();assert.equal(calls.length,1);assert.equal(calls[0].op.expectedPlaybackId,'first');assert.equal(c.sent.some(m=>m.type==='studio-ack'),false,"ACK waits for room persistence");
+  blocked.resolve();await settle();assert.equal(c.sent.at(-1).ok,true);
+  await bridge.connect("ABCDEF",true);peers[1].emit('open');peers[1].connection.emit('open');peers[1].connection.emit('data',{type:'studio-ready',protocol:2});
+  const newSession=peers[1].connection.sent.at(-1).sessionId;
+  assert.notEqual(newSession,snapshot.sessionId);peers[1].connection.emit('data',msg);c.emit('data',msg);await settle();assert.equal(calls.length,1,"old handshake/connection cannot control the room");
+  peers[1].connection.emit('data',{...msg,sessionId:newSession,requestId:'studio-disconnecting'});bridge.disconnect();await settle();assert.equal(calls.length,1,"disconnect before queued dispatch cancels it");
+  const sent=[],applied=[],failed=[];let bootstrap=0;
+  const sync=new StudioRoomSync(m=>sent.push(m),m=>applied.push(m),()=>bootstrap++,e=>failed.push(e));
+  sync.receive({...snapshot,sequence:3});sync.receive({...snapshot,sequence:2,state:{...snapshot.state,bgm:null}});
+  sync.receive({...snapshot,sessionId:'old',sequence:100});assert.equal(applied.length,1,"older sequence and foreign session ignored");
+  for(let i=0;i<50;i++)sync.command({type:'volume',bus:'bgm',vol:i/50});await new Promise(r=>setTimeout(r,140));
+  const commands=sent.filter(m=>m.type==='studio-command');assert.equal(commands.length,1);assert.equal(commands[0].command.vol,.98);
+  sync.receive({type:'studio-ack',sessionId:snapshot.sessionId,requestId:commands[0].requestId,ok:false,error:'roomFull'});assert.deepEqual(failed,['roomFull']);
+  sync.dispose();sync.receive({...snapshot,sequence:10});assert.equal(applied.length,1);assert.equal(bootstrap,0);
+  console.log("Studio v2 unit checks PASS: persistence ACK, target guard, session/sequence isolation, 50 volume inputs coalesce, failure feedback, dispose.");
+}
 try {
-  await roomTest(); await audioTest(); await peerTest();
+  await roomTest(); await audioTest(); await peerTest(); await modernPeerTest();
   const mutations = [
     { name: "dedup", file: "musicBoard/room.ts", from: "if (state.recent.includes(request.requestId)) ok = true;", to: "if (false) ok = true;" },
     { name: "serialize", file: "musicBoard/room.ts", from: "this.queue = this.queue.then(() => this.execute(data, event.connectionId))", to: "this.queue = this.execute(data, event.connectionId)" },

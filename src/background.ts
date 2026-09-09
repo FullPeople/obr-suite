@@ -1,3 +1,4 @@
+import { openPanelIds, onPanelGeometryChange, notifyPanelGeometry, setPanelOpen } from "./utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
 import { startSceneSync, refreshFromScene, getState, onStateChange, onStateRefreshed, onStateRefreshFailed, getLocalLang } from "./state";
 import { ModuleLifecycle, SceneModuleCoordinator, type ModuleHooks } from "./utils/moduleLifecycle";
@@ -22,10 +23,8 @@ import { setupResourceTracker, teardownResourceTracker } from "./modules/resourc
 import { setupBubbles, teardownBubbles } from "./modules/bubbles";
 import { setupStatusTracker, teardownStatusTracker } from "./modules/statusTracker";
 import { setupHpBar, teardownHpBar } from "./modules/hpBar";
-import { setupBossBar, teardownBossBar } from "./modules/bossBar";
+import { setupBossBar, teardownBossBar, setBossBarObstacles } from "./modules/bossBar";
 import { setupTransitions, teardownTransitions } from "./modules/transitions";
-import { setupThreeDragonAnte, teardownThreeDragonAnte } from "./modules/threeDragonAnte";
-import { setupSharedPointer, teardownSharedPointer } from "./modules/sharedPointer";
 import { setupMetadataInspector, teardownMetadataInspector } from "./modules/metadata-inspector";
 import {
   setupDynamicFog,
@@ -333,7 +332,7 @@ async function openCluster() {
       hidePaper: true,
       disableClickAway: true,
     });
-    clusterIsOpen = true;
+    clusterIsOpen = true; setPanelOpen("cluster", true);
   } catch (e) {
     console.error("[obr-suite] openCluster failed", e);
   }
@@ -341,7 +340,7 @@ async function openCluster() {
 
 async function closeCluster() {
   try { await OBR.popover.close(CLUSTER_POPOVER_ID); } catch {}
-  clusterIsOpen = false;
+  clusterIsOpen = false; setPanelOpen("cluster", false);
   // Closing the trigger should also close the row (it's anchored
   // relative to the trigger; orphan rows look awful).
   await closeClusterRow();
@@ -373,7 +372,7 @@ async function openClusterRow() {
       hidePaper: true,
       disableClickAway: true,
     });
-    clusterRowIsOpen = true;
+    clusterRowIsOpen = true; setPanelOpen("cluster-row", true);
     broadcastRowState(true);
   } catch (e) {
     console.error("[obr-suite] openClusterRow failed", e);
@@ -382,7 +381,7 @@ async function openClusterRow() {
 
 async function closeClusterRow() {
   try { await OBR.popover.close(CLUSTER_ROW_POPOVER_ID); } catch {}
-  clusterRowIsOpen = false;
+  clusterRowIsOpen = false; setPanelOpen("cluster-row", false);
   broadcastRowState(false);
 }
 
@@ -401,6 +400,29 @@ function broadcastRowState(open: boolean) {
 // when one isn't currently displayed (e.g. scene not ready).
 let clusterIsOpen = false;
 let clusterRowIsOpen = false;
+
+// Recompute only on actual panel open/close/move. Never poll scene items or all panels.
+let obstacleRequest = 0, obstacleTimer: ReturnType<typeof setTimeout> | undefined, obstacleAlive = true;
+function refreshBossObstacles() {
+  if (!obstacleAlive) return;
+  const request = ++obstacleRequest;
+  if (obstacleTimer) clearTimeout(obstacleTimer);
+  obstacleTimer = setTimeout(async () => {
+    obstacleTimer = undefined;
+    const boxes = await Promise.all(openPanelIds().map(id => computePanelBbox(id)));
+    if (obstacleAlive && request === obstacleRequest) setBossBarObstacles(boxes.filter((box): box is NonNullable<typeof box> => box !== null));
+  }, 40);
+}
+const offBossObstaclePanels = onPanelGeometryChange(refreshBossObstacles);
+const onBossObstacleStorage = (event: StorageEvent) => {
+  if (event.key === null || event.key.startsWith("obr-suite/panel-offset/") || event.key.startsWith("obr-suite/panel-size/")) refreshBossObstacles();
+};
+window.addEventListener("storage", onBossObstacleStorage);
+const offBossObstacleViewport = onViewportResize(refreshBossObstacles);
+window.addEventListener("pagehide", () => {
+  obstacleAlive = false; obstacleRequest++; if (obstacleTimer) clearTimeout(obstacleTimer);
+  offBossObstaclePanels(); offBossObstacleViewport(); window.removeEventListener("storage", onBossObstacleStorage);
+}, { once: true });
 
 // Cluster bbox provider — bottom-LEFT, fixed-size trigger.
 // Sign convention matches openCluster (subtract dy from bottom-distance).
@@ -453,6 +475,7 @@ OBR.onReady(() => {
   // independent stored offsets so a drag on one doesn't drag the
   // other along.
   OBR.broadcast.onMessage(BC_PANEL_DRAG_END, async (event) => {
+    notifyPanelGeometry();
     const payload = event.data as DragEndPayload | undefined;
     if (payload?.panelId === PANEL_IDS.cluster) {
       if (clusterIsOpen) await openCluster();
@@ -692,8 +715,6 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   hpBar: { setup: setupHpBar, teardown: teardownHpBar },
   bossBar: { setup: setupBossBar, teardown: teardownBossBar },
   transitions: { setup: setupTransitions, teardown: teardownTransitions },
-  threeDragonAnte: { setup: setupThreeDragonAnte, teardown: teardownThreeDragonAnte },
-  sharedPointer: { setup: setupSharedPointer, teardown: teardownSharedPointer },
   metadataInspector: {
     setup: async () => { await setupMetadataInspector(); },
     teardown: async () => { teardownMetadataInspector(); },

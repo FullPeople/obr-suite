@@ -1,3 +1,4 @@
+import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR, { type Item } from "@owlbear-rodeo/sdk";
 import { getLocalLang } from "../../state";
 import { assetUrl } from "../../asset-base";
@@ -162,8 +163,8 @@ function revokeInvalidInfo(): void {
 
 function isAutoInfoEnabled(): boolean {
   try {
-    return localStorage.getItem(AUTO_INFO_KEY) === "1";
-  } catch { return false; }
+    return localStorage.getItem(AUTO_INFO_KEY) !== "0";
+  } catch { return true; }
 }
 
 // The main panel opens as a SIZED modal (NOT fullScreen), leaving a
@@ -290,7 +291,7 @@ async function openInfoPopoverFor(cardId: string, roomId: string, itemId: string
       hidePaper: true,
       disableClickAway: true,
     });
-    infoPopoverOpen = true;
+    infoPopoverOpen = true; setPanelOpen("cc-info", true);
   } catch (e) {
     console.error("[obr-suite/character-cards] openInfoPopoverFor failed", e);
   }
@@ -322,7 +323,7 @@ function syncInfoPanel(): Promise<void> {
       if (!active || !sceneReady || !desiredInfo) {
         if (!infoPopoverOpen) { openedInfoUrl = ""; return; }
         try { await OBR.popover.close(INFO_POPOVER_ID); } catch { return; }
-        infoPopoverOpen = false; openedInfoUrl = "";
+        infoPopoverOpen = false; setPanelOpen("cc-info", false); openedInfoUrl = "";
         continue;
       }
       if (infoPopoverOpen && !reanchorInfo) return;

@@ -1,4 +1,5 @@
 import OBR, { buildImage, buildLine, Item } from "@owlbear-rodeo/sdk";
+import { setPanelOpen } from "../../utils/panelObstacles";
 import {
   PANEL_IDS,
   getPanelOffset,
@@ -17,7 +18,8 @@ import {
   resolvePortalEffect,
 } from "./types";
 import { prefersReducedMotion } from "../transitions/protocol";
-import { needsPortalIconMigration, migratePortalIconDraft } from "./appearance";
+import { needsPortalIconMigration, migratePortalIconDraft, applyPortalImage, isPortalImage } from "./appearance";
+import { resolveDefaultPortalImage } from "./default-image";
 // NOT `../../i18n`. This module is on background.ts's boot path, and
 // that file is one ~600-key object literal indexed dynamically, so
 // importing it for three strings put all 46 kB of it in front of every
@@ -193,6 +195,19 @@ export const PORTALS_BC_BLINK_AND_FOCUS = BROADCAST_BLINK_AND_FOCUS;
 // --- DM auto-edit-popover when single portal selected ---
 let editPopoverOpen = false;
 let currentEditId: string | null = null;
+let portalEditorActive = false, portalEditorReady = false, portalEditorAuthority = 0;
+let editorConnectionId = "";
+let editRequestRevision = 0, editSelectionRevision = 0;
+type EditRequest = { id: string; isNew: boolean; epoch: number; authority: number; revision: number; reanchor: boolean; instance: string };
+let desiredEdit: EditRequest | null = null, openedEditEpoch = -1, openedEditAuthority = -1;
+let currentEditInstance = "";
+let editQueue: Promise<void> | null = null, editRequested = false;
+function editorAllowed(epoch: number, authority: number): boolean {
+  return portalEditorActive && portalEditorReady && role === "GM" && epoch === portalEffectEpoch && authority === portalEditorAuthority;
+}
+function currentEditRequest(request: EditRequest): boolean {
+  return desiredEdit === request && request.revision === editRequestRevision && editorAllowed(request.epoch, request.authority);
+}
 // Skip the auto-popover the first time selection becomes the portal we
 // just created — the post-draw flow opens the popover explicitly with
 // isNew=1 and we don't want it racing with the selection-watcher.
@@ -344,6 +359,8 @@ async function clearPairPreview() {
 // --- Create portal --------------------------------------------------------
 
 async function createPortal(center: { x: number; y: number }, radius: number) {
+  const epoch = portalEffectEpoch, authority = portalEditorAuthority;
+  if (!editorAllowed(epoch, authority)) return;
   let prefs: CreatePrefs = {};
   try {
     const raw = localStorage.getItem(CREATE_PREFS_KEY);
@@ -364,6 +381,7 @@ async function createPortal(center: { x: number; y: number }, radius: number) {
   // deletable via OBR's built-in handles.
   let sceneDpi = 150;
   try { sceneDpi = await OBR.scene.grid.getDpi(); } catch {}
+  if (!editorAllowed(epoch, authority)) return;
   const half = ICON_SIZE / 2;
   // Linear scale: visible diameter = 2 × radius scene-pixels.
   // Base render (scale=1) = 1 grid cell = sceneDpi scene-pixels.
@@ -385,7 +403,12 @@ async function createPortal(center: { x: number; y: number }, radius: number) {
     .locked(locked)
     .metadata({ [PORTAL_KEY]: meta })
     .build();
+  applyPortalImage(img, await resolveDefaultPortalImage());
+  if (!editorAllowed(epoch, authority) || await OBR.player.getRole() !== "GM" || !editorAllowed(epoch, authority)) return;
   await OBR.scene.items.addItems([img]);
+  // The scene can change while the host acknowledges an already-issued add.
+  // Do not reopen that old scene's editor (or set its selection suppression).
+  if (!editorAllowed(epoch, authority) || await OBR.player.getRole() !== "GM" || !editorAllowed(epoch, authority)) return;
   suppressAutoEditOnce = img.id;
   await openEditPopover(img.id, true);
 }
@@ -471,11 +494,15 @@ async function createLinkedPortalPair(
   a: { x: number; y: number },
   b: { x: number; y: number },
 ): Promise<void> {
+  const epoch = portalEffectEpoch;
   const tag = await createUniquePairTag();
+  const artwork = await resolveDefaultPortalImage();
   const portals = await Promise.all([
     buildStandardPortalItem(a, tag),
     buildStandardPortalItem(b, tag),
   ]);
+  for (const portal of portals) if (isPortalImage(portal)) applyPortalImage(portal, artwork);
+  if (epoch !== portalEffectEpoch || await OBR.player.getRole() !== "GM" || epoch !== portalEffectEpoch) return;
   await OBR.scene.items.addItems(portals);
 }
 
@@ -502,58 +529,119 @@ registerPanelBbox(PANEL_IDS.portalEdit, async () => {
   } catch { return null; }
 });
 
-async function openEditPopover(portalId: string, isNew: boolean) {
-  if (editPopoverOpen && currentEditId === portalId) return;
-  if (editPopoverOpen) await closeEditPopover();
-  try {
-    const vw = await OBR.viewport.getWidth();
-    const url = `${EDIT_URL}?id=${encodeURIComponent(portalId)}${isNew ? "&isNew=1" : ""}`;
-    const userOff = getPanelOffset(PANEL_IDS.portalEdit);
-    const sizeOverride = getPanelSize(PANEL_IDS.portalEdit);
-    const w = sizeOverride?.width ?? EDIT_W;
-    const h = sizeOverride?.height ?? EDIT_H;
-    await OBR.popover.open({
-      id: EDIT_POPOVER_ID,
-      url,
-      width: w,
-      height: h,
-      anchorReference: "POSITION",
-      anchorPosition: {
-        left: Math.round(vw / 2) + userOff.dx,
-        top: EDIT_TOP_OFFSET + userOff.dy,
-      },
-      anchorOrigin: { horizontal: "CENTER", vertical: "TOP" },
-      transformOrigin: { horizontal: "CENTER", vertical: "TOP" },
-      hidePaper: true,
-      // disableClickAway:true so OBR doesn't insert a viewport-wide
-      // invisible click-catcher overlay (which the user perceives as
-      // "a mouse-event mask"). Clicks outside the popover go straight
-      // to the canvas (move tokens / open menus / etc.); the popover
-      // is dismissed only via its own X / 取消 / 保存 / 删除 buttons.
-      disableClickAway: true,
-    });
-    editPopoverOpen = true;
-    currentEditId = portalId;
-  } catch (e) {
-    console.error("[obr-suite/portals] openEditPopover failed", e);
-  }
+async function openEditPopover(portalId: string, isNew: boolean, reanchor = false) {
+  const epoch = portalEffectEpoch, authority = portalEditorAuthority;
+  if (!editorAllowed(epoch, authority)) return;
+  ++editSelectionRevision;
+  if (!reanchor && desiredEdit?.id === portalId && currentEditRequest(desiredEdit)) return syncEditPopover();
+  desiredEdit = { id: portalId, isNew, epoch, authority, revision: ++editRequestRevision, reanchor, instance: crypto.randomUUID() };
+  await syncEditPopover();
 }
 
 async function closeEditPopover() {
-  try { await OBR.popover.close(EDIT_POPOVER_ID); } catch {}
-  editPopoverOpen = false;
-  currentEditId = null;
+  ++editSelectionRevision; ++editRequestRevision; desiredEdit = null;
+  await syncEditPopover();
+}
+
+/** One host popover ID, one in-flight operation. A stale open is closed before
+ * the next scene's editor opens; a late close never erases the latest intent. */
+function syncEditPopover(): Promise<void> {
+  editRequested = true;
+  if (editQueue) return editQueue;
+  editQueue = (async () => {
+    // This raw close deliberately never queues itself or changes desiredEdit.
+    const closeActual = async () => {
+      if (!editPopoverOpen) return;
+      await OBR.popover.close(EDIT_POPOVER_ID);
+      editPopoverOpen = false; currentEditId = null;
+      currentEditInstance = "";
+      openedEditEpoch = openedEditAuthority = -1;
+      setPanelOpen("portal-edit", false);
+    };
+    while (true) {
+      editRequested = false;
+      const request = desiredEdit;
+      if (!request || !currentEditRequest(request)) {
+        if (desiredEdit === request) desiredEdit = null;
+        await closeActual();
+        if (desiredEdit) continue;
+        return;
+      }
+      const sameTarget = editPopoverOpen && currentEditId === request.id && currentEditInstance === request.instance && openedEditEpoch === request.epoch && openedEditAuthority === request.authority;
+      if (sameTarget && !request.reanchor) return;
+      if (editPopoverOpen && !sameTarget) {
+        await closeActual();
+        if (!currentEditRequest(request)) continue;
+      }
+      const vw = await OBR.viewport.getWidth();
+      if (!currentEditRequest(request)) continue;
+      const freshRole = await OBR.player.getRole();
+      if (!currentEditRequest(request)) continue;
+      if (freshRole !== "GM") { desiredEdit = null; continue; }
+      const userOff = getPanelOffset(PANEL_IDS.portalEdit);
+      const sizeOverride = getPanelSize(PANEL_IDS.portalEdit);
+      await OBR.popover.open({
+        id: EDIT_POPOVER_ID,
+        url: `${EDIT_URL}?id=${encodeURIComponent(request.id)}&instance=${encodeURIComponent(request.instance)}${request.isNew ? "&isNew=1" : ""}`,
+        width: sizeOverride?.width ?? EDIT_W,
+        height: sizeOverride?.height ?? EDIT_H,
+        anchorReference: "POSITION",
+        anchorPosition: { left: Math.round(vw / 2) + userOff.dx, top: EDIT_TOP_OFFSET + userOff.dy },
+        anchorOrigin: { horizontal: "CENTER", vertical: "TOP" },
+        transformOrigin: { horizontal: "CENTER", vertical: "TOP" },
+        hidePaper: true,
+        disableClickAway: true,
+      });
+      // Record what actually opened even if its ACK is stale. The next loop
+      // removes it before fulfilling the latest request, including teardown.
+      editPopoverOpen = true; currentEditId = request.id;
+      currentEditInstance = request.instance;
+      openedEditEpoch = request.epoch; openedEditAuthority = request.authority;
+      setPanelOpen("portal-edit", true);
+      if (currentEditRequest(request)) request.reanchor = false;
+    }
+  })().catch(e => {
+    console.error("[obr-suite/portals] editor operation failed", e);
+    void OBR.notification.show(_lang() === "en" ? "Could not update the portal editor. Please try again." : "传送门编辑窗口操作失败，请重试。", "ERROR").catch(() => {});
+  }).finally(() => {
+    editQueue = null;
+    if (editRequested) void syncEditPopover();
+  });
+  return editQueue;
+}
+
+async function handleEditClose(msg: { connectionId: string; data: unknown }): Promise<void> {
+  const data = msg.data as { id?: unknown; instance?: unknown } | undefined;
+  if (!editorConnectionId || msg.connectionId !== editorConnectionId || !data) return;
+  const desiredMatches = desiredEdit && currentEditRequest(desiredEdit) && data.id === desiredEdit.id && data.instance === desiredEdit.instance;
+  // A failed close retains the actual old window; permit its own retry only
+  // while no newer request owns this ID. Never accept an old iframe's close.
+  const retryMatches = !desiredEdit && editPopoverOpen && data.id === currentEditId && data.instance === currentEditInstance;
+  if (!desiredMatches && !retryMatches) return;
+  await closeEditPopover();
+}
+
+async function reanchorEditPopover(): Promise<void> {
+  // An old physical iframe can remain while its close ACK is pending. Layout
+  // events must follow the latest valid target, never revive that stale ID.
+  if (!editPopoverOpen || !desiredEdit || !currentEditRequest(desiredEdit)) return;
+  await openEditPopover(desiredEdit.id, false, true);
 }
 
 // --- DM selection watcher → auto edit popover -----------------------------
 
 async function handleDMSelectionForEdit(selection: string[] | undefined) {
-  if (role !== "GM") return;
+  const selectionRequest = ++editSelectionRevision, epoch = portalEffectEpoch, authority = portalEditorAuthority;
+  if (!editorAllowed(epoch, authority)) return;
   if (!selection || selection.length !== 1) {
-    if (editPopoverOpen) await closeEditPopover();
+    await closeEditPopover();
     return;
   }
   const id = selection[0];
+  if (desiredEdit && desiredEdit.id !== id) {
+    desiredEdit = null; ++editRequestRevision;
+    void syncEditPopover();
+  }
   if (suppressAutoEditOnce === id) {
     // The post-draw open already handled this id once.
     suppressAutoEditOnce = null;
@@ -562,13 +650,14 @@ async function handleDMSelectionForEdit(selection: string[] | undefined) {
   let portalItem: Item | null = null;
   try {
     const items = await OBR.scene.items.getItems([id]);
+    if (selectionRequest !== editSelectionRevision || !editorAllowed(epoch, authority)) return;
     if (items.length > 0 && isPortal(items[0])) portalItem = items[0];
   } catch {}
+  if (selectionRequest !== editSelectionRevision || !editorAllowed(epoch, authority)) return;
   if (!portalItem) {
-    if (editPopoverOpen) await closeEditPopover();
+    await closeEditPopover();
     return;
   }
-  if (currentEditId === portalItem.id && editPopoverOpen) return;
   await openEditPopover(portalItem.id, false);
 }
 
@@ -1691,6 +1780,8 @@ async function migrateLegacyPortals(): Promise<void> {
 }
 
 export async function setupPortals(): Promise<void> {
+  portalEditorActive = true; ++portalEditorAuthority;
+  try { editorConnectionId = await OBR.player.getConnectionId(); } catch { editorConnectionId = ""; }
   try { role = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch (e) {
     console.warn("[obr-suite/portals] getRole failed — assuming PLAYER", e);
   }
@@ -1829,14 +1920,18 @@ export async function setupPortals(): Promise<void> {
   // scene load diffs against a real previous position (awaited: if the
   // subscription registered first, a later-resolving baseline fetch
   // could overwrite a fresher onChange position and fake a move).
-  if (await OBR.scene.isReady().catch(() => false)) {
+  portalEditorReady = await OBR.scene.isReady().catch(() => false);
+  if (portalEditorReady) {
     await rebuildDragBaseline("setup");
   }
   // background.ts does NOT re-run module setup on scene switches
   // (moduleStatus stays "on"), so the module re-baselines itself.
   unsubs.push(
     OBR.scene.onReadyChange((ready) => {
+      portalEditorReady = ready;
       portalEffectEpoch++;
+      suppressAutoEditOnce = null;
+      void closeEditPopover();
       portalEffectController?.abort();
       portalEffectController = null;
       if (ready) {
@@ -1869,6 +1964,11 @@ export async function setupPortals(): Promise<void> {
   unsubs.push(
     OBR.player.onChange(async (player) => {
       if (player.id) myPlayerId = player.id;
+      if ((player.role === "GM" || player.role === "PLAYER") && player.role !== role) {
+        role = player.role; ++portalEditorAuthority;
+        suppressAutoEditOnce = null;
+        void closeEditPopover();
+      }
       try {
         if (role === "GM") await handleDMSelectionForEdit(player.selection);
       } catch (e) {
@@ -1886,8 +1986,9 @@ export async function setupPortals(): Promise<void> {
   // player drag-end portal-entry check.
   unsubs.push(
     OBR.scene.items.onChange(async (items) => {
-      if (editPopoverOpen && currentEditId) {
-        if (!items.find((i) => i.id === currentEditId)) {
+      const editingId = desiredEdit?.id ?? currentEditId;
+      if (editingId) {
+        if (!items.find((i) => i.id === editingId)) {
           await closeEditPopover();
         }
       }
@@ -2084,14 +2185,13 @@ export async function setupPortals(): Promise<void> {
     OBR.broadcast.onMessage(BROADCAST_EDIT_DELETE, async (msg) => {
       const data = msg.data as { id: string } | undefined;
       if (!data) return;
+      const revision = editRequestRevision, epoch = portalEffectEpoch;
       try { await OBR.scene.items.deleteItems([data.id]); } catch {}
-      await closeEditPopover();
+      if (revision === editRequestRevision && epoch === portalEffectEpoch) await closeEditPopover();
     })
   );
   unsubs.push(
-    OBR.broadcast.onMessage(BROADCAST_EDIT_CLOSE, async () => {
-      await closeEditPopover();
-    })
+    OBR.broadcast.onMessage(BROADCAST_EDIT_CLOSE, handleEditClose)
   );
 
   // Popover-close detector: when the destination popover closes via
@@ -2117,25 +2217,18 @@ export async function setupPortals(): Promise<void> {
     OBR.broadcast.onMessage(BC_PANEL_DRAG_END, async (event) => {
       const payload = event.data as DragEndPayload | undefined;
       if (payload?.panelId !== PANEL_IDS.portalEdit) return;
-      if (!editPopoverOpen || !currentEditId) return;
-      const id = currentEditId;
-      editPopoverOpen = false;
-      currentEditId = null;
-      await openEditPopover(id, false);
+      await reanchorEditPopover();
     }),
   );
   unsubs.push(
     OBR.broadcast.onMessage(BC_PANEL_RESET, async () => {
-      if (!editPopoverOpen || !currentEditId) return;
-      const id = currentEditId;
-      editPopoverOpen = false;
-      currentEditId = null;
-      await openEditPopover(id, false);
+      await reanchorEditPopover();
     }),
   );
 }
 
 export async function teardownPortals(): Promise<void> {
+  portalEditorActive = false; portalEditorReady = false; ++portalEditorAuthority;
   portalEffectEpoch++;
   portalEffectController?.abort();
   portalEffectController = null;
@@ -2143,11 +2236,10 @@ export async function teardownPortals(): Promise<void> {
   await closeDestinationPopover();
   await closeBlinkModal();
   await clearPairPreview();
-  if (role === "GM") {
-    try { await OBR.tool.removeMode(TOOL_PAIR_MODE_ID); } catch {}
-    try { await OBR.tool.removeMode(TOOL_MODE_ID); } catch {}
-    try { await OBR.tool.remove(TOOL_ID); } catch {}
-  }
+  // This client may have lost its GM role after registering the tools.
+  try { await OBR.tool.removeMode(TOOL_PAIR_MODE_ID); } catch {}
+  try { await OBR.tool.removeMode(TOOL_MODE_ID); } catch {}
+  try { await OBR.tool.remove(TOOL_ID); } catch {}
   for (const u of unsubs.splice(0)) u();
   if (dragEndTimer) {
     clearTimeout(dragEndTimer);
@@ -2165,4 +2257,5 @@ export async function teardownPortals(): Promise<void> {
   lastTokenPos.clear();
   recentlyTeleported.clear();
   myPlayerId = "";
+  if (editPopoverOpen) throw Error("Portal editor cleanup failed; teardown can be retried.");
 }

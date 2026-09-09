@@ -1,3 +1,4 @@
+import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
 import { PANEL_IDS, getPanelOffset, registerPanelBbox, BC_PANEL_DRAG_END, BC_PANEL_RESET } from "../../utils/panelLayout";
@@ -27,8 +28,12 @@ async function view(force = false): Promise<void> {
   catch (error) { console.warn("[music-board] panel status failed", error); }
 }
 function command(op: MusicOp): void {
-  if (!room) return;
-  void room.submit(op).catch(error => { console.warn("[music-board] operation failed", error); void OBR.notification.show(musicError(error), "WARNING"); });
+  void submit(op).catch(() => {});
+}
+async function submit(op: MusicOp, requestId?: string): Promise<void> {
+  if (!room) throw new Error("unavailable");
+  try { await room.submit(op, requestId); }
+  catch (error) { console.warn("[music-board] operation failed", error); void OBR.notification.show(musicError(error), "WARNING"); throw error; }
 }
 function reportDuration(): void {
   if (!active || !audio || !room || room.writer !== room.connectionId) { durationReported = ""; return; }
@@ -64,7 +69,7 @@ function syncPanel(): Promise<void> {
       if (!active || !desiredOpen) {
         resizeOff?.(); resizeOff = null;
         if (!panelOpen) return;
-        await OBR.popover.close(PANEL); panelOpen = false;
+        await OBR.popover.close(PANEL); panelOpen = false; setPanelOpen("music-board", false);
         await OBR.broadcast.sendMessage(ACTIVE, { open: false }, { destination: "LOCAL" }); continue;
       }
       if (panelOpen && !geometryDirty) return;
@@ -74,7 +79,7 @@ function syncPanel(): Promise<void> {
       await OBR.popover.open({ id: PANEL, url: assetUrl("music-board.html") + "?mini=" + (stored(MINI) === "1" ? "1" : "0"),
         width: box.width, height: box.height, anchorReference: "POSITION", anchorPosition: { left: box.left, top: box.top },
         anchorOrigin: { horizontal: "LEFT", vertical: "TOP" }, transformOrigin: { horizontal: "LEFT", vertical: "TOP" }, hidePaper: true, disableClickAway: true });
-      panelOpen = true; if (!resizeOff) resizeOff = onViewportResize(() => { geometryDirty = true; void syncPanel(); });
+      panelOpen = true; setPanelOpen("music-board", true); if (!resizeOff) resizeOff = onViewportResize(() => { geometryDirty = true; void syncPanel(); });
       await OBR.broadcast.sendMessage(ACTIVE, { open: true }, { destination: "LOCAL" }); await view(true);
     }
   })().catch(error => console.warn("[music-board] panel update failed", error)).finally(() => { syncing = null; if (panelRequested) void syncPanel(); });
@@ -84,8 +89,8 @@ export async function setupMusicBoard(): Promise<void> {
   if (active) return; active = true; const generation = ++epoch;
   audio = new MusicAudio(() => { reportDuration(); void view(); }, playbackId => { if (room && room.writer === room.connectionId) command({ type: "ended", playbackId }); });
   audio.volume = volumes();
-  room = new RoomMusic(state => { audio?.apply(state); scheduleAdvance(); reportDuration(); if (room && !room.canControl && peer?.status !== "disconnected") peer?.disconnect(); void view(true); });
-  peer = new StudioPeer(command, () => { void view(true); });
+  room = new RoomMusic(state => { audio?.apply(state); peer?.publish(state); scheduleAdvance(); reportDuration(); if (room && !room.canControl && peer?.status !== "disconnected") peer?.disconnect(); void view(true); });
+  peer = new StudioPeer(submit, () => { void view(true); });
   registerPanelBbox(PANEL_IDS.musicBoard, async () => panelOpen ? geometry() : null);
   const onStorage = (event: StorageEvent) => { if (event.key === LOCAL_VOLUMES && audio) { audio.volume = volumes(); audio.volumeChanged(); void view(true); } };
   window.addEventListener("storage", onStorage); unsubs.push(() => window.removeEventListener("storage", onStorage));
@@ -111,6 +116,7 @@ export async function setupMusicBoard(): Promise<void> {
   try {
     await room.start();
     if (!active || generation !== epoch) return;
+    peer.publish(room.state);
     scheduleAdvance(); reportDuration();
     // Reconnect transport without adopting the Studio's unversioned bootstrap.
     if (stored(INTENT) === "1" && stored(PAIR) && room.canControl) void peer.connect(stored(PAIR), true);

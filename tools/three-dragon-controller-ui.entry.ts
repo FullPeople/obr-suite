@@ -1,7 +1,7 @@
-import { TableController } from "../src/modules/threeDragonAnte/controller";
-import { mountTableUI } from "../src/modules/threeDragonAnte/ui";
+import { TableController } from "../extensions/three-dragon-ante/src/game/controller";
+import { mountTableUI } from "../extensions/three-dragon-ante/src/game/ui";
 import { ControllerRoom, MemoryStore } from "./fixtures/three-dragon-controller-room";
-import { tableText } from "../src/modules/threeDragonAnte/text";
+import { tableText } from "../extensions/three-dragon-ante/src/game/text";
 const world = window as unknown as Record<string, any>;
 const room = new ControllerRoom();
 const controllers: Record<string, TableController> = {}, surfaces: Record<string, ReturnType<typeof mountTableUI>> = {};

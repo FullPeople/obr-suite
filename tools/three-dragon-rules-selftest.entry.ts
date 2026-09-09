@@ -1,4 +1,4 @@
-import {CARDS, STANDARD_CARDS, SPECIAL_CARDS, card, createGame, applyAction, eligibleActions, projectPublic, projectSeat, checkInvariants, flightStrength, RULE_PROMPTS, CARD_HINTS, cardName, type GameState, type GameAction} from "../src/modules/threeDragonAnte/rules";
+import {CARDS, STANDARD_CARDS, SPECIAL_CARDS, card, createGame, applyAction, eligibleActions, projectPublic, projectSeat, checkInvariants, flightStrength, RULE_PROMPTS, CARD_HINTS, cardName, type GameState, type GameAction} from "../extensions/three-dragon-ante/src/game/rules";
 let assertions=0,actionSerial=0;
 function check(value:unknown,label:string):asserts value{if(!value)throw Error(`ASSERTION: ${label}`);assertions++;}
 function eq(a:unknown,b:unknown,label:string){check(JSON.stringify(a)===JSON.stringify(b),`${label}: ${JSON.stringify(a)} != ${JSON.stringify(b)}`);}

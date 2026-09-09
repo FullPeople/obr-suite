@@ -32,6 +32,7 @@ function local(type: string, extra: object = {}): void {
 }
 function command(op: MusicOp): void {
   if (!current?.canControl || pending.size) return;
+  if (["pause", "resume", "seek", "loop", "stop"].includes(op.type)) op = { ...op, expectedPlaybackId: current.state.bgm?.playbackId || "" };
   const requestId = crypto.randomUUID();
   const timeout = setTimeout(() => { pending.delete(requestId); feedback(mt("noWriter")); render(); }, 7500);
   pending.set(requestId, timeout); feedback(""); render();

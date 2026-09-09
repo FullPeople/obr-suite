@@ -10,14 +10,14 @@ mkdirSync(images, { recursive: true }); let browser, assertions = 0;
 const check = (ok, label) => { if (!ok) throw Error(`ASSERTION: ${label}`); assertions++; };
 try {
   const file = join(out, 'ui.js'); await build({ input: resolve('tools/three-dragon-ui-selftest.entry.ts'), plugins:[{name:'immersive-mutation',transform(code,id){
-    if(!process.env.THREE_DRAGON_IMMERSIVE_MUTANT||!id.replaceAll('\\','/').endsWith('/threeDragonAnte/ui.ts'))return;
+    if(!process.env.THREE_DRAGON_IMMERSIVE_MUTANT||!id.replaceAll('\\','/').endsWith('/game/ui.ts'))return;
     const target={'expired-phase':['incoming.selectionKey!==selectionKey','false'],'private-preview':['else hidePreview();','else { /* mutation: keep private preview */ }']}[process.env.THREE_DRAGON_IMMERSIVE_MUTANT];
     if(!target||!code.includes(target[0]))throw Error('Missing mutation target');return code.replace(target[0],target[1]);
   }}], output: { file, format: 'iife' } });
   browser = await chromium.launch({ headless: true, executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe' });
   for (const [count, language, width, height] of [[2,'en',1440,900],[6,'zh',1440,900],[6,'en',390,780],[2,'zh',390,780]]) {
     const page = await browser.newPage({ viewport: { width, height }, hasTouch: width < 500 });
-    await page.setContent('<main id="table-app"></main>'); await page.addStyleTag({ content: readFileSync('src/modules/threeDragonAnte/style.css', 'utf8') }); await page.addScriptTag({ path: file });
+    await page.setContent('<main id="table-app"></main>'); await page.addStyleTag({ content: readFileSync('extensions/three-dragon-ante/src/game/style.css', 'utf8') }); await page.addScriptTag({ path: file });
     await page.evaluate(({ count, language }) => { window.visual = window.scenario(count); window.ui.language(language); }, { count, language });
     check(await page.locator('#players .seat').count() === count, `${count}/${language}: all public seats rendered`);
     check(await page.locator('.opponent-hand').count() === count - 1, `${count}/${language}: opponents show only backs and counts`);
@@ -28,13 +28,15 @@ try {
     check(await page.locator('#card-preview').isVisible() && (await page.locator('.preview-hint').textContent()).length > 5, `${count}/${language}: explicit tap opens readable card ability`);
     check(await page.evaluate(() => window.commands.length) === 0, `${count}/${language}: inspect does not execute a game action`);
     await page.locator('#close-preview').click(); await page.mouse.move(2,2);
-    await page.screenshot({ path: join(images, `${count}-${language}-${width}.png`) });
+    await page.evaluate(()=>Promise.allSettled(document.getAnimations().map(a=>a.finished)));await page.screenshot({ path: join(images, `${count}-${language}-${width}.png`) });
     if (width >= 1000) {
+      const geometry = await page.evaluate(() => { const board = document.querySelector('#board-scroll').getBoundingClientRect(); return { board: board.toJSON(), cards: [...document.querySelectorAll('#players .flight .card')].map(c => ({id:c.dataset.card,...c.getBoundingClientRect().toJSON()})) }; });
+      if (geometry.cards.some(c => c.top < geometry.board.top || c.bottom > geometry.board.bottom || c.width < 60)) console.log(JSON.stringify(geometry));
       check(await page.evaluate(() => {const board=document.querySelector('#board-scroll').getBoundingClientRect();return [...document.querySelectorAll('#players .flight .card')].every(card=>{const rect=card.getBoundingClientRect();return rect.top>=board.top&&rect.bottom<=board.bottom&&rect.width>=60;});}), `${count}/${language}: desktop public flights are fully visible with readable card size`);
       const card = page.locator('#hand .card').first(); await card.hover(); check(await page.locator('#card-preview').isVisible(), `${count}/${language}: mouse hover enlarges card information`);
       await page.mouse.move(0,0); await card.focus(); check(await page.locator('#card-preview').isVisible(), `${count}/${language}: keyboard focus previews card`);
       await page.keyboard.press('Escape'); check(await page.locator('#card-preview').isHidden(), `${count}/${language}: Escape dismisses preview`);
-      if(count===6){await page.evaluate(()=>window.scenario(6,true));check(await page.evaluate(()=>{const board=document.querySelector('#board-scroll').getBoundingClientRect();return document.querySelector('#confirm-action')&&[...document.querySelectorAll('#players .flight .card')].every(card=>card.getBoundingClientRect().bottom<=board.bottom);}), 'six-player own turn keeps every public flight above the fixed action dock');await page.screenshot({path:join(images,'6-zh-own-turn-1440.png')});}
+      if(count===6){await page.evaluate(()=>window.scenario(6,true));check(await page.evaluate(()=>{const board=document.querySelector('#board-scroll').getBoundingClientRect();return document.querySelector('#confirm-action')&&[...document.querySelectorAll('#players .flight .card')].every(card=>card.getBoundingClientRect().bottom<=board.bottom);}), 'six-player own turn keeps every public flight above the fixed action dock');await page.evaluate(()=>Promise.allSettled(document.getAnimations().map(a=>a.finished)));await page.screenshot({path:join(images,'6-zh-own-turn-1440.png')});}
     } else {
       await page.locator('#hand .card').first().tap(); check(await page.locator('#card-preview').isVisible(), `${count}/${language}: touch face tap previews without autoplay`);
       const before = await page.evaluate(() => window.commands.length); await page.locator('#close-preview').click(); check(await page.evaluate(() => window.commands.length) === before, `${count}/${language}: touch dismissal never confirms a card`);
@@ -43,7 +45,7 @@ try {
     }
     await page.close();
   }
-  const page = await browser.newPage({ viewport: { width: 800, height: 720 } }); await page.setContent('<main id="table-app"></main>'); await page.addStyleTag({ content: readFileSync('src/modules/threeDragonAnte/style.css', 'utf8') }); await page.addScriptTag({ path: file });
+  const page = await browser.newPage({ viewport: { width: 800, height: 720 } }); await page.setContent('<main id="table-app"></main>'); await page.addStyleTag({ content: readFileSync('extensions/three-dragon-ante/src/game/style.css', 'utf8') }); await page.addScriptTag({ path: file });
   await page.evaluate(() => window.set(window.base)); await page.locator('#hand [data-option]').first().click(); const chosen = await page.locator('#hand [aria-pressed=true]').getAttribute('data-option');
   await page.locator('#display-mode').click();
   check(await page.evaluate(() => window.commands.at(-1).type === 'display' && window.commands.at(-1).mode === 'compact' && !window.commands.at(-1).action), 'mode switch sends only a LOCAL UI draft, never a rules action');

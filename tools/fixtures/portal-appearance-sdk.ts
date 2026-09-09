@@ -14,6 +14,7 @@ const m = (window as any).portalMock = {
   holdWrites: false, failWrite: false, language: "en", languageCallbacks: new Set<(lang: any) => void>(),
   pendingRoles: [] as (() => void)[], holdRole: seed.holdRole ?? false,
   failRoleReads: seed.failRoleReads ?? 0,
+  messages: [] as any[], nativeCloses: [] as string[], failBroadcast: false,
   emit(name: string, event: any) { for (const callback of [...listeners.get(name) ?? []]) callback(event); },
   setRole(role: string) { this.role = role; this.emit("player", { role }); },
   scene(ready: boolean) { this.ready = ready; this.emit("ready", ready); },
@@ -47,6 +48,6 @@ export default {
     },
   },
   assets: { downloadImages: (...args: any[]) => { m.pickerCalls.push(args); return new Promise<any[]>(resolve => m.pendingPicker.push(resolve)); } },
-  broadcast: { sendMessage: async () => {} },
-  popover: { close: async () => {} },
+  broadcast: { sendMessage: async (channel: string, data: any, options: any) => { if(m.failBroadcast)throw Error("Injected close message failure");m.messages.push({channel,data,destination:options.destination}); } },
+  popover: { close: async (id: string) => { m.nativeCloses.push(id); } },
 };

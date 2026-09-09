@@ -17,6 +17,7 @@ const strings = {
   close: ["关闭面板，继续播放", "Close panel; keep playing"], minimize: ["收起", "Minimize"], expand: ["展开音乐板", "Expand music"], drag: ["拖动音乐板", "Move music panel"],
   loading: ["正在读取…", "Loading…"], failed: ["操作失败，请重试。", "Operation failed. Please retry."], unavailable: ["音乐后台尚未就绪。", "Music background is not ready."],
   noWriter: ["控制请求未获确认，请稍后重试。", "Control request was not acknowledged. Retry shortly."], permission: ["你当前没有共享音乐控制权限。", "You do not currently have shared music control permission."],
+  stalePlayback: ["房间已切换曲目，请对当前曲目重试。", "The room track changed. Retry on the current track."],
   invalidTrack: ["需要有效直链或音乐台分享码；本地文件地址不能共享。", "Use a valid direct URL or Studio share code; local file URLs cannot be shared."],
   invalidCommand: ["此操作不可用。", "This action is unavailable."], libraryFull: ["房间曲库最多 32 首，或导入内容过大。请分批导入。", "Room library allows 32 tracks; this import may also be too large. Import fewer tracks."],
   queueFull: ["队列最多 32 首。", "Queue allows up to 32 tracks."], roomFull: ["房间存储空间不足；现有曲库未改动。", "Room storage is full; the existing library was kept."],

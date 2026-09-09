@@ -16,7 +16,7 @@ export const fixture = {
     grid: {dpi: 64, offset: {x: 32, y: 32}}, text: { plainText: "Gate" }, metadata: {
     "com.obr-suite/portals/data": { name: "Gate", tag: "001", radius: 70, effect: "fade" },
   } } as any,
-  add: null as null | (() => Promise<void>), update: null as null | (() => Promise<void>), open: null as null | (() => Promise<void>),
+  add: null as null | (() => Promise<void>), update: null as null | (() => Promise<void>), open: null as null | (() => Promise<void>), close: null as null | (() => Promise<void>),
   roleRead: null as null | (() => Promise<"GM" | "PLAYER">),
   async emit(channel: string, data: unknown, connectionId = "local-connection") {
     for (const fn of handlers.get(channel) ?? []) fn({ data, connectionId });
@@ -63,6 +63,10 @@ const OBR = {
     open: async (options: any) => { if (fixture.open) await fixture.open(); fixture.opened.push(options); },
     close: async (id: string) => { fixture.closed.push(id); },
     setHeight: async (_id: string, _height: number) => {},
+  },
+  modal: {
+    open: async (options: any) => { if (fixture.open) await fixture.open(); fixture.opened.push(options); },
+    close: async (id: string) => { if (fixture.close) await fixture.close(); fixture.closed.push(id); },
   },
   broadcast: {
     onMessage: (channel: string, fn: (message: Message) => void) => listen(channel, fn),

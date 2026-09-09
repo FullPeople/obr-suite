@@ -1,8 +1,9 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { getLocalLang } from "../../state";
-import { BOSS_READY, BOSS_STATE, MAX_BOSSES, validPublicBoss, type BossState, type PublicBoss } from "./model";
-import { BOSS_PREFERENCES_CHANGED, BOSS_PREFERENCES_KEY, getBossPreferences, setBossPreferences } from "./preferences";
+import { BOSS_READY, BOSS_STATE, BOSS_PRESENTED, MAX_BOSSES, validPublicBoss, type BossState, type PublicBoss, type BossObstacle } from "./model";
+import { BOSS_PREFERENCES_CHANGED, BOSS_PREFERENCES_KEY, getBossPreferences } from "./preferences";
 import { t } from "./text";
+import { bossPlacement } from "./layout";
 import "./style.css";
 
 const query = new URLSearchParams(location.search);
@@ -14,7 +15,8 @@ if (query.get("mode") === "config") {
 } else {
   const session = query.get("session") || "";
   const root = document.getElementById("bossBars")!;
-  const hideButton = document.getElementById("localHide") as HTMLButtonElement;
+  document.body.classList.add("display");
+  let obstacles: BossObstacle[] = [];
   type Row = { node: HTMLElement; name: HTMLElement; phase: HTMLElement; track: HTMLElement; fill: HTMLElement; trail: HTMLElement; numbers: HTMLElement;
     dividers: HTMLElement; ratio: number; trailing: number; timer?: ReturnType<typeof setTimeout>; signature: string };
   const rows = new Map<string, Row>();
@@ -24,12 +26,28 @@ if (query.get("mode") === "config") {
 
   function clear(): void {
     for (const row of rows.values()) if (row.timer) clearTimeout(row.timer);
-    rows.clear(); root.replaceChildren(); hideButton.hidden = true;
+    rows.clear(); root.replaceChildren(); present([]);
+  }
+  let lastPresentation = "";
+  function present(ids: string[]): void {
+    const message = { session, version, ids };
+    const signature = JSON.stringify(message);
+    if (signature === lastPresentation || version < 0) return;
+    lastPresentation = signature;
+    void OBR.broadcast.sendMessage(BOSS_PRESENTED, message, { destination: "LOCAL" })
+      .catch(error => console.warn("[boss-bar] presentation acknowledgement failed", error));
+  }
+  function position(): boolean {
+    const placement = bossPlacement(innerWidth, innerHeight, latest.length === 1 ? 60 : latest.length === 2 ? 102 : 144,
+      getBossPreferences().bottomInset, obstacles);
+    root.style.left = `${placement.left}px`; root.style.top = `${placement.top}px`; root.style.width = `${placement.width}px`;
+    root.hidden = !placement.visible;
+    return placement.visible;
   }
   function render(): void {
     const preferences = getBossPreferences();
     document.body.classList.toggle("reduceMotion", preferences.reducedMotion);
-    if (!sceneReady || !alive || preferences.hidden) { clear(); return; }
+    if (!sceneReady || !alive) { clear(); return; }
     const ids = new Set(latest.map(boss => boss.id));
     for (const [id, row] of rows) if (!ids.has(id)) { if (row.timer) clearTimeout(row.timer); row.node.remove(); rows.delete(id); }
     for (const boss of latest) {
@@ -66,13 +84,8 @@ if (query.get("mode") === "config") {
     }
     // Preserve existing nodes and animation state while following deterministic order.
     latest.forEach((boss, index) => { const node = rows.get(boss.id)!.node; if (root.children[index] !== node) root.insertBefore(node, root.children[index] || null); });
-    hideButton.hidden = latest.length === 0;
-    hideButton.title = t("localHide"); hideButton.setAttribute("aria-label", t("localHide"));
+    present(position() ? latest.map(boss => boss.id) : []);
   }
-  hideButton.addEventListener("click", () => {
-    clear();
-    void setBossPreferences({ hidden: true }).catch(error => console.warn("[boss-bar] local hide failed", error));
-  });
   function receive(value: unknown): void {
     if (!alive || !sceneReady || !value || typeof value !== "object") return;
     const message = value as BossState;
@@ -80,7 +93,7 @@ if (query.get("mode") === "config") {
     if ((pendingReplay && !replay) || message.session !== session || !Number.isSafeInteger(message.version)
       || (replay ? message.version < version : message.version <= version) || !Array.isArray(message.bosses)
       || message.bosses.length > MAX_BOSSES || !message.bosses.every(validPublicBoss) || new Set(message.bosses.map(boss => boss.id)).size !== message.bosses.length) return;
-    pendingReplay = ""; version = message.version; latest = message.bosses; render();
+    pendingReplay = ""; version = message.version; latest = message.bosses; obstacles = Array.isArray(message.obstacles) ? message.obstacles : []; render();
   }
   function requestReplay(): void {
     pendingReplay = crypto.randomUUID();
@@ -91,7 +104,8 @@ if (query.get("mode") === "config") {
   const motion = matchMedia("(prefers-reduced-motion: reduce)");
   motion.addEventListener("change", render);
   window.addEventListener("storage", onStorage);
-  window.addEventListener("pagehide", () => { alive = false; latest = []; clear(); for (const off of unsubs) off(); window.removeEventListener("storage", onStorage); motion.removeEventListener("change", render); });
+  window.addEventListener("resize", render);
+  window.addEventListener("pagehide", () => { alive = false; latest = []; clear(); for (const off of unsubs) off(); window.removeEventListener("storage", onStorage); window.removeEventListener("resize", render); motion.removeEventListener("change", render); });
   OBR.onReady(async () => {
     if (!alive) return;
     let sceneObserved = false, roleObserved = false;

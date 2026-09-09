@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { TableController } from "../src/modules/threeDragonAnte/controller";
-import type { SeatView } from "../src/modules/threeDragonAnte/rules";
-import { createPrivateIdentity, PrivateLink } from "../src/modules/threeDragonAnte/private-channel";
+import { TableController } from "../extensions/three-dragon-ante/src/game/controller";
+import type { SeatView } from "../extensions/three-dragon-ante/src/game/rules";
+import { createPrivateIdentity, PrivateLink } from "../extensions/three-dragon-ante/src/game/private-channel";
 import { ControllerRoom, MemoryStore, gate, pause, until } from "./fixtures/three-dragon-controller-room";
 
 const room = new ControllerRoom(), hostStore = new MemoryStore();

@@ -15,8 +15,6 @@ import { bindPanelDrag, applyDragSide, watchDragSide } from "./utils/panelDrag";
 import { PANEL_IDS } from "./utils/panelLayout";
 import { installDebugOverlay } from "./utils/debugOverlay";
 import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
-import { TABLE_OPEN } from "./modules/threeDragonAnte/protocol";
-import { POINTER_ACTIVATE } from "./modules/sharedPointer/protocol";
 
 // Cluster ROW iframe — only rendered while the user has the trigger
 // toggled on. Holds the actual action buttons. The row popover is
@@ -64,7 +62,7 @@ let musicBoardOpen = false;
 let isGM = false;
 
 function isAutoPopupOn(key: string): boolean {
-  return readLS(key, "0") === "1";
+  return readLS(key, "1") !== "0";
 }
 function setAutoPopupOn(key: string, on: boolean, msg: string) {
   writeLS(key, on ? "1" : "0");
@@ -165,15 +163,7 @@ function renderRow() {
   // auto-info. Dice-history toggle moved out: it has its own dedicated
   // trigger button at the bottom-right.
   const popupBtns: string[] = [];
-  if (s.enabled.threeDragonAnte) parts.push(btnHTML({
-    id: "btnThreeDragon", labelHtml: lang === "zh" ? "三龙牌" : "Three-Dragon Ante",
-    title: lang === "zh" ? "打开多人牌桌" : "Open the multiplayer card table",
-  }));
-  if (s.enabled.sharedPointer) parts.push(btnHTML({
-    id: "btnSharedPointer", labelHtml: lang === "zh" ? "共享指针" : "Share pointer",
-    title: lang === "zh" ? "仅在指示工具中共享位置；停留后自动隐藏" : "Share your position in the pointer tool; pause to hide",
-  }));
-  if (s.enabled.transitions) {
+  if (isGM && s.enabled.transitions) {
     parts.push(btnHTML({
       id: "btnTransitions",
       labelHtml: lang === "zh" ? "转场" : "Transitions",
@@ -259,14 +249,6 @@ function renderRow() {
   document.getElementById("btnTimeStop")?.addEventListener("click", onTimeStop);
   document.getElementById("btnFocus")?.addEventListener("click", onFocus);
   document.getElementById("btnMusic")?.addEventListener("click", onMusic);
-  document.getElementById("btnThreeDragon")?.addEventListener("click", () => {
-    void OBR.broadcast.sendMessage(TABLE_OPEN, {}, { destination: "LOCAL" })
-      .catch(error => console.warn("[obr-suite] open card table failed", error));
-  });
-  document.getElementById("btnSharedPointer")?.addEventListener("click", () => {
-    void OBR.broadcast.sendMessage(POINTER_ACTIVATE, {}, { destination: "LOCAL" })
-      .catch(error => console.warn("[obr-suite] shared pointer activation failed", error));
-  });
   document.getElementById("btnTransitions")?.addEventListener("click", () => {
     void OBR.broadcast.sendMessage(BC_TRANSITIONS_OPEN, {}, { destination: "LOCAL" })
       .catch(error => console.warn("[obr-suite] open transitions failed", error));

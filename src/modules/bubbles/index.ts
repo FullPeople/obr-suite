@@ -34,6 +34,8 @@ import OBR, {
   Vector2,
 } from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
+import { DEFAULT_PLAYER_THRESHOLD, SCENE_BUBBLES_SETTINGS_KEY, readScenePlayerThreshold, quantiseRatio } from "./display-policy";
+import { bossReplacesHealthBar, onPresentedBossesChange, presentedBossesRevision } from "../bossBar/suppression";
 
 const PLUGIN_ID = "com.obr-suite/bubbles";
 const BUBBLE_OWNER_KEY = `${PLUGIN_ID}/owner`;
@@ -83,8 +85,6 @@ export const LS_BUBBLES_OVERHEAD_MODE = `${PLUGIN_ID}/overhead-mode`;
 // always 100% (progress invisible). Stored per-DM-client so different
 // tables can pick their own granularity.
 export const LS_BUBBLES_PLAYER_THRESHOLD = `${PLUGIN_ID}/player-threshold`;
-const DEFAULT_PLAYER_THRESHOLD = 25;
-const SCENE_BUBBLES_SETTINGS_KEY = `${PLUGIN_ID}/settings`;
 
 // Initiative-tracker scene metadata key — bubbles reads it to decide
 // whether locked tokens should show their bar to players right now
@@ -286,13 +286,6 @@ function readPlayerThreshold(): number {
  *  (progress invisible). For 0 < T < 100, the next-ceiling step
  *  matches the user's spec: HP must drop to or below NN% before
  *  the player sees a step change. */
-function quantiseRatio(ratio: number, thresholdPercent: number): number {
-  if (thresholdPercent <= 0) return ratio;
-  const step = thresholdPercent / 100;
-  if (step >= 1) return ratio > 0 ? 1 : 0;
-  const stepped = Math.ceil(ratio / step) * step;
-  return Math.max(0, Math.min(1, stepped));
-}
 
 // Combat-active flag, cached so syncBubbles doesn't have to query
 // scene metadata on every tick. Refreshed on scene-ready and on
@@ -309,11 +302,6 @@ let cachedOverheadMode = false;
 function readCombatActive(meta: Record<string, unknown>): boolean {
   const c = meta[COMBAT_STATE_KEY] as { inCombat?: boolean; preparing?: boolean } | undefined;
   return !!(c?.inCombat || c?.preparing);
-}
-function readScenePlayerThreshold(meta: Record<string, unknown>): number {
-  const settings = meta[SCENE_BUBBLES_SETTINGS_KEY] as { playerThreshold?: unknown } | undefined;
-  const n = Number(settings?.playerThreshold);
-  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : DEFAULT_PLAYER_THRESHOLD;
 }
 function readSceneVerticalOffset(meta: Record<string, unknown>): number {
   const settings = meta[SCENE_BUBBLES_SETTINGS_KEY] as { verticalOffset?: unknown } | undefined;
@@ -1632,7 +1620,8 @@ async function syncBubbles(): Promise<void> {
   }
   const sceneRevision = own.sceneRevision;
   const roleRevision = own.roleRevision;
-  const current = () => session === own && own.ready && own.initialized
+  const bossRevision = presentedBossesRevision();
+  const current = () => presentedBossesRevision() === bossRevision && session === own && own.ready && own.initialized
     && own.sceneRevision === sceneRevision && own.roleRevision === roleRevision;
   syncOwner = own;
   try {
@@ -1732,7 +1721,7 @@ async function syncBubbles(): Promise<void> {
       // flip drives a structure-rebuild instead of slipping
       // through patchGeometry.
       const has = {
-        hp: effectiveData.maxHp > 0,
+        hp: effectiveData.maxHp > 0 && !bossReplacesHealthBar(it.id),
         ac: viewMode === "silhouette" ? false : (d.ac != null),
         temp: effectiveData.tempHp > 0 && effectiveData.maxHp > 0,
       };
@@ -1818,7 +1807,7 @@ async function syncBubbles(): Promise<void> {
       const shimmerIds: string[] = [];
       const isSilhouette = w.viewMode === "silhouette";
 
-      if (w.data.maxHp > 0) {
+      if (w.data.maxHp > 0 && !bossReplacesHealthBar(tokId)) {
         const ratio = Math.max(0, Math.min(1, w.data.hp / w.data.maxHp));
         const bg = buildBarBg(ctx, w.layout, w.statsVisible);
         const fill = buildBarFill(ctx, w.layout, ratio);
@@ -1963,6 +1952,7 @@ export async function setupBubbles(): Promise<void> {
   role = "PLAYER";
   myPlayerId = "";
   const active = () => session === own;
+  unsubs.push(onPresentedBossesChange(() => { if (active()) scheduleSync(); }));
   // Subscribe before initial reads: a newer role event must also invalidate
   // a pending snapshot when it happens to equal the safe default above.
   unsubs.push(OBR.player.onChange((p) => {

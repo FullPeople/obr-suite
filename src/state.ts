@@ -31,8 +31,6 @@ export type ModuleId =
   | "hpBar"
   | "bossBar"
   | "transitions"
-  | "threeDragonAnte"
-  | "sharedPointer"
   | "metadataInspector"
   | "fullFog"
   | "fogEditor"
@@ -207,9 +205,6 @@ export const DEFAULT_STATE: SuiteState = {
     hpBar: true,
     bossBar: true,
     transitions: true,
-    threeDragonAnte: true,
-    // Available to everyone; positions are shared only while using its tool.
-    sharedPointer: true,
     // DM-only inspection tool. Default ON in all channels; useful for
     // field debugging token / scene / room metadata.
     metadataInspector: true,
@@ -352,7 +347,11 @@ function merge(partial: any): SuiteState {
   //
   // No replacement: a room that genuinely wants fog off can say so on
   // the settings tab, which is now visible on both channels.
-  const mergedEnabled = { ...DEFAULT_STATE.enabled, ...(partial.enabled ?? {}) };
+  const mergedEnabled = { ...DEFAULT_STATE.enabled };
+  for (const key of Object.keys(DEFAULT_STATE.enabled) as ModuleId[]) {
+    const value = partial.enabled?.[key];
+    if (typeof value === "boolean") mergedEnabled[key] = value;
+  }
   // `fullFog` itself is pinned off — nothing registers against it.
   mergedEnabled.fullFog = false;
   return {

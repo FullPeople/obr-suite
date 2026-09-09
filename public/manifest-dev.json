@@ -1,12 +1,17 @@
 {
   "name": "Full Suite (Dev)",
-  "version": "1.0.149-dev",
+  "version": "1.0.150-dev",
   "manifest_version": 1,
   "author": "FullPeople",
   "description": "Full Suite 测试版 / dev build.",
   "icon": "/suite-dev/exe_icon.png",
   "background_url": "/suite-dev/background.html",
-  "permissions": [{ "name": "autoplay", "reason": "Play shared music in the persistent background after the player enables sound." }],
+  "permissions": [
+    {
+      "name": "autoplay",
+      "reason": "Play shared music in the persistent background after the player enables sound."
+    }
+  ],
   "action": {
     "title": "骰子 / Dice (Dev)",
     "icon": "/suite-dev/d20.png",

@@ -1,3 +1,4 @@
+import { setPanelOpen } from "../../utils/panelObstacles";
 // Standalone HP bar module.
 //
 // Right-click context menus add/remove a per-token flag. Automatic selection
@@ -112,7 +113,7 @@ function syncPanel(): Promise<void> {
         if (!popoverOpen) return;
         try { await OBR.popover.close(POPOVER_ID); }
         catch (error) { console.warn("[hp-bar] close failed", { error }); return; }
-        popoverOpen = false;
+        popoverOpen = false; setPanelOpen("hp-bar", false);
         continue;
       }
       if (popoverOpen && !reanchor) return;
@@ -133,7 +134,7 @@ function syncPanel(): Promise<void> {
           hidePaper: true,
           disableClickAway: true,
         });
-        popoverOpen = true;
+        popoverOpen = true; setPanelOpen("hp-bar", true);
         await sendTarget();
       } catch (error) {
         console.warn("[hp-bar] open failed", { itemId: desiredItemId, error });

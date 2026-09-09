@@ -1,5 +1,57 @@
 :root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#eeeef5;background:#191a24;font-synthesis:none;color-scheme:dark}
 *{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button{cursor:pointer}button:disabled{cursor:default;opacity:.45}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}
 .control{padding:18px;display:grid;gap:16px}.head{display:flex;justify-content:space-between;align-items:center}.head h1{font-size:19px;letter-spacing:.02em;margin:0}.close{border:0;background:transparent;color:#bbbccc;font-size:24px;line-height:1;padding:2px 5px}.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.choice{display:grid;gap:7px;justify-items:center;border:1px solid #414253;border-radius:10px;padding:12px 3px;background:#242530;color:#babccd;font-size:13px}.choice[aria-pressed=true]{border-color:#ae9bf4;background:#353048;color:#f0eaff}.symbol{font-size:22px;line-height:1}.field{display:grid;gap:7px;font-size:12px;color:#b8baca}.field input,.field select{width:100%;height:37px;border:1px solid #414253;border-radius:7px;background:#242530;color:#efeff6;padding:0 10px}.actions{display:flex;gap:8px}.actions button{flex:1;min-height:38px;border:1px solid #5b536f;border-radius:8px;background:transparent;color:#e0d9f5}.actions .primary{background:#b4a0f0;border-color:#b4a0f0;color:#211936;font-weight:650}.preference{display:flex;align-items:center;gap:7px;font-size:12px;color:#b8baca}.preference input{accent-color:#b4a0f0}.hint{color:#999dab;font-size:11px;line-height:1.5;margin:0}.status{min-height:15px;font-size:12px;color:#d2c7f7}.hidden{display:none!important}
-body.presentation{background:transparent;padding:5px}.presentation #app{height:132px}.banner{position:relative;display:flex;align-items:center;gap:17px;height:100%;padding:20px 22px;background:linear-gradient(120deg,#211c32,#171b2b);border:1px solid #686077;border-radius:16px;box-shadow:0 5px 16px #0005;animation:appear .4s ease both;overflow:hidden}.banner:before{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at 12% 70%,#a48cff20,transparent 62%);pointer-events:none}.banner .emblem{font-size:38px;color:#d0bafa;flex:none}.banner .copy{min-width:0;position:relative}.banner h1{font-size:21px;line-height:1.25;font-weight:600;margin:0;color:#f4eefc;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.banner p{font-size:12px;line-height:1.5;color:#b9b6cb;margin:6px 0 0}.banner .close{position:absolute;top:8px;right:9px}.banner.reduced{animation:none}.banner.long{background:linear-gradient(120deg,#172433,#171b2b)}.banner.long .emblem{color:#b4d5f1}@keyframes appear{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){.banner{animation:none}}
-.control{padding:16px;gap:12px}.banner.text .emblem{display:none}.banner.text h1{font-size:16px;line-height:1.4;display:block;overflow:visible}.banner.text .copy{width:100%}
+.control{padding:16px;gap:12px}
+
+/* One finite presentation; original SVG art animates through CSS transforms only. */
+html.presentation-root,body.presentation{background:transparent;width:100%;height:100%;overflow:hidden}
+.presentation #app{height:100%;isolation:isolate}
+.rest-stage{position:fixed;inset:0;overflow:hidden;--orbit-radius:min(29vh,230px);color:#eee3cb}
+.rest-stage>div{pointer-events:none}
+.rest-veil{position:absolute;inset:0;background:#080b10;animation:rest-veil var(--duration) linear both}
+.rest-stage svg{display:block;width:100%;height:100%;overflow:visible}
+.rest-fire{position:absolute;left:50%;bottom:16%;width:clamp(140px,22vh,230px);height:clamp(146px,23vh,240px);margin-left:clamp(-115px,-11vh,-70px);animation:rest-fire var(--duration) cubic-bezier(.22,.7,.3,1) both}
+.rest-clock{position:absolute;left:50%;top:15%;width:clamp(112px,20vh,178px);height:clamp(140px,25vh,222px);transform:translateX(-50%);animation:rest-clock var(--duration) cubic-bezier(.22,.7,.3,1) both}
+.clock-hand{transform-origin:100px 117px;animation:clock-hand .5s steps(2,end) 1.4s 6}
+.clock-pendulum{transform-origin:100px 193px;animation:clock-tick .5s steps(2,end) 1.4s 6}
+.rest-heading{position:absolute;left:12%;right:12%;top:49%;margin:0;text-align:center;font-weight:500;letter-spacing:.16em;font-size:clamp(17px,2.5vh,23px);color:#ddd0b8;animation:rest-title var(--duration) ease both;overflow-wrap:anywhere}
+.rest-heading.custom{top:22%;left:15%;right:15%;font-size:clamp(20px,3.6vh,36px);line-height:1.65;letter-spacing:.03em;white-space:pre-wrap;max-height:43%;overflow:auto;animation:rest-custom var(--duration) ease both}
+.rest-tent{position:absolute;left:50%;bottom:12%;width:clamp(245px,40vw,410px);transform:translateX(-50%);animation:rest-tent var(--duration) cubic-bezier(.22,.7,.3,1) both}
+.rest-orbit{position:absolute;left:50%;top:78%;width:0;height:0;transform-origin:0 0}
+.rest-moon,.rest-sun{position:absolute;right:var(--orbit-radius);top:-35px;width:70px;height:70px;transform-origin:center}
+.moon-orbit{animation:rest-moon-orbit var(--duration) ease both}
+.sun-orbit{animation:rest-sun-orbit var(--duration) ease both}
+.rest-moon{animation:rest-moon-counter var(--duration) ease both}
+.rest-sun{animation:rest-sun-counter var(--duration) ease both}
+.long .rest-heading{top:15%;color:#aebdad;animation:rest-long-title var(--duration) ease both}
+.rest-close{position:absolute;right:max(20px,env(safe-area-inset-right));top:max(15px,env(safe-area-inset-top));border:1px solid #9eabb533;border-radius:50%;width:36px;height:36px;background:#10172280;color:#cad2d4;font-size:24px;line-height:1;opacity:.65}
+.rest-close:hover,.rest-close:focus-visible{opacity:1}
+.rest-retry{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);border:1px solid #c0c7d4;border-radius:8px;background:#151a24;color:#eee;padding:14px 20px;font:inherit}
+.rest-stage.leaving{opacity:0;transition:opacity .35s ease}
+@keyframes rest-veil{0%{opacity:0}10%,86%{opacity:1}100%{opacity:0}}
+@keyframes rest-fire{0%,10%{opacity:0;transform:translateY(50vh)}24%,74%{opacity:1;transform:translateY(0)}90%,100%{opacity:0;transform:translateY(50vh)}}
+@keyframes rest-clock{0%,10%{opacity:0;transform:translate(-50%,-50vh)}23%,74%{opacity:1;transform:translate(-50%,0)}90%,100%{opacity:0;transform:translate(-50%,-50vh)}}
+@keyframes rest-title{0%,20%{opacity:0}30%,71%{opacity:.8}88%,100%{opacity:0}}
+@keyframes rest-custom{0%,18%{opacity:0;transform:translateY(8px)}32%,71%{opacity:1;transform:translateY(0)}88%,100%{opacity:0;transform:translateY(-40vh)}}
+@keyframes clock-hand{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
+@keyframes clock-tick{0%,100%{transform:rotate(-12deg)}50%{transform:rotate(12deg)}}
+@keyframes rest-tent{0%,7%{opacity:0;transform:translate(-50%,50vh)}17%,74%{opacity:1;transform:translate(-50%,0)}88%,100%{opacity:0;transform:translate(-50%,50vh)}}
+@keyframes rest-moon-orbit{0%,12%{opacity:0;transform:rotate(0deg)}27%,39%{opacity:1;transform:rotate(90deg)}57%,100%{opacity:0;transform:rotate(180deg)}}
+@keyframes rest-sun-orbit{0%,39%{opacity:0;transform:translateY(0) rotate(0deg)}57%,74%{opacity:1;transform:translateY(0) rotate(90deg)}88%,100%{opacity:0;transform:translateY(-80vh) rotate(90deg)}}
+@keyframes rest-moon-counter{0%,12%{transform:rotate(0deg)}27%,39%{transform:rotate(-90deg)}57%,100%{transform:rotate(-180deg)}}
+@keyframes rest-sun-counter{0%,39%{transform:rotate(0deg)}57%,100%{transform:rotate(-90deg)}}
+@keyframes rest-long-title{0%,13%{opacity:0}25%,72%{opacity:.8}88%,100%{opacity:0}}
+.rest-stage.reduced .rest-fire,.rest-stage.reduced .rest-clock,.rest-stage.reduced .rest-tent,.rest-stage.reduced .rest-heading,.rest-stage.reduced .rest-orbit{animation:rest-still var(--duration) linear both}
+.rest-stage.reduced .rest-clock,.rest-stage.reduced .rest-tent{transform:translateX(-50%)}
+.rest-stage.reduced .moon-orbit{transform:rotate(90deg)}
+.rest-stage.reduced .rest-moon{animation:none;transform:rotate(-90deg)}
+.rest-stage.reduced .moon-orbit{animation:rest-still-moon var(--duration) linear both}
+.rest-stage.reduced .sun-orbit{transform:rotate(90deg);animation:rest-still-sun var(--duration) linear both}
+.rest-stage.reduced .rest-sun{animation:none;transform:rotate(-90deg)}
+.rest-stage.reduced .clock-hand,.rest-stage.reduced .clock-pendulum{animation:none}
+@keyframes rest-still{0%{opacity:0}8%,86%{opacity:1}100%{opacity:0}}
+@keyframes rest-still-moon{0%{opacity:0}8%,40%{opacity:1}50%,100%{opacity:0}}
+@keyframes rest-still-sun{0%,45%{opacity:0}55%,86%{opacity:1}100%{opacity:0}}
+@media(max-width:520px){.rest-stage{--orbit-radius:25vw}.rest-moon,.rest-sun{width:54px;height:54px;top:-27px}.rest-heading.custom{left:10%;right:10%;font-size:21px}.rest-tent{width:70vw}.rest-fire{bottom:12%}}
+@media(max-height:500px){.rest-clock{top:8%;width:26vh;height:33vh}.rest-heading{top:44%;font-size:16px}.rest-fire{bottom:8%;width:33vh;height:34vh;margin-left:-16.5vh}.rest-tent{width:48vh}.rest-heading.custom{top:12%;font-size:20px;line-height:1.4;max-height:38%}.rest-stage{--orbit-radius:32vh}.long .rest-heading{top:8%}}
+@media(prefers-reduced-motion:reduce){.clock-hand,.clock-pendulum{animation:none}.rest-stage.leaving{transition-duration:.1s}}

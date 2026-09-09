@@ -1,3 +1,4 @@
+import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR, { isImage } from "@owlbear-rodeo/sdk";
 import { getLocalLang } from "../../state";
 import { DiceType, DIE_SIDES, DieResult, rollDie, sidesOf } from "./types";
@@ -390,7 +391,7 @@ async function openHistory(mode: "transient" | "all" = "transient"): Promise<voi
       hidePaper: true,
       disableClickAway: true,
     });
-    historyOpen = true;
+    historyOpen = true; setPanelOpen("dice-history", true);
     broadcastHistoryState(true);
   } catch (e) {
     console.error("[obr-suite/dice] open history failed", e);
@@ -398,7 +399,7 @@ async function openHistory(mode: "transient" | "all" = "transient"): Promise<voi
 }
 async function closeHistory(): Promise<void> {
   try { await OBR.popover.close(HISTORY_POPOVER_ID); } catch {}
-  historyOpen = false;
+  historyOpen = false; setPanelOpen("dice-history", false);
   broadcastHistoryState(false);
 }
 // --- Replay overlay state ---

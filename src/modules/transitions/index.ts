@@ -6,7 +6,7 @@ import {
   BC_TRANSITIONS_DISMISS, CONTROL_ID, DISPLAY_ID, SCENE_KEY, TRANSITION_TTL_MS,
   createTransitionGate, parseTransition, prefersReducedMotion, type TransitionEvent, type TransitionPeer,
 } from "./protocol";
-import { playScreenTransition, removeOrphanScreenTransitions, stopScreenTransition } from "./screen-effect";
+import { removeOrphanScreenTransitions, stopScreenTransition } from "./screen-effect";
 
 let running = false;
 let epoch = 0;
@@ -23,6 +23,17 @@ let displayController: AbortController | null = null;
 let displayTimer: ReturnType<typeof setTimeout> | undefined;
 let unsubs: Array<() => void> = [];
 const gate = createTransitionGate();
+const nativeWindows = new Set<string>();
+const nativeClosures = new Map<string, Promise<void>>();
+
+function closeNative(id: string): Promise<void> {
+  const pending = nativeClosures.get(id);
+  if (pending) return pending;
+  const closing = OBR.modal.close(id).then(() => { nativeWindows.delete(id); })
+    .finally(() => { nativeClosures.delete(id); });
+  nativeClosures.set(id, closing);
+  return closing;
+}
 
 async function closeDisplay(invalidate = true) {
   if (invalidate) displaySequence++;
@@ -34,7 +45,7 @@ async function closeDisplay(invalidate = true) {
   displayTimer = undefined;
   // Unique event IDs make closing independent of opening the next banner.
   // A stuck close RPC must not stall the next presentation.
-  if (closingId) void OBR.popover.close(`${DISPLAY_ID}/${closingId}`).catch(() => {});
+  if (closingId) void closeNative(`${DISPLAY_ID}/${closingId}`).catch(error => console.warn("[transitions] close failed", error));
   if (closingId) await stopScreenTransition(closingId);
 }
 
@@ -53,28 +64,20 @@ async function show(event: TransitionEvent, ownEpoch: number) {
   displayId = event.id;
   const controller = new AbortController();
   displayController = controller;
-  const expiresAt = Math.min(event.expiresAt, Date.now() + 3_600);
+  const expiresAt = event.expiresAt;
   displayTimer = setTimeout(() => { if (displayId === event.id) void closeDisplay(); }, Math.max(0, expiresAt - Date.now()));
-  if (!prefersReducedMotion()) void playScreenTransition("fade", 1_200, controller.signal, event.id);
-  let vw: number, vh: number;
-  try { [vw, vh] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]); }
-  catch (error) {
-    if (displayId === event.id) await closeDisplay();
-    console.warn("[transitions] viewport unavailable", error);
-    return;
-  }
-  if (controller.signal.aborted || ownEpoch !== epoch) return;
   const popoverId = `${DISPLAY_ID}/${event.id}`;
-  const height = event.kind === "text" ? 220 : 142;
   const payload = { ...event, expiresAt, lang: getLocalLang(), reduced: prefersReducedMotion(), popoverId };
   const url = `${assetUrl("transition-display.html")}#${encodeURIComponent(JSON.stringify(payload))}`;
   try {
-    await OBR.popover.open({ id: popoverId, url, width: Math.max(180, Math.min(420, vw - 24)), height,
-      anchorPosition: { left: vw / 2, top: Math.max(12, Math.min(76, vh - height - 12)) },
-      anchorReference: "POSITION", anchorOrigin: { horizontal: "CENTER", vertical: "TOP" },
-      transformOrigin: { horizontal: "CENTER", vertical: "TOP" }, hidePaper: true, disableClickAway: true,
+    nativeWindows.add(popoverId);
+    await OBR.modal.open({ id: popoverId, url, fullScreen: true,
+      hidePaper: true, hideBackdrop: true,
     });
-    if (controller.signal.aborted || ownEpoch !== epoch) await OBR.popover.close(popoverId);
+    if (controller.signal.aborted || ownEpoch !== epoch) {
+      nativeWindows.add(popoverId); // A close before the open ACK may precede actual creation.
+      await closeNative(popoverId);
+    }
   } catch (error) {
     if (displayId === event.id) await closeDisplay();
     console.warn("[transitions] display could not open", error);
@@ -160,6 +163,8 @@ export async function setupTransitions(): Promise<void> {
   running = true;
   const ownLifetime = ++lifetime;
   const ownEpoch = ++epoch;
+  await Promise.all([...nativeWindows].map(closeNative));
+  if (!running || ownEpoch !== epoch || ownLifetime !== lifetime) return;
   [myConnection, myId] = await Promise.all([OBR.player.getConnectionId(), OBR.player.getId()]);
   if (!running || ownEpoch !== epoch || ownLifetime !== lifetime) return;
   const sceneChanged = (next: boolean) => {
@@ -207,6 +212,7 @@ export async function teardownTransitions(): Promise<void> {
   for (const unsub of unsubs.splice(0)) unsub();
   gate.clear();
   await closeDisplay();
+  await Promise.all([...nativeWindows].map(closeNative));
   await OBR.popover.close(CONTROL_ID).catch(() => {});
   await removeOrphanScreenTransitions();
 }

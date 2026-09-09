@@ -33,7 +33,8 @@
 
 import { encodeOpus, estimateOpusBytes } from "./encoder.js";
 import { addTrack, updateTrack, deleteTrack, listTracks } from "./library.js";
-import { t as T, applyI18n, mountLangToggle } from "./i18n.js";
+import { t as T, applyI18n, mountLangToggle } from "./i18n.js?v=20260909-room-sync";
+import { StudioRoomSync } from "./room-sync.js?v=20260909-room-sync";
 
 applyI18n();
 mountLangToggle();
@@ -316,8 +317,8 @@ function getCtx() {
 
 // ============ Local mute (studio-only output) ============
 // Runtime-only flag (NOT persisted) — it's driven by the pairing
-// lifecycle: auto-ON when枭熊 connects, auto-OFF when it disconnects,
-// and the DM can flip it via the banner while connected.
+// lifecycle: auto-ON on pairing, preserved on network loss, auto-OFF on
+// explicit unpair. The banner only controls this website's master gain.
 let localMute = false;
 function applyLocalMute() {
   if (MASTER_GAIN && audioCtx) {
@@ -411,6 +412,8 @@ class Turntable {
     // / `stop()` tell OBR to drop that exact SFX so a finished / stopped
     // one-shot can't linger in OBR's scene metadata.
     this._sfxId = null;
+    this._roomVoice = null;
+    this._mediaVersion = 0;
 
     this.sourceNode = null;
     this.fadeGain = null;
@@ -467,10 +470,18 @@ class Turntable {
       this.barEl.addEventListener("click", (e) => {
         if (!this.audio.duration) return;
         const r = this.barEl.getBoundingClientRect();
-        this.audio.currentTime = ((e.clientX - r.left) / r.width) * this.audio.duration;
+        const position = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * this.audio.duration;
+        if (this.bus === "bgm") {
+          sendToObr({ type: "bgm-seek", position });
+          if (roomConnected()) return;
+        }
+        this.audio.currentTime = position;
       });
     }
     this.audio.addEventListener("ended", () => {
+      // The room writer alone advances shared BGM. A local muted/blocked deck
+      // is not a second clock and cannot clear/advance the room.
+      if (this._roomVoice && roomConnected()) { this._setSpinning(false); return; }
       if (!this.audio.loop) {
         // SFX one-shot finished → tell OBR to drop THIS sfx so it can't
         // be resurrected by a later state write. (BGM end is implicit;
@@ -512,7 +523,8 @@ class Turntable {
   }
 
   _tick() {
-    if (this.audio.duration && !this.audio.paused) {
+    if (this._roomVoice && roomConnected()) this._paintRoomVoice();
+    else if (this.audio.duration && !this.audio.paused) {
       if (this.curEl)  this.curEl.textContent  = fmtTime(this.audio.currentTime);
       if (this.durEl)  this.durEl.textContent  = fmtTime(this.audio.duration);
       if (this.fillEl) this.fillEl.style.width = (this.audio.currentTime / this.audio.duration * 100) + "%";
@@ -540,9 +552,16 @@ class Turntable {
   }
 
   async load(track, autoplay = true) {
+    if (roomConnected() && track.url) {
+      sendToObr(this.bus === "bgm" ? { type: "bgm-load", url: track.url, name: track.name, loop: !!track.loop, position: 0 }
+        : { type: "sfx-add", id: crypto.randomUUID(), url: track.url, name: track.name, loop: !!track.loop });
+      return;
+    }
+    const generation = ++this._mediaVersion; this._roomVoice = null;
     if (this.track && !this.audio.paused && this.fadeGain) {
       await this._ramp(0, FADE_OUT_MS);
     }
+    if (generation !== this._mediaVersion) return;
     if (this.audio.src.startsWith("blob:")) URL.revokeObjectURL(this.audio.src);
     this.track = track;
     state.turntableTrack[this.slot] = track.id;
@@ -557,10 +576,13 @@ class Turntable {
     if (autoplay) {
       try {
         await getCtx().resume();
+        if (generation !== this._mediaVersion) return;
         this._ensureAudioGraph();
         await this.audio.play();
+        if (generation !== this._mediaVersion) return;
         this._applyVolume();
         await this._ramp(1, FADE_IN_MS);
+        if (generation !== this._mediaVersion) return;
         this._setSpinning(true);
         this._syncPlayUI();
         updateDucking();
@@ -569,6 +591,8 @@ class Turntable {
       }
     }
     renderLibrary(); renderFavorites();
+
+    if (generation !== this._mediaVersion) return;
 
     if (this.bus === "bgm") {
       sendToObr({
@@ -601,14 +625,25 @@ class Turntable {
 
   async togglePlay() {
     if (!this.track) return;
+    if (roomConnected() && this._roomVoice) {
+      // Use confirmed shared pause, not HTMLAudioElement.paused: autoplay can
+      // block this website while Owlbear is legitimately playing.
+      sendToObr(this.bus === "bgm" ? { type: this._roomVoice.paused ? "bgm-play" : "bgm-pause" }
+        : { type: "sfx-stop", id: this._sfxId });
+      return;
+    }
+    const generation = ++this._mediaVersion;
     const wasPaused = this.audio.paused;
     if (wasPaused) {
       try {
         await getCtx().resume();
+        if (generation !== this._mediaVersion) return;
         this._ensureAudioGraph();
         await this.audio.play();
+        if (generation !== this._mediaVersion) return;
         this._applyVolume();
         await this._ramp(1, FADE_IN_MS);
+        if (generation !== this._mediaVersion) return;
         this._setSpinning(true);
         this._syncPlayUI();
         updateDucking();
@@ -617,17 +652,22 @@ class Turntable {
       }
     } else {
       await this._ramp(0, FADE_OUT_MS);
+      if (generation !== this._mediaVersion) return;
       this.audio.pause();
       this._setSpinning(false);
       this._syncPlayUI();
       updateDucking();
     }
-    if (this.bus === "bgm") {
+    if (generation === this._mediaVersion && this.bus === "bgm") {
       sendToObr({ type: wasPaused ? "bgm-play" : "bgm-pause", position: this.audio.currentTime });
     }
   }
 
   async stop() {
+    if (roomConnected() && this._roomVoice) {
+      sendToObr(this.bus === "bgm" ? { type: "bgm-stop" } : { type: "sfx-stop", id: this._sfxId }); return;
+    }
+    const generation = ++this._mediaVersion;
     const wasBgm = this.bus === "bgm" && this.track;
     // Capture the live sfx id before we clear it — a manually-stopped
     // SFX (esp. a loop) must be removed from OBR too, or OBR keeps
@@ -636,6 +676,7 @@ class Turntable {
     if (this.fadeGain && !this.audio.paused) {
       await this._ramp(0, FADE_OUT_MS);
     }
+    if (generation !== this._mediaVersion) return;
     this.audio.pause(); this.audio.currentTime = 0;
     if (this.audio.src.startsWith("blob:")) URL.revokeObjectURL(this.audio.src);
     this.audio.removeAttribute("src"); this.audio.load();
@@ -654,13 +695,80 @@ class Turntable {
     else if (sfxId) sendToObr({ type: "sfx-stop", id: sfxId });
   }
 
+  applyRoomVoice(voice) {
+    const changed = this._roomVoice?.id !== voice?.id || this.track?.url !== voice?.track.url;
+    const generation = ++this._mediaVersion;
+    this._roomVoice = voice;
+    if (!voice) {
+      this.audio.pause();
+      if (this.audio.src.startsWith("blob:")) URL.revokeObjectURL(this.audio.src);
+      this.audio.removeAttribute("src"); this.audio.load(); this.track = null; this._sfxId = null;
+      state.turntableTrack[this.slot] = null;
+      if (this.nameEl) this.nameEl.textContent = this.bus === "bgm" ? T("muIdle") : T("muEmpty");
+      if (this.curEl) this.curEl.textContent = "00:00";
+      if (this.durEl) this.durEl.textContent = "00:00";
+      if (this.fillEl) this.fillEl.style.width = "0%";
+      this._setSpinning(false); this._syncPlayUI(); return;
+    }
+    const local = state.lib.find(t => t.url === voice.track.url);
+    this.track = { ...voice.track, id: local?.id || voice.track.id };
+    this._sfxId = this.bus === "sfx" ? voice.id : null;
+    state.turntableTrack[this.slot] = this.track.id;
+    if (this.nameEl) this.nameEl.textContent = this.track.name || T("muUnnamed");
+    if (changed) {
+      this.audio.pause();
+      if (this.audio.src.startsWith("blob:")) URL.revokeObjectURL(this.audio.src);
+      this.audio.src = voice.track.url;
+      if (this.bus === "bgm") { this._pushHistory(this.track); this._updateHistoryButtons(); }
+    }
+    this.audio.loop = !!voice.track.loop;
+    const seek = () => {
+      if (generation !== this._mediaVersion || this._roomVoice !== voice) return;
+      const position = this._roomPosition();
+      if (Math.abs(this.audio.currentTime - position) > .75) { try { this.audio.currentTime = position; } catch {} }
+    };
+    if (this._roomMetadata) this.audio.removeEventListener("loadedmetadata", this._roomMetadata);
+    this._roomMetadata = seek; this.audio.addEventListener("loadedmetadata", seek, { once: true }); seek();
+    if (voice.paused) {
+      this.audio.pause();
+      if (this.fadeGain && audioCtx) { this.fadeGain.gain.cancelScheduledValues(audioCtx.currentTime); this.fadeGain.gain.value = 0; }
+    } else if (this.audio.paused) {
+      this._ensureAudioGraph(); this._applyVolume();
+      this.fadeGain.gain.cancelScheduledValues(audioCtx.currentTime); this.fadeGain.gain.value = 1;
+      // A suspended browser context is a local sound issue. Shared controls/UI
+      // remain usable and local mute never sends a pause or volume command.
+      if (audioCtx.state === "running") void this.audio.play().then(() => {
+        if (generation !== this._mediaVersion) {
+          if (!this._roomVoice || this._roomVoice.paused) this.audio.pause();
+          return;
+        }
+        updateDucking();
+      }).catch(() => { if (generation === this._mediaVersion && !localMute) toast(T("muLocalSoundBlocked"), "warn"); });
+    }
+    this._paintRoomVoice();
+  }
+  _roomPosition() {
+    const v = this._roomVoice; if (!v) return 0;
+    let position = Math.max(0, v.position + (v.paused ? 0 : (performance.now() - v.receivedAt) / 1000));
+    const duration = this.audio.duration || v.track.duration;
+    if (Number.isFinite(duration) && duration > 0) position = v.track.loop ? position % duration : Math.min(position, duration);
+    return position;
+  }
+  _paintRoomVoice() {
+    const v = this._roomVoice; if (!v) return;
+    const position = this._roomPosition(), duration = this.audio.duration || v.track.duration || 0;
+    if (this.curEl) this.curEl.textContent = fmtTime(position);
+    if (this.durEl) this.durEl.textContent = fmtTime(duration);
+    if (this.fillEl) this.fillEl.style.width = (duration > 0 ? position / duration * 100 : 0) + "%";
+    this._setSpinning(!v.paused); this._syncPlayUI();
+  }
   _setSpinning(s) {
     this.el.classList.toggle("playing", s);
     if (this.spinTarget) this.spinTarget.classList.toggle("spinning", s);
   }
   _syncPlayUI() {
     if (!this.playBtn) return;
-    const playing = this.track && !this.audio.paused;
+    const playing = this.track && (this._roomVoice && roomConnected() ? !this._roomVoice.paused : !this.audio.paused);
     this.playBtn.classList.toggle("is-playing", !!playing);
   }
   _pushHistory(track) {
@@ -721,9 +829,12 @@ loopToggle.addEventListener("click", async () => {
   const tt = bgmDeckTT;
   if (!tt.track) { toast(T("muBgmIdle"), "warn"); return; }
   const newLoop = !tt.audio.loop;
+  if (roomConnected()) { sendToObr({ type: "bgm-loop", loop: newLoop }); return; }
+  const track = tt.track, generation = tt._mediaVersion;
   tt.audio.loop = newLoop;
   tt.track.loop = newLoop;
   try { await updateTrack(tt.track.id, { loop: newLoop }); } catch {}
+  if (track !== tt.track || generation !== tt._mediaVersion || roomConnected()) return;
   syncLoopToggleUi();
   // Re-render so the library card's loop badge / future loads pick up
   // the change.
@@ -783,8 +894,8 @@ function bindVerticalVol(bar, fill, readout, bus) {
   // External update hook (e.g. setting changed from elsewhere — unused now).
   return sync;
 }
-bindVerticalVol(bgmVvBar, bgmVvFill, bgmVvReadout, "bgm");
-bindVerticalVol(sfxVvBar, sfxVvFill, sfxVvReadout, "sfx");
+const syncBgmVolume = bindVerticalVol(bgmVvBar, bgmVvFill, bgmVvReadout, "bgm");
+const syncSfxVolume = bindVerticalVol(sfxVvBar, sfxVvFill, sfxVvReadout, "sfx");
 
 // ============ Auto-ducking ============
 function updateDucking() {
@@ -1643,6 +1754,33 @@ const PEER_PREFIX = "obr-music-";
 let _peer = null;
 let _peerConn = null;
 let _pairCode = "";
+let _roomSync = null;
+let _pairVersion = 0;
+const _seenRoomSfx = new Map();
+function roomConnected() { return !!_roomSync?.connected; }
+function applyRoomState(snapshot, sentAt) {
+  const receivedAt = performance.now(), now = Number.isFinite(sentAt) ? sentAt : Date.now();
+  const voice = (track, id, position, startedAt, paused) => ({ track, id, paused, receivedAt,
+    position: Math.max(0, position + (paused ? 0 : Math.max(0, now - startedAt) / 1000)) });
+  const bgm = snapshot.bgm;
+  bgmDeckTT.applyRoomVoice(bgm ? voice(bgm.track, bgm.playbackId, bgm.position, bgm.startedAt, bgm.paused) : null);
+  const pads = TURNTABLES.filter(tt => tt.bus === "sfx");
+  const desired = snapshot.sfx.filter(s => s.track.loop || s.expiresAt > now);
+  for (const tt of pads) if (tt._sfxId && !desired.some(s => s.id === tt._sfxId)) tt.applyRoomVoice(null);
+  for (const s of desired) {
+    let tt = pads.find(p => p._sfxId === s.id);
+    if (tt && !s.track.loop && tt.audio.ended) { tt.applyRoomVoice(null); continue; }
+    if (!tt && (_seenRoomSfx.has(s.id) || (!s.track.loop && now - s.at > 3000))) continue;
+    if (!tt) tt = pads.find(p => !p._roomVoice);
+    if (!tt) continue;
+    _seenRoomSfx.set(s.id, now);
+    tt.applyRoomVoice(voice(s.track, s.id, 0, s.at, false));
+  }
+  for (const [id, at] of _seenRoomSfx) if (now - at > 60000 && !desired.some(s => s.id === id)) _seenRoomSfx.delete(id);
+  state.volumes = { ...snapshot.bus }; syncBgmVolume(); syncSfxVolume();
+  for (const tt of TURNTABLES) tt._applyVolume();
+  syncLoopToggleUi(); renderLibrary(); renderFavorites(); updateDucking();
+}
 
 function genPairCode() {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -1677,7 +1815,18 @@ function updateLocalMuteUi() {
   }
 }
 if (lmbToggle) {
-  lmbToggle.addEventListener("click", () => setLocalMute(!localMute));
+  lmbToggle.addEventListener("click", () => {
+    setLocalMute(!localMute);
+    if (!localMute) {
+      const generation = _pairVersion;
+      void getCtx().resume().then(() => {
+        if (generation !== _pairVersion || localMute) return;
+        for (const tt of TURNTABLES) if (tt._roomVoice) {
+          const v = tt._roomVoice; tt.applyRoomVoice({ ...v, position: tt._roomPosition(), receivedAt: performance.now() });
+        }
+      }).catch(() => toast(T("muLocalSoundBlocked"), "warn"));
+    }
+  });
 }
 pairBtn.addEventListener("click", () => void startPairing());
 pairCancelBtn.addEventListener("click", () => tearDownPair());
@@ -1693,16 +1842,23 @@ pairCodeChip.addEventListener("click", async (e) => {
 });
 async function startPairing() {
   if (_peer) return;
+  const generation = ++_pairVersion;
   try {
     const m = await import("https://esm.sh/peerjs@1.5.4");
+    if (generation !== _pairVersion) return;
     const Peer = m.default ?? m.Peer;
     _pairCode = genPairCode();
     setPairUi("waiting");
     _peer = new Peer(PEER_PREFIX + _pairCode);
     _peer.on("open", () => { toast(T("muPairReady", { code: _pairCode }), "ok"); });
     _peer.on("connection", (conn) => {
+      if (generation !== _pairVersion) { conn.close(); return; }
+      const old = _peerConn;
+      _roomSync?.dispose(); _roomSync = null;
       _peerConn = conn;
+      if (old && old !== conn) old.close();
       conn.on("open", () => {
+        if (_peerConn !== conn || generation !== _pairVersion) return;
         // Auto-silence local output: the music now plays inside the
         // DM's枭熊 popover too, so leaving the studio audible would
         // double up. setLocalMute BEFORE setPairUi so the banner shows
@@ -1710,28 +1866,34 @@ async function startPairing() {
         setLocalMute(true);
         setPairUi("live");
         toast(T("muXiongConnected"), "ok");
-        broadcastCurrentState();
+        _roomSync = new StudioRoomSync(msg => { if (_peerConn === conn && conn.open) conn.send(msg); },
+          applyRoomState, broadcastCurrentState, error => toast(T(error === "permission" ? "muRoomPermission" : "muRoomCommandFailed"), "warn"));
       });
+      conn.on("data", message => { if (_peerConn === conn && generation === _pairVersion) _roomSync?.receive(message); });
       conn.on("close", () => {
+        if (_peerConn !== conn || generation !== _pairVersion) return;
+        _roomSync?.dispose(); _roomSync = null;
         _peerConn = null;
-        // Restore normal local playback — the studio is the only
-        // audio source again.
-        setLocalMute(false);
+        // Owlbear background continues on transport loss. Do not unexpectedly
+        // unmute this website and create a second audible playback.
         setPairUi("waiting");
         toast(T("muXiongDisconnected"), "warn");
       });
-      conn.on("error", (e) => toast(T("muChannelError", { err: e?.message || e }), "error"));
+      conn.on("error", (e) => { if (_peerConn === conn && generation === _pairVersion) toast(T("muChannelError", { err: e?.message || e }), "error"); });
     });
     _peer.on("error", (e) => {
+      if (generation !== _pairVersion) return;
       toast(T("muPairFail", { err: e?.type || e?.message || e }), "error");
       tearDownPair();
     });
   } catch (e) {
+    if (generation !== _pairVersion) return;
     toast(T("muPeerLoadFail", { err: e?.message || e }), "error");
     tearDownPair();
   }
 }
 function tearDownPair() {
+  _pairVersion++; _roomSync?.dispose(); _roomSync = null;
   if (_peerConn) try { _peerConn.close(); } catch {}
   if (_peer) try { _peer.destroy(); } catch {}
   _peer = null; _peerConn = null; _pairCode = "";
@@ -1741,7 +1903,9 @@ function tearDownPair() {
 }
 function sendToObr(msg) {
   if (_peerConn && _peerConn.open) {
-    try { _peerConn.send(msg); } catch (e) { console.warn("[pair] send failed", e); }
+    if (roomConnected() && ["bgm-play", "bgm-pause", "bgm-seek", "bgm-loop", "bgm-stop"].includes(msg.type))
+      msg = { ...msg, expectedPlaybackId: bgmDeckTT._roomVoice?.id || "" };
+    try { if (_roomSync) _roomSync.command(msg); else _peerConn.send(msg); } catch (e) { console.warn("[pair] send failed", e); }
   }
 }
 function broadcastCurrentState() {
@@ -1754,8 +1918,9 @@ function broadcastCurrentState() {
       url:  bgm.track.url, name: bgm.track.name,
       loop: !!bgm.track.loop,
       position: bgm.audio.currentTime || 0,
+      paused: bgm.audio.paused,
     });
-    if (bgm.audio.paused) sendToObr({ type: "bgm-pause", position: bgm.audio.currentTime || 0 });
+    if (bgm.audio.paused && !roomConnected()) sendToObr({ type: "bgm-pause", position: bgm.audio.currentTime || 0 });
   }
   for (const tt of TURNTABLES) {
     if (tt.bus !== "sfx" || !tt.track || !tt.track.url || tt.audio.paused) continue;
