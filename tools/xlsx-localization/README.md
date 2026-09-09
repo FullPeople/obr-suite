@@ -5,6 +5,33 @@ directory contains reproducible inventories, located translations, and the
 adapter used to preserve their native workbook structure. It does not yet supply
 a complete English download.
 
+## Generate the remaining English main-card fields
+
+```text
+python -B -X utf8 tools/xlsx-localization/main_remaining_package.py --input-2014 <lookup-labels-2014.xlsx> --input-2024 <lookup-labels-2024.xlsx> --prepare
+node <spreadsheet-skill>/container_tools/mark_artifact_operation_started.mjs --operation-kind create --expected-output-count 1 --output-format xlsx
+node tools/xlsx-localization/author_remaining_targets.mjs <reported-plan.json> <new-authored-targets.xlsx> <bundled-node-dependency-directory>
+python -B -X utf8 tools/xlsx-localization/main_remaining_package.py --input-2014 <lookup-labels-2014.xlsx> --input-2024 <lookup-labels-2024.xlsx> --authored-targets <new-authored-targets.xlsx>
+```
+
+Requires the preceding lookup-label pair `30189963… / 2ee05231…`. Applies the 49
+remaining static labels/defaults, English ammunition and size lists, carrying
+status and spell preview components/classes. The original dictionaries stay
+intact; an M:N alias table in the existing hidden Export sheet preserves their
+price, weight and size calculations. Ten formulas and five list rules change.
+Ten compact captions expose their full reviewed names. The existing class list
+is partitioned to add hints without losing validation on any of its 335 cells.
+
+The 500-cell author table and all located reviews are bound to the pinned source.
+Only T/AI/AO/AT widths and the affected styles change; the class list wraps.
+Outputs are new `remaining-plan-` or `remaining-candidate-` directories under
+sibling `_audit/xlsx-main-remaining`. Actual Calc checks cover 51 / 43 cases,
+followed by a separate visual check of the final layout. Public templates and
+saved formula caches are unchanged. Number formats, dynamic content and other
+pages still require work; this is not a full English download. The sixth parser
+patch is in `tools/server-patches/main-remaining-20260909`, with scope and evidence
+in `docs/research/xlsx-main-remaining-20260909.md`.
+
 ## Generate the English main-card lookup labels
 
 ```text

@@ -1,0 +1,92 @@
+{
+  "format": "obr-server-parser-patch/v1",
+  "file": "parser.py",
+  "encoding": "utf-8",
+  "line_endings": "LF",
+  "workbooks": [
+    {
+      "name": "DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx",
+      "version": "2014",
+      "sha256": "94444fda4206d579125418b0007b89c414b86c27d6b98655f81f3f1ce65e8fe6"
+    },
+    {
+      "name": "DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx",
+      "version": "2024",
+      "sha256": "264fc65569e3e80932544af548830ca70f10ee308493c8b0234608fcd01c9b04"
+    }
+  ],
+  "deployed": false,
+  "before_sha256": "2512a21b5d760447887ce323eac3aababcda439e714c71062706186a4e9dce06",
+  "before_bytes": 84758,
+  "after_sha256": "457449293fd32bc45a409a8dd6109c34244ec53194d3bbb5b061969576479d03",
+  "after_bytes": 85105,
+  "patch_sha256": "d3f93e99089b0320c51e999bbe5ebae961bd8c7fb5e88228e31b37febb6b4ff2",
+  "patch_bytes": 2779,
+  "prerequisite": "ability-inputs-20260909 exact after result",
+  "prerequisite_packages": {
+    "sheet-aliases-20260908": {
+      ".gitattributes": "e1bfc5eadbc7406c72f43972d571ca2df3f0005e329b78156cd8da2a7af7c522",
+      ".gitignore": "32dae3052f331ee34d628ef535709b301259a45df7c7522c4d35dcf49873f00b",
+      "apply_parser_patch.py": "146062fe51f2bd592b5e5a51292be05c53cd72cafdf613529223c8b5f6794c50",
+      "files.sha256": "8e81423f2d0ce9ef89e680ca8f48cd36b65ac1857ee491f0306b7d2bcb583e3a",
+      "manifest.json": "7564fc43ec33d750d179a8764860f4763610dafa6583e8315ccd8479082a11d5",
+      "parser.patch": "6d6adf180d67beb1449757c7f559983d4606fe653df353eaa60d07e03d81fd43",
+      "README.md": "2f8b24439bc77823468d219ed9289938af26ba312e181c791f914d18fb8c7827",
+      "test_auto_resources.py": "8df1c3c1f5d09515e274d28f3de2395334d9e3204a0e72446b8bcb64415b3db2",
+      "test_sheet_aliases.py": "d7d518221838dd826017f94fd5a5da75f38f4569c9fda365a4cf8c8bbfdb6df8",
+      "test_sheet_aliases_mutations.py": "12af7420fd0b60833e4e0a410d88608e38e23a1393ebe517c8d037fda95073ca",
+      "verify_delivery.py": "101abf402e94dee054365104865aeb1dda0e424cfd87508be92a89ddc9d583c9"
+    },
+    "shield-input-20260908": {
+      ".gitattributes": "e1bfc5eadbc7406c72f43972d571ca2df3f0005e329b78156cd8da2a7af7c522",
+      ".gitignore": "32dae3052f331ee34d628ef535709b301259a45df7c7522c4d35dcf49873f00b",
+      "apply_parser_patch.py": "146062fe51f2bd592b5e5a51292be05c53cd72cafdf613529223c8b5f6794c50",
+      "files.sha256": "2ae6e38993e8c0106db5164646937b880dd68e22160286c24ede04fa4e09bfb9",
+      "manifest.json": "e08a8dbbffd640e4d96006965ada5fe38121a3e907239341844c16c6c16bb211",
+      "parser.patch": "2e20f623f019475c31e46805f6703ce914b08283e9f90144bde38597739770ec",
+      "README.md": "5db7aeb307571843837a4035fd1b3a521c09deb32cc2cc3258ba9a0d7f8446fc",
+      "test_shield_input.py": "bad36b45e9103522dda527a200613d7fba88858cc118708f965f8442bff8b6d6",
+      "verify_delivery.py": "140f2f27e17989c07ab064fe9c7b96d30e9247457c0769774c1a571c03dcae91"
+    },
+    "spell-aliases-20260908": {
+      ".gitattributes": "e1bfc5eadbc7406c72f43972d571ca2df3f0005e329b78156cd8da2a7af7c522",
+      "apply_parser_patch.py": "146062fe51f2bd592b5e5a51292be05c53cd72cafdf613529223c8b5f6794c50",
+      "files.sha256": "46788928a8c9eac0bc969fe48a81c9a792f452b48226518cd2a46c67185f60ae",
+      "manifest.json": "7ed64b642763c339a6ff707db51c7e6f5221ab1c7d46cf323ac9cfcba8d5a55e",
+      "parser.patch": "8532cbff8efbc96999802c945e57f3a40302d0d2f173262a337c0eabc456e389",
+      "README.md": "e5f536956e544bcd7cdd1e59d0ec0ee65001cb54628c8b0b4ad8ea5e6dec6c87",
+      "test_spell_english_aliases.py": "c4fcbcf2f1c26bb3ae50c4be699038b120556a2bb1549b56b306c6d8a57b92da",
+      "verify_delivery.py": "c20634ba9ab6a5e602426511396f2aa13edbf5bbb23410c3ef0fdb0b483fb001"
+    },
+    "main-fields-20260909": {
+      ".gitattributes": "e1bfc5eadbc7406c72f43972d571ca2df3f0005e329b78156cd8da2a7af7c522",
+      ".gitignore": "6feaded4e28ea86e001a6751b4e3d960e8b7c31b9616ff9936b79297086e809b",
+      "apply_parser_patch.py": "146062fe51f2bd592b5e5a51292be05c53cd72cafdf613529223c8b5f6794c50",
+      "files.sha256": "e7eff86e78dcff190f02747bca7e849485bb2ac0a05304f21dae9855075c300c",
+      "manifest.json": "693e065467fb2400dd791568074f57876e15d0f5dd10225afef363326648be85",
+      "parser.patch": "b199df6b4dfda6aa28453c9f3d613b7f79f1d92ee9c6981dcf45f056fc9891a4",
+      "README.md": "5f3ce15f080560d1f4834087a0018fd6b8a1799f73a51103bd328de863bc2d3a",
+      "test_main_fields.py": "8216ca586fc663a3786c03cb2e68ab183a39d766250ef8093ea4f313418d4c40",
+      "verify_delivery.py": "4dd1d5b5b9a9430085edd20ebcc8947b7afc894afe6194909ecc2187cac45cec"
+    },
+    "ability-inputs-20260909": {
+      ".gitattributes": "e1bfc5eadbc7406c72f43972d571ca2df3f0005e329b78156cd8da2a7af7c522",
+      ".gitignore": "6feaded4e28ea86e001a6751b4e3d960e8b7c31b9616ff9936b79297086e809b",
+      "apply_parser_patch.py": "146062fe51f2bd592b5e5a51292be05c53cd72cafdf613529223c8b5f6794c50",
+      "files.sha256": "3c06b33d22fed73b0d698d27d4f931718c1d86e0d6e0fdd8daa7b706ea33c008",
+      "manifest.json": "011e242324a978967f7c329d3e53cc317605ae5996bcf447f89c439e82751d53",
+      "parser.patch": "5f2bacf2e18e2962a81cb99d2b617f55beac02ffbd37e5e96ac690a4bfa6b5a1",
+      "README.md": "b7a6369573f237b2599e2ec55a9be5775d0229a522d949075140299813a931a5",
+      "test_ability_inputs.py": "207b96bd31fe6bbed8589386c19bc99be70cacc03afe8e43aab83304935df34b",
+      "verify_delivery.py": "461bdc4c2c1de56f9f4938885ad1fdb137482447675839b531337b5a87b0e954"
+    }
+  },
+  "tests": [
+    {
+      "file": "test_main_remaining.py",
+      "sha256": "883eeac39f5db7600d5c0e96b27aea1eb0fed60607a1abc0cb6c55acf90e8746",
+      "bytes": 9478
+    }
+  ],
+  "expected_tests": 8
+}
