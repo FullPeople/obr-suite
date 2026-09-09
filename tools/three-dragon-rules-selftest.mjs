@@ -5,7 +5,7 @@ import {tmpdir} from "node:os";
 import {join,resolve} from "node:path";
 const out=mkdtempSync(join(tmpdir(),"three-dragon-rules-"));
 const mutations={
- "bad-starting-gold":["engine.ts","gold:config.seats.length*10","gold:10"],
+ "bad-starting-gold":["engine.ts","gold:config.startingGold??config.seats.length*10","gold:10"],
  "ante-tie-leader":["engine.ts","unique[0]?.index??null","unique[0]?.index??0"],
  "trigger-too-strong":["engine.ts","card(id).strength<=card(previous).strength","card(id).strength>card(previous).strength"],
  "drop-hole-debt":["engine.ts","payer.debt+=amount-paid","payer.debt+=0"],

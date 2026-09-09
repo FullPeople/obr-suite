@@ -10,6 +10,7 @@ Fronts use the user's supplied card pack; backs retain the original vector drago
   responsive projection and resource lifecycle.
 - `types.ts`: the complete public API; this is the authoritative interface.
 - `layout.ts`: seats, physical card locations, anonymous backs and coin display.
+- `currency.ts`: supplied gold/silver crops, extruded outlines and owned textures.
 - `textures.ts`: lazily loaded supplied card fronts, original vector backs, labels
   and runtime paper, wood and felt materials.
 - `stage-selftest.mjs`: actual renderer behavior/pixel checks and three targeted
@@ -52,10 +53,16 @@ face-down slot. ResizeObserver belongs to the renderer; there is no public
 ## Appearance and visible information
 
 The table, card thickness, both card sides and coins are actual WebGL meshes.
+The table is rotationally symmetric with a bevelled timber edge, padded rail,
+apron and pedestal. Regions rotate in the same direction as their cards. Flight
+regions are wider and carry labels on the felt. Overlapping cards expose the top
+strength corner, which is also their inspection anchor.
+
 Fronts use the 100 approved WebP scans with their portrait proportions and unlit
 materials to preserve their printed colors. Backs use the original single-dragon
-Canvas paths, not the supplied pack's reverse. Paper, wood grain, felt and coins
-are generated locally by code. No AI images are used. Front textures request one
+Canvas paths, not the supplied pack's reverse. Paper, wood grain and felt are
+generated locally by code. The two coin faces are conventionally cropped from the
+user's reference and mapped to extruded outlines. No AI images are used. Textures request one
 frame after loading, cancel late callbacks on disposal, and do not create an idle
 render loop. CanvasTexture remains the GPU texture format.
 
@@ -166,3 +173,5 @@ window recreation, fallback and device-performance checks. No deployment or
 version promise follows from these renderer tests.
 
 Deck and discard tops sit on bounded physical paper-edge stacks. Only public counts determine height; two instanced meshes hold at most sixteen representative layers. A single card rests on the felt. The existing owned-instance cleanup also disposes those stacks.
+
+Each seat has a single aligned region pair: ante immediately left of flight, at the same radial depth. Coins sit directly on top of that seat's ante card, with small stable offsets and no extra tray. The far card corners stay exposed; coins do not intercept card inspection. Deck and discard always face the screen, and settled coin faces stay upright. Two-to-six-seat tests populate both flights and antes.

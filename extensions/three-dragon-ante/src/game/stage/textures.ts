@@ -43,8 +43,8 @@ export function cardTexture(card: Card | null, language: "zh" | "en", loaded:()=
 	ctx.fillRect(9, 9, 494, 718);
 	ctx.strokeStyle = "#aa8651";
 	ctx.lineWidth = 3;
-	ctx.strokeRect(18, 18, 476, 700);
-	ctx.strokeRect(28, 28, 456, 680);
+
+
 	const accent = "#b19168";
 	ctx.strokeStyle = accent;
 	ctx.fillStyle = accent;
@@ -84,9 +84,9 @@ export function feltTexture(): THREE.CanvasTexture {
   const result = texture(value); result.wrapS = result.wrapT = THREE.RepeatWrapping; result.repeat.set(7, 7); return result;
 }
 
-export function labelTexture(text: string, muted = false): THREE.CanvasTexture {
+export function labelTexture(text: string, muted = false, accent?:string): THREE.CanvasTexture {
   const { canvas: value, ctx } = canvas(768, 160);
-  ctx.fillStyle = muted ? "#bca882" : "#eed6a4";
+  ctx.fillStyle = accent??(muted ? "#bca882" : "#eed6a4");
   ctx.font = "600 64px Georgia, 'Microsoft YaHei', serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   while (ctx.measureText(text).width > 740 && parseInt(ctx.font.split(" ")[1]) > 24) {
     const size = parseInt(ctx.font.split(" ")[1]) - 2; ctx.font = `600 ${size}px Georgia, 'Microsoft YaHei', serif`;

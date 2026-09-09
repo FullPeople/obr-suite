@@ -3,6 +3,11 @@ let assertions=0,actionSerial=0;
 function check(value:unknown,label:string):asserts value{if(!value)throw Error(`ASSERTION: ${label}`);assertions++;}
 function eq(a:unknown,b:unknown,label:string){check(JSON.stringify(a)===JSON.stringify(b),`${label}: ${JSON.stringify(a)} != ${JSON.stringify(b)}`);}
 const game=(n=3,seed=777,specialIds?:string[])=>createGame({id:"test",seats:Array.from({length:n},(_,i)=>({id:`p${i}`,name:`Player ${i}`})),seed,specialIds});
+for(const n of [2,6])for(const [startingGold,startingHand] of [[10,3],[75,8],[1000,10]]){
+ const state=createGame({id:"custom-start",seats:Array.from({length:n},(_,i)=>({id:`s${i}`,name:String(i)})),startingGold,startingHand,seed:123});
+ eq(state.seats.map(s=>[s.gold,s.hand.length]),Array.from({length:n},()=>[startingGold,startingHand]),"custom deal applied evenly");
+ eq(checkInvariants(state),[],"custom deal conserves cards");eq(state.deck.length,80-n*startingHand,"custom deal draws from deck");
+}
 function act(s:GameState,seat:number,kind:GameAction["kind"],data:Partial<GameAction>={}):GameState{
  const action={id:`action-${++actionSerial}`,revision:s.revision,seatId:s.seats[seat].id,kind,...data};const result=applyAction(s,action);check(result.ok,`valid ${kind} action ${JSON.stringify(action)} ${!result.ok?result.error.code:""}`);if(!result.ok)throw Error("unreachable");
  const errors=checkInvariants(result.state);check(errors.length===0,`invariants after ${kind}: ${errors}`);

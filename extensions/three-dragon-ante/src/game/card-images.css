@@ -1,11 +1,19 @@
 .printed-card-face{display:block;width:100%;height:auto;object-fit:contain;pointer-events:none;user-select:none}
-.card.printed-card{padding:0!important;background:#17110e;overflow:hidden;aspect-ratio:1250/2208;height:auto!important;border-radius:7px;min-height:0}
+.card.printed-card{padding:0!important;background:transparent;overflow:hidden;aspect-ratio:1250/2208;height:auto!important;border:0;border-radius:2px;min-height:0;box-shadow:0 6px 12px #0008}
 .card.printed-card>.printed-card-face{height:100%;width:100%;object-fit:contain}
 .card-back>svg{display:block;width:90%;height:90%;pointer-events:none}
-.card-preview .printed-card-face{width:min(100%,280px);margin:0 auto 16px;border-radius:10px}
+.table-shell>.card-preview,.tda-tutorial .table-shell>.card-preview,.table-shell[data-renderer=webgl]>.card-preview{position:absolute;top:76px;right:20px;bottom:auto;left:auto;transform:none;width:min(340px,34vw,calc((100dvh - 100px)*.566));max-height:calc(100dvh - 100px);padding:0;border:0;border-radius:0;background:none;box-shadow:none;overflow:visible}
+.card-preview .printed-card-face{width:100%;height:auto;max-height:none;margin:0;border-radius:2px;filter:drop-shadow(0 18px 20px #000b)}
+.card-preview #close-preview{position:absolute;right:3px;top:3px;z-index:1;min-height:24px;width:24px;padding:0;background:#15120c99;border:0;color:white;opacity:0}
+.card-preview:hover #close-preview,.card-preview:focus-within #close-preview{opacity:1}
+.table-shell .card.printed-card[aria-pressed=true]{outline:0;box-shadow:0 12px 22px #000a}
+.table-shell .card-wrap.power-active>.card{box-shadow:0 0 24px #f1c66aaa}
+.table-setup{display:flex;flex-wrap:wrap;gap:20px;margin:20px auto;max-width:580px;border:0;background:#161c1980;padding:20px;border-radius:12px}
+.table-setup legend{font-size:1.1rem;font-weight:700}.table-setup label{display:flex;flex-direction:column;gap:8px;flex:1;min-width:160px}.table-setup input{width:100%;box-sizing:border-box;font:700 1.4rem Georgia,serif;background:#141918;color:#f2dfb9;border:1px solid #ab92645c;padding:10px;border-radius:6px}.table-setup small{flex-basis:100%;line-height:1.6}
+.flight{overflow:visible;min-width:140px}.flight .card-wrap+.card-wrap{margin-left:-28px}.flight .card-wrap{position:relative;filter:drop-shadow(-3px 3px 3px #0007)}
+@media(max-width:600px){.table-shell>.card-preview,.tda-tutorial .table-shell>.card-preview,.table-shell[data-renderer=webgl]>.card-preview{top:72px;right:10px;width:min(230px,48vw,calc((100dvh - 90px)*.566))}}
 .preview-hint,.power-description{white-space:pre-line}
-.card-explanation{margin-top:14px;padding-top:10px;border-top:1px solid #ae915655;font-size:.9rem;line-height:1.65}
-.power-card.printed-power-card{padding:0;aspect-ratio:1250/2208;overflow:hidden;background:#17110e}
+.power-card.printed-power-card{padding:0;aspect-ratio:1250/2208;overflow:hidden;background:transparent;border:0;border-radius:2px;box-shadow:18px 22px 40px #000a}
 .printed-power-card .power-card-art{display:block;width:100%;height:100%;margin:0}
 .printed-power-card .power-card-strength,.printed-power-card .power-card-name{display:none}
 .printed-power-card .printed-card-face{width:100%;height:100%;object-fit:contain}

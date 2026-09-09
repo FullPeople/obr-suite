@@ -5,7 +5,7 @@ import type {TableView} from "./protocol";
 import {readUIDraft,type TableDisplayMode,type TableUICommand,type TableUIDraft} from "./ui-command";
 import type {Card} from "./rules/cards";
 import {card} from "./rules/cards";
-import {cardHint, cardName, cardExplanation, rulePrompt} from "./rules/prompts";
+import {cardHint, cardName, rulePrompt} from "./rules/prompts";
 import type {Choice, EligibleAction, PublicEvent, PublicView, SeatView} from "./rules/types";
 import {tableText, type TableLanguage} from "./text";
 import {mountTableStage, type StageHandle, type StageHit} from "./stage";
@@ -22,6 +22,7 @@ export interface TableUIDeps {send(command:TableUICommand):void|Promise<void>;la
 /** This surface receives projections only. It never imports or constructs host state. */
 export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  let view:TableView|null=null,lang=deps.language,sending=false,destroyed=false,selectionKey="",selected=new Set<string>(),resetKey="",localMessage="";
+ let startingGold:number|undefined,startingHand=6,setupTableId="";
  let pendingDraft:TableUIDraft|null=null,touched=false,previewId="",previewPinned=false,pinnedPreviewId="";
  let hoveredHand = "", gestureTimer: ReturnType<typeof setTimeout> | undefined, gestureSequence = Date.now(), lastGesture = "";
  const gestures = new Map<string, { value: HandGesture; timer: ReturnType<typeof setTimeout> }>();
@@ -49,9 +50,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  <div id="board-scroll" class="board-scroll"><div id="table-banner" class="table-banner" role="status" aria-live="polite" hidden><p id="waiting-banner"></p><p id="effect-banner"></p></div><section id="lobby"></section><div id="stage-host" hidden><canvas id="table-stage" tabindex="0" role="application" aria-describedby="stage-keyboard"></canvas><div id="stage-summary"></div><p id="stage-keyboard" aria-live="polite"></p></div><div id="arena" class="arena">
  <section id="players" class="players"></section>
  <section id="public-zone" class="public-zone"><div id="summary" class="summary"></div><div class="table-piles"><div id="deck-pile" class="deck-pile"></div><div class="table-seal" aria-hidden="true">◇<span>III</span>◇</div><button id="discard-pile" class="discard-pile" type="button"></button></div><section id="antes"></section><section id="effects"></section></section></div>
- <div class="table-notes"><details id="accessible-table"><summary id="accessible-title"></summary><div id="accessible-seats"></div></details><details id="discard"><summary id="discard-title"></summary><div id="discard-cards"></div></details>
- <details id="log"><summary id="log-title"></summary><ol id="events"></ol></details>
- <details id="help"><summary id="help-title"></summary><p id="help-text"></p><a id="rules-link" href="https://wizkids.com/three-dragon-ante-legendary-edition/" target="_blank" rel="noopener"></a></details></div></div>
+ </div>
  <div class="table-bubbles"><div id="status" class="notice" role="status" aria-live="polite" hidden></div><section id="turn" class="turn" aria-label="" hidden></section></div>
  <div class="player-dock"><section id="hand" class="hand"></section></div>
  <aside id="card-preview" class="card-preview" aria-live="polite" hidden><button id="close-preview" class="quiet" type="button">×</button><div id="preview-content"></div></aside>
@@ -70,7 +69,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  function preview(value:Card,pinned=false){
   previewId=value.id;previewPinned=pinned;if(pinned)pinnedPreviewId=value.id;
   const panel=el("card-preview"),host=el("preview-content"),key=`${value.id}:${lang}:${pinned}`;
-  if(host.dataset.content!==key){host.dataset.content=key;host.replaceChildren();host.append(cardFaceImage(value.id));host.append(node("span",`${value.strength}`,"preview-strength"),node("h2",cardName(value.id,lang)),node("p",t(value.alignment),"card-kind"),node("p",cardHint(value.family,lang),"preview-hint"));const details=document.createElement("details");details.className="card-explanation";details.append(node("summary",lang==="zh"?"规则详解":"Rule details"),node("p",cardExplanation(value.family,lang)));host.append(details);if(!pinned)host.append(node("small",lang==="zh"?"点击卡牌可固定说明并滚动查看。":"Click the card to pin and scroll through its description.","preview-help"));panel.scrollTop=0;}
+  if(host.dataset.content!==key){host.dataset.content=key;host.replaceChildren();const image=cardFaceImage(value.id);image.alt=cardName(value.id,lang);host.append(image);panel.scrollTop=0;}
   panel.hidden=false;panel.dataset.pinned=String(pinned);panel.dataset.color=value.color??value.alignment;
  }
  function hidePreview(){previewId="";previewPinned=false;pinnedPreviewId="";el("card-preview").hidden=true;}
@@ -158,7 +157,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   const confirm=root.querySelector<HTMLButtonElement>("#confirm-action");if(confirm)confirm.disabled=locked()||selected.size<min||selected.size>max;
   const count=root.querySelector("#selection-count");if(count)count.textContent=`${t("selection")}: ${selected.size} · ${t("chooseRange")}: ${min===max?min:`${min}–${max}`}`;
  }
- function draft():TableUIDraft|null{return view?.table&&view.game?{tableId:view.table.id,gameId:view.game.id,selectionKey,selected:[...selected],boardScroll:el("board-scroll").scrollTop,handScroll:root.querySelector<HTMLElement>("#hand .cards")?.scrollLeft??0,open:["discard","log","help"].filter(id=>el<HTMLDetailsElement>(id).open)}:null;}
+ function draft():TableUIDraft|null{return view?.table&&view.game?{tableId:view.table.id,gameId:view.game.id,selectionKey,selected:[...selected],boardScroll:el("board-scroll").scrollTop,handScroll:root.querySelector<HTMLElement>("#hand .cards")?.scrollLeft??0,open:[]}:null;}
  function send(command:TableUICommand){
   const windowCommand=command.type==="close"||command.type==="display"||command.type==="remember";
   if(!windowCommand&&!receiptCompatible()&&!(command.type==="retry"&&!view))return;
@@ -238,7 +237,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   if(key!==selectionKey){selectionKey=key;selected.clear();}selected=new Set([...selected].filter(id=>eligibleIds().includes(id)));
   document.documentElement.lang=lang==="en"?"en":"zh-CN";document.title=t("title");
   root.dataset.phase=game?.phase??"lobby";root.dataset.players=String(game?.seats.length??0);
-  for(const [id,code] of [["title","title"],["edition","edition"],["log-title","history"],["help-title","help"],["help-text","helpText"],["rules-link","rules"],["reset-title","resetTitle"],["reset-body","resetBody"],["cancel-reset","cancel"],["confirm-reset","confirmReset"]])el(id).textContent=t(code);
+  for(const [id,code] of [["title","title"],["edition","edition"],["reset-title","resetTitle"],["reset-body","resetBody"],["cancel-reset","cancel"],["confirm-reset","confirmReset"]])el(id).textContent=t(code);
   el("tutorial").textContent = lang === "en" ? "How to play" : "如何游玩"; el("language").textContent = lang === "en" ? "中文" : "English";soundControls();root.dataset.powerActive=String(!!power?.busy);
   el("close").setAttribute("aria-label",t("close"));el("close").title=t("close");el("close").textContent=t("backToMap");el("display-mode").textContent=t(deps.mode==="compact"?"expand":"minimize");el("close-preview").setAttribute("aria-label",t("closePreview"));
   const message=view&&!receiptCompatible()?(lang==="zh"?"牌桌后台仍是旧版。请完整刷新枭熊页面后再出牌；现在仍可观看或返回地图。":"The table background is an older version. Fully refresh the Owlbear page before playing. You can still watch or return to the map."):pendingAction?.retryable?(lang==="zh"?"尚未确认这次操作，请重试原操作。":"This action is not confirmed. Retry the same action."):localMessage?(rulePrompt(localMessage,lang)!==localMessage?rulePrompt(localMessage,lang):t(localMessage)):view?.message?tableText(view.message,lang):busy()?t("sending"):!view||!view.connected?t("connecting"):"";
@@ -249,14 +248,21 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
    else if(table){
     if(!seated&&table.stage!=="playing")host.append(button(t("join"),()=>send({type:"join"}),locked()||table.seats.length>=6,"primary"));
     if(seated&&table.stage!=="playing")host.append(button(t("leave"),()=>send({type:"leave"}),locked()));
-    if(view?.isHost&&table.stage==="lobby")host.append(button(t("start"),()=>send({type:"start"}),locked()||table.seats.length<2,"primary"));
+    if(view?.isHost&&table.stage==="lobby")host.append(button(t("start"),()=>send({type:"start",options:{...(startingGold===undefined?{}:{startingGold}),startingHand}}),locked()||table.seats.length<2,"primary"));
     if(view?.isHost&&table.stage!=="lobby")host.append(button(t("newGame"),reset,!receiptCompatible()||busy()||(!view.connected&&view.message!=="recoveryMissing")));
    }
    if(!view?.connected||view?.message||localMessage||pendingAction?.retryable)host.append(button(pendingAction?(lang==="zh"?"重试这次操作":"Retry this action"):t("retry"),()=>send({type:"retry"}),sending||!!view&&!receiptCompatible()));
   });
+  if(table?.id!==setupTableId){setupTableId=table?.id??"";startingGold=undefined;startingHand=6;}
   section("lobby",[table,view?.selfPlayerId,view?.isHost,!!game],host=>{
    if(!table){host.append(node("p",t("noTable")));return;}
-   if(!game){host.append(node("p",t(table.stage==="playing"?"privateSync":"lobby")));const seats=node("div",undefined,"seat-chips");for(const seat of table.seats)seats.append(node("span",`${seat.name}${seat.playerId===view?.selfPlayerId?` (${t("you")})`:""}${seat.playerId===table.hostPlayerId?` · ${t("host")}`:""}`));host.append(seats);if(table.stage==="lobby")host.append(node("p",t(table.seats.length<2?"needPlayers":view?.isHost?"creatorReady":"seated"),"muted"));}
+   if(!game){host.append(node("p",t(table.stage==="playing"?"privateSync":"lobby")));const seats=node("div",undefined,"seat-chips");for(const seat of table.seats)seats.append(node("span",`${seat.name}${seat.playerId===view?.selfPlayerId?` (${t("you")})`:""}${seat.playerId===table.hostPlayerId?` · ${t("host")}`:""}`));host.append(seats);if(table.stage==="lobby")host.append(node("p",t(table.seats.length<2?"needPlayers":view?.isHost?"creatorReady":"seated"),"muted"));if(table.stage==="lobby"&&view?.isHost){
+    const form=node("fieldset",undefined,"table-setup");form.append(node("legend",lang==="zh"?"开局设置":"Game setup"));
+    const input=(id:string,title:string,value:number,min:number,max:number,change:(value:number)=>void)=>{const label=node("label",title),field=document.createElement("input");field.type="number";field.id=id;field.min=String(min);field.max=String(max);field.step="1";field.value=String(value);field.addEventListener("change",()=>{const raw=field.valueAsNumber,next=Number.isFinite(raw)?Math.max(min,Math.min(max,Math.round(raw))):value;field.value=String(next);change(next);});label.append(field);form.append(label);};
+    input("starting-gold",lang==="zh"?"每人初始金币":"Starting gold per player",startingGold??table.seats.length*10,10,1000,value=>startingGold=value);
+    input("starting-hand",lang==="zh"?"每人起始手牌":"Initial cards per player",startingHand,3,10,value=>startingHand=value);
+    form.append(node("small",lang==="zh"?"默认金币为人数 × 10，起始手牌为 6 张。手牌上限始终为 10 张。":"Default gold: players × 10. Initial hand: 6 cards. Hand limit remains 10."));host.append(form);
+   }}
   });
   section("summary",game&&[game.gambit,game.round,game.stakes,game.hole],host=>{if(!game)return;for(const [code,value] of [["gambit",game.gambit],["round",game.round],["stakes",game.stakes],["hole",game.hole]]){const chip=node("span",undefined,`counter ${code}`);chip.append(node("small",t(String(code))),node("strong",String(value)));host.append(chip);}});
   section("deck-pile",game?.deckCount,host=>{if(!game)return;const back=node("div",undefined,"card-back deck-back");back.setAttribute("aria-hidden","true");back.innerHTML=emblem;host.append(back,node("span",`${t("deck")} · ${game.deckCount}`));});
@@ -289,11 +295,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   }});
   section("antes",game&&[game.ante,game.anteOrigins,game.revealed],host=>{if(!game)return;const unplaced=game.ante.filter(c=>!game.anteOrigins?.some(origin=>origin.cardId===c.id));if(unplaced.length)host.append(node("h2",t("ante")),cardList(unplaced));if(game.revealed.length)host.append(node("h2",t("revealed")),cardList(game.revealed));});
   section("effects",game&&[game.effects,game.lastGambit],host=>{if(!game)return;if(game.effects?.length){host.append(node("h2",t("effects")));for(const effect of game.effects)host.append(node("p",`${seatName(effect.seatId)} · ${t(effect.kind)}`));}if(game.lastGambit)host.append(node("p",`${t("lastGambit")}: ${game.lastGambit.winners.map(seatName).join(", ")}`));});
-  el("discard").hidden=!game;el("discard-title").textContent=`${t("discard")} · ${game?.discard.length??0}`;renderDiscard();
-  section("events",game?.events,host=>{for(const event of game?.events.slice(-30).reverse()??[]){const parts=[seatName(event.seatId),t(event.code),event.amount===undefined?"":String(event.amount),seatName(event.targetSeatId),...(event.cardIds??[]).map(id=>cardName(id,lang))].filter(Boolean);host.append(node("li",parts.join(" · ")));}});
-  el("accessible-table").hidden=!game||!stageAvailable;el("accessible-title").textContent=lang==="zh"?"桌面详情":"Table details";
-  section("accessible-seats",game&&[game.seats,game.ante,game.effects],host=>{if(!game)return;for(const seat of game.seats){const row=node("section");row.append(node("h2",seat.name),node("p",`${t("gold")} ${seat.gold} · ${t("strength")} ${seat.strength} · ${t("handCount")} ${seat.handCount}${seat.debt?` · ${t("debt")} ${seat.debt}`:""}`));for(const item of seat.flight)row.append(button(`${cardName(item.cardId,lang)} · ${item.card.strength}`,()=>inspectCard(item.cardId,true)));host.append(row);}const antes=node("section");antes.append(node("h2",t("ante")));for(const value of game.ante)antes.append(button(`${cardName(value.id,lang)} · ${value.strength}`,()=>inspectCard(value.id,true)));host.append(antes);for(const effect of game.effects??[])host.append(node("p",`${seatName(effect.seatId)} · ${t(effect.kind)}`));});
-  el("arena").hidden=!game||stageAvailable;el("stage-host").hidden=!game||!stageAvailable;el("log").hidden=!game;el("turn").hidden=!game||!el("turn").childElementCount;el("hand").hidden=!own||stageAvailable;el("hand").inert=stageAvailable;el("turn").setAttribute("aria-label",t("acting"));root.dataset.hasChoice=String(a?.kind==="choose");renderBanner();
+  el("arena").hidden=!game||stageAvailable;el("stage-host").hidden=!game||!stageAvailable;el("turn").hidden=!game||!el("turn").childElementCount;el("hand").hidden=!own||stageAvailable;el("hand").inert=stageAvailable;el("turn").setAttribute("aria-label",t("acting"));root.dataset.hasChoice=String(a?.kind==="choose");renderBanner();
   el("table-stage").setAttribute("aria-label",lang==="zh"?"三维牌桌。方向键选牌，空格拿起，Enter放到自己区域。":"Three dimensional card table. Arrow keys choose; Space lifts; Enter drops in your own slot.");
   el("stage-keyboard").textContent=keyboardText();
   el("stage-summary").textContent=game?`${t("gambit")} ${game.gambit} · ${t("round")} ${game.round} · ${t("stakes")} ${game.stakes} · ${t("hole")} ${game.hole}`:"";
@@ -302,11 +304,9 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   restoreDraft(); layoutFan(); paintGestures();
   if(el<HTMLDialogElement>("reset-dialog").open&&resetKey!==`${table?.id}:${game?.id}`)el<HTMLDialogElement>("reset-dialog").close();
  }
- function renderDiscard(){if(destroyed||!el<HTMLDetailsElement>("discard").open)return;section("discard-cards",view?.game?.discard,host=>host.append(cardList(view?.game?.discard??[])));}
  function restoreDraft(){if(!pendingDraft||!view?.game)return;const incoming=pendingDraft;pendingDraft=null;if(touched||incoming.tableId!==view.table?.id||incoming.gameId!==view.game.id||incoming.selectionKey!==selectionKey)return;
   const max=action()?.kind==="choose"?(action() as {kind:"choose";choice:Choice}).choice.max:1;
   selected=new Set(incoming.selected.filter(id=>eligibleIds().includes(id)).slice(0,max));syncSelection();
-  for(const id of incoming.open)el<HTMLDetailsElement>(id).open=true;renderDiscard();
   el("board-scroll").scrollTop=incoming.boardScroll;const hand=root.querySelector<HTMLElement>("#hand .cards");if(hand)hand.scrollLeft=incoming.handScroll;
  }
  function language(value:TableLanguage){
@@ -351,8 +351,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
    }
  }
  const resize = new ResizeObserver(layoutFan); resize.observe(el("hand"));
- el("discard").addEventListener("toggle",renderDiscard);
- el("discard-pile").addEventListener("click",()=>{el<HTMLDetailsElement>("discard").open=true;renderDiscard();el("discard").scrollIntoView({block:"nearest"});});
+ el("discard-pile").addEventListener("click",()=>{const cards=view?.game?.discard,top=cards?.[cards.length-1];if(top)preview(top,true);});
  el("close-preview").addEventListener("click",hidePreview);
  el("display-mode").addEventListener("click",()=>send({type:"display",mode:deps.mode==="compact"?"full":"compact"}));
  const keydown=(event:KeyboardEvent)=>{keyboardInput(event);if(!event.defaultPrevented&&event.key==="Escape"&&previewId){event.preventDefault();event.stopPropagation();hidePreview();}};root.addEventListener("keydown",keydown);

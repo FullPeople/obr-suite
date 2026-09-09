@@ -16,7 +16,7 @@ function view(){return{actionReceiptVersion:1,table:{version:1,id:'pack-table',h
 function reset(lesson='gambit-tie',who='you'){surface?.destroy();guide?.destroy();viewer=who;lessonId=lesson;state=createTutorialGame(lesson,'pack-'+(++revision));surface=mountTableUI(document.querySelector('#app')!,{language:'zh',send:c=>sent.push(c)});surface.update(view());return state}
 function move(){const a=tutorialMove(state,lessonId,crypto.randomUUID());const result=applyAction(state,a);if(!result.ok)throw Error(result.error.code);state=result.state;surface.update(view());return state}
 function finishScore(){for(let i=0;i<30;i++){move();if(state.events.some((e:any)=>e.code==='GAMBIT_SCORED'))return state;}throw Error('no score')}
-w.h={reset,move,finishScore,view,card,CARDS,PRINTED_PACK,roundCues,freshPublicEvents,sent,sounds,cardIds:()=>CARDS.map(c=>c.id),surface:()=>surface,
+w.h={lobby(){surface.update({...view(),game:null,table:{...view().table,stage:'lobby'}})},reset,move,finishScore,view,card,CARDS,PRINTED_PACK,roundCues,freshPublicEvents,sent,sounds,cardIds:()=>CARDS.map(c=>c.id),surface:()=>surface,
  guide(){guide?.destroy();guide=mountOnboarding(document.body,{language:'zh',onClose(){},onPractice(){}})},
  snapshot(){return state},disconnect(){surface.update({...view(),connected:false})},reconnect(){surface.update(view())},
  round(){const before=view();state.round++;state.active=(state.active+1)%state.seats.length;state.revision++;state.events.push({code:'ROUND_FIXTURE'});surface.update(view());return before},
@@ -28,6 +28,7 @@ await build({input:'pack-entry',platform:'browser',plugins:[{name:'test-entry',r
 const css=['style.css','tutorial.css','stage-ui.css','power-presentation.css','card-images.css','round-presentation.css','onboarding/style.css'].map(f=>readFileSync(join(base,f),'utf8')).join('\n');
 const server=createServer((req,res)=>{const path=new URL(req.url,'http://localhost').pathname;
  if(path==='/app.js'){res.setHeader('Content-Type','text/javascript');return res.end(readFileSync(join(out,'app.js')))}
+ const currency=/^\/art\/currency\/(dragon-gold|shard-silver)\.webp$/.exec(path);if(currency){res.setHeader('Content-Type','image/webp');return res.end(readFileSync(join(base,'art/currency',currency[1]+'.webp')))}
  const art=/^\/art\/pack-20260910\/cards\/([a-z0-9-]+)\.webp$/.exec(path);if(art){const file=join(base,'art/pack-20260910/cards',art[1]+'.webp');if(!existsSync(file)){res.statusCode=404;return res.end()}res.setHeader('Content-Type','image/webp');return res.end(readFileSync(file))}
  res.setHeader('Content-Type','text/html;charset=utf-8');res.end(`<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style><body><main id="app"></main><script type="module" src="/app.js"></script></body></html>`)});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -44,6 +45,8 @@ try{
  const initialArt=requests.filter(url=>url.endsWith('.webp'));check('opening a table loads only visible cards, not the whole pack',initialArt.length>0&&initialArt.length<40);
  check('every supplied face decodes with consistent portrait dimensions',(await page.evaluate(()=>h.assets())).every(([,w,h])=>w===768&&h===1357));
  check('no supplied reverse image or AI art requested',!requests.some(url=>/背面|back\.webp|imagegen|ai-image/.test(url)));
+ check('removed detail/history/help columns are absent',await page.locator('#accessible-table,#discard,#log,#help,.table-notes').count()===0);
+ check('both referenced gold and silver textures load',requests.some(url=>url.endsWith('dragon-gold.webp'))&&requests.some(url=>url.endsWith('shard-silver.webp')));
  await page.screenshot({path:join(out,'table-pack.png')});
  const scored=await page.evaluate(()=>h.finishScore());check('tied scoring retains immutable public per-card totals',scored.events.some(e=>e.score?.reason==='tied'&&e.score.rows.every(r=>r.cards.reduce((sum,c)=>sum+c.points,0)+r.bonus===r.total)));
  await dismissPowers();await page.waitForFunction(()=>document.querySelector('.round-overlay:not([hidden])')?.getAttribute('data-kind')==='score');
@@ -51,6 +54,8 @@ try{
  await page.waitForFunction(()=>Number(document.querySelector('.round-overlay')?.getAttribute('data-step'))===1);
  check('first stage counts precisely the first card for each player',await page.evaluate(()=>[...document.querySelectorAll('.score-row')].every(row=>row.querySelectorAll('.score-card.counted').length===1)));
  await page.locator('.score-card').first().hover();check('scored cards still open full effect inspection',await page.locator('#card-preview').isVisible());
+ check('preview contains only the enlarged face at original aspect',await page.locator('#preview-content').evaluate(node=>node.children.length===1&&node.firstElementChild.tagName==='IMG'&&Math.abs(node.firstElementChild.width/node.firstElementChild.height-1250/2208)<.01));
+ await page.screenshot({path:join(out,'enlarged-face.png')});
  await page.locator('#close-preview').click();await page.screenshot({path:join(out,'score-addition.png')});
  await page.waitForSelector('.score-result');check('ties explicitly explain the extra round',(await page.locator('.score-result').innerText()).includes('加打一轮'));
  await page.screenshot({path:join(out,'score-tied.png')});
@@ -62,10 +67,15 @@ try{
  await page.evaluate(()=>h.reset('empty','spectator'));await page.evaluate(()=>h.finishScore());await dismissPowers();
  await page.waitForSelector('.score-result');check('spectators see actual win and gold settlement',(await page.locator('.score-result').innerText()).includes('赢得本轮局'));
  await page.evaluate(()=>h.reset('powers'));await page.evaluate(()=>h.guide());
- for(let i=0;i<4;i++)await page.locator('.tda-guide-next').click();
- check('dedicated buying page gives price discard and refill rules',(await page.locator('.tda-guide-description').innerText()).includes('必须买牌')&&(await page.locator('.tda-guide-results').innerText()).includes('4 张'));
- await page.locator('.tda-guide-next').click();check('guide distinguishes game, gambit, round and pack variant',(await page.locator('.tda-guide-description').innerText()).includes('斗牌')&&(await page.locator('.tda-guide-tip').innerText()).includes('墨绿策划者要求更强'));
+ check('two-page guide defines round, gambit, next leader and game end',(await page.locator('.tda-guide-description').innerText()).includes('金币归零')&&(await page.locator('.tda-guide-flow').innerText()).includes('只比较这一轮出的牌')&&await page.locator('.tda-guide-progress button').count()===2);
+ check('important rules use semantic bold text',await page.locator('.tda-guide-copy strong').count()>7);
+ await page.screenshot({path:join(out,'guide-flow.png')});
+ await page.locator('.tda-guide-next').click();check('core rules explain buying, tied ante price and ability timing',(await page.locator('.tda-guide-results').innerText()).includes('4 张手牌')&&(await page.locator('.tda-guide-results').innerText()).includes('8、8、5')&&(await page.locator('.tda-guide-results').innerText()).includes('逆时针相邻玩家'));
  await page.screenshot({path:join(out,'guide-rules.png')});
+ await page.locator('.tda-guide-close').click();await page.evaluate(()=>h.lobby());
+ await page.locator('#starting-gold').fill('75');await page.locator('#starting-hand').fill('8');await page.locator('#starting-hand').blur();
+ await page.locator('#toolbar button').filter({hasText:'开始游戏'}).click();
+ check('creator setup submits selected initial gold and hand',await page.evaluate(()=>h.sent.some(command=>command.type==='start'&&command.options.startingGold===75&&command.options.startingHand===8)));
  await page.evaluate(()=>h.destroy());check('destroy removes every cinematic overlay',await page.locator('.round-overlay,.power-overlay').count()===0);check('no browser runtime errors',errors.length===0);
  writeFileSync(join(out,'result.json'),JSON.stringify({pass:true,checks,errors,initialArtRequests:initialArt.length,output:out},null,2));console.log(out);
 }catch(error){await page.screenshot({path:join(out,'failure.png')});writeFileSync(join(out,'failure.json'),JSON.stringify({error:String(error),checks,errors,output:out},null,2));console.error(out);throw error;}finally{await browser.close();await new Promise(r=>server.close(r))}

@@ -3,6 +3,7 @@ import { createPrivateIdentity, PrivateLink } from "./private-channel";
 import type { KeyHello, PrivateIdentity } from "./private-channel";
 import { TableStore } from "./store";
 import type { SavedTable } from "./store";
+import { validGameSetup } from "./setup";
 import { applyAction, createGame, projectPublic, projectSeat } from "./rules";
 import type { GameAction, GameState, PublicView, SeatView } from "./rules";
 import { packPublic, packSeat, unpackPublic, unpackSeat } from "./wire";
@@ -711,7 +712,8 @@ export class TableController {
         if (command.type === "start" && game) { await respond({ requestId: request.requestId, ok: true }); return; }
         if (request.tableRevision !== table.revision || request.gameId !== (game?.id ?? null)) { await reject("staleTable"); return; }
         if (command.type === "start" && table.seats.length < 2) { await reject("tooFewPlayers"); return; }
-        game = command.type === "newGame" ? null : createGame({ id: crypto.randomUUID(), seats: table.seats.map(seat => ({ id: seat.seatId, name: seat.name })) });
+        if(command.type === "start" && !validGameSetup(command.options)){await reject("invalidCommand");return;}
+        game = command.type === "newGame" ? null : createGame({ ...(command.type === "start" ? command.options : {}), id: crypto.randomUUID(), seats: table.seats.map(seat => ({ id: seat.seatId, name: seat.name })) });
       }
       table.revision++; table.stage = gameStage(game);
       const control = command.type === "action" ? receipts : [...receipts, { playerId: member.id, requestId: request.requestId, fingerprint }].slice(-128);

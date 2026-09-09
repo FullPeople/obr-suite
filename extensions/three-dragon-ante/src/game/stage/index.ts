@@ -1,9 +1,10 @@
 import * as THREE from "three";
+import {currencyGeometry,currencyTexture} from "./currency";
 import { readHandGesture, type HandGesture } from "../gesture";
 import type { PublicEvent, SeatView } from "../rules/types";
 import { card } from "../rules/cards";
 import { cardTexture, labelTexture, woodTexture, feltTexture } from "./textures";
-import { placements, seatPlacements, coinDenominations, DECK, DISCARD, STAKES, pileTop, type Pose, type CardPlacement } from "./layout";
+import { placements, seatPlacements, coinDenominations, moneyPlacement, flightWidth, DECK, DISCARD, STAKES, pileTop, type Pose, type CardPlacement } from "./layout";
 import type { StageAnchorQuery, StageHandle, StageHit, StageModel, StageOptions, StageZone } from "./types";
 import { REVEAL_PRESENTATION_MS, type RevealPhase } from "./types";
 export type * from "./types";
@@ -35,19 +36,26 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   const mat = <T extends THREE.Material>(value: T) => { materials.add(value); return value; };
   const tex = <T extends THREE.Texture>(value: T) => { textures.add(value); return value; };
   const standard = (color: THREE.ColorRepresentation, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => mat(new THREE.MeshStandardMaterial({ color, roughness: .78, ...extra }));
-  const mesh = (geometry: THREE.BufferGeometry, material: THREE.Material, parent: THREE.Object3D = scene) => { const result = new THREE.Mesh(geometry, material); parent.add(result); return result; };
-  const wood = tex(woodTexture()); const woodMat = standard("#aa8666", { map: wood });
-  const table = mesh(geo(new THREE.CylinderGeometry(9.65, 9.45, .5, 80)), woodMat); table.scale.z = .75; table.position.y = -.29; table.receiveShadow = true;
-  const felt = mesh(geo(new THREE.CylinderGeometry(8.4, 8.4, .035, 80)), standard("#193d39", { map: tex(feltTexture()), roughness: 1 })); felt.scale.z = .72; felt.position.y = -.013; felt.receiveShadow = true;
-  const rim = mesh(geo(new THREE.TorusGeometry(8.55, .022, 5, 100)), standard("#a78545", { metalness: .65, roughness: .45 })); rim.rotation.x = -Math.PI / 2; rim.scale.y = .72; rim.position.y = .008;
-  const seal = mesh(geo(new THREE.RingGeometry(2.9, 2.915, 80)), standard("#6b7050", { transparent: true, opacity: .3 })); seal.rotation.x = -Math.PI / 2; seal.position.y = .011;
-  const ambient = new THREE.HemisphereLight("#ffe5b7", "#252b29", 2.3); scene.add(ambient);
-  const key = new THREE.DirectionalLight("#ffeacb", 3.0); key.position.set(-5, 11, 6); key.castShadow = true;
+  const mesh = (geometry: THREE.BufferGeometry, material: THREE.Material|THREE.Material[], parent: THREE.Object3D = scene) => { const result = new THREE.Mesh(geometry, material); parent.add(result); return result; };
+  const wood = tex(woodTexture()); const woodMat = standard("#947b65", { map: wood, roughness:.38 });
+  // A rotationally symmetric, bevelled timber top. No ellipse scaling.
+  const profile=[[0,-.62],[8.45,-.62],[8.67,-.53],[8.82,-.29],[8.9,-.12],[8.86,-.02],[8.7,.015],[0,.015]].map(([x,y])=>new THREE.Vector2(x,y));
+  const table=mesh(geo(new THREE.LatheGeometry(profile,96)),woodMat);table.receiveShadow=true;table.castShadow=true;
+  const apron=mesh(geo(new THREE.CylinderGeometry(8.46,8.34,.5,96)),standard("#211612",{map:wood,roughness:.48}));apron.position.y=-.79;apron.castShadow=true;
+  const felt=mesh(geo(new THREE.CylinderGeometry(7.93,7.93,.022,96)),standard("#153a32",{map:tex(feltTexture()),roughness:1}));felt.position.y=.027;felt.receiveShadow=true;
+  for(const [radius,y,thickness] of [[7.99,.033,.022],[8.56,.025,.017],[8.83,-.19,.025]]){
+    const trim=mesh(geo(new THREE.TorusGeometry(radius,thickness,6,96)),standard("#8f7950",{metalness:.58,roughness:.5}));trim.rotation.x=-Math.PI/2;trim.position.y=y;
+  }
+  const rail=mesh(geo(new THREE.TorusGeometry(8.3,.16,12,96)),standard("#251b17",{roughness:.72}));rail.rotation.x=-Math.PI/2;rail.position.y=.035;rail.receiveShadow=true;
+  const floor=mesh(geo(new THREE.PlaneGeometry(70,70)),standard("#100e0c",{roughness:1}));floor.rotation.x=-Math.PI/2;floor.position.y=-2.8;floor.receiveShadow=true;
+  const pedestal=mesh(geo(new THREE.CylinderGeometry(2.3,3.1,2,32)),woodMat);pedestal.position.y=-1.8;pedestal.castShadow=true;
+  const ambient = new THREE.HemisphereLight("#ffe5b7", "#252b29", 1.5); scene.add(ambient);
+  const key = new THREE.DirectionalLight("#ffeacb", 2.3); key.position.set(-5, 11, 6); key.castShadow = true;
   key.shadow.mapSize.set(1024, 1024); key.shadow.camera.left = -12; key.shadow.camera.right = 12; key.shadow.camera.top = 11; key.shadow.camera.bottom = -11; key.shadow.normalBias = .025; key.shadow.bias = -.0003; key.shadow.intensity = .45; scene.add(key);
   const fill = new THREE.PointLight("#bdcbd7", 50, 35, 2); fill.position.set(6, 8, -5); scene.add(fill);
   const cardBody = geo(new THREE.BoxGeometry(W, THICKNESS, H));
-  const cardPlane = geo(new THREE.PlaneGeometry(W - .025, H - .025));
-  const edgeMat = standard("#b29b76", { roughness: .82 });
+  const cardPlane = geo(new THREE.PlaneGeometry(W, H));
+  const edgeMat = standard("#4f473d", { roughness: .82 });
   const backMat = standard("#ffffff", { map: tex(cardTexture(null, "en")), roughness: .77 });
   const faces = new Map<string, THREE.MeshBasicMaterial>();
   const visuals = new Map<string, Visual>(), motions = new Map<THREE.Object3D, Motion>();
@@ -56,17 +64,20 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   const zoneGeo = geo(new THREE.PlaneGeometry(W * 1.18, H * 1.1));
   const labelGeo = geo(new THREE.PlaneGeometry(1, 160 / 768));
   const zoneBorderGeo = geo(new THREE.EdgesGeometry(zoneGeo));
-  const zoneBorderMat = mat(new THREE.LineBasicMaterial({ color: "#b3965d", transparent: true, opacity: .3 }));
-  const zoneMaterial = standard("#ad8b55", { transparent: true, opacity: .06, depthWrite: false });
+  const zoneBorderMat = mat(new THREE.LineBasicMaterial({ color: "#b3965d", transparent: true, opacity: .55 }));
+  const seatColors=['#e2bd7c','#9ec9a9','#b6afd7','#98bfd8','#dfa997','#b8c985'];
+  const seatBorders=seatColors.map(color=>mat(new THREE.LineBasicMaterial({color,transparent:true,opacity:.65})));
+  // Connection routes use a shared unit segment, transformed per owner.
+  const zoneMaterial = standard("#ad8b55", { transparent: true, opacity: .14, depthWrite: false });
   const activeZoneBorderMat = mat(new THREE.LineBasicMaterial({ color: "#f1d89a", transparent: true, opacity: .95 }));
   const activeZoneMaterial = standard("#e7c781", { transparent: true, opacity: .23, depthWrite: false });
   const priceGlowGeo = geo(new THREE.PlaneGeometry(W * 1.11, H * 1.08));
   const priceGlowMat = mat(new THREE.MeshBasicMaterial({ color: "#ffdb76", transparent: true, opacity: .85, depthWrite: false, toneMapped: false }));
   const effectGlowGeo = geo(new THREE.PlaneGeometry(W * 1.16, H * 1.11));
   const effectGlowMat = mat(new THREE.MeshBasicMaterial({ color: "#ffd67b", transparent: true, opacity: .7, depthWrite: false, toneMapped: false }));
-  const coinGeo = geo(new THREE.CylinderGeometry(.16, .16, .038, 20));
-  const goldMat = standard("#d5a34d", { metalness: .78, roughness: .3 });
-  const silverMat = standard("#b6bcc2", { metalness: .82, roughness: .3 });
+  const coinGeo=geo(currencyGeometry('gold')),silverGeo=geo(currencyGeometry('silver'));
+  const goldMat=[standard("#fff6db",{map:tex(currencyTexture('gold',()=>requestFrame())),metalness:.4,roughness:.48}),standard("#98732b",{metalness:.65,roughness:.4})];
+  const silverMat=[standard("#eeeeed",{map:tex(currencyTexture('silver',()=>requestFrame())),metalness:.42,roughness:.5}),standard("#858888",{metalness:.7,roughness:.4})];
   const dragLineGeo = geo(new THREE.BufferGeometry()); dragLineGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(25 * 3), 3));
   const dragLine = new THREE.Line(dragLineGeo, mat(new THREE.LineBasicMaterial({ color: "#e5c280", transparent: true, opacity: .65, depthTest: false })));
   dragLine.visible = false; dragLine.renderOrder = 10; scene.add(dragLine);
@@ -117,8 +128,8 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     for (const child of [...group.children]) { motions.delete(child); group.remove(child); child.traverse(node => { if ((node as THREE.InstancedMesh).isInstancedMesh) (node as THREE.InstancedMesh).dispose(); const owned = node.userData.ownedMaterial as THREE.MeshBasicMaterial | undefined;
       if (owned) { if (owned.map) { textures.delete(owned.map); owned.map.dispose(); } materials.delete(owned); owned.dispose(); } }); }
   }
-  function label(parent: THREE.Object3D, text: string, position: THREE.Vector3, size = 2.8, muted = false) {
-    const material = mat(new THREE.MeshBasicMaterial({ map: tex(labelTexture(text, muted)), transparent: true, depthWrite: false, toneMapped: false }));
+  function label(parent: THREE.Object3D, text: string, position: THREE.Vector3, size = 2.8, muted = false,accent?:string) {
+    const material = mat(new THREE.MeshBasicMaterial({ map: tex(labelTexture(text, muted,accent)), transparent: true, depthWrite: false, toneMapped: false }));
     const object = mesh(labelGeo, material, parent); object.scale.setScalar(size); object.userData.ownedMaterial = material;
     object.position.copy(position); object.quaternion.copy(camera.quaternion); return object;
   }
@@ -223,25 +234,30 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   function rebuildZones() {
     const view = model.view, selfId = view && "selfSeatId" in view ? view.selfSeatId : null;
     const legal = model.connected !== false && !pending ? model.legalDropZone ?? null : null;
-    const signature = JSON.stringify([view?.id, view?.seats.map(s => s.id), selfId, model.language, legal]);
+    const signature = JSON.stringify([view?.id, view?.seats.map(s => s.id), selfId, model.language, legal,view?.deckCount,view?.discard.length]);
     if (signature === zoneSignature) return; zoneSignature = signature; freeOwnedGroup(zoneGroup);
     const zone = (kind: StageZone, pose: Pose, seatId?: string) => {
       const active = !!selfId && seatId === selfId && kind === legal;
-      const object = mesh(zoneGeo, active ? activeZoneMaterial : zoneMaterial, zoneGroup); object.rotation.x = -Math.PI / 2; object.rotation.z = -pose.yaw; object.position.set(pose.x, .027, pose.z);
-      object.userData.highlight = active;
+      const object = mesh(zoneGeo, active ? activeZoneMaterial : zoneMaterial, zoneGroup); object.rotation.x = -Math.PI / 2; object.rotation.z = pose.yaw; object.position.set(pose.x, .027, pose.z);
+      if(kind==="flight")object.scale.x=flightWidth(view?.seats.length??2)/(W*1.18);
+      object.scale.y=kind==="deck"||kind==="discard"?1.1:1.24;
+      object.position.y=.052;object.userData.highlight = active;
       object.userData.hit = { kind: "zone", zone: kind, ...(seatId ? { seatId } : {}) } satisfies StageHit;
-      const border = new THREE.LineSegments(zoneBorderGeo, active ? activeZoneBorderMat : zoneBorderMat);
+      const ownerIndex=view?.seats.findIndex(seat=>seat.id===seatId)??-1;
+      const border = new THREE.LineSegments(zoneBorderGeo, active ? activeZoneBorderMat : ownerIndex<0?zoneBorderMat:seatBorders[ownerIndex]);
       object.add(border);
-      if (kind !== "stakes") label(zoneGroup, model.language === "zh" ? ({ ante: "暗置区", flight: "牌阵", deck: "牌库", discard: "弃牌", hand: "手牌" }[kind]) : kind.toUpperCase(), new THREE.Vector3(pose.x, .035, pose.z + 1.08), 1.35, true);
+      const words=model.language==="zh"?{ante:"暗置区",flight:"牌阵",deck:`牌库 · ${view?.deckCount??0}`,discard:`弃牌 · ${view?.discard.length??0}`,hand:"手牌",stakes:"公共下注区"}:{ante:"ANTE",flight:"FLIGHT",deck:`DECK · ${view?.deckCount??0}`,discard:`DISCARD · ${view?.discard.length??0}`,hand:"HAND",stakes:"STAKES"};
+      const text=label(zoneGroup,words[kind],new THREE.Vector3(pose.x+Math.sin(pose.yaw)*1.1,.062,pose.z+Math.cos(pose.yaw)*1.1),kind==="flight"?2.6:1.55,true);
+      text.rotation.set(-Math.PI/2,0,pose.yaw);
+
     };
     zone("deck", DECK); zone("discard", DISCARD);
     if (view) for (const seat of seatPlacements(view)) { zone("ante", seat.ante, seat.id); zone("flight", seat.flight, seat.id); }
   }
   function moneyLocation(seatId: string) {
-    if (seatId === "stakes") return new THREE.Vector3(STAKES.x, .07, STAKES.z);
-    const seat = model.view && seatPlacements(model.view).find(s => s.id === seatId);
-    return seat ? new THREE.Vector3(seat.x + Math.cos(seat.angle) * 2.25, .08, seat.z - Math.sin(seat.angle) * 2.25) : new THREE.Vector3(0, .08, -2.7);
+    const point=model.view?moneyPlacement(model.view,seatId):{x:0,z:0};return new THREE.Vector3(point.x,.24,point.z);
   }
+
   function refreshInfo() {
     const view = model.view, signature = JSON.stringify([model.language, view?.id, view?.seats.map(s => [s.id, s.name, s.gold, s.debt, s.strength]), view?.stakes, view?.deckCount, view?.discard.length, view?.activeSeatId]);
     if (signature === infoSignature) return; infoSignature = signature; freeOwnedGroup(infoGroup); freeOwnedGroup(moneyGroup); freeOwnedGroup(stackGroup);
@@ -264,25 +280,39 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     cardStack(DECK, view.deckCount, .005); cardStack(DISCARD, view.discard.length, .004);
     const pile = (id: string, amount: number) => {
       const pos = moneyLocation(id), denominations = coinDenominations(amount);
+      const at=moneyPlacement(view,id),ownerIndex=view.seats.findIndex(seat=>seat.id===id),color=seatColors[ownerIndex]??'#dbc287';
       // Mesh counts are bounded stacks; the adjacent label is the exact LE gold
       // total. Silver is decorative equivalent change, never a game resource.
       for (const [metal, count] of [[goldMat, Math.min(24, denominations.gold)], [silverMat, denominations.silver]] as const) {
         if (!count) continue;
-        const instances = new THREE.InstancedMesh(coinGeo, metal, count); const transform = new THREE.Object3D(); instances.castShadow = true; instances.receiveShadow = true;
-        for (let i = 0; i < count; i++) { const stack = Math.floor(i / 6); transform.position.set(pos.x + (metal === silverMat ? -.45 : stack * .26), pos.y + (i % 6) * .039, pos.z + (metal === silverMat ? .28 : stack % 2 * .18)); transform.rotation.y = i * .53; transform.updateMatrix(); instances.setMatrixAt(i, transform.matrix); }
+        const instances = new THREE.InstancedMesh(metal===silverMat?silverGeo:coinGeo, metal, count); const transform = new THREE.Object3D(); instances.castShadow = true; instances.receiveShadow = true;
+        // Stable small offsets give loose stacks without changing when a room
+        // update arrives. Keep the far card corners clear for strength/inspection.
+        const seed=[...id].reduce((sum,c)=>sum+c.charCodeAt(0),0);
+        for(let i=0;i<count;i++){
+          const silver=metal===silverMat,heights=silver?[6,4]:[8,5,7,4];
+          let stack=0,level=i;while(level>=heights[stack]){level-=heights[stack];stack++;}
+          const jitter=(salt:number)=>(Math.sin(seed*12.9898+salt*78.233)*43758.5453%1)*.035;
+          const offsets=silver?[[-.21,-.32],[.19,-.23]]:[[-.20,.05],[.19,.17],[-.14,.54],[.27,.62]];
+          const x=offsets[stack][0]+jitter(i+1),z=offsets[stack][1]+jitter(i+53);
+          transform.position.set(pos.x+Math.cos(at.yaw)*x+Math.sin(at.yaw)*z,pos.y+level*.042,pos.z-Math.sin(at.yaw)*x+Math.cos(at.yaw)*z);
+          transform.rotation.set(0,0,0);transform.updateMatrix();instances.setMatrixAt(i,transform.matrix);
+        }
+        instances.userData.owner=id;
+
         moneyGroup.add(instances);
       }
-      label(infoGroup, `${amount} ${model.language === "zh" ? "金币" : "GOLD"}`, pos.clone().add(new THREE.Vector3(.3, .2, .62)), 1.8);
+      const value=id==='stakes'?(model.language==='zh'?`公共下注 · ${amount}金`:`Stakes · ${amount}g`):`${amount}${model.language==='zh'?'金':'g'}`;
+      label(infoGroup,value,new THREE.Vector3(at.x,1,at.z-.6),id==='stakes'?2.5:2.2,false,color);
+
     };
     pile("stakes", view.stakes);
     for (const seat of seatPlacements(view)) {
       const value = view.seats.find(s => s.id === seat.id)!; pile(seat.id, value.gold);
       const active = view.activeSeatId === seat.id ? "◆ " : "";
-      label(infoGroup, active + value.name, new THREE.Vector3(seat.x + (seat.self ? 0 : Math.sin(seat.angle) * 1.7), .42, seat.z + (seat.self ? .15 : Math.cos(seat.angle) * 1.7)), 3.0);
+      if(!seat.self)label(infoGroup,active+value.name,new THREE.Vector3(Math.sin(seat.angle)*7.5,.55,Math.cos(seat.angle)*7.5),2.4,false,seatColors[view.seats.findIndex(other=>other.id===seat.id)]);
       if (value.debt) label(infoGroup, `${model.language === "zh" ? "欠债" : "Debt"} ${value.debt}`, moneyLocation(seat.id).add(new THREE.Vector3(.3, .2, 1)), 1.8, true);
     }
-    label(infoGroup, String(view.deckCount), new THREE.Vector3(DECK.x, .15, DECK.z - 1.4), 1);
-    label(infoGroup, String(view.discard.length), new THREE.Vector3(DISCARD.x, .15, DISCARD.z - 1.4), 1);
   }
   function animateMoney(before: StageModel["view"], view = model.view) {
     if (!view || !before || model.reducedMotion) return;
@@ -298,7 +328,7 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
       for (let i = 0; i < Math.min(amount, 4) && budget-- > 0; i++) {
         const object = mesh(coinGeo, goldMat, transferGroup); object.castShadow = true; const from = moneyLocation(source[0]), to = moneyLocation(target[0]);
         object.position.copy(from).add(new THREE.Vector3(i * .08, .35, 0));
-        move(object, { x: to.x + i * .06, y: .35, z: to.z, yaw: i * .7, tilt: 0, scale: 1 }, true, 1.5 + i * .08, false, () => { transferGroup.remove(object); });
+        move(object, { x: to.x + i * .06, y: .35, z: to.z, yaw: 0, tilt: 0, scale: 1 }, true, 1.5 + i * .08, false, () => { transferGroup.remove(object); });
       }
     }
   }
@@ -308,7 +338,7 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
       const object = mesh(coinGeo, goldMat, transferGroup); object.castShadow = true;
       const from = moneyLocation(payment.seatId), to = moneyLocation("stakes"); object.position.copy(from).add(new THREE.Vector3(i * .08, .35, 0));
       object.userData.payment = { ...payment };
-      move(object, { x: to.x + i * .06, y: .35, z: to.z, yaw: i * .7, tilt: 0, scale: 1 }, true, 1.5 + i * .08, false, () => transferGroup.remove(object), PAYMENT_MS);
+      move(object, { x: to.x + i * .06, y: .35, z: to.z, yaw: 0, tilt: 0, scale: 1 }, true, 1.5 + i * .08, false, () => transferGroup.remove(object), PAYMENT_MS);
     }
   }
   function adjusted(placement: CardPlacement): Pose {
@@ -386,7 +416,7 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   function resize() {
     if (destroyed) return; const rect = canvas.getBoundingClientRect(); width = Math.floor(rect.width); height = Math.floor(rect.height);
     if (width <= 0 || height <= 0) { if (raf) cancelAnimationFrame(raf); raf = 0; return; }
-    renderer.setSize(width, height, false); const aspect = width / height, half = Math.max(7.5, 10.3 / aspect);
+    renderer.setSize(width, height, false); const aspect = width / height, half = Math.max(8.3, 11.2 / aspect);
     camera.left = -half * aspect; camera.right = half * aspect; camera.top = half * (aspect < 1 ? .8 : 1); camera.bottom = -half * (aspect < 1 ? 1.2 : 1); camera.updateProjectionMatrix(); camera.updateMatrixWorld();
     // The local hand is a real mesh foreground fan, sized in projected pixels;
     // it remains usable on portrait screens instead of shrinking with the table.
@@ -409,7 +439,7 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     if (!target || destroyed) return null; scene.updateMatrixWorld(true); camera.updateMatrixWorld();
     // Anchor a fanned hand at its exposed strength corner, not at a center that
     // the next physical card can cover. Every card remains an actual ray target.
-    const point = visual?.placement.zone === "hand" ? target.localToWorld(new THREE.Vector3(-W * .34, .03, -H * .34)) : target.getWorldPosition(new THREE.Vector3());
+    const point = visual&&["hand","flight"].includes(visual.placement.zone) ? target.localToWorld(new THREE.Vector3(-W * .34, .03, -H * .34)) : target.getWorldPosition(new THREE.Vector3());
     const projected = point.project(camera), rect = canvas.getBoundingClientRect();
     return { x: rect.left + (projected.x + 1) * rect.width / 2, y: rect.top + (1 - projected.y) * rect.height / 2, visible: Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1 && projected.z >= -1 && projected.z <= 1 };
   }

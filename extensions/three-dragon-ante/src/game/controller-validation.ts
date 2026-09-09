@@ -49,7 +49,9 @@ export function validRecovery(value: SavedTable, roomId: string, summary: TableS
     const cards = [...game.deck, ...game.discard, ...game.ante, ...Object.values(game.committed), ...held, ...pending, ...reserved];
     if (cards.length !== 80 || game.excluded.length !== 20 || new Set([...cards, ...game.excluded]).size !== 100 ||
         [...cards, ...game.excluded].some(id => !CARDS.some(card => card.id === id)) || STANDARD_CARDS.some(card => !cards.includes(card.id))) return false;
-    return game.seats.reduce((sum, seat) => sum + seat.gold, game.stakes + game.hole) === game.seats.length * game.seats.length * 10;
+    const count=game.seats.length,budget=game.initialGold??count*count*10;
+    if(!Number.isSafeInteger(budget)||budget<count*10||budget>count*1000||budget%count!==0)return false;
+    return game.seats.reduce((sum, seat) => sum + seat.gold, game.stakes + game.hole) === budget;
   } catch { return false; }
 }
 

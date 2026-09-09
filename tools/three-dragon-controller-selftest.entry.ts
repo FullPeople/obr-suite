@@ -187,5 +187,25 @@ try {
     await restarting.command({ type: "create" }); assert.equal(restarting.view.message, "protocolMismatch");
   } finally { await restarting.stop(); }
   console.log("PASS: failed SDK initialization retries in place without duplicate listeners; incompatible metadata stays blocked");
-  console.log("THREE_DRAGON_CONTROLLER: 12 actual-controller/native-crypto integration groups passed (simulated SDK transport/storage; not real Owlbear UAT)");
+  const setupRoom=new ControllerRoom(),setupStore=new MemoryStore();
+  let dealer=new TableController(()=>{}, {...options,platform:setupRoom.port("owner","setup-owner"),storage:setupStore});
+  const guest=new TableController(()=>{}, {...options,platform:setupRoom.port("guest","setup-guest"),storage:new MemoryStore()});
+  try {
+    await dealer.start();await guest.start();await dealer.command({type:"create"});
+    await until(()=>guest.view.connected&&!!guest.view.table,"setup lobby connected");await guest.command({type:"join"});
+    await until(()=>!guest.view.pending&&dealer.view.table?.seats.length===2,"setup guest seated");
+    await guest.command({type:"start",options:{startingGold:75,startingHand:8}});
+    await until(()=>!guest.view.pending,"unauthorized start replied");assert.equal(guest.view.message,"notHost");assert.equal(dealer.view.game,null);
+    for(const invalid of [{startingGold:0},{startingGold:1001},{startingGold:1.5},{startingHand:11},{startingHand:2},{startingGold:"75"},{seed:1},null]){
+      await dealer.command({type:"start",options:invalid as any});await until(()=>!dealer.view.pending,"invalid setup replied");assert.equal(dealer.view.message,"invalidCommand");assert.equal(dealer.view.game,null);
+    }
+    await dealer.command({type:"start",options:{startingGold:75,startingHand:8}});
+    await until(()=>guest.view.connected&&!!guest.view.game,"custom game synchronized");
+    assert.deepEqual(dealer.view.game!.seats.map(s=>s.gold),[75,75]);assert.equal(own(guest).hand.length,8);assert.equal(dealer.view.game!.deckCount,64);
+    const id=dealer.view.game!.id;await dealer.stop();setupRoom.remove("setup-owner");
+    dealer=new TableController(()=>{}, {...options,platform:setupRoom.port("owner","setup-returned"),storage:setupStore});await dealer.start();
+    await until(()=>dealer.view.connected&&dealer.view.game?.id===id,"custom deal restored");assert.deepEqual(dealer.view.game!.seats.map(s=>s.gold),[75,75]);assert.equal(own(dealer).hand.length,8);
+  } finally {await Promise.allSettled([dealer.stop(),guest.stop()]);}
+  console.log("PASS: custom starting gold/hand is creator-only, bounds-checked, synchronized and restored without redealing");
+  console.log("THREE_DRAGON_CONTROLLER: 13 actual-controller/native-crypto integration groups passed (simulated SDK transport/storage; not real Owlbear UAT)");
 } finally { await Promise.allSettled([host, ...all].map(controller => controller.stop())); }

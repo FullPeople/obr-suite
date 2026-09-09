@@ -63,7 +63,7 @@ export type TableCommand =
   | { type: "create" }
   | { type: "join" }
   | { type: "leave" }
-  | { type: "start" }
+  | { type: "start"; options?: { startingGold?: number; startingHand?: number } }
   | { type: "newGame" }
   | { type: "action"; action: GameAction }
   /** Optional immutable action restores a failed LOCAL page-to-background send.

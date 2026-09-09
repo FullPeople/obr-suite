@@ -11,7 +11,7 @@
 .score-row{display:grid;grid-template-columns:minmax(70px,14%) minmax(0,1fr) minmax(100px,24%);align-items:center;gap:12px;padding:9px 14px;border:1px solid #a77e3d44;border-radius:10px;background:#2b1b1480;min-width:0}
 .score-player{overflow-wrap:anywhere;font-size:clamp(15px,1.6vw,22px)}
 .score-cards{display:flex;gap:7px;overflow:auto;padding:8px;min-width:0}
-.score-card{position:relative;width:clamp(35px,4vw,63px);flex:none;padding:0;border:1px solid #c5a36a;border-radius:4px;opacity:.45;background:#2b1b10;cursor:help}
+.score-card{position:relative;width:clamp(35px,4vw,63px);flex:none;padding:0;border:0;border-radius:2px;opacity:.45;background:transparent;box-shadow:0 5px 9px #0007;cursor:help}
 .score-card.counted{opacity:1}.score-card.counting{box-shadow:0 0 23px #ffd179;transform:translateY(-5px)}
 .score-card span{position:absolute;right:-5px;bottom:-4px;background:#ffe1a4;color:#352012;font-size:18px;font-weight:800;border-radius:4px;padding:1px 4px;opacity:0}
 .score-card.counted span{opacity:1}.score-sum{text-align:right;display:grid;gap:4px}.score-equation{font-size:clamp(12px,1.3vw,18px);color:#dcc490;overflow-wrap:anywhere}.score-total{font-size:clamp(24px,3vw,42px);color:#ffdc93}

@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 const repo = resolve(import.meta.dirname, '../../../../../..');
 const output = mkdtempSync(join(tmpdir(), 'tda-stage-'));
-const sourceFiles = ['index.ts', 'types.ts', 'textures.ts', 'layout.ts', 'stage-selftest.mjs'];
+const sourceFiles = ['index.ts', 'types.ts', 'textures.ts', 'currency.ts', 'layout.ts', 'stage-selftest.mjs'];
 const sourcePins = () => Object.fromEntries(sourceFiles.map(file => [file, createHash('sha256').update(readFileSync(join(import.meta.dirname, file))).digest('hex')]));
 const initialPins = sourcePins();
 const mutant = process.argv.find(arg => arg.startsWith('--mutant='))?.split('=')[1];
@@ -24,11 +24,12 @@ const { chromium } = await import(pathToFileURL(join(runtime, 'playwright/index.
 const { PNG } = (await import(pathToFileURL(join(runtime, 'pngjs/lib/png.js')))).default;
 const entry = `import{mountTableStage}from ${JSON.stringify(resolve(import.meta.dirname, 'index.ts'))};
 import{createGame,projectSeat,projectPublic,applyAction,card}from ${JSON.stringify(resolve(import.meta.dirname, '../rules/index.ts'))};
-import{coinDenominations}from ${JSON.stringify(resolve(import.meta.dirname, 'layout.ts'))};
+import{coinDenominations,moneyPlacement,seatPlacements,DECK,DISCARD}from ${JSON.stringify(resolve(import.meta.dirname, 'layout.ts'))};
 const canvas=document.querySelector('canvas'),quality=[];
 let state=createGame({id:'webgl-stage',seed:7341,seats:[{id:'s1',name:'Aurelia'},{id:'s2',name:'Bram'},{id:'s3',name:'Cyra'},{id:'s4',name:'Dorian'}]});
 let model={view:projectSeat(state,'s1'),language:'en',connected:true,legalDropZone:'ante'};let lossExtension;let surface=mountTableStage(canvas,{onQuality:q=>quality.push(q)});surface.update(model);
-window.h={surface,quality,coinDenominations,get model(){return model},setModel(next){model=next;surface.update(model)},reset(){model={view:projectSeat(state,'s1'),language:'en',connected:true,animate:false};surface.update(model)},public(){model={...model,view:projectPublic(state),animate:false};surface.update(model)},
+window.h={surface,quality,coinDenominations,moneyPlacement,seatPlacements,DECK,DISCARD,get model(){return model},setModel(next){model=next;surface.update(model)},reset(){model={view:projectSeat(state,'s1'),language:'en',connected:true,animate:false};surface.update(model)},public(){model={...model,view:projectPublic(state),animate:false};surface.update(model)},
+stacks(n){const state=createGame({id:'stack-layout-'+n,seed:7341,seats:Array.from({length:n},(_,i)=>({id:'s'+(i+1),name:['Aurelia','Bram','Cyra','Dorian','Elara','Finn'][i]}))});state.stage='play';state.round=3;state.anteOrigins=[];state.seats.forEach(s=>{s.flight=s.hand.splice(0,3).map(cardId=>({cardId}));const id=s.hand.pop();state.ante.push(id);state.anteOrigins.push({seatId:s.id,cardId:id})});model={view:projectSeat(state,'s1'),language:'zh',connected:true,animate:false};surface.update(model)},
 publicSameRevision(){const{selfSeatId,hand,committedAnte,actions,...view}=model.view;model={...model,view,animate:true};surface.update(model)},
 visibility(value){if(value===null)delete document.hidden;else Object.defineProperty(document,'hidden',{get:()=>value,configurable:true});document.dispatchEvent(new Event('visibilitychange'))},
 doAnte(){const before=projectSeat(state,'s1');let r=applyAction(state,{id:'ante-test',kind:'ante',revision:state.revision,seatId:'s1',cardId:before.hand[0].id});if(!r.ok)throw Error(r.error.code);state=r.state;model={...model,view:projectSeat(state,'s1'),animate:true};surface.update(model);return before.hand[0].id},
@@ -43,6 +44,7 @@ await build({ input: 'stage-fixture', plugins: [{ name: 'stage-fixture', resolve
 const requests = [];
 const server = createServer((request, response) => {
   requests.push(request.url);
+  const currency=/^\/art\/currency\/(dragon-gold|shard-silver)\.webp$/.exec(request.url);if(currency){response.setHeader('content-type','image/webp');return response.end(readFileSync(join(import.meta.dirname,'../art/currency',currency[1]+'.webp')))}
   const art = /^\/art\/pack-20260910\/cards\/([a-z0-9-]+)\.webp$/.exec(request.url);
   if (art) {
     const file = join(import.meta.dirname, '../art/pack-20260910/cards', art[1] + '.webp');
@@ -64,11 +66,12 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.h?.surface.diagnostics().frames > 0); await pause(100);
   let diag = await d(); check('actual WebGL renderer with thick mesh cards and lit table', diag.meshes > 50 && diag.drawCalls > 20 && await page.evaluate(() => h.quality[0].webgl));
   const image = PNG.sync.read(await page.screenshot({ path: join(output, 'hand-wide.png') }));
-  const fronts = requests.filter(url => /\.webp$/.test(url));
+  const fronts = requests.filter(url => /\/cards\/.*\.webp$/.test(url));
   check('only visible supplied fronts load; original back needs no raster request', fronts.length > 0 && fronts.length < 40 && fronts.every(url => /^\/art\/pack-20260910\/cards\/[a-z0-9-]+\.webp$/.test(url)) && !requests.some(url => /back\.webp|\.(?:png|jpe?g)$/.test(url)));
   const palette = new Set(); for (let y = 100; y < image.height - 80; y += 8) for (let x = 80; x < image.width - 80; x += 8) { const offset = (y * image.width + x) * 4; palette.add([...image.data.subarray(offset, offset + 3)].map(c => Math.round(c / 16)).join(',')); }
   check('actual raster contains textured multicolor geometry, not an empty canvas', palette.size > 80);
-  const initial = diag.frames; await pause(260); check('settled scene has no continuous render loop', (await d()).frames === initial);
+  await page.waitForLoadState('networkidle');await pause(80);
+  const initial = (await d()).frames; await pause(260); check('settled scene has no continuous render loop', (await d()).frames === initial);
   const initialFaces = await page.evaluate(() => ({ seen: h.surface.diagnostics().faceCardIds, own: h.model.view.hand.map(c => c.id) }));
   check('only private own hand has front textures on initial hidden table', initialFaces.seen.length === initialFaces.own.length && initialFaces.seen.every(id => initialFaces.own.includes(id)));
   const cardId = initialFaces.own[0]; let anchor = await page.evaluate(id => h.surface.getAnchor({ cardId: id }), cardId);
@@ -115,6 +118,21 @@ try {
   await page.evaluate(() => h.public()); await pause(100); check('spectator projection never retains private hand face textures', (await d()).faceCardIds.length === 0);
   await page.evaluate(() => h.contextLoss()); await pause(120); check('context loss suspends and reports unavailable', (await d()).suspended && await page.evaluate(() => h.quality.some(q => q.reason === 'context-lost')));
   await page.evaluate(() => h.contextRestore()); await pause(300); check('context restore redraws without replacing the canvas', !(await d()).suspended);
+  for(const count of [2,3,4,5,6]){
+    await page.evaluate(n=>h.stacks(n),count);await pause(120);
+    const hits=await page.evaluate(()=>h.model.view.seats.flatMap(s=>s.flight.map(c=>{const point=h.surface.getAnchor({cardId:c.cardId});return {id:c.cardId,point,hit:point&&h.surface.hitTest(point.x,point.y)}})));
+    check(`${count} player overlapping flights expose every strength corner to real picking`,hits.every(row=>row.point?.visible&&row.hit?.cardId===row.id));
+    const anteHits=await page.evaluate(()=>h.model.view.ante.map(c=>{const point=h.surface.getAnchor({cardId:c.id});return {id:c.id,point,hit:point&&h.surface.hitTest(point.x,point.y)}}));
+    check(`${count} player coins leave all underlying public ante cards inspectable`,anteHits.every(row=>row.point?.visible&&row.hit?.cardId===row.id));
+    const layout=await page.evaluate(()=>h.model.view.seats.every(self=>{
+      const view={...h.model.view,selfSeatId:self.id};return h.seatPlacements(view).every(s=>{
+        const dx=s.ante.x-s.flight.x,dz=s.ante.z-s.flight.z,m=h.moneyPlacement(view,s.id);
+        return dx*Math.cos(s.angle)-dz*Math.sin(s.angle)<-2&&Math.abs(dx*Math.sin(s.angle)+dz*Math.cos(s.angle))<1e-8&&m.x===s.ante.x&&m.z===s.ante.z;
+      });
+    })&&h.DECK.yaw===0&&h.DISCARD.yaw===0);
+    check(`${count} seats from every viewpoint keep ante left at matching depth, coins on ante and central piles upright`,layout);
+    await page.screenshot({path:join(output,`stacked-${count}-players.png`)});
+  }
   await page.evaluate(() => h.surface.destroy()); diag = await d(); check('destroy releases every owned texture, mesh and animation', diag.destroyed && diag.textures === 0 && diag.meshes === 0 && diag.animations === 0);
   await pause(200); check('late callbacks cannot restart rendering after destroy', (await d()).frames === diag.frames);
   check('no browser application errors', errors.length === 0);

@@ -1,6 +1,6 @@
 import type {Card} from "./cards";
 export interface SeatConfig { id:string; name:string }
-export interface GameConfig { id:string; seats:SeatConfig[]; specialIds?:string[]; seed?:number }
+export interface GameConfig { id:string; seats:SeatConfig[]; specialIds?:string[]; seed?:number; startingGold?:number; startingHand?:number }
 /** Inject one integer source into create/apply for deterministic simulations.
  * Production defaults to cryptographic randomness; never transmit its state. */
 export interface RandomSource { int(upperExclusive:number):number }
@@ -21,6 +21,8 @@ export interface PublicEvent { code:string; seatId?:string; targetSeatId?:string
 export interface GambitResult { number:number; winners:string[]; reason:string; strengths:Record<string,number>; stakes:number }
 export interface AcceptedAction { fingerprint:string; revision:number }
 export interface GameState {
+  /** Original total currency for recovery conservation; old saves use n*n*10. */
+  initialGold?:number;
   version:1; id:string; revision:number; seats:Seat[]; stage:"ante"|"play"|"resolve"|"ended"|"adjudication";
   deck:string[]; discard:string[]; excluded:string[]; committed:Record<string,string>; ante:string[];
   /** Origins of revealed opening antes only. Optional for pre-existing saves. */
