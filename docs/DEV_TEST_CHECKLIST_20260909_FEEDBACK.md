@@ -1,6 +1,6 @@
 # 第二轮 dev 测试清单
 
-目标版本：Full Suite **1.0.150-dev**；独立三龙牌 **0.1.0-dev**。实际发布与在线指纹以 [本轮发布记录](DEV_RELEASE_20260909_FEEDBACK.md) 为准。
+目标版本：Full Suite **1.0.151-dev**；独立三龙牌 **0.1.0-dev**。主插件已补上[透明展示层黑幕热修](DEV_HOTFIX_20260909_TRANSPARENCY.md)；此前功能见 [本轮发布记录](DEV_RELEASE_20260909_FEEDBACK.md)。
 
 准备：使用一个测试房间、一个 DM 和至少一个玩家。房间只安装一个 Full Suite 通道；本轮使用 [Full Suite Dev](https://obr.dnd.center/suite-dev/manifest-dev.json)。双方完整刷新枭熊页面，音乐网站也刷新。需要测牌局时，由 DM 在房间安装 [三龙牌 Dev](https://obr.dnd.center/three-dragon-ante-dev/manifest.json)，不需要另开牌局服务器。
 

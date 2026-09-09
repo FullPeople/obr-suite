@@ -12,7 +12,7 @@ https://obr.dnd.center/suite/manifest.json
 
 <sub>Testing channel (may break, not for tables you care about): `https://obr.dnd.center/suite-dev/manifest-dev.json` — install one or the other, never both in the same room.</sub>
 
-Dev **1.0.150-dev** and standalone **Three-Dragon Ante 0.1.0-dev** were deployed on 2026-09-09, together with the compatible Music Studio update; stable remains 1.2.2. See the [feedback release notes](docs/DEV_RELEASE_20260909_FEEDBACK.md) and [second test checklist](docs/DEV_TEST_CHECKLIST_20260909_FEEDBACK.md). [Install the optional card table](https://obr.dnd.center/three-dragon-ante-dev/manifest.json). Complete English XLSX downloads and server parser patches are not included. Further feature work waits for real-room testing.
+Dev **1.0.151-dev** includes the [transparent-overlay hotfix](docs/DEV_HOTFIX_20260909_TRANSPARENCY.md); standalone **Three-Dragon Ante 0.1.0-dev** and the compatible Music Studio update remain online. Stable remains 1.2.2. See the [feedback release notes](docs/DEV_RELEASE_20260909_FEEDBACK.md) and [second test checklist](docs/DEV_TEST_CHECKLIST_20260909_FEEDBACK.md). [Install the optional card table](https://obr.dnd.center/three-dragon-ante-dev/manifest.json). Complete English XLSX downloads and server parser patches are not included. A new card-table interaction redesign is now authorized by user feedback; the other roadmap items remain paused.
 
 ---
 
