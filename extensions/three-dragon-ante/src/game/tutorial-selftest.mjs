@@ -84,18 +84,22 @@ let browserChecks=0;
 try {
   const page=await browser.newPage({viewport:{width:1280,height:900},reducedMotion:'reduce'});
   const errors=[];page.on('pageerror',e=>errors.push(String(e)));
-  await page.route('**/*',route=>route.abort());
-  await page.setContent(`<style>${readFileSync(join(base,'style.css'),'utf8')}\n${readFileSync(join(base,'tutorial.css'),'utf8')}</style><button id="real-table">Real table</button><div id="practice"></div>`);
+  // This suite exercises the DOM fallback and teaching engine. The separate
+  // ui-stage-selftest covers actual WebGL, drag and ACK integration.
+  await page.route('**/*',route=>route.request().url()==='http://localhost/'?route.fulfill({contentType:'text/html',body:'<!doctype html><html><body></body></html>'}):route.abort());
+  await page.goto('http://localhost/');
+  await page.evaluate(()=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type==='webgl'||type==='webgl2'?null:original.call(this,type,...args)}});
+  await page.setContent(`<style>${readFileSync(join(base,'style.css'),'utf8')}\n${readFileSync(join(base,'tutorial.css'),'utf8')}\n${readFileSync(join(base,'stage-ui.css'),'utf8')}</style><button id="real-table">Real table</button><div id="practice"></div>`);
   await page.addScriptTag({type:'module',content:readFileSync(entry,'utf8').replace(/export\s*\{[^}]*\};?\s*$/,'')+'\nwindow.mountTutorial=mountTutorial;'});
   await page.waitForFunction(()=>typeof window.mountTutorial==='function');
   await page.evaluate(()=>{document.querySelector('#real-table').focus();window.closedCount=0;window.handle=window.mountTutorial(document.querySelector('#practice'),'en',()=>window.closedCount++);});
   await page.locator('.tutorial-chapter').selectOption('basics');await page.locator('.tutorial-lesson').selectOption('powers');
-  await page.locator('#hand button[data-card="black-3"]').click();await page.locator('#confirm-action').click();
+  await page.locator('#hand button[data-card="black-3"]').focus();await page.keyboard.press('Space');await page.keyboard.press('Enter');
   assert.match(await page.locator('.tutorial-result').innerText(),/Power triggered/);assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),'1');browserChecks++;
   await page.locator('.tutorial-undo').click();assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),'0');
-  await page.locator('#hand button[data-card="gold-13"]').click();await page.locator('#confirm-action').click();assert.match(await page.locator('.tutorial-result').innerText(),/does not trigger/);browserChecks++;
+  await page.locator('#hand button[data-card="gold-13"]').focus();await page.keyboard.press('Space');await page.keyboard.press('Enter');assert.match(await page.locator('.tutorial-result').innerText(),/does not trigger/);browserChecks++;
   const oldGame=await page.locator('.tda-tutorial').getAttribute('data-revision');await page.evaluate(()=>window.handle.setLanguage('zh'));assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),oldGame);assert.match(await page.locator('.tutorial-result').innerText(),/不发动能力/);browserChecks++;
-  await page.locator('.tutorial-restart').click();await page.locator('#hand button[data-card="black-3"]').click();await page.evaluate(()=>window.handle.setLanguage('en'));assert.equal(await page.locator('#hand button[data-card="black-3"]').getAttribute('aria-pressed'),'true');browserChecks++;
+  await page.locator('.tutorial-restart').click();await page.locator('#hand button[data-card="black-3"]').focus();await page.keyboard.press('Space');await page.evaluate(()=>window.handle.setLanguage('en'));assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),'0');await page.keyboard.press('Enter');assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),'1');browserChecks++;
   await page.locator('.tutorial-step').click();const revision=await page.locator('.tda-tutorial').getAttribute('data-revision');await page.waitForTimeout(600);assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),revision);browserChecks++;
   assert.equal(await page.locator('.tda-tutorial #tutorial:visible,.tda-tutorial #language:visible,.tda-tutorial #display-mode:visible,.tda-tutorial #close:visible').count(),0);browserChecks++;
   await page.screenshot({path:join(out,'tutorial-wide.png')});

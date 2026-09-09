@@ -3,7 +3,7 @@ import type { GameAction, GameState } from './rules';
 import { cardHint, cardName, rulePrompt } from './rules/prompts';
 import { tableText, type TableLanguage } from './text';
 import { mountTableUI } from './ui';
-import type { TableView } from './protocol';
+import type { TableView, ActionReceipt } from './protocol';
 import './tutorial.css';
 
 type Words = readonly [string, string];
@@ -141,7 +141,7 @@ export interface TutorialHandle { setLanguage(lang: TableLanguage): void; destro
 export function mountTutorial(parent: HTMLElement, initialLanguage: TableLanguage, onClose: () => void): TutorialHandle {
   let lang = initialLanguage, lessonId = 'game', generation = 0, serial = 0, destroyed = false;
   type Trace = { before: GameState; after: GameState; move: GameAction };
-  let game = createTutorialGame(), last: Trace | null = null;
+  let game = createTutorialGame(), last: Trace | null = null, receipt: ActionReceipt | undefined;
   const history: { game: GameState; last: Trace | null }[] = [];
   const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const oldTitle = document.title, oldLang = document.documentElement.lang;
@@ -159,10 +159,12 @@ export function mountTutorial(parent: HTMLElement, initialLanguage: TableLanguag
     else render();
   } });
   const names: Record<Chapter, Words> = { game: ['完整练习局', 'Complete game'], basics: ['基础规则', 'Core rules'], legendary: ['传奇龙', 'Legendary dragons'], mortal: ['凡人', 'Mortals'] };
-  function reset(id: string) { generation++; lessonId = id; game = createTutorialGame(id, String(generation)); last = null; history.length = 0; render(); }
+  function reset(id: string) { generation++; lessonId = id; game = createTutorialGame(id, String(generation)); last = null; receipt = undefined; history.length = 0; render(); }
   function take(move: GameAction, human: boolean) {
     if (destroyed || human && move.seatId !== 'you') return;
     const result = applyAction(game, move);
+    // A tutorial receipt comes from this actual engine result, never from a timer.
+    if (human) receipt = { actionId: move.id, tableId: game.id, gameId: game.id, revision: result.ok ? result.state.revision : move.revision, ok: result.ok, ...(!result.ok ? { code: result.error.code, retryable: false } : {}) };
     if (!result.ok || result.duplicate) { render(); return; }
     history.push({ game, last }); if (history.length > 256) history.shift();
     const before = game; game = result.state; last = { before, after: game, move }; render();
@@ -185,10 +187,10 @@ export function mountTutorial(parent: HTMLElement, initialLanguage: TableLanguag
     const undo = get<HTMLButtonElement>('.tutorial-undo'); undo.disabled = !history.length; undo.textContent = w(['退回一步', 'Undo one move'], lang);
     get('.tutorial-restart').textContent = w(['重新练习', 'Restart exercise'], lang);
     get('.tutorial-result h2').textContent = w(['刚才发生了什么', 'What just happened'], lang);
-    const lines = last ? tutorialObservation(last.before, last.after, last.move, lang) : [w(['选择一张手牌，再确认；或点击示范。牌上的 i 可展开能力说明。没有自动播放，可以慢慢看。', 'Select a hand card and confirm, or use the demonstration button. Tap i to inspect a power. Nothing advances automatically; take your time.'], lang)];
+    const lines = last ? tutorialObservation(last.before, last.after, last.move, lang) : [w(['拖一张手牌到自己的区域；也可用方向键选牌、空格拿起、Enter放下，或点击示范。点牌可查看能力。没有自动播放，可以慢慢看。', 'Drag a card into your own slot, or use arrows to choose, Space to lift and Enter to drop. You can also use the demonstration button. Tap a card to inspect its power. Nothing advances automatically; take your time.'], lang)];
     get('.tutorial-result ol').replaceChildren(...lines.map(text => { const li = document.createElement('li'); li.textContent = text; return li; }));
     const projected = projectSeat(game, 'you'); projected.seats.forEach(seat => { seat.name = seat.id === 'you' ? w(['练习者', 'Learner'], lang) : seatName(seat.id, lang); });
-    const view: TableView = { table: { version: 1, id: game.id, hostPlayerId: 'local', hostConnectionId: 'tutorial', hostName: 'Tutorial', stage: game.stage === 'ended' ? 'ended' : 'playing', seats: seats.map(seat => ({ playerId: seat.id, seatId: seat.id, name: seatName(seat.id, lang) })), revision: game.revision }, selfPlayerId: 'you', isHost: false, connected: true, pending: false, game: projected };
+    const view: TableView = { actionReceiptVersion: 1, table: { version: 1, id: game.id, hostPlayerId: 'local', hostConnectionId: 'tutorial', hostName: 'Tutorial', stage: game.stage === 'ended' ? 'ended' : 'playing', seats: seats.map(seat => ({ playerId: seat.id, seatId: seat.id, name: seatName(seat.id, lang) })), revision: game.revision }, selfPlayerId: 'you', isHost: false, connected: true, pending: false, game: projected, ...(receipt?.gameId === game.id ? { actionReceipt: receipt } : {}) };
     table.update(view); host.dataset.lesson = lessonId; host.dataset.revision = String(game.revision);
   }
   function destroy() { if (destroyed) return; destroyed = true; abort.abort(); table.destroy(); host.remove(); history.length = 0; last = null; document.title = oldTitle; document.documentElement.lang = oldLang; if (previousFocus?.isConnected) previousFocus.focus(); }
@@ -196,7 +198,7 @@ export function mountTutorial(parent: HTMLElement, initialLanguage: TableLanguag
   listen(chapter, 'change', () => reset(tutorialLessons.find(value => value.chapter === chapter.value)!.id));
   listen(select, 'change', () => reset(select.value));
   listen(get('.tutorial-step'), 'click', () => { const next = tutorialMove(game, lessonId, `lesson:${generation}:${++serial}`); if (next) take(next, false); });
-  listen(get('.tutorial-undo'), 'click', () => { const previous = history.pop(); if (previous) { game = previous.game; last = previous.last; render(); } });
+  listen(get('.tutorial-undo'), 'click', () => { const previous = history.pop(); if (previous) { game = previous.game; last = previous.last; receipt = undefined; render(); } });
   listen(get('.tutorial-restart'), 'click', () => reset(lessonId));
   listen(host, 'keydown', event => { const key = event as KeyboardEvent; if (key.key === 'Escape' && !key.defaultPrevented) { key.preventDefault(); destroy(); onClose(); } });
   render(); get('.tutorial-close').focus();

@@ -7,6 +7,10 @@ import {card} from "./rules/cards";
 import {cardHint, cardName, rulePrompt} from "./rules/prompts";
 import type {Choice, EligibleAction, PublicView, SeatView} from "./rules/types";
 import {tableText, type TableLanguage} from "./text";
+import {mountTableStage, type StageHandle, type StageHit} from "./stage";
+import {mountDragController, type DropIntent, type DragContext} from "./interaction/drag-controller";
+import type {GameAction} from "./rules/types";
+import "./stage-ui.css";
 
 export interface TableUIDeps {send(command:TableUICommand):void|Promise<void>;language:TableLanguage;mode?:TableDisplayMode;gesture?(value:HandGesture):void;id?():string}
 /** This surface receives projections only. It never imports or constructs host state. */
@@ -17,13 +21,22 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  const gestures = new Map<string, { value: HandGesture; timer: ReturnType<typeof setTimeout> }>();
  const motion = new Set<Animation>();
  const signatures=new Map<string,string>();
+ const scopeId=crypto.randomUUID();
+ let stage:StageHandle|null=null,stageAvailable=false,stageReady=false,suspended=false;
+ let dragController:ReturnType<typeof mountDragController>|null=null,domDragController:ReturnType<typeof mountDragController>|null=null;
+ let keyboardCard="",keyboardHeld=false,dispatchFailed=false,resetStage=false;
+ let keyboardContext:DragContext|null=null;
+ let pointerCard="";
+ let domGhost:HTMLElement|null=null;
+ let pendingAction:{actionId:string;tableId:string;gameId:string;revision:number;cardId?:string;zone?:"ante"|"flight";action:GameAction;retryable:boolean}|null=null;
+ const reduced=matchMedia("(prefers-reduced-motion: reduce)");
  root.className="table-shell";root.dataset.mode=deps.mode??"full";
  root.innerHTML=`<header class="table-header"><div class="table-brand"><span class="brand-mark" aria-hidden="true">◈</span><div><h1 id="title"></h1><p id="edition" class="muted"></p></div></div><div class="window-controls"><button id="tutorial" type="button"></button><button id="language" class="quiet" type="button"></button><button id="display-mode" class="quiet" type="button"></button><button id="close" class="quiet" type="button"></button></div></header>
  <div id="status" class="notice" role="status" aria-live="polite"></div><div id="toolbar" class="toolbar"></div>
- <div id="board-scroll" class="board-scroll"><section id="lobby"></section><div id="arena" class="arena">
+ <div id="board-scroll" class="board-scroll"><section id="lobby"></section><div id="stage-host" hidden><canvas id="table-stage" tabindex="0" role="application" aria-describedby="stage-keyboard"></canvas><div id="stage-summary"></div><p id="stage-keyboard" aria-live="polite"></p></div><div id="arena" class="arena">
  <section id="players" class="players"></section>
  <section id="public-zone" class="public-zone"><div id="summary" class="summary"></div><div class="table-piles"><div id="deck-pile" class="deck-pile"></div><div class="table-seal" aria-hidden="true">◇<span>III</span>◇</div><button id="discard-pile" class="discard-pile" type="button"></button></div><section id="antes"></section><section id="effects"></section></section></div>
- <div class="table-notes"><details id="discard"><summary id="discard-title"></summary><div id="discard-cards"></div></details>
+ <div class="table-notes"><details id="accessible-table"><summary id="accessible-title"></summary><div id="accessible-seats"></div></details><details id="discard"><summary id="discard-title"></summary><div id="discard-cards"></div></details>
  <details id="log"><summary id="log-title"></summary><ol id="events"></ol></details>
  <details id="help"><summary id="help-title"></summary><p id="help-text"></p><a id="rules-link" href="https://wizkids.com/three-dragon-ante-legendary-edition/" target="_blank" rel="noopener"></a></details></div></div>
  <div class="player-dock"><section id="turn" class="turn" aria-label=""></section><section id="hand" class="hand"></section><footer id="close-hint" class="muted"></footer></div>
@@ -33,8 +46,9 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  const t=(code:string)=>tableText(code,lang);
  const seatName=(id:string|null|undefined)=>view?.game?.seats.find(s=>s.id===id)?.name??view?.table?.seats.find(s=>s.seatId===id)?.name??"";
  const privateGame=():SeatView|null=>view?.game&&"selfSeatId" in view.game?view.game as SeatView:null;
- const busy=()=>sending||!!view?.pending;
- const locked=()=>busy()||!view?.connected||!!view?.message&&["hostOffline","recoveryMissing","protocolMismatch","privateSync"].includes(view.message);
+ const receiptCompatible=()=>view?.actionReceiptVersion===1;
+ const busy=()=>sending||!!view?.pending||!!pendingAction;
+ const locked=()=>busy()||!receiptCompatible()||!view?.connected||!!view?.message&&["hostOffline","recoveryMissing","protocolMismatch","privateSync"].includes(view.message);
  const node=(tag:string,text?:string,className?:string)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(className)e.className=className;return e;};
  function section(id:string,signature:unknown,build:(host:HTMLElement)=>void){const value=JSON.stringify([lang,signature]);if(signatures.get(id)===value)return;signatures.set(id,value);const host=el(id);host.replaceChildren();build(host);}
  function button(label:string,fn:()=>void,disabled=false,className=""){const b=document.createElement("button");b.type="button";b.textContent=label;b.disabled=disabled;b.className=className;b.addEventListener("click",fn);return b;}
@@ -51,23 +65,57 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   box.addEventListener("pointerenter",event=>{if(event.pointerType!=="touch"&&!previewPinned)preview(value);});
   box.addEventListener("pointerleave",()=>{if(!previewPinned&&previewId===value.id)hidePreview();});
   box.addEventListener("focus",()=>{if(!previewPinned)preview(value);});box.addEventListener("blur",()=>{if(!previewPinned)hidePreview();});
-  box.addEventListener("pointerdown",event=>{if(event.pointerType==="touch")preview(value,true);});
+  box.addEventListener("pointerdown",event=>{if(event.pointerType==="touch"&&!box.closest(".choices"))preview(value,true);});
   if(optionId!==undefined){box.dataset.option=optionId;box.setAttribute("aria-pressed",String(selected.has(optionId)));}
   const inspect=button("i",()=>preview(value,true),false,"inspect-card");inspect.setAttribute("aria-label",`${t("inspectCard")}: ${cardName(value.id,lang)}`);inspect.title=t("inspectCard");wrap.append(box,inspect);return wrap;
  }
  function cardList(values:Card[]){const list=node("div",undefined,"cards");for(const value of values)list.append(cardNode(value));return list;}
  function action():EligibleAction|undefined{return privateGame()?.actions[0];}
  function eligibleIds():string[]{const a=action();return !a?[]:a.kind==="choose"?a.choice.options.map(o=>o.id):a.cardIds;}
+ function dragContext():DragContext|null{const own=privateGame(),a=action();return own&&view?.table?{tableId:view.table.id,gameId:own.id,seatId:own.selfSeatId,revision:own.revision,kind:a&&a.kind!=="choose"?a.kind:null,legalCardIds:a&&a.kind!=="choose"?a.cardIds:[],locked:locked()||suspended,scopeId}:null;}
+ function inspectCard(id:string,pinned:boolean){const own=privateGame(),g=view?.game,a=action();const visible=[...(own?.hand??[]),...(own?.committedAnte?[own.committedAnte]:[]),...(g?.ante??[]),...(g?.discard??[]),...(g?.revealed??[]),...(g?.seats.flatMap(s=>s.flight.map(f=>f.card))??[]),...(a?.kind==="choose"?a.choice.options.filter(o=>o.cardId).map(o=>card(o.cardId!)):[])].find(c=>c.id===id);if(visible)preview(visible,pinned);}
+ function syncStage(){if(!stage)return;stage.update({view:view?.game??null,language:lang,connected:!!view?.connected,reducedMotion:reduced.matches,selectedCardIds:[...selected,...(hoveredHand?[hoveredHand]:[])],...(resetStage?{animate:false}:{})});resetStage=false;}
+ function clearDomDrag(){domGhost?.remove();domGhost=null;for(const c of root.querySelectorAll<HTMLElement>(".dom-dragging"))c.classList.remove("dom-dragging");}
+ function stageCancel(){keyboardHeld=false;keyboardContext=null;pointerCard="";stage?.setDrag(null);clearDomDrag();publishGesture();}
+ function pointerLift(cardId:string){if(pointerCard!==cardId){pointerCard=cardId;publishGesture();}}
+ function refreshKeyboard(){if(!keyboardHeld)return;const now=dragContext(),old=keyboardContext;if(!now||!old||now.locked||now.tableId!==old.tableId||now.gameId!==old.gameId||now.seatId!==old.seatId||now.kind!==old.kind||now.scopeId!==old.scopeId||!now.legalCardIds.includes(keyboardCard))stageCancel();}
+ function dispatchAction(move:GameAction,zone?:"ante"|"flight"):boolean{
+  const own=privateGame(),table=view?.table;if(!own||!table||pendingAction||locked()||move.revision!==own.revision||move.seatId!==own.selfSeatId)return false;
+  pendingAction={actionId:move.id,tableId:table.id,gameId:own.id,revision:move.revision,cardId:move.cardId,zone,action:structuredClone(move),retryable:false};
+  if(zone)stage?.releaseDrag({pending:true,zone});keyboardHeld=false;keyboardContext=null;pointerCard="";dispatchFailed=false;sending=true;localMessage="";render();
+  try{Promise.resolve(deps.send({type:"action",action:move})).catch(()=>{if(destroyed||pendingAction?.actionId!==move.id)return;sending=false;dispatchFailed=true;pendingAction.retryable=true;localMessage="requestFailed";render();});}
+  catch{if(pendingAction?.actionId===move.id){sending=false;dispatchFailed=true;pendingAction.retryable=true;localMessage="requestFailed";render();}}
+  return true;
+ }
+ function drop(intent:DropIntent){const context=dragContext();if(!context||context.locked||intent.tableId!==context.tableId||intent.gameId!==context.gameId||intent.seatId!==context.seatId||intent.revision!==context.revision||intent.kind!==context.kind||!context.legalCardIds.includes(intent.cardId))return false;
+  const submitted=dispatchAction({id:deps.id?.()??crypto.randomUUID(),revision:intent.revision,seatId:intent.seatId,kind:intent.kind,cardId:intent.cardId},intent.zone);if(submitted)clearDomDrag();return submitted;}
+ function applyReceipt(){const p=pendingAction;if(!p)return;
+  if(view?.table?.id!==p.tableId||view.game?.id!==p.gameId||!("selfSeatId" in view.game)||view.game.selfSeatId!==p.action.seatId){pendingAction=null;dispatchFailed=false;resetStage=true;stageCancel();return;}
+  const receipt=view.actionReceipt;if(!receipt||receipt.actionId!==p.actionId||receipt.tableId!==p.tableId||receipt.gameId!==p.gameId||!Number.isSafeInteger(receipt.revision))return;
+  if(receipt.ok===true){if(receipt.revision<p.revision+1||view.game.revision<receipt.revision)return;pendingAction=null;dispatchFailed=false;stage?.resolvePending(true);selected.clear();}
+  else if(receipt.ok===false&&receipt.revision===p.revision){if(receipt.retryable===true){p.retryable=true;localMessage=receipt.code??"requestFailed";return;}pendingAction=null;dispatchFailed=false;stage?.resolvePending(false);stageCancel();localMessage=receipt.code??"requestFailed";}
+ }
+ function keyboardText(){const own=privateGame(),value=own?.hand.find(c=>c.id===keyboardCard);return (lang==="zh"?"←/→ 选牌 · 空格拿起 · Enter 放入自己的区域 · Esc 取消":"←/→ choose · Space lift · Enter drop in your slot · Esc cancel")+(value?` · ${cardName(value.id,lang)} ${value.strength}`:"");}
+ function keyboardInput(event:KeyboardEvent){if(event.target!==el("table-stage")&&!((event.target as HTMLElement).closest?.("#hand")))return;
+  const own=privateGame();if(!own?.hand.length||pendingAction)return;
+  const focusedCard=(event.target as HTMLElement).closest<HTMLElement>("#hand [data-card]")?.dataset.card;
+  if(focusedCard&&!keyboardHeld&&(event.key===" "||!keyboardCard))keyboardCard=focusedCard;
+  const found=own.hand.findIndex(c=>c.id===keyboardCard),index=Math.max(0,found);
+  if(["ArrowLeft","ArrowRight"].includes(event.key)){event.preventDefault();if(keyboardHeld)return;keyboardCard=own.hand[found<0?0:(index+(event.key==="ArrowRight"?1:own.hand.length-1))%own.hand.length].id;hoveredHand=keyboardCard;inspectCard(keyboardCard,false);publishGesture();syncStage();el("stage-keyboard").textContent=keyboardText();}
+  else if(event.key===" "&&!keyboardHeld){event.preventDefault();const context=dragContext();keyboardCard=own.hand[index].id;if(!context||context.locked||!context.legalCardIds.includes(keyboardCard))return;keyboardHeld=true;keyboardContext={...context,legalCardIds:[...context.legalCardIds]};publishGesture();const point=stage?.getAnchor({cardId:keyboardCard});if(point&&stageAvailable)stage?.setDrag({cardId:keyboardCard,x:point.x,y:point.y});el("stage-keyboard").textContent=(lang==="zh"?"已拿起；Enter 放下，Esc 取消。":"Lifted. Enter to drop; Esc to cancel.");}
+  else if(event.key==="Enter"){event.preventDefault();if(!keyboardHeld){inspectCard(own.hand[index].id,true);return;}const context=dragContext();if(context?.kind&&!context.locked){const zone=context.kind==="ante"?"ante":"flight";drop({...context,kind:context.kind,cardId:keyboardCard,zone});}}
+  else if(event.key==="Escape"&&keyboardHeld){event.preventDefault();event.stopPropagation();stageCancel();el("stage-keyboard").textContent=keyboardText();}
+ }
  function toggle(id:string){if(locked()||!eligibleIds().includes(id))return;touched=true;const a=action()!,max=a.kind==="choose"?a.choice.max:1;
   if(selected.has(id))selected.delete(id);else if(max===1)selected=new Set([id]);else if(selected.size<max)selected.add(id);syncSelection();
  }
  function publishGesture(){
-  if (!deps.gesture || destroyed || !privateGame()) return;
+  if (!deps.gesture || destroyed || suspended || !privateGame()) return;
   if (gestureTimer) return;
   gestureTimer = setTimeout(() => {
-    gestureTimer = undefined; const own = privateGame(); if (!own || destroyed) return;
+    gestureTimer = undefined; const own = privateGame(); if (!own || destroyed || suspended) return;
     const hover = own.hand.findIndex(c => c.id === hoveredHand);
-    const value = { gameId: own.id, revision: own.revision, count: own.hand.length, hover: hover < 0 ? null : hover, selected: own.hand.flatMap((c,i) => selected.has(c.id) ? [i] : []), sequence: 0 };
+    const value = { gameId: own.id, revision: own.revision, count: own.hand.length, hover: hover < 0 ? null : hover, selected: own.hand.flatMap((c,i) => selected.has(c.id)||pointerCard===c.id||keyboardHeld&&keyboardCard===c.id ? [i] : []), sequence: 0 };
     const signature = JSON.stringify(value); if (signature === lastGesture) return; lastGesture = signature;
     deps.gesture!({ ...value, sequence: gestureSequence = Math.max(gestureSequence + 1, Date.now()) });
   }, 125);
@@ -77,20 +125,22 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   for(const box of root.querySelectorAll<HTMLButtonElement>("button[data-option]")){box.setAttribute("aria-pressed",String(selected.has(box.dataset.option!)));box.disabled=locked()||!eligibleIds().includes(box.dataset.option!)||!!a&&max>1&&selected.size>=max&&!selected.has(box.dataset.option!);}
   for (const wrap of root.querySelectorAll<HTMLElement>("#hand .card-wrap")) wrap.classList.toggle("selected", selected.has(wrap.querySelector<HTMLElement>("[data-card]")?.dataset.card ?? ""));
   publishGesture();
+  syncStage();
   const confirm=root.querySelector<HTMLButtonElement>("#confirm-action");if(confirm)confirm.disabled=locked()||selected.size<min||selected.size>max;
   const count=root.querySelector("#selection-count");if(count)count.textContent=`${t("selection")}: ${selected.size} · ${t("chooseRange")}: ${min===max?min:`${min}–${max}`}`;
  }
  function draft():TableUIDraft|null{return view?.table&&view.game?{tableId:view.table.id,gameId:view.game.id,selectionKey,selected:[...selected],boardScroll:el("board-scroll").scrollTop,handScroll:root.querySelector<HTMLElement>("#hand .cards")?.scrollLeft??0,open:["discard","log","help"].filter(id=>el<HTMLDetailsElement>(id).open)}:null;}
  function send(command:TableUICommand){
   const windowCommand=command.type==="close"||command.type==="display"||command.type==="remember";
+  if(!windowCommand&&!receiptCompatible()&&!(command.type==="retry"&&!view))return;
   if(destroyed)return;if(!windowCommand&&command.type!=="retry"&&(busy()||(!view?.connected&&!(command.type==="newGame"&&view?.isHost&&view.message==="recoveryMissing"))))return;
   if(command.type==="close"||command.type==="display")command={...command,draft:draft()??undefined};
+  if(command.type==="retry"&&pendingAction)command={type:"retry",tableId:pendingAction.tableId,gameId:pendingAction.gameId,action:structuredClone(pendingAction.action)};
   if(!windowCommand){sending=true;localMessage="";render();}
   try{Promise.resolve(deps.send(command)).catch(()=>{if(!destroyed){sending=false;localMessage="requestFailed";render();}});}catch{sending=false;localMessage="requestFailed";render();}
  }
  function confirmAction(){const game=privateGame(),a=action();if(!game||!a||locked())return;const ids=[...selected];
-  if(a.kind==="choose"){if(ids.length<a.choice.min||ids.length>a.choice.max||ids.some(id=>!a.choice.options.some(o=>o.id===id)))return;send({type:"action",action:{id:deps.id?.()??crypto.randomUUID(),revision:game.revision,seatId:game.selfSeatId,kind:"choose",choiceId:a.choice.id,optionIds:ids}});}
-  else if(ids.length===1&&a.cardIds.includes(ids[0]))send({type:"action",action:{id:deps.id?.()??crypto.randomUUID(),revision:game.revision,seatId:game.selfSeatId,kind:a.kind,cardId:ids[0]}});
+  if(a.kind==="choose"){if(ids.length<a.choice.min||ids.length>a.choice.max||ids.some(id=>!a.choice.options.some(o=>o.id===id)))return;dispatchAction({id:deps.id?.()??crypto.randomUUID(),revision:game.revision,seatId:game.selfSeatId,kind:"choose",choiceId:a.choice.id,optionIds:ids});}
  }
  function reset(){resetKey=`${view?.table?.id}:${view?.game?.id}`;el<HTMLDialogElement>("reset-dialog").showModal();}
  function renderChoice(host:HTMLElement,choice:Choice){
@@ -103,26 +153,27 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   }host.append(options);
  }
  function render(){if(destroyed)return;
+  refreshKeyboard();
   const game=view?.game,own=privateGame(),a=action(),table=view?.table;
   const key=game?`${game.id}:${game.gambit}:${game.round}:${a?.kind??"waiting"}:${a?.kind==="choose"?a.choice.id:""}`:"";
   if(key!==selectionKey){selectionKey=key;selected.clear();}selected=new Set([...selected].filter(id=>eligibleIds().includes(id)));
   document.documentElement.lang=lang==="en"?"en":"zh-CN";document.title=t("title");
   root.dataset.phase=game?.phase??"lobby";root.dataset.players=String(game?.seats.length??0);
   for(const [id,code] of [["title","title"],["edition","edition"],["log-title","history"],["help-title","help"],["help-text","helpText"],["rules-link","rules"],["close-hint","closeHint"],["reset-title","resetTitle"],["reset-body","resetBody"],["cancel-reset","cancel"],["confirm-reset","confirmReset"]])el(id).textContent=t(code);
-  el("tutorial").textContent = lang === "en" ? "Learn by playing" : "跟着打一局"; el("language").textContent = lang === "en" ? "中文" : "English";
+  el("tutorial").textContent = lang === "en" ? "How to play" : "如何游玩"; el("language").textContent = lang === "en" ? "中文" : "English";
   el("close").setAttribute("aria-label",t("close"));el("close").title=t("close");el("close").textContent=t("backToMap");el("display-mode").textContent=t(deps.mode==="compact"?"expand":"minimize");el("close-preview").setAttribute("aria-label",t("closePreview"));
-  const message=localMessage?t(localMessage):view?.message?tableText(view.message,lang):busy()?t("sending"):!view||!view.connected?t("connecting"):"";
+  const message=view&&!receiptCompatible()?(lang==="zh"?"牌桌后台仍是旧版。请完整刷新枭熊页面后再出牌；现在仍可观看或返回地图。":"The table background is an older version. Fully refresh the Owlbear page before playing. You can still watch or return to the map."):pendingAction?.retryable?(lang==="zh"?"尚未确认这次操作，请重试原操作。":"This action is not confirmed. Retry the same action."):localMessage?(rulePrompt(localMessage,lang)!==localMessage?rulePrompt(localMessage,lang):t(localMessage)):view?.message?tableText(view.message,lang):busy()?t("sending"):!view||!view.connected?t("connecting"):"";
   el("status").textContent=message;el("status").hidden=!message;el("status").classList.toggle("error",!!view?.message&&!['connecting','privateSync'].includes(view.message));
-  section("toolbar",[table,view?.selfPlayerId,view?.isHost,view?.connected,view?.message,busy(),localMessage],host=>{
+  section("toolbar",[table,view?.selfPlayerId,view?.isHost,view?.connected,view?.message,receiptCompatible(),busy(),sending,pendingAction?.retryable,localMessage],host=>{
    const seated=table?.seats.some(s=>s.playerId===view?.selfPlayerId);
    if(view&&!table)host.append(button(t("create"),()=>send({type:"create"}),locked(),"primary"));
    else if(table){
     if(!seated&&table.stage!=="playing")host.append(button(t("join"),()=>send({type:"join"}),locked()||table.seats.length>=6,"primary"));
     if(seated&&table.stage!=="playing")host.append(button(t("leave"),()=>send({type:"leave"}),locked()));
     if(view?.isHost&&table.stage==="lobby")host.append(button(t("start"),()=>send({type:"start"}),locked()||table.seats.length<2,"primary"));
-    if(view?.isHost&&table.stage!=="lobby")host.append(button(t("newGame"),reset,busy()||(!view.connected&&view.message!=="recoveryMissing")));
+    if(view?.isHost&&table.stage!=="lobby")host.append(button(t("newGame"),reset,!receiptCompatible()||busy()||(!view.connected&&view.message!=="recoveryMissing")));
    }
-   if(!view?.connected||view?.message||localMessage)host.append(button(t("retry"),()=>send({type:"retry"}),busy()));
+   if(!view?.connected||view?.message||localMessage||pendingAction?.retryable)host.append(button(pendingAction?(lang==="zh"?"重试这次操作":"Retry this action"):t("retry"),()=>send({type:"retry"}),sending||!!view&&!receiptCompatible()));
   });
   section("lobby",[table,view?.selfPlayerId,view?.isHost,!!game],host=>{
    if(!table){host.append(node("p",t("noTable")));return;}
@@ -137,9 +188,9 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
    if(game.phase==="adjudication"){host.append(node("h2",t("paused")),node("p",rulePrompt(game.issue??"ADJUDICATION_REQUIRED",lang)),node("p",t("pausedHelp"),"muted"));return;}
    if(game.phase==="ended"){host.append(node("h2",t("ended")),node("p",`${t("winners")}: ${game.winners.map(seatName).join(", ")}`));return;}
    if(a?.kind==="choose")renderChoice(host,a.choice);
-   else if(a)host.append(node("h2",t(a.kind==="ante"?"antePrompt":"playPrompt")));
+   else if(a)host.append(node("h2",lang==="zh"?(a.kind==="ante"?"拖一张手牌到自己的暗置槽":"拖一张手牌到自己的公开航线"):(a.kind==="ante"?"Drag a hand card to your face-down slot":"Drag a hand card to your flight")));
    else {host.append(node("h2",`${t("waitingFor")}: ${game.waitingSeatIds.map(seatName).join(", ")||t("waiting")}`));if(own?.committedAnte)host.append(node("p",`${t("ownAnte")}: ${cardName(own.committedAnte.id,lang)} · ${own.committedAnte.strength}`));}
-   if(a){const row=node("div",undefined,"action-row"),count=node("span",undefined,"muted");count.id="selection-count";const confirm=button(t(a.kind==="ante"?"confirmAnte":a.kind==="play"?"confirmPlay":"confirmChoice"),confirmAction,true,"primary");confirm.id="confirm-action";row.append(count,confirm);host.append(row);}
+   if(a?.kind==="choose"){const row=node("div",undefined,"action-row"),count=node("span",undefined,"muted");count.id="selection-count";const confirm=button(t("confirmChoice"),confirmAction,true,"primary");confirm.id="confirm-action";row.append(count,confirm);host.append(row);}
   });
   section("hand",own&&[game?.id,own.hand,a?.kind,a&&a.kind!=="choose"?a.cardIds:[]],host=>{if(!own)return;const heading=node("div",undefined,"hand-heading");heading.append(node("h2",`${t("hand")} · ${own.hand.length}`),node("span",t("inspectHint"),"muted"));host.append(heading);const cards=node("div",undefined,"cards");for(const value of own.hand){
     const wrap=cardNode(value,a&&a.kind!=="choose"&&a.cardIds.includes(value.id)?value.id:undefined);
@@ -155,14 +206,21 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
    panel.append(node("h2",`${seat.name}${seat.id===own?.selfSeatId?` (${t("you")})`:""}${seat.id===game.leaderSeatId?` · ${t("leader")}`:""}`),node("p",`${t("gold")} ${seat.gold} · ${t("handCount")} ${seat.handCount} · ${t("strength")} ${seat.strength}${seat.debt?` · ${t("debt")} ${seat.debt}`:""}`));
    if(seat.id!==own?.selfSeatId){const backs=node("div",undefined,"opponent-hand");backs.setAttribute("aria-label",`${seat.name} · ${t("handCount")} ${seat.handCount}`);for(let index=0;index<Math.min(10,seat.handCount);index++){const back=node("span","◈","card-back");back.setAttribute("aria-hidden","true");back.dataset.slot=String(index);back.style.setProperty("--angle",`${(index-(Math.min(10,seat.handCount)-1)/2)*7}deg`);back.style.setProperty("--arc",`${Math.abs(index-(Math.min(10,seat.handCount)-1)/2)*2}px`);backs.append(back);}panel.append(backs);}
    if(seat.committed)panel.append(node("small",t("committed")));if(seat.archmage)panel.append(node("p",t("archmage"),"effect"));
-   const flight=node("div",undefined,"cards flight");for(const item of seat.flight){const c=cardNode(item.card);if(item.wild)c.append(node("small",t("wild")));if(item.rider)c.append(node("small",t("rider")));flight.append(c);}panel.append(flight);host.append(panel);
+   const anteSlot=node("div",lang==="zh"?"暗置槽":"Face-down slot","dom-drop-slot");anteSlot.dataset.dropZone="ante";anteSlot.dataset.dropSeat=seat.id;panel.append(anteSlot);
+   const flight=node("div",undefined,"cards flight");flight.dataset.dropZone="flight";flight.dataset.dropSeat=seat.id;for(const item of seat.flight){const c=cardNode(item.card);if(item.wild)c.append(node("small",t("wild")));if(item.rider)c.append(node("small",t("rider")));flight.append(c);}if(!seat.flight.length)flight.append(node("small",lang==="zh"?"公开航线":"Face-up flight"));panel.append(flight);host.append(panel);
   }});
   section("antes",game&&[game.ante,game.revealed],host=>{if(!game)return;host.append(node("h2",t("ante")));host.append(game.ante.length?cardList(game.ante):node("p",t("none"),"muted"));if(game.revealed.length)host.append(node("h2",t("revealed")),cardList(game.revealed));});
   section("effects",game&&[game.effects,game.lastGambit],host=>{if(!game)return;if(game.effects?.length){host.append(node("h2",t("effects")));for(const effect of game.effects)host.append(node("p",`${seatName(effect.seatId)} · ${t(effect.kind)}`));}if(game.lastGambit)host.append(node("p",`${t("lastGambit")}: ${game.lastGambit.winners.map(seatName).join(", ")}`));});
   el("discard").hidden=!game;el("discard-title").textContent=`${t("discard")} · ${game?.discard.length??0}`;renderDiscard();
   section("events",game?.events,host=>{for(const event of game?.events.slice(-30).reverse()??[]){const parts=[seatName(event.seatId),t(event.code),event.amount===undefined?"":String(event.amount),seatName(event.targetSeatId),...(event.cardIds??[]).map(id=>cardName(id,lang))].filter(Boolean);host.append(node("li",parts.join(" · ")));}});
-  el("arena").hidden=!game;el("log").hidden=!game;el("turn").hidden=!game;el("hand").hidden=!own;el("turn").setAttribute("aria-label",t("acting"));syncSelection();
-  if(previewId){const visible=[...(own?.hand??[]),...(game?.ante??[]),...(game?.revealed??[]),...(game?.discard??[]),...(game?.seats.flatMap(seat=>seat.flight.map(value=>value.card))??[]),...(a?.kind==="choose"?a.choice.options.filter(option=>option.cardId).map(option=>card(option.cardId!)):[])].find(value=>value.id===previewId);if(visible)preview(visible,previewPinned);else hidePreview();}
+  el("accessible-table").hidden=!game||!stageAvailable;el("accessible-title").textContent=lang==="zh"?"桌面详情":"Table details";
+  section("accessible-seats",game&&[game.seats,game.ante,game.effects],host=>{if(!game)return;for(const seat of game.seats){const row=node("section");row.append(node("h2",seat.name),node("p",`${t("gold")} ${seat.gold} · ${t("strength")} ${seat.strength} · ${t("handCount")} ${seat.handCount}${seat.debt?` · ${t("debt")} ${seat.debt}`:""}`));for(const item of seat.flight)row.append(button(`${cardName(item.cardId,lang)} · ${item.card.strength}`,()=>inspectCard(item.cardId,true)));host.append(row);}const antes=node("section");antes.append(node("h2",t("ante")));for(const value of game.ante)antes.append(button(`${cardName(value.id,lang)} · ${value.strength}`,()=>inspectCard(value.id,true)));host.append(antes);for(const effect of game.effects??[])host.append(node("p",`${seatName(effect.seatId)} · ${t(effect.kind)}`));});
+  el("arena").hidden=!game||stageAvailable;el("stage-host").hidden=!game||!stageAvailable;el("log").hidden=!game;el("turn").hidden=!game;el("hand").hidden=!own||stageAvailable;el("hand").inert=stageAvailable;el("turn").setAttribute("aria-label",t("acting"));
+  el("table-stage").setAttribute("aria-label",lang==="zh"?"三维牌桌。方向键选牌，空格拿起，Enter放到自己区域。":"Three dimensional card table. Arrow keys choose; Space lifts; Enter drops in your own slot.");
+  el("stage-keyboard").textContent=keyboardText();
+  el("stage-summary").textContent=game?`${t("gambit")} ${game.gambit} · ${t("round")} ${game.round} · ${t("stakes")} ${game.stakes} · ${t("hole")} ${game.hole}`:"";
+  root.dataset.pendingAction=pendingAction?"true":"false";syncSelection();dragController?.refresh();domDragController?.refresh();
+  if(previewId){const visible=[...(own?.hand??[]),...(own?.committedAnte?[own.committedAnte]:[]),...(game?.ante??[]),...(game?.revealed??[]),...(game?.discard??[]),...(game?.seats.flatMap(seat=>seat.flight.map(value=>value.card))??[]),...(a?.kind==="choose"?a.choice.options.filter(option=>option.cardId).map(option=>card(option.cardId!)):[])].find(value=>value.id===previewId);if(visible)preview(visible,previewPinned);else hidePreview();}
   restoreDraft(); layoutFan(); paintGestures();
   if(el<HTMLDialogElement>("reset-dialog").open&&resetKey!==`${table?.id}:${game?.id}`)el<HTMLDialogElement>("reset-dialog").close();
  }
@@ -172,6 +230,15 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   selected=new Set(incoming.selected.filter(id=>eligibleIds().includes(id)).slice(0,max));syncSelection();
   for(const id of incoming.open)el<HTMLDetailsElement>(id).open=true;renderDiscard();
   el("board-scroll").scrollTop=incoming.boardScroll;const hand=root.querySelector<HTMLElement>("#hand .cards");if(hand)hand.scrollLeft=incoming.handScroll;
+ }
+ function language(value:TableLanguage){
+  const active=document.activeElement instanceof HTMLElement&&root.contains(document.activeElement)?document.activeElement:null;
+  const option=active?.dataset.option,cardId=active?.dataset.card;
+  lang=value;render();
+  if(active&&!active.isConnected&&(option||cardId)){
+   const replacement=[...root.querySelectorAll<HTMLElement>("[data-option],[data-card]")].find(node=>option?node.dataset.option===option:node.dataset.card===cardId);
+   replacement?.focus({preventScroll:true});
+  }
  }
  function layoutFan() {
    const hand=root.querySelector<HTMLElement>("#hand .cards"); if(!hand)return;
@@ -192,6 +259,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   }
  }
  function animateChanges(previous: TableView|null) {
+   if(stageAvailable)return;
    if(!previous?.game || previous.game.id!==view?.game?.id || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
    const oldFlights=new Set(previous.game.seats.flatMap(s=>s.flight.map(c=>c.cardId)));
    for(const card of root.querySelectorAll<HTMLElement>(".flight [data-card]")) {
@@ -209,8 +277,25 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  el("discard-pile").addEventListener("click",()=>{el<HTMLDetailsElement>("discard").open=true;renderDiscard();el("discard").scrollIntoView({block:"nearest"});});
  el("close-preview").addEventListener("click",hidePreview);
  el("display-mode").addEventListener("click",()=>send({type:"display",mode:deps.mode==="compact"?"full":"compact"}));
- const keydown=(event:KeyboardEvent)=>{if(event.key==="Escape"&&previewId){event.preventDefault();event.stopPropagation();hidePreview();}};root.addEventListener("keydown",keydown);
+ const keydown=(event:KeyboardEvent)=>{keyboardInput(event);if(!event.defaultPrevented&&event.key==="Escape"&&previewId){event.preventDefault();event.stopPropagation();hidePreview();}};root.addEventListener("keydown",keydown);
  el("close").addEventListener("click",()=>send({type:"close"}));el("cancel-reset").addEventListener("click",()=>el<HTMLDialogElement>("reset-dialog").close());
  el("confirm-reset").addEventListener("click",()=>{el<HTMLDialogElement>("reset-dialog").close();if(view?.isHost&&resetKey===`${view.table?.id}:${view.game?.id}`)send({type:"newGame"});});
- render();return {update(value:TableView){const previous=view;view=value;sending=false;localMessage="";render();animateChanges(previous);},gesture(seatId:string,value:unknown){if(value===null){const entry=gestures.get(seatId);if(entry)clearTimeout(entry.timer);gestures.delete(seatId);paintGestures();return;}const gesture=readHandGesture(value);if(!gesture||seatId===privateGame()?.selfSeatId)return;const old=gestures.get(seatId);if(old&&gesture.sequence<=old.value.sequence)return;if(old)clearTimeout(old.timer);gestures.set(seatId,{value:gesture,timer:setTimeout(()=>{gestures.delete(seatId);paintGestures();},30000)});paintGestures();},language(value:TableLanguage){lang=value;render();},restore(value:unknown){if(!touched)pendingDraft=readUIDraft(value);restoreDraft();},draft,failed(){sending=false;localMessage="requestFailed";if(view)view={...view,pending:false,connected:false};render();},destroy(){destroyed=true;resize.disconnect();if(gestureTimer)clearTimeout(gestureTimer);for(const entry of gestures.values())clearTimeout(entry.timer);for(const a of motion)a.cancel();root.removeEventListener("keydown",keydown);el<HTMLDialogElement>("reset-dialog").close();root.replaceChildren();}};
+ const domHit=(x:number,y:number):StageHit|null=>{if(stageAvailable)return null;const element=document.elementFromPoint(x,y);if(!element||!root.contains(element)||element.closest(".choices [data-option]"))return null;
+  const cardEl=element.closest<HTMLElement>("[data-card]"),slot=element.closest<HTMLElement>("[data-drop-zone]");
+  if(cardEl){const hand=!!cardEl.closest("#hand");return{kind:hand?"hand":"card",cardId:cardEl.dataset.card!,zone:hand?"hand":slot?.dataset.dropZone==="flight"?"flight":"ante",...(hand?{seatId:privateGame()?.selfSeatId}:slot?{seatId:slot.dataset.dropSeat}:{})};}
+  return slot?{kind:"zone",zone:slot.dataset.dropZone as "ante"|"flight",seatId:slot.dataset.dropSeat}:null;};
+ const hover=(id:string|null)=>{const next=privateGame()?.hand.some(c=>c.id===id)?id??"":"";if(next!==hoveredHand){hoveredHand=next;publishGesture();syncStage();}if(id&&!previewPinned&&previewId!==id)inspectCard(id,false);else if(!id&&!previewPinned)hidePreview();};
+ const ports={context:dragContext,drop,cancel:stageCancel,inspect:inspectCard,hover};
+ stage=mountTableStage(el<HTMLCanvasElement>("table-stage"),{onQuality:quality=>{stageAvailable=quality.webgl;root.dataset.renderer=stageAvailable?"webgl":"dom";if(stageReady&&!destroyed)render();}});stageReady=true;
+ dragController=mountDragController(el("table-stage"),{...ports,hitTest:(x,y)=>stageAvailable?stage?.hitTest(x,y)??null:null,drag:value=>{if(value)pointerLift(value.cardId);stage?.setDrag(value);}});
+ domDragController=mountDragController(root,{...ports,hover:id=>{if(!stageAvailable)hover(id);},hitTest:domHit,drag:value=>{if(!value)return;pointerLift(value.cardId);const item=[...root.querySelectorAll<HTMLElement>("#hand [data-card]")].find(c=>c.dataset.card===value.cardId);if(item){item.classList.add("dom-dragging");if(!domGhost){domGhost=item.cloneNode(true) as HTMLElement;domGhost.classList.remove("dom-dragging");domGhost.classList.add("dom-drag-ghost");domGhost.setAttribute("aria-hidden","true");domGhost.removeAttribute("tabindex");document.body.append(domGhost);}domGhost.style.left=`${value.x-65}px`;domGhost.style.top=`${value.y-90}px`;}}});
+ const motionPreference=()=>{syncStage();};reduced.addEventListener("change",motionPreference);
+ const cancelKeyboard=()=>{if(keyboardHeld)stageCancel();},hideKeyboard=()=>{if(document.hidden)cancelKeyboard();};
+ root.addEventListener("pointerdown",cancelKeyboard,true);window.addEventListener("blur",cancelKeyboard);document.addEventListener("visibilitychange",hideKeyboard);
+ render();return {update(value:TableView){const previous=view;view=value;sending=false;localMessage="";applyReceipt();render();animateChanges(previous);},gesture(seatId:string,value:unknown){if(destroyed)return;if(value===null){stage?.gesture(seatId,null);const entry=gestures.get(seatId);if(entry)clearTimeout(entry.timer);gestures.delete(seatId);paintGestures();return;}const gesture=readHandGesture(value);if(!gesture||seatId===privateGame()?.selfSeatId)return;const old=gestures.get(seatId);if(old&&gesture.sequence<=old.value.sequence)return;stage?.gesture(seatId,gesture);if(old)clearTimeout(old.timer);gestures.set(seatId,{value:gesture,timer:setTimeout(()=>{gestures.delete(seatId);paintGestures();},30000)});paintGestures();},language,restore(value:unknown){if(!touched)pendingDraft=readUIDraft(value);restoreDraft();},draft,
+ waitingForReceipt:()=>!!pendingAction,
+ getAnchor(zone:"hand"|"ownAnte"|"ownFlight"|"stakes"){const own=privateGame();const query=zone==="hand"?{cardId:own?.hand[0]?.id}:zone==="stakes"?{zone:"stakes" as const}:{zone:zone==="ownAnte"?"ante" as const:"flight" as const,seatId:own?.selfSeatId};const point=stageAvailable?stage?.getAnchor(query):null;if(point?.visible)return new DOMRect(point.x-10,point.y-10,20,20);if(!stageAvailable){const target=zone==="hand"?root.querySelector("#hand [data-card]"):zone==="stakes"?root.querySelector(".counter.stakes"):root.querySelector(`.seat.self [data-drop-zone="${zone==="ownAnte"?"ante":"flight"}"]`);return target?.getBoundingClientRect()??null;}return null;},
+ suspend(){suspended=true;stageCancel();hoveredHand="";if(gestureTimer)clearTimeout(gestureTimer);gestureTimer=undefined;lastGesture="";dragController?.cancel();domDragController?.cancel();stage?.suspend();},resume(){suspended=false;stage?.resume();},
+ failed(){sending=false;localMessage="requestFailed";if(pendingAction)pendingAction.retryable=true;if(view)view={...view,pending:false,connected:false};render();},
+ destroy(){if(destroyed)return;destroyed=true;pendingAction=null;clearDomDrag();dragController?.destroy();domDragController?.destroy();stage?.destroy();reduced.removeEventListener("change",motionPreference);root.removeEventListener("pointerdown",cancelKeyboard,true);window.removeEventListener("blur",cancelKeyboard);document.removeEventListener("visibilitychange",hideKeyboard);resize.disconnect();if(gestureTimer)clearTimeout(gestureTimer);for(const entry of gestures.values())clearTimeout(entry.timer);for(const a of motion)a.cancel();root.removeEventListener("keydown",keydown);el<HTMLDialogElement>("reset-dialog").close();root.replaceChildren();}};
 }

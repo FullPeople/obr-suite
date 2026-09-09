@@ -6,6 +6,13 @@ import { tableText } from "../extensions/three-dragon-ante/src/game/text";
 // Each client has its own document, UI and controller. Only the SDK room boundary
 // crosses this same-origin fixture; rules, private crypto and IndexedDB are real.
 const world = window as unknown as Record<string, any>;
+// Real DOM fallback in each document; controller/rules/WebCrypto/IDB are not
+// mocked. A separate stage test owns actual WebGL coverage.
+const nativeContext=HTMLCanvasElement.prototype.getContext;
+(HTMLCanvasElement.prototype as any).getContext=function(type:string,...args:unknown[]){
+  if(type==="webgl"||type==="webgl2"||type==="experimental-webgl")return null;
+  return Reflect.apply(nativeContext,this,[type,...args]);
+};
 if (window === window.parent) {
   world.integration = { room: new ControllerRoom(), clients: {}, gestures: [], commands: [], newGameLabel: tableText("newGame", "en") };
   for (const id of ["host", "alice"]) {

@@ -4,10 +4,10 @@ import type { KeyHello, PrivateIdentity } from "./private-channel";
 import { TableStore } from "./store";
 import type { SavedTable } from "./store";
 import { applyAction, createGame, projectPublic, projectSeat } from "./rules";
-import type { GameState, PublicView, SeatView } from "./rules";
+import type { GameAction, GameState, PublicView, SeatView } from "./rules";
 import { packPublic, packSeat, unpackPublic, unpackSeat } from "./wire";
 import type { PublicWire, SeatWire } from "./wire";
-import type { TableCommand, TableSummary, TableView } from "./protocol";
+import type { ActionReceipt, TableCommand, TableSummary, TableView } from "./protocol";
 import { sdkTablePlatform } from "./controller-platform";
 import type { ControllerPlatform, TableMember } from "./controller-platform";
 import { gameStage, record, tableSummary, validRecovery, validText } from "./controller-validation";
@@ -31,6 +31,7 @@ type RemoteCommand = Exclude<TableCommand, { type: "create" | "retry" | "close" 
 interface Request { kind: "command"; requestId: string; command: RemoteCommand; tableId: string; tableRevision: number; gameId: string | null }
 interface PendingRequest { request: Request; at: number; attempts: number; busy: boolean }
 interface Receipt { requestId: string; ok: boolean; error?: string }
+interface LocalActionRetry { tableId: string; gameId: string; action: GameAction }
 interface Offer { kind: "hello-reply"; version: 1; tableId: string; to: string; requestId: string; sessionId: string; hello: KeyHello }
 interface Session { link: PrivateLink; sessionId: string; requestId: string; at: number; offer?: Offer }
 interface PendingHostSession { requestId: string; sessionId: string; at: number; offer?: Offer; link?: PrivateLink }
@@ -40,6 +41,8 @@ const clone = <T>(value: T): T => structuredClone(value);
 const errorCode = (error: unknown, fallback = "requestFailed") => error instanceof Error &&
   ["storageFailed", "staleTable", "roomFull", "recoveryMissing", "protocolMismatch"].includes(error.message) ? error.message : fallback;
 const transient = (code: string) => ["storageFailed", "roomFull", "requestFailed", "hostOffline", "privateSync"].includes(code);
+// Same fields as the rules engine's idempotency fingerprint; never projected.
+const actionFingerprint = (action: GameAction) => JSON.stringify([action.seatId, action.revision, action.kind, action.cardId ?? null, action.choiceId ?? null, action.optionIds ?? null]);
 
 /** Owns the table for the lifetime of the background extension, not its panel.
  * Ports are injectable for multi-instance tests; production uses SDK + IDB. */
@@ -73,6 +76,9 @@ export class TableController {
   private game: PublicView | SeatView | null = null;
   private gameTableRevision = -1;
   private pending?: PendingRequest;
+  private actionReceipt?: ActionReceipt;
+  private actionResults = new Map<string, { fingerprint: string; receipt: ActionReceipt }>();
+  private actionRetry?: { key: string; promise: Promise<void> };
   private message: string | undefined;
   private lastPulse = 0;
   private gestureReceived = new Map<string, ReceivedGesture>();
@@ -98,9 +104,9 @@ export class TableController {
     const table = this.saved && this.summary?.id === this.saved.table.id && this.saved.table.hostConnectionId === this.self.connectionId ? this.saved.table : this.summary;
     const host = !!table && table.hostPlayerId === this.self.id;
     const connected = this.connected();
-    return clone({ table, selfPlayerId: this.self.id, isHost: host, connected,
+    return clone({ actionReceiptVersion: 1 as const, table, selfPlayerId: this.self.id, isHost: host, connected,
       pending: !!this.creation || this.recovering || !!this.pending?.busy,
-      game: this.game, ...(this.message ? { message: this.message } : {}) });
+      game: this.game, ...(this.actionReceipt ? { actionReceipt: this.actionReceipt } : {}), ...(this.message ? { message: this.message } : {}) });
   }
   private connected(): boolean {
     const connection = this.summary && this.active.get(this.summary.hostConnectionId);
@@ -164,13 +170,15 @@ export class TableController {
     this.running = false; this.ready = false; this.epoch++; this.roomRead++; this.selfRead++; this.partyRead++;
     if (this.timer) clearTimeout(this.timer); this.timer = undefined;
     for (const dispose of this.disposers.splice(0)) dispose();
-    this.resetLinks(); this.creation = undefined; this.pending = undefined;
+    this.resetLinks(); this.creation = undefined; this.pending = undefined; this.actionReceipt = undefined; this.actionResults.clear(); this.actionRetry = undefined;
     await this.work; await this.storage.close();
     this.saved = null; this.summary = null; this.game = null; this.recovering = false; this.dirty = false; this.gameTableRevision = -1;
   }
   private setSelf(player: TableMember): void {
     if (!validText(player.id) || !validText(player.connectionId)) return;
     if (this.self.id && (this.self.id !== player.id || this.self.connectionId !== player.connectionId)) {
+      this.actionReceipt = undefined;
+      this.actionResults.clear(); this.actionRetry = undefined;
       this.resetLinks(); this.saved = null; this.resetSerial = undefined; this.game = null; this.gameTableRevision = -1;
       if (this.self.id !== player.id) this.pending = undefined;
     }
@@ -180,14 +188,14 @@ export class TableController {
   private observe(value: unknown): void {
     if (!this.running) return;
     const next = value === undefined || value === null ? null : tableSummary(value);
-    if (value != null && !next) { this.incompatible = true; this.resetLinks(); this.saved = null; this.game = null; this.fail("protocolMismatch"); return; }
+    if (value != null && !next) { this.incompatible = true; this.resetLinks(); this.saved = null; this.game = null; this.pending = undefined; this.actionReceipt = undefined; this.actionResults.clear(); this.actionRetry = undefined; this.fail("protocolMismatch"); return; }
     this.incompatible = false;
     if (next && this.summary?.id === next.id && next.revision < this.summary.revision) return;
     const changed = next?.id !== this.summary?.id || next?.hostConnectionId !== this.summary?.hostConnectionId;
     if (changed) {
       const sameTable = next?.id === this.summary?.id;
       this.resetLinks(); this.saved = null; this.resetSerial = undefined;
-      if (!sameTable) { this.game = null; this.gameTableRevision = -1; this.pending = undefined; }
+      if (!sameTable) { this.game = null; this.gameTableRevision = -1; this.pending = undefined; this.actionReceipt = undefined; this.actionResults.clear(); this.actionRetry = undefined; }
       else if (this.pending) this.pending.busy = false;
     }
     this.summary = next;
@@ -243,8 +251,16 @@ export class TableController {
   private updateHostView(): void {
     if (!this.saved) return;
     const seat = this.saved.table.seats.find(seat => seat.playerId === this.self.id);
-    this.game = !this.saved.game ? null : seat ? projectSeat(this.saved.game, seat.seatId) : projectPublic(this.saved.game);
-    this.gameTableRevision = this.saved.table.revision; this.emit();
+    this.adoptGame(!this.saved.game ? null : seat ? projectSeat(this.saved.game, seat.seatId) : projectPublic(this.saved.game), this.saved.table.revision);
+    this.emit();
+  }
+  /** Only an authoritative projection invalidates an old game's outstanding
+   * action. A temporary disconnect may still recover and retry that action. */
+  private adoptGame(game: PublicView | SeatView | null, tableRevision: number): void {
+    if (this.game?.id !== game?.id) { this.actionResults.clear(); this.actionRetry = undefined; }
+    if (this.actionReceipt && this.actionReceipt.gameId !== game?.id) this.actionReceipt = undefined;
+    if (this.pending?.request.command.type === "action" && this.pending.request.gameId !== game?.id) this.pending = undefined;
+    this.game = game; this.gameTableRevision = tableRevision;
   }
   /** Save precedes publication. A failed metadata write leaves this exact saved
    * result dirty and retryable; it never rolls back or deals another game. */
@@ -480,7 +496,6 @@ export class TableController {
   private acceptSnapshot(payload: Record<string, unknown>): void {
     const table = tableSummary(payload.table);
     if (!table || !this.summary || table.id !== this.summary.id || table.hostPlayerId !== this.summary.hostPlayerId || table.hostConnectionId !== this.summary.hostConnectionId) return;
-    if (record(payload.receipt)) this.acceptReceipt(payload.receipt as unknown as Receipt);
     if (table.revision < this.summary.revision || table.revision < this.gameTableRevision) return;
     try {
       let game: PublicView | SeatView | null = null;
@@ -496,25 +511,94 @@ export class TableController {
         if (this.game?.id === game.id && game.revision < this.game.revision) return;
         if (this.game && this.game.id !== game.id && table.revision === this.gameTableRevision) return;
       } else if (table.stage !== "lobby" || (this.game && table.revision === this.gameTableRevision)) return;
-      this.summary = table; this.game = game; this.gameTableRevision = table.revision; this.message = undefined; this.emit();
+      this.summary = table; this.adoptGame(game, table.revision); this.message = undefined;
+      // Never acknowledge an action from a stale/invalid snapshot or emit its
+      // receipt alongside the previous hand. Apply both in one local update.
+      if (record(payload.receipt)) this.acceptReceipt(payload.receipt as unknown as Receipt, false);
+      this.emit();
       if (this.pending && !this.pending.busy) void this.sendPending();
     } catch (error) { this.fail(error instanceof Error ? error.message : "protocolMismatch"); }
   }
-  private acceptReceipt(receipt: Receipt): void {
-    if (!this.pending || receipt.requestId !== this.pending.request.requestId || typeof receipt.ok !== "boolean") return;
+  private acceptReceipt(receipt: Receipt, emit = true): void {
+    if (!this.running || !this.pending || receipt.requestId !== this.pending.request.requestId || typeof receipt.ok !== "boolean") return;
+    const request = this.pending.request;
+    if (request.tableId !== this.summary?.id) return;
+    if (request.command.type === "action") {
+      const action = request.command.action;
+      if (!request.gameId || request.gameId !== this.game?.id || (receipt.ok && this.game.revision < action.revision + 1)) return;
+      const code = typeof receipt.error === "string" ? receipt.error : "requestFailed";
+      this.actionReceipt = { actionId: action.id, tableId: request.tableId, gameId: request.gameId,
+        revision: action.revision + (receipt.ok ? 1 : 0), ok: receipt.ok, source: "host",
+        ...(!receipt.ok ? { code, retryable: transient(code) } : {}) };
+      if (receipt.ok || !transient(code)) {
+        this.actionResults.set(action.id, { fingerprint: actionFingerprint(action), receipt: clone(this.actionReceipt) });
+        if (this.actionResults.size > 64) this.actionResults.delete(this.actionResults.keys().next().value!);
+      }
+    }
     if (receipt.ok) { this.pending = undefined; this.message = undefined; }
     else {
       const code = typeof receipt.error === "string" ? receipt.error : "requestFailed";
       if (transient(code)) this.pending.busy = false; else this.pending = undefined;
       this.message = code;
     }
-    this.emit();
+    if (emit) this.emit();
+  }
+  private rejectLocalAction(retry: LocalActionRetry, code: string, retryable = false): void {
+    this.actionReceipt = { actionId: retry.action.id, tableId: retry.tableId, gameId: retry.gameId,
+      revision: retry.action.revision, ok: false, code, retryable, source: "local" };
+    this.fail(code);
+  }
+  /** Recover a LOCAL delivery failure without guessing whether the original
+   * command reached us. Existing pending requests and known host outcomes take
+   * precedence over the current (possibly already advanced) game revision. */
+  private async retryAction(retry: LocalActionRetry): Promise<void> {
+    const fingerprint = actionFingerprint(retry.action), key = JSON.stringify([retry.tableId, retry.gameId, retry.action.id, fingerprint]);
+    if (this.actionRetry?.key === key) { await this.actionRetry.promise; return; }
+    const epoch = this.epoch;
+    // Deferring one microtask installs the in-flight retry guard before any
+    // synchronous host/LOCAL callbacks; duplicate clicks join the same work.
+    const attempt = { key, promise: Promise.resolve().then(async () => {
+      if (!this.alive(epoch)) return;
+      const pending = this.pending;
+      if (!pending) {
+        const seat = this.summary?.seats.find(seat => seat.playerId === this.self.id);
+        if (retry.tableId !== this.summary?.id || retry.gameId !== this.game?.id) { this.rejectLocalAction(retry, "staleTable"); return; }
+        if (!seat || retry.action.seatId !== seat.seatId) { this.rejectLocalAction(retry, "notSeated"); return; }
+        const known = this.actionResults.get(retry.action.id);
+        if (known) {
+          if (known.fingerprint !== fingerprint) { this.rejectLocalAction(retry, "ACTION_ID_CONFLICT"); return; }
+          this.actionReceipt = clone(known.receipt); this.message = known.receipt.code; this.emit(); return;
+        }
+        if (retry.action.revision !== this.game!.revision) { this.rejectLocalAction(retry, "STALE_REVISION"); return; }
+        await this.command({ type: "action", action: retry.action }); return;
+      }
+      const request = pending.request;
+      if (request.command.type !== "action" || request.tableId !== retry.tableId || request.gameId !== retry.gameId || request.command.action.id !== retry.action.id) {
+        this.rejectLocalAction(retry, "requestFailed"); return;
+      }
+      if (actionFingerprint(request.command.action) !== fingerprint) {
+        // The original immutable request is still uncertain. A conflicting
+        // retry must not turn it into a definite rejection or change its data.
+        this.rejectLocalAction(retry, "ACTION_ID_CONFLICT", true); return;
+      }
+      this.message = undefined; pending.attempts = 0; pending.busy = false;
+      await this.enqueue(async () => { await this.reconcile(); if (this.serving() && this.dirty) await this.publish(); });
+      if (this.alive(epoch) && this.pending === pending) await this.sendPending();
+    }) };
+    this.actionRetry = attempt;
+    try { await attempt.promise; } finally { if (this.actionRetry === attempt) this.actionRetry = undefined; }
   }
   async command(command: TableCommand): Promise<void> {
     if (!this.running || !record(command)) return;
     if (command.type === "retry" && (!this.self.id || !this.platform)) { await this.stop(); await this.start(); return; }
     if (!this.self.id) return;
     if (command.type === "close") return;
+    if (command.type === "retry" && ("action" in command || "tableId" in command || "gameId" in command)) {
+      if (!validText(command.tableId) || !validText(command.gameId) || !record(command.action) || !validText(command.action.id, 128) || !Number.isSafeInteger(command.action.revision)) {
+        this.fail("invalidCommand"); return;
+      }
+      await this.retryAction({ tableId: command.tableId, gameId: command.gameId, action: clone(command.action) }); return;
+    }
     if (command.type === "retry") {
       this.message = undefined;
       if (this.pending) { this.pending.attempts = 0; this.pending.busy = false; }
@@ -523,6 +607,7 @@ export class TableController {
       return;
     }
     if (this.pending) { this.fail("requestFailed"); return; }
+    if (command.type === "action") this.actionReceipt = undefined;
     if (command.type === "create") { await this.enqueue(() => this.create()); return; }
     if (!["join", "leave", "start", "newGame", "action"].includes(command.type) || !this.summary) { this.fail("invalidCommand"); return; }
     if (command.type === "action") {
@@ -561,6 +646,7 @@ export class TableController {
   private async sendPending(): Promise<void> {
     const pending = this.pending;
     if (!pending || pending.busy || !this.summary || pending.request.tableId !== this.summary.id) return;
+    if (pending.request.command.type === "action") this.actionReceipt = undefined;
     pending.busy = true; pending.at = Date.now(); pending.attempts++; this.message = undefined; this.emit();
     try {
       if (pending.request.command.type === "newGame" && !this.saved && this.canClaim() && this.resetSerial !== undefined) await this.enqueue(() => this.resetMissingGame(pending.request));

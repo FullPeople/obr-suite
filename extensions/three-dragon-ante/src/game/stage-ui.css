@@ -1,0 +1,38 @@
+/* The WebGL canvas owns the table and hand. DOM choices remain accessible. */
+.table-shell[data-renderer=webgl]{background:#160e0a}
+.table-shell[data-renderer=webgl]>.board-scroll{position:relative;padding:0;overflow:hidden;min-height:150px}
+.table-shell[data-renderer=webgl] #stage-host{position:absolute;inset:0}
+#table-stage{display:block;width:100%;height:100%;touch-action:none;outline-offset:-5px}
+#stage-summary{position:absolute;top:12px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:.72rem;letter-spacing:.04em;color:#eddbc0;text-shadow:0 2px 5px #100906;pointer-events:none;background:#20130b88;padding:6px 12px;border-radius:20px}
+#stage-keyboard{position:absolute;left:50%;bottom:26%;transform:translateX(-50%);margin:0;padding:8px 12px;width:max-content;max-width:90%;background:#1c120eee;border:1px solid #b09060;border-radius:7px;font-size:.75rem;pointer-events:none;opacity:0}
+#table-stage:focus-visible~#stage-keyboard{opacity:1}
+.table-shell[data-renderer=webgl] #lobby:not(:empty){position:absolute;top:5%;left:50%;transform:translateX(-50%);z-index:2;margin:0;padding:12px;max-width:90%}
+.table-shell[data-renderer=webgl]>.player-dock{padding:0 20px 5px;box-shadow:none;z-index:3}
+.table-shell[data-renderer=webgl] .turn{padding:8px 0;max-height:min(30vh,260px)}
+.table-shell[data-renderer=webgl] .turn:empty{display:none}
+.table-shell[data-renderer=webgl]>.board-scroll>.table-notes{position:absolute;bottom:0;left:12px;right:12px;z-index:4;margin:0;max-width:none;gap:5px 13px;pointer-events:none;align-items:flex-end}
+.table-shell[data-renderer=webgl] .table-notes>details{min-width:0;pointer-events:auto;background:#20140ddc;border-radius:5px;padding:0 6px;font-size:.7rem}
+.table-shell[data-renderer=webgl] .table-notes>details[open]{position:absolute;bottom:26px;left:0;right:0;max-height:46vh;overflow:auto;border:1px solid #967047;padding:12px}
+.table-shell[data-renderer=webgl] .table-notes>details[open]>summary{position:sticky;top:-12px;background:#24170f;padding:8px 0;z-index:1}
+#accessible-seats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px}
+#accessible-seats p{font-size:.75rem;margin:5px 0}#accessible-seats button{display:block;font-size:.75rem;margin:4px 0;padding:5px 8px}
+.table-shell[data-renderer=webgl]>.card-preview{top:92px;right:16px;left:auto;bottom:auto;transform:none;max-height:55%;width:260px;padding:20px}
+.table-shell[data-renderer=webgl] .preview-strength{font-size:30px;margin-bottom:6px}
+.table-shell[data-renderer=webgl] .preview-hint{font-size:.88rem;margin-top:12px}
+.dom-drop-slot{border:1px dashed #ad9060;border-radius:8px;padding:12px;text-align:center;font-size:.75rem;min-height:45px;grid-column:1/-1}
+.table-shell[data-renderer=dom] .flight{border:1px dashed #ad9060;min-height:62px}
+.table-shell[data-renderer=dom] #hand [data-card]{touch-action:none}
+.dom-dragging{opacity:.35}
+.dom-drag-ghost{position:fixed!important;z-index:1000!important;pointer-events:none!important;width:130px!important;height:180px!important;transform:rotate(-8deg) scale(1.03)!important;box-shadow:0 30px 20px #0007!important}
+.table-shell[data-pending-action=true] #table-stage{cursor:progress}
+.tda-tutorial .table-shell[data-renderer=webgl]>.board-scroll{padding:0}
+@media(max-width:580px){
+ .table-shell[data-renderer=webgl]>.table-header{gap:8px;padding:8px 10px}
+ .table-shell[data-renderer=webgl] .window-controls{max-width:58%}
+ .table-shell[data-renderer=webgl]>.player-dock{padding-inline:10px}
+ .table-shell[data-renderer=webgl]>.card-preview{top:90px;right:10px;width:min(270px,calc(100% - 20px));max-height:45%}
+ .table-shell[data-renderer=webgl]>.board-scroll>.table-notes{left:5px;right:5px;gap:3px}
+ #stage-summary{top:7px;font-size:.6rem;padding:5px 8px}
+ .table-shell[data-renderer=webgl] .turn h2{font-size:.8rem}
+ .table-shell[data-renderer=webgl] #close-hint{display:none}
+}

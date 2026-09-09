@@ -20,13 +20,35 @@ export interface TableSummary {
   revision: number;
 }
 export type TableError = "connecting" | "hostOffline" | "privateSync" | "storageFailed" | "roomFull" | "tableExists" | "tableFull" | "notHost" | "cannotLeave" | "tooFewPlayers" | "notSeated" | "staleTable" | "invalidCommand" | "requestFailed" | "recoveryMissing" | "protocolMismatch";
+/** LOCAL-only outcome for this client's exact rules action. No card IDs.
+ * Success revision is the applied rules revision; rejection revision is the
+ * submitted base revision. A success also requires the matching authoritative
+ * table/game projection at that revision or later before visually landing. */
+export interface ActionReceipt {
+  actionId: string;
+  tableId: string;
+  gameId: string;
+  revision: number;
+  ok: boolean;
+  code?: string;
+  retryable?: boolean;
+  /** A local rejection means the controller refused this submission/retry;
+   * it is not a host acknowledgement. Older views omit this for host receipts. */
+  source?: "host" | "local";
+}
 export interface TableView {
+  /** LOCAL background capability, not a room/network schema revision. Its
+   * absence identifies an older live background without exact action ACKs. */
+  actionReceiptVersion?: 1;
   table: TableSummary | null;
   selfPlayerId: string;
   isHost: boolean;
   connected: boolean;
   pending: boolean;
   game: PublicView | SeatView | null;
+  /** Retained until another action/retry or a table/game/lifecycle change.
+   * Absence, pending=false and unrelated revisions are never success ACKs. */
+  actionReceipt?: ActionReceipt;
   /** Local status/error; rule action errors also use their exported machine codes. */
   message?: TableError | string;
 }
@@ -37,5 +59,7 @@ export type TableCommand =
   | { type: "start" }
   | { type: "newGame" }
   | { type: "action"; action: GameAction }
-  | { type: "retry" }
+  /** Optional immutable action restores a failed LOCAL page-to-background send.
+   * Never generate a new action ID or rebase its revision while uncertain. */
+  | { type: "retry"; tableId?: string; gameId?: string; action?: GameAction }
   | { type: "close" };

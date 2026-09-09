@@ -29,7 +29,7 @@ async function publish(): Promise<void> {
       if (!active || !panelOpen || !panelClient) return;
       const client = panelClient, instance = panelInstance, generation = epoch;
       const view: TableView = controller?.view ?? { table: null, selfPlayerId: selfId, isHost: false,
-        connected: false, pending: !!starting, game: null, message: errorMessage ?? "connecting" };
+        connected: false, pending: !!starting, game: null, actionReceiptVersion: 1, message: errorMessage ?? "connecting" };
       for (const part of localViewParts(view, client, ++viewSequence)) {
         if (!active || !panelOpen || epoch !== generation || panelClient !== client || panelInstance !== instance) break;
         await OBR.broadcast.sendMessage(TABLE_VIEW, part, { destination: "LOCAL" });
