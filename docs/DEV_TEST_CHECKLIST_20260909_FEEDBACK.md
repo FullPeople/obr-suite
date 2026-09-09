@@ -4,6 +4,8 @@
 
 准备：使用一个测试房间、一个 DM 和至少一个玩家。房间只安装一个 Full Suite 通道；本轮使用 [Full Suite Dev](https://obr.dnd.center/suite-dev/manifest-dev.json)。双方完整刷新枭熊页面，音乐网站也刷新。需要测牌局时，由 DM 在房间安装 [三龙牌 Dev](https://obr.dnd.center/three-dragon-ante-dev/manifest.json)，不需要另开牌局服务器。
 
+已于 2026-09-09 14:01 北京时间上线。独立三龙牌使用自己的存储，旧 Suite 内的牌局不会自动迁移；本轮请新开测试局。
+
 ## 1. 音乐（先测这个）
 
 - [ ] 配对音乐网站与枭熊，加载一首音乐。分别在网站、DM 音乐板、玩家音乐板暂停和继续：三处状态一致，听到的声音一致。
