@@ -5,6 +5,32 @@ directory contains reproducible inventories, located translations, and the
 adapter used to preserve their native workbook structure. It does not yet supply
 a complete English download.
 
+## Generate the English main-card lookup labels
+
+```text
+python -B -X utf8 tools/xlsx-localization/main_lookup_package.py --input-2014 <ability-input-2014.xlsx> --input-2024 <ability-input-2024.xlsx> --prepare
+node <spreadsheet-skill>/container_tools/mark_artifact_operation_started.mjs --operation-kind create --expected-output-count 1 --output-format xlsx
+node tools/xlsx-localization/author_lookup_targets.mjs <reported-plan.json> <new-authored-targets.xlsx> <bundled-node-dependency-directory>
+python -B -X utf8 tools/xlsx-localization/main_lookup_package.py --input-2014 <ability-input-2014.xlsx> --input-2024 <ability-input-2024.xlsx> --authored-targets <new-authored-targets.xlsx>
+```
+
+Requires the preceding ability-input pair `a8e797c2… / d4676e66…`. This increment
+translates both sets of six ability labels and the 18 original 2014 skill labels.
+A bounded K:L alias table in the existing hidden Export sheet keeps old Chinese
+lookup inputs working. The 39 consumers retain their original return columns and
+error behavior. No extra worksheet or player action is introduced. One appended
+font/style per workbook and the E column width make the full names readable.
+
+The complete 544-cell author table, pinned inputs, originals and 30 located
+reviews are checked before generating output. New output directories belong in
+sibling `_audit/xlsx-main-lookup-labels`, prefixed `lookup-plan-` or
+`lookup-candidate-`. Optimization mode is rejected. Native checks cover 30 / 24
+cases, plus all 30 labels in actual before/after PDF previews. The separate
+unchanged parser preserves its complete result for both default and seeded input
+views. These engineering copies still lack saved formula caches and full English
+content. See `docs/research/xlsx-main-lookup-labels-20260909.md` for the initial
+diagnostic failure, resume, preservation checks and remaining work.
+
 ## Generate the English ability-input increment
 
 ```text
