@@ -4,7 +4,9 @@ Independent Owlbear Rodeo extension for the Legendary Edition base game, without
 
 Dev install: `https://obr.dnd.center/three-dragon-ante-dev/manifest.json` (publication is recorded in the repository's current dev release notes).
 
-The GM installs it in the room. Everyone uses its action button to open their own full-screen table. Closing the table returns to the map and keeps their seat. A compact mode is also available. The first table creator hosts the rules; this may be a different person from the room GM.
+Once this extension is enabled in the room, any player can create a table. Other players join, and the table creator starts the game with 2–6 seated players. The DM does not need to join or start it. Only the creator can start a game or return it to the lobby; being the room GM does not grant control of someone else's table.
+
+Everyone uses its action button to open their own full-screen table. Closing the table returns to the map and keeps their seat. A compact mode is also available. The creator can also start or reset their table from another connected window; the original browser continues to run and save the game.
 
 ## Connection and persistence
 

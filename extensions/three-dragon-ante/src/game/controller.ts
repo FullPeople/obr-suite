@@ -701,7 +701,9 @@ export class TableController {
         if (game) { await reject("cannotLeave"); return; }
         table.seats = table.seats.filter(seat => seat.playerId !== member.id);
       } else {
-        if (member.id !== table.hostPlayerId || connection !== this.self.connectionId) { await reject("notHost"); return; }
+        // The creator may control the table from another authenticated window.
+        // This serving connection still owns persistence and game execution.
+        if (member.id !== table.hostPlayerId) { await reject("notHost"); return; }
         if (command.type === "start" && game) { await respond({ requestId: request.requestId, ok: true }); return; }
         if (request.tableRevision !== table.revision || request.gameId !== (game?.id ?? null)) { await reject("staleTable"); return; }
         if (command.type === "start" && table.seats.length < 2) { await reject("tooFewPlayers"); return; }
