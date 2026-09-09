@@ -524,3 +524,26 @@ source copy, including checks that unrelated catalog/review changes do not affec
 the selected plan. This still produces an uncalculated engineering workbook.
 See `docs/research/xlsx-spell-bodies-2024-20260909.md` for preservation, actual
 Calc findings and remaining English-card work.
+
+## Generate the companion-page increment
+
+```text
+python -B -X utf8 tools/xlsx-localization/companion_package.py --input-2014 <2014-feet-format-card> --input-2024 <2024-feet-format-card> --prepare
+node tools/xlsx-localization/author_companion_targets.mjs <reported-plan.json> <new-authored-targets.xlsx> <bundled-runtime-junction-directory>
+python -B -X utf8 tools/xlsx-localization/companion_package.py --input-2014 <2014-feet-format-card> --input-2024 <2024-feet-format-card> --authored-targets <new-authored-targets.xlsx>
+python -B -X utf8 tools/xlsx-localization/companion_verify.py --baseline <feet-format-result.json> --candidate <companion-result.json> --plan <plan.json> --output <new-verification.json>
+```
+
+The input SHA256 values must match the number-format increment. The plan and
+candidate are new directories under sibling `_audit/xlsx-companions`; source
+cards and existing outputs are never overwritten. Use the spreadsheet operation
+marker before authoring, with the bundled runtime and its local dependency junction.
+
+This translates 123 located captions, four dropdown rules per version and full
+caption hints. It fixes five broken 2014 ally saving-throw references by using the
+ally's proficiency input, as the intact Dexterity and 2024 formulas do. Four
+columns per version are widened for English captions and alignment choices.
+All other workbook parts, original styles, input values, X/O behavior, shared
+formulas and export contents are preserved. These remain partial engineering
+cards without saved calculation caches. See
+`docs/research/xlsx-companions-20260910.md` for native validation and remaining work.
