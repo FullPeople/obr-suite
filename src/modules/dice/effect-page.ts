@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../../asset-base";
 import { DiceType, DIE_SIDES, DIE_SIZE_FACTOR, sidesOf } from "./types";
 import * as sfx from "./sfx-broadcast";
 import { isVideoSkin, normalizeSkins, type DiceSkins } from "./dice-skins";
@@ -537,7 +538,7 @@ for (let i = 0; i < N_DICE; i++) {
       el.appendChild(artCustom);
     }
   } else {
-    const url = `/suite/${imgTypeFor(dice[i].type)}.png`;
+    const url = assetUrl(`${imgTypeFor(dice[i].type)}.png`);
     const artBase = document.createElement("div");
     artBase.className = "art-base";
     artBase.style.setProperty("-webkit-mask", `url("${url}") center/contain no-repeat`);

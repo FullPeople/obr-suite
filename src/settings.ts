@@ -280,16 +280,16 @@ const IMPORTANT_NOTES: BilingualHtml = {
     <div class="step">
       <div class="step-title">第 1 步：开启 Character「Owner Only」权限</div>
       <p>左侧 Players 面板中，点 <b>盾牌图标</b>（Player Permissions）。</p>
-      <img src="/suite/owner-step1.png" alt="Players 面板的盾牌按钮">
+      <img src="${assetUrl("owner-step1.png")}" alt="Players 面板的盾牌按钮">
       <p>展开 Map → <b>Character</b> 行，在下拉里勾上 <b>Owner Only</b>，然后 SAVE。</p>
-      <img src="/suite/owner-step2.png" alt="勾选 Owner Only">
+      <img src="${assetUrl("owner-step2.png")}" alt="勾选 Owner Only">
       <p class="tip-line">含义：被指派为某角色 Owner 的玩家，才能修改/操作那个角色（DM 仍可操作所有角色）。</p>
     </div>
 
     <div class="step">
       <div class="step-title">第 2 步：把角色 Owner 指派给玩家</div>
       <p>在地图上<b>左键点选</b>一个角色 Token，悬浮工具栏里点 <b>人形图标</b>（Set Owner），从列表里选玩家即可。</p>
-      <img src="/suite/owner-step3.png" alt="角色工具栏的 Set Owner 按钮">
+      <img src="${assetUrl("owner-step3.png")}" alt="角色工具栏的 Set Owner 按钮">
       <p class="tip-line">每个 Token 单独指派；一个玩家可以拥有多个角色（PC + 召唤物等）。</p>
     </div>
 
@@ -310,16 +310,16 @@ const IMPORTANT_NOTES: BilingualHtml = {
     <div class="step">
       <div class="step-title">Step 1: Enable Character "Owner Only" permission</div>
       <p>In the left Players panel, click the <b>shield icon</b> (Player Permissions).</p>
-      <img src="/suite/owner-step1.png" alt="Shield button in Players panel">
+      <img src="${assetUrl("owner-step1.png")}" alt="Shield button in Players panel">
       <p>Expand Map → <b>Character</b> row, select <b>Owner Only</b> in the dropdown, then SAVE.</p>
-      <img src="/suite/owner-step2.png" alt="Select Owner Only">
+      <img src="${assetUrl("owner-step2.png")}" alt="Select Owner Only">
       <p class="tip-line">This means: only the player assigned as a token's Owner can edit/move it (DM still has full control).</p>
     </div>
 
     <div class="step">
       <div class="step-title">Step 2: Assign Owner to a player</div>
       <p>On the map, <b>left-click</b> a token, then click the <b>person icon</b> (Set Owner) in the floating toolbar and pick a player.</p>
-      <img src="/suite/owner-step3.png" alt="Set Owner button on token toolbar">
+      <img src="${assetUrl("owner-step3.png")}" alt="Set Owner button on token toolbar">
       <p class="tip-line">Per-token assignment; one player can own multiple tokens (PC + summons, etc.).</p>
     </div>
 

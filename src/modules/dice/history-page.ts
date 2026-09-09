@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../../asset-base";
 import { DieResult, sidesOf } from "./types";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
@@ -203,7 +204,7 @@ function chipsHtml(dice: DieResult[]): string {
     const valueStr = d.subtract ? `−${d.value}` : String(d.value);
     parts.push(
       `<span class="die-chip ${cls}${subtractCls}">` +
-      `<img src="/suite/${imgFor(d.type)}.png" alt="${escapeHtml(d.type)}" draggable="false">` +
+      `<img src="${assetUrl(`${imgFor(d.type)}.png`)}" alt="${escapeHtml(d.type)}" draggable="false">` +
       `<span>${valueStr}</span>` +
       `</span>`,
     );
