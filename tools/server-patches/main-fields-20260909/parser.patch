@@ -1,0 +1,113 @@
+--- a/parser.py
++++ b/parser.py
+@@ -674,6 +674,84 @@
+     return next(iter(evidence), None)
+ 
+ 
++def _calibrate_main_fields(main, configured: dict, profile: str) -> dict:
++    """Use known bilingual headers and merged input anchors, per import.
++
++    Called only after the worksheet roles and current ruleset were resolved.
++    Each section proves its own geometry; unknown sections keep their previous
++    coordinates. Neither workbook cells nor shared layout dictionaries change.
++    """
++    fields = dict(configured)
++    merges = {str(region) for region in getattr(main, "merged_cells", ())}
++
++    def matches(headers, ranges):
++        return all(str(_cell(main, cell) or "").casefold() in labels
++                   for cell, labels in headers) and all(r in merges for r in ranges)
++
++    name = ("名称", "name")
++    description = ("描述", "description")
++    attuned = ("同调", "attuned", "attunement", "att.")
++    rarity = ("稀有度", "rarity")
++    if matches((("L39", ("护甲", "护甲类型", "armor", "armor type")),
++                ("P39", attuned), ("R39", name)), ("L40:O40", "R39:S39")):
++        fields["armor_name"] = "L40"
++
++    if matches((("L41", ("奇物", "wondrous items", "wond.")),
++                ("P41", attuned), ("R41", rarity), ("U41", ("部位", "slot")),
++                ("W41", ("特性", "features", "properties"))),
++               (f"{a}{r}:{b}{r}" for r in range(42, 52)
++                for a, b in (("L", "O"), ("W", "AT")))):
++        # This table has no quantity input. Column I belongs to skills.
++        fields["wondrous_qty_col"] = None
++        fields["wondrous_rows"] = (42, 52)
++
++    if matches((("L52", ("消耗品", "consumables", "consum.")),
++                ("R52", rarity), ("U52", description), ("AP52", ("数量", "quantity"))),
++               (f"AP{r}:AQ{r}" for r in range(53, 58))):
++        fields["consumable_qty_col"] = "AP"
++        fields["consumable_rows"] = (53, 58)
++
++    coins = (("gp", "AG59", "AI59:AM59"), ("pp", "AN59", "AP59:AT59"),
++             ("ep", "AG60", "AI60:AM60"), ("sp", "AG61", "AI61:AM61"),
++             ("cp", "AG62", "AI62:AM62"))
++    if matches(((label, (coin,)) for coin, label, _ in coins),
++               (region for _, _, region in coins)):
++        fields.update({"currency_" + coin: region.split(":")[0]
++                       for coin, _, region in coins})
++
++    special_start = 33 if profile == "2014" else 40
++    if matches(((f"BT{special_start - 2}", ("特殊能力", "special abilities")),
++                (f"BT{special_start - 1}", name), (f"BZ{special_start - 1}", description)),
++               (f"{a}{r}:{b}{r}" for r in range(special_start, special_start + 5)
++                for a, b in (("BT", "BY"), ("BZ", "CO")))):
++        fields["feat_special_ability_rows"] = (special_start, special_start + 5)
++        if profile == "2014":
++            fields["feat_fighting_style_rows"] = None
++
++    class_start = 14 if profile == "2014" else 17
++    metadata = (("AX11", ("护甲熟练", "armor proficiency")),
++                ("AX12", ("武器熟练", "weapon proficiency")),
++                ("AX13", ("工具熟练", "tool proficiency"))) if profile == "2014" else (
++                ("AX11", ("豁免熟练", "saving throw proficiency")),
++                ("AX12", ("技能熟练", "skill proficiency")),
++                ("AX13", ("武器熟练", "weapon proficiency")),
++                ("AX14", ("工具熟练", "tool proficiency")),
++                ("AX15", ("护甲受训", "armor training")),
++                ("AX16", ("起始装备", "starting equipment")))
++    if matches((("BJ9", ("职业能力", "class features")),
++                ("AX10", name), ("BC10", description)) + metadata,
++               (f"{a}{r}:{b}{r}" for r in range(class_start, 78)
++                for a, b in (("AX", "BB"), ("BC", "BR")))):
++        fields["feat_class_rows"] = (class_start, 78)
++
++    trait_title = ("种族特性", "racial traits") if profile == "2014" else ("种族特性", "species traits")
++    if matches((("BT1", trait_title), ("BT2", name), ("BZ2", description)),
++               (f"{a}{r}:{b}{r}" for r in range(6, 16)
++                for a, b in (("BT", "BY"), ("BZ", "CO")))):
++        # Creature type, size and speed are metadata, regardless of language.
++        fields["feat_race_rows"] = (6, 16)
++    return fields
++
+ def _select_layout(wb, template_version: str | None = None) -> dict[str, Any]:
+     """Resolve a supported layout and all worksheet roles once per import.
+ 
+@@ -742,12 +820,14 @@
+     # headers prove AS40 is the equipped input. Keep legacy paths unchanged.
+     shield_headers = (("AL39", ("盾牌", "shield")),
+                       ("AQ39", ("ac", "armor class")),
+-                      ("AS39", ("着装", "equipped")))
++                      ("AS39", ("着装", "equipped", "worn")))
+     if modern and template_version != "v1.0.0" and all(
+             str(_cell(main, cell) or "").casefold() in labels
+             for cell, labels in shield_headers):
+         layout["main"] = {**base["main"], "shield_equipped": "AS40",
+                           "shield_equipped_yes_no": True}
++    if modern and template_version != "v1.0.0" and ruleset in ("5E2014", "5E2024"):
++        layout["main"] = _calibrate_main_fields(main, layout["main"], profile)
+     return layout
+ 
+ 
+@@ -1271,7 +1351,8 @@
+             continue
+         out.append({
+             "name":       name,
+-            "quantity":   _int(_cell(main, f"{M['wondrous_qty_col']}{r}"), default=1),
++            "quantity":   (_int(_cell(main, f"{M['wondrous_qty_col']}{r}"), default=1)
++                           if M.get("wondrous_qty_col") else 1),
+             "attuned":    _cell(main, f"{M['wondrous_attuned_col']}{r}") == "O",
+             "rarity":     _str(_cell(main, f"{M['wondrous_rarity_col']}{r}")),
+             "slot":       _str(_cell(main, f"{M['wondrous_slot_col']}{r}")),

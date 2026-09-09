@@ -1,0 +1,70 @@
+{
+  "format": "obr-server-parser-patch/v1",
+  "file": "parser.py",
+  "encoding": "utf-8",
+  "line_endings": "LF",
+  "workbooks": [
+    {
+      "name": "DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx",
+      "version": "2014",
+      "sha256": "94444fda4206d579125418b0007b89c414b86c27d6b98655f81f3f1ce65e8fe6"
+    },
+    {
+      "name": "DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx",
+      "version": "2024",
+      "sha256": "264fc65569e3e80932544af548830ca70f10ee308493c8b0234608fcd01c9b04"
+    }
+  ],
+  "deployed": false,
+  "before_sha256": "a07204634e7f6b5a306ed444c6fbc5ef699c53a2b95331f6f2de3b729de7febe",
+  "before_bytes": 80109,
+  "after_sha256": "9272d4edda9cab30aa1acf9ed7b06b9d9192ff248144654307f33e62c553b7d4",
+  "after_bytes": 84544,
+  "patch_sha256": "b199df6b4dfda6aa28453c9f3d613b7f79f1d92ee9c6981dcf45f056fc9891a4",
+  "patch_bytes": 5932,
+  "prerequisite": "spell-aliases-20260908 exact after result",
+  "prerequisite_packages": {
+    "sheet-aliases-20260908": {
+      ".gitattributes": "e1bfc5eadbc7406c72f43972d571ca2df3f0005e329b78156cd8da2a7af7c522",
+      ".gitignore": "32dae3052f331ee34d628ef535709b301259a45df7c7522c4d35dcf49873f00b",
+      "apply_parser_patch.py": "146062fe51f2bd592b5e5a51292be05c53cd72cafdf613529223c8b5f6794c50",
+      "files.sha256": "8e81423f2d0ce9ef89e680ca8f48cd36b65ac1857ee491f0306b7d2bcb583e3a",
+      "manifest.json": "7564fc43ec33d750d179a8764860f4763610dafa6583e8315ccd8479082a11d5",
+      "parser.patch": "6d6adf180d67beb1449757c7f559983d4606fe653df353eaa60d07e03d81fd43",
+      "README.md": "2f8b24439bc77823468d219ed9289938af26ba312e181c791f914d18fb8c7827",
+      "test_auto_resources.py": "8df1c3c1f5d09515e274d28f3de2395334d9e3204a0e72446b8bcb64415b3db2",
+      "test_sheet_aliases.py": "d7d518221838dd826017f94fd5a5da75f38f4569c9fda365a4cf8c8bbfdb6df8",
+      "test_sheet_aliases_mutations.py": "12af7420fd0b60833e4e0a410d88608e38e23a1393ebe517c8d037fda95073ca",
+      "verify_delivery.py": "101abf402e94dee054365104865aeb1dda0e424cfd87508be92a89ddc9d583c9"
+    },
+    "shield-input-20260908": {
+      ".gitattributes": "e1bfc5eadbc7406c72f43972d571ca2df3f0005e329b78156cd8da2a7af7c522",
+      ".gitignore": "32dae3052f331ee34d628ef535709b301259a45df7c7522c4d35dcf49873f00b",
+      "apply_parser_patch.py": "146062fe51f2bd592b5e5a51292be05c53cd72cafdf613529223c8b5f6794c50",
+      "files.sha256": "2ae6e38993e8c0106db5164646937b880dd68e22160286c24ede04fa4e09bfb9",
+      "manifest.json": "e08a8dbbffd640e4d96006965ada5fe38121a3e907239341844c16c6c16bb211",
+      "parser.patch": "2e20f623f019475c31e46805f6703ce914b08283e9f90144bde38597739770ec",
+      "README.md": "5db7aeb307571843837a4035fd1b3a521c09deb32cc2cc3258ba9a0d7f8446fc",
+      "test_shield_input.py": "bad36b45e9103522dda527a200613d7fba88858cc118708f965f8442bff8b6d6",
+      "verify_delivery.py": "140f2f27e17989c07ab064fe9c7b96d30e9247457c0769774c1a571c03dcae91"
+    },
+    "spell-aliases-20260908": {
+      ".gitattributes": "e1bfc5eadbc7406c72f43972d571ca2df3f0005e329b78156cd8da2a7af7c522",
+      "apply_parser_patch.py": "146062fe51f2bd592b5e5a51292be05c53cd72cafdf613529223c8b5f6794c50",
+      "files.sha256": "46788928a8c9eac0bc969fe48a81c9a792f452b48226518cd2a46c67185f60ae",
+      "manifest.json": "7ed64b642763c339a6ff707db51c7e6f5221ab1c7d46cf323ac9cfcba8d5a55e",
+      "parser.patch": "8532cbff8efbc96999802c945e57f3a40302d0d2f173262a337c0eabc456e389",
+      "README.md": "e5f536956e544bcd7cdd1e59d0ec0ee65001cb54628c8b0b4ad8ea5e6dec6c87",
+      "test_spell_english_aliases.py": "c4fcbcf2f1c26bb3ae50c4be699038b120556a2bb1549b56b306c6d8a57b92da",
+      "verify_delivery.py": "c20634ba9ab6a5e602426511396f2aa13edbf5bbb23410c3ef0fdb0b483fb001"
+    }
+  },
+  "tests": [
+    {
+      "file": "test_main_fields.py",
+      "sha256": "8216ca586fc663a3786c03cb2e68ab183a39d766250ef8093ea4f313418d4c40",
+      "bytes": 15391
+    }
+  ],
+  "expected_tests": 14
+}
