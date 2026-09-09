@@ -1,10 +1,11 @@
+import {cardFaceImage} from "./card-images";
 import { dragonEngraving } from "./card-art";
 import { readHandGesture, type HandGesture } from "./gesture";
 import type {TableView} from "./protocol";
 import {readUIDraft,type TableDisplayMode,type TableUICommand,type TableUIDraft} from "./ui-command";
 import type {Card} from "./rules/cards";
 import {card} from "./rules/cards";
-import {cardHint, cardName, rulePrompt} from "./rules/prompts";
+import {cardHint, cardName, cardExplanation, rulePrompt} from "./rules/prompts";
 import type {Choice, EligibleAction, PublicEvent, PublicView, SeatView} from "./rules/types";
 import {tableText, type TableLanguage} from "./text";
 import {mountTableStage, type StageHandle, type StageHit} from "./stage";
@@ -14,6 +15,8 @@ import {activePowerCards,freshPublicEvents,powerEvents} from "./power-sequence";
 import {mountPowerPresentation} from "./power-presentation";
 import {mountTableAudio} from "./audio";
 import "./stage-ui.css";
+import "./card-images.css";
+import {mountRoundPresentation,roundCues} from "./round-presentation";
 
 export interface TableUIDeps {send(command:TableUICommand):void|Promise<void>;language:TableLanguage;mode?:TableDisplayMode;gesture?(value:HandGesture):void;id?():string;onPresentationChange?(busy:boolean):void}
 /** This surface receives projections only. It never imports or constructs host state. */
@@ -35,6 +38,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  let revealPhase:"placing"|"revealing"|"price"|"payment"|"discard"|null=null;
  let power:ReturnType<typeof mountPowerPresentation>|null=null,sound:ReturnType<typeof mountTableAudio>|null=null;
  let updating=false,syncingStage=false,stageView:PublicView|SeatView|null=null,presentationBase:TableView|null=null,presentationView:TableView|null=null,anteSoundKey="";
+ let cinema:ReturnType<typeof mountRoundPresentation>|null=null;
  let notifiedPresentationBusy=false;
  const deferredSounds=new Map<"draw"|"flip"|"coin",string>();
  let pendingAction:{actionId:string;tableId:string;gameId:string;revision:number;cardId?:string;zone?:"ante"|"flight";action:GameAction;retryable:boolean}|null=null;
@@ -58,7 +62,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  const privateGame=():SeatView|null=>view?.game&&"selfSeatId" in view.game?view.game as SeatView:null;
  const receiptCompatible=()=>view?.actionReceiptVersion===1;
  const busy=()=>sending||!!view?.pending||!!pendingAction;
- const locked=()=>busy()||!!power?.busy||!!revealPhase||suspended||!receiptCompatible()||!view?.connected||!!view?.message&&["hostOffline","recoveryMissing","protocolMismatch","privateSync"].includes(view.message);
+ const locked=()=>busy()||!!power?.busy||!!cinema?.busy||!!revealPhase||suspended||!receiptCompatible()||!view?.connected||!!view?.message&&["hostOffline","recoveryMissing","protocolMismatch","privateSync"].includes(view.message);
  const node=(tag:string,text?:string,className?:string)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(className)e.className=className;return e;};
  function section(id:string,signature:unknown,build:(host:HTMLElement)=>void){const value=JSON.stringify([lang,signature]);if(signatures.get(id)===value)return;signatures.set(id,value);const host=el(id);host.replaceChildren();build(host);}
  function button(label:string,fn:()=>void,disabled=false,className=""){const b=document.createElement("button");b.type="button";b.textContent=label;b.disabled=disabled;b.className=className;b.addEventListener("click",fn);return b;}
@@ -66,7 +70,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  function preview(value:Card,pinned=false){
   previewId=value.id;previewPinned=pinned;if(pinned)pinnedPreviewId=value.id;
   const panel=el("card-preview"),host=el("preview-content"),key=`${value.id}:${lang}:${pinned}`;
-  if(host.dataset.content!==key){host.dataset.content=key;host.replaceChildren();host.append(node("span",`${value.strength}`,"preview-strength"),node("h2",cardName(value.id,lang)),node("p",t(value.alignment),"card-kind"),node("p",cardHint(value.family,lang),"preview-hint"));if(!pinned)host.append(node("small",lang==="zh"?"点击卡牌可固定说明并滚动查看。":"Click the card to pin and scroll through its description.","preview-help"));panel.scrollTop=0;}
+  if(host.dataset.content!==key){host.dataset.content=key;host.replaceChildren();host.append(cardFaceImage(value.id));host.append(node("span",`${value.strength}`,"preview-strength"),node("h2",cardName(value.id,lang)),node("p",t(value.alignment),"card-kind"),node("p",cardHint(value.family,lang),"preview-hint"));const details=document.createElement("details");details.className="card-explanation";details.append(node("summary",lang==="zh"?"规则详解":"Rule details"),node("p",cardExplanation(value.family,lang)));host.append(details);if(!pinned)host.append(node("small",lang==="zh"?"点击卡牌可固定说明并滚动查看。":"Click the card to pin and scroll through its description.","preview-help"));panel.scrollTop=0;}
   panel.hidden=false;panel.dataset.pinned=String(pinned);panel.dataset.color=value.color??value.alignment;
  }
  function hidePreview(){previewId="";previewPinned=false;pinnedPreviewId="";el("card-preview").hidden=true;}
@@ -74,8 +78,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  function cardNode(value:Card,optionId?:string):HTMLElement{
   const wrap=node("div",undefined,"card-wrap");wrap.dataset.color=value.color??value.alignment;
   const box=optionId===undefined?node("div"):button("",()=>toggle(optionId));box.className="card";box.dataset.alignment=value.alignment;box.dataset.card=value.id;
-  const art=node("span",undefined,`card-art ${value.category}`);art.innerHTML=value.category==="mortal"?'<svg viewBox="0 0 100 100" aria-hidden="true"><path d="m23 25 13 12 14-19 14 19 13-12-5 28H28Z M34 65h32 M29 77h42" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><circle cx="50" cy="47" r="4" fill="currentColor"/></svg>':emblem;
-  box.append(node("span",String(value.strength),"card-strength"),art,node("strong",cardName(value.id,lang)),node("span",t(value.alignment),"card-kind"),node("span",cardHint(value.family,lang),"card-hint"));
+  box.classList.add("printed-card");box.append(cardFaceImage(value.id));
   box.setAttribute("aria-label",`${cardName(value.id,lang)} · ${value.strength}. ${cardHint(value.family,lang)}`);
   if(optionId===undefined){box.tabIndex=0;box.setAttribute("role","button");box.addEventListener("click",()=>preview(value,true));box.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();preview(value,true);}});}
   box.addEventListener("pointerenter",event=>{if(event.pointerType!=="touch")preview(value);});
@@ -98,7 +101,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  }
  function legalDropZone(){const a=action();return !locked()&&!suspended&&a&&a.kind!=="choose"&&a.cardIds.length?(a.kind==="ante"?"ante":"flight"):null;}
  function effectCardIds(){return [...activePowerCards(view?.game),...(power?.current?[power.current.cardId]:[])];}
- function syncStage(){if(!stage||syncingStage)return;syncingStage=true;try{if(!power?.busy)stageView=view?.game??null;stage.update({view:stageView,language:lang,connected:!!view?.connected,reducedMotion:reduced.matches,legalDropZone:legalDropZone(),activeEffectCardIds:effectCardIds(),selectedCardIds:[...selected,...(hoveredHand?[hoveredHand]:[])],...(resetStage?{animate:false}:{})});resetStage=false;}finally{syncingStage=false;}}
+ function syncStage(){if(!stage||syncingStage)return;syncingStage=true;try{if(!power?.busy&&!cinema?.holdsTable)stageView=view?.game??null;stage.update({view:stageView,language:lang,connected:!!view?.connected,reducedMotion:reduced.matches,legalDropZone:legalDropZone(),activeEffectCardIds:effectCardIds(),selectedCardIds:[...selected,...(hoveredHand?[hoveredHand]:[])],...(resetStage?{animate:false}:{})});resetStage=false;}finally{syncingStage=false;}}
  function clearDomDrag(){domGhost?.remove();domGhost=null;for(const c of root.querySelectorAll<HTMLElement>(".dom-dragging"))c.classList.remove("dom-dragging");}
  function stageCancel(){keyboardHeld=false;keyboardContext=null;pointerCard="";stage?.setDrag(null);clearDomDrag();publishGesture();}
  function pointerLift(cardId:string){if(pointerCard!==cardId){pointerCard=cardId;publishGesture();}}
@@ -189,16 +192,18 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   const kinds:Array<'draw'|'coin'>=[];
   if(after.deckCount<before.deckCount||fresh.some(event=>event.code==="DECK_RESHUFFLED"))kinds.push('draw');
   if((!ante||!stageAvailable||reduced.matches)&&(after.stakes!==before.stakes||after.hole!==before.hole||after.seats.some(seat=>seat.gold!==before.seats.find(old=>old.id===seat.id)?.gold)))kinds.push('coin');
-  for(const kind of kinds)if(power?.busy)deferredSounds.set(kind,key);else sound?.play(kind,key);
+  for(const kind of kinds)if(power?.busy||cinema?.busy)deferredSounds.set(kind,key);else sound?.play(kind,key);
  }
- function clearPresentation(){presentationView=null;presentationBase=null;deferredSounds.clear();anteSoundKey="";power?.clear();}
- function notifyPresentation(){if(updating||destroyed)return;const busy=!!power?.busy||!!revealPhase;if(busy!==notifiedPresentationBusy){notifiedPresentationBusy=busy;deps.onPresentationChange?.(busy);}}
+ function clearPresentation(){presentationView=null;presentationBase=null;deferredSounds.clear();anteSoundKey="";cinema?.clear();power?.clear();}
+ function notifyPresentation(){if(updating||destroyed)return;const busy=!!power?.busy||!!cinema?.busy||!!revealPhase;if(busy!==notifiedPresentationBusy){notifiedPresentationBusy=busy;deps.onPresentationChange?.(busy);}}
  function presentationChanged(){
   root.dataset.powerActive=String(!!power?.busy);
+  root.dataset.cinemaActive=String(!!cinema?.busy);
+  cinema?.pause(!!power?.busy||!!revealPhase);
   if(updating||destroyed)return;
-  const previous=!power?.busy?presentationBase:null;if(!power?.busy)presentationBase=null;
+  const previous=!power?.busy&&!cinema?.busy?presentationBase:null;if(!power?.busy&&!cinema?.busy)presentationBase=null;
   render();
-  if(!power?.busy){if(previous)animateChanges(previous);for(const [kind,key] of deferredSounds)sound?.play(kind,key);deferredSounds.clear();}
+  if(!power?.busy&&!cinema?.busy){if(previous)animateChanges(previous);for(const [kind,key] of deferredSounds)sound?.play(kind,key);deferredSounds.clear();}
   notifyPresentation();
  }
  function receiveBannerEvent(previous:TableView|null){
@@ -254,7 +259,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
    if(!game){host.append(node("p",t(table.stage==="playing"?"privateSync":"lobby")));const seats=node("div",undefined,"seat-chips");for(const seat of table.seats)seats.append(node("span",`${seat.name}${seat.playerId===view?.selfPlayerId?` (${t("you")})`:""}${seat.playerId===table.hostPlayerId?` · ${t("host")}`:""}`));host.append(seats);if(table.stage==="lobby")host.append(node("p",t(table.seats.length<2?"needPlayers":view?.isHost?"creatorReady":"seated"),"muted"));}
   });
   section("summary",game&&[game.gambit,game.round,game.stakes,game.hole],host=>{if(!game)return;for(const [code,value] of [["gambit",game.gambit],["round",game.round],["stakes",game.stakes],["hole",game.hole]]){const chip=node("span",undefined,`counter ${code}`);chip.append(node("small",t(String(code))),node("strong",String(value)));host.append(chip);}});
-  section("deck-pile",game?.deckCount,host=>{if(!game)return;const back=node("div",undefined,"card-back deck-back");back.setAttribute("aria-hidden","true");back.textContent="◈";host.append(back,node("span",`${t("deck")} · ${game.deckCount}`));});
+  section("deck-pile",game?.deckCount,host=>{if(!game)return;const back=node("div",undefined,"card-back deck-back");back.setAttribute("aria-hidden","true");back.innerHTML=emblem;host.append(back,node("span",`${t("deck")} · ${game.deckCount}`));});
   el("discard-pile").textContent=`${t("discard")} · ${game?.discard.length??0}`;
   section("turn",game&&[game.id,game.phase,game.winners,game.issue,game.waitingSeatIds,game.choice,a,own?.committedAnte,game.seats.map(s=>[s.id,s.name])],host=>{
    if(!game)return;
@@ -277,9 +282,9 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
    const positions=ordered.length===1?["top"]:ordered.length===2?["upper-left","upper-right"]:ordered.length===3?["upper-left","top","upper-right"]:ordered.length===4?["lower-left","upper-left","upper-right","lower-right"]:["lower-left","upper-left","top","upper-right","lower-right"];
    for(const seat of game.seats){const panel=node("article",undefined,"seat");panel.dataset.seat=seat.id;panel.dataset.position=seat.id===game.seats[selfIndex].id?"bottom":positions[ordered.findIndex(other=>other.id===seat.id)];panel.classList.toggle("active",seat.id===game.activeSeatId);panel.classList.toggle("self",seat.id===own?.selfSeatId);
    panel.append(node("h2",`${seat.name}${seat.id===own?.selfSeatId?` (${t("you")})`:""}${seat.id===game.leaderSeatId?` · ${t("leader")}`:""}`),node("p",`${t("gold")} ${seat.gold} · ${t("handCount")} ${seat.handCount} · ${t("strength")} ${seat.strength}${seat.debt?` · ${t("debt")} ${seat.debt}`:""}`));
-   if(seat.id!==own?.selfSeatId){const backs=node("div",undefined,"opponent-hand");backs.setAttribute("aria-label",`${seat.name} · ${t("handCount")} ${seat.handCount}`);for(let index=0;index<Math.min(10,seat.handCount);index++){const back=node("span","◈","card-back");back.setAttribute("aria-hidden","true");back.dataset.slot=String(index);back.style.setProperty("--angle",`${(index-(Math.min(10,seat.handCount)-1)/2)*7}deg`);back.style.setProperty("--arc",`${Math.abs(index-(Math.min(10,seat.handCount)-1)/2)*2}px`);backs.append(back);}panel.append(backs);}
+   if(seat.id!==own?.selfSeatId){const backs=node("div",undefined,"opponent-hand");backs.setAttribute("aria-label",`${seat.name} · ${t("handCount")} ${seat.handCount}`);for(let index=0;index<Math.min(10,seat.handCount);index++){const back=node("span",undefined,"card-back");back.innerHTML=emblem;back.setAttribute("aria-hidden","true");back.dataset.slot=String(index);back.style.setProperty("--angle",`${(index-(Math.min(10,seat.handCount)-1)/2)*7}deg`);back.style.setProperty("--arc",`${Math.abs(index-(Math.min(10,seat.handCount)-1)/2)*2}px`);backs.append(back);}panel.append(backs);}
    if(seat.committed)panel.append(node("small",t("committed")));if(seat.archmage)panel.append(node("p",t("archmage"),"effect"));
-   const anteSlot=node("div",undefined,"dom-drop-slot");anteSlot.dataset.dropZone="ante";anteSlot.dataset.dropSeat=seat.id;anteSlot.append(node("small",lang==="zh"?"暗置区":"Ante area"));const anteId=game.anteOrigins?.find(origin=>origin.seatId===seat.id)?.cardId,anteCard=game.ante.find(c=>c.id===anteId);if(anteCard)anteSlot.append(cardNode(anteCard));else if(seat.committed){const back=node("div","◈","card-back");back.setAttribute("aria-label",t("committed"));anteSlot.append(back);}panel.append(anteSlot);
+   const anteSlot=node("div",undefined,"dom-drop-slot");anteSlot.dataset.dropZone="ante";anteSlot.dataset.dropSeat=seat.id;anteSlot.append(node("small",lang==="zh"?"暗置区":"Ante area"));const anteId=game.anteOrigins?.find(origin=>origin.seatId===seat.id)?.cardId,anteCard=game.ante.find(c=>c.id===anteId);if(anteCard)anteSlot.append(cardNode(anteCard));else if(seat.committed){const back=node("div",undefined,"card-back");back.innerHTML=emblem;back.setAttribute("aria-label",t("committed"));anteSlot.append(back);}panel.append(anteSlot);
    const flight=node("div",undefined,"cards flight");flight.dataset.dropZone="flight";flight.dataset.dropSeat=seat.id;for(const item of seat.flight){const c=cardNode(item.card);if(item.wild)c.append(node("small",t("wild")));if(item.rider)c.append(node("small",t("rider")));flight.append(c);}if(!seat.flight.length)flight.append(node("small",lang==="zh"?"牌阵":"Flight"));panel.append(flight);host.append(panel);
   }});
   section("antes",game&&[game.ante,game.anteOrigins,game.revealed],host=>{if(!game)return;const unplaced=game.ante.filter(c=>!game.anteOrigins?.some(origin=>origin.cardId===c.id));if(unplaced.length)host.append(node("h2",t("ante")),cardList(unplaced));if(game.revealed.length)host.append(node("h2",t("revealed")),cardList(game.revealed));});
@@ -307,7 +312,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  function language(value:TableLanguage){
   const active=document.activeElement instanceof HTMLElement&&root.contains(document.activeElement)?document.activeElement:null;
   const option=active?.dataset.option,cardId=active?.dataset.card;
-  lang=value;power?.language(value);render();
+  lang=value;power?.language(value);cinema?.language(value);render();
   if(active&&!active.isConnected&&(option||cardId)){
    const replacement=[...root.querySelectorAll<HTMLElement>("[data-option],[data-card]")].find(node=>option?node.dataset.option===option:node.dataset.card===cardId);
    replacement?.focus({preventScroll:true});
@@ -360,9 +365,10 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  const hover=(id:string|null)=>{const next=privateGame()?.hand.some(c=>c.id===id)?id??"":"";if(next!==hoveredHand){hoveredHand=next;publishGesture();syncStage();}if(id&&previewId!==id)inspectCard(id,false);else if(!id&&!previewPinned)leavePreview();};
  const ports={context:dragContext,drop,cancel:stageCancel,inspect:inspectCard,hover};
  power=mountPowerPresentation(root,{language:lang,seatName:id=>id===privateGame()?.selfSeatId?t("you"):seatName(id),onChange:presentationChanged});
+ cinema=mountRoundPresentation(root,{language:lang,seatName:id=>id===privateGame()?.selfSeatId?t("you"):seatName(id),onChange:presentationChanged,sound:(kind,key)=>sound?.play(kind,key),inspect:id=>inspectCard(id,true)});
  sound=mountTableAudio(root,{onEnabledChange:()=>{if(!destroyed)soundControls();}});
  el("sound-toggle").addEventListener("click",()=>{sound?.setEnabled(!sound.enabled);soundControls();});
- stage=mountTableStage(el<HTMLCanvasElement>("table-stage"),{onRevealPhase:phase=>{revealPhase=phase;if(!destroyed){renderBanner();if(anteSoundKey&&phase==="revealing")sound?.play('flip',anteSoundKey);if(anteSoundKey&&phase==="payment")sound?.play('coin',anteSoundKey);syncSelection();notifyPresentation();}},onQuality:quality=>{stageAvailable=quality.webgl;root.dataset.renderer=stageAvailable?"webgl":"dom";if(stageReady&&!destroyed)render();}});stageReady=true;
+ stage=mountTableStage(el<HTMLCanvasElement>("table-stage"),{onRevealPhase:phase=>{revealPhase=phase;cinema?.pause(!!power?.busy||!!revealPhase);if(!destroyed){renderBanner();if(anteSoundKey&&phase==="revealing")sound?.play('flip',anteSoundKey);if(anteSoundKey&&phase==="payment")sound?.play('coin',anteSoundKey);syncSelection();notifyPresentation();}},onQuality:quality=>{stageAvailable=quality.webgl;root.dataset.renderer=stageAvailable?"webgl":"dom";if(stageReady&&!destroyed)render();}});stageReady=true;
  dragController=mountDragController(el("table-stage"),{...ports,hitTest:(x,y)=>stageAvailable?stage?.hitTest(x,y)??null:null,drag:value=>{if(value)pointerLift(value.cardId);stage?.setDrag(value);}});
  domDragController=mountDragController(root,{...ports,hover:id=>{if(!stageAvailable)hover(id);},hitTest:domHit,drag:value=>{if(!value)return;pointerLift(value.cardId);const item=[...root.querySelectorAll<HTMLElement>("#hand [data-card]")].find(c=>c.dataset.card===value.cardId);if(item){item.classList.add("dom-dragging");if(!domGhost){domGhost=item.cloneNode(true) as HTMLElement;domGhost.classList.remove("dom-dragging");domGhost.classList.add("dom-drag-ghost");domGhost.setAttribute("aria-hidden","true");domGhost.removeAttribute("tabindex");document.body.append(domGhost);}domGhost.style.left=`${value.x-65}px`;domGhost.style.top=`${value.y-90}px`;}}});
  const motionPreference=()=>{syncStage();};reduced.addEventListener("change",motionPreference);
@@ -384,14 +390,17 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
    if(!live||!!baseline?.game&&!!value.game&&(value.game.revision<baseline.game.revision||value.game.revision>baseline.game.revision+1&&!fresh.length))clearPresentation();
    const cues=live?powerEvents(baseline?.game,value.game):[];
    presentationView=value.connected&&visible?value:null;
-   if(cues.length){if(!power?.busy)presentationBase=baseline;power?.enqueue(cues);}
+   const rounds=live&&baseline?.game&&value.game?roundCues(baseline.game,value.game,fresh):[];
+   if((cues.length||rounds.length)&&!power?.busy&&!cinema?.busy)presentationBase=baseline;
+   if(cues.length)power?.enqueue(cues);
+   cinema?.pause(!!power?.busy||!!revealPhase);if(rounds.length)cinema?.enqueue(rounds);
   }
-  receiveBannerEvent(previous);applyReceipt();render();playUpdateSounds(previous);if(!power?.busy)animateChanges(previous);
+  receiveBannerEvent(previous);applyReceipt();render();playUpdateSounds(previous);if(!power?.busy&&!cinema?.busy)animateChanges(previous);
  }finally{updating=false;notifyPresentation();}},gesture(seatId:string,value:unknown){if(destroyed)return;if(value===null){stage?.gesture(seatId,null);const entry=gestures.get(seatId);if(entry)clearTimeout(entry.timer);gestures.delete(seatId);paintGestures();return;}const gesture=readHandGesture(value);if(!gesture||seatId===privateGame()?.selfSeatId)return;const old=gestures.get(seatId);if(old&&gesture.sequence<=old.value.sequence)return;stage?.gesture(seatId,gesture);if(old)clearTimeout(old.timer);gestures.set(seatId,{value:gesture,timer:setTimeout(()=>{gestures.delete(seatId);paintGestures();},30000)});paintGestures();},language,restore(value:unknown){if(!touched)pendingDraft=readUIDraft(value);restoreDraft();},draft,
  waitingForReceipt:()=>!!pendingAction,
- presentationBusy:()=>!!power?.busy||!!revealPhase,
+ presentationBusy:()=>!!power?.busy||!!cinema?.busy||!!revealPhase,
  getAnchor(zone:"hand"|"ownAnte"|"ownFlight"|"stakes"){const own=privateGame();const query=zone==="hand"?{cardId:own?.hand[0]?.id}:zone==="stakes"?{zone:"stakes" as const}:{zone:zone==="ownAnte"?"ante" as const:"flight" as const,seatId:own?.selfSeatId};const point=stageAvailable?stage?.getAnchor(query):null;if(point?.visible)return new DOMRect(point.x-10,point.y-10,20,20);if(!stageAvailable){const target=zone==="hand"?root.querySelector("#hand [data-card]"):zone==="stakes"?root.querySelector(".counter.stakes"):root.querySelector(`.seat.self [data-drop-zone="${zone==="ownAnte"?"ante":"flight"}"]`);return target?.getBoundingClientRect()??null;}return null;},
  suspend(){suspended=true;sound?.suspend();clearPresentation();stageCancel();hoveredHand="";if(gestureTimer)clearTimeout(gestureTimer);gestureTimer=undefined;lastGesture="";dragController?.cancel();domDragController?.cancel();stage?.suspend();},resume(){suspended=false;sound?.resume();stage?.resume();syncSelection();},
  failed(){sending=false;localMessage="requestFailed";if(pendingAction)pendingAction.retryable=true;if(view)view={...view,pending:false,connected:false};clearPresentation();render();},
- destroy(){if(destroyed)return;destroyed=true;pendingAction=null;power?.destroy();sound?.destroy();deferredSounds.clear();clearBannerEvent();clearDomDrag();dragController?.destroy();domDragController?.destroy();stage?.destroy();reduced.removeEventListener("change",motionPreference);root.removeEventListener("pointerdown",cancelKeyboard,true);window.removeEventListener("blur",cancelKeyboard);document.removeEventListener("visibilitychange",hideKeyboard);resize.disconnect();if(gestureTimer)clearTimeout(gestureTimer);for(const entry of gestures.values())clearTimeout(entry.timer);for(const a of motion)a.cancel();root.removeEventListener("keydown",keydown);el<HTMLDialogElement>("reset-dialog").close();root.replaceChildren();}};
+ destroy(){if(destroyed)return;destroyed=true;pendingAction=null;power?.destroy();cinema?.destroy();sound?.destroy();deferredSounds.clear();clearBannerEvent();clearDomDrag();dragController?.destroy();domDragController?.destroy();stage?.destroy();reduced.removeEventListener("change",motionPreference);root.removeEventListener("pointerdown",cancelKeyboard,true);window.removeEventListener("blur",cancelKeyboard);document.removeEventListener("visibilitychange",hideKeyboard);resize.disconnect();if(gestureTimer)clearTimeout(gestureTimer);for(const entry of gestures.values())clearTimeout(entry.timer);for(const a of motion)a.cancel();root.removeEventListener("keydown",keydown);el<HTMLDialogElement>("reset-dialog").close();root.replaceChildren();}};
 }

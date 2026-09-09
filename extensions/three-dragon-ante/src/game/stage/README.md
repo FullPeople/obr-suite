@@ -1,8 +1,8 @@
 # Three.js table stage
 
-Updated 2026-09-09. This is the implemented renderer contract and its bounded test
+Updated 2026-09-10. This is the implemented renderer contract and its bounded test
 coverage, not a release, deployment, hardware-performance or multiplayer-UAT claim.
-The selected visual direction is the original geometric dragon-card treatment.
+Fronts use the user's supplied card pack; backs retain the original vector dragon.
 
 ## Files and contract
 
@@ -10,8 +10,8 @@ The selected visual direction is the original geometric dragon-card treatment.
   responsive projection and resource lifecycle.
 - `types.ts`: the complete public API; this is the authoritative interface.
 - `layout.ts`: seats, physical card locations, anonymous backs and coin display.
-- `textures.ts`: original geometric card illustrations, backs, labels and runtime
-  paper, wood and felt materials.
+- `textures.ts`: lazily loaded supplied card fronts, original vector backs, labels
+  and runtime paper, wood and felt materials.
 - `stage-selftest.mjs`: actual renderer behavior/pixel checks and three targeted
   mutation modes.
 
@@ -52,11 +52,12 @@ face-down slot. ResizeObserver belongs to the renderer; there is no public
 ## Appearance and visible information
 
 The table, card thickness, both card sides and coins are actual WebGL meshes.
-Cards use original geometric vector-style dragon shapes and mortal emblems, drawn
-with Canvas paths and text into textures. Paper, wood grain, felt and engravings
-are generated locally by code. No AI bitmap atlas, raster-card download or atlas
-adapter belongs to the selected product direction. Vector-style refers to the art
-construction; CanvasTexture is still the GPU texture format.
+Fronts use the 100 approved WebP scans with their portrait proportions and unlit
+materials to preserve their printed colors. Backs use the original single-dragon
+Canvas paths, not the supplied pack's reverse. Paper, wood grain, felt and coins
+are generated locally by code. No AI images are used. Front textures request one
+frame after loading, cancel late callbacks on disposal, and do not create an idle
+render loop. CanvasTexture remains the GPU texture format.
 
 A directional shadow and warm fill illuminate the table. The current renderer
 caps DPR at 1.75 and requests shadow updates only while rendering. There is no

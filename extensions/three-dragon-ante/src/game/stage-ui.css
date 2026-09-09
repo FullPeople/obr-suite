@@ -66,3 +66,5 @@
  .table-shell[data-has-choice=true]>.table-bubbles{bottom:22%;width:55%}
  .table-shell[data-has-choice=true] .table-bubbles>.turn{max-height:52vh}
 }
+
+#help-text{white-space:pre-line;line-height:1.7}

@@ -12,7 +12,7 @@ interface Visual { group: THREE.Group; body: THREE.Mesh; front: THREE.Mesh; back
 interface Motion { object: THREE.Object3D; start: number; duration: number; from: Pose; to: Pose; arc: number; flip: boolean; bounce: boolean; done?: () => void }
 interface RevealData { gameId: string; gambit: number; cards: { placement: CardPlacement; from: Pose }[]; allTied: boolean; payments: { seatId: string; amount: number }[] }
 interface RevealCue { data: RevealData; start: number; cards: Visual[]; labels: THREE.Mesh[]; highlights: THREE.Mesh[]; flipped: boolean; paid: boolean }
-const W = 1.28, H = 1.85, THICKNESS = .045;
+const H = 1.85, W = H * 1250 / 2208, THICKNESS = .045;
 const last = <T>(values: readonly T[]): T | undefined => values[values.length - 1];
 const copyPose = (object: THREE.Object3D): Pose => ({ x: object.position.x, y: object.position.y, z: object.position.z, yaw: object.rotation.y, tilt: object.rotation.x, roll: object.rotation.z, scale: object.scale.x });
 const setPose = (object: THREE.Object3D, pose: Pose) => { object.position.set(pose.x, pose.y, pose.z); object.rotation.set(pose.tilt, pose.yaw, pose.roll ?? 0, "YXZ"); object.scale.setScalar(pose.scale); };
@@ -49,7 +49,7 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   const cardPlane = geo(new THREE.PlaneGeometry(W - .025, H - .025));
   const edgeMat = standard("#b29b76", { roughness: .82 });
   const backMat = standard("#ffffff", { map: tex(cardTexture(null, "en")), roughness: .77 });
-  const faces = new Map<string, THREE.MeshStandardMaterial>();
+  const faces = new Map<string, THREE.MeshBasicMaterial>();
   const visuals = new Map<string, Visual>(), motions = new Map<THREE.Object3D, Motion>();
   const zoneGroup = new THREE.Group(), infoGroup = new THREE.Group(), moneyGroup = new THREE.Group(), stackGroup = new THREE.Group(), transferGroup = new THREE.Group(), revealGroup = new THREE.Group(); scene.add(zoneGroup, infoGroup, moneyGroup, stackGroup, transferGroup, revealGroup);
   const stakesAnchor = new THREE.Object3D(); stakesAnchor.position.set(STAKES.x, STAKES.y, STAKES.z); scene.add(stakesAnchor);
@@ -89,7 +89,7 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   const face = (placement: CardPlacement) => {
     if (!placement.card) return { material: backMat, key: "back" };
     const id = `${model.language}:${placement.card.id}`;
-    let material = faces.get(id); if (!material) { material = standard("#fffaf0", { map: tex(cardTexture(placement.card, model.language)), roughness: .74 }); faces.set(id, material); }
+    let material = faces.get(id); if (!material) { material = mat(new THREE.MeshBasicMaterial({map:tex(cardTexture(placement.card, model.language, requestFrame)),toneMapped:false})); faces.set(id, material); }
     return { material, key: id };
   };
   function requestFrame() { if (!destroyed && !hidden() && !raf) raf = requestAnimationFrame(tick); }

@@ -138,6 +138,21 @@ s=play({play:"green-5",hand:["white-8"]});const badChoice=applyAction(s,{id:"oth
 const invented=applyAction(s,{id:"invented",revision:s.revision,seatId:s.pending!.seatId,kind:"choose",choiceId:s.pending!.id,optionIds:["gold-13"]});check(!invented.ok&&invented.error.code==="INVALID_CHOICE","unoffered cards cannot be submitted");
 
 // Autonomous games exercise real ante/round/choice/settlement progression.
+// Supplied-pack overrides are intentional, including its stronger evil demand.
+eq([card("blue-overlord").strength,card("white-hunter").strength,card("white-6").strength],[8,10,7],"pack numbers replace official values without changing physical identities");
+s=play({play:"green-schemer",hand:["gold-13"],hands:[[],["red-2","red-12"],["white-5","black-9"]]});
+eq(s.pending?.options.filter(o=>o.cardId).map(o=>o.cardId),["red-12"],"pack Green Schemer accepts stronger evil and excludes weaker");s=pick(s,["pay"]);
+eq(s.pending?.options.filter(o=>o.cardId).map(o=>o.cardId),["black-9"],"second neighbor excludes equal strength");s=pick(s,["pay"]);
+s=play({play:"green-5",hand:["gold-13"],hands:[[],["red-2","red-12"],["black-9"]]});
+eq(s.pending?.options.filter(o=>o.cardId).map(o=>o.cardId),["red-2"],"ordinary Green Dragon retains weaker evil demand");
+s=fixture({play:"white-5",hand:["gold-13"],flights:[["dracolich","dragonrider","black-9"],["gold-2","gold-4"],["bronze-1","bronze-3"]],stakes:9,round:3,turnIndex:2,previous:"black-1"});
+s.seats[0].flight.find(f=>f.cardId==="dragonrider")!.rider=true;
+s.effects=[{kind:"dracolich",seat:0,source:"dracolich"},{kind:"dracolich",seat:0,source:"dracolich"},{kind:"priest",seat:1,source:"priest"}];
+s=act(s,0,"play",{cardId:"white-5"});const score=s.events.find(e=>e.code==="GAMBIT_SCORED")?.score;
+check(!!score,"award emits score before clearing flights");eq(score.rows[0].cards.map(c=>[c.cardId,c.points]),[["dracolich",10],["dragonrider",5],["black-9",9],["white-5",5]],"report uses scoring-time Dragonrider strength");
+eq([score.rows[0].bonus,score.rows[0].total],[12,41],"report includes each accumulated Dracolich trigger");eq(score.payouts,[{seatId:"p0",amount:5},{seatId:"p1",amount:4}],"odd Priest stakes report actual winner and clockwise share");
+check(s.seats.every(seat=>seat.flight.length===0)&&score.rows[0].cards.length===4,"public report survives authoritative flight cleanup");
+check(!JSON.stringify(score).includes('hand')&&!JSON.stringify(score).includes('deck'),"score reports expose no private hand or deck fields");
 const completed:Record<number,number>={2:0,6:0};const issues=new Map<string,number>();
 for(const n of [2,6])for(let seed=1;seed<=12;seed++){
  let g=game(n,seed);let steps=0;
@@ -151,7 +166,7 @@ for(const n of [2,6])for(let seed=1;seed<=12;seed++){
   eq(g.stakes+g.hole+g.seats.reduce((sum,p)=>sum+p.gold,0),n*n*10,"full game conserves physical gold including hole");
  }
  check(steps<3000,`${n} player simulation makes progress`);
- if(g.stage==="ended"){completed[n]++;check(g.winners.length>0&&g.seats.some(p=>p.gold===0),"real game end with winner and bankrupt player");}
+ if(g.stage==="ended"){completed[n]++;check(g.winners.length>0&&(g.seats.some(p=>p.gold===0)||(g.winners.length===n&&g.seats.every(p=>p.gold===g.seats[0].gold))),"game ends on empty hoard before awarding the hole; all-zero co-winners can receive hole coins");}
  else issues.set(g.issue??"unknown",(issues.get(g.issue??"unknown")??0)+1);
 }
 check(completed[2]>=8&&completed[6]>=8,"multiple complete 2- and 6-player games");

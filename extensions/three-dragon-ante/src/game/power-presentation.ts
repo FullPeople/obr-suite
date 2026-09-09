@@ -1,4 +1,4 @@
-import { dragonEngraving } from "./card-art";
+import {cardFaceImage} from "./card-images";
 import { card } from "./rules/cards";
 import { cardHint, cardName } from "./rules/prompts";
 import { POWER_CARD_MOTION_MS, type PowerCue } from "./power-sequence";
@@ -18,7 +18,8 @@ export function mountPowerPresentation(host:HTMLElement,options:{language:TableL
  function paint(){
   if(!active)return;const value=card(active.cardId);overlay.dataset.color=value.color??value.alignment;
   el('.power-card-strength').textContent=String(value.strength);el('.power-card-name').textContent=cardName(value.id,language);
-  el('.power-card-art').innerHTML=value.category==='mortal'?'<svg viewBox="0 0 100 100"><path d="m23 25 13 12 14-19 14 19 13-12-5 28H28Z M34 65h32 M29 77h42" fill="none" stroke="currentColor" stroke-width="4"/><circle cx="50" cy="47" r="4" fill="currentColor"/></svg>':dragonEngraving;
+  el('.power-card-art').replaceChildren(cardFaceImage(value.id));
+  el('.power-card').classList.add('printed-power-card');
   el('.power-player').textContent=language==='zh'?`${options.seatName(active.seatId)}正在触发效果`:`${options.seatName(active.seatId)} is resolving a power`;
   el('h2').textContent=cardName(value.id,language);el('.power-description').textContent=cardHint(active.family,language);
   el('.power-continue').textContent=language==='zh'?'点击任意位置继续 · 也可按 Enter 或空格':'Click anywhere to continue · Enter or Space also works';

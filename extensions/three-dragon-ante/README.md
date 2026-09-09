@@ -1,6 +1,6 @@
 # Three-Dragon Ante · 三龙牌
 
-Independent Owlbear Rodeo extension for the Legendary Edition base game, without expansions. Full Suite only links to this extension from Settings; it does not load the card engine, subscribe to the table, or provide a second in-suite launcher.
+Independent Owlbear Rodeo extension using the Legendary Edition base game with the user-supplied card pack's printed values and effects, without expansions. The four intentional rule differences are recorded in [the card-pack notes](../../docs/THREE_DRAGON_CARD_PACK_20260910.md). Full Suite only links to this extension from Settings; it does not load the card engine, subscribe to the table, or provide a second in-suite launcher.
 
 Dev install: `https://obr.dnd.center/three-dragon-ante-dev/manifest.json` (publication is recorded in the repository's current dev release notes).
 
@@ -13,14 +13,16 @@ Everyone uses its action button to open their own full-screen table. Closing the
 - Room seating is stored in Owlbear room metadata. Game messages use Owlbear room broadcasts; no custom game server, WebSocket service, or PeerJS relay is introduced.
 - The hosting browser runs the rules and saves the deck, hands and game in IndexedDB. Other seats receive their own encrypted projection using native P-256/HKDF/AES-GCM. Opponents' hand movements expose ordinal positions and card counts only, never private card identifiers or faces.
 - Refreshing the host can recover its locally saved table. Closing the host's whole browser makes the table unavailable until that host returns. Clearing its browser storage loses the saved host game; there is no cloud backup or automatic replacement host.
-- The website server serves static HTML, scripts, styles and original vector artwork. A server hosting cost is not a per-game simulation cost. Owlbear connectivity is still required for a shared game.
-- The separate extension uses `com.fullpeople/three-dragon-ante` and its own IndexedDB name. Old Full Suite tables are not migrated into it; finish or reset those old games before starting a new table here.
+- The website server serves static HTML, scripts, styles and card artwork. A server hosting cost is not a per-game simulation cost. Owlbear connectivity is still required for a shared game.
+- The supplied-pack edition uses the `com.fullpeople/three-dragon-ante/pack-20260910` room and message namespace. All players must refresh and create a new table after updating from 0.2.x. Previous tables and local saves are left untouched; clients using different rule editions cannot join the same table.
 
 ## Practice and artwork
 
-“How to play” opens a four-page illustrated introduction to the table zones and rules. Its practice entry opens 41 local exercises: a fixed complete game, ten base-rule situations and thirty special-card exercises. Every move goes through the same rules engine as a room game. Opponents act automatically between your choices; you can undo or restart. Practice neither writes room state nor joins an online game.
+“How to play” opens a six-page illustrated introduction to the table zones, turn sequence, compulsory buying and game endings. Its practice entry opens 41 local exercises: a fixed complete game, ten base-rule situations and thirty special-card exercises. Every move goes through the same rules engine as a room game. Opponents act automatically between your choices; you can undo or restart. Practice neither writes room state nor joins an online game.
 
-The tavern table, thick double-sided cards, tilted hand fans and bounded gold/silver stacks are actual Three.js meshes. Card faces retain the original geometric vector dragons and mortal emblem; no AI-generated images or external image atlases are used. Table felt and wood textures are drawn locally from code. The engravings and animations are original code and artwork. No publisher card scans, rulebook pages or commercial illustrations are bundled. Rule descriptions are original summaries; the [publisher's Legendary Edition page](https://wizkids.com/three-dragon-ante-legendary-edition/) remains available in the table help.
+The tavern table, thick double-sided cards, tilted hand fans and bounded gold/silver stacks are actual Three.js meshes. The 100 card fronts use the user's supplied scans, conventionally resized and compressed to WebP. Chinese card names and printed descriptions match that pack; extra rules explanations appear separately. The supplied reverse is excluded: every back retains the original single-dragon vector. No AI-generated images are used. Fronts load only when visible; the background process does not import them. Felt, wood and coins are drawn locally from code. The scans retain their original copyright notices and are not claimed as original artwork. The [publisher's Legendary Edition page](https://wizkids.com/three-dragon-ante-legendary-edition/) remains available in the table help.
+
+Round and turn changes have central animated banners. Scoring shows each public card's contribution, special bonuses and payouts before the next-round announcement. Its immutable public report is shared with players and spectators, without exposing private hands. Reduced motion retains the calculation steps; reconnecting, undoing or reopening does not replay old announcements.
 
 ## Playing at the table
 

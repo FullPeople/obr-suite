@@ -1,5 +1,5 @@
 import {card, CARDS, COLORS, EVIL_COLORS, SPECIAL_CARDS, STANDARD_CARDS} from "./cards";
-import type {ActionResult, Choice, ChoiceOption, EffectKind, FlightCard, GameAction, GameConfig, GameState, RandomSource, Task} from "./types";
+import type {ActionResult, Choice, ChoiceOption, EffectKind, FlightCard, GameAction, GameConfig, GameState, RandomSource, Task, ScoreReport} from "./types";
 
 const copy=<T>(value:T):T=>JSON.parse(JSON.stringify(value));
 const around=(s:GameState,seat:number,includeSelf=false)=>Array.from({length:s.seats.length-(includeSelf?0:1)},(_,i)=>(seat+i+(includeSelf?0:1))%s.seats.length);
@@ -130,10 +130,23 @@ function nextReward(s:GameState,seat:number):{key:string;amount:number;kind:"col
     const key=`strength:${value}`;if(f.filter(item=>cardStrength(s,seat,item,s.scoring)===value).length>=3&&!s.seats[seat].rewards.includes(key))return {key,kind:"strength",amount:value};}
   return null;
 }
-function award(s:GameState,reason:string,rng?:RandomSource){
+/** Capture only already-public cards before cleanup, including rider values and
+ * accumulated Dracolich bonuses. Clients never reconstruct these from a later
+ * snapshot that has already discarded the flights. */
+function reportScore(s:GameState,reason:ScoreReport["reason"],winners:number[]){
+ const finished=reason==="round-complete"||reason==="empty-stakes",split=s.effects.some(e=>e.kind==="priest");
+ const score:ScoreReport={gambit:s.gambit,round:s.round,reason,weakest:s.effects.some(e=>e.kind==="druid"),stakes:s.stakes,
+  rows:s.seats.map((seat,i)=>{const cards=seat.flight.map(f=>({cardId:f.cardId,points:cardStrength(s,i,f,true)}));const total=flightStrength(s,i,true);
+   const eligible=!(seat.flight.some(f=>f.cardId==="bahamut")&&hasAlignment(s,i,"evil"))&&!(seat.flight.some(f=>f.cardId==="tiamat")&&hasAlignment(s,i,"good"));
+   return {seatId:seat.id,cards,total,bonus:total-cards.reduce((sum,c)=>sum+c.points,0),eligible};}),
+  winners:finished?winners.map(i=>s.seats[i].id):[],payouts:finished?winners.flatMap(i=>[{seatId:s.seats[i].id,amount:split?Math.ceil(s.stakes/2):s.stakes},...(split?[{seatId:s.seats[(i+1)%s.seats.length].id,amount:Math.floor(s.stakes/2)}]:[])]):[]};
+ event(s,"GAMBIT_SCORED");s.events[s.events.length-1].score=score;
+}
+function award(s:GameState,reason:"round-complete"|"empty-stakes",rng?:RandomSource){
   const winners=candidateWinners(s);
   if(!winners.length){issue(s,"RULE_NO_ELIGIBLE_GAMBIT_WINNER");return;}
   if(winners.length!==1){issue(s,"RULE_EMPTY_STAKES_TIE");return;}
+  reportScore(s,reason,winners);
   const winner=winners[0],stakes=s.stakes;const split=s.effects.some(e=>e.kind==="priest");
   s.seats[winner].gold+=split?Math.ceil(stakes/2):stakes;
   if(split)s.seats[(winner+1)%s.seats.length].gold+=Math.floor(stakes/2);
@@ -166,7 +179,7 @@ function executePower(s:GameState,t:Task,rng?:RandomSource){
     case "blue":case "blue-overlord":choose(s,seat,"BLUE_DESTINATION",[{id:"hoard",code:"TAKE_GOLD"},{id:"stakes",code:"INCREASE_STAKES"}],{...t,kind:"blue",amount:family==="blue"?1:2});break;
     case "brass":case "brass-sultan":case "green":case "green-schemer":{
       const good=family.startsWith("brass"),targets=family==="brass-sultan"||family==="green-schemer"?[(seat+1)%s.seats.length,right(s,seat)]:[good?right(s,seat):(seat+1)%s.seats.length];
-      addFront(s,...targets.map(target=>({kind:"demand",seat,source,target,mode:good?"good":"evil",amount:strength})));break;
+      addFront(s,...targets.map(target=>({kind:"demand",seat,source,target,mode:good?"good":"evil",amount:strength,flag:family==="green-schemer"})));break;
     }
     case "bronze":case "bronze-warlord":
       if(family==="bronze-warlord")effect(s,"warlord",seat,source);
@@ -223,7 +236,7 @@ function runTask(s:GameState,t:Task,rng?:RandomSource){
     case "power":executePower(s,t,rng);break;
     case "sorcerer-ante":s.ante.push(...t.ids!);s.revealed=s.revealed.filter(id=>!t.ids!.includes(id));break;
     case "demand":{
-      const eligible=s.seats[t.target!].hand.filter(id=>card(id).alignment===t.mode&&(t.mode==="good"?card(id).strength>t.amount!:card(id).strength<t.amount!));
+      const eligible=s.seats[t.target!].hand.filter(id=>card(id).alignment===t.mode&&(t.mode==="good"||t.flag?card(id).strength>t.amount!:card(id).strength<t.amount!));
       choose(s,t.target!,"GIVE_DRAGON_OR_GOLD",[{id:"pay",code:"PAY_FIVE"},...choiceCards(eligible)],t);break;
     }
     case "bronze":{
@@ -258,10 +271,10 @@ function runTask(s:GameState,t:Task,rng?:RandomSource){
     case "score":{
       const winners=candidateWinners(s);
       if(!winners.length){issue(s,"RULE_NO_ELIGIBLE_GAMBIT_WINNER");return;}
-      if(winners.length>1||(s.round===3&&s.effects.some(e=>e.kind==="warlord"&&e.seat!==winners[0]))){nextRound(s,rng);break;}
+      if(winners.length>1||(s.round===3&&s.effects.some(e=>e.kind==="warlord"&&e.seat!==winners[0]))){reportScore(s,winners.length>1?"tied":"warlord",winners);nextRound(s,rng);break;}
       award(s,"round-complete",rng);break;
     }
-    case "award":s.scoring=true;award(s,t.mode!,rng);break;
+    case "award":s.scoring=true;award(s,"empty-stakes",rng);break;
     default:throw Error(`Unknown task: ${t.kind}`);
   }
 }

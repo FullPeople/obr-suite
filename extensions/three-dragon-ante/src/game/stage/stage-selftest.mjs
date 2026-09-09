@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { build } from 'rolldown';
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -43,6 +43,12 @@ await build({ input: 'stage-fixture', plugins: [{ name: 'stage-fixture', resolve
 const requests = [];
 const server = createServer((request, response) => {
   requests.push(request.url);
+  const art = /^\/art\/pack-20260910\/cards\/([a-z0-9-]+)\.webp$/.exec(request.url);
+  if (art) {
+    const file = join(import.meta.dirname, '../art/pack-20260910/cards', art[1] + '.webp');
+    if (!existsSync(file)) { response.statusCode = 404; return response.end(); }
+    response.setHeader('content-type', 'image/webp'); return response.end(readFileSync(file));
+  }
   if (request.url === '/fixture.js') { response.setHeader('content-type', 'text/javascript'); response.end(readFileSync(join(output, 'fixture.js'))); }
   else { response.setHeader('content-type', 'text/html'); response.end('<!doctype html><html><head><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#181211}canvas{width:100%;height:100%;display:block}</style></head><body><canvas aria-label="Three Dragon Ante stage"></canvas><script type="module" src="/fixture.js"></script></body></html>'); }
 });
@@ -58,7 +64,8 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.h?.surface.diagnostics().frames > 0); await pause(100);
   let diag = await d(); check('actual WebGL renderer with thick mesh cards and lit table', diag.meshes > 50 && diag.drawCalls > 20 && await page.evaluate(() => h.quality[0].webgl));
   const image = PNG.sync.read(await page.screenshot({ path: join(output, 'hand-wide.png') }));
-  check('vector card faces load without raster artwork requests', !requests.some(url => /\.(?:png|jpe?g|webp)(?:\?|$)|\/art\//i.test(url)));
+  const fronts = requests.filter(url => /\.webp$/.test(url));
+  check('only visible supplied fronts load; original back needs no raster request', fronts.length > 0 && fronts.length < 40 && fronts.every(url => /^\/art\/pack-20260910\/cards\/[a-z0-9-]+\.webp$/.test(url)) && !requests.some(url => /back\.webp|\.(?:png|jpe?g)$/.test(url)));
   const palette = new Set(); for (let y = 100; y < image.height - 80; y += 8) for (let x = 80; x < image.width - 80; x += 8) { const offset = (y * image.width + x) * 4; palette.add([...image.data.subarray(offset, offset + 3)].map(c => Math.round(c / 16)).join(',')); }
   check('actual raster contains textured multicolor geometry, not an empty canvas', palette.size > 80);
   const initial = diag.frames; await pause(260); check('settled scene has no continuous render loop', (await d()).frames === initial);

@@ -1,11 +1,15 @@
 import type { GameAction, PublicView, SeatView } from "./rules";
 
-export const TABLE_ROOM_KEY = "com.fullpeople/three-dragon-ante/table";
-export const TABLE_NETWORK = "com.fullpeople/three-dragon-ante/network";
-export const TABLE_OPEN = "com.fullpeople/three-dragon-ante/open";
-export const TABLE_READY = "com.fullpeople/three-dragon-ante/ready";
-export const TABLE_VIEW = "com.fullpeople/three-dragon-ante/view";
-export const TABLE_COMMAND = "com.fullpeople/three-dragon-ante/command";
+// This pack changes actual rules. Keep older installed backgrounds/tables on
+// their original channel rather than silently mixing different card values.
+// Old room metadata and private saves remain untouched and recoverable there.
+const PACK_CHANNEL = "com.fullpeople/three-dragon-ante/pack-20260910";
+export const TABLE_ROOM_KEY = `${PACK_CHANNEL}/table`;
+export const TABLE_NETWORK = `${PACK_CHANNEL}/network`;
+export const TABLE_OPEN = `${PACK_CHANNEL}/open`;
+export const TABLE_READY = `${PACK_CHANNEL}/ready`;
+export const TABLE_VIEW = `${PACK_CHANNEL}/view`;
+export const TABLE_COMMAND = `${PACK_CHANNEL}/command`;
 
 export interface TableSeat { playerId: string; seatId: string; name: string }
 /** Room metadata contains seating/ownership only. Never put hands or deck here. */

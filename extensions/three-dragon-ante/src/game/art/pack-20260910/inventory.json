@@ -1,0 +1,707 @@
+{
+  "source": "三龙牌字体加大.rar",
+  "archiveSha256": "183f06d1305a616bb3e04ebe96162d89f30a66a816cc18c1615942f8354120e3",
+  "back": "Original single-dragon vector; supplied reverse excluded",
+  "cards": [
+    {
+      "id": "bahamut",
+      "source": "三龙牌-卡牌_101.jpg",
+      "sourceSha256": "dc7c022f5a4fc68bf13b81af4eb52005dbda5e6a894642d89afc9bd9ccd0240e",
+      "sha256": "85fa0660b0027d065ee258a6b695b31076646bff82f5673bd6c4d24742119c79",
+      "bytes": 113126
+    },
+    {
+      "id": "silver-seer",
+      "source": "三龙牌-卡牌_102.jpg",
+      "sourceSha256": "eafa574300f5fb1d8dd84d5ba6b3e7a750f137ca8986c1c58ae628a649509df0",
+      "sha256": "d6d8943aa326077ed702f9051d316cf4a4a78f6e9a37223b6c1e8594661a53d3",
+      "bytes": 109464
+    },
+    {
+      "id": "red-destroyer",
+      "source": "三龙牌-卡牌_103.jpg",
+      "sourceSha256": "f60ffd4a8686d2ff4219ef72a7fb0881468373ac1b5760dbc784d0f0b7882e97",
+      "sha256": "55ccafded32a02732ffaf128272892d1c6c32e3735c061de4d1e75bb83b54aef",
+      "bytes": 127976
+    },
+    {
+      "id": "copper-trickster",
+      "source": "三龙牌-卡牌_104.jpg",
+      "sourceSha256": "cd19ab45e80c80f148a5bd2b99391165dabd3db9fd960c4be9bc2d1ad0c7fc39",
+      "sha256": "cad07dd31e0ef36a0657f83f97e314ebfab8baee7b2893bb39e998cb8389aa02",
+      "bytes": 125492
+    },
+    {
+      "id": "white-hunter",
+      "source": "三龙牌-卡牌_105.jpg",
+      "sourceSha256": "3c1838579d5aae54e3c045534a1700237f3abaf0d1a3ea18dfcc1ebfdccee285",
+      "sha256": "ce9e9a9f316290f3243e7c8bb8464ddffba0d18dcce39fc03636f41c6295cb6b",
+      "bytes": 102058
+    },
+    {
+      "id": "archmage",
+      "source": "三龙牌-卡牌_106.jpg",
+      "sourceSha256": "eca56dd46e315ef391700994f092a6a7ed2fa92083f62f947676827bc0914cf5",
+      "sha256": "52f3aa6b3bddbcb157bb78315d48b3df4f1e8ecd4dbe8a93dab4df5986cad457",
+      "bytes": 78708
+    },
+    {
+      "id": "thief",
+      "source": "三龙牌-卡牌_107.jpg",
+      "sourceSha256": "452f3810b7ec3fcc2e05400f2ed817868aa6c24b2566c99035ed1cbbde05f9f9",
+      "sha256": "168ea7fe6160d8ec16059bf18b155ecf732e103efab38ac0c70099b89dfbb7ca",
+      "bytes": 64418
+    },
+    {
+      "id": "druid",
+      "source": "三龙牌-卡牌_108.jpg",
+      "sourceSha256": "745f1e044c881db4a6ce867815e24afcb4be6063e1f5ab29a539c9b309f4759d",
+      "sha256": "e9bd7df2dc319a950c27da4b87ae66afc8b7925d6da959be68f7dfb5115776ce",
+      "bytes": 71298
+    },
+    {
+      "id": "princess",
+      "source": "三龙牌-卡牌_109.jpg",
+      "sourceSha256": "ad743559ab30dd8899969ff2b39d717c52e5a5ab834c93db1957bf4671dcb020",
+      "sha256": "bb5eeacd16324f51dffe3cbee5a9612e4d7998b328d2626b786b39f63646009c",
+      "bytes": 61580
+    },
+    {
+      "id": "kobold",
+      "source": "三龙牌-卡牌_110.jpg",
+      "sourceSha256": "ec5cde27871be3554737c7a3b3486a9c87ab8b1257a7e58cee3cfae7d77ffe14",
+      "sha256": "7b32e35f3ead43bbae848eb4c0b60a8e99424c678568eb200408528767338d93",
+      "bytes": 74078
+    },
+    {
+      "id": "illusionist",
+      "source": "三龙牌-卡牌_111.jpg",
+      "sourceSha256": "6a4f2bed0646b986ca277f81ed64b0d2ce26254b734b3d0e024b85e039877b6a",
+      "sha256": "7ce9cc5092ad99ee28bb5adb66b7e1adccde40238a27889a417357bafb43e5da",
+      "bytes": 87776
+    },
+    {
+      "id": "gold-monarch",
+      "source": "三龙牌-卡牌_112.jpg",
+      "sourceSha256": "392bf2fc28beff026302a198b3f5359f9ba2895a62458eb41f15654a9ad3bfc8",
+      "sha256": "3373a7b09cd8e112c5e22b451b868ee370b93136fe9612027e890f0ee12c5bba",
+      "bytes": 111028
+    },
+    {
+      "id": "brass-sultan",
+      "source": "三龙牌-卡牌_113.jpg",
+      "sourceSha256": "4d24f4f5047e2e6d0625504686fe9acc4dfb1baa478779a83d4d09d6a4dc8a71",
+      "sha256": "6d43dcbff00809313f99bb366f5aa56811fa6467499fd447a6aa3ab86a4712ce",
+      "bytes": 109806
+    },
+    {
+      "id": "priest",
+      "source": "三龙牌-卡牌_114.jpg",
+      "sourceSha256": "f049e5a41366d3a1a66a628ef94e9e920acf67d2389903f7e22a57dc0007688d",
+      "sha256": "e1cf6abaa3202e9b0f4617903cc4fd72c6ba5cb847548079a9a04d1ce476f620",
+      "bytes": 71720
+    },
+    {
+      "id": "metallic-wyrmling",
+      "source": "三龙牌-卡牌_115.jpg",
+      "sourceSha256": "9ec3ea0cb501c4f0c0d7ab6b011e5e9b99274e29c92cd2c3358b6eb182ce7fe6",
+      "sha256": "6075a3fa5c68be1206276810eabf44b6b8f526896e8bec3cf386e938f7f70a55",
+      "bytes": 107166
+    },
+    {
+      "id": "wyrmpriest",
+      "source": "三龙牌-卡牌_116.jpg",
+      "sourceSha256": "26f9183fb5f6316ad85e92bf510f8033874296cd465ce5fb22ae6a888829309a",
+      "sha256": "3c4d4c8be411382b00b93dc1a4bbef0e0d356ba83c650ce1b8868597880bb802",
+      "bytes": 76340
+    },
+    {
+      "id": "dragonrider",
+      "source": "三龙牌-卡牌_117.jpg",
+      "sourceSha256": "8e7191b988808c518759f44224cce935e769f07099413aa6ad55d272487f072f",
+      "sha256": "d100bff47d6235f1d96657146006c29b3031ab5056dd296bd9a60d8e84f4d523",
+      "bytes": 67962
+    },
+    {
+      "id": "dracolich",
+      "source": "三龙牌-卡牌_118.jpg",
+      "sourceSha256": "56e0145cd1b75c88122a0e20f5e4f2996af069222940dd00900dad5fc2a4329c",
+      "sha256": "5be66ce66d39c3dd7e704e3c57066254a4197864397ce67efc0bdbc52c90c6f8",
+      "bytes": 82958
+    },
+    {
+      "id": "merchant-prince",
+      "source": "三龙牌-卡牌_119.jpg",
+      "sourceSha256": "ff32584ff9c9602744243618b300845f4e60d4b82e9807af71f2470625830306",
+      "sha256": "a0fd87fb602d7837cf772afba9411efd10bf70f079f483d62c499ecfd8aa8ea7",
+      "bytes": 70420
+    },
+    {
+      "id": "green-schemer",
+      "source": "三龙牌-卡牌_120.jpg",
+      "sourceSha256": "5a91f8de466e6f219890e5e3f921695d3fd2a769b8a01d00935cfc8319895c8d",
+      "sha256": "ea11ee57646c650692c4e06a8e0b6859c1fe42313a73ca3f8546f0a43d3ccef2",
+      "bytes": 109316
+    },
+    {
+      "id": "sorcerer",
+      "source": "三龙牌-卡牌_121.jpg",
+      "sourceSha256": "dddfff879adb76c0e7c76fbe54949646b8f82d753c5f0ed43fafa11923208485",
+      "sha256": "313d3eeea7752d6110bddc206609eb0f0f08a5110285f625859e52d42740f3d8",
+      "bytes": 77120
+    },
+    {
+      "id": "chromatic-wyrmling",
+      "source": "三龙牌-卡牌_122.jpg",
+      "sourceSha256": "972c0a8db41431b5254f45fcd39088d5288b0bae52c184bae2a2d93a6d38125a",
+      "sha256": "810594c14351dcd993a38079b991b14916ee83df9a833c7960ad471f25b8d7c4",
+      "bytes": 112722
+    },
+    {
+      "id": "bronze-warlord",
+      "source": "三龙牌-卡牌_123.jpg",
+      "sourceSha256": "606691cb6db56a4e953a0b94f570352ed675bb2218e509e0e896519a92d7ad8c",
+      "sha256": "345dc4ca4ee2885c265ef4f24890997e90ac36d5e22770f4c2d89137bc9b9f94",
+      "bytes": 106074
+    },
+    {
+      "id": "black-raider",
+      "source": "三龙牌-卡牌_124.jpg",
+      "sourceSha256": "b61a20b190534d83d0df3648c29b9f9b4981ae5082a4ccd48425a015ca6c5aae",
+      "sha256": "0893359510f82fbb56aa43d3b819088a8204c1a57f6c03233ff00387d4a0bfbd",
+      "bytes": 127842
+    },
+    {
+      "id": "queen",
+      "source": "三龙牌-卡牌_125.jpg",
+      "sourceSha256": "718cc79fe501ec9e791fc432e355a19a4aa76a485ef97cd137c2935bc6876ad5",
+      "sha256": "25584a523e0b41bf072ad9c33614ea50ce48fea98587f8c602c88574e78cd30c",
+      "bytes": 70680
+    },
+    {
+      "id": "fool",
+      "source": "三龙牌-卡牌_126.jpg",
+      "sourceSha256": "45fef2fecab0b645a314b829f8d0f98a627c7ac361e240d7bd73da3703ffc8c9",
+      "sha256": "ff4f413d47af1e04ed24b742beb2f760553dcf42916005b0164a5477bdfd8ea3",
+      "bytes": 70554
+    },
+    {
+      "id": "prophet",
+      "source": "三龙牌-卡牌_127.jpg",
+      "sourceSha256": "6aa340fd3f00478b44f008e098dcedd1a2848d645df480c6609b04593615977e",
+      "sha256": "0e354f0acc0b696e257d19cb70cd7d1ba716040a830e92f2617dbad2a1491dd2",
+      "bytes": 73032
+    },
+    {
+      "id": "dragonslayer",
+      "source": "三龙牌-卡牌_128.jpg",
+      "sourceSha256": "c92ba66682457aa8d92af799b0a6bb163180f5d7d79c63948f68a5a668aaa861",
+      "sha256": "1b779c23b7595c597699b2e121aca5be10602ffc6266db5518346bf28f4092f2",
+      "bytes": 78434
+    },
+    {
+      "id": "tiamat",
+      "source": "三龙牌-卡牌_129.jpg",
+      "sourceSha256": "c90f9106b743b9e2f6af1ff30acf0bf802285a77e727e1ee60313c605da7642c",
+      "sha256": "0af12d6aafbb25b8226a985a2816b47f068b69e29a78650dc4daa0e0a0f53c60",
+      "bytes": 129052
+    },
+    {
+      "id": "blue-overlord",
+      "source": "三龙牌-卡牌_130.jpg",
+      "sourceSha256": "1d2fb1861ad1373824103aff6df4bde7cc3a5e381d3df73528f09bea37e28a86",
+      "sha256": "6be0813ad577c8e90fda218a987a0a149db13fea52db57c36311a963f6cd5821",
+      "bytes": 120390
+    },
+    {
+      "id": "black-1",
+      "source": "三龙牌-卡牌_131.jpg",
+      "sourceSha256": "1190ce10d91144e52fec560e2c7483323d31e26d4dc1cb0ec6f2eb100d4414ef",
+      "sha256": "9f3ffbcc4cf79fd9fd00e5e216ee326d95b9073d8148350e070153309a7b853f",
+      "bytes": 78036
+    },
+    {
+      "id": "black-2",
+      "source": "三龙牌-卡牌_132.jpg",
+      "sourceSha256": "b0311a09adabff7a72afc6060596a5ccb50a3e7d3785e4ba0e71936861fdec5f",
+      "sha256": "c4f0d57beee58fb93186f4288441d4c2dfdaf7385bce37c8bfd37551b38e294a",
+      "bytes": 78376
+    },
+    {
+      "id": "black-3",
+      "source": "三龙牌-卡牌_133.jpg",
+      "sourceSha256": "8aca71cc11dee295b065d04dd589db00e195e0c686b23df1d6c7e4f12604f2f4",
+      "sha256": "619eb5fee7a38940457743ad1990b872e476e592a020bd31ee6c662c9604612b",
+      "bytes": 78770
+    },
+    {
+      "id": "black-5",
+      "source": "三龙牌-卡牌_134.jpg",
+      "sourceSha256": "b9cf876d4fbc0246454b2cddf63a8a792471349c97dba5ca08799b6b1ae05a72",
+      "sha256": "b474d2532ca50723b164182fa43bc211c63c40c343a8195d3eec53bb403dba3a",
+      "bytes": 78588
+    },
+    {
+      "id": "black-6",
+      "source": "三龙牌-卡牌_135.jpg",
+      "sourceSha256": "faa49b6ca34a3927736e4278cbf05c70ebf865e9b9a10b44cb7ff214e7c42b8b",
+      "sha256": "4965b62b599b1d9cd25346d299e3e9bd4bf0a805bb2f1c122967db4564ebbda6",
+      "bytes": 78496
+    },
+    {
+      "id": "black-7",
+      "source": "三龙牌-卡牌_136.jpg",
+      "sourceSha256": "8e7179bca2a9db70014d1141d9c1b367278fe94255612b8c98bf58b8abad7d58",
+      "sha256": "cfb0e27c9bacd9cfb21aedc5f42334e4fd2377a748c07739b2df15cb9c9f3dfb",
+      "bytes": 78380
+    },
+    {
+      "id": "black-9",
+      "source": "三龙牌-卡牌_137.jpg",
+      "sourceSha256": "a1ae795d338f5462ab9f794f554e7d0c15d7c91cad0c9d3fe962ab13a53bc3d2",
+      "sha256": "53f59754b01c02452bb0d20395bd0702b41e1a126ae71c19b63bd732473c9ffc",
+      "bytes": 78676
+    },
+    {
+      "id": "blue-1",
+      "source": "三龙牌-卡牌_138.jpg",
+      "sourceSha256": "ce913816c8c8f388debc20055470008e4dbaa8a98b86ddddb6e9188259fb03f5",
+      "sha256": "a564c5add16697b3778cdcb0ecf7afc3c0220295b111a4facf68b10be34e08ec",
+      "bytes": 82974
+    },
+    {
+      "id": "blue-2",
+      "source": "三龙牌-卡牌_139.jpg",
+      "sourceSha256": "c6ceff1b594acf753d1cbc767e2d11ea44752d44b9e0213d66a1db3f1fb5e614",
+      "sha256": "4b4847e0976cc0513a190ceaa59a53fe619cb49a63e187c15519eb450e54d6bf",
+      "bytes": 84162
+    },
+    {
+      "id": "blue-4",
+      "source": "三龙牌-卡牌_140.jpg",
+      "sourceSha256": "a711c24ebf2c40d3aa9537a5f42027f178498651dd7bd6180306530dfd42ba0c",
+      "sha256": "499cda75cf374866b9acd7d9119e94dae410612767041102f1f71f1f3be80ebb",
+      "bytes": 83284
+    },
+    {
+      "id": "blue-6",
+      "source": "三龙牌-卡牌_141.jpg",
+      "sourceSha256": "cbf5c5e90df4637a188648952aadb2a6f65168b2cc1641b2313e6e6f823a5f44",
+      "sha256": "a52b2cd1c3215886194b0eac5e3abf77e067a627e60327c17eb47441f64c3627",
+      "bytes": 84402
+    },
+    {
+      "id": "blue-7",
+      "source": "三龙牌-卡牌_142.jpg",
+      "sourceSha256": "7e71875aa0ba325c08ef3401f2452d0bbb6c60344ab23e25caf2d6ba39c12d6f",
+      "sha256": "05c36088b1f00f69d0f64523cecd9864d5c0e7e146cfc5852e2c57416df34ae3",
+      "bytes": 84084
+    },
+    {
+      "id": "blue-9",
+      "source": "三龙牌-卡牌_143.jpg",
+      "sourceSha256": "17d90d1c7e8326a48b51774f8840323b3d4695050f768495f27a9a599c7434b8",
+      "sha256": "ed6e894a0507bd523b7ba1441a8378b0f7e8d7a268d5b97fcd00031be462bfd9",
+      "bytes": 84226
+    },
+    {
+      "id": "blue-11",
+      "source": "三龙牌-卡牌_144.jpg",
+      "sourceSha256": "b526593a7679c99efa68d7fe49032750d2fc0cb80e0565f96ed202a7d60ca675",
+      "sha256": "794c4495d39760cb5aaed46bc2e29bbfab55e48b87c0494e3e06a543e11d2c54",
+      "bytes": 83192
+    },
+    {
+      "id": "brass-1",
+      "source": "三龙牌-卡牌_145.jpg",
+      "sourceSha256": "fbbe29352ab09b7a29443a3bfdacc0fdf2221bd93d87d758f48de07d24ba1e3c",
+      "sha256": "78c573522178bd0e2106b883d2ba8c12f5c2d3c9b089f80aefecbe483d7054b3",
+      "bytes": 72916
+    },
+    {
+      "id": "brass-2",
+      "source": "三龙牌-卡牌_146.jpg",
+      "sourceSha256": "9a64915b499b6609d52b6d9c763e2d4046c9a6c185afb079ae33bd5ad213fb08",
+      "sha256": "a4482b967c0f93ecdb670e5cadc5ef0e62b7fde48c460bd1b35d8fa720baf3da",
+      "bytes": 73358
+    },
+    {
+      "id": "brass-3",
+      "source": "三龙牌-卡牌_147.jpg",
+      "sourceSha256": "80313d610ab399711e0f774ad041624cdc3bfc6f3d2f457baf47d47152f8d22c",
+      "sha256": "da90bb9ad2235728f5197e30d1ffcf682396e0427ae3d235c2316aa1d553a04f",
+      "bytes": 73190
+    },
+    {
+      "id": "brass-4",
+      "source": "三龙牌-卡牌_148.jpg",
+      "sourceSha256": "6923a6d0d6534b4f567cd7e074f7a7cf46a0bc990edaf0be4da49db0e4363b22",
+      "sha256": "87c0f3c789827cd5cde375cee8f0ebaff984ca58313db19f34b0f347c57e58ae",
+      "bytes": 73136
+    },
+    {
+      "id": "brass-5",
+      "source": "三龙牌-卡牌_149.jpg",
+      "sourceSha256": "3c1dd5e0e4f6704e197078b47861863da6e17017d3fe2aec9fa3c52109fb937e",
+      "sha256": "70d0b3795064e4f1fd884b0e719db4da509f021761b975e0cc3ce87b03937b49",
+      "bytes": 73216
+    },
+    {
+      "id": "brass-7",
+      "source": "三龙牌-卡牌_150.jpg",
+      "sourceSha256": "0bba1d3f839956de1675a4e8fc845c488220dd96f5adc0c1e48d7807ff2237ed",
+      "sha256": "0986c0fb4efff0e796bc1efefffc8541612ae8d21ffe56e957a3221a692d4f5a",
+      "bytes": 73112
+    },
+    {
+      "id": "brass-9",
+      "source": "三龙牌-卡牌_151.jpg",
+      "sourceSha256": "5ed9deedd1b6b88addecae42711f25b2213008e58883b6b74a00ef35080c7364",
+      "sha256": "ce91283856e0c66290f116cca0875132672f6572180e492557b817baba9310b4",
+      "bytes": 73194
+    },
+    {
+      "id": "bronze-1",
+      "source": "三龙牌-卡牌_152.jpg",
+      "sourceSha256": "5170e60a382bbd38aad2acf66cf36a74820f3c384b31a7e572562357497203e6",
+      "sha256": "6f7f322f6c449ff685a981f6f62f19ca6d2d67f6d045d8f07ab5bc99f618a200",
+      "bytes": 83190
+    },
+    {
+      "id": "bronze-3",
+      "source": "三龙牌-卡牌_153.jpg",
+      "sourceSha256": "ffa2d9d4359e1eb83a557217cf08e7826f3d7159d347aa416a2bab85918a1608",
+      "sha256": "8f4873445bd4afd375298699ead5ac4089e33e19ac66d9ecaf142f55e912f45a",
+      "bytes": 84286
+    },
+    {
+      "id": "bronze-6",
+      "source": "三龙牌-卡牌_154.jpg",
+      "sourceSha256": "557059f71e64f10831b7919b6d5b6d9726fa0f92602e910bdce58d82b11b2791",
+      "sha256": "ec03479f91a73c543dd18d6e10207c42fd37018b05a16a1a508ef3e81ae9fafa",
+      "bytes": 83728
+    },
+    {
+      "id": "bronze-7",
+      "source": "三龙牌-卡牌_155.jpg",
+      "sourceSha256": "2faef5075112a18e68d5b32e3dc141c4a67792dad64ef62b62b311cd0ed1a7be",
+      "sha256": "84f7215f766c6dd6f5151c4aa3e0e2623c640d888c20ac2d2610c3f38382ab01",
+      "bytes": 83412
+    },
+    {
+      "id": "bronze-8",
+      "source": "三龙牌-卡牌_156.jpg",
+      "sourceSha256": "69bd95f25f5ee9ae70a972d9af036c353ec9087801b94d68bc87479b85bc7348",
+      "sha256": "ba99db064a1b1389382c3235e422f19ecb4ac25ea2a67e8ae83a174c8ef475ce",
+      "bytes": 84454
+    },
+    {
+      "id": "bronze-9",
+      "source": "三龙牌-卡牌_157.jpg",
+      "sourceSha256": "beab8eff0dacaa326ba2caf2ec65df8330f4c9b9029ad55c89066cb7cf0aa22f",
+      "sha256": "2c389120ea13af7cd2d3228f023f8ed19d5b7675788891d014c9e33fb6a3dab0",
+      "bytes": 84296
+    },
+    {
+      "id": "bronze-11",
+      "source": "三龙牌-卡牌_158.jpg",
+      "sourceSha256": "6f9ff72807e6f55cd80f68994a2f5a457c3c770c8cf1b27183096788c88c9ca8",
+      "sha256": "2e8803f84da455b938e0f6f541b147875a2618060a37bb46bd32583e628641f8",
+      "bytes": 84078
+    },
+    {
+      "id": "copper-1",
+      "source": "三龙牌-卡牌_159.jpg",
+      "sourceSha256": "6da2fa1fc9811841caae06529b587c32026231537abe695dcdd0d1fbcafe7be8",
+      "sha256": "22c250fab86bd79ca45fdcd4a43fd008f6806b1b1146ca763d314ccd99f814d8",
+      "bytes": 107206
+    },
+    {
+      "id": "copper-3",
+      "source": "三龙牌-卡牌_160.jpg",
+      "sourceSha256": "70171943dd0164e5b05708ac5a469003cc6fc7526d4d6dd76094555b336521b0",
+      "sha256": "7f2563669ef0653814450b7fbef8c166d2e9f0aef72c468acd7846ff89f1f1f4",
+      "bytes": 109906
+    },
+    {
+      "id": "copper-5",
+      "source": "三龙牌-卡牌_161.jpg",
+      "sourceSha256": "1ae90e294126d503d15b39adec6cb8e2126f3e048c27e0c2297eb978e2d74995",
+      "sha256": "45905577ecaa2f1fb94ef9444dc1c30d894eaf9c885b95c71959ff02d8ee8cf0",
+      "bytes": 109682
+    },
+    {
+      "id": "copper-6",
+      "source": "三龙牌-卡牌_162.jpg",
+      "sourceSha256": "c3ecbad75146decdd8d79ff2d94c9875c6d5c8e5bd9661771df6ef8329424626",
+      "sha256": "8081ebd14192b2dd5eb83f590b52510f9e9fc8f5f978f87210b9514c7127241d",
+      "bytes": 109838
+    },
+    {
+      "id": "copper-7",
+      "source": "三龙牌-卡牌_163.jpg",
+      "sourceSha256": "0cea299ea7291c2540e21d1476cd3e8a91e5e71cde1206afd4cfa8831092d6f1",
+      "sha256": "25dac7079a85b3c1b7a4a8c78d3a58b3bdbb358a79d4faa1fd38af07dc06e4d5",
+      "bytes": 109480
+    },
+    {
+      "id": "copper-8",
+      "source": "三龙牌-卡牌_164.jpg",
+      "sourceSha256": "40137ebe4c68a1660b00f19f05d791aebc96e8dfd2a5215394fa6ae4db8f50ba",
+      "sha256": "af0ce9c5e18e7e6a09bbdf3ab5f3e06ef0f33355973652c9fb0cc19a125a26c8",
+      "bytes": 109856
+    },
+    {
+      "id": "copper-10",
+      "source": "三龙牌-卡牌_165.jpg",
+      "sourceSha256": "b85bdae806f4f1bc1c0eecefb812f675f4dbbc5ad87033ec03b26c2095ab4298",
+      "sha256": "c9c14d8a49d87d7f66f074d124485d0c9d05000a86ed4dbc1c3531220b5b79f6",
+      "bytes": 109816
+    },
+    {
+      "id": "gold-2",
+      "source": "三龙牌-卡牌_166.jpg",
+      "sourceSha256": "6903ccec994fb8bf6c074a18d9771c078893a6689422275214eb5720b9205f3f",
+      "sha256": "004309185978ea8e89f7cafc866a6b19b2b512d917a50d23033a58a274bd5502",
+      "bytes": 83144
+    },
+    {
+      "id": "gold-4",
+      "source": "三龙牌-卡牌_167.jpg",
+      "sourceSha256": "f42b8b782cb0b45a12762a91f4e8b8244c398c99704fc20985dea31e394cb66d",
+      "sha256": "bb704aa150a56cd1cd1bc7edf1b748238b08973dd8806c58bb23e1c0a8f29b84",
+      "bytes": 82988
+    },
+    {
+      "id": "gold-6",
+      "source": "三龙牌-卡牌_168.jpg",
+      "sourceSha256": "bc7ae40b96d3b009d555a5880dce16343e9262c6765826532f0f43fcf97c3f29",
+      "sha256": "9bc5e2e36ca1e31ff1f0972bd51bf8d684a2ff2c8d797cfb4a72f72e350693fd",
+      "bytes": 83190
+    },
+    {
+      "id": "gold-8",
+      "source": "三龙牌-卡牌_169.jpg",
+      "sourceSha256": "e2833b08c00f7c9bfb0bbb8bfd4abb6f85ce5d12edfbe16d97bc27b2b2bfc5b6",
+      "sha256": "19ec2f106b46c0f1c45939fc11f27f0d181ce7309598ce046dac2181df00375e",
+      "bytes": 83290
+    },
+    {
+      "id": "gold-9",
+      "source": "三龙牌-卡牌_170.jpg",
+      "sourceSha256": "62704b46ae7b2468c964c23aef59c9c09ae474d5248faa6c933eb2b7e1415276",
+      "sha256": "89151176d142a9a950a4d84238557921915cdbf413d5898edb4a8574687c0e18",
+      "bytes": 83106
+    },
+    {
+      "id": "gold-11",
+      "source": "三龙牌-卡牌_171.jpg",
+      "sourceSha256": "4d0b9f511fc2a91dcb8d6feb0d7f1a67f6ccc065b62dc47d2fca7882728bf490",
+      "sha256": "b2951720235ebb6e2f45f505caf05a47ae795944f5ebdf0e84d5ff0d8893585b",
+      "bytes": 82942
+    },
+    {
+      "id": "gold-13",
+      "source": "三龙牌-卡牌_172.jpg",
+      "sourceSha256": "05284bc910e97dd369ded975e56b42f02deb19faa284e9543c77fd11a6003fd0",
+      "sha256": "87dbf5b5ab7e306c969ecb17f482109c06cbae8ad0f2f63cc3c03e9bc4d4bb03",
+      "bytes": 83290
+    },
+    {
+      "id": "green-1",
+      "source": "三龙牌-卡牌_173.jpg",
+      "sourceSha256": "9776e4b7451f033dd79cfb37f093fdee668d10080b9aad86ee64c7f5bb52b4ae",
+      "sha256": "46e19c4d91fc25a636568bc4d2bdc1a1095fc896c8359c9a4163426aec9c775b",
+      "bytes": 94718
+    },
+    {
+      "id": "green-2",
+      "source": "三龙牌-卡牌_174.jpg",
+      "sourceSha256": "f78528e81d58ad90e8cc21d36d36faa5a4654dd4d64adf437790a8662ea71b24",
+      "sha256": "d79af7b29f6316ed77a08617572178ca089781441f480a9b809609f1ea0f33c3",
+      "bytes": 95376
+    },
+    {
+      "id": "green-4",
+      "source": "三龙牌-卡牌_175.jpg",
+      "sourceSha256": "b789987cd3b69a454be1f0b8afd22ad2793152b18d31e4232090005aa332b68d",
+      "sha256": "9442cfa415c0d8abaa664a5c6d3f4b33ace924e387571cc45561d738bc1f5f7f",
+      "bytes": 95260
+    },
+    {
+      "id": "green-5",
+      "source": "三龙牌-卡牌_176.jpg",
+      "sourceSha256": "281b234491eb1eff6ddfa06962d3f4905459fa716f9c8558e4ea365b002f0705",
+      "sha256": "981adec874133b9649f4b8161a184753d314f2466a2e568ea43b7fb589de9441",
+      "bytes": 95270
+    },
+    {
+      "id": "green-6",
+      "source": "三龙牌-卡牌_177.jpg",
+      "sourceSha256": "f2bdd5705f5586b094fd8911e55012c5834095b160d7c6fab63f1a511df56b07",
+      "sha256": "fd69e58973f5256adfed52231e35fb5efd79d68e109047863142c6ae3d8782f6",
+      "bytes": 95104
+    },
+    {
+      "id": "green-8",
+      "source": "三龙牌-卡牌_178.jpg",
+      "sourceSha256": "5b37f33c97ebc0d3c0e308aefd61ec5d7f29e08bf15b206514cd32580b5ca3da",
+      "sha256": "e981da245ad3dc5be742165b935ed0db63d300494f83e186bf1b8afee7f3bf67",
+      "bytes": 95452
+    },
+    {
+      "id": "green-10",
+      "source": "三龙牌-卡牌_179.jpg",
+      "sourceSha256": "02c3301e5231d82f05c358199feb9828d95df702a180356c6aea350dd13691bb",
+      "sha256": "7472c906e27c67db34f17edc10f9b8e00edf34c93229537edb32d328e6c793b4",
+      "bytes": 96198
+    },
+    {
+      "id": "red-2",
+      "source": "三龙牌-卡牌_180.jpg",
+      "sourceSha256": "de65767ce64362ba4e49cc12d2cc424f5e17f485f9a7cad2e7f058ea35af3924",
+      "sha256": "28e5ef3fe106de956d6cde8dfb6c361fd184a953be16fc299316666dda86b7f3",
+      "bytes": 109438
+    },
+    {
+      "id": "red-3",
+      "source": "三龙牌-卡牌_181.jpg",
+      "sourceSha256": "1aed61c9df58eb6eee8a0769c7cd0ebecf389424c241a10bed9325b89fc2172e",
+      "sha256": "d7286048fe61d3a42d8352237655eea811ed601dfc015d1d3203c08848e4c866",
+      "bytes": 109490
+    },
+    {
+      "id": "red-5",
+      "source": "三龙牌-卡牌_182.jpg",
+      "sourceSha256": "ed9785563c38e825c4142fd43ca2c05c54fa6e0383979afb6c302c446fafb43f",
+      "sha256": "d4b3a662ff62e511dbb03323d566f7d78101f5d5b21519e1164ec86cb74defc1",
+      "bytes": 109366
+    },
+    {
+      "id": "red-7",
+      "source": "三龙牌-卡牌_183.jpg",
+      "sourceSha256": "ddf1ff855d38713e4bce85ba35689038188ab9b20547cdc25dd7bce4cb6e06dd",
+      "sha256": "a74725a96583972fceb7313b717e2f0405f6dd4788f01e7399b35ee0b87be2af",
+      "bytes": 109276
+    },
+    {
+      "id": "red-8",
+      "source": "三龙牌-卡牌_184.jpg",
+      "sourceSha256": "300b7f98d958b1c19b9e3adfa99c954574f895637165049a3d1e6f9e210898bd",
+      "sha256": "40e4b96e50062b90580f825fad3919e480084517a21a6db464b99b240b2a5100",
+      "bytes": 109614
+    },
+    {
+      "id": "red-10",
+      "source": "三龙牌-卡牌_185.jpg",
+      "sourceSha256": "28aa517a89badbc759f118aeeddaaa6d30c13f3a5bbf0ba7c27c0c8be8fd8432",
+      "sha256": "7ad83923b78d106f864829162dd1332b0b424a4913685f9c1cf3b906fb01348c",
+      "bytes": 109676
+    },
+    {
+      "id": "red-12",
+      "source": "三龙牌-卡牌_186.jpg",
+      "sourceSha256": "8d32e5763ddeeb0fb3598cc0a5f3e01b432176934fee5c13ed6e02e744bf37d0",
+      "sha256": "760b8e84ef3c1e23572a230a22f2c0849583ff31f67ab9186a89d653ca167571",
+      "bytes": 109560
+    },
+    {
+      "id": "silver-2",
+      "source": "三龙牌-卡牌_187.jpg",
+      "sourceSha256": "ef259b84f00626945018541f9e0d3fcbe4191ebc0807e1d50e813eaee0b2c651",
+      "sha256": "be52c98db18d6d6438486a136bc23922b2cb77983aafff4dbdcd9c9fb6d87b82",
+      "bytes": 99628
+    },
+    {
+      "id": "silver-3",
+      "source": "三龙牌-卡牌_188.jpg",
+      "sourceSha256": "d4bc1fb69222abf9ed273e715793addef2681090187a654f971ba147233baa9c",
+      "sha256": "f4eb6300b3ff93356d8eb561ede3d8fe2daa6ccadfb47d26a55fd58d7926cf02",
+      "bytes": 99722
+    },
+    {
+      "id": "silver-6",
+      "source": "三龙牌-卡牌_189.jpg",
+      "sourceSha256": "bfc32dc6df8f87db89a48b9ae1a9fe81debf8433e84c959c157a9ebe90252b3a",
+      "sha256": "fe9679065f94d9a0d24ff477b1df911be2aa785508db8115c07ab54ed9a94e77",
+      "bytes": 99730
+    },
+    {
+      "id": "silver-7",
+      "source": "三龙牌-卡牌_190.jpg",
+      "sourceSha256": "ed0ccccf7b058c8efde24fc60eea0db1c91588227cab2eaa68d8e5459fcfb8b6",
+      "sha256": "fe0ee0d9a5da5c068a7e9424d9fa1162f0402011b98f547a2ff24fa1788348f7",
+      "bytes": 99588
+    },
+    {
+      "id": "silver-8",
+      "source": "三龙牌-卡牌_191.jpg",
+      "sourceSha256": "cd65003dfc2a5b32c3ca565bbef60616be4f6126b20a5332c08dbf6aaaa7c131",
+      "sha256": "397f678e9be7ea98dcde3952ca3283e00c51adb61b58880521054058e8114290",
+      "bytes": 99822
+    },
+    {
+      "id": "silver-10",
+      "source": "三龙牌-卡牌_192.jpg",
+      "sourceSha256": "d0de0d2e56000eb641fe5dd0bdf7a39b589990426a9c7f1004df17570aea2ae2",
+      "sha256": "1e3cfd879eb9e19d3d911caf6b3b0001c17d39b71063991671a00d5ee7248a55",
+      "bytes": 99888
+    },
+    {
+      "id": "silver-12",
+      "source": "三龙牌-卡牌_193.jpg",
+      "sourceSha256": "edb8a9d0690ca3f569f849e9942c450df7700f54c4df941352307534cba9ef85",
+      "sha256": "b4b9025c177ee6bde4932ac4b08441ca257a2b21180fb46fbfaf6f20abfbd8cc",
+      "bytes": 99956
+    },
+    {
+      "id": "white-1",
+      "source": "三龙牌-卡牌_194.jpg",
+      "sourceSha256": "c54170c0dbd8867cfd17b6d86400ee3e2ed24e412cbbadac19d0f6205f060c6f",
+      "sha256": "2c783399c6570df329fdbdef8a0bf5c6ce6d581f796592f93adaf236aaa8b7f6",
+      "bytes": 62032
+    },
+    {
+      "id": "white-2",
+      "source": "三龙牌-卡牌_195.jpg",
+      "sourceSha256": "c786db6b98f4bc05c89c5d954590945c71db9574181620a88bfa8463dd196116",
+      "sha256": "60b699cb371ec4fc3c5ce9d9d1440ca4c058f08c70263b63320522cb3bd6dd22",
+      "bytes": 62664
+    },
+    {
+      "id": "white-3",
+      "source": "三龙牌-卡牌_196.jpg",
+      "sourceSha256": "c69d68f0f8e4355b432935bd4e0fc2ca948112ee7e3fa9d504f965b7f5d0cf2c",
+      "sha256": "35ecefa9001cc69e056215c4975f72338a432481a42aa53cf939547ab45fabd2",
+      "bytes": 62644
+    },
+    {
+      "id": "white-4",
+      "source": "三龙牌-卡牌_197.jpg",
+      "sourceSha256": "2b62bcbaac1d10410f86a5bc6e7feac3c03967c6583bb86f9d46975a77c798a2",
+      "sha256": "1d600389cd8f1eadeed78579abbb85b1fc0d80be1b71c6f48c56c65a7a97f757",
+      "bytes": 62250
+    },
+    {
+      "id": "white-5",
+      "source": "三龙牌-卡牌_198.jpg",
+      "sourceSha256": "32400f394cd40683fc7126cd0e721a93b281943a87c959751be18e6908b272af",
+      "sha256": "3e87b4fdbd76e8ea0a5d896ca75233bf9d88880229411c176a84c35903dbd291",
+      "bytes": 62494
+    },
+    {
+      "id": "white-6",
+      "source": "三龙牌-卡牌_199.jpg",
+      "sourceSha256": "d5e6efa3b4c0c858b69ef6aff9be147dfab27b1f53045294afdf9493d10de71a",
+      "sha256": "2739cfde0e0873dcef9fca0443fd4bd08a22baf3e714490b126e40823ecaa0bb",
+      "bytes": 62364
+    },
+    {
+      "id": "white-8",
+      "source": "三龙牌-卡牌_200.jpg",
+      "sourceSha256": "0f240ee036cf81bac1e79a62511e67f610459fc201eb149a50db7a3795036bb8",
+      "sha256": "d4d531cf15b52841b5f585caabdf63476affd265c436b4b078c9bef1bd03c819",
+      "bytes": 62828
+    }
+  ]
+}

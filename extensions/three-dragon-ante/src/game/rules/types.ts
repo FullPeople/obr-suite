@@ -12,7 +12,12 @@ export interface ChoiceOption { id:string; code?:string; cardId?:string; seatId?
 export interface Choice { id:string; seatId:string; code:string; options:ChoiceOption[]; min:number; max:number; sourceCardId?:string; beneficiarySeatId?:string }
 export interface Pending extends Choice { task:Task }
 export type Task = { kind:string; seat:number; source?:string; family?:string; ids?:string[]; target?:number; amount?:number; mode?:string; flag?:boolean; index?:number };
-export interface PublicEvent { code:string; seatId?:string; targetSeatId?:string; cardIds?:string[]; amount?:number; effectFamily?:string }
+export interface ScoreReport {
+ gambit:number; round:number; reason:"round-complete"|"empty-stakes"|"tied"|"warlord"; weakest:boolean;
+ rows:{seatId:string;cards:{cardId:string;points:number}[];bonus:number;total:number;eligible:boolean}[];
+ winners:string[]; stakes:number; payouts:{seatId:string;amount:number}[];
+}
+export interface PublicEvent { code:string; seatId?:string; targetSeatId?:string; cardIds?:string[]; amount?:number; effectFamily?:string; score?:ScoreReport }
 export interface GambitResult { number:number; winners:string[]; reason:string; strengths:Record<string,number>; stakes:number }
 export interface AcceptedAction { fingerprint:string; revision:number }
 export interface GameState {

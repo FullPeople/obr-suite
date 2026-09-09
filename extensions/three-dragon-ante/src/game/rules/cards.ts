@@ -1,6 +1,7 @@
 /** Base-box identities and numeric rules data, independently transcribed from
  * the publisher's card inventory (Legendary Edition rulebook, printed p15).
- * No card artwork or printed power text is distributed here. */
+ * 2026-09-10: the user chose their supplied card pack's three differing values.
+ * Keep white-6 as a stable identity for saves; its printed strength is now 7. */
 export const COLORS = ["black", "blue", "brass", "bronze", "copper", "gold", "green", "red", "silver", "white"] as const;
 export type Color = typeof COLORS[number];
 export type Alignment = "good" | "evil" | "mortal";
@@ -22,13 +23,13 @@ const STANDARD: Record<Color, number[]> = {
 export const EVIL_COLORS: readonly Color[] = ["black", "blue", "green", "red", "white"];
 const pages: Record<Color, number> = {black:16,blue:16,brass:17,bronze:17,copper:18,gold:19,green:20,red:22,silver:22,white:23};
 const title = (id:string) => id.split("-").map(part=>part[0].toUpperCase()+part.slice(1)).join(" ");
-export const STANDARD_CARDS: readonly Card[] = COLORS.flatMap(color=>STANDARD[color].map(strength=>({id:`${color}-${strength}`,family:color,name:`${title(color)} Dragon`,strength,color,alignment:EVIL_COLORS.includes(color)?"evil":"good",category:"standard",rulesPage:pages[color]} as Card)));
+export const STANDARD_CARDS: readonly Card[] = COLORS.flatMap(color=>STANDARD[color].map(strength=>({id:`${color}-${strength}`,family:color,name:`${title(color)} Dragon`,strength:color==="white"&&strength===6?7:strength,color,alignment:EVIL_COLORS.includes(color)?"evil":"good",category:"standard",rulesPage:pages[color]} as Card)));
 const legendary: [string,number,Alignment,Color|undefined,number][] = [
-  ["bahamut",13,"good",undefined,16], ["black-raider",8,"evil","black",16], ["blue-overlord",10,"evil","blue",16],
+  ["bahamut",13,"good",undefined,16], ["black-raider",8,"evil","black",16], ["blue-overlord",8,"evil","blue",16],
   ["brass-sultan",8,"good","brass",17], ["bronze-warlord",10,"good","bronze",17], ["chromatic-wyrmling",1,"evil",undefined,18],
   ["copper-trickster",9,"good","copper",18], ["dracolich",10,"evil",undefined,18], ["gold-monarch",12,"good","gold",19],
   ["green-schemer",5,"evil","green",20], ["metallic-wyrmling",1,"good",undefined,21], ["red-destroyer",11,"evil","red",22],
-  ["silver-seer",11,"good","silver",23], ["tiamat",13,"evil",undefined,23], ["white-hunter",7,"evil","white",23],
+  ["silver-seer",11,"good","silver",23], ["tiamat",13,"evil",undefined,23], ["white-hunter",10,"evil","white",23],
 ];
 const mortals: [string,number,number][] = [["archmage",9,16],["dragonrider",6,19],["dragonslayer",8,19],["druid",6,19],["fool",3,19],
   ["illusionist",4,20],["kobold",2,20],["merchant-prince",5,21],["priest",5,21],["princess",4,21],["prophet",10,22],

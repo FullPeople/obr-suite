@@ -51,7 +51,7 @@ if(window===window.parent){
  };
  const controller=new TableController(deliver,{storage,creationSettleMs:20,retryMs:150,heartbeatMs:1000,timeoutMs:15000});
  surface=mountTableUI(document.querySelector('#app')!,{language:'en',send:async command=>{shared.commands.push({connection,command:structuredClone(command)});if(command.type==='close'){surface.destroy();return}await controller.command(command)}});
- shared.clients[connection]={controller,surface,views,hold:false,flush(){deliver(latest)},ready:false};
+ shared.clients[connection]={controller,surface,powerVisible:()=>!document.querySelector(".power-overlay").hidden,views,hold:false,flush(){deliver(latest)},ready:false};
  await controller.start();shared.clients[connection].ready=true;
 }
 `;
@@ -61,7 +61,7 @@ const sdk=`
 const shared=()=>window.parent.ownerUI;
 const connection=()=>new URLSearchParams(location.search).get('connection');
 const port=()=>shared().port(connection());
-const key='com.fullpeople/three-dragon-ante/table',channel='com.fullpeople/three-dragon-ante/network';
+const key='com.fullpeople/three-dragon-ante/pack-20260910/table',channel='com.fullpeople/three-dragon-ante/pack-20260910/network';
 export default{
  room:{get id(){return port().roomId},async getMetadata(){return{[key]:await port().readTable()}},async setMetadata(meta){if(Object.keys(meta).join()!==key)throw Error('unexpected metadata write');shared().sdkWrites.push({connection:connection(),value:structuredClone(meta[key])});await port().writeTable(meta[key])},onMetadataChange(fn){return port().onTable(value=>fn({[key]:value}))}},
  player:{async getId(){return port().member.id},async getConnectionId(){return port().member.connectionId},async getName(){return port().member.name},async getRole(){shared().roleReads.push(connection());return port().member.role},onChange(fn){return port().onSelf(fn)}},
@@ -70,8 +70,8 @@ export default{
 };`;
 await build({input:'owner-ui-entry',platform:'browser',plugins:[{name:'owner-ui-sdk-boundary',resolveId(id){if(id==='owner-ui-entry')return '\0owner-ui.ts';if(id==='@owlbear-rodeo/sdk')return '\0owner-sdk';if(id.endsWith('.css'))return '\0style'},load(id){if(id==='\0owner-ui.ts')return entry;if(id==='\0owner-sdk')return sdk;if(id==='\0style')return ''},transform(code,id){if(!mutant||!id.replaceAll('\\','/').endsWith(mutations[mutant].file))return;const m=mutations[mutant];assert.equal(code.split(m.from).length,2);mutated=true;return code.replace(m.from,m.to)}}],output:{file:join(out,'app.js'),format:'esm',codeSplitting:false},logLevel:'silent'});
 if(mutant)assert.ok(mutated,'mutation applied before execution');
-const css=['style.css','stage-ui.css','power-presentation.css'].map(f=>readFileSync(join(base,f),'utf8')).join('\n');
-const server=createServer((req,res)=>{const url=new URL(req.url,'http://localhost');if(url.pathname==='/app.js'){res.setHeader('Content-Type','text/javascript');return res.end(readFileSync(join(out,'app.js')))}res.setHeader('Content-Type','text/html;charset=utf-8');res.end(url.pathname==='/client'?`<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style><main id="app"></main><script type="module" src="/app.js"></script></html>`:'<!doctype html><html><meta charset="utf-8"><style>html,body{margin:0;overflow:hidden}iframe{width:100vw;height:100dvh;border:0;display:block}iframe[hidden]{display:none}</style><script type="module" src="/app.js"></script></html>')});
+const css=['style.css','stage-ui.css','power-presentation.css','card-images.css','round-presentation.css'].map(f=>readFileSync(join(base,f),'utf8')).join('\n');
+const server=createServer((req,res)=>{const url=new URL(req.url,'http://localhost');const art=/^\/art\/pack-20260910\/cards\/([a-z0-9-]+)\.webp$/.exec(url.pathname);if(art){res.setHeader('Content-Type','image/webp');return res.end(readFileSync(join(base,'art/pack-20260910/cards',art[1]+'.webp')))}if(url.pathname==='/app.js'){res.setHeader('Content-Type','text/javascript');return res.end(readFileSync(join(out,'app.js')))}res.setHeader('Content-Type','text/html;charset=utf-8');res.end(url.pathname==='/client'?`<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style><main id="app"></main><script type="module" src="/app.js"></script></html>`:'<!doctype html><html><meta charset="utf-8"><style>html,body{margin:0;overflow:hidden}iframe{width:100vw;height:100dvh;border:0;display:block}iframe[hidden]{display:none}</style><script type="module" src="/app.js"></script></html>')});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const browser=await chromium.launch({headless:true,channel:'msedge'}),checks=[],errors=[],requests=[];
 const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('PASS '+name)};
@@ -107,29 +107,41 @@ try{
  await page.evaluate(()=>ownerUI.clients.friend.controller.command({type:'join'}));await ready(['owner','friend']);
  await page.evaluate(()=>ownerUI.add({id:'public-observer',connection:'observer',name:'Observer',role:'PLAYER'}));await allReady();
  await begin();const first=await playNext();
- check('dealer, remote seat and public spectator all show a network-triggered power',await page.evaluate(()=>Object.values(ownerUI.clients).every(c=>c.surface.presentationBusy())));
+ check('dealer, remote seat and public spectator all show a network-triggered power',await page.evaluate(()=>Object.values(ownerUI.clients).every(c=>c.powerVisible())));
  check('real controller emits transient syncing snapshots for dealer and recipient',await page.evaluate(()=>['owner','friend'].every(id=>ownerUI.clients[id].views.some(v=>v.syncing&&!v.connected))));
  for(const id of ids){await show(id);check(id+' displays actual card name and full description',await frame(id).locator('.power-card-name').innerText()===await frame(id).locator('.power-copy h2').innerText()&&(await frame(id).locator('.power-description').innerText()).length>20)}
- await page.waitForTimeout(1700);check('network introduction does not close after 1.5 seconds',await page.evaluate(()=>Object.values(ownerUI.clients).every(c=>c.surface.presentationBusy())));
- await dismiss('observer');check('spectator click only dismisses their own introduction',await page.evaluate(()=>!ownerUI.clients.observer.surface.presentationBusy()&&ownerUI.clients.owner.surface.presentationBusy()&&ownerUI.clients.friend.surface.presentationBusy()));
+ await page.waitForTimeout(1700);check('network introduction does not close after 1.5 seconds',await page.evaluate(()=>Object.values(ownerUI.clients).every(c=>c.powerVisible())));
+ await dismiss('observer');check('spectator click only dismisses their own introduction',await page.evaluate(()=>!ownerUI.clients.observer.powerVisible()&&ownerUI.clients.owner.powerVisible()&&ownerUI.clients.friend.powerVisible()));
  for(const id of ['owner','friend'])await dismiss(id);
  await page.evaluate(()=>Object.values(ownerUI.clients).forEach(c=>c.flush()));
- check('duplicate LOCAL snapshots do not replay an acknowledged effect',await page.evaluate(()=>Object.values(ownerUI.clients).every(c=>!c.surface.presentationBusy())));
+ check('duplicate LOCAL snapshots do not replay an acknowledged effect',await page.evaluate(()=>Object.values(ownerUI.clients).every(c=>!c.powerVisible())));
  await begin();const baseline=(await view('observer')).game.revision;
  await page.evaluate(()=>ownerUI.clients.observer.hold=true);
  await playNext();for(const id of ['owner','friend'])await dismiss(id);
  await playNext();
  check('coalescing fixture skips at least one real game revision',(await view('observer')).game.revision>=baseline+2);
- check('held spectator page has not displayed undelivered powers',!await page.evaluate(()=>ownerUI.clients.observer.surface.presentationBusy()));
+ check('held spectator page has not displayed undelivered powers',!await page.evaluate(()=>ownerUI.clients.observer.powerVisible()));
  await page.evaluate(()=>{const c=ownerUI.clients.observer;c.hold=false;c.flush()});
- check('new public events survive a coalesced LOCAL revision jump',await page.evaluate(()=>ownerUI.clients.observer.surface.presentationBusy()));
- await show('observer');await page.screenshot({path:join(out,'spectator-network-power.png')});
+ check('new public events survive a coalesced LOCAL revision jump',await page.evaluate(()=>ownerUI.clients.observer.powerVisible()));
+ await show('observer');await frame('observer').locator('.power-overlay img').evaluate(async image=>{await image.decode()});
+ check('network power uses a decoded supplied face at a visible size',await frame('observer').locator('.power-overlay img').evaluate(image=>image.naturalWidth===768&&image.getBoundingClientRect().width>100&&image.getBoundingClientRect().height>100));
+ await page.screenshot({path:join(out,'spectator-network-power.png')});
+ // Run real rule actions until an award/tie score crosses both private links
+ // and the public observer link. No synthetic presentation event is injected.
+ for(const id of ids)await dismiss(id);
+ for(let i=0;!(await view('owner')).game.events.some(e=>e.code==='GAMBIT_SCORED');i++){
+  assert.ok(i<60,'real network game reaches scoring');await playNext();for(const id of ids)await dismiss(id);
+ }
+ const reports=await page.evaluate(()=>Object.values(ownerUI.clients).map(c=>c.controller.view.game.events.find(e=>e.code==='GAMBIT_SCORED').score));
+ check('dealer, private seat and public spectator receive identical scoring breakdowns',reports.length===3&&reports.every(r=>JSON.stringify(r)===JSON.stringify(reports[0])));
+ check('network scoring cards sum to real totals without private hand data',reports[0].rows.every(row=>row.cards.reduce((sum,c)=>sum+c.points,0)+row.bonus===row.total)&&!JSON.stringify(reports[0]).includes('hand'));
+ await page.waitForFunction(()=>Object.values(ownerUI.clients).every(c=>{const e=c.surface;return e.presentationBusy()}));
  const savedPort=await page.evaluate(()=>{ownerUI.oldPort=ownerUI.room.ports.get('owner');ownerUI.room.remove('owner');return true});
  await page.waitForFunction(()=>!ownerUI.clients.observer.controller.view.connected);
- check('actual authority departure clears the spectator introduction',!await page.evaluate(()=>ownerUI.clients.observer.surface.presentationBusy()));
+ check('actual authority departure clears the spectator introduction',!await page.evaluate(()=>ownerUI.clients.observer.powerVisible()));
  check('authority departure is not labelled as transient synchronization',!(await view('observer')).syncing);
  await page.evaluate(()=>{ownerUI.room.ports.set('owner',ownerUI.oldPort);ownerUI.room.membersChanged()});await allReady();
- check('a real transport re-handshake does not replay missed history',!await page.evaluate(()=>ownerUI.clients.observer.surface.presentationBusy()));
+ check('a real transport re-handshake does not replay missed history',!await page.evaluate(()=>ownerUI.clients.observer.powerVisible()));
  const observations=await page.evaluate(()=>({views:Object.fromEntries(Object.entries(ownerUI.clients).map(([id,c])=>[id,c.views.map(v=>({connected:v.connected,syncing:v.syncing,revision:v.game?.revision,events:v.game?.events?.filter(e=>e.code==='POWER_TRIGGERED')}))])),networkKinds:[...new Set(ownerUI.room.traffic.map(t=>t.value.kind))]}));
  await page.evaluate(()=>ownerUI.stop());check('cleanup removes actual controller subscriptions',await page.evaluate(()=>ownerUI.room.listeners===0));
  check('no uncaught browser errors',errors.length===0);

@@ -61,9 +61,9 @@ export function createTutorialGame(lessonId = 'game', instance = 'local'): GameS
   const ante = ['blue-4', 'copper-5', 'bronze-8'];
   if (lessonId === 'powers') return position(id, { hands: [['black-3', 'gold-13'], [], []], flights: [['white-1'], ['red-3'], ['gold-2', 'white-5']], round: 2, leader: 2, active: 0, turnIndex: 1, roundCards: [null, null, 'white-5'] });
   if (lessonId === 'color') return position(id, { hands: [['white-6'], [], []], flights: [['white-1', 'white-2'], flights[1], flights[2]], ante });
-  if (lessonId === 'strength') return position(id, { hands: [['gold-6'], [], []], flights: [['white-6', 'black-6'], flights[1], flights[2]], ante });
+  if (lessonId === 'strength') return position(id, { hands: [['gold-6'], [], []], flights: [['bronze-6', 'black-6'], flights[1], flights[2]], ante });
   if (lessonId === 'ante-tie' || lessonId === 'ante-all-tied' || lessonId === 'debt') {
-    const selected = lessonId === 'ante-tie' ? ['red-10', 'green-10', 'gold-9'] : lessonId === 'debt' ? ['gold-13', 'red-12', 'silver-12'] : ['gold-6', 'black-6', 'white-6'];
+    const selected = lessonId === 'ante-tie' ? ['red-10', 'green-10', 'gold-9'] : lessonId === 'debt' ? ['gold-13', 'red-12', 'silver-12'] : ['gold-6', 'black-6', 'bronze-6'];
     return position(id, { stage: 'ante', round: 0, hands: selected.map(value => [value]), stakes: 0, gold: lessonId === 'debt' ? [1, 44, 45] : [30, 30, 30] });
   }
   if (lessonId === 'round-tie') return position(id, { hands: [['white-5'], [], []], flights: [[], ['black-5'], ['red-5']], round: 1, leader: 1, active: 0, turnIndex: 2, roundCards: [null, 'black-5', 'red-5'] });

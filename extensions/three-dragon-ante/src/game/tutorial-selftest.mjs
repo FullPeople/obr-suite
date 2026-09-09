@@ -97,7 +97,7 @@ try {
   await page.goto('http://localhost/');
   await page.clock.install({time:new Date('2026-09-09T00:00:00Z')});await page.clock.pauseAt(new Date('2026-09-09T00:00:01Z'));
   await page.evaluate(()=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type==='webgl'||type==='webgl2'?null:original.call(this,type,...args)}});
-  await page.setContent(`<style>${readFileSync(join(base,'style.css'),'utf8')}\n${readFileSync(join(base,'tutorial.css'),'utf8')}\n${readFileSync(join(base,'stage-ui.css'),'utf8')}\n${readFileSync(join(base,'power-presentation.css'),'utf8')}</style><button id="real-table">Real table</button><div id="practice"></div>`);
+  await page.setContent(`<style>${readFileSync(join(base,'style.css'),'utf8')}\n${readFileSync(join(base,'tutorial.css'),'utf8')}\n${readFileSync(join(base,'stage-ui.css'),'utf8')}\n${readFileSync(join(base,'power-presentation.css'),'utf8')}${readFileSync(join(base,'card-images.css'),'utf8')}${readFileSync(join(base,'round-presentation.css'),'utf8')}</style><button id="real-table">Real table</button><div id="practice"></div>`);
   await page.addScriptTag({type:'module',content:readFileSync(entry,'utf8').replace(/export\s*\{[^}]*\};?\s*$/,'')+'\nwindow.mountTutorial=mountTutorial;'});
   await page.waitForFunction(()=>typeof window.mountTutorial==='function');
   await page.evaluate(()=>{document.querySelector('#real-table').focus();window.__tutorialViews=[];window.closedCount=0;window.handle=window.mountTutorial(document.querySelector('#practice'),'en',()=>window.closedCount++);});
@@ -114,6 +114,14 @@ try {
       assert.equal(await revision(),before,'Dismissing a presentation never submits a rule action');
       presentationDismissals++;
     }
+    // Newly requested round/scoring banners finish before the next bot's
+    // one-second thought. Advance actual scheduled milestones, not a guessed
+    // blanket sleep that could accidentally execute a bot action as well.
+    for(let i=0;await page.locator('.round-overlay').isVisible();i++){
+      assert.ok(i<100,'finite round/score presentation');
+      const delay=await page.locator('.round-overlay').evaluate(e=>Math.max(0,Number(e.dataset.nextAt)-performance.now()));
+      await page.clock.runFor(Math.ceil(delay));
+    }
   }
   await page.locator('.tutorial-chapter').selectOption('basics');await page.locator('.tutorial-lesson').selectOption('powers');
   await page.locator('#hand button[data-card="black-3"]').focus();await page.keyboard.press('Space');await page.keyboard.press('Enter');
@@ -122,7 +130,7 @@ try {
   await page.locator('#hand button[data-card="gold-13"]').focus();await page.keyboard.press('Space');await page.keyboard.press('Enter');assert.match(await page.locator('.tutorial-result').innerText(),/does not trigger/);browserChecks++;
   const oldGame=await page.locator('.tda-tutorial').getAttribute('data-revision');await page.evaluate(()=>window.handle.setLanguage('zh'));assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),oldGame);assert.match(await page.locator('.tutorial-result').innerText(),/不发动能力/);browserChecks++;
   await page.locator('.tutorial-restart').click();await page.locator('#hand button[data-card="black-3"]').focus();await page.keyboard.press('Space');await page.evaluate(()=>window.handle.setLanguage('en'));assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),'0');await page.keyboard.press('Enter');assert.equal(await page.locator('.tda-tutorial').getAttribute('data-revision'),'1');browserChecks++;
-  assert.equal(await page.locator('.tutorial-step').count(),0);await page.clock.runFor(30000);assert.equal(await revision(),'1','Reduced motion still waits for a real dismissal, however long the player reads');assert.equal(await page.locator('.power-overlay').isVisible(),true);await dismissPowers();await page.clock.runFor(999);assert.equal(await revision(),'1','Closing the final explanation starts a full one-second thought');await page.clock.runFor(1);assert.equal(await revision(),'2');browserChecks++;
+  assert.equal(await page.locator('.tutorial-step').count(),0);await page.clock.runFor(30000);assert.equal(await revision(),'1','Reduced motion still waits for a real dismissal, however long the player reads');assert.equal(await page.locator('.power-overlay').isVisible(),true);await dismissPowers();await page.clock.runFor(999);assert.equal(await revision(),'1','Closing the explanation and finishing its banner starts a full one-second thought');await page.clock.runFor(1);assert.equal(await revision(),'2');browserChecks++;
   assert.equal(await page.locator('.tda-tutorial #tutorial:visible,.tda-tutorial #language:visible,.tda-tutorial #display-mode:visible,.tda-tutorial #close:visible').count(),0);browserChecks++;
   await dismissPowers();await page.screenshot({path:join(out,'tutorial-wide.png')});
   await page.locator('.tutorial-chapter').selectOption('game');
@@ -165,7 +173,7 @@ try {
     }
     assert.equal(Number(await revision()),beforeRevision+1,'Exactly one real rule action resolves per user submission or bot timer');
   }
-  await dismissPowers();assert.equal((await latest()).game.phase,'ended');assert.ok(automatic.choices>=1&&automatic.humanChoices>=1);assert.equal(completeSteps,35);
+  await dismissPowers();assert.equal((await latest()).game.phase,'ended');assert.ok(automatic.choices>=1&&automatic.humanChoices>=1);assert.equal(completeSteps,52);
   assert.match(await page.locator('.tutorial-suggestion').innerText(),/game is complete/);assert.equal(await page.locator('.tutorial-step').count(),0);browserChecks++;
   console.log('Automatic full-game browser trace: '+JSON.stringify({steps:completeSteps,...automatic}));
   // The engine and receipt advance immediately; only the next bot's thinking
@@ -173,8 +181,8 @@ try {
   await page.emulateMedia({reducedMotion:'no-preference'});await page.locator('.tutorial-chapter').selectOption('basics');await page.locator('.tutorial-lesson').selectOption('ante-tie');await playOwn('red-10');await page.clock.runFor(2000);
   assert.equal(await revision(),'3');assert.equal((await latest()).game.phase,'play');assert.equal((await latest()).game.actions.length,0,'The real untied ante makes Jade lead');
   assert.equal((await latest()).actionReceipt.ok,true);assert.equal((await latest()).actionReceipt.revision,1,'Presentation never postpones the human action receipt');
-  await page.clock.runFor(REVEAL_PRESENTATION_MS);assert.equal(await revision(),'3','Reveal completes before the next bot starts its one-second thought');await page.clock.runFor(999);assert.equal(await revision(),'3');await page.clock.runFor(1);assert.equal(await revision(),'4');browserChecks++;
-  await dismissPowers();await page.emulateMedia({reducedMotion:'reduce'});await page.locator('.tutorial-restart').click();await playOwn('red-10');await page.clock.runFor(2000);assert.equal(await revision(),'3');
+  await page.clock.runFor(REVEAL_PRESENTATION_MS);assert.equal(await revision(),'3','Reveal and round banner finish before the next bot thinks');await dismissPowers();await page.clock.runFor(999);assert.equal(await revision(),'3');await page.clock.runFor(1);assert.equal(await revision(),'4');browserChecks++;
+  await dismissPowers();await page.emulateMedia({reducedMotion:'reduce'});await page.locator('.tutorial-restart').click();await playOwn('red-10');await page.clock.runFor(2000);assert.equal(await revision(),'3');await dismissPowers();
   await page.clock.runFor(999);assert.equal(await revision(),'3');await page.clock.runFor(1);assert.equal(await revision(),'4','Reduced motion skips only presentation, not the one-second thought');browserChecks++;
   await dismissPowers();await page.locator('.tutorial-lesson').selectOption('powers');
   await page.evaluate(()=>{window.__normalTimeout=window.setTimeout;window.__timerDelays=[];window.setTimeout=(fn,delay,...args)=>{window.__timerDelays.push(delay);return window.__normalTimeout(fn,delay,...args);};});
@@ -209,7 +217,7 @@ try {
     {name:'Ember moves early',anchor:"key: 'opening:ember', seatId: 'ember', delay: 2000",replacement:"key: 'opening:ember', seatId: 'ember', delay: 1999",async dom(){await page.clock.runFor(1999);assert.equal(await revision(),'0','Ember must not act before 2000ms');}},
     {name:'Jade ignores your ante',anchor:"if (!Object.prototype.hasOwnProperty.call(game.committed, 'you')) return null;",replacement:'void 0;',async dom(){await page.clock.runFor(3000);assert.equal(await revision(),'1','Jade must wait for your ante');}},
     {name:'player resets Ember delay',anchor:"key: 'opening:ember', seatId: 'ember', delay: 2000",replacement:"key: `opening:ember:${game.revision}`, seatId: 'ember', delay: 2000",async dom(){await page.clock.runFor(500);await playOwn();await page.clock.runFor(1500);assert.equal(await revision(),'2','Your early action must not restart the Ember timer');}},
-    {name:'bot skips ante reveal',anchor:'delay: 1000 + revealDelay',replacement:'delay: 1000',async dom(){await page.emulateMedia({reducedMotion:'no-preference'});await page.locator('.tutorial-chapter').selectOption('basics');await page.locator('.tutorial-lesson').selectOption('ante-tie');await playOwn('red-10');await page.clock.runFor(2000);assert.equal(await revision(),'3');await page.clock.runFor(1000);assert.equal(await revision(),'3','Bot must not play while ante reveal is running');}},
+    {name:'bot skips post-presentation thought',anchor:'scheduleBot(1000);',replacement:'scheduleBot(0);',async dom(){await page.locator('.tutorial-chapter').selectOption('basics');await page.locator('.tutorial-lesson').selectOption('powers');await playOwn('black-3');await dismissPowers();await page.clock.runFor(999);assert.equal(await revision(),'1','A bot must wait a full second after all presentations');}},
   ];
   for(const [index,mutant] of mutants.entries()){
     let applied=0;const file=join(out,`mutant-${index}.mjs`);
