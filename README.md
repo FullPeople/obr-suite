@@ -12,6 +12,8 @@ https://obr.dnd.center/suite/manifest.json
 
 <sub>Testing channel (may break, not for tables you care about): `https://obr.dnd.center/suite-dev/manifest-dev.json` — install one or the other, never both in the same room.</sub>
 
+Dev **1.0.149-dev** was deployed on 2026-09-09; stable remains 1.2.2. Further feature work is paused for user testing. See the [test checklist](docs/DEV_TEST_CHECKLIST_20260909.md) and [deployment record](docs/DEV_RELEASE_20260909.md). Complete English XLSX downloads and server parser patches are not included in this deployment.
+
 ---
 
 ## <img src="docs/icons/translate.svg" width="16" align="center" /> Documentation
