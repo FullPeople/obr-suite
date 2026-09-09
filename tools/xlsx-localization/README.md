@@ -116,6 +116,39 @@ no caches and is not ready for upload or public download. It does not patch the
 server parser's separate layout mappings. See
 `docs/research/xlsx-main-export-20260909.md` for precise evidence and remaining work.
 
+## Use English Yes/No main-card controls
+
+This next increment takes the exact main-export outputs above. It translates
+five existing defaults: average Hit Dice and Heroic Inspiration in both cards,
+plus the 2014 Jack of All Trades switch. The 2024 O/X switch and prior shield
+control retain their existing behavior. Only the main worksheet changes.
+
+```text
+python -B -X utf8 tools/xlsx-localization/main_toggle_package.py --prepare --input-2014 <2014-main-export.xlsx> --input-2024 <2024-main-export.xlsx>
+node <spreadsheet-skill>/container_tools/mark_artifact_operation_started.mjs --operation-kind create --expected-output-count 1 --output-format xlsx
+node tools/xlsx-localization/author_toggle_targets.mjs <reported-plan.json> <new-author.xlsx> <bundled-node-dependency-directory>
+python -B -X utf8 tools/xlsx-localization/main_toggle_package.py --input-2014 <2014-main-export.xlsx> --input-2024 <2024-main-export.xlsx> --authored-targets <new-author.xlsx>
+```
+
+The single separate author table has 29 entries and 120 actual cells. Formula
+expressions are stored as text. The adapter checks all targets against the
+originals, formal reviews and both pinned inputs before creating candidates.
+Output directories must be new children of sibling `_audit/xlsx-main-toggles`,
+prefixed `toggle-plan-` or `toggle-candidate-`; Python optimization is rejected.
+
+The dropdowns offer Yes/No with the original strict validation settings. Twenty
+calculation formulas and two conditional predicates also recognize legacy Chinese
+values. Existing styles, objects, other inputs, helper sheets and AV1 remain.
+Actual Calc compared HP branches, all 18 affected skills and complete JSON output
+against the preceding cards; five longer Yes values were checked in actual PDFs.
+This is still partial English without caches. Dynamic multiline text, remaining
+lookups, full content, Excel/WPS and upload acceptance remain unfinished. See
+`docs/research/xlsx-main-toggles-20260909.md`.
+
+The server's separate layout corrections are delivered in four incremental
+packages under `tools/server-patches/`; the latest is `main-fields-20260909`.
+Applying a workbook stage does not install a server patch.
+
 ## Rebuild and check
 
 From the repository root, using Python 3.11 or newer:
