@@ -83,6 +83,39 @@ content, Excel/WPS interaction, saving and upload still need work. Exact native
 validation qualifications are in
 `docs/research/xlsx-main-display-20260909.md`.
 
+## Correct the main-card export fields
+
+Use the exact main-display outputs above as inputs for this additional stage.
+It fixes the original export's wrong special-ability rows, header-as-item row,
+quantities read from adjacent skills, and currency references to labels instead
+of amount inputs. The prior AS40 shield correction remains in place.
+
+```text
+python -B -X utf8 tools/xlsx-localization/main_export_package.py --prepare
+node <spreadsheet-skill>/container_tools/mark_artifact_operation_started.mjs --operation-kind create --expected-output-count 2 --output-format xlsx
+node tools/xlsx-localization/author_export_targets.mjs <reported-plan-directory> <new-author-directory> <bundled-node-dependency-directory>
+python -B -X utf8 tools/xlsx-localization/main_export_package.py --input-2014 <2014-main-display.xlsx> --input-2024 <2024-main-display.xlsx> --author-directory <new-author-directory>
+python -B -X utf8 tools/xlsx-localization/main_export_fields_selftest.py
+```
+
+The author tables contain literal formula text and never import a native card.
+Every actual value is checked before writing a candidate. The existing hidden
+Export sheet and main AV1 formula are the only changed parts; visible layout,
+other formulas, inputs, styles, images and comments remain intact. The unchanged,
+hash-checked compiler retains JSON escaping, numeric guards and overflow handling.
+
+Outputs stay in fresh sibling `_audit/xlsx-main-export` directories prefixed
+`export-plan-` or `export-candidate-`. Run from the desired checkout; explicit
+input files must match the reviewed preceding stage. Existing outputs and public
+files are never overwritten, and Python optimization mode is rejected.
+
+Native Calc verified the corrected field locations and row behavior in both
+versions. Dynamic multiline/tab user text exposed a separate Calc compatibility
+failure: those characters do not yet survive export intact. This stage still has
+no caches and is not ready for upload or public download. It does not patch the
+server parser's separate layout mappings. See
+`docs/research/xlsx-main-export-20260909.md` for precise evidence and remaining work.
+
 ## Rebuild and check
 
 From the repository root, using Python 3.11 or newer:
