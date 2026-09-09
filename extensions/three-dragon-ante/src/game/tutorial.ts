@@ -5,7 +5,6 @@ import { tableText, type TableLanguage } from './text';
 import { mountTableUI } from './ui';
 import type { TableView, ActionReceipt } from './protocol';
 import { REVEAL_PRESENTATION_MS } from './stage/types';
-import { POWER_PRESENTATION_MS, powerEvents } from './power-sequence';
 import './tutorial.css';
 
 type Words = readonly [string, string];
@@ -147,7 +146,7 @@ export interface TutorialHandle { setLanguage(lang: TableLanguage): void; suspen
 /** Isolated teaching table with paced local opponents. No SDK, storage, controller or room messages. */
 export function mountTutorial(parent: HTMLElement, initialLanguage: TableLanguage, onClose: () => void): TutorialHandle {
   let lang = initialLanguage, lessonId = 'game', generation = 0, serial = 0, destroyed = false;
-  let suspended = false, pageActive = true, botTimer: ReturnType<typeof setTimeout> | undefined;
+  let suspended = false, pageActive = true, presentationHeld = false, tableReady = false, botTimer: ReturnType<typeof setTimeout> | undefined;
   let scheduled: { key: string; seatId: string; remaining: number; due: number; generation: number; gameId: string } | null = null;
   type Trace = { before: GameState; after: GameState; move: GameAction };
   let game = createTutorialGame(), last: Trace | null = null, receipt: ActionReceipt | undefined;
@@ -161,16 +160,24 @@ export function mountTutorial(parent: HTMLElement, initialLanguage: TableLanguag
   const chapter = get<HTMLSelectElement>('.tutorial-chapter'), select = get<HTMLSelectElement>('.tutorial-lesson');
   const abort = new AbortController();
   const listen = (element: EventTarget, event: string, fn: EventListener) => element.addEventListener(event, fn, { signal: abort.signal });
-  const table = mountTableUI(get('.tutorial-table'), { language: lang, id: () => `lesson:${generation}:${++serial}`, send(command) {
+  const table = mountTableUI(get('.tutorial-table'), { language: lang, id: () => `lesson:${generation}:${++serial}`, onPresentationChange: presentationChanged, send(command) {
     if (destroyed) return;
     if (command.type === 'action') take(command.action, true);
     // The embedded table's room/window controls are hidden. Never forward commands.
     else render();
   } });
+  tableReady = true;
   const names: Record<Chapter, Words> = { game: ['完整练习局', 'Complete game'], basics: ['基础规则', 'Core rules'], legendary: ['传奇龙', 'Legendary dragons'], mortal: ['凡人', 'Mortals'] };
   function cancelBot() { if (botTimer !== undefined) clearTimeout(botTimer); botTimer = undefined; scheduled = null; }
   function paused() { return destroyed || suspended || !pageActive || document.hidden; }
   function pauseBot() { if (botTimer !== undefined && scheduled) scheduled.remaining = Math.max(0, scheduled.due - performance.now()); if (botTimer !== undefined) clearTimeout(botTimer); botTimer = undefined; }
+  function presentationChanged(busy: boolean) {
+    if (destroyed) return;
+    const wasHeld = presentationHeld; presentationHeld = busy;
+    if (!tableReady) return;
+    if (busy) { cancelBot(); return; }
+    if (wasHeld) { cancelBot(); scheduleBot(1000); }
+  }
   function botPlan(): { key: string; seatId: string; delay: number } | null {
     if (['ended', 'adjudication'].includes(game.stage)) return null;
     const opening = lessonId === 'game' && game.gambit === 1 && game.stage === 'ante' && !game.events.some(event => event.code === 'ANTE_ALL_TIED');
@@ -183,29 +190,29 @@ export function mountTutorial(parent: HTMLElement, initialLanguage: TableLanguag
     const actor = game.seats.find(seat => seat.id !== 'you' && projectSeat(game, seat.id).actions.length);
     // Authority already advanced. Only pace the next opponent after this reveal.
     const revealDelay = last?.move.kind === 'ante' && last.before.stage === 'ante' && last.after.stage === 'play' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? REVEAL_PRESENTATION_MS : 0;
-    const powerDelay = last ? powerEvents(projectSeat(last.before, 'you'), projectSeat(last.after, 'you')).length * POWER_PRESENTATION_MS : 0;
-    return actor ? { key: `${game.revision}:${actor.id}`, seatId: actor.id, delay: 1000 + revealDelay + powerDelay } : null;
+    return actor ? { key: `${game.revision}:${actor.id}`, seatId: actor.id, delay: 1000 + revealDelay } : null;
   }
-  function scheduleBot() {
+  function scheduleBot(resumedDelay?: number) {
     const plan = botPlan(), key = plan && `${generation}:${game.id}:${plan.key}`;
     if (!plan) { cancelBot(); return; }
-    if (scheduled?.key !== key) { cancelBot(); scheduled = { key: key!, seatId: plan.seatId, remaining: plan.delay, due: 0, generation, gameId: game.id }; }
-    if (paused() || botTimer !== undefined) return;
+    if (scheduled?.key !== key) { cancelBot(); scheduled = { key: key!, seatId: plan.seatId, remaining: resumedDelay ?? plan.delay, due: 0, generation, gameId: game.id }; }
+    if (paused() || presentationHeld || botTimer !== undefined) return;
+    if (table.presentationBusy()) { presentationHeld = true; cancelBot(); return; }
     const current = scheduled!; current.due = performance.now() + current.remaining;
     botTimer = setTimeout(() => {
       if (scheduled !== current || current.generation !== generation || current.gameId !== game.id || destroyed) return;
       botTimer = undefined;
       if (paused()) { current.remaining = 0; return; }
-      // A delayed presentation callback may outlive its nominal duration.
-      // Recheck only while it is busy; the same scoped timer is cancelled on hide/reset.
-      if (table.presentationBusy()) { current.remaining = 50; scheduleBot(); return; }
+      // User-dismissed presentations have no duration. Wait for the UI event;
+      // closing the final cue begins a fresh one-second thought, with no polling.
+      if (table.presentationBusy()) { presentationHeld = true; cancelBot(); return; }
       scheduled = null;
       const move = tutorialMove(game, lessonId, `lesson:${generation}:${++serial}`, current.seatId);
       if (move) take(move, false); else scheduleBot();
     }, current.remaining);
   }
   function syncVisibility() { if (paused()) { pauseBot(); table.suspend(); } else { table.resume(); scheduleBot(); } }
-  function reset(id: string) { cancelBot(); generation++; lessonId = id; game = createTutorialGame(id, String(generation)); last = null; receipt = undefined; history.length = 0; render(); }
+  function reset(id: string) { cancelBot(); presentationHeld = false; generation++; lessonId = id; game = createTutorialGame(id, String(generation)); last = null; receipt = undefined; history.length = 0; render(); }
   function take(move: GameAction, human: boolean) {
     if (paused() || human && move.seatId !== 'you' || !human && move.seatId === 'you') return;
     const result = applyAction(game, move);
@@ -242,7 +249,7 @@ export function mountTutorial(parent: HTMLElement, initialLanguage: TableLanguag
   listen(get('.tutorial-close'), 'click', () => { destroy(); onClose(); });
   listen(chapter, 'change', () => reset(tutorialLessons.find(value => value.chapter === chapter.value)!.id));
   listen(select, 'change', () => reset(select.value));
-  listen(get('.tutorial-undo'), 'click', () => { const previous = history.pop(); if (previous) { cancelBot(); generation++; game = previous.game; last = previous.last; receipt = undefined; render(); } });
+  listen(get('.tutorial-undo'), 'click', () => { const previous = history.pop(); if (previous) { cancelBot(); presentationHeld = false; generation++; game = previous.game; last = previous.last; receipt = undefined; render(); } });
   listen(get('.tutorial-restart'), 'click', () => reset(lessonId));
   listen(host, 'keydown', event => { const key = event as KeyboardEvent; if (key.key === 'Escape' && !key.defaultPrevented) { key.preventDefault(); destroy(); onClose(); } });
   listen(document, 'visibilitychange', syncVisibility);

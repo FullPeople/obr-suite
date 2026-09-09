@@ -1,7 +1,8 @@
 import { card, CARDS } from "./rules/cards";
 import type { PublicEvent, PublicView } from "./rules/types";
 
-export const POWER_PRESENTATION_MS = 1500;
+/** Rotation stops after this interval; the explanation waits for a click. */
+export const POWER_CARD_MOTION_MS = 1500;
 export interface PowerCue { cardId:string; seatId:string; family:string; key:string }
 
 /** Consume only a provably new public log suffix. No replay on first load or a gap. */

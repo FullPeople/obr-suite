@@ -8,7 +8,7 @@ import {join,resolve,basename} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 const base=import.meta.dirname,out=mkdtempSync(join(tmpdir(),'tda-ui-stage-'));
-const files=['ui.ts','page.ts','tutorial.ts','stage-ui.css','stage/index.ts','stage/layout.ts','stage/textures.ts','interaction/drag-controller.ts','protocol.ts'];
+const files=['ui.ts','page.ts','tutorial.ts','stage-ui.css','stage/index.ts','stage/layout.ts','stage/textures.ts','interaction/drag-controller.ts','protocol.ts','power-presentation.ts','power-presentation.css','power-sequence.ts','rules/prompts.ts'];
 const hashFiles=()=>Object.fromEntries(files.map(f=>[f,existsSync(join(base,f))?createHash('sha256').update(readFileSync(join(base,f))).digest('hex'):null]));
 const hashes=hashFiles();
 const runtime=process.env.CODEX_NODE_MODULES||'C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';
@@ -104,7 +104,11 @@ try{
  check('practice action receives real engine ACK and does not stay locked',await page.evaluate(()=>document.querySelector('.tda-tutorial').dataset.revision==='1'&&document.querySelector('.tda-tutorial .table-shell').dataset.pendingAction==='false'));
  await page.locator('.tutorial-undo').click();check('practice undo restores earlier engine projection',await page.locator('.tda-tutorial').getAttribute('data-revision')==='0');
  await page.locator('.tutorial-chapter').selectOption('mortal');await page.locator('.tutorial-lesson').selectOption('kobold');await settled();
- const kobold=await page.evaluate(()=>({from:stages.at(-1).getAnchor({cardId:'kobold'}),to:stages.at(-1).getAnchor({zone:'flight',seatId:'you'})}));assert.ok(kobold.from&&kobold.to);await page.mouse.move(kobold.from.x,kobold.from.y);await page.mouse.down();await page.mouse.move(kobold.to.x,kobold.to.y,{steps:8});await page.mouse.up();await page.locator('.tda-tutorial #confirm-action').click();
+ const kobold=await page.evaluate(()=>({from:stages.at(-1).getAnchor({cardId:'kobold'}),to:stages.at(-1).getAnchor({zone:'flight',seatId:'you'})}));assert.ok(kobold.from&&kobold.to);await page.mouse.move(kobold.from.x,kobold.from.y);await page.mouse.down();await page.mouse.move(kobold.to.x,kobold.to.y,{steps:8});await page.mouse.up();
+ // The complete power explanation now waits for a deliberate click, including
+ // in reduced-motion practice. Dismiss the real visible overlay before choosing.
+ const koboldPower=page.locator('.tda-tutorial .power-overlay');await koboldPower.waitFor({state:'visible'});await koboldPower.click();await koboldPower.waitFor({state:'hidden'});
+ await page.locator('.tda-tutorial #confirm-action').click();
  check('special ability choice alone retains confirm and receives real ACK',await page.evaluate(()=>document.querySelector('.tda-tutorial').dataset.revision==='2'&&document.querySelector('.tda-tutorial .table-shell').dataset.pendingAction==='false'));
  await page.locator('.tutorial-close').click();check('closing practice disposes its GPU and resumes real table',await page.evaluate(()=>stages.at(-1).diagnostics().destroyed&&!stages[stages.length-2].diagnostics().suspended));
  await page.evaluate(()=>h.surface.destroy());check('destroy clears UI and pending resources',await page.evaluate(()=>!document.querySelector('#table-app').children.length&&stages[stages.length-2].diagnostics().destroyed));

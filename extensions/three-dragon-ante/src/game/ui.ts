@@ -15,7 +15,7 @@ import {mountPowerPresentation} from "./power-presentation";
 import {mountTableAudio} from "./audio";
 import "./stage-ui.css";
 
-export interface TableUIDeps {send(command:TableUICommand):void|Promise<void>;language:TableLanguage;mode?:TableDisplayMode;gesture?(value:HandGesture):void;id?():string}
+export interface TableUIDeps {send(command:TableUICommand):void|Promise<void>;language:TableLanguage;mode?:TableDisplayMode;gesture?(value:HandGesture):void;id?():string;onPresentationChange?(busy:boolean):void}
 /** This surface receives projections only. It never imports or constructs host state. */
 export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  let view:TableView|null=null,lang=deps.language,sending=false,destroyed=false,selectionKey="",selected=new Set<string>(),resetKey="",localMessage="";
@@ -35,6 +35,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  let revealPhase:"placing"|"revealing"|"price"|"payment"|"discard"|null=null;
  let power:ReturnType<typeof mountPowerPresentation>|null=null,sound:ReturnType<typeof mountTableAudio>|null=null;
  let updating=false,syncingStage=false,stageView:PublicView|SeatView|null=null,presentationBase:TableView|null=null,anteSoundKey="";
+ let notifiedPresentationBusy=false;
  const deferredSounds=new Map<"draw"|"flip"|"coin",string>();
  let pendingAction:{actionId:string;tableId:string;gameId:string;revision:number;cardId?:string;zone?:"ante"|"flight";action:GameAction;retryable:boolean}|null=null;
  const reduced=matchMedia("(prefers-reduced-motion: reduce)");
@@ -191,12 +192,14 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   for(const kind of kinds)if(power?.busy)deferredSounds.set(kind,key);else sound?.play(kind,key);
  }
  function clearPresentation(){presentationBase=null;deferredSounds.clear();anteSoundKey="";power?.clear();}
+ function notifyPresentation(){if(updating||destroyed)return;const busy=!!power?.busy||!!revealPhase;if(busy!==notifiedPresentationBusy){notifiedPresentationBusy=busy;deps.onPresentationChange?.(busy);}}
  function presentationChanged(){
   root.dataset.powerActive=String(!!power?.busy);
   if(updating||destroyed)return;
   const previous=!power?.busy?presentationBase:null;if(!power?.busy)presentationBase=null;
   render();
   if(!power?.busy){if(previous)animateChanges(previous);for(const [kind,key] of deferredSounds)sound?.play(kind,key);deferredSounds.clear();}
+  notifyPresentation();
  }
  function receiveBannerEvent(previous:TableView|null){
   const old=previous?.game,next=view?.game;
@@ -359,7 +362,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  power=mountPowerPresentation(root,{language:lang,seatName:id=>id===privateGame()?.selfSeatId?t("you"):seatName(id),onChange:presentationChanged});
  sound=mountTableAudio(root,{onEnabledChange:()=>{if(!destroyed)soundControls();}});
  el("sound-toggle").addEventListener("click",()=>{sound?.setEnabled(!sound.enabled);soundControls();});
- stage=mountTableStage(el<HTMLCanvasElement>("table-stage"),{onRevealPhase:phase=>{revealPhase=phase;if(!destroyed){renderBanner();if(anteSoundKey&&phase==="revealing")sound?.play('flip',anteSoundKey);if(anteSoundKey&&phase==="payment")sound?.play('coin',anteSoundKey);syncSelection();}},onQuality:quality=>{stageAvailable=quality.webgl;root.dataset.renderer=stageAvailable?"webgl":"dom";if(stageReady&&!destroyed)render();}});stageReady=true;
+ stage=mountTableStage(el<HTMLCanvasElement>("table-stage"),{onRevealPhase:phase=>{revealPhase=phase;if(!destroyed){renderBanner();if(anteSoundKey&&phase==="revealing")sound?.play('flip',anteSoundKey);if(anteSoundKey&&phase==="payment")sound?.play('coin',anteSoundKey);syncSelection();notifyPresentation();}},onQuality:quality=>{stageAvailable=quality.webgl;root.dataset.renderer=stageAvailable?"webgl":"dom";if(stageReady&&!destroyed)render();}});stageReady=true;
  dragController=mountDragController(el("table-stage"),{...ports,hitTest:(x,y)=>stageAvailable?stage?.hitTest(x,y)??null:null,drag:value=>{if(value)pointerLift(value.cardId);stage?.setDrag(value);}});
  domDragController=mountDragController(root,{...ports,hover:id=>{if(!stageAvailable)hover(id);},hitTest:domHit,drag:value=>{if(!value)return;pointerLift(value.cardId);const item=[...root.querySelectorAll<HTMLElement>("#hand [data-card]")].find(c=>c.dataset.card===value.cardId);if(item){item.classList.add("dom-dragging");if(!domGhost){domGhost=item.cloneNode(true) as HTMLElement;domGhost.classList.remove("dom-dragging");domGhost.classList.add("dom-drag-ghost");domGhost.setAttribute("aria-hidden","true");domGhost.removeAttribute("tabindex");document.body.append(domGhost);}domGhost.style.left=`${value.x-65}px`;domGhost.style.top=`${value.y-90}px`;}}});
  const motionPreference=()=>{syncStage();};reduced.addEventListener("change",motionPreference);
@@ -375,7 +378,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   const cues=live&&adjacent?powerEvents(previous?.game,value.game):[];
   if(cues.length){if(!power?.busy)presentationBase=previous;power?.enqueue(cues);}
   receiveBannerEvent(previous);applyReceipt();render();playUpdateSounds(previous);if(!power?.busy)animateChanges(previous);
- }finally{updating=false;}},gesture(seatId:string,value:unknown){if(destroyed)return;if(value===null){stage?.gesture(seatId,null);const entry=gestures.get(seatId);if(entry)clearTimeout(entry.timer);gestures.delete(seatId);paintGestures();return;}const gesture=readHandGesture(value);if(!gesture||seatId===privateGame()?.selfSeatId)return;const old=gestures.get(seatId);if(old&&gesture.sequence<=old.value.sequence)return;stage?.gesture(seatId,gesture);if(old)clearTimeout(old.timer);gestures.set(seatId,{value:gesture,timer:setTimeout(()=>{gestures.delete(seatId);paintGestures();},30000)});paintGestures();},language,restore(value:unknown){if(!touched)pendingDraft=readUIDraft(value);restoreDraft();},draft,
+ }finally{updating=false;notifyPresentation();}},gesture(seatId:string,value:unknown){if(destroyed)return;if(value===null){stage?.gesture(seatId,null);const entry=gestures.get(seatId);if(entry)clearTimeout(entry.timer);gestures.delete(seatId);paintGestures();return;}const gesture=readHandGesture(value);if(!gesture||seatId===privateGame()?.selfSeatId)return;const old=gestures.get(seatId);if(old&&gesture.sequence<=old.value.sequence)return;stage?.gesture(seatId,gesture);if(old)clearTimeout(old.timer);gestures.set(seatId,{value:gesture,timer:setTimeout(()=>{gestures.delete(seatId);paintGestures();},30000)});paintGestures();},language,restore(value:unknown){if(!touched)pendingDraft=readUIDraft(value);restoreDraft();},draft,
  waitingForReceipt:()=>!!pendingAction,
  presentationBusy:()=>!!power?.busy||!!revealPhase,
  getAnchor(zone:"hand"|"ownAnte"|"ownFlight"|"stakes"){const own=privateGame();const query=zone==="hand"?{cardId:own?.hand[0]?.id}:zone==="stakes"?{zone:"stakes" as const}:{zone:zone==="ownAnte"?"ante" as const:"flight" as const,seatId:own?.selfSeatId};const point=stageAvailable?stage?.getAnchor(query):null;if(point?.visible)return new DOMRect(point.x-10,point.y-10,20,20);if(!stageAvailable){const target=zone==="hand"?root.querySelector("#hand [data-card]"):zone==="stakes"?root.querySelector(".counter.stakes"):root.querySelector(`.seat.self [data-drop-zone="${zone==="ownAnte"?"ante":"flight"}"]`);return target?.getBoundingClientRect()??null;}return null;},
