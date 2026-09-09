@@ -1,0 +1,659 @@
+{
+  "schema_version": "0.3",
+  "meta": {
+    "template_name": "Beiling",
+    "template_version": "ver.",
+    "layout_version": "v1.0.12",
+    "ruleset": "5E2024",
+    "source_file": "tmpma5wuyud.xlsx",
+    "parsed_at": "2026-09-09T21:37:12Z"
+  },
+  "identity": {
+    "character_name": "Hero \"name\"\nSecond\tColumn",
+    "display_name": null,
+    "player": "悲灵",
+    "race": {
+      "name": null,
+      "subrace": null
+    },
+    "alignment": null,
+    "faith": null,
+    "age": null,
+    "gender": null,
+    "height": null,
+    "weight": null,
+    "hometown": null,
+    "languages": [],
+    "tool_proficiencies": []
+  },
+  "classes": [
+    {
+      "role": "主职",
+      "name": null,
+      "subclass": null,
+      "level": null
+    },
+    {
+      "role": "兼职1",
+      "name": null,
+      "subclass": null,
+      "level": null
+    },
+    {
+      "role": "兼职2",
+      "name": null,
+      "subclass": null,
+      "level": null
+    }
+  ],
+  "total_level": 0,
+  "abilities": {
+    "str": {
+      "total": 10,
+      "initial": 10,
+      "background": 0,
+      "growth": 0,
+      "misc": 0,
+      "modifier": 0,
+      "save": {
+        "proficient": false,
+        "bonus": 0,
+        "misc": 0
+      }
+    },
+    "dex": {
+      "total": 10,
+      "initial": 10,
+      "background": 0,
+      "growth": 0,
+      "misc": 0,
+      "modifier": 0,
+      "save": {
+        "proficient": false,
+        "bonus": 0,
+        "misc": 0
+      }
+    },
+    "con": {
+      "total": 10,
+      "initial": 10,
+      "background": 0,
+      "growth": 0,
+      "misc": 0,
+      "modifier": 0,
+      "save": {
+        "proficient": false,
+        "bonus": 0,
+        "misc": 0
+      }
+    },
+    "int": {
+      "total": 10,
+      "initial": 10,
+      "background": 0,
+      "growth": 0,
+      "misc": 0,
+      "modifier": 0,
+      "save": {
+        "proficient": false,
+        "bonus": 0,
+        "misc": 0
+      }
+    },
+    "wis": {
+      "total": 10,
+      "initial": 10,
+      "background": 0,
+      "growth": 0,
+      "misc": 0,
+      "modifier": 0,
+      "save": {
+        "proficient": false,
+        "bonus": 0,
+        "misc": 0
+      }
+    },
+    "cha": {
+      "total": 10,
+      "initial": 10,
+      "background": 0,
+      "growth": 0,
+      "misc": 0,
+      "modifier": 0,
+      "save": {
+        "proficient": false,
+        "bonus": 0,
+        "misc": 0
+      }
+    }
+  },
+  "core_stats": {
+    "proficiency_bonus": 2,
+    "initiative": 0,
+    "ac": 12,
+    "dc": 10,
+    "dc_ability": "Charisma",
+    "passive_perception": 10,
+    "speed": 30,
+    "size": "Medium",
+    "hp": {
+      "current": 0,
+      "max": 0,
+      "temp": 0
+    },
+    "hit_dice": {
+      "current": 0,
+      "max": 0,
+      "die_size": null
+    }
+  },
+  "defenses": {
+    "resistances": [],
+    "immunities": [],
+    "advantages": [],
+    "disadvantages": []
+  },
+  "skills": [
+    {
+      "name": "运动",
+      "ability": "str",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "特技",
+      "ability": "dex",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "巧手",
+      "ability": "dex",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "隐匿",
+      "ability": "dex",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "调查",
+      "ability": "int",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "奥秘",
+      "ability": "int",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "历史",
+      "ability": "int",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "自然",
+      "ability": "int",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "宗教",
+      "ability": "int",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "察觉",
+      "ability": "wis",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "洞悉",
+      "ability": "wis",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "驯兽",
+      "ability": "wis",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "医药",
+      "ability": "wis",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "求生",
+      "ability": "wis",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "游说",
+      "ability": "cha",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "欺瞒",
+      "ability": "cha",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "威吓",
+      "ability": "cha",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    },
+    {
+      "name": "表演",
+      "ability": "cha",
+      "proficiency": "none",
+      "total": 0,
+      "misc_bonus": 0
+    }
+  ],
+  "combat": {
+    "armor": {
+      "name": null,
+      "ac_base": 10,
+      "dex_bonus_cap": 0,
+      "attuned": false,
+      "weight": null,
+      "equipped": true
+    },
+    "shield": {
+      "ac_bonus": 2,
+      "attuned": false,
+      "equipped": true
+    },
+    "weapons": [],
+    "other_equipment": []
+  },
+  "spellcasting": {
+    "spellcasting_ability": "Charisma",
+    "save_dc": 10,
+    "attack_bonus": "D20+2",
+    "max_prepared": null,
+    "spell_slots": {},
+    "sorcery_points": null,
+    "always_known": [],
+    "cantrips_known": [],
+    "prepared": []
+  },
+  "features": {
+    "class_features": [],
+    "race_features": [],
+    "feats": [],
+    "fighting_style_feats": [],
+    "special_abilities": [
+      {
+        "name": "Custom Feature",
+        "description": "First \"quoted\" line \\ 中文\nSecond line\tTabbed\nThird line"
+      }
+    ]
+  },
+  "special_resources": [],
+  "background": {
+    "background_name": "自定义背景",
+    "personality": null,
+    "appearance": null,
+    "traits": null,
+    "ideals": null,
+    "bonds": null,
+    "flaws": null,
+    "story": null,
+    "description": "角色的背景代表了这个角色在成为冒险者之前的经历。通过创建一个独特的背景或对玩家手册中现有的背景进行修改，你可以反映战役的特定主题或是你世界中的独特元素。你也可以通过创建新的背景来帮助玩家为他们的角色制作心目中的起源故事。"
+  },
+  "inventory": {
+    "currency": {
+      "wallet": {
+        "gp": 0,
+        "pp": 0,
+        "ep": 0,
+        "sp": 0,
+        "cp": 0
+      },
+      "total_gp": 0,
+      "total_gp_raw": "0GP"
+    },
+    "encumbrance": {
+      "equipment_weight": 6,
+      "pack1_weight": 0,
+      "pack2_weight": 0,
+      "total_weight": 6,
+      "light_threshold": 0,
+      "heavy_threshold": 0,
+      "overloaded_threshold": 0,
+      "max_capacity": 150
+    },
+    "items": [],
+    "wondrous_items": [
+      {
+        "name": "Ring",
+        "quantity": 1,
+        "attuned": false,
+        "rarity": null,
+        "slot": null,
+        "properties": "First \"quoted\" line \\ 中文\nSecond line\tTabbed\nThird line"
+      }
+    ],
+    "consumables": [
+      {
+        "name": "Potion",
+        "quantity": 1,
+        "rarity": null,
+        "description": "First \"quoted\" line \\ 中文\nSecond line\tTabbed\nThird line"
+      }
+    ],
+    "containers": [
+      {
+        "label": "背包 1",
+        "rows": "5-25",
+        "schema": {
+          "name": "B",
+          "desc": "G",
+          "weight": "S",
+          "qty": "V"
+        },
+        "items": [
+          {
+            "row": 15,
+            "name": "工具",
+            "description": null,
+            "weight": null,
+            "quantity": null
+          }
+        ]
+      },
+      {
+        "label": "背包 2",
+        "rows": "5-25",
+        "schema": {
+          "name": "Y",
+          "desc": "AD",
+          "weight": "AP",
+          "qty": "AS"
+        },
+        "items": []
+      },
+      {
+        "label": "次元袋 1",
+        "rows": "29-49",
+        "schema": {
+          "name": "B",
+          "desc": "G",
+          "weight": "S",
+          "qty": "V"
+        },
+        "items": []
+      },
+      {
+        "label": "次元袋 2",
+        "rows": "29-49",
+        "schema": {
+          "name": "Y",
+          "desc": "AD",
+          "weight": "AP",
+          "qty": "AS"
+        },
+        "items": []
+      }
+    ]
+  },
+  "auto_resources": [],
+  "exports": {
+    "dice_bot": "{\"schema\":\"obr-suite-card/v1\",\"meta\":{\"template\":\"DND 5E 2024 Character Sheet <Beiling ver.>\",\"ruleset\":\"5E2024\"},\"identity\":{\"character_name\":\"Hero \\\"name\\\"Second\\u0001Column\",\"display_name\":\"\",\"player\":\"悲灵\",\"race\":\"\",\"subrace\":\"\",\"alignment\":\"\",\"faith\":\"\"},\"classes\":[{\"name\":\"\",\"sub\":\"\",\"level\":0}],\"abilities\":{\"str\":{\"score\":10,\"mod\":\"0\",\"save\":\"0\",\"save_prof\":\"X\"},\"dex\":{\"score\":10,\"mod\":\"0\",\"save\":\"0\",\"save_prof\":\"X\"},\"con\":{\"score\":10,\"mod\":\"0\",\"save\":\"0\",\"save_prof\":\"X\"},\"int\":{\"score\":10,\"mod\":\"0\",\"save\":\"0\",\"save_prof\":\"X\"},\"wis\":{\"score\":10,\"mod\":\"0\",\"save\":\"0\",\"save_prof\":\"X\"},\"cha\":{\"score\":10,\"mod\":\"0\",\"save\":\"0\",\"save_prof\":\"X\"}},\"core_stats\":{\"prof_bonus\":\"2\",\"initiative\":\"0\",\"ac\":\"12\",\"dc\":\"10\",\"dc_ability\":\"Charisma\",\"passive_perception\":\"10\",\"speed\":\"30\",\"size\":\"Medium\",\"hp\":{\"current\":0,\"max\":0,\"temp\":0},\"hd\":{\"current\":0,\"max\":0}},\"combat\":{\"armor\":{\"name\":\"\",\"ac_base\":\"10\",\"dex_cap\":\"0\",\"attuned\":\"\",\"weight\":\"\"},\"shield\":{\"ac_bonus\":\"2\",\"attuned\":\"\",\"equipped\":\"Yes\"},\"weapons\":[]},\"spell_slots\":{\"1\":{\"current\":0,\"max\":0},\"2\":{\"current\":0,\"max\":0},\"3\":{\"current\":0,\"max\":0},\"4\":{\"current\":0,\"max\":0},\"5\":{\"current\":0,\"max\":0},\"6\":{\"current\":0,\"max\":0},\"7\":{\"current\":0,\"max\":0},\"8\":{\"current\":0,\"max\":0},\"9\":{\"current\":0,\"max\":0}},\"special_resources\":[{\"name\":\"Special Ability\",\"cur\":0,\"max\":0,\"recharge\":\"\"},{\"name\":\"Special Ability\",\"cur\":0,\"max\":0,\"recharge\":\"\"},{\"name\":\"Special Ability\",\"cur\":0,\"max\":0,\"recharge\":\"\"},{\"name\":\"Special Ability\",\"cur\":0,\"max\":0,\"recharge\":\"\"},{\"name\":\"Special Ability\",\"cur\":0,\"max\":0,\"recharge\":\"\"},{\"name\":\"Special Ability\",\"cur\":0,\"max\":0,\"recharge\":\"\"},{\"name\":\"Special Ability\",\"cur\":0,\"max\":0,\"recharge\":\"\"},{\"name\":\"Special Ability\",\"cur\":0,\"max\":0,\"recharge\":\"\"},{\"name\":\"Special Ability\",\"cur\":0,\"max\":0,\"recharge\":\"\"}],\"features\":{\"fighting_style\":[],\"special_abilities\":[{\"name\":\"Custom Feature\",\"desc\":\"First \\\"quoted\\\" line \\\\ 中文Second line\\u0001TabbedThird line\"}]},\"wondrous\":[{\"name\":\"Ring\",\"qty\":\"1\",\"attuned\":\"\",\"rarity\":\"\",\"slot\":\"\",\"props\":\"First \\\"quoted\\\" line \\\\ 中文Second line\\u0001TabbedThird line\"}],\"consumables\":[{\"name\":\"Potion\",\"qty\":\"\",\"rarity\":\"\",\"desc\":\"First \\\"quoted\\\" line \\\\ 中文Second line\\u0001TabbedThird line\"}],\"currency\":{\"pp\":0,\"gp\":0,\"ep\":0,\"sp\":0,\"cp\":0}}",
+    "embedded_json": {
+      "schema": "obr-suite-card/v1",
+      "meta": {
+        "template": "DND 5E 2024 Character Sheet <Beiling ver.>",
+        "ruleset": "5E2024"
+      },
+      "identity": {
+        "character_name": "Hero \"name\"Second\u0001Column",
+        "display_name": "",
+        "player": "悲灵",
+        "race": "",
+        "subrace": "",
+        "alignment": "",
+        "faith": ""
+      },
+      "classes": [
+        {
+          "name": "",
+          "sub": "",
+          "level": 0
+        }
+      ],
+      "abilities": {
+        "str": {
+          "score": 10,
+          "mod": "0",
+          "save": "0",
+          "save_prof": "X"
+        },
+        "dex": {
+          "score": 10,
+          "mod": "0",
+          "save": "0",
+          "save_prof": "X"
+        },
+        "con": {
+          "score": 10,
+          "mod": "0",
+          "save": "0",
+          "save_prof": "X"
+        },
+        "int": {
+          "score": 10,
+          "mod": "0",
+          "save": "0",
+          "save_prof": "X"
+        },
+        "wis": {
+          "score": 10,
+          "mod": "0",
+          "save": "0",
+          "save_prof": "X"
+        },
+        "cha": {
+          "score": 10,
+          "mod": "0",
+          "save": "0",
+          "save_prof": "X"
+        }
+      },
+      "core_stats": {
+        "prof_bonus": "2",
+        "initiative": "0",
+        "ac": "12",
+        "dc": "10",
+        "dc_ability": "Charisma",
+        "passive_perception": "10",
+        "speed": "30",
+        "size": "Medium",
+        "hp": {
+          "current": 0,
+          "max": 0,
+          "temp": 0
+        },
+        "hd": {
+          "current": 0,
+          "max": 0
+        }
+      },
+      "combat": {
+        "armor": {
+          "name": "",
+          "ac_base": "10",
+          "dex_cap": "0",
+          "attuned": "",
+          "weight": ""
+        },
+        "shield": {
+          "ac_bonus": "2",
+          "attuned": "",
+          "equipped": "Yes"
+        },
+        "weapons": []
+      },
+      "spell_slots": {
+        "1": {
+          "current": 0,
+          "max": 0
+        },
+        "2": {
+          "current": 0,
+          "max": 0
+        },
+        "3": {
+          "current": 0,
+          "max": 0
+        },
+        "4": {
+          "current": 0,
+          "max": 0
+        },
+        "5": {
+          "current": 0,
+          "max": 0
+        },
+        "6": {
+          "current": 0,
+          "max": 0
+        },
+        "7": {
+          "current": 0,
+          "max": 0
+        },
+        "8": {
+          "current": 0,
+          "max": 0
+        },
+        "9": {
+          "current": 0,
+          "max": 0
+        }
+      },
+      "special_resources": [
+        {
+          "name": "Special Ability",
+          "cur": 0,
+          "max": 0,
+          "recharge": ""
+        },
+        {
+          "name": "Special Ability",
+          "cur": 0,
+          "max": 0,
+          "recharge": ""
+        },
+        {
+          "name": "Special Ability",
+          "cur": 0,
+          "max": 0,
+          "recharge": ""
+        },
+        {
+          "name": "Special Ability",
+          "cur": 0,
+          "max": 0,
+          "recharge": ""
+        },
+        {
+          "name": "Special Ability",
+          "cur": 0,
+          "max": 0,
+          "recharge": ""
+        },
+        {
+          "name": "Special Ability",
+          "cur": 0,
+          "max": 0,
+          "recharge": ""
+        },
+        {
+          "name": "Special Ability",
+          "cur": 0,
+          "max": 0,
+          "recharge": ""
+        },
+        {
+          "name": "Special Ability",
+          "cur": 0,
+          "max": 0,
+          "recharge": ""
+        },
+        {
+          "name": "Special Ability",
+          "cur": 0,
+          "max": 0,
+          "recharge": ""
+        }
+      ],
+      "features": {
+        "fighting_style": [],
+        "special_abilities": [
+          {
+            "name": "Custom Feature",
+            "desc": "First \"quoted\" line \\ 中文Second line\u0001TabbedThird line"
+          }
+        ]
+      },
+      "wondrous": [
+        {
+          "name": "Ring",
+          "qty": "1",
+          "attuned": "",
+          "rarity": "",
+          "slot": "",
+          "props": "First \"quoted\" line \\ 中文Second line\u0001TabbedThird line"
+        }
+      ],
+      "consumables": [
+        {
+          "name": "Potion",
+          "qty": "",
+          "rarity": "",
+          "desc": "First \"quoted\" line \\ 中文Second line\u0001TabbedThird line"
+        }
+      ],
+      "currency": {
+        "pp": 0,
+        "gp": 0,
+        "ep": 0,
+        "sp": 0,
+        "cp": 0
+      }
+    }
+  }
+}

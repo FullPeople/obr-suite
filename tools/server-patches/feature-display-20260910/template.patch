@@ -1,0 +1,33 @@
+--- a/renderer/template.html
++++ b/renderer/template.html
+@@ -17,7 +17,7 @@
+   <div class="id-bar">
+     <div class="cell name-cell">
+       <div class="label">角色</div>
+-      <div class="value">{{ c.identity.display_name or '—' }}</div>
++      <div class="value">{{ c.identity.display_name or c.identity.character_name or '—' }}</div>
+       <div class="sub">{{ c.identity.character_name or '' }}</div>
+     </div>
+     <div class="cell">
+@@ -181,6 +181,21 @@
+           {% if f.description %}<div class="feat-desc">{{ f.description }}</div>{% endif %}
+         </div>
+         {% endfor %}
++        {% for key, title in [('fighting_style_feats', '战斗风格'), ('special_abilities', '特殊能力')] %}
++        {% set entries = c.features.get(key) or [] %}
++        {% if entries %}
++        <div class="feat-section-label">{{ title }}</div>
++        {% for f in entries %}
++        <details class="feat-item" data-feature-kind="{{ key }}" open>
++          <summary class="feat-head">
++            {% if f.level %}<span class="feat-lv">Lv{{ f.level }}</span>{% endif %}
++            <span class="feat-name">{{ f.name }}</span>
++          </summary>
++          {% if f.description %}<div class="feat-desc" style="display:block;overflow-wrap:anywhere">{{ f.description }}</div>{% endif %}
++        </details>
++        {% endfor %}
++        {% endif %}
++        {% endfor %}
+       </div>
+     </div>
+ 

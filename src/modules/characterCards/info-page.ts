@@ -12,6 +12,7 @@ import { mountStatBanner } from "../../utils/statBanner";
 import { installPanelZoom } from "../../utils/panelZoom";
 import {getLocalLang,onLangChange} from "../../state";
 import {ccText,ccTerm,ccName,ccUnits,ccProperty,abilityKey,abilityName} from "./localization";
+import { renderCardEntries } from "./info-entries";
 const L=(key:string)=>ccText(key,getLocalLang());
 const term=(value:unknown)=>ccTerm(value,getLocalLang());
 
@@ -613,12 +614,10 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {},l
 
   const weps = weaponRows.length ? weaponRows.join("") : `<div class="empty">${L("none")}</div>`;
 
-  // ── Searchable chips: features / feats / spells ────────────────
-  // Each chip is a tiny compact name-only box. Clicking fills the
-  // cluster's search input with that name (BC_SEARCH_QUERY) so the
-  // 5etools search popover opens with matching results — letting
-  // the player look up a feature definition without leaving OBR.
-  const featuresHtml = renderSearchChips(d);
+  // Keep the reader's expanded entries while switching display language.
+  const openEntries = new Set(languageOnly
+    ? Array.from(root.querySelectorAll<HTMLDetailsElement>(".cc-entry[open]"), entry => entry.dataset.entryId!) : []);
+  const featuresHtml = renderCardEntries(d, getLocalLang(), openEntries);
 
   // Combined attribute pane content (chips / abilities / weapons /
   // features). On stable: render flat (no tabs, no slide). On dev:
@@ -767,64 +766,9 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {},l
 // pointer-capture state inside panelDrag, which the unbind handles.)
 let currentDragUnbind: (() => void) | null = null;
 
-// Compact name-only chips. Click → fires BC_SEARCH_QUERY to populate
-// the cluster's search input. The cluster echoes its own input value
-// from this broadcast so the user sees the chip text appear in the
-// search box and the search popover opens with matching results.
-function renderSearchChips(d: any): string {
-  const sections: string[] = [];
-  const features = d.features ?? {};
-
-  const renderChips = (items: any[]) => items
-    .filter((x) => x && x.name)
-    .map((x) => {
-      const nm = ccName(x,getLocalLang());
-      return `<span class="srch-chip" data-q="${escapeHtml(nm)}">${escapeHtml(nm)}</span>`;
-    })
-    .join("");
-
-  // 特性 = race_features + class_features (merged into one tight grid).
-  const featList: any[] = [];
-  if (Array.isArray(features.race_features)) featList.push(...features.race_features);
-  if (Array.isArray(features.class_features)) featList.push(...features.class_features);
-  if (featList.length) {
-    sections.push(`<div class="srch-sect">
-      <div class="srch-sect-h">${L("features")}</div>
-      <div class="srch-grid">${renderChips(featList)}</div>
-    </div>`);
-  }
-
-  // 专长 — class feats list.
-  if (Array.isArray(features.feats) && features.feats.length) {
-    sections.push(`<div class="srch-sect">
-      <div class="srch-sect-h">${L("feats")}</div>
-      <div class="srch-grid">${renderChips(features.feats)}</div>
-    </div>`);
-  }
-
-  // 法术 — flatten always_known + prepared + cantrips_known into one
-  // grid (de-duplicated by name).
-  const sp = d.spellcasting ?? {};
-  const allSpells: any[] = [];
-  for (const key of ["cantrips_known", "always_known", "prepared"]) {
-    const arr = sp[key];
-    if (Array.isArray(arr)) for (const s of arr) if (s && s.name) allSpells.push(s);
-  }
-  if (allSpells.length) {
-    const seen = new Set<string>();
-    const uniq = allSpells.filter((s) => {
-      if (seen.has(s.name)) return false;
-      seen.add(s.name);
-      return true;
-    });
-    sections.push(`<div class="srch-sect">
-      <div class="srch-sect-h">${L("spells")}</div>
-      <div class="srch-grid">${renderChips(uniq)}</div>
-    </div>`);
-  }
-
-  return sections.join("");
-}
+root.addEventListener("toggle", event => {
+  if ((event.target as Element | null)?.matches(".cc-entry")) queueAdjustHeight();
+}, true);
 
 // Single delegated click handler for ALL rollable spans inside the
 // card. Reads the bound token id at click time so dice anchor on the
@@ -840,7 +784,7 @@ root.addEventListener("click", async (e) => {
   if(!isCurrent(renderedTarget))return;
   // Search-chip click → fill the cluster's search input so the
   // 5etools popover opens with matching results.
-  const chip = (e.target as HTMLElement | null)?.closest<HTMLElement>(".srch-chip");
+  const chip = (e.target as HTMLElement | null)?.closest<HTMLElement>("button.srch-chip[data-q]");
   if (chip) {
     e.preventDefault();
     e.stopPropagation();

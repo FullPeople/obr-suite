@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{ c.identity.display_name or c.identity.character_name }} · 角色卡</title>
+<link rel="stylesheet" href="style.css">
+{% if mode == 'html' %}<script src="tooltip.js" defer></script>{% endif %}
+</head>
+<body class="mode-{{ mode }}">
+
+{% set skills_by_ability = {'str':[], 'dex':[], 'con':[], 'int':[], 'wis':[], 'cha':[]} %}
+{% for s in c.skills %}{% set _ = skills_by_ability[s.ability].append(s) %}{% endfor %}
+
+<section class="page">
+
+  {# ============================================================ ROW 1 身份条 ============================================================ #}
+  <div class="id-bar">
+    <div class="cell name-cell">
+      <div class="label">角色</div>
+      <div class="value">{{ c.identity.display_name or c.identity.character_name or '—' }}</div>
+      <div class="sub">{{ c.identity.character_name or '' }}</div>
+    </div>
+    <div class="cell">
+      <div class="label">玩家</div>
+      <div class="value xs">{{ c.identity.player or '—' }}</div>
+    </div>
+    <div class="cell">
+      <div class="label">职业 · 等级</div>
+      {% set main_class = c.classes[0] %}
+      <div class="value">{{ main_class.name or '—' }} Lv{{ c.total_level }}</div>
+      <div class="sub">{{ main_class.subclass or '' }}</div>
+    </div>
+    <div class="cell">
+      <div class="label">种族</div>
+      <div class="value">{{ c.identity.race.name or '—' }}</div>
+      <div class="sub">{{ c.identity.race.subrace or '' }}</div>
+    </div>
+    <div class="cell">
+      <div class="label">阵营</div>
+      <div class="value">{{ c.identity.alignment or '—' }}</div>
+    </div>
+    <div class="cell">
+      <div class="label">信仰 · 背景</div>
+      <div class="value xs">{{ c.identity.faith or '—' }}</div>
+      <div class="sub">{{ c.background.background_name or '' }}</div>
+    </div>
+    <div class="cell">
+      <div class="label">性别</div>
+      <div class="value">{{ c.identity.gender or '—' }}</div>
+    </div>
+    <div class="cell">
+      <div class="label">年龄</div>
+      <div class="value">{{ c.identity.age or '—' }}</div>
+    </div>
+    <div class="cell">
+      <div class="label">体型 · 移速</div>
+      <div class="value xs">{{ c.core_stats.size or '—' }} · {{ c.core_stats.speed }}尺</div>
+      <div class="sub">{{ c.identity.height or '' }} / {{ c.identity.weight or '' }}</div>
+    </div>
+  </div>
+
+  {# ============================================================ ROW 2 属性（3×2 含技能） ============================================================ #}
+  <div class="win">
+    <div class="win-title">
+      <span class="title-txt">■ 属性</span>
+      <span class="title-buttons"><span class="title-btn">_</span><span class="title-btn">□</span><span class="title-btn">×</span></span>
+    </div>
+    <div class="abilities-grid">
+      {% for key, label in [('str','力量'),('dex','敏捷'),('con','体质'),('int','智力'),('wis','感知'),('cha','魅力')] %}
+      {% set a = c.abilities[key] %}
+      <div class="ability-cell">
+        <div class="ability">
+          <div class="abil-name">{{ label }}</div>
+          <div class="abil-total">{{ a.total }}</div>
+          <div class="abil-mod">{{ '%+d'|format(a.modifier) }}</div>
+          <div class="abil-save {% if a.save.proficient %}is-prof{% endif %}">
+            <span class="prof-dot"></span>豁免 <b>{{ '%+d'|format(a.save.bonus) }}</b>
+          </div>
+        </div>
+        <div class="cell-skills {% if not skills_by_ability[key] %}empty{% endif %}">
+          {% for s in skills_by_ability[key] %}
+          <div class="skill-mini prof-{{ s.proficiency }}">
+            <span class="prof-marker"></span>
+            <span class="skill-total">{{ '%+d'|format(s.total) }}</span>
+            <span class="skill-name">{{ s.name }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ============================================================ 核心数据 ============================================================ #}
+  <div class="win">
+    <div class="win-title">
+      <span class="title-txt">■ 核心数据</span>
+      <span class="title-buttons"><span class="title-btn">_</span><span class="title-btn">□</span><span class="title-btn">×</span></span>
+    </div>
+    <div class="core-stats">
+      <div class="stat-box stat-hp">
+        <div class="stat-label">生命值上限</div>
+        <div class="stat-value">{{ c.core_stats.hp.max }}</div>
+        <div class="stat-sub">生命骰 {{ c.core_stats.hit_dice.max }}{{ c.core_stats.hit_dice.die_size or '' }}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">护甲 AC</div>
+        <div class="stat-value">{{ c.core_stats.ac }}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">先攻</div>
+        <div class="stat-value">{{ '%+d'|format(c.core_stats.initiative) }}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">被动察觉</div>
+        <div class="stat-value">{{ c.core_stats.passive_perception }}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">熟练加值</div>
+        <div class="stat-value">+{{ c.core_stats.proficiency_bonus }}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">法术豁免 DC</div>
+        <div class="stat-value">{{ c.core_stats.dc }}</div>
+        <div class="stat-sub">{{ c.spellcasting.spellcasting_ability or '' }}</div>
+      </div>
+    </div>
+  </div>
+
+  {# ============================================================ 武器 ============================================================ #}
+  <div class="win">
+    <div class="win-title">
+      <span class="title-txt">■ 武器</span>
+      <span class="title-buttons"><span class="title-btn">_</span><span class="title-btn">□</span><span class="title-btn">×</span></span>
+    </div>
+    <div class="win-body">
+      <table class="equip-table">
+        <thead>
+          <tr>
+            <th style="width:18%">名称</th>
+            <th style="width:16%">命中</th>
+            <th style="width:22%">伤害</th>
+            <th>特性</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for w in c.combat.weapons %}
+          <tr>
+            <td class="name-cell">{{ w.name }}{% if w.proficient %} ✓{% endif %}</td>
+            <td class="num">1d20{{ w.attack_bonus or '' }}</td>
+            <td class="num">{{ w.damage or '—' }}<br><span style="font-weight:400;font-size:9px;color:var(--win-text-soft)">{{ w.damage_type or '' }}</span></td>
+            <td class="weapon-props">
+              {% for part, tip in (w.properties | split_props) %}
+                {% if tip %}<span class="prop-chip tip-target" data-tip="{{ tip }}">{{ part }}</span>
+                {% else %}<span class="prop-chip">{{ part }}</span>{% endif %}
+              {% endfor %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# ============================================================ 特性 ============================================================ #}
+  <div class="row-features">
+
+    {# 左：职业特性（仅） #}
+    <div class="col win">
+      <div class="win-title">
+        <span class="title-txt">■ 职业特性</span>
+        <span class="title-buttons"><span class="title-btn">_</span><span class="title-btn">□</span><span class="title-btn">×</span></span>
+      </div>
+      <div class="feature-list">
+        {% for f in c.features.class_features %}
+        <div class="feat-item" data-tip="{{ f.description or '' }}">
+          <div class="feat-head">
+            {% if f.level %}<span class="feat-lv">Lv{{ f.level }}</span>{% endif %}
+            <span class="feat-name">{{ f.name }}</span>
+          </div>
+          {% if f.description %}<div class="feat-desc">{{ f.description }}</div>{% endif %}
+        </div>
+        {% endfor %}
+        {% for key, title in [('fighting_style_feats', '战斗风格'), ('special_abilities', '特殊能力')] %}
+        {% set entries = c.features.get(key) or [] %}
+        {% if entries %}
+        <div class="feat-section-label">{{ title }}</div>
+        {% for f in entries %}
+        <details class="feat-item" data-feature-kind="{{ key }}" open>
+          <summary class="feat-head">
+            {% if f.level %}<span class="feat-lv">Lv{{ f.level }}</span>{% endif %}
+            <span class="feat-name">{{ f.name }}</span>
+          </summary>
+          {% if f.description %}<div class="feat-desc" style="display:block;overflow-wrap:anywhere">{{ f.description }}</div>{% endif %}
+        </details>
+        {% endfor %}
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+
+    {# 右：种族特性 + 专长（合并一个窗口） #}
+    <div class="col col-race win">
+      <div class="win-title">
+        <span class="title-txt">■ 种族特性 · 专长</span>
+        <span class="title-buttons"><span class="title-btn">_</span><span class="title-btn">□</span><span class="title-btn">×</span></span>
+      </div>
+      <div class="feature-list">
+        <div class="feat-section-label">种族特性</div>
+        {% for f in c.features.race_features %}
+        <div class="feat-item" data-tip="{{ f.description or '' }}">
+          <div class="feat-head"><span class="feat-name">{{ f.name }}</span></div>
+          {% if f.description %}<div class="feat-desc">{{ f.description }}</div>{% endif %}
+        </div>
+        {% endfor %}
+
+        <div class="feat-section-label">专长</div>
+        {% for f in c.features.feats %}
+        <div class="feat-item" data-tip="{{ f.description or '' }}">
+          <div class="feat-head">
+            {% if f.level %}<span class="feat-lv">Lv{{ f.level }}</span>{% endif %}
+            <span class="feat-name">{{ f.name }}</span>
+          </div>
+          {% if f.description %}<div class="feat-desc">{{ f.description }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {# ============================================================ 法术 ============================================================ #}
+  <div class="win spell-win">
+    <div class="win-title">
+      <span class="title-txt">■ 法术</span>
+      <span class="title-buttons"><span class="title-btn">_</span><span class="title-btn">□</span><span class="title-btn">×</span></span>
+    </div>
+
+    <div class="spell-header">
+      <span class="title">施法档案</span>
+      <span></span>
+      <span class="meta-box">施法属性 <b>{{ c.spellcasting.spellcasting_ability or '—' }}</b></span>
+      <span class="meta-box">法术 DC <b>{{ c.spellcasting.save_dc or '—' }}</b></span>
+      <span class="meta-box">攻击检定 <b>{{ c.spellcasting.attack_bonus or '—' }}</b></span>
+      <span class="meta-box">可准备法术数量 <b>{{ c.spellcasting.max_prepared or '—' }}</b></span>
+    </div>
+
+    <div class="spell-slot-row">
+      <span class="label">法术位上限</span>
+      {% for lv in range(1, 10) %}
+        {% set slot = c.spellcasting.spell_slots.get(lv|string) %}
+        {% if slot %}
+          <span class="chip">{{ lv }}环 × <b>{{ slot.max }}</b></span>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <div class="spell-grid">
+      <div class="spell-col">
+        <h4>戏法</h4>
+        {% for s in c.spellcasting.cantrips_known %}
+        <div class="spell-item">
+          <span class="lv lv-0">0</span>
+          <span class="spell-name tip-target{% if s.meta and s.meta.concentration %} is-concentration{% endif %}{% if s.meta and s.meta.ritual %} is-ritual{% endif %}"
+                data-tip="{{ build_tip(s) }}">{{ s.name }}</span>
+        </div>
+        {% else %}<div style="color:var(--win-disabled);font-size:10px;text-align:center">—</div>{% endfor %}
+      </div>
+
+      <div class="spell-col">
+        <h4>始终准备</h4>
+        {% for s in c.spellcasting.always_known %}
+        <div class="spell-item">
+          <span class="lv">{{ s.level }}</span>
+          <span class="spell-name tip-target{% if s.meta and s.meta.concentration %} is-concentration{% endif %}{% if s.meta and s.meta.ritual %} is-ritual{% endif %}"
+                data-tip="{{ build_tip(s) }}">{{ s.name }}</span>
+        </div>
+        {% else %}<div style="color:var(--win-disabled);font-size:10px;text-align:center">—</div>{% endfor %}
+      </div>
+
+      {% for group in [1, 2, 3] %}
+      <div class="spell-col">
+        <h4>准备 · 组{{ group }}</h4>
+        {% for s in c.spellcasting.prepared if s.group == group %}
+        <div class="spell-item">
+          <span class="lv {% if s.level == 0 %}lv-0{% endif %}">{{ s.level }}</span>
+          <span class="spell-name tip-target{% if s.meta and s.meta.concentration %} is-concentration{% endif %}{% if s.meta and s.meta.ritual %} is-ritual{% endif %}"
+                data-tip="{{ build_tip(s) }}">{{ s.name }}</span>
+        </div>
+        {% else %}<div style="color:var(--win-disabled);font-size:10px;text-align:center">—</div>{% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if mode == 'png' %}
+    {% set seen = [] %}
+    <div class="spell-appendix">
+      {% for s in c.spellcasting.cantrips_known + c.spellcasting.always_known + c.spellcasting.prepared %}
+        {% if s.name not in seen and s.description %}
+          {% set _ = seen.append(s.name) %}
+          <div class="spell-entry">
+            <div class="sp-head">
+              <span class="sp-lv">{{ '戏法' if s.level == 0 else (s.level|string + '环') }}</span>
+              <span class="sp-name">{{ s.name }}</span>
+              {% if s.meta and s.meta.english %}<span class="sp-eng">{{ s.meta.english }}</span>{% endif %}
+            </div>
+            {% if s.meta %}
+            <div class="sp-meta">
+              {% if s.meta.school %}<b>{{ s.meta.school }}</b>{% endif %}
+              {% if s.meta.casting_time %} · 施法 {{ s.meta.casting_time }}{% endif %}
+              {% if s.meta.range %} · 距离 {{ s.meta.range }}{% endif %}
+              {% if s.meta.components %} · {{ s.meta.components }}{% endif %}
+              {% if s.meta.duration %} · {{ s.meta.duration }}{% endif %}
+              {% if s.meta.concentration %} · <b style="color:var(--win-green)">专注</b>{% endif %}
+              {% if s.meta.ritual %} · <b style="color:var(--win-accent-bg)">仪式</b>{% endif %}
+            </div>
+            {% endif %}
+            <div class="sp-desc">{{ s.description }}</div>
+          </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="footer">
+    <span>{{ c.meta.template_name }} {{ c.meta.template_version }} · {{ c.meta.source_file }}</span>
+    <span>模式: {{ mode }} | 静态数据</span>
+  </div>
+
+</section>
+
+</body>
+</html>

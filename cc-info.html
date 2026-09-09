@@ -387,6 +387,7 @@ html[lang="en"] .chip .k{letter-spacing:0}
   padding:0 2px;
 }
 .srch-chip{
+  font-family:inherit;
   display:inline-block;
   padding:1px 6px;
   background:rgba(255,255,255,0.06);
@@ -400,11 +401,21 @@ html[lang="en"] .chip .k{letter-spacing:0}
   max-width:160px;
   overflow:hidden;text-overflow:ellipsis;
 }
-.srch-chip:hover{
+.srch-chip:hover,.srch-chip:focus-visible{
   background:rgba(93,173,226,0.18);
   border-color:rgba(93,173,226,0.5);
   color:#bfe2f5;
 }
+.srch-chip:focus-visible{outline:2px solid #5dade2;outline-offset:1px}
+.cc-entry{min-width:0;max-width:100%}
+.cc-entry > summary{display:block;list-style:none}
+.cc-entry > summary::-webkit-details-marker{display:none}
+.cc-entry > summary::before{content:"▸ ";color:#9ab}
+.cc-entry[open]{flex-basis:100%;background:rgba(255,255,255,.035);border-radius:4px;padding:3px}
+.cc-entry[open] > summary{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.cc-entry[open] > summary::before{content:"▾ "}
+.cc-entry-body{font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;color:#e4e7ef;padding:6px 4px}
+.cc-entry-actions{display:flex;justify-content:flex-end;padding:0 3px 3px}
 .srch-chip:active{transform:scale(0.96)}
 .srch-chip.srch-flash{animation:srchFlash 0.4s ease-out}
 @keyframes srchFlash{
