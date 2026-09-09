@@ -43,7 +43,7 @@ import { assetUrl } from "./asset-base";
 
 const MODAL_ID = "com.obr-suite/dm-announcement";
 
-type SectionKind = "warn" | "info" | "notice" | "issues" | "highlights" | "todo" | "changelog" | "footer" | "raw";
+type SectionKind = "warn" | "info" | "notice" | "release" | "history" | "issues" | "highlights" | "todo" | "changelog" | "footer" | "raw";
 type SectionLang = "zh" | "en" | undefined; // undefined = visible in both
 
 interface Section {
@@ -63,7 +63,7 @@ interface Section {
 }
 
 const KNOWN_KINDS: ReadonlySet<SectionKind> = new Set([
-  "warn", "info", "notice", "issues", "highlights", "todo", "changelog", "footer", "raw",
+  "warn", "info", "notice", "release", "history", "issues", "highlights", "todo", "changelog", "footer", "raw",
 ]);
 
 // Issues section: type → chip class. Anything not in this map renders
@@ -180,6 +180,13 @@ function renderInlineNoSpan(text: string): string {
 }
 
 function renderSection(s: Section): string {
+  if (s.kind === "release" || s.kind === "history") {
+    const list = `<ul class="release-items">${s.items.map(item => `<li>${renderInline(item)}</li>`).join("")}</ul>`;
+    const heading = escapeHtml(s.heading);
+    return s.kind === "history"
+      ? `<details class="release-history"><summary>${heading}</summary>${list}</details>`
+      : `<section class="release-current"><h2>${heading}</h2>${list}</section>`;
+  }
   if (s.kind === "warn" || s.kind === "info") {
     const cls = s.kind === "warn" ? "warn" : "info";
     return s.items

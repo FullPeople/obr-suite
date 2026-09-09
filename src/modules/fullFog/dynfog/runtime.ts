@@ -19,7 +19,7 @@ let alwaysShowOverlay = false;
 /** GM setting: hide other people's lights unless a wall-free sight line
  *  reaches them from one of your own. See `light/occlusion.ts`. */
 let lightOcclusion = true;
-let shareVision = false;
+let shareVision = true;
 let runtimeRevision = 0;
 let identityRevision = 0, partyRevision = 0, cardsRevision = 0, dpiRevision = 0;
 let party: Pick<Player, "id" | "role">[] = [];

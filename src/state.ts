@@ -189,11 +189,11 @@ export const DEFAULT_STATE: SuiteState = {
     dice: true,
     portals: true,
     bubbles: true,
-    // Status tracker — promoted to stable. Default ON in all channels.
+    // Status tracker — available in both channels, opt-in by default.
     // The right-click "状态追踪" pill on the Select tool + the new
     // toolbar tool both work for everyone (no role gate); per-token
     // buff metadata is enforced by OBR's normal item-edit permissions.
-    statusTracker: true,
+    statusTracker: false,
     // Resource tracker — per-token consumable / progress / numeric
     // resources, plus a DM-only toolbar tool that opens a full-screen
     // stats panel of every player character's resources. Default ON.
@@ -205,9 +205,9 @@ export const DEFAULT_STATE: SuiteState = {
     hpBar: true,
     bossBar: true,
     transitions: true,
-    // DM-only inspection tool. Default ON in all channels; useful for
+    // DM-only inspection tool. Opt-in in all channels; useful for
     // field debugging token / scene / room metadata.
-    metadataInspector: true,
+    metadataInspector: false,
     // fullFog — RETIRED as a module id on 2026-08-25, split into the
     // two below. The flag stays in the type and the state shape so a
     // room that stored it doesn't fail to parse, but nothing is
@@ -241,7 +241,7 @@ export const DEFAULT_STATE: SuiteState = {
     // user's OBR asset library via OBR.assets.uploadImages, and the
     // user drags from there to the scene. Promoted from dev to
     // stable on 2026-05-08; available everywhere now.
-    circleImage: true,
+    circleImage: false,
     // Follow — retired 2026-05-14 per user request. The flag stays in
     // the type/state shape (removing it would ripple through settings
     // + saved scene metadata) but it's hard-pinned OFF and no longer
@@ -270,7 +270,7 @@ export const DEFAULT_STATE: SuiteState = {
   fogPlayerDoors: true,
   fogDoorOverlayAlways: false,
   fogLightOcclusion: true,
-  fogShareVision: false,
+  fogShareVision: true,
   libraries: DEFAULT_LIBRARIES,
 };
 
@@ -382,7 +382,7 @@ function merge(partial: any): SuiteState {
       partial.fogDoorOverlayAlways ?? DEFAULT_STATE.fogDoorOverlayAlways,
     fogLightOcclusion:
       partial.fogLightOcclusion ?? DEFAULT_STATE.fogLightOcclusion,
-    fogShareVision: partial.fogShareVision === true,
+    fogShareVision: typeof partial.fogShareVision === "boolean" ? partial.fogShareVision : DEFAULT_STATE.fogShareVision,
     libraries,
   };
 }
@@ -469,6 +469,12 @@ function notifyStateRefreshed(): void {
   }
 }
 
+function notifyStateChanged(): void {
+  for (const fn of listeners) {
+    try { fn(cached); } catch (error) { console.warn("[obr-suite/state] state listener failed", error); }
+  }
+}
+
 export async function refreshFromScene(): Promise<SuiteState> {
   const revision = ++refreshRevision;
   let next: SuiteState;
@@ -519,7 +525,7 @@ export async function refreshFromScene(): Promise<SuiteState> {
   const changed = !suiteStateEqual(cached, next);
   cached = next;
   if (changed) {
-    for (const fn of listeners) fn(cached);
+    notifyStateChanged();
   }
   if (revision === refreshRevision) notifyStateRefreshed();
   return cached;
@@ -576,7 +582,7 @@ export async function setState(partial: Partial<SuiteState>): Promise<void> {
   }
 
   if (writeScene !== sceneGeneration) return;
-  for (const fn of listeners) fn(cached);
+  notifyStateChanged();
   if (appliedRevision === refreshRevision) notifyStateRefreshed();
   // Explicit broadcast for cross-iframe sync. OBR.scene.onMetadataChange
   // SHOULD fire in all iframes when scene metadata changes, but in
@@ -610,27 +616,41 @@ let lastRoomStateJson = "";
 export function startSceneSync() {
   if (sceneSyncStarted) return;
   sceneSyncStarted = true;
-  OBR.scene.onReadyChange(() => {
+  let queued = false, ready = true;
+  // The event is only a read hint. Never accept a broadcast payload as saved
+  // settings. Invalidate an older read immediately, then coalesce same-turn
+  // metadata + LOCAL notifications into one authoritative refresh.
+  const requestRefresh = () => {
+    ++refreshRevision;
+    if (queued || !ready) return;
+    queued = true;
+    queueMicrotask(() => { queued = false; if (ready) void refreshFromScene(); });
+  };
+  OBR.scene.onReadyChange((value) => {
     ++sceneGeneration;
     ++refreshRevision;
     lastSceneStateJson = "";
+    lastRoomStateJson = "";
+    ready = value;
+    if (ready) requestRefresh();
   });
-  void refreshFromScene().then((s) => {
-    lastSceneStateJson = JSON.stringify(s);
-  });
+  // Some popover iframes miss the host metadata notification. setState already
+  // sends this LOCAL hint; every iframe must actually subscribe to receive it.
+  OBR.broadcast.onMessage?.(BROADCAST_STATE_CHANGED, requestRefresh);
+  void refreshFromScene();
   OBR.scene.onMetadataChange((meta) => {
-    if (!meta || !(SCENE_KEY in meta)) return;
+    if (!meta) return;
     const nextJson = JSON.stringify(meta[SCENE_KEY] ?? null);
     if (nextJson === lastSceneStateJson) return;
     lastSceneStateJson = nextJson;
-    void refreshFromScene();
+    requestRefresh();
   });
   OBR.room.onMetadataChange((meta) => {
-    if (!meta || !(ROOM_STATE_KEY in meta)) return;
+    if (!meta) return;
     const nextJson = JSON.stringify(meta[ROOM_STATE_KEY] ?? null);
     if (nextJson === lastRoomStateJson) return;
     lastRoomStateJson = nextJson;
-    void refreshFromScene();
+    requestRefresh();
   });
 }
 

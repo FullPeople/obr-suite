@@ -118,13 +118,14 @@ assert.equal(invalidReadiness, 0, "failed read incorrectly released the new-scen
 stopFailures(); stopReadiness();
 console.log("PASS 8: failed reads preserve cache, report failure and never signal scene readiness");
 
-// Old rooms and malformed values must never accidentally grant party vision.
+// Missing or malformed sharing values use the new enabled default; explicit
+// false remains authoritative in existing rooms.
 sdk.room.getMetadata = async () => ({});
 sdk.scene.setMetadata = async (data) => { writes.push(data); };
-for (const value of [undefined, false, "true", 1, {}]) {
+for (const value of [undefined, "true", 1, {}, false]) {
   sdk.scene.getMetadata = async () => ({ [SCENE_KEY]: { fogShareVision: value } });
   await refreshFromScene();
-  assert.equal(getState().fogShareVision, false);
+  assert.equal(getState().fogShareVision, value !== false);
   assert.equal(getState().enabled.bossBar, true);
   assert.equal(getState().enabled.transitions, true);
 }
@@ -141,7 +142,7 @@ assert.equal(writes.at(-1)[SCENE_KEY].fogShareVision, false);
 assert.equal(writes.at(-1)[SCENE_KEY].enabled.bossBar, false);
 assert.equal(writes.at(-1)[SCENE_KEY].enabled.transitions, false);
 stopVisionChanges();
-console.log("PASS 9: shared vision fails closed for old/malformed rooms and toggles notify/persist with new module switches");
+console.log("PASS 9: sharing defaults on, preserves saved off and toggles notify/persist with new module switches");
 const library = { id: "test-library", name: "Custom", baseUrl: "https://example.com", enabled: true };
 for (const value of [undefined, "fr", 1, {}, null]) {
   sdk.scene.getMetadata = async () => ({ [SCENE_KEY]: { libraries: [{ ...library, language: value }] } });

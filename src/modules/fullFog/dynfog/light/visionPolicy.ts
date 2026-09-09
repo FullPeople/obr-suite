@@ -7,7 +7,7 @@ export const CARD_BIND_KEY = "com.character-cards/boundCardId";
 const MONSTER_BIND_KEY = "com.bestiary/slug";
 
 export interface VisionOwnership {
-  mode: "auto" | "team" | "gm" | "owners";
+  mode: "auto" | "gm" | "owners";
   ownerIds: string[];
 }
 export interface VisionCard {
@@ -33,7 +33,9 @@ export function readVisionOwnership(raw: unknown): VisionOwnership {
   const value = raw as Record<string, unknown>;
   const mode = value.mode;
   return {
-    mode: mode === "auto" || mode === "team" || mode === "owners" ? mode : "gm",
+    // The former party option now uses automatic player ownership too.
+    // Read old scenes without rewriting their metadata merely by opening UI.
+    mode: mode === "team" ? "auto" : mode === "auto" || mode === "owners" ? mode : "gm",
     ownerIds: Array.isArray(value.ownerIds) ? [...new Set(value.ownerIds.filter((id): id is string => typeof id === "string" && id.length > 0))] : [],
   };
 }
@@ -81,15 +83,15 @@ export function resolveVisionSource(
   if (ownership) {
     if (ownership.mode === "gm") return deny;
     if (ownership.mode === "owners") return fromOwners(ownership.ownerIds, true);
-    // A deliberately public party source contributes only with sharing ON.
-    return { visible, personal: false, team: true, publicAmbient: false };
   }
   const bound = chain.find(node => CARD_BIND_KEY in node.metadata);
   if (bound) {
     const id = bound.metadata[CARD_BIND_KEY];
     const card = typeof id === "string" ? context.cards.get(id) : undefined;
     if (!card || card.visibility === "dm") return deny;
-    return { ...fromOwners(card.ownerIds, card.visibility === "public"), publicAmbient: card.visibility === "public" };
+    // Card-detail privacy does not disable the GM's shared-vision setting.
+    // DM-only cards were excluded above; no card fields are shared here.
+    return { ...fromOwners(card.ownerIds, true), publicAmbient: card.visibility === "public" };
   }
   if (chain.some(node => MONSTER_BIND_KEY in node.metadata)) return { ...deny, publicAmbient: true };
   const token = chain.find(node => node.layer === "CHARACTER" || node.layer === "MOUNT");

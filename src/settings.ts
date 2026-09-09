@@ -3339,10 +3339,12 @@ const TABS: TabDef[] = [
     en: `${ICONS.box} Three-Dragon Ante`,
     dynamicBody: (lang) => {
       const en = lang === "en";
-      const url = `https://obr.dnd.center/three-dragon-ante${import.meta.env.BASE_URL.includes("suite-dev") ? "-dev" : ""}/manifest.json`;
+        // The independently deployed table is currently in public testing.
+        // Both Suite channels must link to the actual published manifest.
+        const url = "https://obr.dnd.center/three-dragon-ante-dev/manifest.json";
       return `<h3>${en ? "A separate card table" : "独立的酒馆牌桌"}</h3>
         <p>${en ? "Install Three-Dragon Ante in this room when your table wants to play. It has its own entry and does not need Full Suite to stay open." : "想打牌时，由 DM 将三龙牌安装到房间。它有自己的入口，无需依赖套件窗口。"}</p>
-        <a class="layout-editor-btn" href="${url}" target="_blank" rel="noopener">${en ? "Three-Dragon Ante extension address" : "三龙牌插件地址"}</a>
+          <a class="layout-editor-btn" href="${url}" target="_blank" rel="noopener">${en ? "Three-Dragon Ante extension address (Dev)" : "三龙牌插件地址（测试版）"}</a>
         <p><code>${url}</code></p>
         <p>${en ? "Legendary Edition base game for 2–6 players, with a guided practice table. Uses Owlbear room messages; the host browser runs and saves the game." : "Legendary Edition 基础版，2–6 人，含新手实战引导。通过枭熊房间消息联网，主持人的浏览器运行和保存牌局。"}</p>`;
     },

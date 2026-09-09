@@ -3,7 +3,6 @@ import {
   startSceneSync,
   getState,
   onStateChange,
-  refreshFromScene,
   readLS,
   writeLS,
   getLocalLang,
@@ -60,6 +59,14 @@ let cachedAnnounceVersion: string | null = null;
 let timeStopActive = false;
 let musicBoardOpen = false;
 let isGM = false;
+let rowAlive = true;
+let roleRevision = 0;
+let timeStopReadRevision = 0;
+const rowDisposers: Array<() => void> = [];
+window.addEventListener("pagehide", () => {
+  rowAlive = false; ++roleRevision; ++timeStopReadRevision;
+  for (const dispose of rowDisposers.splice(0)) dispose();
+}, { once: true });
 
 function isAutoPopupOn(key: string): boolean {
   return readLS(key, "1") !== "0";
@@ -96,6 +103,7 @@ function btnHTML(opts: {
 const BC_CLUSTER_ROW_WIDTH = "com.obr-suite/cluster-row-width";
 
 function reportNaturalWidth() {
+  if (!rowAlive) return;
   const wrap = document.getElementById("wrap");
   const row = document.getElementById("row");
   const grip = document.getElementById("row-drag-handle");
@@ -123,6 +131,7 @@ function reportNaturalWidth() {
 }
 
 function renderRow() {
+  if (!rowAlive) return;
   const s = getState();
   const lang = getLocalLang();
   rowEl.setAttribute("aria-label", lang === "zh" ? "常用工具，窄屏时可横向滚动" : "Quick tools; scroll horizontally in narrow windows");
@@ -428,6 +437,7 @@ function installSupporterOverlayCloseListener(): void {
 }
 
 OBR.onReady(async () => {
+  if (!rowAlive) return;
   window.addEventListener("resize", reportNaturalWidth);
   rowEl.addEventListener("wheel", (event) => {
     if (rowEl.scrollWidth <= rowEl.clientWidth + 1 || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
@@ -437,10 +447,12 @@ OBR.onReady(async () => {
   }, { passive: false });
   installDebugOverlay();
   installSupporterOverlayCloseListener();
-  OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {
+  rowDisposers.push(OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {
+    if (!rowAlive) return;
+    ++timeStopReadRevision;
     timeStopActive = !!(event.data as any)?.active;
     renderRow();
-  });
+  }));
   // Drive the 时停 button's gold state from scene metadata (the source
   // of truth), not just the BC_STATE broadcast. The broadcast can fire
   // BEFORE this row iframe mounts — e.g. "显示为 CG" turns time-stop on
@@ -455,19 +467,27 @@ OBR.onReady(async () => {
     const active = !!(ts && ts.active);
     if (active !== timeStopActive) { timeStopActive = active; renderRow(); }
   };
-  try {
-    await OBR.scene.isReady();
-    syncTimeStopFromMeta(await OBR.scene.getMetadata());
-  } catch {}
-  try { OBR.scene.onMetadataChange(syncTimeStopFromMeta); } catch {}
-  OBR.broadcast.onMessage("com.obr-suite/music-board:state-active", (event) => {
+  const readTimeStop = async () => {
+    const revision = ++timeStopReadRevision;
+    try {
+      if (!await OBR.scene.isReady() || !rowAlive || revision !== timeStopReadRevision) return;
+      const meta = await OBR.scene.getMetadata();
+      if (rowAlive && revision === timeStopReadRevision) syncTimeStopFromMeta(meta);
+    } catch {}
+  };
+  try { rowDisposers.push(OBR.scene.onMetadataChange(meta => { ++timeStopReadRevision; if (rowAlive) syncTimeStopFromMeta(meta); })); } catch {}
+  try { rowDisposers.push(OBR.scene.onReadyChange(ready => { ++timeStopReadRevision; if (ready && rowAlive) void readTimeStop(); })); } catch {}
+  rowDisposers.push(OBR.broadcast.onMessage("com.obr-suite/music-board:state-active", (event) => {
+    if (!rowAlive) return;
     musicBoardOpen = !!(event.data as any)?.open;
     renderRow();
-  });
+  }));
 
   const recheckRole = async () => {
+    const revision = ++roleRevision;
     try {
       const role = await OBR.player.getRole();
+      if (!rowAlive || revision !== roleRevision) return;
       const next = role === "GM";
       if (next !== isGM) {
         isGM = next;
@@ -477,21 +497,23 @@ OBR.onReady(async () => {
       console.warn("[obr-suite/cluster-row] getRole failed", e);
     }
   };
-  await recheckRole();
-  OBR.player.onChange((p) => {
+  rowDisposers.push(OBR.player.onChange((p) => {
+    ++roleRevision;
+    if (!rowAlive) return;
     const next = p.role === "GM";
     if (next !== isGM) {
       isGM = next;
       renderRow();
     }
-  });
+  }));
 
+  rowDisposers.push(onStateChange(() => renderRow()), onLangChange(() => renderRow()));
   startSceneSync();
-  onStateChange(() => renderRow());
-  onLangChange(() => renderRow());
-
-  await refreshFromScene();
   renderRow();
+  // Install all subscriptions before independent initial reads. A slow role or
+  // time-stop read must not postpone settings updates in the already open row.
+  void recheckRole();
+  void readTimeStop();
 
   // Drag-handle for the row itself. Positioned at the start/end of
   // the row container so the user can grab it without overlapping any

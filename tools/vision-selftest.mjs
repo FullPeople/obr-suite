@@ -10,7 +10,7 @@ const mutations = {
   "no-current-guard": ["reconcile/Patcher.ts", "this.guards.get(item.id)?.(item);", "/* omitted */"],
   "foreign-primary": ["reconcile/actors/LightActor.ts", 'this.lightType !== "SECONDARY" && !this.reveals ? "SECONDARY" : this.lightType', "this.lightType"],
   "share-always": ["runtime.ts", "return shareVision;", "return true;"],
-  "private-shared": ["light/visionPolicy.ts", 'fromOwners(card.ownerIds, card.visibility === "public")', "fromOwners(card.ownerIds, true)"],
+  "private-card-blocks-vision": ["light/visionPolicy.ts", 'fromOwners(card.ownerIds, true)', 'fromOwners(card.ownerIds, card.visibility === "public")'],
   "creator-over-card": ["light/visionPolicy.ts", "if (bound) {", "if (false && bound) {"],
   "stale-read": ["reconcile/Reconciler.ts", "generation !== this.generation || revision !== this.readRevision", "false"],
   "old-ancestor": ["reconcile/Reconciler.ts", "this.currentItems.get(id) ?? null", "this.currentItems.get(id) ?? this.prevItems.get(id) ?? null"],

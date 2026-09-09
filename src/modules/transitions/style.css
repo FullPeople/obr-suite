@@ -13,7 +13,7 @@ html.presentation-root,body.presentation{background:transparent;width:100%;heigh
 .rest-stage svg{display:block;width:100%;height:100%;overflow:visible}
 .rest-fire{position:absolute;left:50%;bottom:16%;width:clamp(140px,22vh,230px);height:clamp(146px,23vh,240px);margin-left:clamp(-115px,-11vh,-70px);animation:rest-fire var(--duration) cubic-bezier(.22,.7,.3,1) both}
 .rest-clock{position:absolute;left:50%;top:15%;width:clamp(112px,20vh,178px);height:clamp(140px,25vh,222px);transform:translateX(-50%);animation:rest-clock var(--duration) cubic-bezier(.22,.7,.3,1) both}
-.clock-hand{transform-origin:100px 117px;animation:clock-hand .5s steps(2,end) 1.4s 6}
+.clock-hand{transform-origin:100px 117px;animation:clock-hand 3s steps(6,start) 1.4s 1 forwards}
 .clock-pendulum{transform-origin:100px 193px;animation:clock-tick .5s steps(2,end) 1.4s 6}
 .rest-heading{position:absolute;left:12%;right:12%;top:49%;margin:0;text-align:center;font-weight:500;letter-spacing:.16em;font-size:clamp(17px,2.5vh,23px);color:#ddd0b8;animation:rest-title var(--duration) ease both;overflow-wrap:anywhere}
 .rest-heading.custom{top:22%;left:15%;right:15%;font-size:clamp(20px,3.6vh,36px);line-height:1.65;letter-spacing:.03em;white-space:pre-wrap;max-height:43%;overflow:auto;animation:rest-custom var(--duration) ease both}
@@ -34,7 +34,7 @@ html.presentation-root,body.presentation{background:transparent;width:100%;heigh
 @keyframes rest-clock{0%,10%{opacity:0;transform:translate(-50%,-50vh)}23%,74%{opacity:1;transform:translate(-50%,0)}90%,100%{opacity:0;transform:translate(-50%,-50vh)}}
 @keyframes rest-title{0%,20%{opacity:0}30%,71%{opacity:.8}88%,100%{opacity:0}}
 @keyframes rest-custom{0%,18%{opacity:0;transform:translateY(8px)}32%,71%{opacity:1;transform:translateY(0)}88%,100%{opacity:0;transform:translateY(-40vh)}}
-@keyframes clock-hand{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
+@keyframes clock-hand{from{transform:rotate(0deg)}to{transform:rotate(36deg)}}
 @keyframes clock-tick{0%,100%{transform:rotate(-12deg)}50%{transform:rotate(12deg)}}
 @keyframes rest-tent{0%,7%{opacity:0;transform:translate(-50%,50vh)}17%,74%{opacity:1;transform:translate(-50%,0)}88%,100%{opacity:0;transform:translate(-50%,50vh)}}
 @keyframes rest-moon-orbit{0%,12%{opacity:0;transform:rotate(0deg)}27%,39%{opacity:1;transform:rotate(90deg)}57%,100%{opacity:0;transform:rotate(180deg)}}

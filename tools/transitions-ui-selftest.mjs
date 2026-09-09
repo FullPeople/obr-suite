@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PACKAGE ?? "C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright");
@@ -56,6 +57,8 @@ try {
   const base = `http://127.0.0.1:${server.address().port}`;
   const errors = [];
   const checks = [];
+  const clockSamples = [];
+  const sourcePins = Object.fromEntries(["src/modules/transitions/style.css", "src/modules/transitions/art.ts", "tools/transitions-ui-selftest.mjs"].map(path => [path, createHash("sha256").update(readFileSync(resolve(path))).digest("hex")]));
   for (const [role, lang] of [["GM", "en"], ["GM", "zh"], ["PLAYER", "en"]]) {
     const page = await browser.newPage({ viewport: { width: 380, height: 500 } });
     page.on("pageerror", (error) => errors.push(error.message));
@@ -86,10 +89,14 @@ try {
   };
   const opacity = (page, selector) => page.locator(selector).evaluate(el => Number(getComputedStyle(el).opacity));
   const box = (page, selector) => page.locator(selector).boundingBox();
+  const angle = (page, selector) => page.locator(selector).evaluate(el => {
+    const value=getComputedStyle(el).transform, matrix=new DOMMatrixReadOnly(value==="none"?undefined:value);
+    return Math.round(Math.atan2(matrix.b,matrix.a)*180/Math.PI*100000)/100000;
+  });
   for (const [kind, lang, reduced, width, height] of [
     ["short","zh",false,1280,800],["long","en",false,1280,800],["text","zh",false,1280,800],
     ["long","zh",false,390,844],["short","en",false,740,390],
-    ["long","en",true,390,844],["text","en",true,390,844],
+    ["long","en",true,390,844],["text","en",true,390,844],["short","en",true,390,844],
   ]) {
     const page = await browser.newPage({ viewport: { width, height }, reducedMotion: reduced ? "reduce" : "no-preference" });
     page.on("pageerror", (error) => errors.push(error.message));
@@ -118,7 +125,34 @@ try {
     }else{
       await sample(page,.4,duration); const fire=await box(page,".rest-fire"), heading=await box(page,".rest-heading");
       assert.ok(heading.y+heading.height<=fire.y+2,"title and campfire must not overlap");
-      if(kind==="short") { const clock=await box(page,".rest-clock"); assert.ok(clock.y+clock.height<=heading.y+2,"clock and title must not overlap"); }
+      if(kind==="short") {
+        const clock=await box(page,".rest-clock"); assert.ok(clock.y+clock.height<=heading.y+2,"clock and title must not overlap");
+        if(reduced) {
+          assert.equal(await page.locator(".clock-hand").evaluate(el=>getComputedStyle(el).animationName),"none");
+          assert.equal(await angle(page,".clock-hand"),0,"reduced motion leaves hand still");
+        } else {
+          const observed=[];
+          // Seek the actual browser CSSAnimation, then read the rendered SVG transform.
+          // Two samples inside every half-second tick reject continuous interpolation;
+          // pre-delay and departure samples reject early movement or end-of-loop reset.
+          for(const time of [1000,1390,1410,1680,1880,1910,2180,2380,2410,2680,2880,2910,3180,3380,3410,3680,3880,3910,4180,4380,4410,4700,5200]) {
+            await sample(page,time/duration,duration);
+            observed.push({time,angle:await angle(page,".clock-hand"),pendulum:await angle(page,".clock-pendulum")});
+          }
+          clockSamples.push({filename,observed});
+          // Preserve raw evidence even if this regression rejects an old stylesheet.
+          writeFileSync(join(shots,"clock-samples.json"),JSON.stringify({sourcePins,clockSamples},null,2));
+          for(const entry of observed) {
+            const expected=entry.time<1400?0:Math.min(36,(Math.floor((entry.time-1400)/500)+1)*6);
+            assert.ok(Math.abs(entry.angle-expected)<.001,`clock hand must accumulate discrete forward ticks: ${entry.time}ms expected ${expected}deg, saw ${entry.angle}deg`);
+          }
+          assert.ok(observed.every((entry,index)=>index===0||entry.angle>=observed[index-1].angle),"clock hand never swings backwards");
+          assert.deepEqual([...new Set(observed.map(entry=>Math.round(entry.angle)))],[0,6,12,18,24,30,36]);
+          assert.ok(observed.some(entry=>entry.pendulum<-10)&&observed.some(entry=>entry.pendulum>10),"pendulum keeps its existing swing");
+          await sample(page,.4,duration);
+          checks.push(`${filename}: 23 browser samples, six forward half-second ticks and held exit angle; pendulum unchanged`);
+        }
+      }
       await page.screenshot({path:join(shots,filename+".png")});
       if(!reduced){ await sample(page,.84,duration); assert.ok((await box(page,".rest-fire")).y>fire.y); }
     }
@@ -247,7 +281,7 @@ try {
     checks.push(`portal ${lang}: independent blink effect persists`);
   }
   assert.deepEqual(errors, []);
-  writeFileSync(join(shots,"result.json"),JSON.stringify({checks,errors,scope:"Actual Edge DOM/CSS with isolated SDK host; no real room writes or audio autoplay certification."},null,2));
+  writeFileSync(join(shots,"result.json"),JSON.stringify({checks,errors,sourcePins,clockSamples,scope:"Actual Edge DOM/CSS with isolated SDK host; CSSAnimation seeking measures rendered hand transforms; no real room writes or audio autoplay certification."},null,2));
   console.log(`TRANSITIONS_CG_UI ${checks.length}/${checks.length}; screenshots: ${shots}`);
 } finally {
   await browser?.close();

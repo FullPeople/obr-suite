@@ -79,10 +79,11 @@ const bound=token("assigned","gm",{metadata:{[LIGHT_KEY]:{},[CARD_BIND_KEY]:"c"}
 equal(flags(bound,{cards}),[true,false,true],"GM-created token uses player card owner");
 equal(flags({...bound,createdUserId:"p1"},{cards}),[true,false,true],"bound card wins over creator");
 equal(flags(bound),[true,false,false],"missing bound card does not fall back");
-equal(flags(bound,{cards:readVisionCards([{id:"c",owner_ids:["p1","p2"],visibility:"owners"}])}),[true,true,false],"private card own view only");
+equal(flags(bound,{cards:readVisionCards([{id:"c",owner_ids:["p1","p2"],visibility:"owners"}])}),[true,true,true],"private card details do not disable party vision");
 equal(flags(bound,{cards:readVisionCards([{id:"c",owner_ids:["p1"],visibility:"dm"}])}),[true,false,false],"DM card never player view");
 equal(flags({...bound,metadata:{...bound.metadata,[VISION_KEY]:{mode:"owners",ownerIds:["p1"]}}},{cards}),[true,true,true],"explicit owner overrides card");
-equal(flags(token("explicit-team","gm",{metadata:{[VISION_KEY]:{mode:"team"}}})),[true,false,true],"explicit team pool");
+equal(flags(token("legacy-team","p2",{metadata:{[VISION_KEY]:{mode:"team"}}})),[true,false,true],"legacy party choice uses automatic player ownership");
+equal(flags(token("legacy-team-gm","gm",{metadata:{[VISION_KEY]:{mode:"team"}}})),[true,false,false],"merged automatic source needs a player owner");
 equal(flags(token("explicit-gm","p1",{metadata:{[VISION_KEY]:{mode:"gm"}}})),[true,false,false],"explicit GM overrides inferred owner");
 equal(flags(token("bad","p1",{metadata:{[VISION_KEY]:null}})),[true,false,false],"malformed explicit ownership fails closed");
 const parent=token("parent","p2",{metadata:{[CARD_BIND_KEY]:"c"}}), child=token("child","gm",{layer:"ATTACHMENT",attachedTo:"parent"});
@@ -114,7 +115,7 @@ rec=await engine([
  token("ambient","gm",{metadata:{[LIGHT_KEY]:{ambient:true}}}),
  token("private-ambient","gm",{metadata:{[LIGHT_KEY]:{ambient:true},[VISION_KEY]:{mode:"gm"}}}),
  token("private-card-ambient","gm",{metadata:{[LIGHT_KEY]:{ambient:true},[CARD_BIND_KEY]:"missing"}}),
- token("team","gm",{metadata:{[LIGHT_KEY]:{},[VISION_KEY]:{mode:"team"}}}),
+ token("team","p2",{metadata:{[LIGHT_KEY]:{},[VISION_KEY]:{mode:"team"}}}),
  token("hidden","p1",{visible:false}),
  token("npc-cone","gm",{metadata:{[LIGHT_KEY]:{outerAngle:90}}}),
 ]);

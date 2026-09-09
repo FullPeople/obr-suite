@@ -16,7 +16,7 @@
 // follows if the GM clicks another light without closing the menu.
 
 import OBR, { type GridScale, type Item } from "@owlbear-rodeo/sdk";
-import { getLocalLang } from "../../../../state";
+import { getLocalLang, getState, onStateChange, startSceneSync } from "../../../../state";
 import { LIGHT_KEY } from "../ids";
 import { isPlainObject } from "../meta";
 import { VISION_KEY, readVisionOwnership, type VisionOwnership } from "./visionPolicy";
@@ -59,7 +59,7 @@ const visionLabel = document.createElement("span");
 visionLabel.textContent = en ? "Vision owner" : "视野归属";
 const visionOwner = document.createElement("select");
 visionOwner.style.cssText = "display:block;width:100%;margin-top:4px;padding:4px;background:#1e2230;color:#eee;border:1px solid #50566a;border-radius:4px";
-visionOwner.title = en ? "Overrides card ownership. Hidden tokens never provide vision. Public party sources require shared vision." : "可覆盖角色卡归属。隐藏单位不提供视野；队伍公用来源需开启共享视野。";
+visionOwner.title = en ? "Uses the card owner or player who created the character. Shared vision lets all players use these sources. Hidden and GM-only units are excluded." : "自动识别角色卡归属或创建角色的玩家。开启共享视野后，全部玩家可使用这些视野；隐藏单位和仅主持人单位除外。";
 visionField.append(visionLabel, visionOwner);
 const visionError = document.createElement("span");
 visionError.style.cssText = "display:block;color:#f0b8a0;font-size:10px;margin-top:3px";
@@ -79,6 +79,12 @@ let loadRevision = 0;
 let sceneRevision = 0;
 let savedVisionOwner = "auto";
 let visionWriteRevision = 0;
+
+function automaticOwnerLabel(): string {
+  return getState().fogShareVision
+    ? (en ? "All players (automatic)" : "全部玩家（自动归属）")
+    : (en ? "Owning player (automatic)" : "所属玩家（自动归属）");
+}
 
 function setStatus(text: string | null): void {
   if (text) {
@@ -208,8 +214,7 @@ async function load(): Promise<void> {
   const option = (value: string, text: string) => {
     const el = document.createElement("option"); el.value = value; el.textContent = text; visionOwner.append(el);
   };
-  option("auto", en ? "Automatic (card / player token)" : "自动（角色卡 / 玩家单位）");
-  option("team", en ? "Public party source (when shared)" : "队伍公用（开启共享时）");
+  option("auto", automaticOwnerLabel());
   option("gm", en ? "GM only" : "仅主持人");
   for (const player of players.filter(player => player.role === "PLAYER")) option(`owner:${player.id}`, player.name);
   const own = readVisionOwnership(withLight.metadata[VISION_KEY]);
@@ -236,7 +241,7 @@ visionOwner.addEventListener("change", async () => {
   if (value === "owners") return;
   const ownership: VisionOwnership = value.startsWith("owner:")
     ? { mode: "owners", ownerIds: [value.slice(6)] }
-    : { mode: value === "team" ? "team" : value === "gm" ? "gm" : "auto", ownerIds: [] };
+    : { mode: value === "gm" ? "gm" : "auto", ownerIds: [] };
   const scene = sceneRevision;
   const targets = [...targetIds];
   const revision = ++visionWriteRevision;
@@ -357,6 +362,13 @@ removeBtn.addEventListener("click", async () => {
 });
 
 OBR.onReady(async () => {
+  startSceneSync();
+  const stopState = onStateChange(() => {
+    // Update only the label: a settings change must not discard an edit.
+    const automatic = visionOwner.querySelector('option[value="auto"]');
+    if (automatic) automatic.textContent = automaticOwnerLabel();
+  });
+  window.addEventListener("pagehide", stopState, { once: true });
   OBR.scene.onReadyChange(ready => {
     sceneRevision++; loadRevision++; targetIds = [];
     if (ready) void load();

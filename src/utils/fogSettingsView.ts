@@ -21,8 +21,8 @@ export function renderFogSettings(s: SuiteState, lang: Language, gm: boolean, au
         ? "没有无遮挡视线时隐藏其他灯光。关闭只改变照明显示，不会把 NPC 的视野共享给玩家。自动归属的环境光保留公开照明与视野；明确归属和私密角色设置优先。"
         : "Hide other lights without an unobstructed sight line. Turning this off does not grant NPC vision. Automatic ambient lights retain public lighting and vision; explicit ownership and private-card settings take precedence.", s.fogLightOcclusion)}
       <p>${zh
-        ? "主光源和辅助光源需要视野授权；次光源只照亮已经可见的区域。DM 可在光源设置里指定归属，或设为队伍公用、仅 DM。离线成员的普通视野暂不共享，重连后恢复。"
-        : "Primary and auxiliary lights require vision permission. Secondary lights illuminate already visible areas. The GM can assign an owner, share with the party, or reserve a light for GMs. Ordinary offline-player vision leaves the shared pool until they reconnect."}</p>
+        ? "主光源和辅助光源需要视野授权；次光源只照亮已经可见的区域。视野归属中的自动选项会随共享开关切换为所属玩家或全部玩家；也可指定玩家或仅 DM。角色卡详情的私密设置不影响共享视野。离线成员的普通视野暂不共享，重连后恢复。"
+        : "Primary and auxiliary lights require vision permission. Secondary lights illuminate already visible areas. Automatic ownership uses the owning player with sharing off, or all players with sharing on. The GM can also assign a player or reserve a light for GMs. Private card details stay private when vision is shared. Offline-player vision leaves the pool until they reconnect."}</p>
       ${authoring ? row("fogPlayerDoors", zh ? "玩家可以开关门窗" : "Players can operate openings", zh
         ? "显示可操作的普通门窗；密门仍由 DM 管理。"
         : "Show player-operable doors and windows; secret doors remain GM-only.", s.fogPlayerDoors) +
