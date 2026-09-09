@@ -1,4 +1,6 @@
-:root { color-scheme: dark; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; color: #ffefd5; }
+/* Match the embedding iframe's scheme; a forced dark root makes the browser
+   paint an opaque canvas even when html/body backgrounds are transparent. */
+:root { color-scheme: normal; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; color: #ffefd5; }
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; min-width: 0; background: transparent !important; overflow: hidden; }
 button, input, select { font: inherit; }
@@ -26,7 +28,7 @@ body.display { width: 100vw; height: 100vh; pointer-events: none; }
 .reduceMotion .fill, .reduceMotion .trail { transition: none; }
 @media (prefers-reduced-motion: reduce) { .fill, .trail { transition: none; } }
 @media (max-width: 360px) { .bossName { font-size: 13px; letter-spacing: .02em; } .bossPhase { font-size: 9px; } .bossHeader { gap: 5px; } }
-body.config { padding: 12px 14px; background: #211d23 !important; }
+body.config { color-scheme: dark; padding: 12px 14px; background: #211d23 !important; }
 #bossOptions header { display: flex; align-items: center; justify-content: space-between; }
 #bossOptions header strong { font-size: 15px; }
 #closeOptions { border: 0; color: #d8cfc2; background: transparent; font-size: 21px; padding: 0 3px; }

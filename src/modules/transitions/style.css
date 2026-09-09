@@ -4,6 +4,7 @@
 .control{padding:16px;gap:12px}
 
 /* One finite presentation; original SVG art animates through CSS transforms only. */
+html.presentation-root{color-scheme:normal}
 html.presentation-root,body.presentation{background:transparent;width:100%;height:100%;overflow:hidden}
 .presentation #app{height:100%;isolation:isolate}
 .rest-stage{position:fixed;inset:0;overflow:hidden;--orbit-radius:min(29vh,230px);color:#eee3cb}
