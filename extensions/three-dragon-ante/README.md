@@ -18,7 +18,7 @@ Everyone uses its action button to open their own full-screen table. Closing the
 
 ## Practice and artwork
 
-“How to play” opens a four-page illustrated introduction to the table zones and rules. Its practice entry opens 41 local exercises: a fixed complete game, ten base-rule situations and thirty special-card exercises. Every move goes through the same rules engine as a room game. Step through opponents, choose your own cards, undo or restart. Practice neither writes room state nor joins an online game.
+“How to play” opens a four-page illustrated introduction to the table zones and rules. Its practice entry opens 41 local exercises: a fixed complete game, ten base-rule situations and thirty special-card exercises. Every move goes through the same rules engine as a room game. Opponents act automatically between your choices; you can undo or restart. Practice neither writes room state nor joins an online game.
 
 The tavern table, thick double-sided cards, tilted hand fans and bounded gold/silver stacks are actual Three.js meshes. Card faces retain the original geometric vector dragons and mortal emblem; no AI-generated images or external image atlases are used. Table felt and wood textures are drawn locally from code. The engravings and animations are original code and artwork. No publisher card scans, rulebook pages or commercial illustrations are bundled. Rule descriptions are original summaries; the [publisher's Legendary Edition page](https://wizkids.com/three-dragon-ante-legendary-edition/) remains available in the table help.
 
@@ -27,6 +27,8 @@ The tavern table, thick double-sided cards, tilted hand fans and bounded gold/si
 Drag a card from your hand to your own face-down slot to commit an ante, or to your own face-up flight when it is your turn. There is no betting or ordinary-play confirmation button. A curved guide, lifted card, flip and landing animation show the move. Opponent hover and selection animate anonymous card backs only. Gold transfers follow actual rules results; decorative silver is visual change (ten pieces represent one gold), not another rules currency.
 
 A submitted card waits for the hosting browser's matching action receipt. Normal room updates cannot accept it. After a timeout, retry resends the same action ID and revision; a confirmed rejection returns to the current legal hand. If the table page updates while an old background is still running, it asks for a full Owlbear refresh before playing.
+
+Live multiplayer powers show the card and its full effect to the creator, other players and spectators. Each viewer clicks to close their own explanation. Ordinary metadata/private-hand synchronization and coalesced updates preserve new effects; reconnecting or reopening does not replay old powers. Seats follow clockwise turn order. Instructions identify clockwise or counterclockwise neighbors explicitly, including the previous player's card used for the normal power comparison.
 
 Keyboard: focus the table, use Left/Right to choose, Space to lift, Enter to place in your own slot, and Escape to cancel. Special abilities retain their required choices and confirmation. Without WebGL, an accessible DOM table supports dragging and the same keyboard actions. Reduced motion keeps all rules and input available while suppressing movement.
 

@@ -5,9 +5,10 @@ import type { PublicEvent, PublicView } from "./rules/types";
 export const POWER_CARD_MOTION_MS = 1500;
 export interface PowerCue { cardId:string; seatId:string; family:string; key:string }
 
-/** Consume only a provably new public log suffix. No replay on first load or a gap. */
+/** Consume a new public log suffix, including coalesced revisions. First load
+ * and unmatched history gaps have no provable suffix and are not replayed. */
 export function freshPublicEvents(before:PublicView|null|undefined,after:PublicView|null|undefined):PublicEvent[] {
- if(!before||!after||before.id!==after.id||after.revision!==before.revision+1)return [];
+ if(!before||!after||before.id!==after.id||after.revision<=before.revision)return [];
  const old=before.events.map(event=>JSON.stringify(event)),next=after.events.map(event=>JSON.stringify(event));
  if(!old.length)return after.revision===before.revision+1?after.events:[];
  for(let size=Math.min(old.length,next.length);size>0;size--)if(old.slice(-size).every((event,i)=>event===next[i]))return after.events.slice(size);

@@ -104,7 +104,11 @@ export class TableController {
     const table = this.saved && this.summary?.id === this.saved.table.id && this.saved.table.hostConnectionId === this.self.connectionId ? this.saved.table : this.summary;
     const host = !!table && table.hostPlayerId === this.self.id;
     const connected = this.connected();
+    const session = this.summary && this.active.get(this.summary.hostConnectionId);
+    const syncing = !connected && !this.incompatible && (this.serving() ||
+      !!session && Date.now() - session.at < this.timeoutMs && !!this.summary && this.present(this.summary.hostConnectionId, this.summary.hostPlayerId));
     return clone({ actionReceiptVersion: 1 as const, table, selfPlayerId: this.self.id, isHost: host, connected,
+      syncing,
       pending: !!this.creation || this.recovering || !!this.pending?.busy,
       game: this.game, ...(this.actionReceipt ? { actionReceipt: this.actionReceipt } : {}), ...(this.message ? { message: this.message } : {}) });
   }

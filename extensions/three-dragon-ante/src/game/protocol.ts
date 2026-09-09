@@ -44,6 +44,9 @@ export interface TableView {
   selfPlayerId: string;
   isHost: boolean;
   connected: boolean;
+  /** LOCAL: authenticated connection is alive, but publication/projection is
+   * catching up. Input remains blocked; this is not a transport disconnect. */
+  syncing?: boolean;
   pending: boolean;
   game: PublicView | SeatView | null;
   /** Retained until another action/retry or a table/game/lifecycle change.

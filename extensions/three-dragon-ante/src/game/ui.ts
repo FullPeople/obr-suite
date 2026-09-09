@@ -34,7 +34,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  let bannerEvent:PublicEvent|null=null,bannerTimer:ReturnType<typeof setTimeout>|undefined;
  let revealPhase:"placing"|"revealing"|"price"|"payment"|"discard"|null=null;
  let power:ReturnType<typeof mountPowerPresentation>|null=null,sound:ReturnType<typeof mountTableAudio>|null=null;
- let updating=false,syncingStage=false,stageView:PublicView|SeatView|null=null,presentationBase:TableView|null=null,anteSoundKey="";
+ let updating=false,syncingStage=false,stageView:PublicView|SeatView|null=null,presentationBase:TableView|null=null,presentationView:TableView|null=null,anteSoundKey="";
  let notifiedPresentationBusy=false;
  const deferredSounds=new Map<"draw"|"flip"|"coin",string>();
  let pendingAction:{actionId:string;tableId:string;gameId:string;revision:number;cardId?:string;zone?:"ante"|"flight";action:GameAction;retryable:boolean}|null=null;
@@ -191,7 +191,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   if((!ante||!stageAvailable||reduced.matches)&&(after.stakes!==before.stakes||after.hole!==before.hole||after.seats.some(seat=>seat.gold!==before.seats.find(old=>old.id===seat.id)?.gold)))kinds.push('coin');
   for(const kind of kinds)if(power?.busy)deferredSounds.set(kind,key);else sound?.play(kind,key);
  }
- function clearPresentation(){presentationBase=null;deferredSounds.clear();anteSoundKey="";power?.clear();}
+ function clearPresentation(){presentationView=null;presentationBase=null;deferredSounds.clear();anteSoundKey="";power?.clear();}
  function notifyPresentation(){if(updating||destroyed)return;const busy=!!power?.busy||!!revealPhase;if(busy!==notifiedPresentationBusy){notifiedPresentationBusy=busy;deps.onPresentationChange?.(busy);}}
  function presentationChanged(){
   root.dataset.powerActive=String(!!power?.busy);
@@ -273,9 +273,9 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
     wrap.addEventListener("focusout",()=>{hoveredHand="";publishGesture();}); cards.append(wrap);
    }host.append(cards);});
   section("players",game&&[own?.selfSeatId,game.seats,game.ante,game.anteOrigins,game.leaderSeatId,game.activeSeatId],host=>{if(!game)return;
-   const selfIndex=game.seats.findIndex(seat=>seat.id===own?.selfSeatId),ordered=selfIndex<0?game.seats:[...game.seats.slice(selfIndex+1),...game.seats.slice(0,selfIndex)];
-   const positions=ordered.length===1?["top"]:ordered.length===2?["upper-left","upper-right"]:ordered.length===3?["upper-left","top","upper-right"]:["upper-left","top","upper-right","lower-right","lower-left","bottom"];
-   for(const seat of game.seats){const panel=node("article",undefined,"seat");panel.dataset.seat=seat.id;panel.dataset.position=seat.id===own?.selfSeatId?"bottom":positions[ordered.findIndex(other=>other.id===seat.id)];panel.classList.toggle("active",seat.id===game.activeSeatId);panel.classList.toggle("self",seat.id===own?.selfSeatId);
+   const selfIndex=Math.max(0,game.seats.findIndex(seat=>seat.id===own?.selfSeatId)),ordered=[...game.seats.slice(selfIndex+1),...game.seats.slice(0,selfIndex)];
+   const positions=ordered.length===1?["top"]:ordered.length===2?["upper-left","upper-right"]:ordered.length===3?["upper-left","top","upper-right"]:ordered.length===4?["lower-left","upper-left","upper-right","lower-right"]:["lower-left","upper-left","top","upper-right","lower-right"];
+   for(const seat of game.seats){const panel=node("article",undefined,"seat");panel.dataset.seat=seat.id;panel.dataset.position=seat.id===game.seats[selfIndex].id?"bottom":positions[ordered.findIndex(other=>other.id===seat.id)];panel.classList.toggle("active",seat.id===game.activeSeatId);panel.classList.toggle("self",seat.id===own?.selfSeatId);
    panel.append(node("h2",`${seat.name}${seat.id===own?.selfSeatId?` (${t("you")})`:""}${seat.id===game.leaderSeatId?` · ${t("leader")}`:""}`),node("p",`${t("gold")} ${seat.gold} · ${t("handCount")} ${seat.handCount} · ${t("strength")} ${seat.strength}${seat.debt?` · ${t("debt")} ${seat.debt}`:""}`));
    if(seat.id!==own?.selfSeatId){const backs=node("div",undefined,"opponent-hand");backs.setAttribute("aria-label",`${seat.name} · ${t("handCount")} ${seat.handCount}`);for(let index=0;index<Math.min(10,seat.handCount);index++){const back=node("span","◈","card-back");back.setAttribute("aria-hidden","true");back.dataset.slot=String(index);back.style.setProperty("--angle",`${(index-(Math.min(10,seat.handCount)-1)/2)*7}deg`);back.style.setProperty("--arc",`${Math.abs(index-(Math.min(10,seat.handCount)-1)/2)*2}px`);backs.append(back);}panel.append(backs);}
    if(seat.committed)panel.append(node("small",t("committed")));if(seat.archmage)panel.append(node("p",t("archmage"),"effect"));
@@ -369,14 +369,23 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
  const cancelKeyboard=()=>{if(keyboardHeld)stageCancel();},hideKeyboard=()=>{if(document.hidden){cancelKeyboard();clearPresentation();sound?.suspend();}else if(!suspended){sound?.resume();render();}};
  root.addEventListener("pointerdown",cancelKeyboard,true);window.addEventListener("blur",cancelKeyboard);document.addEventListener("visibilitychange",hideKeyboard);
  render();return {update(value:TableView){if(destroyed)return;const previous=view;updating=true;try{
-  const oldSelf=previous?.game&&"selfSeatId" in previous.game?previous.game.selfSeatId:null,newSelf=value.game&&"selfSeatId" in value.game?value.game.selfSeatId:null;
-  const same=previous?.table?.id===value.table?.id&&previous?.game?.id===value.game?.id&&oldSelf===newSelf;
-  const live=!!previous?.connected&&value.connected&&same&&!suspended&&!document.hidden;
-  const adjacent=!!previous?.game&&!!value.game&&value.game.revision===previous.game.revision+1;
+  const baseline=presentationView;
+  const oldSelf=baseline?.game&&"selfSeatId" in baseline.game?baseline.game.selfSeatId:null,newSelf=value.game&&"selfSeatId" in value.game?value.game.selfSeatId:null;
+  const same=!!baseline&&baseline.table?.id===value.table?.id&&baseline.table?.hostConnectionId===value.table?.hostConnectionId&&baseline.game?.id===value.game?.id&&oldSelf===newSelf;
+  const visible=!suspended&&!document.hidden;
+  const live=!!baseline?.connected&&value.connected&&same&&visible;
+  const catchingUp=value.syncing===true&&!value.connected&&same&&visible;
   view=value;sending=false;localMessage="";
-  if(!live||!same||!!previous?.game&&!!value.game&&(value.game.revision<previous.game.revision||value.game.revision>previous.game.revision+1))clearPresentation();
-  const cues=live&&adjacent?powerEvents(previous?.game,value.game):[];
-  if(cues.length){if(!power?.busy)presentationBase=previous;power?.enqueue(cues);}
+  // Metadata can arrive before the private projection, and the dealer emits
+  // while publishing its durable state. Keep the last usable visual baseline
+  // across those updates without enabling input or replaying a reconnect.
+  if(!catchingUp){
+   const fresh=live?freshPublicEvents(baseline?.game,value.game):[];
+   if(!live||!!baseline?.game&&!!value.game&&(value.game.revision<baseline.game.revision||value.game.revision>baseline.game.revision+1&&!fresh.length))clearPresentation();
+   const cues=live?powerEvents(baseline?.game,value.game):[];
+   presentationView=value.connected&&visible?value:null;
+   if(cues.length){if(!power?.busy)presentationBase=baseline;power?.enqueue(cues);}
+  }
   receiveBannerEvent(previous);applyReceipt();render();playUpdateSounds(previous);if(!power?.busy)animateChanges(previous);
  }finally{updating=false;notifyPresentation();}},gesture(seatId:string,value:unknown){if(destroyed)return;if(value===null){stage?.gesture(seatId,null);const entry=gestures.get(seatId);if(entry)clearTimeout(entry.timer);gestures.delete(seatId);paintGestures();return;}const gesture=readHandGesture(value);if(!gesture||seatId===privateGame()?.selfSeatId)return;const old=gestures.get(seatId);if(old&&gesture.sequence<=old.value.sequence)return;stage?.gesture(seatId,gesture);if(old)clearTimeout(old.timer);gestures.set(seatId,{value:gesture,timer:setTimeout(()=>{gestures.delete(seatId);paintGestures();},30000)});paintGestures();},language,restore(value:unknown){if(!touched)pendingDraft=readUIDraft(value);restoreDraft();},draft,
  waitingForReceipt:()=>!!pendingAction,

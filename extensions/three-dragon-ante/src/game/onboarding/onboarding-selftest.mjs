@@ -42,7 +42,7 @@ try{
   }
   if(i===2){
    const body=await page.locator('.tda-guide-description').innerText(),examples=await page.locator('.tda-guide-results').innerText(),tip=await page.locator('.tda-guide-tip').innerText();
-   check('turn compares this round cards and triggers the acting player own card',body.includes('your right-hand player played this round')&&body.includes('Equal or lower strength triggers your card')&&body.includes('not your whole flights')&&body.includes('does not trigger your opponent’s card again'));
+   check('turn compares this round cards and triggers the acting player own card',body.includes('your counterclockwise neighbor played this round')&&body.includes('take turns clockwise')&&body.includes('Equal or lower strength triggers your card')&&body.includes('not your whole flights')&&body.includes('does not trigger your opponent’s card again'));
    check('turn shows equal lower and higher examples without discarding an untriggered card',examples.includes('strength 5 or 7 card triggers its own power')&&examples.includes('strength 9 card normally does not trigger')&&examples.includes('still stays in your flight'));
    check('turn names decision actor and limits compulsory purchases',tip.includes('not always the player who just played')&&tip.includes('cannot pass or buy')&&tip.includes('only 1 hand card')&&tip.includes('no hand cards after powers finish')&&tip.includes('until you hold 4 cards'));
   }

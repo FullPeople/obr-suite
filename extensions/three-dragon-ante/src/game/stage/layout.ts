@@ -15,7 +15,8 @@ export function seatPlacements(view: PublicView): SeatPlacement[] {
   const first = Math.max(0, view.seats.findIndex(seat => seat.id === self));
   return view.seats.map((seat, index) => {
     const offset = (index - first + view.seats.length) % view.seats.length;
-    const angle = offset * Math.PI * 2 / view.seats.length;
+    // From the near/bottom seat, clockwise proceeds toward screen-left.
+    const angle = -offset * Math.PI * 2 / view.seats.length;
     const x = Math.sin(angle) * 6.6, z = Math.cos(angle) * 4.5;
     const pose = (along: number, inward: number): Pose => ({ x: x + Math.cos(angle) * along - Math.sin(angle) * inward, y: .11, z: z - Math.sin(angle) * along - Math.cos(angle) * inward, yaw: angle, tilt: 0, scale: .92 });
     const isSelf = seat.id === self && "selfSeatId" in view;
