@@ -46,8 +46,8 @@ function installFixture() {
   window.__MUSIC_SDK__={
     onReady:fn=>queueMicrotask(fn), player:{getId:async()=>"gm",getConnectionId:async()=>"test",getRole:async()=>fixture.role,onChange:fn=>on("player",fn)},
     party:{getPlayers:async()=>[],onChange:fn=>on("party",fn)},
-    room:{getMetadata:async()=>structuredClone(metadata),setMetadata:async patch=>{fixture.writes++;Object.assign(metadata,structuredClone(patch));emit("metadata",structuredClone(metadata));},onMetadataChange:fn=>on("metadata",fn)},
-    scene:{isReady:async()=>true,getMetadata:async()=>({})},
+    room:{id:"music-browser-room",getMetadata:async()=>structuredClone(metadata),setMetadata:async patch=>{fixture.writes++;Object.assign(metadata,structuredClone(patch));emit("metadata",structuredClone(metadata));},onMetadataChange:fn=>on("metadata",fn)},
+    scene:{isReady:async()=>true,getMetadata:async()=>({}),onReadyChange:fn=>on("scene-ready",fn),onMetadataChange:fn=>on("scene-meta",fn),setMetadata:async patch=>emit("scene-meta",patch)},
     viewport:{getWidth:async()=>900,getHeight:async()=>760},
     broadcast:{sendMessage:async(key,data)=>send(key,data),onMessage:on},
     popover:{open:async args=>{parent.postMessage({kind:"open",url:args.url,width:args.width,height:args.height},"*");},close:async()=>{parent.postMessage({kind:"close"},"*");}},

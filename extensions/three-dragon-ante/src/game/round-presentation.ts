@@ -42,7 +42,10 @@ export function mountRoundPresentation(host:HTMLElement,options:{language:TableL
  const words=(zh:string,en:string)=>language==="zh"?zh:en;
  const node=(tag:string,text?:string,cls?:string)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
  const reduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
- function animate(el:HTMLElement,frames:Keyframe[],duration:number){if(reduced()||paused)return null;const animation=el.animate(frames,{duration,easing:"cubic-bezier(.18,.78,.25,1)",fill:"both"});animations.add(animation);animation.finished.catch(()=>{}).finally(()=>animations.delete(animation));return animation;}
+ function animate(el:HTMLElement,frames:Keyframe[],duration:number){if(reduced()||paused)return null;const animation=el.animate(frames,{duration,easing:"cubic-bezier(.18,.78,.25,1)",fill:"both"});animations.add(animation);
+  // Finished fill effects still own opacity/transform. Keep them until the cue
+  // is cleared, so a departed banner cannot make the next score transparent.
+  animation.finished.catch(()=>{}).finally(()=>{if(animation.playState==="idle")animations.delete(animation);});return animation;}
  function fly(from:DOMRect,to:DOMRect,text:string,coin=false){
   if(reduced()||paused)return;const particle=node("span",text,coin?"score-flying-coin":"score-flying-point");
   const origin=overlay.getBoundingClientRect();particle.style.left=`${from.x+from.width/2-origin.x}px`;particle.style.top=`${from.y+from.height/2-origin.y}px`;overlay.append(particle);
@@ -117,7 +120,7 @@ export function mountRoundPresentation(host:HTMLElement,options:{language:TableL
    // Never make a lagging viewer watch a backlog of obsolete turn prompts.
    if(cue.kind==='turn'||cue.kind==='round')for(let i=queue.length-1;i>=0;i--)if(queue[i].kind==='turn'||queue[i].kind==='round')queue.splice(i,1);
    if(queue.length<32)queue.push(structuredClone(cue));}while(seen.size>256)seen.delete(seen.values().next().value!);if(!active&&queue.length)next();},
-  pause(value:boolean){if(dead||paused===value)return;paused=value;overlay.hidden=!active||paused;if(paused){if(timer!==undefined){remaining=Math.max(0,due-performance.now());cancelTimer();}for(const a of animations)a.pause();}else{for(const a of animations)a.play();arm();}},
+  pause(value:boolean){if(dead||paused===value)return;paused=value;overlay.hidden=!active||paused;if(paused){if(timer!==undefined){remaining=Math.max(0,due-performance.now());cancelTimer();}for(const a of animations)if(a.playState==="running")a.pause();}else{for(const a of animations)if(a.playState==="paused")a.play();arm();}},
   language(value:TableLanguage){language=value;paint();},
   clear(){cancelTimer();continuation=null;active=null;queue.length=0;seen.clear();for(const a of animations)a.cancel();animations.clear();overlay.hidden=true;content.replaceChildren();if(!dead)options.onChange();},
   destroy(){dead=true;cancelTimer();continuation=null;active=null;queue.length=0;for(const a of animations)a.cancel();animations.clear();overlay.remove();}

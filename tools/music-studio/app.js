@@ -34,7 +34,7 @@
 import { encodeOpus, estimateOpusBytes } from "./encoder.js";
 import { addTrack, updateTrack, deleteTrack, listTracks } from "./library.js";
 import { t as T, applyI18n, mountLangToggle } from "./i18n.js?v=20260909-room-sync";
-import { StudioRoomSync } from "./room-sync.js?v=20260909-room-sync";
+import { StudioRoomSync } from "./room-sync.js?v=20260910-storage";
 
 applyI18n();
 mountLangToggle();
@@ -1867,7 +1867,7 @@ async function startPairing() {
         setPairUi("live");
         toast(T("muXiongConnected"), "ok");
         _roomSync = new StudioRoomSync(msg => { if (_peerConn === conn && conn.open) conn.send(msg); },
-          applyRoomState, broadcastCurrentState, error => toast(T(error === "permission" ? "muRoomPermission" : "muRoomCommandFailed"), "warn"));
+          applyRoomState, broadcastCurrentState, (error,adoptionFailed) => { if(adoptionFailed)tearDownPair();toast(T(error === "permission" ? "muRoomPermission" : "muRoomCommandFailed"), "warn"); });
       });
       conn.on("data", message => { if (_peerConn === conn && generation === _pairVersion) _roomSync?.receive(message); });
       conn.on("close", () => {
@@ -1908,7 +1908,16 @@ function sendToObr(msg) {
     try { if (_roomSync) _roomSync.command(msg); else _peerConn.send(msg); } catch (e) { console.warn("[pair] send failed", e); }
   }
 }
-function broadcastCurrentState() {
+function broadcastCurrentState(modern = false) {
+  if (modern) {
+    const bgm = turntableFor("bgm");
+    sendToObr({type:"studio-load",snapshot:{
+      bgm:bgm.track?{url:bgm.track.url||"",name:bgm.track.name,loop:!!bgm.track.loop,position:bgm.audio.currentTime||0,paused:bgm.audio.paused}:null,
+      sfx:TURNTABLES.filter(tt=>tt.bus==="sfx"&&tt.track&&!tt.audio.paused).map(tt=>({url:tt.track.url||"",name:tt.track.name,loop:!!tt.track.loop,bus:"sfx"})),
+      bus:{bgm:state.volumes.bgm,sfx:state.volumes.sfx}
+    }});
+    return;
+  }
   sendToObr({ type: "volume", bus: "bgm", vol: state.volumes.bgm });
   sendToObr({ type: "volume", bus: "sfx", vol: state.volumes.sfx });
   const bgm = turntableFor("bgm");

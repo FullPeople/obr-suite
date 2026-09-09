@@ -23,14 +23,14 @@ export class StudioRoomSync {
       this.sessionId = message.sessionId; this.sequence = message.sequence; clearTimeout(this.timer); clearTimeout(this.helloTimer);
       // On an explicitly paired, completely fresh room, preserve Studio playback.
       // Reconnect always receives the existing room, including a deliberate stop.
-      if (first && message.adoptStudio) this.bootstrap();
+      if (first && message.adoptStudio) this.bootstrap(message.atomicStudioLoad === true);
       else this.apply(message.state, message.sentAt);
       return;
     }
     if (message.type === "studio-ack" && message.sessionId === this.sessionId) {
       const entry = this.pending.get(message.requestId); if (!entry) return;
       clearTimeout(entry.timer); this.pending.delete(message.requestId);
-      if (!message.ok) this.failed(message.error || "failed");
+      if (!message.ok) this.failed(message.error || "failed",entry.message.command.type === "studio-load");
     }
   }
   command(command) {
@@ -54,7 +54,7 @@ export class StudioRoomSync {
     this.pending.set(requestId, entry);
     const attempt = () => {
       if (!this.active || !this.pending.has(requestId)) return;
-      if (++entry.tries > 3) { this.pending.delete(requestId); this.failed("timeout"); return; }
+      if (++entry.tries > 3) { this.pending.delete(requestId); this.failed("timeout",command.type === "studio-load"); return; }
       this.send(message); entry.timer = setTimeout(attempt, 2500);
     };
     attempt();

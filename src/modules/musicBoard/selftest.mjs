@@ -22,7 +22,7 @@ async function bundle(entry, mutation) {
   const file = join(out, entry + "-" + serial++ + ".mjs"); await build.write({ file, format: "esm" }); await build.close(); if (mutation) assert.ok(changed); return import(pathToFileURL(file).href);
 }
 function network() {
-  const clients = new Map(), players = new Map(); let metadata = {}, writes = [], writeGate = null;
+  const clients = new Map(), players = new Map(); let metadata = {}, writes = [], writeGate = null, sceneMetadata = {}, sceneWrites = [], sceneReady = true, roomError = "";
   const deliver = (channel, data, connectionId, destination = "ALL") => { for (const [id, client] of clients) {
     if (destination === "LOCAL" && id !== connectionId || destination === "REMOTE" && id === connectionId) continue;
     client.emit(channel, { data: structuredClone(data), connectionId });
@@ -35,15 +35,20 @@ function network() {
     client.sdk = {
       player: { getId: async () => id, getConnectionId: async () => id, getRole: async () => player.role, onChange: fn => on("player", fn) },
       party: { getPlayers: async () => [...players.values()].filter(p => p.id !== id), onChange: fn => on("party", fn) },
-      room: { getMetadata: async () => { client.readCalls++; const copy = structuredClone(metadata); const blocked = client.readGate; if (blocked) await blocked.promise; return copy; },
-        setMetadata: async patch => { writes.push({ id, patch: structuredClone(patch) }); const blocked = writeGate; if (blocked) await blocked.promise;
+      room: { id:"music-test-room", getMetadata: async () => { client.readCalls++; const copy = structuredClone(metadata); const blocked = client.readGate; if (blocked) await blocked.promise; return copy; },
+        setMetadata: async patch => { if(roomError){const error=roomError;roomError="";throw Error(error);}writes.push({ id, patch: structuredClone(patch) }); const blocked = writeGate; if (blocked) await blocked.promise;
           metadata = { ...metadata, ...structuredClone(patch) }; for (const target of clients.values()) target.emit("metadata", structuredClone(metadata)); }, onMetadataChange: fn => on("metadata", fn) },
-      scene: { isReady: async () => true, getMetadata: async () => ({ "com.obr-suite/music-board:state": { bgm: { url: "https://example.invalid/legacy.ogg", name: "Legacy", loop: true, paused: false, position: 12 }, sfx: [{ id: "old", url: "https://example.invalid/sfx.ogg", name: "Old" }] } }) },
+      scene: { isReady: async () => sceneReady, getMetadata: async () => ({ "com.obr-suite/music-board:state": { bgm: { url: "https://example.invalid/legacy.ogg", name: "Legacy", loop: true, paused: false, position: 12 }, sfx: [{ id: "old", url: "https://example.invalid/sfx.ogg", name: "Old" }] },...structuredClone(sceneMetadata)}),
+        onReadyChange:fn=>on("scene-ready",fn),onMetadataChange:fn=>on("scene-meta",fn),
+        setMetadata:async patch=>{sceneWrites.push(structuredClone(patch));Object.assign(sceneMetadata,structuredClone(patch));for(const target of clients.values())target.emit("scene-meta",structuredClone(sceneMetadata))}
+      },
       broadcast: { sendMessage: async (channel, data, options = {}) => deliver(channel, data, id, options.destination || "REMOTE"), onMessage: on },
     };
     clients.set(id, client); return client;
   }
-  return { add, deliver, clients, players, get metadata() { return metadata; }, set metadata(value) { metadata = value; }, get writes() { return writes; },
+  return { add, deliver, clients, players, sceneWrites,get sceneMetadata(){return sceneMetadata;},set roomError(value){roomError=value;},
+    changeScene(value){sceneReady=false;for(const client of clients.values())client.emit("scene-ready",false);sceneMetadata=value;sceneReady=true;for(const client of clients.values())client.emit("scene-ready",true);},
+    get metadata() { return metadata; }, set metadata(value) { metadata = value; }, get writes() { return writes; },
     set writeGate(value) { writeGate = value; }, changed: () => { for (const [id, client] of clients) client.emit("party", [...players.values()].filter(p => p.id !== id)); } };
 }
 async function roomTest(mutation) {
@@ -97,9 +102,24 @@ async function roomTest(mutation) {
     const { RoomMusic: LateRoom } = await bundle("room", mutation); const late = new LateRoom(() => {}); await late.start();
     assert.deepEqual(late.state.queue, ["two"]); assert.equal(late.state.bgm.track.id, "one"); assert.ok(late.state.bgm.paused);
     pool.metadata = { ...pool.metadata, unrelatedExtension: "x".repeat(16000) };
-    const retained = structuredClone(pool.metadata[KEY]); await assert.rejects(other.submit({ type: "add", tracks: [track("large")] }), /roomFull/);
-    assert.deepEqual(pool.metadata[KEY], retained);
+    const retained = structuredClone(pool.metadata); await other.submit({ type: "add", tracks: [track("large")] });
+    assert.deepEqual(pool.metadata, retained,"full room metadata and every unrelated extension remain intact");
+    assert.ok(player.state.tracks.some(track=>track.id==='large'),"full-room add synchronizes through scene storage");
+    const saved=structuredClone(other.state),sceneKey='com.obr-suite/music-board:room-music-test-room';
+    assert.deepEqual(pool.sceneMetadata[sceneKey],saved,"complete playlist and playback persist together");
+    pool.changeScene({unrelatedScene:{wall:'keep'}});await settle();
+    assert.deepEqual(pool.sceneMetadata[sceneKey],saved,"scene switch carries playback once for future cold joins");
+    assert.deepEqual(pool.sceneMetadata.unrelatedScene,{wall:'keep'});
+    const e=pool.add('E','PLAYER');pool.changed();globalThis.__MUSIC_SDK__=e.sdk;const{RoomMusic:FreshRoom}=await bundle('room',mutation);const joined=[];const fresh=new FreshRoom(state=>joined.push(structuredClone(state)));await fresh.start();
+    assert.deepEqual(fresh.state,saved,"cold join prefers newer scene music to stale room metadata");assert.ok(joined.every(state=>state.revision===saved.revision),"cold join never publishes stale room playback before scene recovery");await fresh.stop();pool.clients.delete('E');pool.players.delete('E');pool.changed();
     delete pool.metadata.unrelatedExtension;
+    const beforeRace=structuredClone(pool.metadata);pool.roomError="metadata size limit exceeded";
+    await other.submit({type:"add",tracks:[track("quota-race")]});
+    assert.deepEqual(pool.metadata,beforeRace,"SDK quota race falls back without altering the failed room snapshot");
+    assert.ok(pool.sceneMetadata[sceneKey].tracks.some(track=>track.id==='quota-race'));
+    const beforePermission=structuredClone(other.state);pool.roomError="permission denied";
+    await assert.rejects(other.submit({type:"add",tracks:[track("must-not-write")]}),/permission denied/);
+    assert.deepEqual(other.state,beforePermission,"host permissions are not bypassed through scene fallback");
     await other.submit({ type: "allowPlayers", value: false });
     await other.stop(); pool.players.delete("C"); pool.clients.delete("C"); pool.changed();
     assert.equal(player.writer, "B");

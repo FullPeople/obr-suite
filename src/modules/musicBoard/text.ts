@@ -21,6 +21,7 @@ const strings = {
   invalidTrack: ["需要有效直链或音乐台分享码；本地文件地址不能共享。", "Use a valid direct URL or Studio share code; local file URLs cannot be shared."],
   invalidCommand: ["此操作不可用。", "This action is unavailable."], libraryFull: ["房间曲库最多 32 首，或导入内容过大。请分批导入。", "Room library allows 32 tracks; this import may also be too large. Import fewer tracks."],
   queueFull: ["队列最多 32 首。", "Queue allows up to 32 tracks."], roomFull: ["房间存储空间不足；现有曲库未改动。", "Room storage is full; the existing library was kept."],
+  sceneUnavailable: ["场景正在切换或尚未打开，请在场景就绪后重试。", "The scene is changing or not open. Retry once it is ready."],
   sourceLimit: ["默认曲库仅在此浏览；点击曲目加入房间，不会一次写入所有曲目。", "Browse defaults here and add individual tracks to the room."],
 } as const;
 export function mt(key: keyof typeof strings): string { return strings[key][getLocalLang() === "en" ? 1 : 0]; }

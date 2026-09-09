@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createServer } from "node:http";
 import { rolldown } from "rolldown";
+const freshMode=process.argv.includes("--fresh-full"), rejectAdoption=process.argv.includes("--reject-adoption");
 const out = mkdtempSync(join(tmpdir(), "music-studio-sync-"));
 for (const [entry, name] of [["src/modules/musicBoard/index.ts","background"],["src/music-board-page.ts","page"]]) {
   const build = await rolldown({ input: resolve(entry), platform: "browser", plugins: [{ name: "fixture-boundaries",
@@ -30,7 +31,7 @@ for (const [entry, name] of [["src/modules/musicBoard/index.ts","background"],["
     },
   }] }); await build.write({ file: join(out, name + ".js"), format: "esm" }); await build.close();
 }
-function installFixture() {
+function installFixture(fresh = false, reject = false) {
   const callbacks = new Map();
   const on = (key, fn) => { if (!callbacks.has(key)) callbacks.set(key,new Set()); callbacks.get(key).add(fn); return ()=>callbacks.get(key).delete(fn); };
   const emit = (key,value)=>{window.fixture?.events.push({key,value});for(const fn of [...(callbacks.get(key)||[])]) fn(value);};
@@ -39,15 +40,16 @@ function installFixture() {
   window.addEventListener("message",event=>{if(event.data?.kind==="toggle")emit("com.obr-suite/music-board:toggle",{data:{},connectionId:"test"});});
   const track={id:"one",url:location.origin+"/tone.wav",name:"月下的旅人 · The Moonlit Road",bus:"bgm",loop:true,duration:60};
   const state={version:2,revision:1,author:"test",allowPlayers:true,tracks:[track,{...track,id:"two",name:"Silent City",url:location.origin+"/tone.wav?two"}],queue:["two"],bgm:{track:{...track,loop:true,duration:60},playbackId:"first",position:0,startedAt:Date.now(),paused:false},sfx:[],bus:{bgm:.8,sfx:1},recent:[],ts:Date.now()};
-  const metadata={"com.obr-suite/music-board:session":state};
-  window.fixture={metadata,writes:0,voices:[],contexts:[],events:[],role:"GM"};
+  const metadata=fresh?{unrelatedExtension:"x".repeat(15800)}:{"com.obr-suite/music-board:session":state};
+  const sceneMetadata={unrelatedScene:{keep:true}};
+  window.fixture={metadata,sceneMetadata,sceneWrites:0,writes:0,voices:[],contexts:[],events:[],role:"GM"};
   const NativeAudio=window.Audio; window.Audio=function(url){const voice=new NativeAudio(url);fixture.voices.push(voice);return voice;};
   const NativeContext=window.AudioContext;window.AudioContext=class extends NativeContext{constructor(){super();fixture.contexts.push(this);}};
   window.__MUSIC_SDK__={
     onReady:fn=>queueMicrotask(fn), player:{getId:async()=>"gm",getConnectionId:async()=>"test",getRole:async()=>fixture.role,onChange:fn=>on("player",fn)},
     party:{getPlayers:async()=>[],onChange:fn=>on("party",fn)},
-    room:{getMetadata:async()=>structuredClone(metadata),setMetadata:async patch=>{fixture.writes++;Object.assign(metadata,structuredClone(patch));emit("metadata",structuredClone(metadata));},onMetadataChange:fn=>on("metadata",fn)},
-    scene:{isReady:async()=>true,getMetadata:async()=>({})},
+    room:{id:"music-browser-room",getMetadata:async()=>structuredClone(metadata),setMetadata:async patch=>{fixture.writes++;Object.assign(metadata,structuredClone(patch));emit("metadata",structuredClone(metadata));},onMetadataChange:fn=>on("metadata",fn)},
+    scene:{isReady:async()=>true,getMetadata:async()=>structuredClone(sceneMetadata),onReadyChange:fn=>on("scene-ready",fn),onMetadataChange:fn=>on("scene-meta",fn),setMetadata:async patch=>{if(reject)throw Error("scene quota exceeded");fixture.sceneWrites++;Object.assign(sceneMetadata,structuredClone(patch));emit("scene-meta",structuredClone(sceneMetadata))}},
     viewport:{getWidth:async()=>900,getHeight:async()=>760},
     broadcast:{sendMessage:async(key,data)=>send(key,data),onMessage:on},
     popover:{open:async args=>{parent.postMessage({kind:"open",url:args.url,width:args.width,height:args.height},"*");},close:async()=>{parent.postMessage({kind:"close"},"*");}},
@@ -55,7 +57,7 @@ function installFixture() {
   };
 }
 const css=readFileSync(resolve("src/modules/musicBoard/style.css"),"utf8");
-const pageHtml=readFileSync(resolve("music-board.html"),"utf8").replace('./src/music-board-page.ts','/page.js').replace("</head>","<style>"+css+"</style><script>("+installFixture.toString()+")();</script></head>");
+const pageHtml=readFileSync(resolve("music-board.html"),"utf8").replace('./src/music-board-page.ts','/page.js').replace("</head>","<style>"+css+"</style><script>("+installFixture.toString()+")("+freshMode+","+rejectAdoption+");</script></head>");
 const samples=44100*60,wav=Buffer.alloc(44+samples*2);
 wav.write("RIFF");wav.writeUInt32LE(wav.length-8,4);wav.write("WAVEfmt ",8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);
 wav.writeUInt32LE(44100,24);wav.writeUInt32LE(88200,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write("data",36);wav.writeUInt32LE(samples*2,40);
@@ -85,7 +87,7 @@ const child=createServer((request,response)=>{
   }
   if(request.url?.startsWith("/tone.wav")){response.setHeader("Content-Type","audio/wav");response.setHeader("Access-Control-Allow-Origin","*");response.setHeader('Accept-Ranges','bytes');const range=/bytes=(\d+)-(\d*)/.exec(request.headers.range||'');if(range){const start=Number(range[1]),end=Math.min(wav.length-1,range[2]?Number(range[2]):wav.length-1);response.statusCode=206;response.setHeader('Content-Range',`bytes ${start}-${end}/${wav.length}`);response.setHeader('Content-Length',end-start+1);response.end(wav.subarray(start,end+1));}else{response.setHeader('Content-Length',wav.length);response.end(wav);}}
   else if(request.url==="/background.js"||request.url==="/page.js"){response.setHeader("Content-Type","text/javascript");response.end(readFileSync(join(out,request.url.slice(1))));}
-  else if(request.url==="/background"){response.end('<script>('+installFixture.toString()+')();</script><script type="module">import {setupMusicBoard} from "/background.js";await setupMusicBoard();__MUSIC_SDK__.broadcast.sendMessage("com.obr-suite/music-board:toggle",{},{});window.booted=true;</script>');}
+  else if(request.url==="/background"){response.end('<script>('+installFixture.toString()+')('+freshMode+','+rejectAdoption+');</script><script type="module">import {setupMusicBoard} from "/background.js";await setupMusicBoard();__MUSIC_SDK__.broadcast.sendMessage("com.obr-suite/music-board:toggle",{},{});window.booted=true;</script>');}
   else response.end(pageHtml);
 });
 async function listenSafe(server){for(let i=0;i<20;i++){try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(20000+Math.floor(Math.random()*30000),'127.0.0.1',()=>{server.removeListener('error',reject);resolve();});});return;}catch(error){if(error.code!=='EADDRINUSE')throw error;}}throw Error('No available test port');}
@@ -99,7 +101,46 @@ const context=await browser.newContext({viewport:{width:1200,height:900},deviceS
 
 await context.route("https://esm.sh/peerjs@1.5.4",route=>route.fulfill({status:200,contentType:"text/javascript",body:peerModule,headers:{"Access-Control-Allow-Origin":"*"}}));
 const checks=[];function ok(name){checks.push(name);console.log("PASS "+name);}
+async function freshRoom(){
+ await page.goto("http://127.0.0.1:"+host.address().port);await page.locator("#control").waitFor();
+ const background=page.frames().find(frame=>frame.url().endsWith('/background')),control=page.frameLocator('#control');
+ await background.waitForFunction(()=>window.booted,null,{polling:50});await control.locator('#enable').click();
+ if(!rejectAdoption){
+  await context.route('https://obr.dnd.center/music/manifest.json',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({tracks:[{id:'default-tone',url:childUrl+'/tone.wav?default',name:'默认曲库测试曲',bus:'bgm',loop:true,duration:60}]})}));
+  await control.locator('summary').filter({hasText:'曲库与音效'}).click();await control.locator('#defaults').click();await control.locator('#catalogTracks button').click();
+  await background.waitForFunction(()=>fixture.sceneMetadata['com.obr-suite/music-board:room-music-browser-room']?.tracks.length===1,null,{polling:50});
+  assert.equal(await background.evaluate(()=>fixture.writes),0);assert.equal(await background.evaluate(()=>fixture.metadata.unrelatedExtension.length),15800);
+  ok('default-library add succeeds in an otherwise full room without changing unrelated metadata');
+ }
+ const studio=await context.newPage();studio.on('pageerror',e=>errors.push(String(e)));await studio.goto(childUrl+'/studio/');await studio.waitForFunction(()=>fixture.voices.length===5);
+ await studio.locator('#addUrlBtn').click();await studio.locator('#urlInput').fill(childUrl+'/tone.wav?fresh');await studio.locator('#urlName').fill('Fresh Studio track');await studio.locator('#urlAddBtn').click();await studio.locator('.lib-card').filter({hasText:'Fresh Studio track'}).dblclick();
+ await studio.waitForFunction(()=>!fixture.voices[0].paused&&fixture.voices[0].currentTime>0);
+ await studio.locator('#pairBtn').click();await studio.locator('#pairCodeValue').filter({hasText:/[A-Z2-9]{6}/}).waitFor();
+ await control.locator('summary').filter({hasText:'网页音乐台'}).click();await control.locator('#pairCode').fill(await studio.locator('#pairCodeValue').textContent());await control.locator('#pair').click();
+ if(rejectAdoption){
+  await studio.waitForFunction(()=>peerFixture.received.some(m=>m.type==='studio-ack'&&!m.ok));
+  await studio.waitForFunction(()=>document.querySelector('#pairBtn')?.classList.contains('hidden')===false);
+  assert.equal(await studio.evaluate(()=>fixture.voices[0].paused),false);await studio.waitForFunction(()=>fixture.gains[0].gain.value===1);assert.equal(await studio.evaluate(()=>fixture.gains[0].gain.value),1);
+  await studio.waitForTimeout(1300);assert.equal(await background.evaluate(()=>peerFixture.connections.length),1);
+  assert.equal(await background.evaluate(()=>fixture.sceneWrites),0);assert.equal(await studio.evaluate(()=>peerFixture.received.filter(m=>m.type==='room-state').length),1);
+  ok('failed initial adoption leaves website audio playing, unmutes it and does not publish an empty stop snapshot');
+ }else{
+  await background.waitForFunction(()=>fixture.sceneMetadata['com.obr-suite/music-board:room-music-browser-room']?.bgm?.track.name==='Fresh Studio track',null,{polling:50});
+  await studio.waitForFunction(()=>peerFixture.received.some(m=>m.type==='studio-ack'&&m.ok));
+  assert.equal(await studio.evaluate(()=>peerFixture.sent.filter(m=>m.type==='studio-command'&&m.command.type==='studio-load').length),1);
+  assert.equal(await studio.evaluate(()=>peerFixture.sent.filter(m=>m.type==='studio-command'&&m.command.type==='volume').length),0);
+  assert.equal(await studio.locator('#localMuteBanner').getAttribute('data-muted'),'1');
+  await background.waitForFunction(()=>fixture.voices.some(v=>!v.paused&&v.src.includes('?fresh')),null,{polling:50});
+  assert.equal(await background.evaluate(()=>fixture.metadata.unrelatedExtension.length),15800);assert.deepEqual(await background.evaluate(()=>fixture.sceneMetadata.unrelatedScene),{keep:true});
+  ok('fresh pairing after adding library tracks adopts playback atomically via scene persistence and keeps room audio audible');
+  await studio.locator('.bgm-deck [data-act="play"]').click();await background.waitForFunction(()=>fixture.sceneMetadata['com.obr-suite/music-board:room-music-browser-room'].bgm.paused,null,{polling:50});
+  await control.locator('#play').click();await studio.locator('.bgm-deck [data-act="play"].is-playing').waitFor();
+  ok('both directions still pause and resume after storage fallback');
+ }
+ await studio.screenshot({path:join(out,rejectAdoption?'failed-adoption-keeps-playing.png':'fresh-full-room.png')});
+}
 try{
+ if(freshMode){await freshRoom();}else{
   await page.goto("http://127.0.0.1:"+host.address().port);await page.locator("#control").waitFor();
   const background=page.frames().find(frame=>frame.url().endsWith("/background"));
   const waitBackground=background.waitForFunction.bind(background);
@@ -186,6 +227,7 @@ try{
   await studio.screenshot({path:join(out,"studio-synced-muted.png"),fullPage:false});
   await studio.evaluate(()=>window.onbeforeunload=null);studio.on('dialog',dialog=>dialog.accept());await studio.close();
   assert.equal(await background.evaluate(()=>fixture.metadata['com.obr-suite/music-board:session'].bgm.paused),false);ok("closing website cannot stop room background playback");
+ }
   assert.deepEqual(errors,[]);
   writeFileSync(join(out,"result.json"),JSON.stringify({checks,errors,artifacts:out,scope:"Real Studio DOM, RoomMusic/MusicAudio, browser media; SDK/PeerJS transport fixtures, not a real Owlbear room"},null,2));
   console.log("Music Studio integration PASS: "+checks.length+" checks; artifacts "+out);

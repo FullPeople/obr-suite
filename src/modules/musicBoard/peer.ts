@@ -17,6 +17,7 @@ export class StudioPeer {
   private volumeTimer: ReturnType<typeof setTimeout> | undefined;
   private volumes = new Map<string, MusicOp>();
   private modern = false;
+  private adoptionFailed = false;
   private sessionId = "";
   private sequence = 0;
   private snapshot: MusicSession | null = null;
@@ -32,7 +33,7 @@ export class StudioPeer {
     if (!this.modern || !this.snapshot) return;
     const { revision, author, bgm, sfx, bus } = this.snapshot;
     this.send({ type: "room-state", protocol: 2, sessionId: this.sessionId, sequence: ++this.sequence,
-      sentAt: Date.now(), state: { revision, author, bgm, sfx, bus }, adoptStudio });
+      sentAt: Date.now(), atomicStudioLoad: true, state: { revision, author, bgm, sfx, bus }, adoptStudio });
   }
   async connect(code: string, restoring = false): Promise<void> {
     this.disconnect(false); this.code = code.trim().toUpperCase(); this.attempts = 0;
@@ -41,11 +42,12 @@ export class StudioPeer {
   }
   private async dial(restoring: boolean): Promise<void> {
     const version = ++this.version;
-    this.modern = false; this.sessionId = crypto.randomUUID(); this.sequence = 0; this.inFlight = new Set();
+    this.adoptionFailed = false; this.modern = false; this.sessionId = crypto.randomUUID(); this.sequence = 0; this.inFlight = new Set();
     this.status = restoring ? "reconnecting" : "connecting"; this.changed();
     const current = () => this.version === version && !!this.code;
     const retry = () => {
       if (!current() || this.retry) return;
+      if(this.adoptionFailed){this.status="error";this.changed();return;}
       this.status = "reconnecting"; this.changed();
       this.retry = setTimeout(() => { this.retry = undefined; if (!current()) return; this.version++; this.peer?.destroy(); this.peer = null; void this.dial(true); }, Math.min(30000, 1000 * 2 ** Math.min(this.attempts++, 5)));
     };
@@ -64,7 +66,7 @@ export class StudioPeer {
           if (data.type === "studio-ready" && data.protocol === 2) {
             if (this.modern) { this.sendState(); return; }
             this.modern = true; this.parked = null; this.status = "connected";
-            this.sendState(!restoring && this.snapshot?.revision === 0 && !this.snapshot.bgm); this.changed(); return;
+            this.sendState(!restoring && !!this.snapshot && !(this.snapshot.playbackSet ?? this.snapshot.revision > 0) && !this.snapshot.bgm && !this.snapshot.sfx.length); this.changed(); return;
           }
           if (this.modern) {
             if (data.type !== "studio-command" || data.sessionId !== this.sessionId || typeof data.requestId !== "string" || !/^studio-[a-zA-Z0-9-]{1,80}$/.test(data.requestId)) return;
@@ -76,7 +78,8 @@ export class StudioPeer {
             void Promise.resolve().then(() => { if (!current()) throw new Error("unavailable"); return this.command(op, data.requestId); }).then(() => {
               if (current()) { this.sendState(); this.send({ type: "studio-ack", sessionId: this.sessionId, requestId: data.requestId, ok: true }); }
             }, error => {
-              if (current()) { this.sendState(); this.send({ type: "studio-ack", sessionId: this.sessionId, requestId: data.requestId, ok: false, error: error instanceof Error ? error.message : "failed" }); }
+              if(op.type==="studio-load")this.adoptionFailed=true;
+              if (current()) { this.send({ type: "studio-ack", sessionId: this.sessionId, requestId: data.requestId, ok: false, error: error instanceof Error ? error.message : "failed" }); }
             }).finally(() => pending.delete(data.requestId));
             return;
           }
@@ -114,6 +117,7 @@ export function studioOperation(value: unknown): MusicOp | null {
   if (!value || typeof value !== "object") return null;
   const message = value as Record<string, any>;
   switch (message.type) {
+    case "studio-load": return {type:"studio-load",snapshot:message.snapshot};
     case "bgm-load": return safeMediaUrl(message.url) ? { type: "play", track: { url: message.url, name: message.name, loop: !!message.loop }, position: message.position, paused: message.paused === true } : null;
     case "bgm-play": return { type: "resume", position: message.position };
     case "bgm-pause": return { type: "pause", position: message.position };

@@ -10,12 +10,12 @@ export const MAX_TRACKS = 32;
 export interface Track { id: string; url: string; name: string; bus: "bgm" | "sfx"; loop: boolean; duration: number }
 export interface Bgm { track: Track; playbackId: string; position: number; startedAt: number; paused: boolean }
 export interface Sfx { id: string; track: Track; at: number; expiresAt: number }
-export interface MusicSession { version: 2; revision: number; author: string; allowPlayers: boolean; tracks: Track[]; queue: string[];
+export interface MusicSession { version: 2; revision: number; playbackSet?: boolean; author: string; allowPlayers: boolean; tracks: Track[]; queue: string[];
   bgm: Bgm | null; sfx: Sfx[]; bus: { bgm: number; sfx: number }; recent: string[]; ts: number }
-export interface MusicOp { type: string; track?: unknown; tracks?: unknown[]; id?: string; position?: number; duration?: number; value?: boolean; volume?: number; bus?: "bgm" | "sfx"; playbackId?: string; expectedPlaybackId?: string; paused?: boolean }
+export interface MusicOp { type: string; snapshot?: unknown; track?: unknown; tracks?: unknown[]; id?: string; position?: number; duration?: number; value?: boolean; volume?: number; bus?: "bgm" | "sfx"; playbackId?: string; expectedPlaybackId?: string; paused?: boolean }
 export const finite = (value: unknown, fallback = 0) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
 export const unit = (value: unknown, fallback = 1) => Math.max(0, Math.min(1, finite(value, fallback)));
-export function emptySession(): MusicSession { return { version: 2, revision: 0, author: "", allowPlayers: true, tracks: [], queue: [], bgm: null, sfx: [], bus: { bgm: .8, sfx: 1 }, recent: [], ts: 0 }; }
+export function emptySession(): MusicSession { return { version: 2, revision: 0, playbackSet: false, author: "", allowPlayers: true, tracks: [], queue: [], bgm: null, sfx: [], bus: { bgm: .8, sfx: 1 }, recent: [], ts: 0 }; }
 export function safeMediaUrl(value: unknown): string {
   if (typeof value !== "string" || value.length > 2048) return "";
   try { const url = new URL(value.trim()); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.href : ""; } catch { return ""; }
@@ -38,6 +38,7 @@ export function normaliseSession(value: unknown): MusicSession | null {
   const raw = value as MusicSession, out = emptySession();
   out.revision = Math.max(0, Math.trunc(finite(raw.revision))); out.author = typeof raw.author === "string" ? raw.author : "";
   out.allowPlayers = raw.allowPlayers !== false;
+  out.playbackSet = typeof raw.playbackSet === "boolean" ? raw.playbackSet : !!raw.bgm || out.revision > 0;
   out.tracks = Array.isArray(raw.tracks) ? raw.tracks.map(trackFrom).filter((track): track is Track => !!track).slice(0, MAX_TRACKS) : [];
   out.queue = Array.isArray(raw.queue) ? raw.queue.filter(id => typeof id === "string" && out.tracks.some(track => track.id === id)).slice(0, MAX_TRACKS) : [];
   const track = trackFrom(raw.bgm?.track);
@@ -65,8 +66,21 @@ export function reduceMusic(state: MusicSession, op: MusicOp, commandId: string,
   const next = structuredClone(state);
   next.sfx = next.sfx.filter(sfx => sfx.track.loop || sfx.expiresAt > now);
   const requireTrack = () => { const track = op.track ? trackFrom(op.track) : next.tracks.find(track => track.id === op.id); if (!track) throw new Error("invalidTrack"); return track; };
-  const play = (track: Track) => { next.bgm = { track: { ...track, bus: "bgm" }, playbackId: commandId, position: Math.max(0, finite(op.position)), startedAt: now, paused: op.paused === true }; };
+  const play = (track: Track) => { next.playbackSet=true; next.bgm = { track: { ...track, bus: "bgm" }, playbackId: commandId, position: Math.max(0, finite(op.position)), startedAt: now, paused: op.paused === true }; };
   switch (op.type) {
+    case "studio-load": {
+      // Fresh pairing adopts one coherent snapshot. No successful volume write
+      // may publish an empty BGM between the website's bootstrap commands.
+      if ((state.playbackSet ?? state.revision > 0) || state.bgm || state.sfx.length) throw new Error("stalePlayback");
+      const source=op.snapshot as {bgm?:{url?:unknown;name?:unknown;loop?:unknown;position?:unknown;paused?:unknown};sfx?:unknown[];bus?:{bgm?:unknown;sfx?:unknown}} | null;
+      if(!source||typeof source!=="object"||Array.isArray(source)||!Array.isArray(source.sfx)||source.sfx.length>4)throw new Error("invalidCommand");
+      if(source.bgm){const track=trackFrom(source.bgm);if(!track)throw new Error("invalidTrack");
+        next.bgm={track:{...track,bus:"bgm"},playbackId:commandId,position:Math.max(0,finite(source.bgm.position)),startedAt:now,paused:source.bgm.paused===true};}
+      next.playbackSet=true;
+      next.sfx=source.sfx.map((value,index)=>{const track=trackFrom(value);if(!track)throw new Error("invalidTrack");return{id:`${commandId}:${index}`,track:{...track,bus:"sfx" as const},at:now,expiresAt:now+Math.max(3000,(track.duration||30)*1000)};});
+      next.bus={bgm:unit(source.bus?.bgm,.8),sfx:unit(source.bus?.sfx,1)};
+      break;
+    }
     case "add": {
       const tracks = (op.tracks || [op.track]).map(trackFrom); if (tracks.some(track => !track)) throw new Error("invalidTrack");
       for (const track of tracks as Track[]) { if (next.tracks.some(t => t.url === track.url)) continue; if (next.tracks.some(t => t.id === track.id)) throw new Error("invalidTrack"); if (next.tracks.length >= MAX_TRACKS) throw new Error("libraryFull"); next.tracks.push(track); } break;
@@ -89,7 +103,7 @@ export function reduceMusic(state: MusicSession, op: MusicOp, commandId: string,
     case "pause": if (next.bgm) { next.bgm.position = typeof op.position === "number" ? Math.max(0, finite(op.position)) : livePosition(next.bgm, now); next.bgm.paused = true; next.bgm.startedAt = now; } break;
     case "resume": if (next.bgm && next.bgm.paused) { if (typeof op.position === "number") next.bgm.position = Math.max(0, finite(op.position)); next.bgm.startedAt = now; next.bgm.paused = false; } break;
     case "seek": if (next.bgm) { next.bgm.position = Math.max(0, finite(op.position)); next.bgm.startedAt = now; } break;
-    case "stop": next.bgm = null; break;
+    case "stop": next.playbackSet=true; next.bgm = null; break;
     case "loop": if (next.bgm) { next.bgm.position = livePosition(next.bgm, now); next.bgm.startedAt = now; next.bgm.track.loop = !!op.value; } break;
     case "sfx": { const track = requireTrack(), id = op.playbackId || commandId; next.sfx = next.sfx.filter(sfx => sfx.id !== id); next.sfx.push({ id, track: { ...track, bus: "sfx" }, at: now, expiresAt: now + Math.max(3000, (track.duration || 30) * 1000) }); next.sfx = next.sfx.slice(-4); break; }
     case "sfx-stop": next.sfx = next.sfx.filter(sfx => sfx.id !== op.id); break;
