@@ -48,7 +48,14 @@ export function placements(view: PublicView): CardPlacement[] {
   }
   if (view.deckCount) result.push({ key: "deck", card: null, zone: "deck", pose: { ...DECK, y: pileTop(view.deckCount, .005) } });
   const top = view.discard[view.discard.length - 1]; if (top) result.push({ key: top.id, card: top, cardId: top.id, zone: "discard", pose: { ...DISCARD, y: pileTop(view.discard.length, .004) } });
-  view.ante.forEach((card, i) => result.push({ key: card.id, card, cardId: card.id, zone: "ante", pose: { x: (i - (view.ante.length - 1) / 2) * 1.03, y: .17 + i * .005, z: 1.02, yaw: 0, tilt: 0, scale: .78 } }));
+  const origins = new Map((view.anteOrigins ?? []).map(origin => [origin.cardId, origin.seatId]));
+  const neutral = view.ante.filter(card => !seats.some(seat => seat.id === origins.get(card.id)));
+  view.ante.forEach(card => {
+    const seat = seats.find(seat => seat.id === origins.get(card.id));
+    const index = neutral.findIndex(value => value.id === card.id);
+    result.push({ key: card.id, card, cardId: card.id, zone: "ante", ...(seat ? { seatId: seat.id } : {}),
+      pose: seat ? { ...seat.ante, y: .15 } : { x: (index - (neutral.length - 1) / 2) * 1.03, y: .17 + index * .005, z: 1.02, yaw: 0, tilt: 0, scale: .78 } });
+  });
   // A source projection can reveal a card in multiple public informational lists;
   // only physical locations above produce objects. Never render `revealed` again.
   return result;

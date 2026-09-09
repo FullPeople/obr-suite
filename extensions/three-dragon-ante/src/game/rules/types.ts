@@ -18,6 +18,8 @@ export interface AcceptedAction { fingerprint:string; revision:number }
 export interface GameState {
   version:1; id:string; revision:number; seats:Seat[]; stage:"ante"|"play"|"resolve"|"ended"|"adjudication";
   deck:string[]; discard:string[]; excluded:string[]; committed:Record<string,string>; ante:string[];
+  /** Origins of revealed opening antes only. Optional for pre-existing saves. */
+  anteOrigins?:{seatId:string;cardId:string}[];
   stakes:number; hole:number; gambit:number; round:number; leader:number; active:number; turnIndex:number;
   roundCards:(string|null)[]; effects:Effect[]; queue:Task[]; pending:Pending|null; choiceSerial:number;
   events:PublicEvent[]; revealed:string[]; accepted:Record<string,AcceptedAction>; randomState?:number;
@@ -33,6 +35,7 @@ export interface PublicView {
   version:1; id:string; revision:number; phase:GameState["stage"]|"choice"; seats:PublicSeat[]; stakes:number; hole:number;
   gambit:number; round:number; leaderSeatId:string|null; activeSeatId:string|null; waitingSeatIds:string[];
   ante:Card[]; discard:Card[]; deckCount:number; revealed:Card[]; events:PublicEvent[];
+  anteOrigins?:{seatId:string;cardId:string}[];
   choice:{id:string;seatId:string;code:string}|null; lastGambit:GambitResult|null; winners:string[]; issue:string|null;
   effects:{kind:EffectKind;seatId:string;sourceCardId:string}[];
 }

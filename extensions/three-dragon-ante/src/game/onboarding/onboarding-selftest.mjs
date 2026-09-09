@@ -32,6 +32,16 @@ try{
  for(let i=0;i<4;i++){
   check('page '+i+' has exactly one current progress marker',await page.locator('[aria-current="step"]').count()===1&&await page.locator('dialog').getAttribute('data-step')===String(i));
   check('page '+i+' has meaningful body', (await page.locator('.tda-guide-description').innerText()).length>100);
+  check('page '+i+' has three directly defined terms',await page.locator('.tda-guide-glossary dt').count()===3&&await page.locator('.tda-guide-glossary dd').count()===3);
+  const terms=await page.locator('.tda-guide-glossary').innerText();
+  check('page '+i+' glossary matches current rules',terms.includes(['Gambit','Tied','Flight','Total strength'][i]));
+  if(i===0){check('first page uses exact name and five-step flow',await page.locator('h1').innerText()==='Three-Dragon Ante'&&await page.locator('.tda-guide-flow li').count()===5);}
+  if(i===1){check('ante payment and leader are separate large consequences',await page.locator('.tda-guide-results p').count()===2&&await page.locator('.tda-guide-results p').first().evaluate(e=>parseFloat(getComputedStyle(e).fontSize)>parseFloat(getComputedStyle(document.querySelector('.tda-guide-description')).fontSize)));
+   check('ante includes tied-highest price and highest-untied leader example',(await page.locator('.tda-guide-results').innerText()).includes('including tied highest')&&(await page.locator('.tda-guide-tip').innerText()).includes('9, 9, 6'));
+   check('public antes have an explicit lifetime',(await page.locator('.tda-guide-caption').innerText()).includes('until taken by an effect or the gambit ends'));
+  }
+  if(i===2)check('turn instructions retain ability conditions and no voluntary pass or buy',(await page.locator('.tda-guide-description').innerText()).includes('no greater than')&&(await page.locator('.tda-guide-tip').innerText()).includes('cannot pass or buy'));
+  if(i===3)check('scoring distinguishes gambit from game end',(await page.locator('.tda-guide-description').innerText()).includes('everyone plays another round')&&(await page.locator('.tda-guide-tip').innerText()).includes('If anyone now has no gold'));
   await page.screenshot({path:join(shots,'en-'+(i+1)+'-1440.png')});
   if(i<3)await page.locator('.tda-guide-next').click();
  }
@@ -41,7 +51,9 @@ try{
  await page.evaluate(()=>makeGuide('en'));await page.keyboard.press('ArrowRight');
  await page.locator('.tda-guide-next').focus();await page.evaluate(()=>guide.setLanguage('zh'));
  check('language updates in place preserving page and control focus',await page.evaluate(()=>document.querySelector('dialog').dataset.step==='1'&&document.querySelector('dialog').lang==='zh-CN'&&document.activeElement===document.querySelector('.tda-guide-next')&&document.querySelector('.tda-guide-next').textContent==='下一步'));
+ check('language change updates glossary and direct consequences',(await page.locator('.tda-guide-glossary').innerText()).includes('并列')&&(await page.locator('.tda-guide-results').innerText()).includes('包含并列最高'));
  await page.keyboard.press('ArrowLeft');check('keyboard back returns to first page',await page.locator('dialog').getAttribute('data-step')==='0');
+ check('Chinese first page has requested exact title and flow',await page.locator('h1').innerText()==='三龙牌'&&(await page.locator('.tda-guide-description').innerText()).startsWith('和多名玩家一起打牌。')&&(await page.locator('.tda-guide-flow li').allTextContents()).join('>')==='暗置放牌>同时翻出>结算效果>轮流出牌>循环直到轮次结束');
  await page.locator('.tda-guide-progress button').nth(2).click();check('progress navigation selects intended page',await page.locator('dialog').getAttribute('data-step')==='2');
  await page.keyboard.press('Escape');check('Escape closes once and restores launch focus',await page.evaluate(()=>calls.close===1&&!document.querySelector('dialog')&&document.activeElement.id==='open'));
  await page.evaluate(()=>makeGuide('en'));for(let i=0;i<18;i++){await page.keyboard.press('Tab');check('native focus trap '+i,await page.evaluate(()=>!!document.activeElement?.closest('dialog')));}
@@ -58,6 +70,12 @@ try{
    await page.locator('.tda-guide-progress button').nth(i).click();
    const metrics=await page.evaluate(()=>{const d=document.querySelector('dialog'),r=d.getBoundingClientRect(),n=document.querySelector('.tda-guide-next').getBoundingClientRect(),c=document.querySelector('.tda-guide-close').getBoundingClientRect();return{width:innerWidth,height:innerHeight,left:r.left,right:r.right,top:r.top,bottom:r.bottom,nextBottom:n.bottom,nextRight:n.right,closeTop:c.top,scroll:d.scrollWidth,client:d.clientWidth};});
    check(lang+' '+width+' page '+i+' dialog and exit/actions stay in viewport',metrics.left>=0&&metrics.right<=width+1&&metrics.top>=0&&metrics.bottom<=height+1&&metrics.nextBottom<=height&&metrics.nextRight<=width&&metrics.closeTop>=0&&metrics.scroll<=metrics.client+1);
+   const beforeGlossary=await page.locator('.tda-guide-glossary').boundingBox();await page.locator('.tda-guide-body').evaluate(e=>e.scrollTop=e.scrollHeight);
+   const afterGlossary=await page.locator('.tda-guide-glossary').boundingBox();
+   const brand=await page.locator('.tda-guide-brand').boundingBox();
+   check(lang+' '+width+' page '+i+' glossary stays at top right while body scrolls',!!brand&&!!beforeGlossary&&!!afterGlossary&&beforeGlossary.y===afterGlossary.y&&afterGlossary.x>=brand.x+brand.width&&afterGlossary.y+afterGlossary.height<=height&&await page.locator('.tda-guide-glossary').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
+   check(lang+' '+width+' page '+i+' complete rule text is scroll reachable',await page.locator('.tda-guide-tip').evaluate(e=>{const r=e.getBoundingClientRect(),b=document.querySelector('.tda-guide-body').getBoundingClientRect();return r.bottom<=b.bottom+1&&r.top>=b.top-1;}));
+   await page.locator('.tda-guide-body').evaluate(e=>e.scrollTop=0);
    await page.screenshot({path:join(shots,lang+'-'+(i+1)+'-'+width+'.png')});
   }
   await page.evaluate(()=>guide.destroy());

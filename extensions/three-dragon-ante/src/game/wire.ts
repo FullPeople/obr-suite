@@ -11,6 +11,7 @@ export function packPublic(view: PublicView): PublicWire {
     leaderSeatId: view.leaderSeatId, activeSeatId: view.activeSeatId, waitingSeatIds: view.waitingSeatIds,
     deckCount: view.deckCount, events: view.events, choice: view.choice, lastGambit: view.lastGambit,
     winners: view.winners, issue: view.issue, effects: view.effects,
+    anteOrigins: (view.anteOrigins ?? []).filter(origin => view.ante.some(card => card.id === origin.cardId) && view.seats.some(seat => seat.id === origin.seatId)).map(origin => ({ seatId: origin.seatId, cardId: origin.cardId })),
     ante: view.ante.map(card => card.id), discard: view.discard.map(card => card.id), revealed: view.revealed.map(card => card.id),
     seats: view.seats.map(seat => ({ id: seat.id, name: seat.name, gold: seat.gold, debt: seat.debt,
       handCount: seat.handCount, strength: seat.strength, committed: seat.committed, archmage: seat.archmage,

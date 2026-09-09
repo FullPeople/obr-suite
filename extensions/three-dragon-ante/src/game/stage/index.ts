@@ -1,14 +1,19 @@
 import * as THREE from "three";
 import { readHandGesture, type HandGesture } from "../gesture";
-import type { SeatView } from "../rules/types";
+import type { PublicEvent, SeatView } from "../rules/types";
+import { card } from "../rules/cards";
 import { cardTexture, labelTexture, woodTexture, feltTexture } from "./textures";
 import { placements, seatPlacements, coinDenominations, DECK, DISCARD, STAKES, pileTop, type Pose, type CardPlacement } from "./layout";
 import type { StageAnchorQuery, StageHandle, StageHit, StageModel, StageOptions, StageZone } from "./types";
+import { REVEAL_PRESENTATION_MS, type RevealPhase } from "./types";
 export type * from "./types";
 
 interface Visual { group: THREE.Group; front: THREE.Mesh; faceKey: string; placement: CardPlacement }
-interface Motion { object: THREE.Object3D; start: number; duration: number; from: Pose; to: Pose; arc: number; flip: boolean; done?: () => void }
+interface Motion { object: THREE.Object3D; start: number; duration: number; from: Pose; to: Pose; arc: number; flip: boolean; bounce: boolean; done?: () => void }
+interface RevealData { gameId: string; gambit: number; cards: { placement: CardPlacement; from: Pose }[]; allTied: boolean; payments: { seatId: string; amount: number }[] }
+interface RevealCue { data: RevealData; start: number; cards: Visual[]; labels: THREE.Mesh[]; highlights: THREE.Mesh[]; flipped: boolean; paid: boolean }
 const W = 1.28, H = 1.85, THICKNESS = .045;
+const last = <T>(values: readonly T[]): T | undefined => values[values.length - 1];
 const copyPose = (object: THREE.Object3D): Pose => ({ x: object.position.x, y: object.position.y, z: object.position.z, yaw: object.rotation.y, tilt: object.rotation.x, roll: object.rotation.z, scale: object.scale.x });
 const setPose = (object: THREE.Object3D, pose: Pose) => { object.position.set(pose.x, pose.y, pose.z); object.rotation.set(pose.tilt, pose.yaw, pose.roll ?? 0, "YXZ"); object.scale.setScalar(pose.scale); };
 const poseEquals = (a: Pose, b: Pose) => ["x", "y", "z", "yaw", "tilt", "scale", "roll"].every(key => Math.abs(((a as any)[key] ?? 0) - ((b as any)[key] ?? 0)) < .00001);
@@ -46,12 +51,17 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   const backMat = standard("#ffffff", { map: tex(cardTexture(null, "en")), roughness: .77 });
   const faces = new Map<string, THREE.MeshStandardMaterial>();
   const visuals = new Map<string, Visual>(), motions = new Map<THREE.Object3D, Motion>();
-  const zoneGroup = new THREE.Group(), infoGroup = new THREE.Group(), moneyGroup = new THREE.Group(), stackGroup = new THREE.Group(); scene.add(zoneGroup, infoGroup, moneyGroup, stackGroup);
+  const zoneGroup = new THREE.Group(), infoGroup = new THREE.Group(), moneyGroup = new THREE.Group(), stackGroup = new THREE.Group(), transferGroup = new THREE.Group(), revealGroup = new THREE.Group(); scene.add(zoneGroup, infoGroup, moneyGroup, stackGroup, transferGroup, revealGroup);
+  const stakesAnchor = new THREE.Object3D(); stakesAnchor.position.set(STAKES.x, STAKES.y, STAKES.z); scene.add(stakesAnchor);
   const zoneGeo = geo(new THREE.PlaneGeometry(W * 1.18, H * 1.1));
   const labelGeo = geo(new THREE.PlaneGeometry(1, 160 / 768));
   const zoneBorderGeo = geo(new THREE.EdgesGeometry(zoneGeo));
   const zoneBorderMat = mat(new THREE.LineBasicMaterial({ color: "#b3965d", transparent: true, opacity: .3 }));
   const zoneMaterial = standard("#ad8b55", { transparent: true, opacity: .06, depthWrite: false });
+  const activeZoneBorderMat = mat(new THREE.LineBasicMaterial({ color: "#f1d89a", transparent: true, opacity: .95 }));
+  const activeZoneMaterial = standard("#e7c781", { transparent: true, opacity: .23, depthWrite: false });
+  const priceGlowGeo = geo(new THREE.PlaneGeometry(W * 1.11, H * 1.08));
+  const priceGlowMat = mat(new THREE.MeshBasicMaterial({ color: "#ffdb76", transparent: true, opacity: .85, depthWrite: false, toneMapped: false }));
   const coinGeo = geo(new THREE.CylinderGeometry(.16, .16, .038, 20));
   const goldMat = standard("#d5a34d", { metalness: .78, roughness: .3 });
   const silverMat = standard("#b6bcc2", { metalness: .82, roughness: .3 });
@@ -63,6 +73,11 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   let destroyed = false, explicitSuspend = false, contextLost = false, raf = 0, frames = 0, width = 0, height = 0;
   let drag: { cardId: string; origin: Pose; offsetX: number; offsetY: number } | null = null, pending: { cardId: string; gameId: string } | null = null;
   let zoneSignature = "", infoSignature = "";
+  const revealQueue: RevealData[] = [];
+  const deferredMoney: { before: NonNullable<StageModel["view"]>; after: NonNullable<StageModel["view"]> }[] = [];
+  let revealCue: RevealCue | null = null;
+  let revealPhase: RevealPhase | null = null;
+  const PLACE_MS = 250, FLIP_MS = 360, FLASH_MS = 640, PAYMENT_MS = REVEAL_PRESENTATION_MS - PLACE_MS - FLIP_MS - FLASH_MS;
   const gestureValues = new Map<string, { value: HandGesture; expires: number; timer: ReturnType<typeof setTimeout> }>();
   const ray = new THREE.Raycaster(), pointer = new THREE.Vector2();
   const fanRotation = new THREE.Quaternion(), fanTurn = new THREE.Quaternion();
@@ -79,21 +94,22 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   function finishMotions() { for (const motion of [...motions.values()]) { setPose(motion.object, motion.to); motion.done?.(); } motions.clear(); }
   function tick(now: number) {
     raf = 0; if (destroyed || hidden()) return;
+    tickReveal(now);
     for (const [object, motion] of motions) {
       const t = Math.max(0, Math.min(1, (now - motion.start) / motion.duration));
       const ease = t * t * (3 - 2 * t), p = motion.from, q = motion.to;
-      const bounce = t > .82 ? Math.sin((t - .82) / .18 * Math.PI) * .035 : 0;
+      const bounce = motion.bounce && t > .82 ? Math.sin((t - .82) / .18 * Math.PI) * .035 : 0;
       setPose(object, { x: THREE.MathUtils.lerp(p.x, q.x, ease), y: THREE.MathUtils.lerp(p.y, q.y, ease) + Math.sin(Math.PI * t) * motion.arc + bounce,
         z: THREE.MathUtils.lerp(p.z, q.z, ease), yaw: THREE.MathUtils.lerp(p.yaw, q.yaw, ease), tilt: THREE.MathUtils.lerp(p.tilt, q.tilt, ease),
         roll: THREE.MathUtils.lerp(p.roll ?? 0, q.roll ?? 0, ease) + (motion.flip ? Math.PI * (1 - ease) : 0), scale: THREE.MathUtils.lerp(p.scale, q.scale, ease) });
       if (t >= 1) { setPose(object, q); motions.delete(object); motion.done?.(); }
     }
     renderer.shadowMap.needsUpdate = true; renderer.render(scene, camera); frames++;
-    if (motions.size) requestFrame();
+    if (motions.size || revealCue) requestFrame();
   }
-  function move(object: THREE.Object3D, to: Pose, animate: boolean, arc = .7, flip = false, done?: () => void) {
+  function move(object: THREE.Object3D, to: Pose, animate: boolean, arc = .7, flip = false, done?: () => void, duration = 470) {
     if (!animate || model.reducedMotion || hidden()) { motions.delete(object); setPose(object, to); done?.(); return; }
-    motions.set(object, { object, from: copyPose(object), to, start: performance.now(), duration: 470, arc, flip, done });
+    motions.set(object, { object, from: copyPose(object), to, start: performance.now(), duration, arc, flip, bounce: arc > 0, done });
   }
   function freeOwnedGroup(group: THREE.Group) {
     for (const child of [...group.children]) { motions.delete(child); group.remove(child); child.traverse(node => { if ((node as THREE.InstancedMesh).isInstancedMesh) (node as THREE.InstancedMesh).dispose(); const owned = node.userData.ownedMaterial as THREE.MeshBasicMaterial | undefined;
@@ -104,17 +120,105 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     const object = mesh(labelGeo, material, parent); object.scale.setScalar(size); object.userData.ownedMaterial = material;
     object.position.copy(position); object.quaternion.copy(camera.quaternion); return object;
   }
+  function newEvents(before: NonNullable<StageModel["view"]>, after: NonNullable<StageModel["view"]>): PublicEvent[] {
+    // Public logs have no event ID and are capped. Only consume an adjacent
+    // projection's provable suffix; never replay a reconnect's historical log.
+    if (!before.events.length) return after.events;
+    const old = before.events.map(event => JSON.stringify(event)), next = after.events.map(event => JSON.stringify(event));
+    for (let count = Math.min(old.length, next.length); count > 0; count--) {
+      if (old.slice(-count).every((event, index) => event === next[index])) return after.events.slice(count);
+    }
+    return [];
+  }
+  function prepareReveal(before: NonNullable<StageModel["view"]>, after: NonNullable<StageModel["view"]>): RevealData | null {
+    const events = newEvents(before, after), index = events.findIndex(event => event.code === "ANTE_REVEALED");
+    if (index < 0) return null;
+    const ids = events[index].cardIds;
+    if (!ids || ids.length !== after.seats.length || new Set(ids).size !== ids.length) return null;
+    const seats = seatPlacements(after), cards: RevealData["cards"] = [];
+    for (let i = 0; i < ids.length; i++) {
+      let value; try { value = card(ids[i]); } catch { return null; }
+      const seat = seats.find(seat => seat.id === after.seats[i].id)!;
+      const old = [...visuals.values()].find(visual => visual.placement.zone === "ante" && visual.placement.seatId === seat.id) ??
+        [...visuals.values()].find(visual => visual.placement.zone === "hand" && visual.placement.cardId === value.id && visual.placement.seatId === seat.id) ??
+        last([...visuals.values()].filter(visual => visual.placement.zone === "hand" && visual.placement.seatId === seat.id));
+      cards.push({ placement: { key: value.id, cardId: value.id, card: value, zone: "ante", seatId: seat.id, pose: { ...seat.ante, y: .15 } }, from: old ? copyPose(old.group) : { ...seat.ante, y: .15 } });
+    }
+    const following = events.slice(index + 1), allTied = following.some(event => event.code === "ANTE_ALL_TIED");
+    const payments = allTied ? [] : following.slice(0, after.seats.length).filter(event => event.code === "PAID_STAKES" && event.seatId && after.seats.some(seat => seat.id === event.seatId) && Number.isFinite(event.amount) && event.amount! > 0)
+      .map(event => ({ seatId: event.seatId!, amount: event.amount! }));
+    return { gameId: after.id, gambit: after.gambit, cards, allTied, payments };
+  }
+  function makeVisual(placement: CardPlacement, parent: THREE.Object3D = scene): Visual {
+    const group = new THREE.Group(); parent.add(group);
+    const body = mesh(cardBody, edgeMat, group); body.castShadow = true; body.receiveShadow = true;
+    const front = mesh(cardPlane, backMat, group); front.rotation.x = -Math.PI / 2; front.position.y = THICKNESS / 2 + .001; front.receiveShadow = true;
+    const back = mesh(cardPlane, backMat, group); back.rotation.x = Math.PI / 2; back.position.y = -THICKNESS / 2 - .001;
+    return { group, front, faceKey: "back", placement };
+  }
+  function presentationVisibility() {
+    const active = revealCue?.data;
+    for (const visual of visuals.values()) visual.group.visible = !active || visual.placement.key === pending?.cardId || visual.placement.key === drag?.cardId ||
+      !(active.cards.some(card => card.placement.cardId === visual.placement.cardId) || visual.placement.zone === "ante" && active.cards.some(card => card.placement.seatId === visual.placement.seatId));
+    for (const visual of revealCue?.cards ?? []) visual.group.visible = visual.placement.cardId !== pending?.cardId && visual.placement.cardId !== drag?.cardId;
+  }
+  function startReveal(data: RevealData) {
+    if (destroyed || hidden() || model.reducedMotion) return;
+    const cards = data.cards.map(source => { const visual = makeVisual(source.placement, revealGroup); setPose(visual.group, source.from); move(visual.group, source.placement.pose, true, poseEquals(source.from, source.placement.pose) ? 0 : .5, false, undefined, PLACE_MS); return visual; });
+    const highest = Math.max(...data.cards.map(source => source.placement.card!.strength));
+    const labels = data.cards.filter(source => source.placement.card!.strength === highest).map(source => {
+      const pose = source.placement.pose, object = label(revealGroup, String(highest), new THREE.Vector3(pose.x, .75, pose.z), 2.0); object.visible = false; return object;
+    });
+    const highlights = cards.filter(visual => visual.placement.card!.strength === highest).map(visual => {
+      const object = mesh(priceGlowGeo, priceGlowMat, visual.group); object.rotation.x = -Math.PI / 2; object.position.y = .012; object.visible = false; return object;
+    });
+    revealCue = { data, start: performance.now(), cards, labels, highlights, flipped: false, paid: false };
+    notifyReveal("placing");
+    presentationVisibility(); requestFrame();
+  }
+  function notifyReveal(phase: RevealPhase | null) { if (phase === revealPhase) return; revealPhase = phase; options.onRevealPhase?.(phase); }
+  function clearReveal() {
+    revealCue = null; revealQueue.length = 0; deferredMoney.length = 0; freeOwnedGroup(revealGroup); presentationVisibility(); notifyReveal(null);
+  }
+  function tickReveal(now: number) {
+    const cue = revealCue; if (!cue) return;
+    const elapsed = now - cue.start;
+    if (!cue.flipped && elapsed >= PLACE_MS) {
+      cue.flipped = true; notifyReveal("revealing");
+      for (const visual of cue.cards) { const material = face(visual.placement); visual.front.material = material.material; visual.faceKey = material.key; move(visual.group, visual.placement.pose, true, 0, true, undefined, FLIP_MS); }
+    }
+    const flashing = elapsed - PLACE_MS - FLIP_MS;
+    // Two finite flashes of the actual maximum (including every tied maximum).
+    if (flashing >= 0 && flashing < FLASH_MS) notifyReveal("price");
+    for (const object of [...cue.labels, ...cue.highlights]) object.visible = flashing >= 0 && flashing < FLASH_MS && flashing % (FLASH_MS / 2) < FLASH_MS / 4;
+    if (!cue.paid && flashing >= FLASH_MS) {
+      cue.paid = true; notifyReveal(cue.data.allTied ? "discard" : "payment");
+      if (cue.data.allTied) cue.cards.forEach((visual, index) => move(visual.group, { ...DISCARD, y: .16 + index * .006 }, true, .6, false, undefined, PAYMENT_MS));
+      else animatePayments(cue.data.payments);
+    }
+    if (flashing >= FLASH_MS + PAYMENT_MS) {
+      freeOwnedGroup(revealGroup); revealCue = null;
+      const next = revealQueue.shift(); if (next) startReveal(next); else {
+        presentationVisibility(); notifyReveal(null);
+        for (const transfer of deferredMoney.splice(0)) animateMoney(transfer.before, transfer.after);
+      }
+    }
+  }
   function rebuildZones() {
-    const view = model.view, signature = JSON.stringify([view?.id, view?.seats.map(s => s.id), view && "selfSeatId" in view ? view.selfSeatId : null, model.language]);
+    const view = model.view, selfId = view && "selfSeatId" in view ? view.selfSeatId : null;
+    const legal = model.connected !== false && !pending ? model.legalDropZone ?? null : null;
+    const signature = JSON.stringify([view?.id, view?.seats.map(s => s.id), selfId, model.language, legal]);
     if (signature === zoneSignature) return; zoneSignature = signature; freeOwnedGroup(zoneGroup);
     const zone = (kind: StageZone, pose: Pose, seatId?: string) => {
-      const object = mesh(zoneGeo, zoneMaterial, zoneGroup); object.rotation.x = -Math.PI / 2; object.rotation.z = -pose.yaw; object.position.set(pose.x, .027, pose.z);
+      const active = !!selfId && seatId === selfId && kind === legal;
+      const object = mesh(zoneGeo, active ? activeZoneMaterial : zoneMaterial, zoneGroup); object.rotation.x = -Math.PI / 2; object.rotation.z = -pose.yaw; object.position.set(pose.x, .027, pose.z);
+      object.userData.highlight = active;
       object.userData.hit = { kind: "zone", zone: kind, ...(seatId ? { seatId } : {}) } satisfies StageHit;
-      const border = new THREE.LineSegments(zoneBorderGeo, zoneBorderMat);
+      const border = new THREE.LineSegments(zoneBorderGeo, active ? activeZoneBorderMat : zoneBorderMat);
       object.add(border);
-      if (kind !== "stakes") label(zoneGroup, model.language === "zh" ? ({ ante: "暗置牌", flight: "航线", deck: "牌库", discard: "弃牌", hand: "手牌" }[kind]) : kind.toUpperCase(), new THREE.Vector3(pose.x, .035, pose.z + 1.08), 1.35, true);
+      if (kind !== "stakes") label(zoneGroup, model.language === "zh" ? ({ ante: "暗置区", flight: "牌阵", deck: "牌库", discard: "弃牌", hand: "手牌" }[kind]) : kind.toUpperCase(), new THREE.Vector3(pose.x, .035, pose.z + 1.08), 1.35, true);
     };
-    zone("deck", DECK); zone("discard", DISCARD); zone("stakes", { ...DECK, ...STAKES });
+    zone("deck", DECK); zone("discard", DISCARD);
     if (view) for (const seat of seatPlacements(view)) { zone("ante", seat.ante, seat.id); zone("flight", seat.flight, seat.id); }
   }
   function moneyLocation(seatId: string) {
@@ -164,8 +268,8 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     label(infoGroup, String(view.deckCount), new THREE.Vector3(DECK.x, .15, DECK.z - 1.4), 1);
     label(infoGroup, String(view.discard.length), new THREE.Vector3(DISCARD.x, .15, DISCARD.z - 1.4), 1);
   }
-  function animateMoney(before: StageModel["view"]) {
-    const view = model.view; if (!view || !before || model.reducedMotion) return;
+  function animateMoney(before: StageModel["view"], view = model.view) {
+    if (!view || !before || model.reducedMotion) return;
     const old = new Map(before.seats.map(s => [s.id, s.gold])); old.set("stakes", before.stakes);
     const next = new Map(view.seats.map(s => [s.id, s.gold])); next.set("stakes", view.stakes);
     const loss: [string, number][] = [], gain: [string, number][] = [];
@@ -176,10 +280,19 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     for (const source of loss) for (const target of gain) {
       const amount = Math.min(source[1], target[1]); if (!amount) continue; source[1] -= amount; target[1] -= amount;
       for (let i = 0; i < Math.min(amount, 4) && budget-- > 0; i++) {
-        const object = mesh(coinGeo, goldMat, moneyGroup); object.castShadow = true; const from = moneyLocation(source[0]), to = moneyLocation(target[0]);
+        const object = mesh(coinGeo, goldMat, transferGroup); object.castShadow = true; const from = moneyLocation(source[0]), to = moneyLocation(target[0]);
         object.position.copy(from).add(new THREE.Vector3(i * .08, .35, 0));
-        move(object, { x: to.x + i * .06, y: .35, z: to.z, yaw: i * .7, tilt: 0, scale: 1 }, true, 1.5 + i * .08, false, () => { moneyGroup.remove(object); });
+        move(object, { x: to.x + i * .06, y: .35, z: to.z, yaw: i * .7, tilt: 0, scale: 1 }, true, 1.5 + i * .08, false, () => { transferGroup.remove(object); });
       }
+    }
+  }
+  function animatePayments(payments: RevealData["payments"]) {
+    let budget = 12;
+    for (const payment of payments) for (let i = 0; i < Math.min(4, payment.amount) && budget-- > 0; i++) {
+      const object = mesh(coinGeo, goldMat, transferGroup); object.castShadow = true;
+      const from = moneyLocation(payment.seatId), to = moneyLocation("stakes"); object.position.copy(from).add(new THREE.Vector3(i * .08, .35, 0));
+      object.userData.payment = { ...payment };
+      move(object, { x: to.x + i * .06, y: .35, z: to.z, yaw: i * .7, tilt: 0, scale: 1 }, true, 1.5 + i * .08, false, () => transferGroup.remove(object), PAYMENT_MS);
     }
   }
   function adjusted(placement: CardPlacement): Pose {
@@ -214,18 +327,25 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   }
   function reconcile(animate: boolean) {
     const desired = new Map((model.view ? placements(model.view) : []).map(p => [p.key, p]));
+    const sourcePoses = new Map<string, Pose>();
+    if (animate) for (const [id, placement] of desired) {
+      if (visuals.has(id) || !placement.seatId || !["ante", "flight"].includes(placement.zone)) continue;
+      // Reuse an outgoing anonymous mesh when possible. Its ordinal is only a
+      // visual source, never evidence of what that opponent previously held.
+      const candidates = [...visuals.entries()].filter(([key, value]) => key !== pending?.cardId && key !== drag?.cardId && value.placement.seatId === placement.seatId &&
+        (placement.zone === "ante" && value.placement.zone === "ante" && !desired.has(key) || value.placement.zone === "hand" && !value.placement.card));
+      const source = candidates.find(([key, value]) => value.placement.zone === "ante" && !desired.has(key)) ?? candidates.find(([key]) => !desired.has(key)) ?? last(candidates);
+      if (source) {
+        sourcePoses.set(id, copyPose(source[1].group));
+        if (!desired.has(source[0])) { visuals.delete(source[0]); visuals.set(id, source[1]); }
+      }
+    }
     for (const [id, visual] of visuals) if (!desired.has(id) && pending?.cardId !== id && drag?.cardId !== id) { motions.delete(visual.group); scene.remove(visual.group); visuals.delete(id); }
     for (const [id, placement] of desired) {
       let visual = visuals.get(id); const fresh = !visual;
       if (!visual) {
-        const group = new THREE.Group(); scene.add(group); const body = mesh(cardBody, edgeMat, group); body.castShadow = true; body.receiveShadow = true;
-        const front = mesh(cardPlane, backMat, group); front.rotation.x = -Math.PI / 2; front.position.y = THICKNESS / 2 + .001; front.receiveShadow = true;
-        const back = mesh(cardPlane, backMat, group); back.rotation.x = Math.PI / 2; back.position.y = -THICKNESS / 2 - .001;
-        visual = { group, front, faceKey: "back", placement }; visuals.set(id, visual);
-        setPose(group, animate ? { ...DECK, y: .25 } : adjusted(placement));
-        // An opponent's newly public flight starts at that player's face-down
-        // hand region, without assigning an identity to any prior hidden back.
-        if (animate && placement.zone === "flight" && placement.seatId) { const seat = model.view && seatPlacements(model.view).find(s => s.id === placement.seatId); if (seat) setPose(group, { ...placement.pose, x: seat.x, z: seat.z, y: .35 }); }
+        visual = makeVisual(placement); visuals.set(id, visual);
+        setPose(visual.group, animate ? sourcePoses.get(id) ?? { ...DECK, y: .25 } : adjusted(placement));
       }
       const old = visual.placement; visual.placement = placement;
       const hit: StageHit = placement.cardId ? { kind: placement.zone === "hand" ? "hand" : "card", cardId: placement.cardId, zone: placement.zone, ...(placement.seatId ? { seatId: placement.seatId } : {}) } : { kind: "zone", zone: placement.zone, ...(placement.seatId ? { seatId: placement.seatId } : {}) };
@@ -234,13 +354,16 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
       const material = face(placement); const faceChanged = material.key !== visual.faceKey;
       visual.front.material = material.material; visual.faceKey = material.key;
       const to = adjusted(placement), moving = motions.get(visual.group);
-      if (fresh || !poseEquals(moving?.to ?? copyPose(visual.group), to) || old.zone !== placement.zone) {
-        move(visual.group, to, animate, placement.zone === "hand" ? .45 : 1.2, animate && placement.card !== null && (fresh && placement.zone !== "hand" || faceChanged && old.card === null));
+      if (fresh || !poseEquals(moving?.to ?? copyPose(visual.group), to) || old.zone !== placement.zone || faceChanged && old.card === null && placement.card !== null) {
+        const handAdjustment = !fresh && old.zone === "hand" && placement.zone === "hand";
+        const revealInPlace = !fresh && old.zone === "ante" && placement.zone === "ante" && faceChanged;
+        move(visual.group, to, animate, handAdjustment || revealInPlace ? 0 : placement.zone === "hand" ? .45 : 1.2,
+          animate && placement.card !== null && (fresh && placement.zone !== "hand" || faceChanged && old.card === null), undefined, handAdjustment ? 170 : 470);
       }
     }
-    const used = new Set([...visuals.values()].map(v => v.faceKey));
+    const used = new Set([...visuals.values(), ...(revealCue?.cards ?? [])].map(v => v.faceKey));
     for (const [id, material] of faces) if (!used.has(id)) { if (material.map) { material.map.dispose(); textures.delete(material.map); } material.dispose(); materials.delete(material); faces.delete(id); }
-    rebuildZones(); refreshInfo(); requestFrame();
+    rebuildZones(); refreshInfo(); presentationVisibility(); requestFrame();
   }
   function clearInteraction() { drag = null; pending = null; dragLine.visible = landing.visible = false; }
   function clearGestures() { for (const entry of gestureValues.values()) clearTimeout(entry.timer); gestureValues.clear(); }
@@ -255,8 +378,8 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     requestFrame();
   }
   const observer = new ResizeObserver(resize); observer.observe(canvas);
-  const visibility = () => { if (document.hidden) { if (raf) cancelAnimationFrame(raf); raf = 0; finishMotions(); clearInteraction(); clearGestures(); } else { reconcile(false); resize(); } };
-  const lost = (event: Event) => { event.preventDefault(); contextLost = true; if (raf) cancelAnimationFrame(raf); raf = 0; finishMotions(); clearInteraction(); options.onQuality?.({ webgl: false, quality: "unavailable", reason: "context-lost" }); };
+  const visibility = () => { if (document.hidden) { if (raf) cancelAnimationFrame(raf); raf = 0; clearReveal(); finishMotions(); clearInteraction(); clearGestures(); } else { reconcile(false); resize(); } };
+  const lost = (event: Event) => { event.preventDefault(); contextLost = true; if (raf) cancelAnimationFrame(raf); raf = 0; clearReveal(); finishMotions(); clearInteraction(); options.onQuality?.({ webgl: false, quality: "unavailable", reason: "context-lost" }); };
   const restored = () => { if (destroyed) return; contextLost = false; options.onQuality?.({ webgl: true, quality: "high" }); resize(); reconcile(false); };
   document.addEventListener("visibilitychange", visibility); canvas.addEventListener("webglcontextlost", lost); canvas.addEventListener("webglcontextrestored", restored);
   const setRay = (x: number, y: number) => { const rect = canvas.getBoundingClientRect(); if (!rect.width || !rect.height || x < rect.left || y < rect.top || x > rect.right || y > rect.bottom) return false;
@@ -264,6 +387,7 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   function anchor(query: StageAnchorQuery) {
     let target: THREE.Object3D | undefined;
     if (query.cardId) target = visuals.get(query.cardId)?.group;
+    else if (query.zone === "stakes" && !query.seatId) target = stakesAnchor;
     else target = zoneGroup.children.find(child => { const hit = child.userData.hit as StageHit | undefined; return !!hit && hit.zone === query.zone && hit.seatId === query.seatId; });
     if (!target || destroyed) return null; scene.updateMatrixWorld(true); camera.updateMatrixWorld();
     // Anchor a fanned hand at its exposed strength corner, not at a center that
@@ -281,15 +405,21 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
       const nextSelf = next.view && "selfSeatId" in next.view ? next.view.selfSeatId : null;
       const reset = !before || !next.view || before.id !== next.view.id || oldSelf !== nextSelf || next.view.revision < before.revision || next.animate === false || next.connected === false;
       const animate = !reset && next.view!.revision >= before!.revision && next.view!.revision <= before!.revision + 1;
-      if (reset) { clearInteraction(); clearGestures(); finishMotions(); }
+      if (reset || !animate) { clearReveal(); clearInteraction(); clearGestures(); finishMotions(); }
       else if (before?.revision !== next.view?.revision) clearGestures();
-      if (next.reducedMotion) finishMotions();
-      model = next; previousView = before; reconcile(animate);
-      if (animate && next.view!.revision !== before!.revision) animateMoney(previousView);
+      if (next.reducedMotion) { clearReveal(); finishMotions(); }
+      const reveal = animate && !next.reducedMotion && next.view!.revision === before!.revision + 1 ? prepareReveal(before!, next.view!) : null;
+      model = next; previousView = before;
+      if (reveal && !hidden()) { if (revealCue) { if (revealQueue.length < 4) revealQueue.push(reveal); } else startReveal(reveal); }
+      reconcile(animate);
+      if (!reveal && animate && next.view!.revision !== before!.revision) {
+        if (revealCue) { if (deferredMoney.length < 8) deferredMoney.push({ before: before!, after: next.view! }); }
+        else animateMoney(previousView);
+      }
     },
     hitTest(x, y) {
       if (destroyed || hidden() || !setRay(x, y)) return null;
-      const intersections = ray.intersectObjects([...visuals.values()].filter(v => v.placement.key !== drag?.cardId && v.placement.key !== pending?.cardId).map(v => v.group).concat([zoneGroup]), true);
+      const intersections = ray.intersectObjects([...visuals.values()].filter(v => v.group.visible && v.placement.key !== drag?.cardId && v.placement.key !== pending?.cardId).map(v => v.group).concat([zoneGroup]), true);
       for (const hit of intersections) { let object: THREE.Object3D | null = hit.object; while (object) { if (object.userData.hit) return { ...object.userData.hit } as StageHit; object = object.parent; } }
       return null;
     },
@@ -308,14 +438,17 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
       const origin = new THREE.Vector3(drag.origin.x, drag.origin.y, drag.origin.z), end = visual.group.position;
       const curve = new THREE.QuadraticBezierCurve3(origin, origin.clone().lerp(end, .5).add(new THREE.Vector3(0, 1.6, 0)), end);
       const attribute = dragLineGeo.getAttribute("position"); curve.getPoints(24).forEach((p, i) => attribute.setXYZ(i, p.x, p.y, p.z)); attribute.needsUpdate = true; dragLineGeo.computeBoundingSphere(); dragLine.visible = true;
-      const seat = seatPlacements(model.view).find(s => s.self)!; const closest = [seat.ante, seat.flight].sort((a, b) => Math.hypot(a.x - point.x, a.z - point.z) - Math.hypot(b.x - point.x, b.z - point.z))[0];
-      landing.position.set(closest.x, .055, closest.z); landing.visible = true; requestFrame();
+       const seat = seatPlacements(model.view).find(s => s.self), hit = handle.hitTest(value.x, value.y);
+       const legal = model.legalDropZone;
+       landing.visible = !!seat && !!legal && hit?.seatId === seat.id && hit.zone === legal;
+       if (landing.visible && seat && legal) landing.position.set(seat[legal].x, .055, seat[legal].z);
+       requestFrame();
     },
     releaseDrag(value = {}) {
       if (!drag || destroyed) return; const id = drag.cardId;
       if (value.pending && model.view) { pending = { cardId: id, gameId: model.view.id }; const visual = visuals.get(id); const seat = seatPlacements(model.view).find(s => s.self);
         if (visual && seat && value.zone) move(visual.group, { ...seat[value.zone], y: 1.05, tilt: .14, scale: 1.12 }, true, .6); }
-      drag = null; dragLine.visible = landing.visible = false; if (!pending) reconcile(true); requestFrame();
+      drag = null; dragLine.visible = landing.visible = false; if (!pending) reconcile(true); else rebuildZones(); requestFrame();
     },
     resolvePending(_accepted) { if (destroyed || !pending) return; pending = null; reconcile(true); },
     gesture(seatId, value) {
@@ -326,16 +459,16 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
       if (old) clearTimeout(old.timer); const timer = setTimeout(() => { gestureValues.delete(seatId); if (!destroyed) reconcile(true); }, 30000);
       gestureValues.set(seatId, { value: valid, expires: Date.now() + 30000, timer }); reconcile(true);
     },
-    suspend() { if (destroyed) return; explicitSuspend = true; if (raf) cancelAnimationFrame(raf); raf = 0; clearInteraction(); clearGestures(); finishMotions(); },
+    suspend() { if (destroyed) return; explicitSuspend = true; if (raf) cancelAnimationFrame(raf); raf = 0; clearReveal(); clearInteraction(); clearGestures(); finishMotions(); },
     resume() { if (destroyed) return; explicitSuspend = false; reconcile(false); resize(); },
     destroy() {
-      if (destroyed) return; destroyed = true; if (raf) cancelAnimationFrame(raf); raf = 0; motions.clear(); clearInteraction(); clearGestures(); observer.disconnect();
+      if (destroyed) return; destroyed = true; if (raf) cancelAnimationFrame(raf); raf = 0; clearReveal(); motions.clear(); clearInteraction(); clearGestures(); observer.disconnect();
       document.removeEventListener("visibilitychange", visibility); canvas.removeEventListener("webglcontextlost", lost); canvas.removeEventListener("webglcontextrestored", restored);
       scene.traverse(object => { if ((object as THREE.InstancedMesh).isInstancedMesh) (object as THREE.InstancedMesh).dispose(); });
       for (const item of textures) item.dispose(); for (const item of materials) item.dispose(); for (const item of geometries) item.dispose();
       textures.clear(); materials.clear(); geometries.clear(); faces.clear(); visuals.clear(); scene.clear(); renderer.renderLists.dispose(); renderer.dispose(); renderer.forceContextLoss();
     },
-    diagnostics() { let meshes = 0; scene.traverse(object => { if ((object as THREE.Mesh).isMesh) meshes++; }); return { frames, animations: motions.size, meshes, textures: textures.size, drawCalls: renderer.info.render.calls, suspended: hidden(), destroyed, pendingCardId: pending?.cardId ?? null, faceCardIds: [...visuals.values()].filter(v => v.faceKey !== "back").map(v => v.placement.cardId!).filter(Boolean) }; },
+    diagnostics() { let meshes = 0; scene.traverse(object => { if ((object as THREE.Mesh).isMesh) meshes++; }); return { frames, animations: motions.size + (revealCue ? 1 : 0), meshes, textures: textures.size, drawCalls: renderer.info.render.calls, suspended: hidden(), destroyed, pendingCardId: pending?.cardId ?? null, faceCardIds: [...visuals.values(), ...(revealCue?.cards ?? [])].filter(v => v.group.visible && v.faceKey !== "back").map(v => v.placement.cardId!).filter(Boolean) }; },
   };
   return handle;
 }

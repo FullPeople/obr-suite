@@ -40,6 +40,10 @@ export function validRecovery(value: SavedTable, roomId: string, summary: TableS
         game.seats.some((seat, i) => seat.id !== table.seats[i].seatId) || checkInvariants(game).length ||
         !integer(game.stakes) || !integer(game.hole) || table.stage !== gameStage(game)) return false;
     const held = game.seats.flatMap(seat => [...seat.hand, ...seat.flight.map(item => item.cardId)]);
+    if (game.anteOrigins !== undefined && (!Array.isArray(game.anteOrigins) || game.anteOrigins.length > game.seats.length ||
+        game.anteOrigins.some(origin => !record(origin) || !game.seats.some(seat => seat.id === origin.seatId) || !CARDS.some(card => card.id === origin.cardId)) ||
+        new Set(game.anteOrigins.map(origin => origin.cardId)).size !== game.anteOrigins.length ||
+        new Set(game.anteOrigins.map(origin => origin.seatId)).size !== game.anteOrigins.length)) return false;
     const pending = game.pending && ["seer-keep", "sorcerer"].includes(game.pending.task.kind) ? game.pending.task.ids ?? [] : [];
     const reserved = game.queue.filter(task => task.kind === "sorcerer-ante").flatMap(task => task.ids ?? []);
     const cards = [...game.deck, ...game.discard, ...game.ante, ...Object.values(game.committed), ...held, ...pending, ...reserved];

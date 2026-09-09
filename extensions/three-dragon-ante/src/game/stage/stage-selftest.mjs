@@ -13,7 +13,7 @@ const sourcePins = () => Object.fromEntries(sourceFiles.map(file => [file, creat
 const initialPins = sourcePins();
 const mutant = process.argv.find(arg => arg.startsWith('--mutant='))?.split('=')[1];
 const mutations = {
-  idle: ['if (motions.size) requestFrame();', 'requestFrame();', 'settled scene has no continuous render loop'],
+  idle: ['if (motions.size || revealCue) requestFrame();', 'requestFrame();', 'settled scene has no continuous render loop'],
   pending: ['if (pending?.cardId === id || drag?.cardId === id) continue;', 'if (drag?.cardId === id) continue;', 'projection arriving before acknowledgement keeps one pending card'],
   privacy: ['oldSelf !== nextSelf', 'false', 'changing to spectator cancels private pending mesh without waiting for an ACK'],
 };
@@ -27,7 +27,7 @@ import{createGame,projectSeat,projectPublic,applyAction,card}from ${JSON.stringi
 import{coinDenominations}from ${JSON.stringify(resolve(import.meta.dirname, 'layout.ts'))};
 const canvas=document.querySelector('canvas'),quality=[];
 let state=createGame({id:'webgl-stage',seed:7341,seats:[{id:'s1',name:'Aurelia'},{id:'s2',name:'Bram'},{id:'s3',name:'Cyra'},{id:'s4',name:'Dorian'}]});
-let model={view:projectSeat(state,'s1'),language:'en',connected:true};let lossExtension;let surface=mountTableStage(canvas,{onQuality:q=>quality.push(q)});surface.update(model);
+let model={view:projectSeat(state,'s1'),language:'en',connected:true,legalDropZone:'ante'};let lossExtension;let surface=mountTableStage(canvas,{onQuality:q=>quality.push(q)});surface.update(model);
 window.h={surface,quality,coinDenominations,get model(){return model},setModel(next){model=next;surface.update(model)},reset(){model={view:projectSeat(state,'s1'),language:'en',connected:true,animate:false};surface.update(model)},public(){model={...model,view:projectPublic(state),animate:false};surface.update(model)},
 publicSameRevision(){const{selfSeatId,hand,committedAnte,actions,...view}=model.view;model={...model,view,animate:true};surface.update(model)},
 visibility(value){if(value===null)delete document.hidden;else Object.defineProperty(document,'hidden',{get:()=>value,configurable:true});document.dispatchEvent(new Event('visibilitychange'))},

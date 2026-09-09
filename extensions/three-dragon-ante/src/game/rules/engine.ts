@@ -109,15 +109,15 @@ function nextRound(s:GameState,rng?:RandomSource){
   s.round++;s.active=s.leader;s.turnIndex=0;s.roundCards=s.seats.map(()=>null);s.scoring=false;startTurn(s,rng);
 }
 function beginAnte(s:GameState,rng?:RandomSource){
-  s.stage="ante";s.round=0;s.committed={};s.ante=[];s.roundCards=s.seats.map(()=>null);s.effects=[];s.scoring=false;
+  s.stage="ante";s.round=0;s.committed={};s.ante=[];s.anteOrigins=[];s.roundCards=s.seats.map(()=>null);s.effects=[];s.scoring=false;
   for(const seat of s.seats){seat.flight=[];seat.rewards=[];seat.archmage=false;}
   // No voluntary buying at ante; normal end-of-gambit draws supply these cards.
   if(s.seats.some(seat=>!seat.hand.length))issue(s,"RULE_EMPTY_HAND_AT_ANTE");
 }
 function resolveAnte(s:GameState,rng?:RandomSource){
-  const ids=s.seats.map(seat=>s.committed[seat.id]);s.ante=[...ids];s.committed={};event(s,"ANTE_REVEALED",undefined,ids);
+  const ids=s.seats.map(seat=>s.committed[seat.id]);s.ante=[...ids];s.anteOrigins=s.seats.map((seat,index)=>({seatId:seat.id,cardId:ids[index]}));s.committed={};event(s,"ANTE_REVEALED",undefined,ids);
   const lead=highestUntied(ids.map(id=>card(id).strength));
-  if(lead===null){s.discard.push(...s.ante);s.ante=[];event(s,"ANTE_ALL_TIED");for(let i=0;i<s.seats.length;i++)draw(s,i,1,rng);if(s.stage!=="adjudication")s.stage="ante";return;}
+  if(lead===null){s.discard.push(...s.ante);s.ante=[];s.anteOrigins=[];event(s,"ANTE_ALL_TIED");for(let i=0;i<s.seats.length;i++)draw(s,i,1,rng);if(s.stage!=="adjudication")s.stage="ante";return;}
   const price=Math.max(...ids.map(id=>card(id).strength));for(let i=0;i<s.seats.length;i++)pay(s,i,"stakes",price);
   s.leader=lead;s.active=lead;s.round=1;s.turnIndex=0;startTurn(s,rng);if(!s.stakes)emptyStakes(s);
 }
@@ -141,7 +141,7 @@ function award(s:GameState,reason:string,rng?:RandomSource){
   s.lastGambit={number:s.gambit,winners:[s.seats[winner].id],reason,strengths:Object.fromEntries(s.seats.map((seat,i)=>[seat.id,flightStrength(s,i,true)])),stakes};
   for(const e of s.effects.filter(e=>e.kind==="monarch"&&e.seat===winner))for(const opponent of around(s,winner))pay(s,winner,opponent,3);
   for(const seat of s.seats){s.discard.push(...seat.flight.map(f=>f.cardId));seat.flight=[];const paid=Math.min(seat.gold,seat.debt);seat.gold-=paid;s.hole+=paid;seat.debt=0;}
-  s.discard.push(...s.ante);s.ante=[];s.effects=[];s.queue=[];s.pending=null;s.revealed=[];s.scoring=false;
+  s.discard.push(...s.ante);s.ante=[];s.anteOrigins=[];s.effects=[];s.queue=[];s.pending=null;s.revealed=[];s.scoring=false;
   event(s,"GAMBIT_WON",winner,undefined,stakes);
   if(s.seats.some(seat=>seat.gold===0)){
     const most=Math.max(...s.seats.map(seat=>seat.gold));const won=s.seats.map((seat,i)=>({seat,i})).filter(({seat})=>seat.gold===most);

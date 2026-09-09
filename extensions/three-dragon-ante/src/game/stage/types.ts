@@ -2,6 +2,9 @@ import type { PublicView, SeatView } from "../rules/types";
 import type { HandGesture } from "../gesture";
 
 export type StageZone = "hand" | "ante" | "flight" | "deck" | "discard" | "stakes";
+/** Pure timing contract; importing this module does not load Three.js. */
+export const REVEAL_PRESENTATION_MS = 1720;
+export type RevealPhase = "placing" | "revealing" | "price" | "payment" | "discard";
 export type StageHit =
   | { kind: "hand" | "card"; cardId: string; zone: StageZone; seatId?: string }
   | { kind: "zone"; zone: StageZone; seatId?: string };
@@ -11,6 +14,8 @@ export interface StageModel {
   connected?: boolean;
   reducedMotion?: boolean;
   selectedCardIds?: readonly string[];
+  /** Provided by the UI only while that own-seat action is legal and unlocked. */
+  legalDropZone?: null | "ante" | "flight";
   /** Set false on reconnect/snapshot replacement. Gaps and new games also snap. */
   animate?: boolean;
 }
@@ -21,6 +26,7 @@ export interface StageQuality {
 }
 export interface StageOptions {
   onQuality?(quality: StageQuality): void;
+  onRevealPhase?(phase: RevealPhase | null): void;
   /** Reserved for integration; renderer never installs input handlers. */
   onInspect?(cardId: string): void;
 }
