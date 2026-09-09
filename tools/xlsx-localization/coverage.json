@@ -8,12 +8,12 @@
   "all_surfaces": {
     "context_records": 25922,
     "occurrences": 28648,
-    "seed_records": 2347,
-    "reviewed_records": 10330,
-    "missing_records": 13245,
-    "missing_characters": 767313,
-    "long_missing_records": 2613,
-    "long_missing_characters": 605355,
+    "seed_records": 2257,
+    "reviewed_records": 10506,
+    "missing_records": 13159,
+    "missing_characters": 765997,
+    "long_missing_records": 2609,
+    "long_missing_characters": 604877,
     "by_kind": {
       "cell_text": 24418,
       "comment": 67,
@@ -27,8 +27,8 @@
       "xml_attribute": 113
     },
     "seed_methods": {
-      "context_reviewed": 10330,
-      "exact_glossary": 988,
+      "context_reviewed": 10506,
+      "exact_glossary": 898,
       "existing_english_column": 1330,
       "number_unit": 29
     }
@@ -37,12 +37,12 @@
     "2014": {
       "context_records": 9933,
       "occurrences": 11223,
-      "seed_records": 973,
-      "reviewed_records": 4100,
-      "missing_records": 4860,
-      "missing_characters": 260853,
-      "long_missing_records": 884,
-      "long_missing_characters": 199992,
+      "seed_records": 922,
+      "reviewed_records": 4202,
+      "missing_records": 4809,
+      "missing_characters": 260155,
+      "long_missing_records": 882,
+      "long_missing_characters": 199753,
       "by_kind": {
         "cell_text": 9450,
         "comment": 33,
@@ -56,8 +56,8 @@
         "xml_attribute": 56
       },
       "seed_methods": {
-        "context_reviewed": 4100,
-        "exact_glossary": 430,
+        "context_reviewed": 4202,
+        "exact_glossary": 379,
         "existing_english_column": 521,
         "number_unit": 22
       }
@@ -65,12 +65,12 @@
     "2024": {
       "context_records": 15989,
       "occurrences": 17425,
-      "seed_records": 1374,
-      "reviewed_records": 6230,
-      "missing_records": 8385,
-      "missing_characters": 506460,
-      "long_missing_records": 1729,
-      "long_missing_characters": 405363,
+      "seed_records": 1335,
+      "reviewed_records": 6304,
+      "missing_records": 8350,
+      "missing_characters": 505842,
+      "long_missing_records": 1727,
+      "long_missing_characters": 405124,
       "by_kind": {
         "cell_text": 14968,
         "comment": 34,
@@ -83,8 +83,8 @@
         "xml_attribute": 57
       },
       "seed_methods": {
-        "context_reviewed": 6230,
-        "exact_glossary": 558,
+        "context_reviewed": 6304,
+        "exact_glossary": 519,
         "existing_english_column": 809,
         "number_unit": 7
       }
