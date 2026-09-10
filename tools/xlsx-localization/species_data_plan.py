@@ -231,6 +231,21 @@ def plan(inputs):
                             'cell': ref, 'kind': 'formula', 'source': '=' + before, 'target': '=' + after,
                             'formula_attributes': {}, 'purpose': 'Preserve blank and unknown inputs; accept Chinese and English keys'})
         assert len(normalizers) == 15
+        if version == '2014':
+            # The last four description slots had drifting lookup bounds.
+            # AN12 owns a shared formula for AN12:AN14; absolute bounds repair
+            # its followers without replacing their shared-formula metadata.
+            for ref, old_range in [('AN11', 'AH7:AI22'), ('AN12', 'AH8:AI23')]:
+                node = p.fragment(cells[ref])
+                selected_ref = 'AM' + ref[2:]
+                before = node.findtext(p.q('f'))
+                assert before == 'IFERROR(VLOOKUP(' + selected_ref + ',' + old_range + ',2,0),"")'
+                after = 'IFERROR(VLOOKUP(' + selected_ref + ',$AH$6:$AI$21,2,0),"")'
+                entries.append({'id': version + '-trait-description-' + ref, 'version': version,
+                                'sheet': '种族', 'cell': ref, 'kind': 'formula',
+                                'source': '=' + before, 'target': '=' + after,
+                                'formula_attributes': node.find(p.q('f')).attrib,
+                                'purpose': 'Keep all trait description slots on the full active-trait lookup range'})
         assert path.read_bytes() == raw, 'Input changed while planning'
         version_plans[version] = {'name_aliases': name_aliases, 'trait_aliases': trait_aliases,
                                  'scoped_trait_aliases': scoped_aliases, 'ambiguous_global_traits': ambiguous,
