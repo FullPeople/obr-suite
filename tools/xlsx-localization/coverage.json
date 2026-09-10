@@ -8,10 +8,10 @@
   "all_surfaces": {
     "context_records": 25922,
     "occurrences": 28648,
-    "seed_records": 2223,
-    "reviewed_records": 10929,
-    "missing_records": 12770,
-    "missing_characters": 739247,
+    "seed_records": 2171,
+    "reviewed_records": 13303,
+    "missing_records": 10448,
+    "missing_characters": 709547,
     "long_missing_records": 2511,
     "long_missing_characters": 582011,
     "by_kind": {
@@ -27,20 +27,20 @@
       "xml_attribute": 113
     },
     "seed_methods": {
-      "context_reviewed": 10929,
-      "exact_glossary": 864,
+      "context_reviewed": 13303,
+      "exact_glossary": 817,
       "existing_english_column": 1330,
-      "number_unit": 29
+      "number_unit": 24
     }
   },
   "by_version": {
     "2014": {
       "context_records": 9933,
       "occurrences": 11223,
-      "seed_records": 903,
-      "reviewed_records": 4488,
-      "missing_records": 4542,
-      "missing_characters": 234044,
+      "seed_records": 877,
+      "reviewed_records": 5429,
+      "missing_records": 3627,
+      "missing_characters": 222952,
       "long_missing_records": 784,
       "long_missing_characters": 176887,
       "by_kind": {
@@ -56,8 +56,8 @@
         "xml_attribute": 56
       },
       "seed_methods": {
-        "context_reviewed": 4488,
-        "exact_glossary": 360,
+        "context_reviewed": 5429,
+        "exact_glossary": 334,
         "existing_english_column": 521,
         "number_unit": 22
       }
@@ -65,10 +65,10 @@
     "2024": {
       "context_records": 15989,
       "occurrences": 17425,
-      "seed_records": 1320,
-      "reviewed_records": 6441,
-      "missing_records": 8228,
-      "missing_characters": 505203,
+      "seed_records": 1294,
+      "reviewed_records": 7874,
+      "missing_records": 6821,
+      "missing_characters": 486595,
       "long_missing_records": 1727,
       "long_missing_characters": 405124,
       "by_kind": {
@@ -83,10 +83,10 @@
         "xml_attribute": 57
       },
       "seed_methods": {
-        "context_reviewed": 6441,
-        "exact_glossary": 504,
+        "context_reviewed": 7874,
+        "exact_glossary": 483,
         "existing_english_column": 809,
-        "number_unit": 7
+        "number_unit": 2
       }
     }
   },
