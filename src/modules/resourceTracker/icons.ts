@@ -248,3 +248,12 @@ export const ICON_LABELS: Record<IconId, string> = {
 };
 
 export const ICON_IDS: IconId[] = Object.keys(ICON_LIBRARY) as IconId[];
+
+const ICON_LABELS_EN: Record<IconId, string> = {
+  gem: "Gem", heart: "Heart", starFour: "Four-pointed star", starFive: "Five-pointed star", skull: "Skull",
+  hourglass: "Hourglass", catEye: "Cat's eye", gear: "Gear", swords: "Crossed swords", apple: "Apple",
+  drumstick: "Drumstick", mask: "Mask", cross: "Cross", axe: "Axe", shield: "Shield", fist: "Fist",
+  bow: "Bow", note: "Musical note", lute: "Lute", dagger: "Dagger", lightning: "Lightning",
+  bloodDrop: "Blood drop", leaf: "Leaf", waterDrop: "Water drop", spellbook: "Spellbook",
+};
+export function iconLabel(id: IconId, language: "zh" | "en"): string { return (language === "en" ? ICON_LABELS_EN : ICON_LABELS)[id] ?? id; }

@@ -8,6 +8,36 @@
 import OBR, { Item } from "@owlbear-rodeo/sdk";
 import { Resource, RESOURCES_KEY } from "./types";
 
+export type ResourceWriteGuard = (item: Item) => boolean;
+
+/** One edit session uses one atomic operation. An edit of a deleted resource
+ * never falls through to create, and duplicate saves never append twice. */
+export async function commitResourceEdit(itemId: string, resourceId: string | null, resource: Resource | null, shouldApply: ResourceWriteGuard): Promise<boolean> {
+  let changed = false;
+  await OBR.scene.items.updateItems([itemId], (drafts) => {
+    const item = drafts[0];
+    if (!item || !shouldApply(item)) return;
+    const raw = item.metadata[RESOURCES_KEY];
+    const values = Array.isArray(raw) ? raw : [];
+    const index = resourceId ? values.findIndex((value: any) => value?.id === resourceId) : -1;
+    if (resourceId && index < 0) return;
+    if (!resource) {
+      if (!resourceId) return;
+      item.metadata[RESOURCES_KEY] = values.filter((value: any) => value?.id !== resourceId);
+    } else {
+      if (!normaliseResource(resource) || (resourceId && resource.id !== resourceId)) return;
+      if (resourceId) values[index] = { ...values[index], ...resource };
+      else {
+        if (values.some((value: any) => value?.id === resource.id)) return;
+        values.push(resource);
+      }
+      item.metadata[RESOURCES_KEY] = values;
+    }
+    changed = true;
+  });
+  return changed;
+}
+
 /** Read the resources array from a token's metadata. Returns [] if
  *  none configured or metadata malformed. */
 export function readResources(item: Item | null | undefined): Resource[] {
@@ -43,11 +73,12 @@ function normaliseResource(raw: unknown): Resource | null {
 export async function writeResources(
   itemId: string,
   next: Resource[],
+  shouldApply?: ResourceWriteGuard,
 ): Promise<void> {
   try {
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       const d = drafts[0];
-      if (!d) return;
+      if (!d || (shouldApply && !shouldApply(d))) return;
       (d.metadata as any)[RESOURCES_KEY] = next;
     });
   } catch (e) {
@@ -62,12 +93,13 @@ export async function updateResource(
   itemId: string,
   resourceId: string,
   reducer: (cur: Resource) => Resource,
+  shouldApply?: ResourceWriteGuard,
 ): Promise<Resource | null> {
   let next: Resource | null = null;
   try {
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       const d = drafts[0];
-      if (!d) return;
+      if (!d || (shouldApply && !shouldApply(d))) return;
       const arr = (d.metadata as any)?.[RESOURCES_KEY];
       if (!Array.isArray(arr)) return;
       const i = arr.findIndex((r: any) => r?.id === resourceId);
@@ -75,8 +107,8 @@ export async function updateResource(
       const cur = normaliseResource(arr[i]);
       if (!cur) return;
       const upd = reducer(cur);
-      arr[i] = upd;
-      next = upd;
+      arr[i] = { ...arr[i], ...upd };
+      next = arr[i];
     });
   } catch (e) {
     console.error("[obr-suite/resources] updateResource failed", e);
@@ -84,15 +116,30 @@ export async function updateResource(
   return next;
 }
 
+/** Reordering changes order only; concurrent values, added resources and
+ * legacy repair markers remain in the latest SDK draft. */
+export async function reorderResources(itemId: string, orderedIds: string[], shouldApply?: ResourceWriteGuard): Promise<void> {
+  await OBR.scene.items.updateItems([itemId], (drafts) => {
+    const item = drafts[0];
+    if (!item || (shouldApply && !shouldApply(item))) return;
+    const resources = item.metadata[RESOURCES_KEY];
+    if (!Array.isArray(resources)) return;
+    const rank = new Map(orderedIds.map((id, index) => [id, index]));
+    const sorted = [...resources].sort((a, b) => (rank.get(a?.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b?.id) ?? Number.MAX_SAFE_INTEGER));
+    item.metadata[RESOURCES_KEY] = sorted.map((resource, order) => ({ ...resource, order }));
+  });
+}
+
 /** Add a new resource to the end of the array. */
 export async function addResource(
   itemId: string,
   resource: Resource,
+  shouldApply?: ResourceWriteGuard,
 ): Promise<void> {
   try {
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       const d = drafts[0];
-      if (!d) return;
+      if (!d || (shouldApply && !shouldApply(d))) return;
       const arr = (d.metadata as any)?.[RESOURCES_KEY];
       const next = Array.isArray(arr) ? [...arr] : [];
       next.push(resource);
@@ -116,12 +163,12 @@ export const RESOURCES_BACKUP_KEY = "com.obr-suite/resources/backup-pre-idfix";
  *  — the snapshot stays in metadata purely as audit evidence until the
  *  rollback deletes it. Returns the reverted-entry count, or null when
  *  there is nothing to revert / the write fails. */
-export async function restoreResourceIdBackup(itemId: string): Promise<number | null> {
+export async function restoreResourceIdBackup(itemId: string, shouldApply?: ResourceWriteGuard): Promise<number | null> {
   let reverted: number | null = null;
   try {
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       const d = drafts[0];
-      if (!d) return;
+      if (!d || (shouldApply && !shouldApply(d))) return;
       const arr = (d.metadata as any)?.[RESOURCES_KEY];
       const hasBackup = RESOURCES_BACKUP_KEY in (d.metadata as any);
       if (!Array.isArray(arr) && !hasBackup) return;
@@ -154,11 +201,12 @@ export async function restoreResourceIdBackup(itemId: string): Promise<number | 
 export async function deleteResource(
   itemId: string,
   resourceId: string,
+  shouldApply?: ResourceWriteGuard,
 ): Promise<void> {
   try {
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       const d = drafts[0];
-      if (!d) return;
+      if (!d || (shouldApply && !shouldApply(d))) return;
       const arr = (d.metadata as any)?.[RESOURCES_KEY];
       if (!Array.isArray(arr)) return;
       (d.metadata as any)[RESOURCES_KEY] = arr.filter((r: any) => r?.id !== resourceId);

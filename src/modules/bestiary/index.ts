@@ -1,3 +1,4 @@
+import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
 import { setupGroupSaves, teardownGroupSaves } from "./group-saves";
 import { assetUrl } from "../../asset-base";
@@ -12,8 +13,9 @@ import {
   type DragEndPayload,
 } from "../../utils/panelLayout";
 import { BC_LOCAL_CONTENT_CHANGED, forceReloadLocalContent } from "../../utils/localContent";
+import { contentConfigurationKey } from "../../utils/contentLocale";
 import { clearMonsterCache, loadAllMonsters, getRawMonster } from "./data";
-import { onStateChange, getState, getLocalLang } from "../../state";
+import { onStateChange, onLangChange, getState, getLocalLang } from "../../state";
 import { createCanvasDragMode } from "../../utils/canvasDragMode";
 
 // Per-client language for context-menu / tool labels, read once at
@@ -172,7 +174,7 @@ const BUBBLES_NAME = "com.owlbear-rodeo-bubbles-extension/name";
 const INITIATIVE_MODKEY = "com.initiative-tracker/dexMod";
 
 const isAutoPopupOn = (): boolean => {
-  try { return localStorage.getItem(AUTO_POPUP_KEY) === "1"; } catch { return false; }
+  try { return localStorage.getItem(AUTO_POPUP_KEY) !== "0"; } catch { return true; }
 };
 
 const POPOVER_WIDTH = 350;
@@ -229,7 +231,7 @@ async function openPanel() {
       transformOrigin: { horizontal: "RIGHT", vertical: "TOP" },
       disableClickAway: true,
     });
-    isOpen = true;
+    isOpen = true; setPanelOpen("bestiary-panel", true);
   } catch (e) {
     console.error("[obr-suite/bestiary] openPanel failed", e);
   }
@@ -237,7 +239,7 @@ async function openPanel() {
 
 async function closePanel() {
   try { await OBR.popover.close(POPOVER_ID); } catch {}
-  isOpen = false;
+  isOpen = false; setPanelOpen("bestiary-panel", false);
 }
 
 async function openInfoPopoverFor(slug: string, itemId: string | null) {
@@ -265,7 +267,7 @@ async function openInfoPopoverFor(slug: string, itemId: string | null) {
       hidePaper: true,
       disableClickAway: true,
     });
-    infoPopoverOpen = true;
+    infoPopoverOpen = true; setPanelOpen("bestiary-info", true);
   } catch (e) {
     console.error("[obr-suite/bestiary] openInfoPopoverFor failed", e);
   }
@@ -273,7 +275,7 @@ async function openInfoPopoverFor(slug: string, itemId: string | null) {
 
 async function closeInfoPopover() {
   try { await OBR.popover.close(INFO_POPOVER_ID); } catch {}
-  infoPopoverOpen = false;
+  infoPopoverOpen = false; setPanelOpen("bestiary-info", false);
   currentInfoSlug = null;
   currentInfoItemId = null;
 }
@@ -373,22 +375,7 @@ async function handleSelection(selection: string[] | undefined) {
 }
 
 export async function setupBestiary(): Promise<void> {
-  // One-time migration: the legacy standalone "bestiary" / "character-
-  // cards" plugins both wrote `com.bestiary/auto-popup = "0"` from
-  // a UI that was visible to ALL roles. The suite hides the toggle
-  // from non-GM, leaving players permanently stuck with auto-popup
-  // off and no way to flip it back on. Clear the stale "0" once so
-  // the new player-facing popover (owner-token) actually shows up.
-  // Players + GM can now toggle it via the cluster row.
-  try {
-    const MIG_KEY = "obr-suite/bestiary-popup-migration-v2";
-    if (localStorage.getItem(MIG_KEY) !== "done") {
-      if (localStorage.getItem(AUTO_POPUP_KEY) === "0") {
-        localStorage.removeItem(AUTO_POPUP_KEY);
-      }
-      localStorage.setItem(MIG_KEY, "done");
-    }
-  } catch {}
+  // Unset means enabled; preserve an explicit local choice to disable previews.
   // Local-content invalidation: when the user imports / removes a
   // homebrew JSON or MD file, drop our merged-monster cache so the
   // bestiary panel re-renders with the new entries. Also refresh
@@ -416,12 +403,9 @@ export async function setupBestiary(): Promise<void> {
   // added/removed OR a per-source blacklist toggled in settings.
   // Signature includes baseUrl + disabledSources so both kinds of
   // mutation invalidate.
-  const libSig = () => JSON.stringify(
-    (getState().libraries || [])
-      .filter((l) => l.enabled)
-      .map((l) => `${l.baseUrl}|${(l.disabledSources ?? []).slice().sort().join(",")}`),
-  );
+  const libSig = () => contentConfigurationKey(getState().libraries ?? [], getLocalLang());
   let lastLibSig = libSig();
+  unsubs.push(onLangChange(() => { lastLibSig = libSig(); clearMonsterCache(); }));
   unsubs.push(
     onStateChange(() => {
       const sig = libSig();
@@ -648,7 +632,7 @@ export async function setupBestiary(): Promise<void> {
     onViewportResize(async () => {
       if (isOpen) await openPanel();
       if (infoPopoverOpen && currentInfoSlug) {
-        infoPopoverOpen = false;
+        infoPopoverOpen = false; setPanelOpen("bestiary-info", false);
         await openInfoPopoverFor(currentInfoSlug, currentInfoItemId);
       }
     }),
@@ -663,7 +647,7 @@ export async function setupBestiary(): Promise<void> {
         if (isOpen) await openPanel();
       } else if (payload?.panelId === PANEL_IDS.bestiaryInfo) {
         if (infoPopoverOpen && currentInfoSlug) {
-          infoPopoverOpen = false;
+          infoPopoverOpen = false; setPanelOpen("bestiary-info", false);
           await openInfoPopoverFor(currentInfoSlug, currentInfoItemId);
         }
       }
@@ -877,7 +861,7 @@ export async function setupBestiary(): Promise<void> {
     OBR.broadcast.onMessage(BC_PANEL_RESET, async () => {
       if (isOpen) await openPanel();
       if (infoPopoverOpen && currentInfoSlug) {
-        infoPopoverOpen = false;
+        infoPopoverOpen = false; setPanelOpen("bestiary-info", false);
         await openInfoPopoverFor(currentInfoSlug, currentInfoItemId);
       }
     }),

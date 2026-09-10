@@ -3,7 +3,6 @@ import {
   startSceneSync,
   getState,
   onStateChange,
-  refreshFromScene,
   readLS,
   writeLS,
   getLocalLang,
@@ -14,6 +13,7 @@ import { assetUrl } from "./asset-base";
 import { bindPanelDrag, applyDragSide, watchDragSide } from "./utils/panelDrag";
 import { PANEL_IDS } from "./utils/panelLayout";
 import { installDebugOverlay } from "./utils/debugOverlay";
+import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
 
 // Cluster ROW iframe — only rendered while the user has the trigger
 // toggled on. Holds the actual action buttons. The row popover is
@@ -59,9 +59,17 @@ let cachedAnnounceVersion: string | null = null;
 let timeStopActive = false;
 let musicBoardOpen = false;
 let isGM = false;
+let rowAlive = true;
+let roleRevision = 0;
+let timeStopReadRevision = 0;
+const rowDisposers: Array<() => void> = [];
+window.addEventListener("pagehide", () => {
+  rowAlive = false; ++roleRevision; ++timeStopReadRevision;
+  for (const dispose of rowDisposers.splice(0)) dispose();
+}, { once: true });
 
 function isAutoPopupOn(key: string): boolean {
-  return readLS(key, "0") === "1";
+  return readLS(key, "1") !== "0";
 }
 function setAutoPopupOn(key: string, on: boolean, msg: string) {
   writeLS(key, on ? "1" : "0");
@@ -95,13 +103,15 @@ function btnHTML(opts: {
 const BC_CLUSTER_ROW_WIDTH = "com.obr-suite/cluster-row-width";
 
 function reportNaturalWidth() {
+  if (!rowAlive) return;
   const wrap = document.getElementById("wrap");
   const row = document.getElementById("row");
   const grip = document.getElementById("row-drag-handle");
   if (!wrap || !row) return;
   // Sum: drag-grip (incl. its own margins) + row content. Add 16px
   // padding so the popover frame doesn't crowd the buttons.
-  let w = row.offsetWidth + 16;
+  let w = row.scrollWidth + 16;
+  row.classList.toggle("is-overflowing", row.scrollWidth > row.clientWidth + 1);
   if (grip) w += grip.offsetWidth + 12;
   // Clamp so absurd lang strings don't grow the popover wider than
   // the viewport (background also clamps).
@@ -121,8 +131,10 @@ function reportNaturalWidth() {
 }
 
 function renderRow() {
+  if (!rowAlive) return;
   const s = getState();
   const lang = getLocalLang();
+  rowEl.setAttribute("aria-label", lang === "zh" ? "常用工具，窄屏时可横向滚动" : "Quick tools; scroll horizontally in narrow windows");
 
   const parts: string[] = [];
 
@@ -145,12 +157,7 @@ function renderRow() {
       })
     );
   }
-  // 2026-05-23 — music board RETIRED with project closure. The button
-  // is hard-pinned off regardless of any stored `state.enabled.musicBoard`
-  // flag from older rooms (matches background.ts removing musicBoard from
-  // the modules registry). Click handler / state listeners below are left
-  // wired but become no-ops since #btnMusic never enters the DOM.
-  if (false) {
+  if (s.enabled.musicBoard) {
     parts.push(
       btnHTML({
         id: "btnMusic",
@@ -165,6 +172,13 @@ function renderRow() {
   // auto-info. Dice-history toggle moved out: it has its own dedicated
   // trigger button at the bottom-right.
   const popupBtns: string[] = [];
+  if (isGM && s.enabled.transitions) {
+    parts.push(btnHTML({
+      id: "btnTransitions",
+      labelHtml: lang === "zh" ? "转场" : "Transitions",
+      title: lang === "zh" ? "短休、长休与文字演出" : "Short rest, long rest and custom titles",
+    }));
+  }
   // Bestiary popup toggle — visible to ALL roles now (was GM-only).
   // Players can also see the monster info popover when they own a
   // bestiary-bound token, so they need their own auto-popup control.
@@ -244,6 +258,10 @@ function renderRow() {
   document.getElementById("btnTimeStop")?.addEventListener("click", onTimeStop);
   document.getElementById("btnFocus")?.addEventListener("click", onFocus);
   document.getElementById("btnMusic")?.addEventListener("click", onMusic);
+  document.getElementById("btnTransitions")?.addEventListener("click", () => {
+    void OBR.broadcast.sendMessage(BC_TRANSITIONS_OPEN, {}, { destination: "LOCAL" })
+      .catch(error => console.warn("[obr-suite] open transitions failed", error));
+  });
   document
     .getElementById("btnBestiaryPopup")
     ?.addEventListener("click", onBestiaryPopup);
@@ -419,12 +437,22 @@ function installSupporterOverlayCloseListener(): void {
 }
 
 OBR.onReady(async () => {
+  if (!rowAlive) return;
+  window.addEventListener("resize", reportNaturalWidth);
+  rowEl.addEventListener("wheel", (event) => {
+    if (rowEl.scrollWidth <= rowEl.clientWidth + 1 || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rowEl.clientWidth : 1;
+    rowEl.scrollLeft += event.deltaY * unit;
+    event.preventDefault();
+  }, { passive: false });
   installDebugOverlay();
   installSupporterOverlayCloseListener();
-  OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {
+  rowDisposers.push(OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {
+    if (!rowAlive) return;
+    ++timeStopReadRevision;
     timeStopActive = !!(event.data as any)?.active;
     renderRow();
-  });
+  }));
   // Drive the 时停 button's gold state from scene metadata (the source
   // of truth), not just the BC_STATE broadcast. The broadcast can fire
   // BEFORE this row iframe mounts — e.g. "显示为 CG" turns time-stop on
@@ -439,19 +467,27 @@ OBR.onReady(async () => {
     const active = !!(ts && ts.active);
     if (active !== timeStopActive) { timeStopActive = active; renderRow(); }
   };
-  try {
-    await OBR.scene.isReady();
-    syncTimeStopFromMeta(await OBR.scene.getMetadata());
-  } catch {}
-  try { OBR.scene.onMetadataChange(syncTimeStopFromMeta); } catch {}
-  OBR.broadcast.onMessage("com.obr-suite/music-board:state-active", (event) => {
+  const readTimeStop = async () => {
+    const revision = ++timeStopReadRevision;
+    try {
+      if (!await OBR.scene.isReady() || !rowAlive || revision !== timeStopReadRevision) return;
+      const meta = await OBR.scene.getMetadata();
+      if (rowAlive && revision === timeStopReadRevision) syncTimeStopFromMeta(meta);
+    } catch {}
+  };
+  try { rowDisposers.push(OBR.scene.onMetadataChange(meta => { ++timeStopReadRevision; if (rowAlive) syncTimeStopFromMeta(meta); })); } catch {}
+  try { rowDisposers.push(OBR.scene.onReadyChange(ready => { ++timeStopReadRevision; if (ready && rowAlive) void readTimeStop(); })); } catch {}
+  rowDisposers.push(OBR.broadcast.onMessage("com.obr-suite/music-board:state-active", (event) => {
+    if (!rowAlive) return;
     musicBoardOpen = !!(event.data as any)?.open;
     renderRow();
-  });
+  }));
 
   const recheckRole = async () => {
+    const revision = ++roleRevision;
     try {
       const role = await OBR.player.getRole();
+      if (!rowAlive || revision !== roleRevision) return;
       const next = role === "GM";
       if (next !== isGM) {
         isGM = next;
@@ -461,21 +497,23 @@ OBR.onReady(async () => {
       console.warn("[obr-suite/cluster-row] getRole failed", e);
     }
   };
-  await recheckRole();
-  OBR.player.onChange((p) => {
+  rowDisposers.push(OBR.player.onChange((p) => {
+    ++roleRevision;
+    if (!rowAlive) return;
     const next = p.role === "GM";
     if (next !== isGM) {
       isGM = next;
       renderRow();
     }
-  });
+  }));
 
+  rowDisposers.push(onStateChange(() => renderRow()), onLangChange(() => renderRow()));
   startSceneSync();
-  onStateChange(() => renderRow());
-  onLangChange(() => renderRow());
-
-  await refreshFromScene();
   renderRow();
+  // Install all subscriptions before independent initial reads. A slow role or
+  // time-stop read must not postpone settings updates in the already open row.
+  void recheckRole();
+  void readTimeStop();
 
   // Drag-handle for the row itself. Positioned at the start/end of
   // the row container so the user can grab it without overlapping any

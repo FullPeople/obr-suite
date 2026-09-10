@@ -1,0 +1,141 @@
+{
+  "scope": "Read-only original XLSX formulas with cached-cell reference model and real parser functions; NOT Excel/WPS recalculation. In-memory patch cases never saved to workbook.",
+  "results": [
+    {
+      "version": "2014",
+      "source_formula_reference_model_equals_cached_json": true,
+      "escape_cases": [
+        {
+          "case": "ascii",
+          "json_valid": true,
+          "roundtrip_equal": true,
+          "decoded_repr": "'Aria'"
+        },
+        {
+          "case": "double_quote",
+          "json_valid": false,
+          "error": "Expecting ',' delimiter"
+        },
+        {
+          "case": "backslash",
+          "json_valid": true,
+          "roundtrip_equal": false,
+          "decoded_repr": "'C:\\notes'"
+        },
+        {
+          "case": "line_feed",
+          "json_valid": false,
+          "error": "Invalid control character at"
+        },
+        {
+          "case": "cr_lf",
+          "json_valid": false,
+          "error": "Invalid control character at"
+        },
+        {
+          "case": "tab",
+          "json_valid": false,
+          "error": "Invalid control character at"
+        },
+        {
+          "case": "backspace",
+          "json_valid": false,
+          "error": "Invalid control character at"
+        }
+      ],
+      "renamed_sheets_selected_layout": "v1.0.0",
+      "renamed_sheets_import_result": "KeyError: '主要'",
+      "overlay_original_str": 10,
+      "overlay_requested_str": 19,
+      "overlay_observed_str": 10,
+      "overlay_original_hp": {
+        "current": 0,
+        "max": 0,
+        "temp": 0
+      },
+      "overlay_requested_hp": {
+        "current": 7,
+        "max": 21,
+        "temp": 3
+      },
+      "overlay_observed_hp": {
+        "current": 0,
+        "max": 0,
+        "temp": 0
+      },
+      "overlay_class_observed": null,
+      "spell_db_count": 522,
+      "spell_db_after_rename_with_old_layout": 0,
+      "first_spell_key": "酸液飞溅",
+      "first_skill_name": "运动"
+    },
+    {
+      "version": "2024",
+      "source_formula_reference_model_equals_cached_json": true,
+      "escape_cases": [
+        {
+          "case": "ascii",
+          "json_valid": true,
+          "roundtrip_equal": true,
+          "decoded_repr": "'Aria'"
+        },
+        {
+          "case": "double_quote",
+          "json_valid": false,
+          "error": "Expecting ',' delimiter"
+        },
+        {
+          "case": "backslash",
+          "json_valid": true,
+          "roundtrip_equal": false,
+          "decoded_repr": "'C:\\notes'"
+        },
+        {
+          "case": "line_feed",
+          "json_valid": false,
+          "error": "Invalid control character at"
+        },
+        {
+          "case": "cr_lf",
+          "json_valid": false,
+          "error": "Invalid control character at"
+        },
+        {
+          "case": "tab",
+          "json_valid": false,
+          "error": "Invalid control character at"
+        },
+        {
+          "case": "backspace",
+          "json_valid": false,
+          "error": "Invalid control character at"
+        }
+      ],
+      "renamed_sheets_selected_layout": "v1.0.0",
+      "renamed_sheets_import_result": "KeyError: '主要'",
+      "overlay_original_str": 10,
+      "overlay_requested_str": 19,
+      "overlay_observed_str": 10,
+      "overlay_original_hp": {
+        "current": 0,
+        "max": 0,
+        "temp": 0
+      },
+      "overlay_requested_hp": {
+        "current": 7,
+        "max": 21,
+        "temp": 3
+      },
+      "overlay_observed_hp": {
+        "current": 0,
+        "max": 0,
+        "temp": 0
+      },
+      "overlay_class_observed": null,
+      "spell_db_count": 808,
+      "spell_db_after_rename_with_old_layout": 0,
+      "first_spell_key": "酸液飞溅",
+      "first_skill_name": "运动"
+    }
+  ]
+}

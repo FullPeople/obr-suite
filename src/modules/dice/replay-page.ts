@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../../asset-base";
 import { DieResult, sidesOf } from "./types";
 
 // 2026-05-15 — i18n hint patch (was inline <script> in dice-replay.html,
@@ -95,7 +96,7 @@ function chipsFor(slice: DieResult[]): string {
       d.loser ? "loser" :
       d.value === sides ? "crit" :
       d.value === 1 ? "fail" : "";
-    return `<span class="die ${cls}"><img src="/suite/${imgFor(d.type)}.png" alt="">${d.value}</span>`;
+    return `<span class="die ${cls}"><img src="${assetUrl(`${imgFor(d.type)}.png`)}" alt="">${d.value}</span>`;
   }).join("");
 }
 

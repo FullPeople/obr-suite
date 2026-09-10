@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {build} from 'rolldown';
+import {readFileSync,writeFileSync,mkdtempSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+import {createServer} from 'node:http';
+import {createRequire} from 'node:module';
+const base=resolve('extensions/three-dragon-ante/src/game'),out=mkdtempSync(join(tmpdir(),'tda-round-lifecycle-'));
+const entry=`import{mountRoundPresentation}from ${JSON.stringify(join(base,'round-presentation.ts'))};
+const report={gambit:1,round:3,reason:'winner',weakest:false,rows:[{seatId:'you',cards:[{cardId:'red-12',points:12}],bonus:0,total:12,eligible:true},{seatId:'other',cards:[{cardId:'white-1',points:1}],bonus:0,total:1,eligible:true}],winners:['you'],payouts:[{seatId:'you',amount:20}]};
+const p=mountRoundPresentation(document.querySelector('#app'),{language:'zh',seatName:id=>id,onChange(){},sound(){},inspect(){}});
+window.h={p,report,banner(){p.enqueue([{key:crypto.randomUUID(),kind:'round',round:3,seatId:'you'}])},score(){p.enqueue([{key:crypto.randomUUID(),kind:'score',report}])},finishBanner(){for(const a of document.querySelector('.round-content').getAnimations())a.finish()}};`;
+await build({input:'test',plugins:[{name:'fixture',resolveId(id){if(id==='test')return '\0test.ts';if(id.endsWith('.css'))return '\0css'},load(id){if(id==='\0test.ts')return entry;if(id==='\0css')return ''}}],output:{file:join(out,'app.js'),format:'esm'},logLevel:'silent'});
+const css=readFileSync(join(base,'round-presentation.css'),'utf8')+readFileSync(join(base,'card-images.css'),'utf8');
+const server=createServer((req,res)=>{if(req.url==='/app.js'){res.setHeader('Content-Type','text/javascript');return res.end(readFileSync(join(out,'app.js')))}const id=/\/cards\/([\w-]+)\.webp/.exec(req.url);if(id){res.setHeader('Content-Type','image/webp');return res.end(readFileSync(join(base,'art/pack-20260910/cards',id[1]+'.webp')))}res.setHeader('Content-Type','text/html;charset=utf-8');res.end(`<style>body{margin:0;background:#183b29}*{box-sizing:border-box}#app{position:relative;width:100vw;height:100vh}${css}</style><main id="app"></main><script type="module" src="/app.js"></script>`)});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const require=createRequire(import.meta.url),{chromium}=require('C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true}),page=await browser.newPage({viewport:{width:1200,height:800}}),errors=[],checks=[];page.on('pageerror',e=>errors.push(e.message));
+const check=(name,value)=>{assert.ok(value,name);checks.push(name)};
+try{
+ await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForFunction(()=>window.h);
+ await page.evaluate(()=>{h.banner();h.score();h.finishBanner()});await page.waitForTimeout(60);
+ await page.waitForFunction(()=>document.querySelector('.round-overlay').dataset.kind==='score');
+ const shown=await page.locator('.round-content').evaluate(el=>({opacity:getComputedStyle(el).opacity,transform:getComputedStyle(el).transform,rect:el.getBoundingClientRect().toJSON(),cards:el.querySelectorAll('.score-card').length}));
+ await page.screenshot({path:join(out,'score-after-completed-banner.png')});
+ check('score after a completed exit animation has visible content and cards',shown.opacity==='1'&&shown.transform==='none'&&shown.cards===2&&shown.rect.x>=0&&shown.rect.right<=1201);
+ await page.waitForFunction(()=>document.querySelector('.round-overlay').dataset.step==='1');
+ check('score content remains visible while point particles fly',await page.locator('.round-content').evaluate(el=>getComputedStyle(el).opacity==='1')&&await page.locator('.score-total').first().innerText()==='= 12');
+ await page.evaluate(()=>h.p.pause(true));check('power interruption hides score',!await page.locator('.round-overlay').isVisible());
+ await page.evaluate(()=>h.p.pause(false));check('resume shows score without resurrecting finished banner',await page.locator('.round-content').evaluate(el=>getComputedStyle(el).opacity==='1'&&el.getAnimations().length===0));
+ await page.evaluate(()=>{h.p.language('en');h.p.clear();h.banner();h.finishBanner()});await page.waitForTimeout(60);await page.evaluate(()=>{h.p.clear();h.score()});
+ check('clear and reconnect discard completed exit effects',await page.locator('.round-content').evaluate(el=>getComputedStyle(el).opacity==='1'&&getComputedStyle(el).transform==='none'));
+ await page.evaluate(()=>h.p.destroy());check('destroy releases presentation',await page.locator('.round-overlay').count()===0);check('no runtime errors',errors.length===0);
+ writeFileSync(join(out,'result.json'),JSON.stringify({checks,errors,output:out},null,2));console.log(JSON.stringify({output:out,checks:checks.length}));
+}catch(error){writeFileSync(join(out,'failure.json'),JSON.stringify({error:String(error),checks,errors},null,2));console.error(out);throw error}finally{await browser.close();await new Promise(r=>server.close(r))}

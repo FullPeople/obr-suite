@@ -19,6 +19,8 @@
 // element; the resource tracker just drops it into a card.
 
 import OBR from "@owlbear-rodeo/sdk";
+import { getLocalLang, onLangChange } from "../state";
+import { createInteractionGuard } from "../modules/resourceTracker/interaction";
 import {
   type BubblesData,
   readBubbles,
@@ -40,9 +42,13 @@ export interface StatBannerOptions {
   initialLive?: BubblesData;
 }
 
-const LOCK_TITLE_LOCKED =
-  "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）";
-const LOCK_TITLE_UNLOCKED = "已解锁：所有玩家可见完整 HP / AC 数值";
+const statTip = () => getLocalLang() === "en" ? "Supports 20 / +5 / -3 / 15+5" : "支持 20 / +5 / -3 / 15+5";
+const lockTitle = (locked: boolean) => getLocalLang() === "en"
+  ? locked ? "Locked: players see the HP ratio without numbers or AC during combat" : "Unlocked: all players see full HP and AC"
+  : locked ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）" : "已解锁：所有玩家可见完整 HP / AC 数值";
+const fieldLabel = (field: string) => (getLocalLang() === "en"
+  ? { health: "Hit points", "max health": "Maximum hit points", "temporary health": "Temporary hit points", "armor class": "Armor Class" }
+  : { health: "生命值", "max health": "最大生命值", "temporary health": "临时生命值", "armor class": "护甲等级" })[field] ?? field;
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -50,7 +56,7 @@ function escapeHtml(s: string): string {
 }
 
 function lockButtonHtml(locked: boolean): string {
-  const title = locked ? LOCK_TITLE_LOCKED : LOCK_TITLE_UNLOCKED;
+  const title = lockTitle(locked);
   return `
     <button class="stat-lock" data-locked="${locked ? "true" : "false"}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" type="button">
       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -80,27 +86,27 @@ function statBannerHtml(
           <span class="prev-hint" data-prev></span>
           <input class="stat-input" type="text" inputmode="numeric"
                  data-field="health" value="${escapeHtml(String(liveHp))}"
-                 title="支持 20 / +5 / -3 / 15+5">
+                 title="${escapeHtml(statTip())}">
         </span>
         <span class="slash">/</span>
         <span class="stat-cell">
           <span class="prev-hint" data-prev></span>
           <input class="stat-input" type="text" inputmode="numeric"
                  data-field="max health" value="${escapeHtml(String(liveMaxHp))}"
-                 title="支持 20 / +5 / -3 / 15+5">
+                 title="${escapeHtml(statTip())}">
         </span>
       </div>
       <div class="temp-pill stat-cell">
         <span class="prev-hint" data-prev></span>
         <input class="stat-input" type="text" inputmode="numeric"
                data-field="temporary health" value="${escapeHtml(String(liveTempHp))}"
-               title="支持 20 / +5 / -3 / 15+5">
+               title="${escapeHtml(statTip())}">
       </div>
       <div class="ac-pill stat-cell">
         <span class="prev-hint" data-prev></span>
         <input class="stat-input" type="text" inputmode="numeric"
                data-field="armor class" value="${escapeHtml(String(liveAc))}"
-               title="支持 20 / +5 / -3 / 15+5">
+               title="${escapeHtml(statTip())}">
       </div>
       ${isGM ? lockButtonHtml(live.locked !== false) : ""}
     </div>
@@ -221,144 +227,106 @@ export function mountStatBanner(opts: StatBannerOptions): {
 } {
   const { container, getItemId, isGM, fallback = {}, initialLive } = opts;
   ensureStatBannerStyles();
-
-  // Update the four inputs + HP fill + lock state from live data
-  // WITHOUT a full re-render (preserves focus, no layout jump). Used
-  // by both a local commit and the external-sync path.
-  function refreshInputs(live: BubblesData, skipFocused = true): void {
-    const fields: Array<keyof BubblesData> = [
-      "health", "max health", "temporary health", "armor class",
-    ];
-    for (const f of fields) {
-      const v = live[f];
-      if (v == null) continue;
-      const el = container.querySelector<HTMLInputElement>(`.stat-input[data-field="${f}"]`);
-      if (!el) continue;
-      if (skipFocused && document.activeElement === el) continue;
-      el.value = String(v);
-    }
-    const hp = typeof live.health === "number" ? live.health : null;
-    const maxHp = typeof live["max health"] === "number" ? live["max health"] : null;
-    const ratio = (hp != null && maxHp != null && maxHp > 0)
-      ? Math.max(0, Math.min(1, hp / maxHp)) : 1;
-    const pill = container.querySelector<HTMLElement>(".hp-pill");
-    if (pill) pill.style.setProperty("--hp-ratio", ratio.toFixed(3));
-    const lockBtn = container.querySelector<HTMLButtonElement>(".stat-lock");
-    if (lockBtn) {
-      const locked = live.locked === undefined ? true : !!live.locked;
-      lockBtn.dataset.locked = locked ? "true" : "false";
-      lockBtn.title = locked ? LOCK_TITLE_LOCKED : LOCK_TITLE_UNLOCKED;
+  let readRevision = 0, viewRevision = 0, writeRevision = 0;
+  let displayedId = getItemId();
+  let live = initialLive ?? {};
+  const guard = createInteractionGuard(getItemId, () => container.isConnected, () => {
+    readRevision++; viewRevision++;
+    localize();
+    void refresh();
+  });
+  type Lease = NonNullable<ReturnType<typeof guard.capture>>;
+  function localize() {
+    if (!guard.alive()) return;
+    container.querySelectorAll<HTMLInputElement>(".stat-input").forEach((input) => {
+      input.title = statTip(); input.setAttribute("aria-label", fieldLabel(input.dataset.field ?? ""));
+      input.disabled = !guard.capture();
+    });
+    const button = container.querySelector<HTMLButtonElement>(".stat-lock");
+    if (button) {
+      button.hidden = !isGM || !guard.isGM();
+      button.style.display = button.hidden ? "none" : "";
+      button.title = lockTitle(button.dataset.locked !== "false");
+      button.setAttribute("aria-label", button.title);
     }
   }
-
-  function bind(): void {
-    // Lock button (GM only — render() skips it for players). Toggles
-    // BUBBLES_META.locked on the bound token.
-    const lockBtn = container.querySelector<HTMLButtonElement>(".stat-lock");
-    if (lockBtn) {
-      lockBtn.addEventListener("click", async () => {
-        const id = getItemId();
-        if (!id) return;
-        const wasLocked = lockBtn.dataset.locked !== "false";
-        const next = !wasLocked;
-        lockBtn.dataset.locked = next ? "true" : "false";
-        lockBtn.title = next ? LOCK_TITLE_LOCKED : LOCK_TITLE_UNLOCKED;
-        try {
-          await patchBubbles(id, { locked: next } as Partial<BubblesData>);
-        } catch (e) {
-          console.warn("[statBanner] toggle lock failed", e);
-          lockBtn.dataset.locked = wasLocked ? "true" : "false";
-        }
-      });
+  function refreshInputs(next: BubblesData, skipFocused = true) {
+    live = next;
+    for (const field of ["health", "max health", "temporary health", "armor class"] as const) {
+      const input = container.querySelector<HTMLInputElement>(`.stat-input[data-field="${field}"]`);
+      if (!input || (skipFocused && document.activeElement === input)) continue;
+      input.value = String(next[field] ?? fallback[field] ?? (field === "armor class" ? 10 : 0));
     }
-
-    const inputs = container.querySelectorAll<HTMLInputElement>(".stat-input[data-field]");
-    inputs.forEach((input) => {
-      const field = input.dataset.field as keyof BubblesData | undefined;
-      if (!field) return;
-      // "Current value at edit start" — the +/- relative parser does
-      // its math against the displayed value, not the half-typed one.
-      let editStart = input.value;
-      const cell = input.closest<HTMLElement>(".stat-cell");
-      const prevHint = cell?.querySelector<HTMLElement>(".prev-hint");
-
-      const commit = async () => {
-        const id = getItemId();
-        if (!id) { input.value = editStart; return; }
-        const text = input.value;
-        const cur = parseFloat(editStart);
-        const parsed = parseStatInput(text, Number.isFinite(cur) ? cur : 0);
-        if (parsed == null) { input.value = editStart; return; }
-        const next = clampStat(field, parsed);
-        try {
-          // patchBubbles returns the cross-field-clamped final state
-          // (HP > maxHP clamps down; lowering maxHP drags HP with it).
-          // Refresh all four inputs so the user sees what committed.
-          const final = await patchBubbles(id, { [field]: next } as Partial<BubblesData>);
-          refreshInputs(final);
-          editStart = input.value;
-        } catch (e) {
-          console.warn("[statBanner] patch bubbles failed", e);
-          input.value = editStart;
-        }
-      };
-
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); input.blur(); }
-        else if (e.key === "Escape") { e.preventDefault(); input.value = editStart; input.blur(); }
-      });
+    const hp = next.health ?? fallback.health ?? 0, max = next["max health"] ?? fallback["max health"] ?? 0;
+    container.querySelector<HTMLElement>(".hp-pill")?.style.setProperty("--hp-ratio", (max > 0 ? Math.max(0, Math.min(1, hp / max)) : 1).toFixed(3));
+    const button = container.querySelector<HTMLButtonElement>(".stat-lock");
+    if (button) button.dataset.locked = String(next.locked !== false);
+    localize();
+  }
+  async function write(target: Lease, patch: Partial<BubblesData>) {
+    if (!target.current()) return;
+    readRevision++;
+    const operation = ++writeRevision, before = viewRevision;
+    const final = await patchBubbles(target.id, patch, target.current);
+    if (!target.current() || operation !== writeRevision || before !== viewRevision) return;
+    if (Object.keys(final).length) refreshInputs(final);
+    else refreshInputs(live);
+  }
+  function bind() {
+    container.querySelector<HTMLButtonElement>(".stat-lock")?.addEventListener("click", () => {
+      const target = guard.capture(true);
+      if (!target) return;
+      const next = live.locked === false;
+      void write(target, { locked: next });
+    });
+    container.querySelectorAll<HTMLInputElement>(".stat-input[data-field]").forEach((input) => {
+      const field = input.dataset.field as keyof BubblesData;
+      let editStart = input.value, editTarget: Lease | null = null;
+      const cell = input.closest<HTMLElement>(".stat-cell"), hint = cell?.querySelector<HTMLElement>(".prev-hint");
       input.addEventListener("focus", () => {
-        editStart = input.value;
-        if (prevHint) prevHint.textContent = editStart;
+        editTarget = guard.capture(); editStart = input.value;
+        if (hint) hint.textContent = editStart;
         cell?.classList.add("editing");
-        // Clear (not select) on focus — no blue selection rectangle;
-        // an empty commit on blur just reverts to editStart.
-        requestAnimationFrame(() => { input.value = ""; });
+        const target = editTarget;
+        requestAnimationFrame(() => { if (target?.current() && editTarget === target && document.activeElement === input) input.value = ""; });
       });
       input.addEventListener("blur", () => {
         cell?.classList.remove("editing");
+        const target = editTarget; editTarget = null;
+        if (!target?.current()) return;
         const text = input.value.trim();
-        if (text === "") { input.value = editStart; return; }
-        if (text !== editStart) void commit();
+        if (!text) { input.value = editStart; return; }
+        const parsed = parseStatInput(text, Number(editStart) || 0);
+        if (parsed === null) { input.value = editStart; return; }
+        if (text !== editStart) void write(target, { [field]: clampStat(field, parsed) });
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") { event.preventDefault(); input.blur(); }
+        else if (event.key === "Escape") { event.preventDefault(); editTarget = null; input.value = editStart; input.blur(); }
       });
     });
   }
-
-  function renderWith(live: BubblesData): void {
-    container.innerHTML = statBannerHtml(live, isGM, fallback);
-    bind();
+  function render(next: BubblesData) {
+    container.innerHTML = statBannerHtml(next, isGM, fallback);
+    live = next; bind(); localize();
   }
-
-  // Initial paint — synchronous (flicker-free) when the caller passed
-  // initialLive; otherwise an empty banner that refresh() fills in.
-  renderWith(initialLive ?? {});
-
-  async function refresh(): Promise<void> {
-    const id = getItemId();
-    let live: BubblesData = {};
-    if (id) { try { live = await readBubbles(id); } catch {} }
-    renderWith(live);
+  render(live);
+  async function refresh() {
+    const target = guard.capture(), own = ++readRevision;
+    if (!target) return;
+    const next = await readBubbles(target.id);
+    if (!target.current() || own !== readRevision) return;
+    viewRevision++;
+    if (displayedId !== target.id) { displayedId = target.id; render(next); }
+    else refreshInputs(next);
   }
-
-  // External sync — any other writer of this token's bubbles metadata
-  // (the HP bar component, fullscreen card edits, dice damage, the
-  // OTHER stat banner) re-flows here. Updates inputs in place so the
-  // field the user is mid-edit on isn't clobbered.
-  const itemsUnsub = OBR.scene.items.onChange(() => {
-    void (async () => {
-      const id = getItemId();
-      if (!id) return;
-      let live: BubblesData = {};
-      try { live = await readBubbles(id); } catch {}
-      refreshInputs(live, true);
-    })();
-  });
-
+  const itemsUnsub = OBR.scene.items.onChange(() => { void refresh(); });
+  const langUnsub = onLangChange(localize);
   return {
     refresh,
-    unmount: () => {
-      try { itemsUnsub(); } catch {}
-      container.innerHTML = "";
+    unmount() {
+      guard.dispose(); readRevision++; writeRevision++;
+      itemsUnsub(); langUnsub(); container.innerHTML = "";
     },
   };
 }

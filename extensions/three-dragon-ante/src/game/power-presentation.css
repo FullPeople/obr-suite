@@ -1,0 +1,17 @@
+.power-overlay{position:absolute;inset:0;z-index:90;display:grid;grid-template-columns:minmax(180px,35%) minmax(0,1fr);align-items:center;gap:clamp(20px,4vw,72px);padding:clamp(20px,5vw,72px);background:radial-gradient(ellipse at 24% 50%,#785124d9,#160f0bef 55%,#090807f5);pointer-events:auto;overflow:hidden;color:#f6e7c9}
+.power-overlay[hidden]{display:none}
+.power-card-space{display:flex;justify-content:center;perspective:1100px}
+.power-card{position:relative;width:clamp(145px,20vw,270px);aspect-ratio:5/7;background:linear-gradient(135deg,#664420,#281b12);border:5px double #e5c47e;border-radius:10px;box-shadow:0 0 0 3px #b18b47,0 0 45px #f4d48172,20px 22px 55px #0009;color:var(--card-color,#e9c681);display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:16px 9px;transform-style:preserve-3d}
+.power-card-strength{position:absolute;top:9px;left:13px;font:bold clamp(28px,4vw,46px) Georgia,serif}
+.power-card-art{width:86%;margin:auto}.power-card-art svg{display:block;width:100%;height:auto;fill:currentColor}
+.power-card-name{font:700 clamp(16px,1.8vw,25px)/1.3 Georgia,'Microsoft YaHei',serif;text-align:center}
+.power-copy{max-height:86%;overflow:auto;scrollbar-width:thin;pointer-events:auto}
+.power-player{font-size:clamp(13px,1.3vw,18px);color:#d8bd85;margin:0 0 15px}
+.power-continue{position:absolute;bottom:14px;left:12px;right:12px;margin:0;text-align:center;font-size:13px;line-height:1.5;color:#d8bd85;pointer-events:none}
+.power-copy h2{font-size:clamp(28px,3.5vw,48px);line-height:1.25;margin:0 0 20px;color:#ffe3a8}
+.power-description{font-size:clamp(16px,1.6vw,24px);line-height:1.65;margin:0;white-space:pre-line;overflow-wrap:anywhere}
+.table-shell[data-power-active=true] .table-bubbles>.turn{visibility:hidden;pointer-events:none}
+.table-shell .card-wrap.power-active>.card{box-shadow:0 0 0 2px #f6d68b,0 0 20px #f1c66a88}
+.preview-hint{white-space:pre-line;overflow-wrap:anywhere}.preview-help{display:block;margin-top:12px;line-height:1.5;color:#d0bc9d}
+@media(max-width:600px){.power-overlay{grid-template-columns:minmax(105px,28%) minmax(0,1fr);padding:16px 12px;gap:15px}.power-card{width:100%;padding:12px 5px;border-width:3px}.power-card-strength{font-size:24px;top:5px;left:6px}.power-card-name{font-size:12px}.power-player{font-size:12px;margin-bottom:10px}.power-copy h2{font-size:25px;margin-bottom:12px}.power-description{font-size:16px;line-height:1.6}.power-copy{max-height:92%}}
+@media(prefers-reduced-motion:reduce){.power-card{transform:none!important}}

@@ -29,7 +29,8 @@ import {
   textColorFor,
 } from "./modules/statusTracker/types";
 import { t, applyI18nDom } from "./i18n";
-import { getLocalLang } from "./state";
+import { getLocalLang, onLangChange } from "./state";
+import { rememberStatusSource, statusName } from "./modules/statusTracker/localization";
 
 // Read the active language fresh on each render. This popover is
 // short-lived (opens on a token, closes on drop), so a live language
@@ -57,7 +58,7 @@ const btnClose = document.getElementById("btnClose") as HTMLButtonElement;
 let catalog: BuffDef[] = [];
 let myBuffIds: string[] = [];
 let myBuffRounds: Record<string, number> = {};
-let tokenName = T("stRoleFallback");
+let tokenName = "";
 
 // 2026-05-15 — strip pictographic emoji from buff names so the manage
 // popover stays text-only (matches the palette + capture sweep). The
@@ -98,7 +99,7 @@ function parseCatalogArray(v: unknown): BuffDef[] {
       // look (and so a transfer/remove drag carries the full def).
       if (typeof e.webmAsset === "string") def.webmAsset = e.webmAsset;
       if (typeof e.iconAsset === "string") def.iconAsset = e.iconAsset;
-      return def as BuffDef;
+      return rememberStatusSource(def as BuffDef, e as BuffDef);
     });
 }
 
@@ -131,10 +132,10 @@ async function loadTokenState(itemsSnapshot?: Item[]): Promise<void> {
       : (await OBR.scene.items.getItems([tokenId]))[0];
     if (!tok) {
       myBuffIds = [];
-      tokenName = T("stRoleFallback");
+      tokenName = "";
       return;
     }
-    tokenName = tok.name || T("stRoleFallback");
+    tokenName = tok.name || "";
     const ids = (tok.metadata as any)[STATUS_BUFFS_KEY];
     myBuffIds = Array.isArray(ids) ? ids.filter((x: any) => typeof x === "string") : [];
     const rounds = (tok.metadata as any)[STATUS_BUFF_ROUNDS_KEY];
@@ -164,7 +165,7 @@ function resolveBuff(id: string): BuffDef {
 }
 
 function render(): void {
-  titleEl.textContent = `${tokenName} · buff`;
+  titleEl.textContent = `${tokenName || T("stRoleFallback")} · buff`;
   if (myBuffIds.length === 0) {
     gridEl.innerHTML = `<div class="empty">${T("stNoBuffsOnChar")}</div>`;
     return;
@@ -174,7 +175,7 @@ function render(): void {
     const b = resolveBuff(id);
     const fg = textColorFor(b.color);
     const rounds = myBuffRounds[id];
-    const cleanName = stripEmoji(b.name);
+    const cleanName = stripEmoji(statusName(b, getLocalLang()));
     const label = rounds > 0 ? `${cleanName} ${rounds}` : cleanName;
     return `<div class="bubble" data-id="${escapeHtml(id)}"
                  style="background:${escapeHtml(b.color)};color:${escapeHtml(fg)}">${escapeHtml(label)}</div>`;
@@ -241,6 +242,18 @@ OBR.onReady(async () => {
   await loadCatalog();
   await loadTokenState();
   render();
+  const refreshLanguage = () => {
+    document.documentElement.lang = getLocalLang(); document.title = T("stManageBuffs");
+    applyI18nDom(getLocalLang());
+    titleEl.textContent = `${tokenName || T("stRoleFallback")} · buff`;
+    gridEl.querySelectorAll<HTMLElement>(".bubble[data-id]").forEach(el => {
+      const id = el.dataset.id!, buff = resolveBuff(id), rounds = myBuffRounds[id];
+      el.textContent = stripEmoji(statusName(buff, getLocalLang())) + (rounds > 0 ? ` ${rounds}` : "");
+    });
+    const empty = gridEl.querySelector(".empty"); if (empty) empty.textContent = T("stNoBuffsOnChar");
+  };
+  refreshLanguage(); const offLanguage = onLangChange(refreshLanguage);
+  window.addEventListener("pagehide", offLanguage, { once: true });
 
   // Re-render when the catalog changes (e.g. user edits a buff
   // colour from the palette while this popover is open).

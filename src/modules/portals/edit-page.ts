@@ -8,11 +8,13 @@ import {
   CreatePrefs,
   Presets,
   PortalMeta,
+  normalizePortalEffect,
 } from "./types";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
 import { bindPanelDrag } from "../../utils/panelDrag";
 import { PANEL_IDS } from "../../utils/panelLayout";
+import { mountPortalAppearance } from "./appearance-control";
 
 let lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -51,6 +53,7 @@ function writeCreatePrefs() {
 
 const params = new URLSearchParams(location.search);
 const portalId = params.get("id") ?? "";
+const editorInstance = params.get("instance") ?? "";
 const isNew = params.get("isNew") === "1";
 
 const EDIT_POPOVER_ID = `${PLUGIN_ID}/edit-popover`;
@@ -66,6 +69,23 @@ const inpTag = $i("inp-tag");
 const chipsNames = $("chips-names");
 const chipsTags = $("chips-tags");
 const titleEl = $("title");
+// Keep the existing editor HTML/entry point; insert one compact setting row.
+const effectRow = document.createElement("label");
+effectRow.className = "row";
+effectRow.innerHTML = `<span class="lbl" id="effect-label"></span><select id="portal-effect" style="width:100%;height:30px;border:1px solid var(--border);border-radius:5px;background:var(--bg-strong);color:var(--text);padding:0 8px;font:inherit"></select>`;
+document.querySelector(".body")?.append(effectRow);
+const effectSelect = document.getElementById("portal-effect") as HTMLSelectElement;
+let appearance: ReturnType<typeof mountPortalAppearance> | undefined;
+function renderEffectLabel() {
+  const selected = normalizePortalEffect(effectSelect.value);
+  $("effect-label").textContent = lang === "zh" ? "进入此门时的转场" : "Transition when entering this portal";
+  effectSelect.replaceChildren(...([
+    ["inherit", "跟随个人设置", "Use personal setting"], ["off", "无特效", "None"],
+    ["blink", "眨眼", "Blink"], ["fade", "淡入淡出", "Fade"],
+  ].map(([value, zh, en]) => new Option(lang === "zh" ? zh : en, value))));
+  effectSelect.value = selected;
+}
+renderEffectLabel();
 
 let presets = readPresets();
 
@@ -278,6 +298,7 @@ async function loadCurrent() {
       showName = meta.showName === true;
       isVisible = meta.visible !== false;
       isLocked = meta.locked === true;
+      effectSelect.value = normalizePortalEffect(meta.effect);
     }
     if (isNew) {
       const prefs = readCreatePrefs();
@@ -328,6 +349,7 @@ async function autoSave() {
           showName,
           visible: isVisible,
           locked: isLocked,
+          effect: normalizePortalEffect(effectSelect.value),
         };
         const txt = (d as any).text;
         if (txt) txt.plainText = showName ? name : "";
@@ -339,6 +361,7 @@ async function autoSave() {
 }
 
 async function cancel() {
+  appearance?.dispose();
   cancelled = true;
   if (isNew) {
     // Drag-draw cancelled — remove the just-created portal entirely.
@@ -366,21 +389,38 @@ async function cancel() {
 }
 
 async function closeSelf() {
+  if (closing) return;
+  closing = true;
+  closeFailed = false; renderCloseError();
+  appearance?.dispose();
   // Auto-save on close (X click, Esc, etc.) — but only if Cancel
   // hasn't already taken over the close path.
-  if (!cancelled) await autoSave();
   try {
+    if (!cancelled) await autoSave();
+    if (!editorInstance) throw Error("Missing editor instance");
     await OBR.broadcast.sendMessage(
       BROADCAST_EDIT_CLOSE,
-      {},
+      { id: portalId, instance: editorInstance },
       { destination: "LOCAL" },
     );
-  } catch {}
-  try { await OBR.popover.close(EDIT_POPOVER_ID); } catch {}
+  } catch (error) {
+    console.warn("[obr-suite/portals] close request failed", error);
+    closeFailed = true; renderCloseError();
+  } finally { closing = false; }
+}
+let closing = false, closeFailed = false;
+let closeError: HTMLParagraphElement | undefined;
+function renderCloseError() {
+  if (!closeFailed) { closeError?.remove(); closeError = undefined; return; }
+  if (!closeError) { closeError = document.createElement("p"); closeError.setAttribute("role", "alert"); document.querySelector(".body")?.append(closeError); }
+  closeError.textContent = lang === "en" ? "Could not close the editor. Please try again." : "编辑窗口暂时无法关闭，请重试。";
 }
 
 // Re-render labels + title when the user flips language in Settings.
 function reapplyI18n() {
+  renderCloseError();
+  renderEffectLabel();
+  appearance?.setLanguage(lang);
   applyI18nDom(lang);
   if (titleEl) {
     titleEl.textContent = isNew ? tt("portalNew") : tt("portalEdit");
@@ -395,6 +435,8 @@ onLangChange((next) => {
 });
 
 OBR.onReady(async () => {
+  const body = document.querySelector<HTMLElement>(".body");
+  if (body) appearance = mountPortalAppearance(body, portalId, lang);
   applyI18nDom(lang);
   renderChips();
   setupAddForms();

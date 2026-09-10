@@ -1,22 +1,26 @@
+import { setPanelOpen } from "../../utils/panelObstacles";
 // Standalone HP bar module.
 //
-// Right-click context menu adds a per-token "hp-bar-enabled" flag,
-// but ONLY for tokens that have neither a bestiary binding nor a
-// character-card binding (since both of those already render their
-// own HP/AC editors via their own info popovers). When such a flagged
-// token is selected, a draggable mini-popover appears next to it
+// Right-click context menus add/remove a per-token flag. Automatic selection
+// excludes bestiary/card bindings because they already have an HP editor.
+// When an eligible flagged token is selected, a draggable mini-popover appears
 // showing the same HP/Temp/AC pills as the bestiary info popover —
 // editing in the popover writes to the bubbles metadata key, which
 // is the same source the on-token HP bar / heater shield reads
 // from, so all three views (popover, on-token bar, bubbles plugin)
 // stay in sync.
 //
-// The popover closes automatically on deselect or when the
-// selection changes to a different token. Drag the popover by its
+// Unless pinned, the popover closes when selection is no longer eligible.
+// Switching between eligible tokens updates the same iframe. Drag it by its
 // grip handle to reposition; offset is persisted via the standard
 // panelLayout system.
 
-import OBR from "@owlbear-rodeo/sdk";
+import OBR, { type Item } from "@owlbear-rodeo/sdk";
+import {
+  HP_BAR_FLAG_KEY, HP_BAR_TARGET, HP_BAR_READY, eligibilitySignature,
+  hpEligibility, mayEditHp, type HpBarTarget,
+} from "./target";
+export { HP_BAR_FLAG_KEY } from "./target";
 import { getLocalLang } from "../../state";
 import { assetUrl } from "../../asset-base";
 import { onViewportResize } from "../../utils/viewportAnchor";
@@ -32,25 +36,6 @@ import {
 const PLUGIN_ID = "com.obr-suite/hp-bar";
 const POPOVER_ID = `${PLUGIN_ID}/popover`;
 const POPOVER_URL = assetUrl("hp-bar.html");
-
-// Per-token metadata key — when present (any truthy value), the
-// right-click menu shows "remove HP bar" instead of "add", and
-// selecting the token auto-pops the bar.
-export const HP_BAR_FLAG_KEY = `${PLUGIN_ID}/enabled`;
-
-// Bindings we mutually exclude with — both have their own info
-// popover that already includes an HP editor, so showing the
-// standalone bar on top would be redundant clutter.
-const BESTIARY_SLUG_KEY = "com.bestiary/slug";
-const CC_BIND_KEY = "com.character-cards/boundCardId";
-
-// Bubbles plugin's metadata key. Tokens with this key set (HP/AC
-// values present) are the ones the bubbles module renders an HP
-// bar over. The HP bar component is now tied to this — selecting
-// any token that already has bubbles + no other binding auto-
-// enables the HP bar component on the fly.
-const BUBBLES_META_KEY = "com.obr-suite/bubbles/data";
-const EXTERNAL_BUBBLES_META_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
 
 const CTX_ADD = "com.obr-suite/hp-bar-add";
 const CTX_REMOVE = "com.obr-suite/hp-bar-remove";
@@ -73,11 +58,31 @@ let popoverOpen = false;
 let currentItemId: string | null = null;
 let hpBarIsGM = false;
 let hpBarPlayerId = "";
+let active = false;
+let sceneReady = false;
+let selection: string[] = [];
+let selectionVersion = 0;
+let selectedSignature = "";
+let desiredItemId: string | null = null;
+let reanchor = false;
+let panelQueue: Promise<void> | null = null;
+let panelRequested = false;
+let target: HpBarTarget = { session: "", version: 0, itemId: null, pending: true };
+
+function publishTarget(itemId: string | null, pending: boolean): void {
+  if (target.itemId === itemId && target.pending === pending) return;
+  target = { ...target, version: target.version + 1, itemId, pending };
+  void sendTarget();
+}
+
+async function sendTarget(): Promise<void> {
+  try { await OBR.broadcast.sendMessage(HP_BAR_TARGET, target, { destination: "LOCAL" }); }
+  catch (error) { console.warn("[hp-bar] target broadcast failed", { itemId: target.itemId, version: target.version, error }); }
+}
 
 async function popoverAnchor(): Promise<{ left: number; top: number }> {
   let vw = 1280, vh = 720;
-  try { vw = await OBR.viewport.getWidth(); } catch {}
-  try { vh = await OBR.viewport.getHeight(); } catch {}
+  try { [vw, vh] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]); } catch {}
   const off = getPanelOffset(PANEL_IDS.hpBar);
   // RIGHT-anchored: anchor X is the right edge of the popover.
   // dx > 0 pulls the popover LEFTWARDS, matching the convention
@@ -90,76 +95,64 @@ async function popoverAnchor(): Promise<{ left: number; top: number }> {
 }
 
 async function openPopoverFor(itemId: string): Promise<void> {
-  // If we're already showing the right token, do nothing — re-issuing
-  // popover.open() would force a flicker on selection-flip-flop.
-  if (popoverOpen && currentItemId === itemId) return;
-  // If we're showing a DIFFERENT token, close first so the new one
-  // opens at the correct anchor.
-  if (popoverOpen && currentItemId !== itemId) {
-    await closePopover();
-  }
+  desiredItemId = itemId;
   currentItemId = itemId;
-  const anchor = await popoverAnchor();
-  try {
-    await OBR.popover.open({
-      id: POPOVER_ID,
-      url: `${POPOVER_URL}?itemId=${encodeURIComponent(itemId)}`,
-      width: POPOVER_W,
-      height: POPOVER_H,
-      anchorReference: "POSITION",
-      anchorPosition: anchor,
-      anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
-      transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
-      hidePaper: true,
-      disableClickAway: true,
-    });
-    popoverOpen = true;
-  } catch (e) {
-    console.warn("[hp-bar] open failed", e);
-    popoverOpen = false;
-    currentItemId = null;
-  }
+  publishTarget(itemId, false);
+  await syncPanel();
+}
+
+/** Only one open/close can be in flight. A -> B updates the existing iframe;
+ * a ready handshake recovers the latest target if its first message was early. */
+function syncPanel(): Promise<void> {
+  panelRequested = true;
+  if (panelQueue) return panelQueue;
+  panelQueue = (async () => {
+    while (true) {
+      panelRequested = false;
+      if (!desiredItemId || !active || !sceneReady) {
+        if (!popoverOpen) return;
+        try { await OBR.popover.close(POPOVER_ID); }
+        catch (error) { console.warn("[hp-bar] close failed", { error }); return; }
+        popoverOpen = false; setPanelOpen("hp-bar", false);
+        continue;
+      }
+      if (popoverOpen && !reanchor) return;
+      const session = target.session;
+      const anchor = await popoverAnchor();
+      if (!desiredItemId || !active || !sceneReady || target.session !== session) continue;
+      reanchor = false;
+      try {
+        await OBR.popover.open({
+          id: POPOVER_ID,
+          url: `${POPOVER_URL}?session=${encodeURIComponent(session)}`,
+          width: POPOVER_W,
+          height: POPOVER_H,
+          anchorReference: "POSITION",
+          anchorPosition: anchor,
+          anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
+          transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
+          hidePaper: true,
+          disableClickAway: true,
+        });
+        popoverOpen = true; setPanelOpen("hp-bar", true);
+        await sendTarget();
+      } catch (error) {
+        console.warn("[hp-bar] open failed", { itemId: desiredItemId, error });
+        return;
+      }
+    }
+  })().finally(() => {
+    panelQueue = null;
+    if (panelRequested) void syncPanel();
+  });
+  return panelQueue;
 }
 
 async function closePopover(): Promise<void> {
-  if (!popoverOpen) return;
-  popoverOpen = false;
+  desiredItemId = null;
   currentItemId = null;
-  try { await OBR.popover.close(POPOVER_ID); } catch {}
-}
-
-// Decide what to do based on the user's current selection. Called
-// from `OBR.player.onChange` and `OBR.scene.items.onChange` — the
-// latter handles the case where a selected token's metadata gets
-// the flag added/removed mid-selection.
-/** Returns true if the token has any HP/AC bubble values written
- *  to it (i.e. the bubbles plugin renders something for it). */
-function hasBubblesMetadata(item: any): boolean {
-  const meta = item?.metadata || {};
-  const m = meta[BUBBLES_META_KEY] ?? meta[EXTERNAL_BUBBLES_META_KEY];
-  if (!m || typeof m !== "object") return false;
-  const r = m as Record<string, unknown>;
-  // Any of: health, max health, temp HP, AC. Even a 0-value AC
-  // counts (the user explicitly set it).
-  return r["health"] != null
-    || r["max health"] != null
-    || r["temporary health"] != null
-    || r["armor class"] != null;
-}
-
-function isBubblesLocked(item: any): boolean {
-  const meta = item?.metadata || {};
-  const m = meta[BUBBLES_META_KEY] ?? meta[EXTERNAL_BUBBLES_META_KEY];
-  if (!m || typeof m !== "object") return true;
-  const raw = (m as Record<string, unknown>)["locked"];
-  return raw === undefined ? true : !!raw;
-}
-
-function isBubblesHidden(item: any): boolean {
-  const meta = item?.metadata || {};
-  const m = meta[BUBBLES_META_KEY] ?? meta[EXTERNAL_BUBBLES_META_KEY];
-  if (!m || typeof m !== "object") return false;
-  return !!(m as Record<string, unknown>)["hide"];
+  publishTarget(null, true);
+  await syncPanel();
 }
 
 // 2026-05-10: pin-panel state — when the user toggles the pin in the
@@ -173,55 +166,42 @@ function readHpBarPinned(): boolean {
   try { return localStorage.getItem(LS_HP_BAR_PINNED) === "1"; } catch { return false; }
 }
 
-async function handleSelection(selection: string[] | undefined): Promise<void> {
+async function handleSelection(nextSelection: string[] | undefined, snapshot?: Item | null): Promise<void> {
+  selection = [...(nextSelection ?? [])];
+  const version = ++selectionVersion;
+  const current = () => active && sceneReady && version === selectionVersion;
+  if (!current()) return;
   // Pin-aware close helper: when pinned, keep the popover up even if
   // the new selection doesn't qualify (no token / wrong type / no
   // bubbles meta). When unpinned, fall through to normal close.
   const pinned = readHpBarPinned();
   const closeIfNotPinned = async (): Promise<void> => {
-    if (popoverOpen && !pinned) await closePopover();
+    if (!current()) return;
+    if (!pinned) await closePopover();
+    else publishTarget(currentItemId, false);
   };
 
   if (!selection || selection.length !== 1) {
+    selectedSignature = "";
     await closeIfNotPinned();
     return;
   }
   const id = selection[0];
-  let item: any = null;
-  try {
-    const items = await OBR.scene.items.getItems([id]);
-    item = items[0];
-  } catch {}
-  if (!item) {
-    await closeIfNotPinned();
-    return;
+  let item: Item | undefined = snapshot ?? undefined;
+  if (snapshot === undefined) {
+    selectedSignature = "";
+    publishTarget(currentItemId, true);
+    try { item = (await OBR.scene.items.getItems([id]))[0]; }
+    catch (error) {
+      console.warn("[hp-bar] selected item read failed", { itemId: id, version, error });
+      if (current()) await closePopover();
+      return;
+    }
   }
-  // Image tokens only — abilities/areas don't need an HP bar.
-  if (item.type !== "IMAGE") {
-    await closeIfNotPinned();
-    return;
-  }
-  const meta = (item.metadata || {}) as Record<string, unknown>;
-  const ownsItem = !!hpBarPlayerId && (item as any).createdUserId === hpBarPlayerId;
-  if (!hpBarIsGM && (!ownsItem || isBubblesHidden(item))) {
-    await closeIfNotPinned();
-    return;
-  }
-  if (hpBarIsGM && isBubblesHidden(item)) {
-    await closeIfNotPinned();
-    return;
-  }
-  // 2026-05-12 — user request #9: tokens BOUND to a character card OR
-  // a bestiary monster shouldn't get the standalone hp-bar popover
-  // auto-attached. The cc-info / monster-info popovers already show
-  // HP/AC inline, so the floating hp-bar popover is redundant +
-  // visually duplicates the bubble. The right-click "添加血条组件"
-  // still works manually for users who DO want both.
-  const hasCcBind =
-    typeof meta[CC_BIND_KEY] === "string" && (meta[CC_BIND_KEY] as string).length > 0;
-  const hasBestiaryBind =
-    typeof meta[BESTIARY_SLUG_KEY] === "string" && (meta[BESTIARY_SLUG_KEY] as string).length > 0;
-  if (hasCcBind || hasBestiaryBind) {
+  if (!current()) return;
+  selectedSignature = eligibilitySignature(item);
+  const eligibility = hpEligibility(item, hpBarIsGM, hpBarPlayerId);
+  if (eligibility === "none") {
     await closeIfNotPinned();
     return;
   }
@@ -236,45 +216,49 @@ async function handleSelection(selection: string[] | undefined): Promise<void> {
   // re-added it on the next items.onChange. Using `=== undefined`
   // restricts auto-add to first-touch only — explicit removal sets
   // the flag to `false` and that wins.
-  const flagState = meta[HP_BAR_FLAG_KEY];
-  if (flagState === undefined) {
-    if (!hasBubblesMetadata(item)) {
-      await closeIfNotPinned();
-      return;
-    }
+  if (eligibility === "enable") {
+    let accepted = false;
     try {
       await OBR.scene.items.updateItems([id], (drafts) => {
         for (const d of drafts) {
-          (d.metadata as any)[HP_BAR_FLAG_KEY] = true;
+          if (current() && d.id === id) {
+            const latest = hpEligibility(d, hpBarIsGM, hpBarPlayerId);
+            if (latest === "enable") d.metadata[HP_BAR_FLAG_KEY] = true;
+            accepted = latest !== "none";
+          }
         }
       });
     } catch (e) {
-      console.warn("[hp-bar] auto-add flag failed", e);
+      console.warn("[hp-bar] auto-add flag failed", { itemId: id, error: e });
+      if (current()) await closePopover();
+      return;
     }
-  } else if (flagState === false || !flagState) {
-    // Explicitly removed — respect the user's choice and don't open.
-    await closeIfNotPinned();
-    return;
+    if (!accepted) { await closeIfNotPinned(); return; }
   }
-  await openPopoverFor(id);
-}
-
-// Auto-popup flags from the bestiary / character-cards modules.
-// Both default to OFF when the localStorage key is absent. Users
-// flip these via Settings → 怪物图鉴 / 角色卡.
-function isBestiaryAutoPopupOn(): boolean {
-  try { return localStorage.getItem("com.bestiary/auto-popup") === "1"; }
-  catch { return false; }
-}
-function isCcAutoPopupOn(): boolean {
-  try { return localStorage.getItem("character-cards/auto-info") === "1"; }
-  catch { return false; }
+  if (current()) await openPopoverFor(id);
 }
 
 export async function setupHpBar(): Promise<void> {
+  if (active) return;
+  active = true;
+  target = { session: crypto.randomUUID(), version: 0, itemId: null, pending: true };
+  selection = [];
+  selectedSignature = "";
+  selectionVersion++;
   const en = getLocalLang() === "en";
-  try { hpBarIsGM = (await OBR.player.getRole()) === "GM"; } catch {}
-  try { hpBarPlayerId = await OBR.player.getId(); } catch {}
+  try {
+    const [ready, role, id] = await Promise.all([OBR.scene.isReady(), OBR.player.getRole(), OBR.player.getId()]);
+    sceneReady = ready;
+    hpBarIsGM = role === "GM";
+    hpBarPlayerId = id;
+  } catch (error) {
+    active = false;
+    console.warn("[hp-bar] setup identity/scene read failed", { error });
+    throw error;
+  }
+  unsubs.push(OBR.broadcast.onMessage(HP_BAR_READY, event => {
+    if ((event.data as { session?: string } | undefined)?.session === target.session) void sendTarget();
+  }));
   // Bbox for layout editor / drag preview.
   registerPanelBbox(PANEL_IDS.hpBar, async () => {
     if (!popoverOpen) return null; // hide from editor when closed
@@ -301,12 +285,8 @@ export async function setupHpBar(): Promise<void> {
           icon: assetUrl("status-icon.svg"),
           label: en ? "Add HP bar" : "添加血条组件",
           filter: {
-            // 2026-05-10c — dropped the BESTIARY_SLUG / CC_BIND
-            // exclusions in `every`. Now that the hp-bar popover
-            // follows CC / bestiary bound characters too, users on
-            // those tokens need a way to re-add the bar after an
-            // explicit "移除" (flag = false). The menu now shows on
-            // every IMAGE.
+            // Keep the existing bulk context menu available on images;
+            // bound tokens remain excluded from automatic popup selection.
             every: [
               { key: "type", value: "IMAGE" },
             ],
@@ -349,12 +329,10 @@ export async function setupHpBar(): Promise<void> {
           // For multi-select, only the "current selection" matters —
           // OBR's selection is always a list, and our handleSelection
           // only opens for single-token selections anyway.
-          try {
-            const sel = await OBR.player.getSelection();
-            await handleSelection(sel);
-          } catch {}
+          // Re-read only this explicit action's target, never on unrelated edits.
+          await handleSelection(selection);
         } catch (e) {
-          console.error("[hp-bar] add failed", e);
+          console.error("[hp-bar] add failed", { itemIds: ids, error: e });
         }
       },
     });
@@ -409,10 +387,11 @@ export async function setupHpBar(): Promise<void> {
           // close on the next selection change anyway, but doing it
           // eagerly here feels snappier).
           if (popoverOpen && currentItemId && ids.includes(currentItemId)) {
+            selectionVersion++;
             await closePopover();
           }
         } catch (e) {
-          console.error("[hp-bar] remove failed", e);
+          console.error("[hp-bar] remove failed", { itemIds: ids, error: e });
         }
       },
     });
@@ -423,9 +402,14 @@ export async function setupHpBar(): Promise<void> {
   // Selection listener.
   unsubs.push(
     OBR.player.onChange(async (player) => {
+      const nextSelection = player.selection ?? [];
+      const changed = hpBarIsGM !== (player.role === "GM")
+        || (!!player.id && hpBarPlayerId !== player.id)
+        || selection.join("\0") !== nextSelection.join("\0");
       hpBarIsGM = player.role === "GM";
       hpBarPlayerId = player.id || hpBarPlayerId;
-      try { await handleSelection(player.selection); } catch (e) {
+      if (!changed) return;
+      try { await handleSelection(nextSelection); } catch (e) {
         console.warn("[hp-bar] handleSelection threw:", e);
       }
     }),
@@ -436,11 +420,23 @@ export async function setupHpBar(): Promise<void> {
   // bestiary monster / character card while the popover is open
   // (we should close in that case to avoid duplicate UI).
   unsubs.push(
-    OBR.scene.items.onChange(async () => {
-      try {
-        const sel = await OBR.player.getSelection();
-        await handleSelection(sel);
-      } catch {}
+    OBR.scene.items.onChange((items) => {
+      if (!active || !sceneReady) return;
+      // These are current full snapshots, consumed synchronously before any
+      // await. A later relevant snapshot invalidates an outstanding read.
+      if (currentItemId) {
+        const shown = items.find(item => item.id === currentItemId);
+        if (!mayEditHp(shown, hpBarIsGM, hpBarPlayerId)) {
+          publishTarget(null, true);
+          void closePopover(); // Pin never preserves deleted/revoked targets.
+        }
+      }
+      if (selection.length !== 1) return;
+      const item = items.find(item => item.id === selection[0]);
+      if (eligibilitySignature(item) === selectedSignature) return;
+      void handleSelection(selection, item ?? null).catch(error => {
+        console.warn("[hp-bar] item snapshot handling failed", { itemId: item?.id, error });
+      });
     }),
   );
 
@@ -457,40 +453,40 @@ export async function setupHpBar(): Promise<void> {
       // Only re-check on PIN-OFF; turning pin ON shouldn't disturb
       // the open popover.
       if (data?.pinned !== false) return;
-      try {
-        const sel = await OBR.player.getSelection();
-        await handleSelection(sel);
-      } catch {}
+      await handleSelection(selection);
     }),
   );
 
   // Scene-ready: re-evaluate selection so popover opens if needed.
   unsubs.push(
     OBR.scene.onReadyChange(async (ready) => {
-      if (!ready) await closePopover();
+      sceneReady = ready;
+      selectionVersion++;
+      selectedSignature = "";
+      if (!ready) { selection = []; await closePopover(); }
       else {
+        const version = selectionVersion;
         try {
           const sel = await OBR.player.getSelection();
-          await handleSelection(sel);
-        } catch {}
+          if (active && sceneReady && version === selectionVersion) await handleSelection(sel);
+        } catch (error) { console.warn("[hp-bar] scene selection read failed", { error }); }
       }
     }),
   );
 
   // Initial pass.
   try {
+    const version = selectionVersion;
     const sel = await OBR.player.getSelection();
-    await handleSelection(sel);
-  } catch {}
+    if (active && sceneReady && version === selectionVersion) await handleSelection(sel);
+  } catch (error) { console.warn("[hp-bar] initial selection read failed", { error }); }
 
   // Re-anchor on viewport resize, drag-end, and panel reset.
   unsubs.push(
     onViewportResize(async () => {
       if (popoverOpen && currentItemId) {
-        const id = currentItemId;
-        popoverOpen = false;
-        currentItemId = null;
-        await openPopoverFor(id);
+        reanchor = true;
+        await syncPanel();
       }
     }),
   );
@@ -499,26 +495,26 @@ export async function setupHpBar(): Promise<void> {
       const payload = event.data as DragEndPayload | undefined;
       if (payload?.panelId !== PANEL_IDS.hpBar) return;
       if (popoverOpen && currentItemId) {
-        const id = currentItemId;
-        popoverOpen = false;
-        currentItemId = null;
-        await openPopoverFor(id);
+        reanchor = true;
+        await syncPanel();
       }
     }),
   );
   unsubs.push(
     OBR.broadcast.onMessage(BC_PANEL_RESET, async () => {
       if (popoverOpen && currentItemId) {
-        const id = currentItemId;
-        popoverOpen = false;
-        currentItemId = null;
-        await openPopoverFor(id);
+        reanchor = true;
+        await syncPanel();
       }
     }),
   );
 }
 
 export async function teardownHpBar(): Promise<void> {
+  active = false;
+  sceneReady = false;
+  selectionVersion++;
+  selection = [];
   for (const u of unsubs.splice(0)) {
     try { u(); } catch {}
   }

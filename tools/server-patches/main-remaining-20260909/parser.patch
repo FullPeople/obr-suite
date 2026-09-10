@@ -1,0 +1,44 @@
+--- a/parser.py
++++ b/parser.py
+@@ -720,7 +720,7 @@
+                        for coin, _, region in coins})
+ 
+     special_start = 33 if profile == "2014" else 40
+-    if matches(((f"BT{special_start - 2}", ("特殊能力", "special abilities")),
++    if matches(((f"BT{special_start - 2}", ("特殊能力", "special abilities", "special ability")),
+                 (f"BT{special_start - 1}", name), (f"BZ{special_start - 1}", description)),
+                (f"{a}{r}:{b}{r}" for r in range(special_start, special_start + 5)
+                 for a, b in (("BT", "BY"), ("BZ", "CO")))):
+@@ -729,15 +729,15 @@
+             fields["feat_fighting_style_rows"] = None
+ 
+     class_start = 14 if profile == "2014" else 17
+-    metadata = (("AX11", ("护甲熟练", "armor proficiency")),
+-                ("AX12", ("武器熟练", "weapon proficiency")),
+-                ("AX13", ("工具熟练", "tool proficiency"))) if profile == "2014" else (
+-                ("AX11", ("豁免熟练", "saving throw proficiency")),
+-                ("AX12", ("技能熟练", "skill proficiency")),
+-                ("AX13", ("武器熟练", "weapon proficiency")),
+-                ("AX14", ("工具熟练", "tool proficiency")),
++    metadata = (("AX11", ("护甲熟练", "armor proficiency", "armor proficiencies", "armor prof.")),
++                ("AX12", ("武器熟练", "weapon proficiency", "weapon proficiencies", "weapon prof.")),
++                ("AX13", ("工具熟练", "tool proficiency", "tool proficiencies", "tool prof."))) if profile == "2014" else (
++                ("AX11", ("豁免熟练", "saving throw proficiency", "saving throw proficiencies", "save prof.")),
++                ("AX12", ("技能熟练", "skill proficiency", "skill proficiencies", "skill prof.")),
++                ("AX13", ("武器熟练", "weapon proficiency", "weapon proficiencies", "weapon prof.")),
++                ("AX14", ("工具熟练", "tool proficiency", "tool proficiencies", "tool prof.")),
+                 ("AX15", ("护甲受训", "armor training")),
+-                ("AX16", ("起始装备", "starting equipment")))
++                ("AX16", ("起始装备", "starting equipment", "starting eq.")))
+     if matches((("BJ9", ("职业能力", "class features")),
+                 ("AX10", name), ("BC10", description)) + metadata,
+                (f"{a}{r}:{b}{r}" for r in range(class_start, 78)
+@@ -1324,7 +1324,7 @@
+     for r in range(r0, r1):
+         for col in cols_cfg:
+             name = _str(_cell(main, f"{col['name']}{r}"))
+-            if not name or name in ("特殊能力", "名称"):
++            if not name or name in ("特殊能力", "名称") or name.casefold() == "special ability":
+                 continue
+             entry = {
+                 "name": name,

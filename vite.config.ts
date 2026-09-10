@@ -117,6 +117,8 @@ export default defineConfig(({ command }) => ({
         "portal-edit": resolve(__dirname, "portal-edit.html"),
         "portal-destination": resolve(__dirname, "portal-destination.html"),
         "portal-blink": resolve(__dirname, "portal-blink.html"),
+        "transition-control": resolve(__dirname, "transition-control.html"),
+        "transition-display": resolve(__dirname, "transition-display.html"),
         "trickster-edit": resolve(__dirname, "trickster-edit.html"),
         "circleimage": resolve(__dirname, "circleimage.html"),
         "transform": resolve(__dirname, "transform.html"),
@@ -138,8 +140,8 @@ export default defineConfig(({ command }) => ({
         "fullfog-edit": resolve(__dirname, "fullfog-edit.html"),
         "fullfog-light-edit": resolve(__dirname, "fullfog-light-edit.html"),
         "hp-bar": resolve(__dirname, "hp-bar.html"),
-        // 2026-05-19 — music board (dev-only via STABLE_HIDES; module
-        // registration is gated in background.ts).
+        "boss-bar": resolve(__dirname, "boss-bar.html"),
+        // Shared music controls; playback lives in the background module.
         "music-board": resolve(__dirname, "music-board.html"),
       },
     },

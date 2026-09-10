@@ -1,0 +1,54 @@
+--- a/parser.py
++++ b/parser.py
+@@ -363,11 +363,8 @@
+         "armor_weight":   "AA40",
+         "shield_ac":      "AQ40",
+         "shield_attuned": "AP40",
+-        # 2026-05-15 — 2024-version 盾牌着装 ("equipped") flag at AS41.
+-        # Older parser had `shield.equipped` hard-coded to True, which
+-        # meant a shield in the inventory always contributed its AC
+-        # bonus to the rendered card even when the character wasn't
+-        # actually wearing it.
++        # Legacy modern-layout fallback. Confirmed published shield headers
++        # override this coordinate per import in _select_layout.
+         "shield_equipped": "AS41",
+         "weapon_rows": (32, 37),
+         "weapon_name_col":     "B",
+@@ -741,6 +738,16 @@
+     layout = dict(base)
+     layout["version_label"] = label
+     layout["sheets"] = {**base["sheets"], **{role: name for role, name in resolved.items() if name is not None}}
++    # Only the already resolved modern main-sheet role and all three known
++    # headers prove AS40 is the equipped input. Keep legacy paths unchanged.
++    shield_headers = (("AL39", ("盾牌", "shield")),
++                      ("AQ39", ("ac", "armor class")),
++                      ("AS39", ("着装", "equipped")))
++    if modern and template_version != "v1.0.0" and all(
++            str(_cell(main, cell) or "").casefold() in labels
++            for cell, labels in shield_headers):
++        layout["main"] = {**base["main"], "shield_equipped": "AS40",
++                          "shield_equipped_yes_no": True}
+     return layout
+ 
+ 
+@@ -886,9 +893,8 @@
+         "weight":        _int(_cell(main, M["armor_weight"]), default=None),
+         "equipped":      True,
+     }
+-    # 2026-05-15 — pick up `shield.equipped` from AS41 when the layout
+-    # has it (2024-version cards). Older layouts without the cell fall
+-    # back to True so existing cards keep rendering the shield's AC.
++    # Use the coordinate proved by this import's layout. Legacy layouts
++    # without an equipped input retain their original True default.
+     shield_equipped_cell = M.get("shield_equipped")
+     shield_equipped = True
+     if shield_equipped_cell:
+@@ -896,6 +902,8 @@
+         # Belling marks "equipped" as "O" / "Y" / "✓" / 1 — anything
+         # else (including blank or "X") means not currently worn.
+         shield_equipped = v in ("O", "Y", "✓", 1, True) or str(v).strip().upper() in ("O", "Y", "TRUE", "1", "YES")
++        if M.get("shield_equipped_yes_no") and v == "是":
++            shield_equipped = True
+     shield = {
+         "ac_bonus": _int(_cell(main, M["shield_ac"]), default=None),
+         "attuned":  _cell(main, M["shield_attuned"]) == "O",

@@ -1,0 +1,99 @@
+{
+  "schema": "obr-xlsx-localization-preparation/v1",
+  "workbooks_unchanged": true,
+  "release_ready": false,
+  "translation_status": "Linguistic reviews retain pending dependencies; unreviewed seeds and untranslated long prose remain.",
+  "cell_only_combined_unique_texts": 12632,
+  "cell_only_combined_unique_characters": 1096926,
+  "all_surfaces": {
+    "context_records": 25922,
+    "occurrences": 28648,
+    "seed_records": 2171,
+    "reviewed_records": 13571,
+    "missing_records": 10180,
+    "missing_characters": 666813,
+    "long_missing_records": 2277,
+    "long_missing_characters": 542556,
+    "by_kind": {
+      "cell_text": 24418,
+      "comment": 67,
+      "conditional_literal": 38,
+      "defined_name": 109,
+      "format_literal": 2,
+      "formula_literal": 1033,
+      "sheet_name": 35,
+      "validation_literal": 24,
+      "validation_message": 83,
+      "xml_attribute": 113
+    },
+    "seed_methods": {
+      "context_reviewed": 13571,
+      "exact_glossary": 817,
+      "existing_english_column": 1330,
+      "number_unit": 24
+    }
+  },
+  "by_version": {
+    "2014": {
+      "context_records": 9933,
+      "occurrences": 11223,
+      "seed_records": 877,
+      "reviewed_records": 5546,
+      "missing_records": 3510,
+      "missing_characters": 204663,
+      "long_missing_records": 684,
+      "long_missing_characters": 160239,
+      "by_kind": {
+        "cell_text": 9450,
+        "comment": 33,
+        "conditional_literal": 11,
+        "defined_name": 109,
+        "format_literal": 1,
+        "formula_literal": 227,
+        "sheet_name": 17,
+        "validation_literal": 12,
+        "validation_message": 17,
+        "xml_attribute": 56
+      },
+      "seed_methods": {
+        "context_reviewed": 5546,
+        "exact_glossary": 334,
+        "existing_english_column": 521,
+        "number_unit": 22
+      }
+    },
+    "2024": {
+      "context_records": 15989,
+      "occurrences": 17425,
+      "seed_records": 1294,
+      "reviewed_records": 8025,
+      "missing_records": 6670,
+      "missing_characters": 462150,
+      "long_missing_records": 1593,
+      "long_missing_characters": 382317,
+      "by_kind": {
+        "cell_text": 14968,
+        "comment": 34,
+        "conditional_literal": 27,
+        "format_literal": 1,
+        "formula_literal": 806,
+        "sheet_name": 18,
+        "validation_literal": 12,
+        "validation_message": 66,
+        "xml_attribute": 57
+      },
+      "seed_methods": {
+        "context_reviewed": 8025,
+        "exact_glossary": 483,
+        "existing_english_column": 809,
+        "number_unit": 2
+      }
+    }
+  },
+  "limitations": [
+    "No workbook edits, formula recalculation, Excel rendering, backend upload or multiplayer validation.",
+    "XML surface inventory cannot recognize Chinese raster image pixels; every media part needs visual review before a full-English claim.",
+    "Existing English spell names are same-row candidates only, not verified official spell translations.",
+    "Neither seeds nor linguistic reviews authorize workbook writes; formula, dropdown/lookup, sheet, importer and layout dependencies remain pending."
+  ]
+}

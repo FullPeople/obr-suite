@@ -11,9 +11,11 @@
 import OBR, { type Item } from "@owlbear-rodeo/sdk";
 
 interface Batch {
+  generation: number;
   additions: Item[];
   deletions: string[];
   updates: Map<string, ((item: Item) => void)[]>;
+  restrictions: Set<string>;
 }
 
 export class Patcher {
@@ -22,10 +24,26 @@ export class Patcher {
   private updates: Map<string, ((item: Item) => void)[]> = new Map();
   private ready = false;
   private queue: Promise<void> = Promise.resolve();
+  private generation = 0;
+  private restrictions = new Set<string>();
+  private guards = new Map<string, (item: Item) => void>();
 
   setReady(ready: boolean) {
+    this.invalidate();
     this.ready = ready;
   }
+
+  /** A new scene/lifetime never inherits queued writes or actor permissions. */
+  invalidate(): void {
+    this.generation++;
+    this.additions = []; this.deletions = []; this.updates = new Map();
+    this.restrictions = new Set(); this.guards.clear();
+  }
+
+  /** Authorization is evaluated at submission, including for queued batches
+   * built before a player/party change. Only light actors install guards. */
+  protectItem(id: string, guard: (item: Item) => void): void { this.guards.set(id, guard); }
+  restrictItems(...ids: string[]): void { for (const id of ids) this.restrictions.add(id); }
 
   addItems(...items: Item[]) {
     this.additions.push(...items);
@@ -48,18 +66,21 @@ export class Patcher {
     if (
       this.additions.length === 0 &&
       this.deletions.length === 0 &&
-      this.updates.size === 0
+      this.updates.size === 0 && this.restrictions.size === 0
     ) {
       return this.queue;
     }
     const batch: Batch = {
+      generation: this.generation,
       additions: this.additions,
       deletions: this.deletions,
       updates: this.updates,
+      restrictions: this.restrictions,
     };
     this.additions = [];
     this.deletions = [];
     this.updates = new Map();
+    this.restrictions = new Set();
     this.queue = this.queue.then(() => this.flush(batch));
     return this.queue;
   }
@@ -87,30 +108,60 @@ export class Patcher {
    * different items.
    */
   private async flush(batch: Batch) {
-    if (!this.ready) return;
+    const current = () => this.ready && batch.generation === this.generation;
+    if (!current()) return;
+    // Fold the after-hook's updates into brand-new items BEFORE addItems.
+    // Otherwise an initially permitted PRIMARY can reveal hidden rooms during
+    // the round trip between addItems and the authorization update.
+    for (const item of batch.additions) {
+      for (const update of batch.updates.get(item.id) ?? []) update(item);
+      batch.updates.delete(item.id);
+      batch.restrictions.delete(item.id);
+      this.guards.get(item.id)?.(item);
+    }
+    // Revoke old LIGHT visibility before granting new vision. Wall changes
+    // still use grow-before-shrink: no wall is deleted or shortened here.
+    if (batch.restrictions.size > 0) {
+      try {
+        await OBR.scene.local.updateItems([...batch.restrictions], items => {
+          if (!current()) return;
+          for (const item of items) if (item.type === "LIGHT") item.visible = false;
+        });
+      } catch (e) {
+        console.warn("[dynfog] light restriction failed", e);
+        return;
+      }
+    }
+    if (!current()) return;
     if (batch.additions.length > 0) {
       try {
+        for (const item of batch.additions) this.guards.get(item.id)?.(item);
         await OBR.scene.local.addItems(batch.additions);
       } catch (e) {
         console.warn("[dynfog] local add failed", e);
       }
     }
+    if (!current()) return;
     if (batch.updates.size > 0) {
       try {
         await OBR.scene.local.updateItems([...batch.updates.keys()], (items) => {
+          if (!current()) return;
           for (const item of items) {
             const fns = batch.updates.get(item.id);
             if (!fns) continue;
             for (const fn of fns) fn(item);
+            this.guards.get(item.id)?.(item);
           }
         });
       } catch (e) {
         console.warn("[dynfog] local update failed", e);
       }
     }
+    if (!current()) return;
     if (batch.deletions.length > 0) {
       try {
         await OBR.scene.local.deleteItems(batch.deletions);
+        if (current()) for (const id of batch.deletions) this.guards.delete(id);
       } catch (e) {
         console.warn("[dynfog] local delete failed", e);
       }

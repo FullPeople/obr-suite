@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { setPanelOpen } from "../../utils/panelObstacles";
 import { assetUrl } from "../../asset-base";
 import { onViewportResize } from "../../utils/viewportAnchor";
 import { getState, onStateChange, refreshFromScene } from "../../state";
@@ -199,7 +200,7 @@ async function openBar(): Promise<void> {
       });
       return;
     }
-    try { await OBR.popover.close(POPOVER_ID); } catch {}
+    try { await OBR.popover.close(POPOVER_ID); isOpen = false; setPanelOpen(PANEL_IDS.search, false); } catch {}
     // Pass quadrant info to the iframe so it can flip element order
     // (e.g. detail panel goes ABOVE the input row when vAnchor=BOTTOM).
     const h_q = hAnchor === "LEFT" ? "left" : "right";
@@ -220,7 +221,7 @@ async function openBar(): Promise<void> {
       // below it always pass through.
       disableClickAway: true,
     });
-    isOpen = true;
+    isOpen = true; setPanelOpen(PANEL_IDS.search, true);
   } catch (e) {
     console.error("[obr-suite/search] openPopover failed", e);
   } finally {
@@ -236,6 +237,7 @@ async function closeBar(entry = "close"): Promise<void> {
   const wasVisible = isOpen || openInFlight;
   try {
     await OBR.popover.close(POPOVER_ID);
+    isOpen = false; setPanelOpen(PANEL_IDS.search, false);
   } catch (e) {
     if (wasVisible) {
       console.warn("[obr-suite/search] popover.close failed", {
@@ -243,7 +245,6 @@ async function closeBar(entry = "close"): Promise<void> {
       });
     }
   }
-  isOpen = false;
 }
 
 export async function setupSearch(): Promise<void> {

@@ -1,5 +1,5 @@
 import { render, createContext } from "preact";
-import { useEffect, useState, useMemo, useCallback, useContext } from "preact/hooks";
+import { useEffect, useState, useMemo, useCallback, useContext, useRef } from "preact/hooks";
 import OBR from "@owlbear-rodeo/sdk";
 import { fireQuickRoll } from "../dice/tags";
 import { subscribeToSfx } from "../dice/sfx-broadcast";
@@ -7,7 +7,10 @@ import { patchBubbles, type BubblesData } from "../../utils/statEdit";
 import { normalizeCombatGearFlags, readBooleanFlag } from "./data-normalize";
 import { reconcileUploadedCardShieldState } from "./xlsx-shield-state";
 import { t, type Language } from "../../i18n";
-import { getLocalLang, onLangChange } from "../../state";
+import { getLocalLang, onLangChange, getState, onStateChange, startSceneSync, onStateRefreshed, onStateRefreshFailed, refreshFromScene } from "../../state";
+import { abilityKey } from "./localization";
+import { fullName, fullTerm, fullMeasure, fullProperties, fullDescription, fullContainer, fullText } from "./fullscreen-localization";
+import { createSpellContent, spellContextKey, spellEntryText, spellMechanicalText, type SpellEntry, type SpellContext, type SpellDetail } from "./fullscreen-content";
 
 // i18n — this is a deeply nested Preact tree, so rather than thread a
 // `lang` prop through every section we keep a module-level `_lang` that
@@ -19,6 +22,24 @@ let _lang: Language = (() => {
   try { return (getLocalLang() as Language) ?? "zh"; } catch { return "zh"; }
 })();
 const T = (k: Parameters<typeof t>[1]) => t(_lang, k);
+const L = (zh: string, en: string) => fullText(_lang, zh, en);
+const N = (value: any) => fullName(value, _lang);
+const TERM = (value: unknown) => fullTerm(value, _lang);
+const MEASURE = (value: unknown) => fullMeasure(value, _lang);
+const spellContent = createSpellContent();
+let contentSettingsReady = false;
+const contentSettingsEvents = new EventTarget();
+const getSpellContext = (): SpellContext => ({ libraries: contentSettingsReady ? getState().libraries ?? [] : [], language: getLocalLang(), version: getState().dataVersion, ready: contentSettingsReady });
+function useSpellContext(): SpellContext {
+  const [context, setContext] = useState(getSpellContext);
+  useEffect(() => {
+    const refresh = () => setContext((prior) => { const next = getSpellContext(); return spellContextKey(prior) === spellContextKey(next) ? prior : next; });
+    const offState = onStateChange(refresh), offLang = onLangChange(refresh);
+    contentSettingsEvents.addEventListener("change", refresh);
+    refresh(); return () => { offState(); offLang(); contentSettingsEvents.removeEventListener("change", refresh); };
+  }, []);
+  return context;
+}
 
 // Token-binding metadata key — must mirror modules/characterCards/index.ts
 // so we can locate every token in the scene that's bound to the
@@ -142,8 +163,8 @@ const ABL_ABBR_ZH: Record<string, string> = {
 const ABL_ABBR_EN: Record<string, string> = {
   str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA",
 };
-const ablLabel = (k: string): string => (_lang === "en" ? ABL_LABEL_EN : ABL_LABEL_ZH)[k] ?? k;
-const ablAbbr = (k: string): string => (_lang === "en" ? ABL_ABBR_EN : ABL_ABBR_ZH)[k] ?? k;
+const ablLabel = (k: string): string => (_lang === "en" ? ABL_LABEL_EN : ABL_LABEL_ZH)[abilityKey(k)] ?? k;
+const ablAbbr = (k: string): string => (_lang === "en" ? ABL_ABBR_EN : ABL_ABBR_ZH)[abilityKey(k)] ?? k;
 
 // 2026-05-14 (#14 follow-up) — tab structure reduced to 4 per user
 // request. 战斗 (CombatSection) and 装备 (InventorySection) now live
@@ -214,7 +235,7 @@ function EditNum({
   const { editing } = useEdit();
   if (editing) {
     return (
-      <input
+      <CardInput
         class={`cc-edit-num ${className}`}
         type="number"
         value={value ?? ""}
@@ -247,57 +268,6 @@ function smoothScrollToNewRow(ev: Event | undefined, rowSelector: string): void 
   );
 }
 
-// 2026-05-14 (#14 f3) — spell-name lookup for the SpellPickModal.
-// Pulls the suite's library search index(es) and extracts every
-// category-2 (spell) entry. The kiwee index stores BOTH names:
-//   n  = English name   ("Fireball")
-//   cn = Chinese name    ("火球术")
-// We keep both: `label` (cn preferred, en fallback) is what the
-// modal shows + what gets written onto the card; `en` is kept so
-// search can match English typing too. Cached module-wide after the
-// first successful load. Falls back to the kiwee base when no
-// library is configured.
-interface SpellEntry { label: string; en: string }
-let _spellNamesCache: SpellEntry[] | null = null;
-async function loadSpellNames(): Promise<SpellEntry[]> {
-  if (_spellNamesCache) return _spellNamesCache;
-  let bases: string[] = [];
-  try {
-    const { getState } = await import("../../state");
-    const libs = ((getState() as any).libraries || []) as any[];
-    bases = libs
-      .filter((l) => l && l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim())
-      .map((l) => String(l.baseUrl).replace(/\/+$/, ""));
-  } catch {}
-  if (bases.length === 0) bases = ["https://5e.kiwee.top"];
-  // label -> en. Map de-dups across libraries by display label.
-  const byLabel = new Map<string, string>();
-  await Promise.all(
-    bases.map(async (base) => {
-      try {
-        const res = await fetch(`${base}/search/index.json`, { cache: "force-cache" });
-        if (!res.ok) return;
-        const idx = await res.json();
-        const arr = Array.isArray(idx?.x) ? idx.x : [];
-        for (const e of arr) {
-          // c === 2 is the spell category in the suite search index.
-          if (!e || e.c !== 2) continue;
-          const en = typeof e.n === "string" ? e.n.trim() : "";
-          const cn = typeof e.cn === "string" ? e.cn.trim() : "";
-          const label = cn || en;
-          if (label && !byLabel.has(label)) byLabel.set(label, en);
-        }
-      } catch {
-        /* one library failing is non-fatal — others may still load */
-      }
-    }),
-  );
-  _spellNamesCache = [...byLabel.entries()]
-    .map(([label, en]) => ({ label, en }))
-    .sort((a, b) => a.label.localeCompare(b.label, "zh"));
-  return _spellNamesCache;
-}
-
 // Helper: text input bound to a path on data. Static span when !editing.
 function EditText({
   value, onSet, fallback = "—", placeholder = "", className = "",
@@ -311,7 +281,7 @@ function EditText({
   const { editing } = useEdit();
   if (editing) {
     return (
-      <input
+      <CardInput
         class={`cc-edit-text ${className}`}
         type="text"
         value={value ?? ""}
@@ -361,10 +331,10 @@ function Header({
 
   const cls = (data.classes || [])
     .filter((c) => c?.name)
-    .map((c) => `${c.name}${c.subclass ? `（${c.subclass}）` : ""}${c.level ? ` Lv${c.level}` : ""}`)
+    .map((c) => `${N(c)}${c.subclass ? ` (${TERM(c.subclass)})` : ""}${c.level ? ` Lv${c.level}` : ""}`)
     .join(" / ") || "—";
 
-  const race = [id.race?.name, id.race?.subrace].filter(Boolean).join("·") || "—";
+  const race = [N(id.race), TERM(id.race?.subrace)].filter(Boolean).join("·") || "—";
   const totalLv = data.total_level != null ? data.total_level : "?";
 
   return (
@@ -390,8 +360,8 @@ function Header({
           <span class="pip"><b>{race}</b></span>
           <span class="pip"><b>{cls}</b></span>
           <span class="pip">{T("ccTotalLevel")} <b>{totalLv}</b></span>
-          {id.alignment && <span class="pip">{T("ccAlignment")} <b>{id.alignment}</b></span>}
-          {cs.size && <span class="pip">{T("ccSize")} <b>{cs.size}</b></span>}
+          {id.alignment && <span class="pip">{T("ccAlignment")} <b>{TERM(id.alignment)}</b></span>}
+          {cs.size && <span class="pip">{T("ccSize")} <b>{TERM(cs.size)}</b></span>}
           {id.faith && <span class="pip">{T("ccFaith")} <b>{id.faith}</b></span>}
         </div>
       </div>
@@ -606,25 +576,28 @@ function SpellPickModal({
 }: {
   title: string;
   onCancel: () => void;
-  onPick: (name: string) => void;
+  onPick: (name: string, reference?: SpellEntry) => void;
 }) {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [spells, setSpells] = useState<SpellEntry[]>([]);
+  const context = useSpellContext();
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true); setLoadError(false); setSpells([]);
     void (async () => {
       try {
-        const list = await loadSpellNames();
+        const list = await spellContent.list(context);
         if (!cancelled) { setSpells(list); setLoading(false); }
       } catch {
         if (!cancelled) { setLoadError(true); setLoading(false); }
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [context, retry]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -640,7 +613,7 @@ function SpellPickModal({
     const q = query.trim().toLowerCase();
     if (!q) return spells.slice(0, 60);
     return spells
-      .filter((s) => s.label.toLowerCase().includes(q) || s.en.toLowerCase().includes(q))
+      .filter((s) => [...s.aliases, s.source].some((name) => name.toLowerCase().includes(q)))
       .slice(0, 60);
   }, [query, spells]);
 
@@ -651,7 +624,7 @@ function SpellPickModal({
           <h3>{title}</h3>
           <span class="cc-modal-hint">{T("ccSpellModalHint")}</span>
         </div>
-        <input
+        <CardInput
           class="cc-edit-text"
           autofocus
           style={{ width: "100%", marginBottom: "8px", padding: "7px 10px", fontSize: "13px" }}
@@ -669,11 +642,12 @@ function SpellPickModal({
           )}
           {loading && <div class="cc-modal-msg">{T("ccSpellLoading")}</div>}
           {loadError && (
-            <div class="cc-modal-msg">{T("ccSpellLoadErr")}</div>
+            <div class="cc-modal-msg">{T("ccSpellLoadErr")} <button class="cc-btn" onClick={() => setRetry((v) => v + 1)}>{L("重试", "Retry")}</button></div>
           )}
           {!loading && matches.map((s) => (
-            <button class="cc-modal-row" onClick={() => onPick(s.label)}>
+            <button class="cc-modal-row" onClick={() => onPick(s.label, s)}>
               <span>{s.label}</span>
+              <small>{s.source}</small>
               {s.en && s.en !== s.label && (
                 <span class="cc-modal-row-en">{s.en}</span>
               )}
@@ -682,6 +656,10 @@ function SpellPickModal({
           {!loading && !loadError && matches.length === 0 && query.trim() && (
             <div class="cc-modal-msg">{T("ccSpellNoMatch")}</div>
           )}
+          {!loading && !loadError && spells.length === 0 && !query.trim() && <div class="cc-modal-msg">
+            {context.ready === false ? L("资料库设置尚未读取。", "Library settings are not available yet.") : L("没有可用的法术；可检查资料库设置或直接输入名称。", "No spells are available. Check library settings or enter a name.")}
+            <button class="cc-btn" onClick={() => { if (!contentSettingsReady) void refreshFromScene(); setRetry((value) => value + 1); }}>{L("重试", "Retry")}</button>
+          </div>}
         </div>
         <div class="cc-modal-foot">
           <button class="cc-btn" onClick={onCancel}>{T("ccCancel")}</button>
@@ -689,6 +667,85 @@ function SpellPickModal({
       </div>
     </div>
   );
+}
+
+/** Keep a focused field's raw draft (including blank numbers) across language renders. */
+function CardInput(props: any) {
+  const draft = useRef({ focused: false, dirty: false, value: "" });
+  const [, redraw] = useState(0);
+  return <input {...props}
+    value={draft.current.focused && draft.current.dirty ? draft.current.value : props.value}
+    onFocus={(event: any) => { draft.current.focused = true; props.onFocus?.(event); }}
+    onInput={(event: any) => {
+      draft.current.dirty = true; draft.current.value = event.currentTarget.value;
+      props.onInput?.(event);
+    }}
+    onBlur={(event: any) => {
+      draft.current.focused = false; draft.current.dirty = false;
+      props.onBlur?.(event); redraw((value) => value + 1);
+    }} />;
+}
+
+function SpellDetails({ spell }: { spell: any }) {
+  const context = useSpellContext();
+  const [detail, setDetail] = useState<SpellDetail | null>(null);
+  const [choices, setChoices] = useState<SpellEntry[]>([]);
+  const [selected, setSelected] = useState<SpellEntry | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [unavailable, setUnavailable] = useState(false);
+  const body = fullDescription(spell, _lang);
+  const source = String(spell.source ?? spell.meta?.source ?? "").toUpperCase();
+  const identity = JSON.stringify([spell.name, spell.name_en, spell.name_zh, source]);
+  useEffect(() => { setSelected(null); }, [identity]);
+  useEffect(() => {
+    let cancelled = false;
+    setDetail(null); setChoices([]); setUnavailable(false);
+    if (body) { setLoading(false); return; }
+    setLoading(true);
+    void (async () => {
+      try {
+        const entries = await spellContent.list(context, !!source);
+        const names = [spell.name, spell.name_en, spell.name_zh].filter((value) => typeof value === "string").map((value) => value.toLowerCase());
+        const matches = entries.filter((entry) => (!source || entry.source === source) && entry.aliases.some((name) => names.includes(name.toLowerCase())));
+        if (cancelled) return;
+        const chosen = selected && matches.find((entry) => entry.source === selected.source && entry.en === selected.en) || (matches.length === 1 ? matches[0] : null);
+        if (!chosen) { setChoices(matches); setUnavailable(matches.length === 0); return; }
+        const found = await spellContent.detail(chosen, context);
+        if (!cancelled) { setDetail(found); setUnavailable(!found); }
+      } catch { if (!cancelled) setUnavailable(true); }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [identity, body, context, selected, retry]);
+  const meta = spell.meta;
+  return <div class="spell-detail" style={{ whiteSpace: "pre-wrap" }}>
+    {body ? <>
+      {meta && <div class="meta">
+        {meta.school && <span>{TERM(meta.school)}</span>}
+        {meta.casting_time && <span>{T("ccCastingTime")} {MEASURE(meta.casting_time)}</span>}
+        {meta.range && <span>{T("ccRange")} {MEASURE(meta.range)}</span>}
+        {meta.components && <span>{MEASURE(meta.components)}</span>}
+        {meta.duration && <span>{T("ccDuration")} {MEASURE(meta.duration)}</span>}
+      </div>}
+      {source && <div class="meta">{source}</div>}
+      {body}
+    </> : <>
+      {loading && <span>{T("ccSpellLoading")}</span>}
+      {choices.length > 1 && <div>{L("请选择这张角色卡使用的法术来源：", "Choose the spell source used by this character:")}
+        {choices.map((entry) => <button class="cc-btn" onClick={() => setSelected(entry)}>{entry.label} · {entry.source}</button>)}
+      </div>}
+      {unavailable && <div>{L("启用的资料库中暂未找到对应详情。", "Details are unavailable in the enabled libraries.")} <button class="cc-btn" onClick={() => { if (!contentSettingsReady) void refreshFromScene(); setRetry((v) => v + 1); }}>{L("重试", "Retry")}</button></div>}
+      {detail && <>
+        <div class="meta">{detail.source} · {N({ name: detail.entry.name, name_en: detail.entry.ENG_name })}
+          {detail.language !== "auto" && detail.language !== _lang && ` · ${L("使用资料库原文", "Original library language")}`}
+        </div>
+        <div class="meta">{spellMechanicalText(detail.entry, _lang).map((line) => <span>{line}</span>)}</div>
+        {spellEntryText(detail.entry.entries)}
+        {detail.entry.entriesHigherLevel && <div>{spellEntryText(detail.entry.entriesHigherLevel)}</div>}
+      </>}
+    </>}
+  </div>;
 }
 
 function StatsBanner({
@@ -729,11 +786,11 @@ function StatsBanner({
       <div class="stat-cell hp">
         <div class="stat-cell-label">HP</div>
         <div class="stat-cell-val">
-          <input class="stat-input big"
+          <CardInput class="stat-input big"
             value={hp.current ?? 0}
             onChange={(e: any) => setHp("current", e.target.value)} />
           <span class="slash">/</span>
-          <input class="stat-input small"
+          <CardInput class="stat-input small"
             value={hp.max ?? 0}
             onChange={(e: any) => setHp("max", e.target.value)} />
         </div>
@@ -741,7 +798,7 @@ function StatsBanner({
       <div class="stat-cell">
         <div class="stat-cell-label">{T("ccTemp")}</div>
         <div class="stat-cell-val">
-          <input class="stat-input big"
+          <CardInput class="stat-input big"
             value={hp.temp ?? 0}
             onChange={(e: any) => setHp("temp", e.target.value)} />
         </div>
@@ -749,7 +806,7 @@ function StatsBanner({
       <div class="stat-cell ac">
         <div class="stat-cell-label">AC</div>
         <div class="stat-cell-val">
-          <input class="stat-input big"
+          <CardInput class="stat-input big"
             value={cs.ac ?? 10}
             onChange={(e: any) => setAc(e.target.value)} />
         </div>
@@ -758,7 +815,7 @@ function StatsBanner({
         <div class="stat-cell-label">{T("ccInit")}</div>
         <div class="stat-cell-val">
           {editing ? (
-            <input class="stat-input big" type="number"
+            <CardInput class="stat-input big" type="number"
               value={cs.initiative ?? 0}
               onInput={(e: any) => {
                 const n = parseInt(e.target.value, 10);
@@ -773,7 +830,7 @@ function StatsBanner({
         <div class="stat-cell-label">{T("ccSpeed")}</div>
         <div class="stat-cell-val">
           {editing ? (
-            <input class="stat-input big" type="number"
+            <CardInput class="stat-input big" type="number"
               value={cs.speed ?? 0}
               onInput={(e: any) => {
                 const n = parseInt(e.target.value, 10);
@@ -789,7 +846,7 @@ function StatsBanner({
         <div class="stat-cell-label">{T("ccPassivePerc")}</div>
         <div class="stat-cell-val">
           {editing ? (
-            <input class="stat-input big" type="number"
+            <CardInput class="stat-input big" type="number"
               value={cs.passive_perception ?? 0}
               onInput={(e: any) => {
                 const n = parseInt(e.target.value, 10);
@@ -804,7 +861,7 @@ function StatsBanner({
         <div class="stat-cell-label">{T("ccProf")}</div>
         <div class="stat-cell-val">
           {editing ? (
-            <input class="stat-input big" type="number"
+            <CardInput class="stat-input big" type="number"
               value={cs.proficiency_bonus ?? 0}
               onInput={(e: any) => {
                 const n = parseInt(e.target.value, 10);
@@ -818,18 +875,18 @@ function StatsBanner({
       <div class="stat-cell">
         <div class="stat-cell-label">{T("ccHitDice")}</div>
         <div class="stat-cell-val">
-          <input class="stat-input big" value={hd.current ?? 0}
+          <CardInput class="stat-input big" value={hd.current ?? 0}
             onChange={(e: any) => setHdCur(e.target.value)} />
           <span class="slash">/</span>
           {editing ? (
             <>
-              <input class="stat-input small" type="number"
+              <CardInput class="stat-input small" type="number"
                 value={hd.max ?? 0}
                 onInput={(e: any) => {
                   const n = parseInt(e.target.value, 10);
                   if (Number.isFinite(n)) setHd({ max: n });
                 }} />
-              <input class="stat-input small" type="text"
+              <CardInput class="stat-input small" type="text"
                 style={{ width: "44px" }}
                 placeholder="d8"
                 value={hd.die_size ?? ""}
@@ -855,7 +912,7 @@ function AbilitiesAndSkills({ data }: { data: CharacterData }) {
   const cs = data.core_stats || {};
   const skills = Array.isArray(data.skills) ? data.skills : [];
   const skBy: Record<string, any[]> = {};
-  for (const s of skills) (skBy[s.ability] ??= []).push(s);
+  for (const s of skills) (skBy[abilityKey(s.ability)] ??= []).push(s);
 
   // 2026-05-14 (#14 / f3) — edit helpers. We mutate the ability or
   // skill in place via spread + index replacement, then push the
@@ -931,7 +988,7 @@ function AbilitiesAndSkills({ data }: { data: CharacterData }) {
     const nextProf = order[(order.indexOf(cur) + 1) % order.length];
     // Recompute total from the skill's ability modifier + proficiency
     // multiplier. mult: none=0, proficient=1, expertise=2.
-    const abil = ab[sk.ability] || {};
+    const abil = ab[abilityKey(sk.ability)] || {};
     const abilMod = typeof abil.modifier === "number" ? abil.modifier : 0;
     const mult = nextProf === "expertise" ? 2 : nextProf === "proficient" ? 1 : 0;
     const misc = typeof sk.misc_bonus === "number" ? sk.misc_bonus : 0;
@@ -961,7 +1018,7 @@ function AbilitiesAndSkills({ data }: { data: CharacterData }) {
               return (
                 <div class="abl">
                   <div class="abl-name">{ablLabel(k)}</div>
-                  <input class="abl-total cc-edit-num" type="number"
+                  <CardInput class="abl-total cc-edit-num" type="number"
                     value={a.total ?? 10}
                     onInput={(e: any) => {
                       const n = parseInt(e.target.value, 10);
@@ -980,7 +1037,7 @@ function AbilitiesAndSkills({ data }: { data: CharacterData }) {
                     <span class="abl-save-dot"
                           onClick={() => toggleSaveProf(k)}
                           title={T("ccTipToggleSaveProf")}>{a.save?.proficient ? "●" : "○"}</span>
-                    <input class="cc-edit-num" type="number"
+                    <CardInput class="cc-edit-num" type="number"
                       style={{ width: "44px" }}
                       value={a.save?.bonus ?? saveBonus}
                       onInput={(e: any) => {
@@ -1029,9 +1086,9 @@ function AbilitiesAndSkills({ data }: { data: CharacterData }) {
                             title={T("ccTipCycleSkillProf")}>
                         {cls === "exp" ? "★" : cls === "prof" ? "●" : "○"}
                       </span>
-                      <span class="sk-name">{s.name}</span>
+                      <span class="sk-name">{N(s)}</span>
                       <span class="sk-abil">{ablAbbr(s.ability) || ""}</span>
-                      <input class="cc-edit-num sk-val" type="number"
+                      <CardInput class="cc-edit-num sk-val" type="number"
                         style={{ width: "48px" }}
                         value={s.total ?? 0}
                         onInput={(e: any) => {
@@ -1043,11 +1100,11 @@ function AbilitiesAndSkills({ data }: { data: CharacterData }) {
                 }
                 return (
                   <div class={`sk ${cls}`}
-                    onClick={() => rollExpr(`${s.name}${T("ccCheckSuffix")}`, expr)}
-                    onContextMenu={(e: any) => { e.preventDefault(); rollExpr(`${s.name}${T("ccCheckAdvSuffix")}`, expr, "adv"); }}
-                    title={`${s.name}${T("ccCheckSuffix")} ${expr}\n${T("ccRollHint")}`}>
+                    onClick={() => rollExpr(`${N(s)}${T("ccCheckSuffix")}`, expr)}
+                    onContextMenu={(e: any) => { e.preventDefault(); rollExpr(`${N(s)}${T("ccCheckAdvSuffix")}`, expr, "adv"); }}
+                    title={`${N(s)}${T("ccCheckSuffix")} ${expr}\n${T("ccRollHint")}`}>
                     <span class="sk-prof">{cls === "exp" ? "★" : cls === "prof" ? "●" : "○"}</span>
-                    <span class="sk-name">{s.name}</span>
+                    <span class="sk-name">{N(s)}</span>
                     <span class="sk-abil">{ablAbbr(s.ability) || ""}</span>
                     <span class="sk-val">{fmtMod(s.total)}</span>
                   </div>
@@ -1115,7 +1172,7 @@ function Defenses({ data }: { data: CharacterData }) {
         <span class="def-label">{label}</span>
         {list.map((x: string) => (
           <span class={`def-tag ${css}`}>
-            {x}
+            {TERM(x)}
             {editing && (
               <button class="cc-tag-x" onClick={() => removeTag(cat, x)} title={T("ccRemove")}>×</button>
             )}
@@ -1141,7 +1198,7 @@ function Defenses({ data }: { data: CharacterData }) {
             <span class="def-label">{T("ccLanguages")}</span>
             {langs.map((x) => (
               <span class="def-tag">
-                {x}
+                {TERM(x)}
                 {editing && (
                   <button class="cc-tag-x" onClick={() => removeLangTool("languages", x)} title={T("ccRemove")}>×</button>
                 )}
@@ -1157,7 +1214,7 @@ function Defenses({ data }: { data: CharacterData }) {
             <span class="def-label">{T("ccTools")}</span>
             {tools.map((x) => (
               <span class="def-tag">
-                {x}
+                {TERM(x)}
                 {editing && (
                   <button class="cc-tag-x" onClick={() => removeLangTool("tool_proficiencies", x)} title={T("ccRemove")}>×</button>
                 )}
@@ -1220,7 +1277,7 @@ function CombatSection({ data }: { data: CharacterData }) {
         {(armor.name || armor.ac_base != null) && (
           <div class="weap" style={{ background: "rgba(138,111,63,0.06)" }}>
             <div class="weap-name">
-              🛡 {armor.name || T("ccArmor")}
+              🛡 {N(armor) || T("ccArmor")}
               {armorEquipped && <span class="weap-prof">{T("ccEquipped")}</span>}
               {armorAttuned && <span class="weap-prof">{T("ccAttuned")}</span>}
             </div>
@@ -1259,19 +1316,19 @@ function CombatSection({ data }: { data: CharacterData }) {
           if (editing) {
             return (
               <div class="weap weap-edit" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.4fr) minmax(54px,0.7fr) minmax(68px,1fr) minmax(0,1fr) auto", gap: "6px", alignItems: "center", minWidth: 0 }}>
-                <input class="cc-edit-text" type="text"
+                <CardInput class="cc-edit-text" type="text"
                   value={w.name ?? ""}
                   placeholder={T("ccWeaponNamePh")}
                   onInput={(e: any) => updateWeapon(idx, { name: e.target.value })} />
-                <input class="cc-edit-text" type="text"
+                <CardInput class="cc-edit-text" type="text"
                   value={w.attack_bonus ?? ""}
                   placeholder="+5"
                   onInput={(e: any) => updateWeapon(idx, { attack_bonus: e.target.value })} />
-                <input class="cc-edit-text" type="text"
+                <CardInput class="cc-edit-text" type="text"
                   value={w.damage ?? ""}
                   placeholder="1d8+3"
                   onInput={(e: any) => updateWeapon(idx, { damage: e.target.value })} />
-                <input class="cc-edit-text" type="text"
+                <CardInput class="cc-edit-text" type="text"
                   value={w.damage_type ?? ""}
                   placeholder={T("ccDmgTypePh")}
                   onInput={(e: any) => updateWeapon(idx, { damage_type: e.target.value })} />
@@ -1282,39 +1339,39 @@ function CombatSection({ data }: { data: CharacterData }) {
           return (
             <div class="weap">
               <div class="weap-name">
-                ⚔ {w.name || "?"}
+                ⚔ {N(w) || "?"}
                 {w.proficient && <span class="weap-prof">{T("ccProfShort")}</span>}
               </div>
               <div class="weap-atk"
-                onClick={() => rollExpr(`${w.name} ${T("ccHit")}`, atkExpr)}
-                onContextMenu={(e: any) => { e.preventDefault(); rollExpr(`${w.name} ${T("ccHitAdv")}`, atkExpr, "adv"); }}
+                onClick={() => rollExpr(`${N(w)} ${T("ccHit")}`, atkExpr)}
+                onContextMenu={(e: any) => { e.preventDefault(); rollExpr(`${N(w)} ${T("ccHitAdv")}`, atkExpr, "adv"); }}
                 title={`${T("ccRollLR")} · ${atkExpr}`}>
                 {w.attack_bonus || `${fmtMod(atkBn)}`}
               </div>
               <div class="weap-dmg"
-                onClick={() => rollExpr(`${w.name} ${T("ccDamage")}${w.damage_type ? `(${w.damage_type})` : ""}`, dmgExpr)}
-                title={`${w.damage} ${w.damage_type ?? ""}`}>
-                {w.damage ?? "—"} {w.damage_type ? <span style={{ opacity: 0.7, fontSize: "10px" }}>{w.damage_type}</span> : ""}
+                onClick={() => rollExpr(`${N(w)} ${T("ccDamage")}${w.damage_type ? `(${TERM(w.damage_type)})` : ""}`, dmgExpr)}
+                title={`${w.damage} ${TERM(w.damage_type)}`}>
+                {w.damage ?? "—"} {w.damage_type ? <span style={{ opacity: 0.7, fontSize: "10px" }}>{TERM(w.damage_type)}</span> : ""}
               </div>
               {w.extra_damage && (
                 <div class="weap-dmg weap-dmg-extra"
                   onClick={(e: any) => {
                     e.stopPropagation();
                     rollExpr(
-                      `${w.name} ${T("ccExtraDamage")}${w.extra_damage_type ? `(${w.extra_damage_type})` : ""}`,
+                      `${N(w)} ${T("ccExtraDamage")}${w.extra_damage_type ? `(${TERM(w.extra_damage_type)})` : ""}`,
                       String(w.extra_damage).replace(/\s+/g, ""),
                     );
                   }}
-                  title={`${T("ccExtraDmgDie")} ${w.extra_damage}${w.extra_damage_type ? ` · ${w.extra_damage_type}` : ""}`}>
-                  +{w.extra_damage} {w.extra_damage_type ? <span style={{ opacity: 0.7, fontSize: "10px" }}>{w.extra_damage_type}</span> : ""}
+                  title={`${T("ccExtraDmgDie")} ${w.extra_damage}${w.extra_damage_type ? ` · ${TERM(w.extra_damage_type)}` : ""}`}>
+                  +{w.extra_damage} {w.extra_damage_type ? <span style={{ opacity: 0.7, fontSize: "10px" }}>{TERM(w.extra_damage_type)}</span> : ""}
                 </div>
               )}
-              {(w.properties || w.weight != null || w.ammo_type) && (
+              {(w.properties || w.mastery || w.weight != null || w.ammo_type) && (
                 <div class="weap-props">
                   {[
-                    w.properties,
+                    fullProperties(w, _lang),
                     w.weight != null ? `${w.weight} ${T("ccLbUnit")}` : null,
-                    w.ammo_type ? `${T("ccAmmo")}:${w.ammo_type}` : null,
+                    w.ammo_type ? `${T("ccAmmo")}:${TERM(w.ammo_type)}` : null,
                   ].filter(Boolean).join(" · ")}
                 </div>
               )}
@@ -1355,11 +1412,12 @@ function SpellsSection({ data }: { data: CharacterData }) {
   ) => {
     setPickFor({ slot, level, ev });
   };
-  const commitSpellPick = (name: string) => {
+  const commitSpellPick = (name: string, reference?: SpellEntry) => {
     if (!pickFor) return;
     const { slot, level, ev } = pickFor;
     const cur = Array.isArray((sp as any)[slot]) ? (sp as any)[slot] : [];
-    onPatch({ spellcasting: { ...sp, [slot]: [...cur, { name, level }] } });
+    const provenance = reference ? { source: reference.source, name_en: reference.en || undefined, name_zh: reference.cn || undefined } : {};
+    onPatch({ spellcasting: { ...sp, [slot]: [...cur, { name, level, ...provenance }] } });
     setPickFor(null);
     smoothScrollToNewRow(ev, ".spell");
   };
@@ -1372,6 +1430,9 @@ function SpellsSection({ data }: { data: CharacterData }) {
     const cur = Array.isArray((sp as any)[slot]) ? (sp as any)[slot] : [];
     const next = [...cur];
     next[idx] = { ...next[idx], ...patch };
+    if (typeof patch.name === "string" && patch.name !== cur[idx]?.name) {
+      delete next[idx].name_en; delete next[idx].name_zh;
+    }
     onPatch({ spellcasting: { ...sp, [slot]: next } });
   };
   const setSlot = (lv: number, which: "current" | "max", v: number) => {
@@ -1407,7 +1468,7 @@ function SpellsSection({ data }: { data: CharacterData }) {
     if (editing && slot) {
       return (
         <div class="spell" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-          <input class="cc-edit-num" type="number"
+          <CardInput class="cc-edit-num" type="number"
             style={{ width: "48px", textAlign: "center" }}
             value={s.level ?? 0}
             onInput={(e: any) => {
@@ -1415,7 +1476,7 @@ function SpellsSection({ data }: { data: CharacterData }) {
               if (Number.isFinite(n)) patchSpell(slot, idx, { level: n });
             }}
             title={T("ccSpellLevelTip")} />
-          <input class="cc-edit-text" type="text"
+          <CardInput class="cc-edit-text" type="text"
             style={{ flex: "1" }}
             value={s.name ?? ""}
             placeholder={T("ccSpellNamePh")}
@@ -1441,25 +1502,11 @@ function SpellsSection({ data }: { data: CharacterData }) {
               Removed the inner onClick so clicks anywhere on the row
               (including the name) open the detail panel. Players who
               still want to search can use the global search bar. */}
-          <span class="spell-name">{s.name}</span>
+          <span class="spell-name">{N(s)}</span>
           {s.meta?.concentration && <span class="spell-tag conc">{T("ccConcentration")}</span>}
           {s.meta?.ritual && <span class="spell-tag ritual">{T("ccRitual")}</span>}
         </div>
-        {isOpen && s.description && (
-          <div class="spell-detail">
-            {s.meta && (
-              <div class="meta">
-                {s.meta.school && <span>{s.meta.school}</span>}
-                {s.meta.casting_time && <span>{T("ccCastingTime")} {s.meta.casting_time}</span>}
-                {s.meta.range && <span>{T("ccRange")} {s.meta.range}</span>}
-                {s.meta.components && <span>{s.meta.components}</span>}
-                {s.meta.duration && <span>{T("ccDuration")} {s.meta.duration}</span>}
-                {s.meta.source && <span>《{s.meta.source}》</span>}
-              </div>
-            )}
-            {s.description}
-          </div>
-        )}
+        {isOpen && <SpellDetails key={key} spell={s} />}
       </>
     );
   };
@@ -1470,7 +1517,7 @@ function SpellsSection({ data }: { data: CharacterData }) {
         <span class="sec-h-title">{T("ccSecSpells")}</span>
         {(sp.spellcasting_ability || sp.save_dc) && (
           <span class="sec-h-meta">
-            {sp.spellcasting_ability && `${T("ccSpellAbility")}: ${sp.spellcasting_ability}`}
+            {sp.spellcasting_ability && `${T("ccSpellAbility")}: ${ablLabel(sp.spellcasting_ability)}`}
             {sp.save_dc != null && `  ·  ${T("ccSaveDC")}: ${sp.save_dc}`}
             {sp.attack_bonus && `  ·  ${T("ccSpellAttack")}: ${sp.attack_bonus}`}
             {sp.max_prepared != null && `  ·  ${T("ccMaxPrepared")}: ${sp.max_prepared}`}
@@ -1490,14 +1537,14 @@ function SpellsSection({ data }: { data: CharacterData }) {
               return (
                 <div class={`slot ${has ? "has-slots" : ""}`}>
                   <div class="slot-lv">{lv}{T("ccRing")}</div>
-                  <input class="cc-edit-num" type="number"
+                  <CardInput class="cc-edit-num" type="number"
                     style={{ width: "100%", textAlign: "center", fontSize: "13px" }}
                     value={s?.current ?? 0}
                     onInput={(e: any) => {
                       const n = parseInt(e.target.value, 10);
                       if (Number.isFinite(n)) setSlot(lv, "current", n);
                     }} />
-                  <input class="cc-edit-num" type="number"
+                  <CardInput class="cc-edit-num" type="number"
                     style={{ width: "100%", textAlign: "center", fontSize: "11px", opacity: 0.8 }}
                     value={s?.max ?? 0}
                     onInput={(e: any) => {
@@ -1629,12 +1676,12 @@ function FeatureBlock({
           return (
             <div class="feat is-open" style={{ marginBottom: "6px" }}>
               <div class="feat-h" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                <input class="cc-edit-text" type="text"
+                <CardInput class="cc-edit-text" type="text"
                   style={{ flex: "1" }}
                   value={f.name ?? ""}
                   placeholder={T("ccNamePh")}
                   onInput={(e: any) => onPatchItem?.(slot, i, { name: e.target.value })} />
-                <input class="cc-edit-num" type="number"
+                <CardInput class="cc-edit-num" type="number"
                   style={{ width: "54px" }}
                   value={f.level ?? ""}
                   placeholder="Lv"
@@ -1672,13 +1719,13 @@ function FeatureBlock({
                 {/* 2026-05-15 — dropped the inner "search by name"
                     onClick (same change as the spell rows). Clicking
                     anywhere on the header now collapses/expands. */}
-                <span class="srch-name">{f.name}</span>
+                <span class="srch-name">{N(f)}</span>
                 {f.level != null && <span class="lv">Lv{f.level}</span>}
-                {f.category && <span class="lv" style={{ borderColor: "var(--teal-soft)", color: "var(--teal)" }}>{f.category}</span>}
+                {f.category && <span class="lv" style={{ borderColor: "var(--teal-soft)", color: "var(--teal)" }}>{TERM(f.category)}</span>}
               </span>
               <span class="feat-toggle">▼</span>
             </div>
-            {isOpen && f.description && <div class="feat-body">{f.description}</div>}
+            {isOpen && fullDescription(f, _lang) && <div class="feat-body">{fullDescription(f, _lang)}</div>}
           </div>
         );
       })}
@@ -1774,7 +1821,7 @@ function BackgroundSection({ data }: { data: CharacterData }) {
         {editing && (
           <div class="def-row" style={{ marginBottom: "10px" }}>
             <span class="def-label">{T("ccBackgroundNameField")}</span>
-            <input class="cc-edit-text" type="text" style={{ flex: "1" }}
+            <CardInput class="cc-edit-text" type="text" style={{ flex: "1" }}
               value={bg.background_name ?? ""}
               placeholder={T("ccBackgroundNamePh")}
               onInput={(e: any) => setBg("background_name", e.target.value)} />
@@ -1782,25 +1829,25 @@ function BackgroundSection({ data }: { data: CharacterData }) {
         )}
         <dl class="kv" style={{ marginBottom: "12px" }}>
           {(editing || id.player) && (<><dt>{T("ccPlayer")}</dt><dd>{editing
-            ? <input class="cc-edit-text" type="text" value={id.player ?? ""} onInput={(e: any) => setId("player", e.target.value)} />
+            ? <CardInput class="cc-edit-text" type="text" value={id.player ?? ""} onInput={(e: any) => setId("player", e.target.value)} />
             : id.player}</dd></>)}
           {(editing || id.gender) && (<><dt>{T("ccGender")}</dt><dd>{editing
-            ? <input class="cc-edit-text" type="text" value={id.gender ?? ""} onInput={(e: any) => setId("gender", e.target.value)} />
+            ? <CardInput class="cc-edit-text" type="text" value={id.gender ?? ""} onInput={(e: any) => setId("gender", e.target.value)} />
             : id.gender}</dd></>)}
           {(editing || id.age != null) && (<><dt>{T("ccAge")}</dt><dd>{editing
-            ? <input class="cc-edit-num" type="number" value={id.age ?? ""} onInput={(e: any) => {
+            ? <CardInput class="cc-edit-num" type="number" value={id.age ?? ""} onInput={(e: any) => {
                 const v = e.target.value;
                 setId("age", v === "" ? null : parseInt(v, 10));
               }} />
             : id.age}</dd></>)}
           {(editing || id.height) && (<><dt>{T("ccHeight")}</dt><dd>{editing
-            ? <input class="cc-edit-text" type="text" value={id.height ?? ""} onInput={(e: any) => setId("height", e.target.value)} />
+            ? <CardInput class="cc-edit-text" type="text" value={id.height ?? ""} onInput={(e: any) => setId("height", e.target.value)} />
             : id.height}</dd></>)}
           {(editing || id.weight) && (<><dt>{T("ccBodyWeight")}</dt><dd>{editing
-            ? <input class="cc-edit-text" type="text" value={id.weight ?? ""} onInput={(e: any) => setId("weight", e.target.value)} />
+            ? <CardInput class="cc-edit-text" type="text" value={id.weight ?? ""} onInput={(e: any) => setId("weight", e.target.value)} />
             : id.weight}</dd></>)}
           {(editing || id.hometown) && (<><dt>{T("ccHometown")}</dt><dd>{editing
-            ? <input class="cc-edit-text" type="text" value={id.hometown ?? ""} onInput={(e: any) => setId("hometown", e.target.value)} />
+            ? <CardInput class="cc-edit-text" type="text" value={id.hometown ?? ""} onInput={(e: any) => setId("hometown", e.target.value)} />
             : id.hometown}</dd></>)}
         </dl>
         {!!visibleBlocks.length && (
@@ -1849,6 +1896,7 @@ function InventorySection({ data }: { data: CharacterData }) {
     const label = String(c?.label ?? T("ccBackpack"));
     return Array.isArray(c?.items)
       ? c.items.map((it: any) => ({
+          ...it,
           name: it?.name ?? "",
           weight: it?.weight ?? null,
           location: label,
@@ -1911,7 +1959,7 @@ function InventorySection({ data }: { data: CharacterData }) {
       <div class="coin-name">{label}</div>
       <div class="coin-val">
         {editing ? (
-          <input class="cc-edit-num" type="number"
+          <CardInput class="cc-edit-num" type="number"
             style={{ width: "60px", textAlign: "center" }}
             value={(w as any)[key] ?? 0}
             onInput={(e: any) => {
@@ -1977,18 +2025,18 @@ function InventorySection({ data }: { data: CharacterData }) {
               if (editing) {
                 return (
                   <div class="weap weap-edit" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.4fr) minmax(48px,0.6fr) minmax(0,0.8fr) auto", gap: "6px", alignItems: "center", minWidth: 0 }}>
-                    <input class="cc-edit-text" type="text"
+                    <CardInput class="cc-edit-text" type="text"
                       value={it.name ?? ""}
                       placeholder={T("ccItemNamePh")}
                       onInput={(e: any) => updateItem(idx, { name: e.target.value })} />
-                    <input class="cc-edit-text" type="text"
+                    <CardInput class="cc-edit-text" type="text"
                       value={it.weight ?? ""}
                       placeholder={T("ccWeightPh")}
                       onInput={(e: any) => {
                         const v = e.target.value;
                         updateItem(idx, { weight: v === "" ? null : parseFloat(v) });
                       }} />
-                    <input class="cc-edit-text" type="text"
+                    <CardInput class="cc-edit-text" type="text"
                       value={it.location ?? ""}
                       placeholder={T("ccLocationPh")}
                       onInput={(e: any) => updateItem(idx, { location: e.target.value })} />
@@ -2004,16 +2052,16 @@ function InventorySection({ data }: { data: CharacterData }) {
               const qty = it.quantity != null && it.quantity !== 1 ? ` × ${it.quantity}` : "";
               const weightStr = it.weight != null && it.weight !== ""
                 ? `${it.weight} ${T("ccLbUnit")}` : "";
-              const loc = it.location ? `· ${it.location}` : "";
+              const loc = it.location ? `· ${fullContainer(it.location, _lang)}` : "";
               const meta = [weightStr, loc].filter(Boolean).join(" ");
               return (
                 <div class="weap">
-                  <div class="weap-name">{(it.name || "?") + qty}</div>
+                  <div class="weap-name">{(N(it) || "?") + qty}</div>
                   <div class="weap-atk" style={{ visibility: "hidden" }}>—</div>
                   <div class="weap-dmg" style={{ background: "transparent", border: "0", color: "var(--ink-dim)" }}>
                     {meta}
                   </div>
-                  {it.description && <div class="weap-props">{it.description}</div>}
+                  {it.description && <div class="weap-props">{fullDescription(it, _lang)}</div>}
                 </div>
               );
             })}
@@ -2027,17 +2075,39 @@ function InventorySection({ data }: { data: CharacterData }) {
 // ===== Main app ==============================================
 function App() {
   const [data, setData] = useState<CharacterData | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ kind: "preview" | "params" | "fetch"; detail?: string } | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
   // 2026-05-14 (#14) — edit-mode flag, toggled from the header.
   const [editing, setEditing] = useState(false);
   const [savingEdits, setSavingEdits] = useState(false);
+  const [remotePending, setRemotePending] = useState(false);
+  const updateOrigin = useRef(crypto.randomUUID());
+  const readSession = useRef({ alive: true, revision: 0, draftRevision: 0, dirty: false, editing: false, controller: null as AbortController | null });
+  readSession.current.editing = editing;
+  const markDraft = useCallback(() => {
+    const session = readSession.current;
+    if (session.controller) setRemotePending(true);
+    session.dirty = true; session.draftRevision++; session.revision++; session.controller?.abort();
+    session.controller = null;
+  }, []);
+  useEffect(() => {
+    const track = (event: Event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest(".cc-modal")) return;
+      if (target.closest(".cc-stats") || (readSession.current.editing && target.closest(".cc-body"))) markDraft();
+    };
+    const stop = () => { const session = readSession.current; session.alive = false; session.revision++; session.controller?.abort(); spellContent.clear(); };
+    document.addEventListener("input", track);
+    window.addEventListener("pagehide", stop);
+    return () => { stop(); document.removeEventListener("input", track); window.removeEventListener("pagehide", stop); };
+  }, []);
   // i18n — mirror `lang` state into the module-level `_lang` at the top
   // of each render (parent renders before children, so T() reads the
   // live value everywhere) and re-render on a language flip.
   const [lang, setLang] = useState<Language>(_lang);
   _lang = lang;
   useEffect(() => onLangChange((l) => setLang((l as Language) ?? "zh")), []);
+  useEffect(() => { document.documentElement.lang = lang === "en" ? "en" : "zh-CN"; document.title = L("角色卡", "Character sheet"); }, [lang]);
   const roomId = getQS("room") || "";
   const cardId = getQS("card") || "";
   // 2026-05-26 — preview mode. When `?preview=sample|paste` is in the
@@ -2049,41 +2119,56 @@ function App() {
   const previewMode = (getQS("preview") as "sample" | "paste" | null) || null;
   const isPreview = previewMode === "sample" || previewMode === "paste";
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (force = false): Promise<boolean> => {
+    const session = readSession.current;
+    if (!session.alive) return false;
+    if (!force && (session.dirty || session.editing)) { setRemotePending(true); return false; }
+    session.controller?.abort(); session.controller = new AbortController();
+    const controller = session.controller, own = ++session.revision, draft = session.draftRevision;
+    const current = () => session.alive && own === session.revision && draft === session.draftRevision;
     if (isPreview) {
       try {
         const raw = localStorage.getItem("obr-suite/cc-preview-payload");
         if (!raw) {
-          setError(T("ccPreviewMissingPayload"));
-          return;
+          setError({ kind: "preview" });
+          return false;
         }
         const wrap = JSON.parse(raw);
         if (!wrap || typeof wrap !== "object" || !wrap.json) {
-          setError(T("ccPreviewMissingPayload"));
-          return;
+          setError({ kind: "preview" });
+          return false;
         }
         setError(null);
         setData(normalizeCombatGearFlags(wrap.json));
       } catch (e: any) {
-        setError(`${T("ccLoadFailedPrefix")}${e?.message || String(e)}`);
+        setError({ kind: "fetch", detail: e?.message || String(e) });
       }
-      return;
+      return true;
     }
     if (!roomId || !cardId) {
-      setError(T("ccErrNoParams"));
-      return;
+      setError({ kind: "params" });
+      return false;
     }
     setError(null);
+    const deadline = setTimeout(() => controller.abort(new DOMException("Character read timed out", "TimeoutError")), 12_000);
     try {
       const res = await fetch(
         `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data.json`,
-        { cache: "no-cache" },
+        { cache: "no-cache", signal: controller.signal },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
+      if (!current()) return false;
       setData(normalizeCombatGearFlags(json));
+      session.dirty = false; setRemotePending(false);
+      return true;
     } catch (e: any) {
-      setError(`${T("ccLoadFailedPrefix")}${e?.message || String(e)}`);
+      if (!current()) return false;
+      setError({ kind: "fetch", detail: e?.message || String(e) });
+      return false;
+    } finally {
+      clearTimeout(deadline);
+      if (session.controller === controller) session.controller = null;
     }
   }, [roomId, cardId, isPreview]);
 
@@ -2096,12 +2181,15 @@ function App() {
   useEffect(() => {
     if (!cardId) return;
     const unsub = OBR.broadcast.onMessage(BC_CARD_UPDATED, (event) => {
-      const payload = event.data as { cardId?: string } | undefined;
+      const payload = event.data as { cardId?: string; roomId?: string; url?: string; origin?: string } | undefined;
       if (payload?.cardId !== cardId) return;
+      if (payload.origin === updateOrigin.current) return;
+      if (payload.roomId && payload.roomId !== roomId) return;
+      if (payload.url && !payload.url.startsWith(`${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/`)) return;
       void loadData();
     });
     return unsub;
-  }, [cardId, loadData]);
+  }, [roomId, cardId, loadData]);
 
   // Patch handler — updates local state AND propagates HP / AC edits
   // to the bound token(s)' bubbles metadata so the HP-bar overlay on
@@ -2116,6 +2204,8 @@ function App() {
   // through the upstream-compat key (`health` / `max health` / etc.)
   // that the bubbles renderer already listens to.
   const onPatch = useCallback((patch: Partial<CharacterData>) => {
+    if (!readSession.current.alive) return;
+    markDraft();
     setData((prev) => prev ? normalizeCombatGearFlags({ ...prev, ...patch }) : prev);
     // Translate `core_stats.hp.* / .ac` deltas into the bubbles patch
     // shape and push to OBR. Nothing to do if the patch doesn't touch
@@ -2164,11 +2254,15 @@ function App() {
   // broadcast, the user reported "刷新只刷新大面板，小面板还是旧数据"
   // — the small panel doesn't know fresh data.json is available.
   const onRefresh = useCallback(async () => {
-    await loadData();
+    const session = readSession.current;
+    if ((session.dirty || session.editing) && !window.confirm(L("重新读取会丢弃未保存的编辑，是否继续？", "Reloading discards unsaved edits. Continue?"))) return;
+    if (!await loadData(true)) return;
     try {
       if (cardId) {
         const updatedPayload = {
           cardId,
+          roomId,
+          origin: updateOrigin.current,
           url: `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/`,
         };
         OBR.broadcast.sendMessage(BC_CARD_UPDATED, updatedPayload, { destination: "LOCAL" });
@@ -2244,6 +2338,8 @@ function App() {
     if (!parsed || typeof parsed !== "object" || !("abilities" in parsed || "identity" in parsed)) {
       return `✕ ${source} ${T("ccNotCardJson")}`;
     }
+    markDraft();
+    const ownDraft = readSession.current.draftRevision;
     setData(normalizeCombatGearFlags(parsed));
     try {
       const url = `${SERVER_ORIGIN}/api/character/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data`;
@@ -2257,15 +2353,18 @@ function App() {
         return `⚠ ${source} ${T("ccSaveFailHttp").replace("{status}", String(res.status)).replace("{body}", body.slice(0, 120))}`;
       }
       const result = await res.json();
+      if (readSession.current.alive && readSession.current.draftRevision === ownDraft) readSession.current.dirty = false;
       try {
         const updatedPayload = {
           cardId,
+          roomId,
+          origin: updateOrigin.current,
           url: `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/`,
         };
         OBR.broadcast.sendMessage(BC_CARD_UPDATED, updatedPayload, { destination: "LOCAL" });
         OBR.broadcast.sendMessage(BC_CARD_UPDATED, updatedPayload, { destination: "REMOTE" });
       } catch {}
-      let msg = `✓ ${source} → ${result.name || "current card"}`;
+      let msg = `✓ ${source} → ${result.name || L("当前角色卡", "current card")}`;
       if (result.render_warning) msg += T("ccRenderWarn").replace("{warn}", result.render_warning);
       return msg;
     } catch (e: any) {
@@ -2301,6 +2400,8 @@ function App() {
             summary.push(`✕ ${f.name} ${T("ccNotCardJson")}`);
             continue;
           }
+          markDraft();
+          const ownDraft = readSession.current.draftRevision;
           setData(normalizeCombatGearFlags(parsed));
           try {
             const url = `${SERVER_ORIGIN}/api/character/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data`;
@@ -2314,6 +2415,7 @@ function App() {
               summary.push(`⚠ ${f.name} ${T("ccSaveFailHttp").replace("{status}", String(res.status)).replace("{body}", body.slice(0, 120))}`);
             } else {
               const result = await res.json();
+              if (readSession.current.alive && readSession.current.draftRevision === ownDraft) readSession.current.dirty = false;
               try {
                 // 2026-05-14 — also broadcast LOCAL so the SAME client's
                 // background module catches this and propagates to bound
@@ -2322,12 +2424,14 @@ function App() {
                 // user would still need to re-bind to apply.
                 const updatedPayload = {
                   cardId,
+                  roomId,
+                  origin: updateOrigin.current,
                   url: `${SERVER_ORIGIN}/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/`,
                 };
                 OBR.broadcast.sendMessage(BC_CARD_UPDATED, updatedPayload, { destination: "LOCAL" });
                 OBR.broadcast.sendMessage(BC_CARD_UPDATED, updatedPayload, { destination: "REMOTE" });
               } catch {}
-              summary.push(`✓ ${f.name} → ${result.name || "current card"}`);
+              summary.push(`✓ ${f.name} → ${result.name || L("当前角色卡", "current card")}`);
               if (result.render_warning) {
                 summary.push(T("ccRenderWarn").replace("{warn}", result.render_warning));
               }
@@ -2422,8 +2526,9 @@ function App() {
   // div + the body staying transparent (see CSS) achieves the
   // "same blue, more see-through" look the user asked for. The
   // loaded panel keeps its solid background for sheet legibility.
-  if (error) {
-    return <div class="cc-error cc-translucent">{error}</div>;
+  const errorText = error?.kind === "preview" ? T("ccPreviewMissingPayload") : error?.kind === "params" ? T("ccErrNoParams") : error ? `${T("ccLoadFailedPrefix")}${error.detail ?? ""}` : "";
+  if (error && !data) {
+    return <div class="cc-error cc-translucent">{errorText} <button class="cc-btn" onClick={() => void loadData(true)}>{L("重试", "Retry")}</button></div>;
   }
   if (!data) {
     return <div class="cc-loading cc-translucent">{T("ccLoadingCard")}</div>;
@@ -2431,6 +2536,10 @@ function App() {
 
   return (
     <EditCtx.Provider value={{ editing, data, onPatch }}>
+      {(remotePending || error) && <div class="cc-sync-notice" role="status" style={{ padding: "8px 12px", color: "var(--ink-dim)" }}>
+        {error ? errorText : L("服务器上有更新；已保留本地编辑。", "An update is available; your local edits have been kept.")}
+        <button class="cc-btn" onClick={onRefresh}>{L("重新读取", "Reload")}</button>
+      </div>}
       <Header
         data={data}
         onExport={onExport}
@@ -2553,8 +2662,23 @@ function renderTabSection(key: TabKey, data: CharacterData) {
 
 const appEl = document.getElementById("app");
 if (appEl) {
+  let alive = true;
+  const setReady = (ready: boolean) => {
+    if (!alive) return;
+    contentSettingsReady = ready; spellContent.clear(); contentSettingsEvents.dispatchEvent(new Event("change"));
+  };
+  const ownSubscriptions = [onStateRefreshed(() => {
+    // Ordinary metadata reads with unchanged settings keep the warm detail cache.
+    if (!contentSettingsReady) setReady(true);
+  }), onStateRefreshFailed(() => setReady(false))];
+  OBR.onReady(() => {
+    if (!alive) return;
+    startSceneSync();
+    ownSubscriptions.push(OBR.scene.onReadyChange((ready) => { setReady(false); if (ready && alive) void refreshFromScene(); }));
+  });
   // Subscribe to dice SFX broadcasts so click-to-roll plays sound
   // even though this iframe normally doesn't have audio context warmed.
   try { subscribeToSfx(); } catch {}
   render(<App />, appEl);
+  window.addEventListener("pagehide", () => { alive = false; for (const off of ownSubscriptions) off(); render(null, appEl); }, { once: true });
 }

@@ -1,0 +1,74 @@
+--- a/parser.py
++++ b/parser.py
+@@ -981,13 +981,17 @@
+     return {"armor": armor, "shield": shield, "weapons": weapons, "other_equipment": []}
+ 
+ 
+-def load_spell_db(wb, L: dict) -> dict[str, dict]:
+-    """法术大全 sheet 在两版结构相同."""
++def load_spell_db(wb, L: dict, aliases: dict[str, str] | None = None) -> dict[str, dict]:
++    """Keep original A keys; optionally collect unambiguous same-row N aliases."""
++    if aliases is not None:
++        aliases.clear()
+     sheet_name = L["sheets"]["spell_db"]
+     if sheet_name not in wb.sheetnames:
+         return {}
+     ws = wb[sheet_name]
+     db: dict[str, dict] = {}
++    candidates: dict[str, str | None] = {}
++    key_rows: dict[str, int] = {}
+     for r in range(3, ws.max_row + 1):
+         name = _str(ws.cell(r, 1).value)
+         if not name:
+@@ -1010,11 +1014,27 @@
+             "english":      _str(ws.cell(r, 14).value),
+             "source":       _str(ws.cell(r, 26).value),
+         }
++        if aliases is not None:
++            key_rows[name] = key_rows.get(name, 0) + 1
++            english = db[name]["english"]
++            if english:
++                key = english.casefold()
++                candidates[key] = None if key in candidates else name
++    if aliases is not None:
++        original_keys = {name.casefold() for name in db}
++        for english, name in candidates.items():
++            # A duplicate A row retains the historical last-row lookup, but
++            # must not redirect another row's English name to that body.
++            if name is not None and key_rows[name] == 1 and english not in original_keys:
++                aliases[english] = name
+     return db
+ 
+ 
+-def _enrich_spell(entry: dict, db: dict) -> dict:
++def _enrich_spell(entry: dict, db: dict, aliases: dict[str, str] | None = None) -> dict:
+     info = db.get(entry["name"])
++    if info is None and aliases is not None:
++        original = aliases.get(entry["name"].casefold())
++        info = db.get(original) if original is not None else None
+     if not info:
+         return entry
+     entry["description"] = info["description"]
+@@ -1035,7 +1055,8 @@
+ def parse_spellcasting(wb, L: dict) -> dict:
+     main = wb[L["sheets"]["main"]]
+     M = L["main"]
+-    spell_db = load_spell_db(wb, L)
++    spell_aliases: dict[str, str] = {}
++    spell_db = load_spell_db(wb, L, spell_aliases)
+ 
+     active_abil = _str(_cell(main, M["spell_active_ability_cell"]))
+     # 找 DC/atk 对应的行
+@@ -1098,9 +1119,9 @@
+     for lv_col, name_col in M["spell_cantrip_cols"]:
+         cantrips_known += _collect(lv_col, name_col, cantrip_rows)
+ 
+-    always_known   = [_enrich_spell(e, spell_db) for e in always_known]
+-    cantrips_known = [_enrich_spell(e, spell_db) for e in cantrips_known]
+-    prepared       = [_enrich_spell(e, spell_db) for e in prepared]
++    always_known   = [_enrich_spell(e, spell_db, spell_aliases) for e in always_known]
++    cantrips_known = [_enrich_spell(e, spell_db, spell_aliases) for e in cantrips_known]
++    prepared       = [_enrich_spell(e, spell_db, spell_aliases) for e in prepared]
+ 
+     return {
+         "spellcasting_ability": active_abil,

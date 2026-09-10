@@ -1,4 +1,9 @@
 import OBR from "@owlbear-rodeo/sdk";
+import * as en from "./locale";
+const tr = (zh: string, english: string) => getLocalLang() === "en" ? english : zh;
+const comma = () => tr("，", ", ");
+import { selectContentLibraries, contentConfigurationKey, type ContentSource, type ContentLanguage } from "../../utils/contentLocale";
+import { fetchContentJson, createContentRequestGuard, mapWithConcurrency } from "../../utils/contentRequests";
 import {
   startSceneSync,
   getState,
@@ -30,86 +35,20 @@ import { groupSpellcastingByDisplay } from "../bestiary/spellcasting-display";
 
 const POPOVER_ID = "com.obr-suite/search-bar";
 
-// Data source — kiwee.top works for both languages, but additional
-// libraries can be wired in via the suite's library list (set in
-// Settings → 库设置). When >1 library is enabled, loadIndex fetches
-// from every one and merges entries — that way a self-hosted
-// Cloudflare lib's homebrew monsters show up in search alongside
-// the kiwee defaults.
-const DEFAULT_BASE = "https://5e.kiwee.top";
-
-function getEnabledLibraryBases(): string[] {
-  try {
-    const libs = getState().libraries || [];
-    const bases = libs
-      .filter((l) => l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim().length > 0)
-      .map((l) => l.baseUrl.replace(/\/+$/, ""));
-    return bases.length > 0 ? bases : [DEFAULT_BASE];
-  } catch {
-    return [DEFAULT_BASE];
-  }
+// Data language is local to this player. Room libraries and authored data are never rewritten.
+function getEnabledLibrarySources(): ContentSource[] {
+  return selectContentLibraries(getState().libraries ?? [], getLocalLang());
 }
-
-/** Like getEnabledLibraryBases but also returns each library's
- *  configured `indexPath` (defaults to `search/index.json` when
- *  unset) AND its `disabledSources` blacklist. Used by `loadIndex`
- *  so the partnered kiwee listing (`search/index-partnered.json`)
- *  gets fetched correctly AND so per-library source-code blacklists
- *  filter the merged entries. */
-function getEnabledLibrarySources(): Array<{
-  base: string;
-  indexPath: string;
-  disabledSources: Set<string>;
-}> {
-  try {
-    const libs = getState().libraries || [];
-    // 2026-05-10: empty result means EMPTY — we no longer fall back
-    // to the kiwee default base when every library is disabled. Users
-    // with only local-content imports want a clean canvas without the
-    // kiwee firehose merging in. The local-content branch in
-    // loadIndex still runs, so search results will reflect just
-    // imported JSON / MD files in that case.
-    return libs
-      .filter((l) => l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim().length > 0)
-      .map((l) => ({
-        base: l.baseUrl.replace(/\/+$/, ""),
-        indexPath: typeof l.indexPath === "string" && l.indexPath.length > 0
-          ? l.indexPath.replace(/^\/+/, "")
-          : "search/index.json",
-        // Normalise disabled list to lower-case so the per-entry check
-        // is case-insensitive against whatever 5etools emits.
-        disabledSources: new Set(
-          (Array.isArray(l.disabledSources) ? l.disabledSources : [])
-            .map((s) => String(s).toLowerCase())
-            .filter((s) => s.length > 0),
-        ),
-      }));
-  } catch {
-    return [];
-  }
-}
-
-function dataBase(_lang: Language): string {
-  // First enabled lib is the "primary" — used for per-entry data
-  // fetches that look up by source code (we walk every base when
-  // resolving). Fallback is the kiwee mirror.
-  return getEnabledLibraryBases()[0];
-}
-function indexUrl(lang: Language): string { return `${dataBase(lang)}/search/index.json`; }
-function booksUrl(lang: Language): string { return `${dataBase(lang)}/data/books.json`; }
 
 const BAR_W_IDLE = 280;
 const BAR_W_OPEN = 720;
 const BAR_H_IDLE = 40;
 const BAR_H_OPEN = 440;
 
-// v3 (2026-05-09): bumped because merged entries now carry a STRING
-// source code in `e.s` (instead of the per-library numeric id) — see
-// the BookOfEbonTides:11 vs XPHB:11 collision fix in `loadIndex`.
-// Old v2 caches stored numeric `s`, which would render the wrong
-// source label after this update if loaded without invalidation.
-const CACHE_KEY = "obr-suite/search-index-v3";
-const BOOKS_CACHE_KEY = "obr-suite/search-books-v3";
+// v4 includes originating library and content language. Old v3 index/book
+// caches cannot identify the chosen translation and are intentionally ignored.
+const CACHE_KEY = "obr-suite/search-index-v4";
+const BOOKS_CACHE_KEY = "obr-suite/search-books-v4";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_RESULTS = 50;
 
@@ -130,6 +69,9 @@ interface Entry {
   cn?: string;
   uh?: string;
   b?: string;
+  library?: string;
+  contentLanguage?: ContentLanguage;
+  local?: boolean;
 }
 interface IndexFile {
   x: Entry[];
@@ -141,6 +83,8 @@ interface DataEntry {
   source?: string;
   page?: number;
   entries?: any[];
+  _contentLibrary?: string;
+  _contentLanguage?: ContentLanguage;
   [k: string]: any;
 }
 
@@ -263,24 +207,30 @@ function srcCode(s: Entry["s"]): string {
   if (typeof s === "number") return sourceById.get(s) ?? "";
   return "";
 }
-function sourceLabel(code: string): string {
-  const cn = sourceNames.get(code.toUpperCase());
-  return cn ? `${code}（${cn}）` : code;
+function sourceLabel(code: string, entry?: Entry): string {
+  const name = sourceNames.get(`${entry?.library}|${code.toUpperCase()}`);
+  return name ? `${code} (${name})` : code;
 }
 
 // --- Index + books fetch & cache ---
 let indexCache: IndexFile | null = null;
 let indexLoading: Promise<IndexFile> | null = null;
-let booksLoading: Promise<void> | null = null;
+let contentAbort = new AbortController();
+const previewRequests = createContentRequestGuard();
+let contentGeneration = 0;
+let indexRetryAt = Infinity;
 
 async function loadIndex(): Promise<IndexFile> {
-  if (indexCache) return indexCache;
+  if (indexCache && Date.now() < indexRetryAt) return indexCache;
   if (indexLoading) return indexLoading;
+  const generation = contentGeneration;
+  let incomplete = false;
   indexLoading = (async () => {
     // 2026-05-10 — warm the IDB-backed local-content cache before we
     // call getLocalContentSignature() / getLocalIndexFile() below.
     // Idempotent.
     await initLocalContent();
+    if (generation !== contentGeneration) throw new DOMException("Content changed", "AbortError");
     // Cache key is keyed on the active library set + local-content
     // signature so switching libraries OR adding/removing local
     // imports both invalidate the cached merged index.
@@ -289,15 +239,14 @@ async function loadIndex(): Promise<IndexFile> {
     // between index.json and index-partnered.json AND toggling any
     // per-library source blacklist (e.g. disabling BOOKOFEBONTIDES)
     // both invalidate the cache.
-    const cacheKey = `${CACHE_KEY}:${sources
-      .map((s) => `${s.base}|${s.indexPath}|${[...s.disabledSources].sort().join(",")}`)
-      .join("||")}:${getLocalContentSignature()}`;
+    const cacheKey = `${CACHE_KEY}:${contentConfigurationKey(getState().libraries ?? [], getLocalLang())}:${getLocalContentSignature()}`;
     try {
       const raw = localStorage.getItem(cacheKey);
       if (raw) {
         const parsed = JSON.parse(raw) as { ts: number; data: IndexFile };
         if (Date.now() - parsed.ts < CACHE_TTL_MS && parsed.data?.x?.length) {
           indexCache = parsed.data;
+          indexRetryAt = Infinity;
           buildSourceMap(indexCache);
           return indexCache;
         }
@@ -309,15 +258,20 @@ async function loadIndex(): Promise<IndexFile> {
     const perLibrary = await Promise.all(
       sources.map(async (cfg) => {
         try {
-          const res = await fetch(`${cfg.base}/${cfg.indexPath}`, { cache: "no-cache" });
-          if (!res.ok) return null;
-          return { idx: (await res.json()) as IndexFile, cfg };
+          const res = await fetchContentJson(`${cfg.base}/${cfg.indexPath}`, { cache: "no-cache", signal: contentAbort.signal });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const idx = await res.json() as IndexFile;
+          if (!Array.isArray(idx.x)) throw new Error("Invalid search index");
+          return { idx, cfg };
         } catch (e) {
+          incomplete = true;
           console.warn(`[obr-suite/search] index fetch failed for ${cfg.base}/${cfg.indexPath}`, e);
           return null;
         }
       })
     );
+    if (generation !== contentGeneration) throw new DOMException("Content changed", "AbortError");
+    indexRetryAt = incomplete ? Date.now() + 15_000 : Infinity;
     const valid = perLibrary.filter(
       (x): x is { idx: IndexFile; cfg: typeof sources[number] } =>
         !!x && Array.isArray(x.idx.x),
@@ -327,9 +281,9 @@ async function loadIndex(): Promise<IndexFile> {
     // Local content has no `disabledSources` blacklist (per-source
     // toggling for local homebrew can be done by deleting the file).
     const localIdx = getLocalIndexFile();
-    const allValid: Array<{ idx: IndexFile; cfg: { disabledSources: Set<string> } }> =
+    const allValid: Array<{ idx: IndexFile; cfg: Pick<ContentSource, "disabledSources"> & Partial<ContentSource> }> =
       localIdx.x.length > 0
-        ? [...valid, { idx: localIdx as unknown as IndexFile, cfg: { disabledSources: new Set<string>() } }]
+        ? [{ idx: localIdx as unknown as IndexFile, cfg: { disabledSources: new Set<string>() } }, ...valid]
         : valid;
     if (allValid.length === 0) {
       // 2026-05-10: with all libraries disabled and no local content,
@@ -398,6 +352,7 @@ async function loadIndex(): Promise<IndexFile> {
       return String(e.s).toLowerCase();
     };
     const seen = new Set<string>();
+    const mergedByKey = new Map<string, Entry>();
     for (const { idx, cfg } of allValid) {
       for (const e of idx.x) {
         const cn = (e.cn || "").trim().toLowerCase();
@@ -408,61 +363,81 @@ async function loadIndex(): Promise<IndexFile> {
         // dedupe so an entry available in another library where the
         // source is allowed still gets through under that library.
         if (cfg.disabledSources.size > 0 && src && cfg.disabledSources.has(src)) continue;
-        const key = `${cn}|${n}|${src}|${e.c ?? ""}`;
-        if (seen.has(key)) continue;
+        const key = `${n || cn}|${src}|${e.c ?? ""}`;
+        if (seen.has(key)) {
+          // Keep alternate query names even when their translated body loses
+          // priority. Existing character-card chips may still search in Chinese.
+          const preferred = mergedByKey.get(key);
+          if (preferred && (!preferred.cn || preferred.cn === preferred.n) && e.cn) preferred.cn = e.cn;
+          continue;
+        }
         seen.add(key);
         // Clone the entry with `s` rewritten to the resolved code
         // string (uppercased — display does .toUpperCase() anyway,
         // and uppercase makes it easier to grep filenames). When
         // src is empty (entry has no resolvable source), preserve
         // the original `e.s` so we don't accidentally null it out.
-        const fixedEntry: Entry = src
-          ? { ...e, s: src.toUpperCase() }
-          : e;
+        const fixedEntry: Entry = {
+          ...e, s: src ? src.toUpperCase() : e.s,
+          library: cfg.id, contentLanguage: cfg.language ?? "auto", local: !cfg.id,
+        };
+        mergedByKey.set(key, fixedEntry);
         merged.x.push(fixedEntry);
       }
     }
     // Synthesise weapon-property entries from items-base.json's
     // itemProperty array. 5etools doesn't add these to the search
     // index because they're definitional, but the cc-info weapon
-    // chips need them to resolve. Best-effort — first library that
-    // 200s wins.
+    // chips need them to resolve. The same language order/blacklist applies;
+    // successful files are shared with subsequent property detail requests.
     try {
-      for (const base of sources.map((s) => s.base)) {
+      const propertyFiles = await Promise.all(sources.map(async (cfg) => {
+        try { return { cfg, body: await loadSourceFile(cfg, "items-base.json") }; }
+        catch { return { cfg, body: null }; }
+      }));
+      for (const { cfg, body: j } of propertyFiles) {
         try {
-          const r = await fetch(`${base}/data/items-base.json`, { cache: "no-cache" });
-          if (!r.ok) continue;
-          const j = await r.json();
+          if (!j) continue;
           const arr = (j.itemProperty ?? []) as any[];
           let synthId = 9_000_000;
           for (const p of arr) {
             const inner = Array.isArray(p.entries) && p.entries[0] && typeof p.entries[0] === "object" ? p.entries[0] : null;
             const cn = (p as any).name ?? inner?.name ?? "";
-            const en = (p as any).ENG_name ?? inner?.ENG_name ?? (p as any).abbreviation ?? "";
+            const en = (p as any).ENG_name ?? inner?.ENG_name ?? (p as any).name ?? inner?.name ?? (p as any).abbreviation ?? "";
             if (!cn && !en) continue;
-            const dedupeKey = `${cn}|${en}|prop`;
-            if (seen.has(dedupeKey)) continue;
+            const source = String(p.source ?? "");
+            if (cfg.disabledSources.has(source.toLowerCase())) continue;
+            const dedupeKey = `${en || cn}|${source.toLowerCase()}|58`;
+            if (seen.has(dedupeKey)) {
+              const preferred = mergedByKey.get(dedupeKey);
+              if (preferred && (!preferred.cn || preferred.cn === preferred.n) && cn) preferred.cn = cn;
+              continue;
+            }
             seen.add(dedupeKey);
-            merged.x.push({
+            const property: Entry = {
               id: synthId++,
+              u: "",
               c: 58,
               s: (p as any).source ?? "",
               n: en,
-              cn,
-            } as any);
+              cn, library: cfg.id, contentLanguage: cfg.language,
+            };
+            mergedByKey.set(dedupeKey, property);
+            merged.x.push(property);
           }
-          break;
         } catch {}
       }
     } catch {}
+    if (generation !== contentGeneration) throw new DOMException("Content changed", "AbortError");
     indexCache = merged;
     buildSourceMap(indexCache);
     try {
-      localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: merged }));
+      if (!incomplete) localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: merged }));
     } catch {}
     return merged;
   })();
-  try { return await indexLoading; } finally { indexLoading = null; }
+  const pending = indexLoading;
+  try { return await pending; } finally { if (indexLoading === pending) indexLoading = null; }
 }
 
 /**
@@ -514,42 +489,51 @@ function buildSourceMap(idx: IndexFile) {
   buildSearchKeys(idx);
 }
 
-async function loadBooks(): Promise<void> {
-  if (booksLoading) return booksLoading;
-  if (sourceNames.size > 0) return;
-  booksLoading = (async () => {
-    try {
-      const raw = localStorage.getItem(BOOKS_CACHE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { ts: number; data: Record<string, string> };
-        if (Date.now() - parsed.ts < CACHE_TTL_MS) {
-          for (const [k, v] of Object.entries(parsed.data)) sourceNames.set(k, v);
-          return;
-        }
+// Book labels use the selected detail library, not a global cross-language map.
+const booksCache = new Map<string, Record<string, string>>();
+const booksPending = new Map<string, Promise<Record<string, string>>>();
+async function loadBooks(entry?: Entry): Promise<void> {
+  const generation = contentGeneration;
+  const code = entry ? srcCode(entry.s).toUpperCase() : "";
+  const sources = getEnabledLibrarySources().filter((source) => !source.disabledSources.has(code.toLowerCase()));
+  const own = sources.find((source) => source.id === entry?.library);
+  const candidates = own ? [own] : sources.slice(0, 1);
+  for (const source of candidates) {
+    const key = `${BOOKS_CACHE_KEY}:${getLocalLang()}:${source.identity}`;
+    let names = booksCache.get(key);
+    if (!names) {
+      let pending = booksPending.get(key);
+      if (!pending) {
+        pending = (async () => {
+          try {
+            const saved = JSON.parse(localStorage.getItem(key) ?? "null");
+            if (saved && Date.now() - saved.ts < CACHE_TTL_MS && typeof saved.data === "object") return saved.data as Record<string, string>;
+          } catch {}
+          const response = await fetchContentJson(`${source.base}/data/books.json`, { cache: "no-cache", signal: contentAbort.signal });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const body = await response.json();
+          if (!Array.isArray(body.book)) throw new Error("Invalid book list");
+          const result: Record<string, string> = {};
+          for (const book of body.book) {
+            const id = String(book.source ?? book.id ?? "").toUpperCase();
+            if (id && typeof book.name === "string" && !source.disabledSources.has(id.toLowerCase())) result[id] = book.name;
+          }
+          if (generation === contentGeneration) {
+            booksCache.set(key, result);
+            try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: result })); } catch {}
+          }
+          return result;
+        })();
+        booksPending.set(key, pending);
       }
-    } catch {}
-    try {
-      const res = await fetch(booksUrl(getLocalLang()), { cache: "no-cache" });
-      if (!res.ok) return;
-      const data = await res.json();
-      const map: Record<string, string> = {};
-      for (const b of data.book ?? []) {
-        if (b.source && b.name) {
-          const code = String(b.source).toUpperCase();
-          const cn = String(b.name);
-          sourceNames.set(code, cn);
-          map[code] = cn;
-        }
-      }
-      try {
-        localStorage.setItem(
-          BOOKS_CACHE_KEY,
-          JSON.stringify({ ts: Date.now(), data: map })
-        );
-      } catch {}
-    } catch {}
-  })();
-  return booksLoading;
+      try { names = await pending; }
+      catch { return; } // Optional labels never block or fail the detail view.
+      finally { if (booksPending.get(key) === pending) booksPending.delete(key); }
+    }
+    if (generation !== contentGeneration) return;
+    // This map is display-only; keys include the originating library in cache.
+    if (code && names?.[code]) sourceNames.set(`${source.id}|${code}`, names[code]);
+  }
 }
 
 // --- Filter & search ---
@@ -561,8 +545,8 @@ interface FilterOpts {
 }
 interface Hit { entry: Entry; score: number; }
 
-const CORE_2014 = new Set(["PHB", "MM"]);
-const CORE_2024 = new Set(["XPHB", "XMM"]);
+const CORE_2014 = new Set(["PHB", "MM", "DMG"]);
+const CORE_2024 = new Set(["XPHB", "XMM", "XDMG"]);
 
 function passesVersion(code: string, dv: DataVersion): boolean {
   if (dv === "all") return true;
@@ -621,257 +605,113 @@ function search(query: string, idx: IndexFile, opts: FilterOpts): Entry[] {
   return hits.slice(0, MAX_RESULTS).map((h) => h.entry);
 }
 
-// --- Per-source data file cache ---
-const dataCache = new Map<string, DataEntry[]>();
-const dataPending = new Map<string, Promise<DataEntry[]>>();
-// One-time-per-source warnings for sources whose data files 404
-// from every (base × case-variant) combination — keyed by
-// `${dataKey}|${sourceCode}`. See the warning at the all-404 branch
-// below for the workaround we surface to users.
-//
-// The same set is consulted by `isSourceDataKnownMissing` (used by
-// `renderPreviewFor`'s empty-state UI to surface a specific-and-
-// actionable workaround message instead of the generic "数据尚未同步").
+// Successful JSON files are cached per configuration and generation. A detail
+// request reads one candidate library at a time; no all-library detail fan-out.
+const dataCache = new Map<string, any>();
+const dataPending = new Map<string, Promise<any>>();
 const loggedMissingSources = new Set<string>();
+const unavailableSources = new Set<string>();
 
-/** True if a previous fetch attempt for (cat.data.key, sourceCode)
- *  returned 404 from every (base × case-variant) combination. The
- *  preview UI uses this to upgrade its empty-state message from
- *  the generic "数据可能尚未同步" to a specific "kiwee.top 合作版
- *  没收对应数据文件，建议关掉那个库" hint. */
-function isSourceDataKnownMissing(
-  dataKey: string | undefined,
-  sourceCode: string,
-): boolean {
-  if (!dataKey) return false;
-  return loggedMissingSources.has(`${dataKey}|${sourceCode}`);
+function invalidateSearchContent() {
+  contentGeneration++;
+  contentAbort.abort();
+  contentAbort = new AbortController();
+  booksCache.clear();
+  booksPending.clear();
+  sourceNames.clear();
+  previewRequests.invalidate();
+  indexCache = null;
+  indexLoading = null;
+  indexRetryAt = Infinity;
+  dataCache.clear();
+  dataPending.clear();
+  loggedMissingSources.clear();
+  unavailableSources.clear();
 }
-function dataCacheKey(c: number, src: string): string {
-  return `${c}:${src.toLowerCase()}`;
+function isSourceDataKnownMissing(key: string | undefined, source: string): boolean {
+  return !!key && loggedMissingSources.has(`${key}|${source}`);
 }
-async function loadCategoryData(
-  entry: Entry,
-  catOverride?: CategoryInfo,
-): Promise<DataEntry[]> {
-  // findEntryData passes a `catOverride` with a swapped key (race →
-  // subrace, class → subclass / classFeature) when the primary
-  // lookup misses. Same file, different list inside.
-  const cat = catOverride ?? categoryInfo(entry.c);
+async function loadSourceFile(source: ContentSource, path: string): Promise<any | null> {
+  const generation = contentGeneration;
+  const key = `${generation}:${source.identity}:${path}`;
+  if (dataCache.has(key)) return dataCache.get(key);
+  const existing = dataPending.get(key);
+  if (existing) return existing;
+  const signal = contentAbort.signal;
+  const pending = (async () => {
+    const response = await fetchContentJson(`${source.base}/data/${path}`, { cache: "no-cache", signal });
+    if (!response.ok) {
+      if (response.status === 404) return null;
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const body = await response.json();
+    if (!body || typeof body !== "object") throw new Error("Invalid content file");
+    if (generation !== contentGeneration) throw new DOMException("Content changed", "AbortError");
+    dataCache.set(key, body);
+    return body;
+  })().finally(() => { if (dataPending.get(key) === pending) dataPending.delete(key); });
+  dataPending.set(key, pending);
+  return pending;
+}
+
+async function loadCategoryData(entry: Entry, cat = categoryInfo(entry.c), source?: ContentSource): Promise<DataEntry[]> {
   if (!cat.data) return [];
-
-  // Class-family lookup: pool every class-*.json file. Cache key is
-  // independent of entry source/category since the pooled data covers
-  // all sources at once.
-  if ("allClassFiles" in cat.data) {
-    return loadAllClassData(cat.data.key);
-  }
-
-  // itemsBaseKey: weapon properties / item masteries pulled from
-  // items-base.json. The file isn't in the search index but the chip
-  // search flow still wants definitions for 灵巧 / 轻型 / 投掷 / etc.
-  if ("itemsBaseKey" in cat.data) {
-    return loadItemsBaseSubarray(cat.data.itemsBaseKey);
-  }
-
-  const srcOriginal = srcCode(entry.s);
-  const src = srcOriginal.toLowerCase();
-  // Cache key must include the data key (not just c+src) so
-  // race-vs-subrace lookups don't collide.
-  const ck = `${dataCacheKey(entry.c, src)}:${cat.data.key}`;
-  const cached = dataCache.get(ck);
-  if (cached) return cached;
-  const pending = dataPending.get(ck);
-  if (pending) return pending;
-  // Build candidate file paths. Different libraries follow different
-  // case conventions for the source segment in filenames:
-  //   - kiwee.top:        bestiary-mm.json (lowercase)
-  //   - homebrew/GitHub:  bestiary-HOMEBREW.json (uppercase)
-  // Try every case variant in parallel — case-sensitive servers like
-  // GitHub Pages 404 on the wrong case, so we have to send all
-  // candidates and merge whichever 200s.
-  const filePathsForSrc = (s: string) => {
-    const data = cat.data!;
-    if ("fileBySource" in data) return [data.fileBySource(s)];
-    if ("file" in data) return [data.file];
-    return [];
-  };
-  const candidatePaths = new Set<string>([
-    ...filePathsForSrc(src),                  // lowercase
-    ...filePathsForSrc(srcOriginal),          // original case
-    ...filePathsForSrc(srcOriginal.toUpperCase()),  // uppercase
-  ]);
-  const bases = getEnabledLibraryBases();
-  const p = (async () => {
-    // Local imports always win — if the user has a homebrew JSON
-    // imported with the matching source, prefer it over any URL.
+  if (!source) return getLocalDataByKeySource(cat.data.key, srcCode(entry.s)) as DataEntry[];
+  const data = cat.data;
+  let files: string[];
+  if ("allClassFiles" in data) {
+    const index = await loadSourceFile(source, "class/index.json");
+    if (!index) return [];
+    const entries = Object.entries(index).filter((pair): pair is [string, string] => typeof pair[1] === "string");
+    // Native hash contains the parent class slug even when the displayed name
+    // has been translated. Unknown/homebrew hashes retain the pooled fallback.
+    let hash = entry.u ?? "";
+    try { hash = decodeURIComponent(hash).toLowerCase(); } catch {}
+    const parsed = parseClassFamilyEntry(entry);
+    const candidates = [parsed.classCn, parsed.classEn, entry.c === 5 ? entry.n : ""].filter(Boolean).map((name) => name!.toLowerCase());
+    const matched = entries.filter(([name]) => candidates.includes(name.toLowerCase()) || hash.split("_").includes(name.toLowerCase()));
+    files = [...new Set((matched.length ? matched : entries).map(([, file]) => `class/${file}`))];
+  } else if ("itemsBaseKey" in data) files = ["items-base.json"];
+  else if ("file" in data) files = [data.file];
+  else files = [...new Set([srcCode(entry.s).toLowerCase(), srcCode(entry.s), srcCode(entry.s).toUpperCase()].map(data.fileBySource))];
+  const result: DataEntry[] = [];
+  let failure: unknown;
+  const readFile = async (file: string): Promise<DataEntry[] | null> => {
     try {
-      const localArr = getLocalDataByKeySource(cat.data!.key, srcCode(entry.s));
-      if (localArr.length > 0) {
-        dataCache.set(ck, localArr as DataEntry[]);
-        return localArr as DataEntry[];
+      const body = await loadSourceFile(source, file);
+      if (!body) return null;
+      const rows = body[data.key] ?? [];
+      if (!Array.isArray(rows)) throw new Error("Invalid detail list");
+      const items: DataEntry[] = [];
+      for (const row of rows) {
+        if (!row || typeof row !== "object" || source.disabledSources.has(String(row.source ?? "").toLowerCase())) continue;
+        if ("itemsBaseKey" in data) {
+          const inner = row.entries?.[0];
+          items.push({ ...row, ENG_name: row.ENG_name ?? inner?.ENG_name ?? row.abbreviation,
+            name: row.name ?? inner?.name, entries: inner?.entries ?? row.entries,
+            _contentLibrary: source.id, _contentLanguage: source.language });
+        } else items.push({ ...row, _contentLibrary: source.id, _contentLanguage: source.language });
       }
-    } catch (e) {
-      console.warn("[obr-suite/search] local data lookup failed", e);
+      return items;
+    } catch (error) {
+      failure = error;
+      if (contentAbort.signal.aborted || (error as Error).name === "AbortError") throw error;
+      unavailableSources.add(`${data.key}|${srcCode(entry.s)}`);
+      return null;
     }
-    // Fetch from every (base × candidatePath) combination in parallel
-    // and merge. First non-empty result keyed (ENG_name|source)
-    // survives. Built-in kiwee will typically have most entries;
-    // custom hosts contribute their homebrew without overwriting.
-    let okCount = 0;
-    const responses = await Promise.all(
-      bases.flatMap((base) =>
-        [...candidatePaths].map(async (path) => {
-          try {
-            const res = await fetch(`${base}/data/${path}`, { cache: "no-cache" });
-            if (!res.ok) return null;
-            okCount++;
-            const json = await res.json();
-            return (json[cat.data!.key] ?? []) as DataEntry[];
-          } catch {
-            return null;
-          }
-        }),
-      ),
-    );
-    // If EVERY (base × case-variant) combination returned 404 / network
-    // error, the data for this source is unreachable from any of the
-    // user's configured libraries. Log ONCE per source so the user can
-    // open DevTools and immediately see which library is the culprit
-    // (typically a third-party homebrew extension whose author renamed
-    // or removed files on the mirror). Suggest the workaround inline.
-    if (okCount === 0) {
-      const probeKey = `${cat.data!.key}|${srcOriginal}`;
-      if (!loggedMissingSources.has(probeKey)) {
-        loggedMissingSources.add(probeKey);
-        console.warn(
-          `[obr-suite/search] data file for ${cat.data!.key} source="${srcOriginal}" is missing from every enabled library. ` +
-          `Tried paths: ${[...candidatePaths].join(" / ")}. ` +
-          `Workaround: 设置 → 库设置 临时关掉对应的第三方扩展库。`,
-        );
-      }
+  };
+  if ("allClassFiles" in data) {
+    // Unknown homebrew hashes retain bounded, ordered pooled loading. There
+    // is no total-duration cutoff that could truncate healthy slow sources.
+    for (const rows of await mapWithConcurrency(files, 2, readFile)) if (rows) result.push(...rows);
+  } else {
+    for (const file of files) {
+      const rows = await readFile(file);
+      if (rows) { result.push(...rows); break; } // Case variants are alternatives.
     }
-    const merged: DataEntry[] = [];
-    const seen = new Set<string>();
-    for (const arr of responses) {
-      if (!arr) continue;
-      for (const e of arr) {
-        const key = `${(e.ENG_name || e.name || "").toLowerCase()}|${(e.source || "").toUpperCase()}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        merged.push(e);
-      }
-    }
-    dataCache.set(ck, merged);
-    return merged;
-  })().finally(() => { dataPending.delete(ck); });
-  dataPending.set(ck, p);
-  return p;
-}
-
-// === Class-family pooled loader ======================================
-// 5etools splits each class into its own JSON file; the search index
-// doesn't include the parent-class slug for features. We pool every
-// `class/class-*.json` listed in `class/index.json` and merge the
-// requested key (class / classFeature / subclass / subclassFeature).
-const classPoolCache = new Map<string, DataEntry[]>();
-const classPoolPending = new Map<string, Promise<DataEntry[]>>();
-async function loadAllClassData(key: string): Promise<DataEntry[]> {
-  const cached = classPoolCache.get(key);
-  if (cached) return cached;
-  const pending = classPoolPending.get(key);
-  if (pending) return pending;
-  const bases = getEnabledLibraryBases();
-  const p = (async () => {
-    const merged: DataEntry[] = [];
-    const seen = new Set<string>();
-    for (const base of bases) {
-      let index: Record<string, string> | null = null;
-      try {
-        const res = await fetch(`${base}/data/class/index.json`, { cache: "no-cache" });
-        if (res.ok) index = await res.json();
-      } catch {}
-      if (!index) continue;
-      const filenames = Object.values(index);
-      // Fetch all class files for this library in parallel.
-      const arrays = await Promise.all(
-        filenames.map(async (fn) => {
-          try {
-            const r = await fetch(`${base}/data/class/${fn}`, { cache: "no-cache" });
-            if (!r.ok) return null;
-            const j = await r.json();
-            return (j[key] ?? []) as DataEntry[];
-          } catch { return null; }
-        }),
-      );
-      for (const arr of arrays) {
-        if (!arr) continue;
-        for (const e of arr) {
-          // Dedupe across libraries by ENG_name + source — same
-          // approach as the per-source loader above.
-          const eng = (e.ENG_name || (e as any).name || "").toLowerCase();
-          const src = (e.source || "").toUpperCase();
-          const k = `${eng}|${src}|${(e as any).className ?? ""}|${(e as any).level ?? ""}`;
-          if (seen.has(k)) continue;
-          seen.add(k);
-          merged.push(e);
-        }
-      }
-    }
-    classPoolCache.set(key, merged);
-    return merged;
-  })().finally(() => { classPoolPending.delete(key); });
-  classPoolPending.set(key, p);
-  return p;
-}
-
-// === items-base.json subarray loader ================================
-// Weapon properties / item masteries (轻型 / 灵巧 / 投掷 / 重型 …) live
-// in `items-base.json` under `itemProperty`. Not indexed by 5etools
-// search — we load lazily so weapon-property chip searches in
-// character-card popovers can resolve a definition.
-const itemsBaseCache = new Map<string, DataEntry[]>();
-const itemsBasePending = new Map<string, Promise<DataEntry[]>>();
-async function loadItemsBaseSubarray(key: string): Promise<DataEntry[]> {
-  const cached = itemsBaseCache.get(key);
-  if (cached) return cached;
-  const pending = itemsBasePending.get(key);
-  if (pending) return pending;
-  const bases = getEnabledLibraryBases();
-  const p = (async () => {
-    const merged: DataEntry[] = [];
-    const seen = new Set<string>();
-    for (const base of bases) {
-      try {
-        const r = await fetch(`${base}/data/items-base.json`, { cache: "no-cache" });
-        if (!r.ok) continue;
-        const j = await r.json();
-        const arr = (j[key] ?? []) as DataEntry[];
-        for (const e of arr) {
-          // itemProperty entries are nested: each has `entries[]` whose
-          // first item carries `name` (CN) + `ENG_name` (EN). Hoist
-          // those onto the top-level entry so the standard search
-          // matcher finds them.
-          const inner = (Array.isArray(e.entries) && e.entries[0] && typeof e.entries[0] === "object") ? e.entries[0] : null;
-          const top: DataEntry = {
-            ...e,
-            ENG_name: e.ENG_name ?? (inner as any)?.ENG_name ?? (e as any).abbreviation ?? "",
-            name: (e as any).name ?? (inner as any)?.name ?? "",
-            entries: inner?.entries ?? e.entries,
-          };
-          const eng = (top.ENG_name || top.name || "").toLowerCase();
-          const src = (top.source || "").toUpperCase();
-          const k = `${eng}|${src}`;
-          if (seen.has(k)) continue;
-          seen.add(k);
-          merged.push(top);
-        }
-      } catch {}
-    }
-    itemsBaseCache.set(key, merged);
-    return merged;
-  })().finally(() => { itemsBasePending.delete(key); });
-  itemsBasePending.set(key, p);
-  return p;
+  }
+  if (failure && !result.length) throw failure;
+  return result;
 }
 
 // Parse the malformed `n` / `cn` fields the search index uses for
@@ -885,6 +725,7 @@ async function loadItemsBaseSubarray(key: string): Promise<DataEntry[]> {
 // Returns a partial breakdown so the matcher can pick the right entry
 // out of the pooled class data.
 interface ParsedClassEntry {
+  classEn: string | null;
   classCn: string | null;       // parent-class CN ("奇械师")
   level: number | null;         // 1, 2, 3, …
   featureEng: string | null;    // "Spellcasting"
@@ -899,6 +740,7 @@ function parseClassFamilyEntry(entry: Entry): ParsedClassEntry {
   const mCn = re.exec(cn);
   if (mEn || mCn) {
     return {
+      classEn: mEn ? mEn[1].trim() : null,
       classCn: mCn ? mCn[1].trim() : null,
       level: mEn ? parseInt(mEn[2], 10) : (mCn ? parseInt(mCn[2], 10) : null),
       featureEng: mEn ? mEn[3].trim() : null,
@@ -907,6 +749,7 @@ function parseClassFamilyEntry(entry: Entry): ParsedClassEntry {
   }
   // No semicolon → it's a top-level class or subclass entry.
   return {
+    classEn: n || null,
     classCn: cn || null,
     level: null,
     featureEng: n || null,
@@ -914,132 +757,63 @@ function parseClassFamilyEntry(entry: Entry): ParsedClassEntry {
   };
 }
 
+function matchesEntry(entry: Entry, data: DataEntry): boolean {
+  const source = srcCode(entry.s).toUpperCase();
+  // Same name in PHB and XPHB must never resolve to the other edition.
+  if (source && String(data.source ?? "").toUpperCase() !== source) return false;
+  const classFamily = [5, 30, 40, 41].includes(entry.c);
+  const parsed = classFamily ? parseClassFamilyEntry(entry) : null;
+  const names = (parsed ? [parsed.featureEng, parsed.featureCn] : [entry.n, entry.cn])
+    .filter(Boolean).map((name) => name!.toLowerCase());
+  if (![data.ENG_name, data.name, data.abbreviation].some((name) => typeof name === "string" && names.includes(name.toLowerCase()))) return false;
+  if (parsed?.level != null && data.level != null && parsed.level !== data.level) return false;
+  if (parsed?.level != null && data.className) {
+    const classes = [parsed.classEn, parsed.classCn].filter(Boolean).map((name) => name!.toLowerCase());
+    let hash = entry.u ?? "";
+    try { hash = decodeURIComponent(hash).toLowerCase(); } catch {}
+    if (!classes.includes(String(data.className).toLowerCase()) && !hash.split("_").includes(String(data.className).toLowerCase())) return false;
+  }
+  return true;
+}
+
 async function findEntryData(entry: Entry): Promise<DataEntry | null> {
-  let arr = await loadCategoryData(entry);
-  // Some 5etools categories are physically stored under MULTIPLE keys
-  // in the same JSON file. The category map points at one primary
-  // key, but if the lookup misses we widen to the fallback key(s).
-  // Common cases:
-  //   c=10 (race)   — top-level races at key "race", subraces (e.g.
-  //                    Pale Elf, Sea Elf) at key "subrace".
-  //   c=5 (class)   — primary "class", but sub-class data may also
-  //                    appear at "subclass" / "classFeature".
-  const fallbackKeys: Record<number, string[]> = {
-    10: ["subrace", "race"],
-    5: ["class", "subclass", "classFeature"],
-    30: ["classFeature", "subclassFeature"],
-  };
-  const tryKeys = fallbackKeys[entry.c] ?? [];
-  if (arr.length === 0 && tryKeys.length === 0) return null;
-
-  const targetSrc = srcCode(entry.s).toUpperCase();
-  // For class-family entries the search index encodes `n` as
-  // "<className_cn> <level>; <featureName>" (with stray `}`); the
-  // CN side is in `cn`. We need to extract the feature name + parent
-  // class name to match against the pooled file data.
-  const isClassFamily = [5, 30, 40, 41].includes(entry.c);
-  const parsed = isClassFamily ? parseClassFamilyEntry(entry) : null;
-  const matchAny = (pool: DataEntry[]): DataEntry | null => {
-    if (parsed) {
-      // Match strategy for class/feature/subclass/subclassFeature.
-      // Falls back through progressively looser matches so homebrew
-      // packs (where ENG_name is often missing or set to a Chinese
-      // string) still resolve content. The key insight for homebrew
-      // is that featureEng will frequently equal featureCn — the
-      // index regex extracts whatever's in `n` regardless of script.
-      const targetEng = parsed.featureEng?.toLowerCase();
-      const targetCn = parsed.featureCn;
-      const targetClass = parsed.classCn;
-      const lvl = parsed.level;
-      const matchByLevel = (e: any) =>
-        lvl == null || e.level == null || e.level === lvl;
-      const matchByClass = (e: any) =>
-        targetClass ? (e.className === targetClass) : true;
-      // Helper: case-insensitive name comparison that also tries the
-      // raw `name` field (homebrew packs sometimes only set `name`).
-      const nameMatches = (e: any, target: string | null | undefined): boolean => {
-        if (!target) return false;
-        const t = target.toLowerCase();
-        const eng = (e.ENG_name || "").toLowerCase();
-        const nm = (e.name || "").toLowerCase();
-        return eng === t || nm === t;
-      };
-      return (
-        // 1. ENG_name + source + className + level
-        pool.find((e: any) =>
-          nameMatches(e, targetEng) &&
-          e.source?.toUpperCase() === targetSrc &&
-          matchByClass(e) &&
-          matchByLevel(e),
-        ) ??
-        // 2. ENG_name + className + level (any source)
-        pool.find((e: any) =>
-          nameMatches(e, targetEng) &&
-          matchByClass(e) &&
-          matchByLevel(e),
-        ) ??
-        // 3. featureCn + className + level (homebrew often has
-        //    only Chinese names with featureEng === featureCn)
-        pool.find((e: any) =>
-          nameMatches(e, targetCn) &&
-          matchByClass(e) &&
-          matchByLevel(e),
-        ) ??
-        // 4. ENG_name alone
-        pool.find((e: any) => nameMatches(e, targetEng)) ??
-        // 5. featureCn alone
-        pool.find((e: any) => nameMatches(e, targetCn)) ??
-        // 6. CN name only via raw `name` field (last resort)
-        pool.find((e: any) => targetCn && e.name === targetCn) ??
-        null
-      );
-    }
-    return (
-      pool.find(
-        (e) =>
-          e.ENG_name?.toLowerCase() === entry.n.toLowerCase() &&
-          e.source?.toUpperCase() === targetSrc,
-      ) ??
-      pool.find((e) => e.ENG_name?.toLowerCase() === entry.n.toLowerCase()) ??
-      // Some subrace entries store the sub name in `name` only (e.g.
-      // "苍白精灵") with no separate ENG_name in the cn release.
-      pool.find((e) => (e as any).name?.toLowerCase() === entry.n.toLowerCase()) ??
-      null
-    );
-  };
-
-  let found = matchAny(arr);
-  if (!found && tryKeys.length > 0) {
-    const cat = categoryInfo(entry.c);
-    if (cat.data) {
-      // Refetch with each fallback key and try matching there.
-      for (const k of tryKeys) {
-        if (k === cat.data.key) continue; // already tried
-        const altCat: CategoryInfo = {
-          ...cat,
-          data: { ...cat.data, key: k } as CategoryInfo["data"],
-        };
-        const altArr = await loadCategoryData({ ...entry } as Entry, altCat);
-        const hit = matchAny(altArr);
-        if (hit) {
-          found = hit;
-          break;
+  const generation = contentGeneration;
+  const cat = categoryInfo(entry.c);
+  if (!cat.data) return null;
+  const keys = [...new Set([cat.data.key, ...({ 10: ["subrace"], 5: ["subclass", "classFeature"], 30: ["subclassFeature"] } as Record<number, string[]>)[entry.c] ?? []])];
+  const code = srcCode(entry.s);
+  const sources = getEnabledLibrarySources().filter((source) => !source.disabledSources.has(code.toLowerCase()));
+  // A stale selection is never permission to fetch a disabled library.
+  if (entry.library && !sources.some((source) => source.id === entry.library)) return null;
+  const availableKey = `${cat.data.key}|${code}`;
+  let unavailable = false;
+  for (const source of [undefined, ...sources]) {
+    for (const key of keys) {
+      try {
+        const pool = await loadCategoryData(entry, { ...cat, data: { ...cat.data, key } }, source);
+        if (generation !== contentGeneration) return null;
+        let found = pool.find((item) => matchesEntry(entry, item));
+        if (!found) continue;
+        if (!source) found = { ...found, _contentLanguage: "auto" }; // Authored content is verbatim.
+        if (!found.entries && found._copy) {
+          const copy = found._copy;
+          const parentName = String(copy.ENG_name ?? copy.name ?? "").toLowerCase();
+          const parent = pool.find((item) => String(item.ENG_name ?? item.name ?? "").toLowerCase() === parentName &&
+            (!copy.source || item.source?.toUpperCase() === String(copy.source).toUpperCase()));
+          if (parent?.entries) found = { ...found, entries: parent.entries, _copyResolvedFrom: parent.ENG_name || parent.name };
         }
+        unavailableSources.delete(availableKey);
+        return found;
+      } catch (error) {
+        if (generation !== contentGeneration) return null;
+        unavailable = true;
+        console.warn("[search] detail candidate unavailable", { library: source?.base, code, key, error });
       }
     }
   }
-  if (!found) return null;
-  if (!found.entries && found._copy) {
-    const cp = found._copy;
-    const parentName = (cp.ENG_name || cp.name || "")?.toLowerCase();
-    if (parentName) {
-      const parent = arr.find((e) => (e.ENG_name || e.name || "").toLowerCase() === parentName);
-      if (parent?.entries) {
-        return { ...found, entries: parent.entries, _copyResolvedFrom: parent.ENG_name || parent.name };
-      }
-    }
-  }
-  return found;
+  if (unavailable || unavailableSources.has(availableKey)) unavailableSources.add(availableKey);
+  else loggedMissingSources.add(availableKey);
+  return null;
 }
 
 // --- HTML escape + 5etools tag stripping ---
@@ -1138,6 +912,7 @@ const ALIGN_ZH: Record<string, string> = {
   L: "守序", N: "中立", C: "混乱", G: "善良", E: "邪恶", U: "无属", A: "任意",
 };
 function alignmentStr(a: any): string {
+  if (getLocalLang() === "en") return en.alignmentEn(a);
   if (!a) return "";
   if (typeof a === "string") return ALIGN_ZH[a] ?? a;
   if (Array.isArray(a))
@@ -1164,25 +939,25 @@ function chipsFor(entry: Entry, data: DataEntry | null): string {
     add("CR", crStr(data.cr));
     add("AC", acStr(data.ac));
     add("HP", hpStr(data.hp));
-    add("速度", speedStr(data.speed));
+    add(tr("速度", "Speed"), speedStr(data.speed));
   } else if (c === 2) {
-    add("环阶", spellLevelStr(data.level));
-    add("学派", schoolStr(data.school));
-    add("施法", timeStr(data.time));
-    add("距离", rangeStr(data.range));
-    add("成分", componentsStr(data.components));
-    add("持续", durationStr(data.duration));
-  } else if (c === 4 || c === 56 || c === 57) {
-    add("类型", String(data.type ?? data.weaponCategory ?? data.armorCategory ?? ""));
-    if (data.weight != null) add("重量", `${data.weight} 磅`);
-    if (data.value != null) add("价值", `${data.value} cp`);
-    if (data.rarity) add("稀有度", String(data.rarity));
-    if (data.reqAttune) add("需调谐", typeof data.reqAttune === "string" ? stripTags(data.reqAttune) : "是");
+    add(tr("环阶", "Level"), spellLevelStr(data.level));
+    add(tr("学派", "School"), schoolStr(data.school));
+    add(tr("施法", "Casting Time"), timeStr(data.time));
+    add(tr("距离", "Range"), rangeStr(data.range));
+    add(tr("成分", "Components"), componentsStr(data.components));
+    add(tr("持续", "Duration"), durationStr(data.duration));
+  } else if (c === 4 || c === 31 || c === 56 || c === 57) {
+    add(tr("类型", "Type"), getLocalLang() === "en" ? en.enumEn("item", data.type ?? data.weaponCategory ?? data.armorCategory) : String(data.type ?? data.weaponCategory ?? data.armorCategory ?? ""));
+    if (data.weight != null) add(tr("重量", "Weight"), `${data.weight} ${tr("磅", "lb.")}`);
+    if (data.value != null) add(tr("价值", "Value"), `${data.value} cp`);
+    if (data.rarity) add(tr("稀有度", "Rarity"), String(data.rarity));
+    if (data.reqAttune) add(tr("需调谐", "Attunement"), typeof data.reqAttune === "string" ? stripTags(data.reqAttune) : tr("是", "Yes"));
   } else if (c === 8) {
-    if (data.prerequisite) add("先决", prerequisiteStr(data.prerequisite));
+    if (data.prerequisite) add(tr("先决", "Prerequisite"), prerequisiteStr(data.prerequisite));
   } else if (c === 10) {
-    add("体型", sizeStr(data.size));
-    add("速度", speedStr(data.speed));
+    add(tr("体型", "Size"), sizeStr(data.size));
+    add(tr("速度", "Speed"), speedStr(data.speed));
   }
   return chips.length ? `<div class="chips">${chips.join("")}</div>` : "";
 }
@@ -1194,7 +969,7 @@ function renderMonster(entry: Entry, data: DataEntry): string {
   const ty = typeStr(data.type);
   const al = alignmentStr(data.alignment);
   const sub = [sz, ty].filter(Boolean).join(" ");
-  const subLine = al ? `${sub}，${al}` : sub;
+  const subLine = al ? `${sub}${comma()}${al}` : sub;
   if (subLine) parts.push(`<div class="prev-subtitle">${escapeHtml(subLine)}</div>`);
 
   parts.push(chipsFor(entry, data));
@@ -1204,7 +979,7 @@ function renderMonster(entry: Entry, data: DataEntry): string {
   if (data.entries) parts.push(renderEntries(data.entries));
 
   if (data.trait?.length) {
-    parts.push("<h4>特性</h4>");
+    parts.push(`<h4>${tr("特性", "Traits")}</h4>`);
     for (const t of data.trait) parts.push(renderTrait(t));
   }
   // displayAs routing (checklist §5) — mirrors the monster-info
@@ -1223,29 +998,29 @@ function renderMonster(entry: Entry, data: DataEntry): string {
     if (hasNative) for (const t of native!) parts.push(renderTrait(t));
     for (const sc of spellEntries) parts.push(renderSpellcasting(sc));
   };
-  pushActionSection("动作", data.action, scGroups.action);
-  pushActionSection("附赠动作", data.bonus, scGroups.bonus);
-  pushActionSection("反应", data.reaction, scGroups.reaction);
+  pushActionSection(tr("动作", "Actions"), data.action, scGroups.action);
+  pushActionSection(tr("附赠动作", "Bonus Actions"), data.bonus, scGroups.bonus);
+  pushActionSection(tr("反应", "Reactions"), data.reaction, scGroups.reaction);
   if (data.legendary?.length) {
-    parts.push("<h4>传奇动作</h4>");
+    parts.push(`<h4>${tr("传奇动作", "Legendary Actions")}</h4>`);
     if (data.legendaryHeader) parts.push(renderEntries(data.legendaryHeader));
     else
       parts.push(
-        `<p>本怪物可执行 ${data.legendaryActions ?? 3} 次传奇动作，从下列动作中选择，每次只能用一个传奇动作选项，且只能在另一生物的回合结束时使用。每回合开始时回复全部消耗。</p>`
+        `<p>${tr(`本怪物可执行 ${data.legendaryActions ?? 3} 次传奇动作，从下列动作中选择，每次只能用一个传奇动作选项，且只能在另一生物的回合结束时使用。在自己的回合开始时回复全部消耗。`, `This creature has ${data.legendaryActions ?? 3} legendary actions. It can use one option at the end of another creature's turn and regains spent actions at the start of its turn.`)}</p>`
       );
     for (const t of data.legendary) parts.push(renderTrait(t));
   }
   if (data.mythic?.length) {
-    parts.push("<h4>神话动作</h4>");
+    parts.push(`<h4>${tr("神话动作", "Mythic Actions")}</h4>`);
     if (data.mythicHeader) parts.push(renderEntries(data.mythicHeader));
     for (const t of data.mythic) parts.push(renderTrait(t));
   }
   if (data.lairActions?.length) {
-    parts.push("<h4>巢穴动作</h4>");
+    parts.push(`<h4>${tr("巢穴动作", "Lair Actions")}</h4>`);
     for (const t of data.lairActions) parts.push(renderEntries([t]));
   }
   if (data.regionalEffects?.length) {
-    parts.push("<h4>区域效应</h4>");
+    parts.push(`<h4>${tr("区域效应", "Regional Effects")}</h4>`);
     for (const t of data.regionalEffects) parts.push(renderEntries([t]));
   }
   return parts.join("");
@@ -1272,29 +1047,29 @@ function renderMonsterSummary(data: DataEntry): string {
 
   if (data.save && Object.keys(data.save).length) {
     const parts = Object.entries(data.save)
-      .map(([k, v]) => `${ABILITY_ZH[k] ?? k} ${v}`);
-    lines.push(mkLine("豁免", parts.join("，")));
+      .map(([k, v]) => `${getLocalLang() === "en" ? en.abilityEn[k] ?? k : ABILITY_ZH[k] ?? k} ${v}`);
+    lines.push(mkLine(tr("豁免", "Saving Throws"), parts.join(comma())));
   }
   if (data.skill && Object.keys(data.skill).length) {
     const parts = Object.entries(data.skill).map(([k, v]) => `${k} ${v}`);
-    lines.push(mkLine("技能", parts.join("，")));
+    lines.push(mkLine(tr("技能", "Skills"), parts.join(comma())));
   }
-  if (data.resist) lines.push(mkLine("抗性", formatTypeList(data.resist)));
-  if (data.immune) lines.push(mkLine("免疫", formatTypeList(data.immune)));
-  if (data.vulnerable) lines.push(mkLine("易伤", formatTypeList(data.vulnerable)));
-  if (data.conditionImmune) lines.push(mkLine("状态免疫", formatTypeList(data.conditionImmune)));
+  if (data.resist) lines.push(mkLine(tr("抗性", "Damage Resistances"), formatTypeList(data.resist)));
+  if (data.immune) lines.push(mkLine(tr("免疫", "Damage Immunities"), formatTypeList(data.immune)));
+  if (data.vulnerable) lines.push(mkLine(tr("易伤", "Damage Vulnerabilities"), formatTypeList(data.vulnerable)));
+  if (data.conditionImmune) lines.push(mkLine(tr("状态免疫", "Condition Immunities"), formatTypeList(data.conditionImmune)));
   if (data.senses) {
     const senses = Array.isArray(data.senses)
-      ? data.senses.map(stripTags).join("，")
+      ? data.senses.map(stripTags).join(comma())
       : stripTags(String(data.senses));
-    const passive = data.passive != null ? `，被动察觉 ${data.passive}` : "";
-    lines.push(mkLine("感官", `${senses}${passive}`));
+    const passive = data.passive != null ? `${comma()}${tr("被动察觉", "Passive Perception")} ${data.passive}` : "";
+    lines.push(mkLine(tr("感官", "Senses"), `${senses}${passive}`));
   }
   if (data.languages) {
     const langs = Array.isArray(data.languages)
-      ? data.languages.map(stripTags).join("，")
+      ? data.languages.map(stripTags).join(comma())
       : stripTags(String(data.languages));
-    lines.push(mkLine("语言", langs));
+    lines.push(mkLine(tr("语言", "Languages"), langs));
   }
   return lines.length ? `<div class="mon-summary">${lines.join("")}</div>` : "";
 }
@@ -1313,7 +1088,7 @@ function formatTypeList(arr: any): string {
       return "";
     })
     .filter(Boolean)
-    .join("，");
+    .join(comma());
 }
 
 function renderTrait(t: any): string {
@@ -1324,38 +1099,38 @@ function renderTrait(t: any): string {
 
 function renderSpellcasting(sc: any): string {
   const parts: string[] = [];
-  parts.push(`<div class="trait"><b>${escapeHtml(stripTags(sc.name ?? "施法"))}.</b> `);
+  parts.push(`<div class="trait"><b>${escapeHtml(stripTags(sc.name ?? tr("施法", "Spellcasting")))}.</b> `);
   if (sc.headerEntries) parts.push(renderEntries(sc.headerEntries));
   parts.push("</div>");
 
   const fmtSpells = (arr: any[]) =>
-    (arr || []).map((s) => escapeHtml(stripTags(String(s)))).join("、");
+    (arr || []).map((s) => escapeHtml(stripTags(String(s)))).join(tr("、", ", "));
 
-  if (sc.will?.length) parts.push(`<p><b>随意施放：</b>${fmtSpells(sc.will)}</p>`);
+  if (sc.will?.length) parts.push(`<p><b>${tr("随意施放：", "At will: ")}</b>${fmtSpells(sc.will)}</p>`);
   if (sc.daily) {
     for (const k of ["1", "1e", "2", "2e", "3", "3e", "4", "4e", "5", "5e"]) {
       const arr = (sc.daily as any)[k];
       if (Array.isArray(arr) && arr.length) {
-        const label = k.endsWith("e") ? `每日 ${k.slice(0, -1)}/天` : `${k}/天`;
-        parts.push(`<p><b>${label}：</b>${fmtSpells(arr)}</p>`);
+        const label = getLocalLang() === "en" ? `${k.replace(/e$/, "")}/day${k.endsWith("e") ? " each" : ""}` : k.endsWith("e") ? `每日每项 ${k.slice(0, -1)} 次` : `${k}/天`;
+        parts.push(`<p><b>${label}${tr("：", ": ")}</b>${fmtSpells(arr)}</p>`);
       }
     }
   }
   if (sc.rest) {
     for (const [k, v] of Object.entries(sc.rest)) {
       if (Array.isArray(v) && v.length)
-        parts.push(`<p><b>每次休整 ${k}/次：</b>${fmtSpells(v as any[])}</p>`);
+        parts.push(`<p><b>${tr(`每次休整 ${k}/次：`, `${k.replace(/e$/, "")}/rest${k.endsWith("e") ? " each" : ""}: `)}</b>${fmtSpells(v as any[])}</p>`);
     }
   }
   if (sc.spells) {
     for (const [level, info] of Object.entries(sc.spells)) {
-      const lvl = level === "0" ? "戏法" : `${level} 环`;
+      const lvl = spellLevelStr(Number(level));
       const slots = (info as any).slots != null
-        ? `（${(info as any).slots} 个法术位）`
+        ? tr(`（${(info as any).slots} 个法术位）`, ` (${(info as any).slots} ${(info as any).slots === 1 ? "slot" : "slots"})`)
         : "";
-      const ll = (info as any).lower ? `（${(info as any).lower}–${level} 环）` : "";
+      const ll = (info as any).lower ? tr(`（${(info as any).lower}–${level} 环）`, ` (levels ${(info as any).lower}–${level})`) : "";
       const arr = (info as any).spells ?? [];
-      parts.push(`<p><b>${lvl}${slots}${ll}：</b>${fmtSpells(arr)}</p>`);
+      parts.push(`<p><b>${lvl}${slots}${ll}${tr("：", ": ")}</b>${fmtSpells(arr)}</p>`);
     }
   }
   if (sc.footerEntries) parts.push(renderEntries(sc.footerEntries));
@@ -1366,7 +1141,7 @@ function renderSpell(_entry: Entry, data: DataEntry): string {
   const parts: string[] = [];
   if (data.entries) parts.push(renderEntries(data.entries));
   if (data.entriesHigherLevel) {
-    parts.push("<h4>当以更高阶法术位施放时</h4>");
+    parts.push(`<h4>${tr("当以更高阶法术位施放时", "At Higher Levels")}</h4>`);
     parts.push(renderEntries(data.entriesHigherLevel));
   }
   const fromClass: string[] = [];
@@ -1376,7 +1151,7 @@ function renderSpell(_entry: Entry, data: DataEntry): string {
     for (const c of data.classes.fromSubclass)
       fromClass.push(`${stripTags(c.class?.name ?? "")} (${stripTags(c.subclass?.name ?? "")})`);
   if (fromClass.length)
-    parts.push(`<p><b>职业列表：</b>${escapeHtml(fromClass.join("、"))}</p>`);
+    parts.push(`<p><b>${tr("职业列表：", "Classes: ")}</b>${escapeHtml(fromClass.join(tr("、", ", ")))}</p>`);
   return parts.join("");
 }
 
@@ -1384,10 +1159,10 @@ function renderItem(_entry: Entry, data: DataEntry): string {
   const parts: string[] = [];
   const weaponBits: string[] = [];
   if (data.dmg1) weaponBits.push(`${stripTags(String(data.dmg1))} ${dmgTypeStr(data.dmgType)}`);
-  if (data.dmg2) weaponBits.push(`双手 ${stripTags(String(data.dmg2))}`);
+  if (data.dmg2) weaponBits.push(`${tr("双手", "Two-handed")} ${stripTags(String(data.dmg2))}`);
   if (Array.isArray(data.property) && data.property.length)
-    weaponBits.push(`属性：${data.property.map(stripTags).join("、")}`);
-  if (data.range) weaponBits.push(`射程：${stripTags(String(data.range))}`);
+    weaponBits.push(`${tr("属性：", "Properties: ")}${data.property.map((value: string) => getLocalLang() === "en" ? en.enumEn("property", value) : stripTags(value)).join(tr("、", ", "))}`);
+  if (data.range) weaponBits.push(`${tr("射程：", "Range: ")}${stripTags(String(data.range))}`);
   if (weaponBits.length)
     parts.push(`<p>${escapeHtml(weaponBits.join("　"))}</p>`);
   if (data.ac != null) parts.push(`<p><b>AC</b> ${escapeHtml(String(data.ac))}</p>`);
@@ -1396,6 +1171,7 @@ function renderItem(_entry: Entry, data: DataEntry): string {
 }
 
 function dmgTypeStr(t: any): string {
+  if (getLocalLang() === "en") return en.enumEn("damage", t);
   const M: Record<string, string> = {
     A: "酸", B: "钝击", C: "冷冻", F: "火焰", "FORCE": "力场", "F_": "力场",
     L: "闪电", N: "死灵", P: "穿刺", "POISON": "毒素", "PSY": "心灵",
@@ -1431,6 +1207,7 @@ function hpStr(hp: any): string {
   return "";
 }
 function speedStr(sp: any): string {
+  if (getLocalLang() === "en") return en.speedEn(sp);
   if (!sp) return "";
   if (typeof sp === "number") return `${sp} 尺`;
   const parts: string[] = [];
@@ -1440,15 +1217,17 @@ function speedStr(sp: any): string {
     if (k === "walk") parts.unshift(`${n} 尺${cond}`);
     else if (typeof n === "number") parts.push(`${k} ${n} 尺${cond}`);
   }
-  return parts.join("，");
+  return parts.join(comma());
 }
 function sizeStr(size: any): string {
+  if (getLocalLang() === "en") return (Array.isArray(size) ? size : [size]).filter(Boolean).map((value) => en.enumEn("size", value)).join("/");
   const SZ: Record<string, string> = { T: "微型", S: "小型", M: "中型", L: "大型", H: "巨型", G: "超巨" };
   if (Array.isArray(size)) return size.map((c) => SZ[c] ?? c).join("/");
   if (typeof size === "string") return SZ[size] ?? size;
   return "";
 }
 function spellLevelStr(lvl: any): string {
+  if (getLocalLang() === "en") return en.spellLevelEn(lvl);
   if (lvl == null) return "";
   if (lvl === 0) return "戏法";
   return `${lvl} 环`;
@@ -1466,6 +1245,7 @@ const SCHOOLS: Record<string, string> = {
   V: "塑能", I: "幻术", N: "死灵", T: "变化",
 };
 function schoolStr(s: any): string {
+  if (getLocalLang() === "en") return en.enumEn("school", s);
   return typeof s === "string" ? SCHOOLS[s] ?? s : "";
 }
 // 2026-05-16 — casting-time unit translation. 5etools sends
@@ -1485,6 +1265,7 @@ function castTimeUnitZh(u: unknown): string {
   return CAST_TIME_UNIT_ZH[u.toLowerCase()] ?? u;
 }
 function timeStr(t: any): string {
+  if (getLocalLang() === "en") return en.timeEn(t);
   if (!Array.isArray(t)) return "";
   return t
     .map((x) => {
@@ -1498,7 +1279,7 @@ function timeStr(t: any): string {
       const cond = typeof x.condition === "string" ? stripTags(x.condition) : "";
       return cond ? `${out}（${cond}）` : out;
     })
-    .join("，");
+    .join(comma());
 }
 // 2026-05-16 — distance / shape unit translation. 5etools uses
 // `distance.type` = "self" / "touch" / "feet" / "miles" /
@@ -1516,6 +1297,7 @@ const RANGE_SHAPE_ZH: Record<string, string> = {
   cylinder: "圆柱",
 };
 function rangeStr(r: any): string {
+  if (getLocalLang() === "en") return en.rangeEn(r);
   if (!r) return "";
   if (typeof r === "string") return r;
   const d = r.distance;
@@ -1536,6 +1318,7 @@ function rangeStr(r: any): string {
   return shape || "";
 }
 function componentsStr(c: any): string {
+  if (getLocalLang() === "en") return en.componentsEn(c);
   if (!c) return "";
   const parts: string[] = [];
   if (c.v) parts.push("V");
@@ -1580,6 +1363,7 @@ function durationUnitZh(u: unknown): string {
   return DURATION_UNIT_ZH[u.toLowerCase()] ?? u;
 }
 function durationStr(d: any): string {
+  if (getLocalLang() === "en") return en.durationEn(d);
   if (!Array.isArray(d) || !d.length) return "";
   const x = d[0];
   if (typeof x === "string") return x;
@@ -1605,6 +1389,7 @@ function durationStr(d: any): string {
   return x.type ?? "";
 }
 function prerequisiteStr(prereq: any): string {
+  if (getLocalLang() === "en") return en.prerequisiteEn(prereq);
   if (!Array.isArray(prereq) || !prereq.length) return "";
   return prereq
     .map((p) =>
@@ -1619,11 +1404,11 @@ function prerequisiteStr(prereq: any): string {
 function renderAdventure(_entry: Entry, data: DataEntry): string {
   const parts: string[] = [];
   const lvl = data.level && (data.level.start != null || data.level.end != null)
-    ? `<p><b>等级范围：</b>${escapeHtml(`${data.level.start ?? "?"} - ${data.level.end ?? "?"}`)}</p>`
+    ? `<p><b>${tr("等级范围：", "Level Range: ")}</b>${escapeHtml(`${data.level.start ?? "?"} - ${data.level.end ?? "?"}`)}</p>`
     : "";
-  const author = data.author ? `<p><b>作者：</b>${escapeHtml(stripTags(String(data.author)))}</p>` : "";
-  const story = data.storyline ? `<p><b>故事线：</b>${escapeHtml(stripTags(String(data.storyline)))}</p>` : "";
-  const published = data.published ? `<p><b>出版：</b>${escapeHtml(String(data.published))}</p>` : "";
+  const author = data.author ? `<p><b>${tr("作者：", "Author: ")}</b>${escapeHtml(stripTags(String(data.author)))}</p>` : "";
+  const story = data.storyline ? `<p><b>${tr("故事线：", "Storyline: ")}</b>${escapeHtml(stripTags(String(data.storyline)))}</p>` : "";
+  const published = data.published ? `<p><b>${tr("出版：", "Published: ")}</b>${escapeHtml(String(data.published))}</p>` : "";
   parts.push(lvl, author, story, published);
   if (Array.isArray(data.contents) && data.contents.length) {
     const chapters = data.contents
@@ -1641,15 +1426,15 @@ function renderAdventure(_entry: Entry, data: DataEntry): string {
         return `<li>${ord}${title}${headers}</li>`;
       })
       .join("");
-    parts.push(`<h4>章节</h4><ol class="chap-list">${chapters}</ol>`);
+    parts.push(`<h4>${tr("章节", "Chapters")}</h4><ol class="chap-list">${chapters}</ol>`);
   }
   return parts.join("");
 }
 
 function renderBook(_entry: Entry, data: DataEntry): string {
   const parts: string[] = [];
-  if (data.published) parts.push(`<p><b>出版：</b>${escapeHtml(String(data.published))}</p>`);
-  if (data.author) parts.push(`<p><b>作者：</b>${escapeHtml(stripTags(String(data.author)))}</p>`);
+  if (data.published) parts.push(`<p><b>${tr("出版：", "Published: ")}</b>${escapeHtml(String(data.published))}</p>`);
+  if (data.author) parts.push(`<p><b>${tr("作者：", "Author: ")}</b>${escapeHtml(stripTags(String(data.author)))}</p>`);
   if (Array.isArray(data.contents) && data.contents.length) {
     const chapters = data.contents.map((ch: any) => {
       const ord = ch.ordinal
@@ -1658,7 +1443,7 @@ function renderBook(_entry: Entry, data: DataEntry): string {
       const title = escapeHtml(stripTags(ch.name ?? ch.ENG_name ?? "?"));
       return `<li>${ord}${title}</li>`;
     }).join("");
-    parts.push(`<h4>目录</h4><ol class="chap-list">${chapters}</ol>`);
+    parts.push(`<h4>${tr("目录", "Contents")}</h4><ol class="chap-list">${chapters}</ol>`);
   }
   return parts.join("");
 }
@@ -1685,6 +1470,11 @@ let pendingAutoPin = false;
 
 function applyLangPlaceholder() {
   const lang = getLocalLang();
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  document.title = tr("全局搜索", "Global Search");
+  const drag = document.getElementById("search-drag-handle");
+  drag?.setAttribute("title", tr("拖动搜索栏", "Drag search bar"));
+  drag?.setAttribute("aria-label", tr("拖动搜索栏", "Drag search bar"));
   inputEl.placeholder =
     lang === "zh"
       ? "搜索 5etools…（怪物/法术/物品/职业/种族…）"
@@ -1727,7 +1517,7 @@ function renderResults(hits: Entry[], q: string) {
   pinnedEntry = null;
   if (hits.length === 0) {
     countEl.textContent = "0";
-    renderHint("无匹配条目");
+    renderHint(tr("无匹配条目", "No matching entries"));
     renderPreviewIdle();
     return;
   }
@@ -1735,13 +1525,16 @@ function renderResults(hits: Entry[], q: string) {
   const parts: string[] = [];
   hits.forEach((e, idx) => {
     const cat = categoryInfo(e.c);
-    const display = e.cn || e.n;
-    const sub = e.cn && e.n !== e.cn ? e.n : "";
+    const display = !e.local && getLocalLang() === "en" ? e.n || e.cn || "" : e.cn || e.n;
+    // Retain translated aliases in the search index without adding a second
+    // language to the English result surface. Authored local titles stay intact.
+    const alternate = getLocalLang() === "en" ? "" : e.n;
+    const sub = alternate && alternate !== display ? alternate : "";
     const code = srcCode(e.s).toUpperCase();
     const edClass =
-      code === "PHB" || code === "MM"
+      CORE_2014.has(code)
         ? "ed-2014"
-        : code === "XPHB" || code === "XMM"
+        : CORE_2024.has(code)
         ? "ed-2024"
         : "";
     parts.push(
@@ -1774,7 +1567,8 @@ function renderResults(hits: Entry[], q: string) {
 }
 
 function renderPreviewIdle() {
-  previewEl.innerHTML = `<div class="prev-empty">悬停或点击词条查看详情<br><span class="prev-empty-sub">Esc 关闭 · ↑↓ 选择</span></div>`;
+  previewRequests.invalidate();
+  previewEl.innerHTML = `<div class="prev-empty">${tr("悬停或点击词条查看详情", "Hover over or select an entry for details")}<br><span class="prev-empty-sub">${tr("Esc 关闭 · ↑↓ 选择", "Esc Close · ↑↓ Select")}</span></div>`;
 }
 
 async function onRowHover(idx: number) {
@@ -1788,7 +1582,7 @@ async function onRowHover(idx: number) {
 async function onRowClick(idx: number) {
   const entry = currentHits[idx];
   if (!entry) return;
-  if (pinnedEntry && pinnedEntry.id === entry.id) {
+  if (pinnedEntry === entry) {
     pinnedEntry = null;
   } else {
     pinnedEntry = entry;
@@ -1814,7 +1608,7 @@ async function sendMissingReport(
   if (btn.disabled) return;
   btn.disabled = true;
   const originalLabel = btn.innerHTML;
-  btn.innerHTML = `<span style="opacity:0.7">汇报中…</span>`;
+  btn.innerHTML = `<span style="opacity:0.7">${tr("汇报中…", "Sending…")}</span>`;
   // Lightweight visible-context snapshot: first ~600 chars of the
   // body's textContent. Helps me see what DID render (or that it's
   // empty) without needing the user to type anything.
@@ -1841,42 +1635,49 @@ async function sendMissingReport(
       body: JSON.stringify(payload),
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    btn.innerHTML = `<span style="color:#7be0a0">✓ 已汇报，谢谢</span>`;
+    btn.innerHTML = `<span style="color:#7be0a0">${tr("✓ 已汇报，谢谢", "✓ Report sent, thank you")}</span>`;
     // Restore after a moment so the user can resubmit if needed
     setTimeout(() => { btn.innerHTML = originalLabel; btn.disabled = false; }, 2400);
   } catch (e) {
-    btn.innerHTML = `<span style="color:#ff7a6b">汇报失败，稍后再试</span>`;
+    btn.innerHTML = `<span style="color:#ff7a6b">${tr("汇报失败，稍后再试", "Report failed. Try again later.")}</span>`;
     setTimeout(() => { btn.innerHTML = originalLabel; btn.disabled = false; }, 2400);
     console.warn("[search/missing-report]", e);
   }
 }
 
 async function renderPreviewFor(entry: Entry) {
+  const isCurrent = previewRequests.next();
   const cat = categoryInfo(entry.c);
-  const display = entry.cn || entry.n;
+  const display = !entry.local && getLocalLang() === "en" ? entry.n || entry.cn || "" : entry.cn || entry.n;
   const code = srcCode(entry.s).toUpperCase();
   const page = entry.p ? ` · p.${entry.p}` : "";
 
-  await loadBooks();
-  const srcDisplay = sourceLabel(code);
+  const srcDisplay = sourceLabel(code, entry);
 
   previewEl.innerHTML = `
     <div class="prev-head">
       <button class="prev-report" id="prev-report" type="button"
-              title="该词条没正确显示？点一下汇报，我会收集起来做适配。">
+              title="${tr("该词条没正确显示？点一下汇报，我会收集起来做适配。", "Report a problem displaying this entry.")}">
         <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" fill="none"
              stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
              style="vertical-align:-1px;margin-right:3px">
           <circle cx="8" cy="8" r="6"/><path d="M8 5v4"/><path d="M8 11.2v.05"/>
-        </svg>未显示？顺手汇报
+        </svg>${tr("未显示？顺手汇报", "Report a display issue")}
       </button>
       <div class="prev-title">${escapeHtml(display)}</div>
       ${entry.n && entry.n !== display ? `<div class="prev-eng">${escapeHtml(entry.n)}</div>` : ""}
       <div class="prev-meta">${escapeHtml(cat.label)} · ${escapeHtml(srcDisplay)}${escapeHtml(page)}</div>
     </div>
-    <div class="prev-body" id="prev-body"><div class="prev-loading">加载中…</div></div>
+    <div class="prev-body" id="prev-body"><div class="prev-loading">${tr("加载中…", "Loading…")}</div></div>
   `;
   const bodyEl = previewEl.querySelector("#prev-body") as HTMLDivElement;
+  const metaEl = previewEl.querySelector(".prev-meta") as HTMLDivElement;
+  // Source names are optional decoration. Paint the usable shell first.
+  let detailLoaded = false;
+  void loadBooks(entry).then(() => {
+    if (!isCurrent() || !metaEl.isConnected || detailLoaded) return;
+    metaEl.textContent = `${cat.label} · ${sourceLabel(code, entry)}${page}`;
+  });
   // Wire the "未显示？汇报" button. POST the search entry to the
   // character-cards Flask service (it logs to a JSONL file the
   // maintainer reviews). Single-shot per click, with a small toast on
@@ -1887,15 +1688,22 @@ async function renderPreviewFor(entry: Entry) {
   }
 
   if (!cat.data) {
-    bodyEl.innerHTML = `<div class="prev-empty">该分类暂无内置详情<br><span class="prev-empty-sub">${escapeHtml(cat.label)} · 仅显示名称与来源</span></div>`;
+    bodyEl.innerHTML = `<div class="prev-empty">${tr("该分类暂无内置详情", "No built-in details for this category")}<br><span class="prev-empty-sub">${escapeHtml(cat.label)} · ${tr("仅显示名称与来源", "Name and source only")}</span></div>`;
     return;
   }
 
   let data: DataEntry | null = null;
-  try { data = await findEntryData(entry); } catch {}
-  if (!pinnedEntry && lastHoverEntry && lastHoverEntry.id !== entry.id) return;
+  try { data = await findEntryData(entry); }
+  catch (error) { console.warn("[search] preview load failed", { entry: entry.n, source: code, error }); }
+  if (!isCurrent() || !bodyEl.isConnected) return;
+  detailLoaded = true;
 
   if (!data) {
+    if (unavailableSources.has(`${cat.data?.key}|${srcCode(entry.s)}`)) {
+      bodyEl.innerHTML = `<div class="prev-empty">${getLocalLang() === "zh" ? "暂时无法读取此资料。" : "This content is temporarily unavailable."}<br><button type="button" class="prev-retry">${getLocalLang() === "zh" ? "重试" : "Retry"}</button></div>`;
+      bodyEl.querySelector(".prev-retry")?.addEventListener("click", () => { void renderPreviewFor(entry); });
+      return;
+    }
     // If we've previously detected that this source's data files are
     // entirely missing from every enabled library (the all-404 path
     // in loadCategoryData also recorded a probeKey), show a more
@@ -1905,27 +1713,31 @@ async function renderPreviewFor(entry: Entry) {
     // ~5300 stub entries with no backing JSON files.
     const isMissing = isSourceDataKnownMissing(cat.data?.key, srcCode(entry.s));
     if (isMissing) {
-      bodyEl.innerHTML = `
-        <div class="prev-empty">该来源的详情数据不在任何已启用库的镜像上
-          <br><span class="prev-empty-sub">
-            来源 <b>${escapeHtml(code)}</b> · 仅有搜索条目，没有对应的内容文件。
-            <br>建议在「<b>设置 → 库设置</b>」临时关掉
-            「<b>5etools (kiwee.top, 合作版)</b>」等收录该来源的库，
-            或等镜像维护者补齐数据文件。
-          </span>
-        </div>`;
+      bodyEl.innerHTML = `<div class="prev-empty">${tr("已启用的资料库中没有对应详情", "No matching details in the enabled libraries")}<br><span class="prev-empty-sub">${tr("来源", "Source")} ${escapeHtml(code)} · ${tr("搜索目录存在此条目，但内容文件可能缺失。可在设置中检查资料库。", "The index lists this entry, but its content may be missing. Check Libraries in Settings.")}</span></div>`;
     } else {
-      bodyEl.innerHTML = `<div class="prev-empty">未找到详情数据<br><span class="prev-empty-sub">来源 ${escapeHtml(code)} 的数据可能尚未同步</span></div>`;
+      bodyEl.innerHTML = `<div class="prev-empty">${tr("未找到详情数据", "Details not found")}<br><span class="prev-empty-sub">${tr("来源", "Source")} ${escapeHtml(code)}</span></div>`;
     }
     return;
   }
 
+  const origin = { ...entry, library: data._contentLibrary, contentLanguage: data._contentLanguage };
+  if (!data._contentLibrary && data.name) {
+    // Local authors' names stay visible even when their ENG_name doubles as
+    // the lookup identity for an override of a published record.
+    previewEl.querySelector(".prev-title")!.textContent = data.name;
+  }
+  const originLabel = data._contentLanguage && data._contentLanguage !== "auto" && data._contentLanguage !== getLocalLang()
+    ? tr(` · 原文：${data._contentLanguage === "en" ? "英语" : "中文"}`, ` · Original: ${data._contentLanguage === "zh" ? "Chinese" : "English"}`) : "";
+  metaEl.textContent = `${cat.label} · ${sourceLabel(code, origin)}${page}${originLabel}`;
+  void loadBooks(origin).then(() => {
+    if (isCurrent() && metaEl.isConnected) metaEl.textContent = `${cat.label} · ${sourceLabel(code, origin)}${page}${originLabel}`;
+  });
   const c = entry.c;
   if (c === 1 || c === 46) {
     bodyEl.innerHTML = renderMonster(entry, data);
   } else if (c === 2) {
     bodyEl.innerHTML = chipsFor(entry, data) + renderSpell(entry, data);
-  } else if (c === 4 || c === 56 || c === 57) {
+  } else if (c === 4 || c === 31 || c === 56 || c === 57) {
     bodyEl.innerHTML = chipsFor(entry, data) + renderItem(entry, data);
   } else if (c === 13) {
     bodyEl.innerHTML = chipsFor(entry, data) + renderAdventure(entry, data);
@@ -1940,15 +1752,17 @@ async function renderPreviewFor(entry: Entry) {
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function runSearch(q: string) {
-  if (!indexCache) renderHint("加载索引中…（首次约 1 秒）");
+  const generation = contentGeneration;
+  if (!indexCache) renderHint(tr("加载索引中…（首次约 1 秒）", "Loading search index…"));
   let idx: IndexFile;
   try { idx = await loadIndex(); }
   catch (e) {
-    renderHint("索引加载失败：" + ((e as Error).message ?? "网络错误"), true);
+    if (generation !== contentGeneration) return;
+    renderHint(tr("索引加载失败，请稍后重试。", "The search index could not be loaded. Please try again."), true);
     return;
   }
   const currentQ = inputEl.value.trim();
-  if (currentQ !== q) return;
+  if (currentQ !== q || generation !== contentGeneration) return;
   const s = getState();
   const hits = search(q, idx, {
     dataVersion: s.dataVersion,
@@ -2027,11 +1841,14 @@ OBR.onReady(() => {
   // iframe (manual import OR URL subscription refresh) wouldn't be
   // visible here until the user reloads the whole page.
   OBR.broadcast.onMessage(BC_LOCAL_CONTENT_CHANGED, () => {
+    invalidateSearchContent();
+    lastHoverEntry = null;
+    pinnedEntry = null;
+    renderPreviewIdle();
     void forceReloadLocalContent().then(() => {
-      indexCache = null;
-      dataCache.clear();
-      dataPending.clear();
-    });
+      invalidateSearchContent();
+      refilter();
+    }).catch((error) => console.warn("[search] local content refresh failed", error));
   });
 });
 
@@ -2160,19 +1977,17 @@ OBR.onReady(async () => {
   // signature missed the change → search kept showing entries from
   // disabled sources because the in-memory indexCache wasn't reset.
   const libSig = () => {
-    const libs = (getState().libraries || []).filter((l) => l.enabled);
-    return JSON.stringify(
-      libs.map((l) => `${l.baseUrl}|${l.indexPath ?? ""}|${(l.disabledSources ?? []).slice().sort().join(",")}`),
-    );
+    return contentConfigurationKey(getState().libraries ?? [], getLocalLang());
   };
   let lastLibSig = libSig();
   onStateChange(() => {
     const sig = libSig();
     if (sig !== lastLibSig) {
       lastLibSig = sig;
-      indexCache = null;
-      dataCache.clear();
-      dataPending.clear();
+      invalidateSearchContent();
+      lastHoverEntry = null;
+      pinnedEntry = null;
+      renderPreviewIdle();
       // Reload the index in the background so the next user input
       // doesn't stall on a fetch. If the input is already populated,
       // re-run the filter once the new index lands.
@@ -2184,6 +1999,11 @@ OBR.onReady(async () => {
     }
   });
   onLangChange((next) => {
+    lastLibSig = libSig();
+    invalidateSearchContent();
+    lastHoverEntry = null;
+    pinnedEntry = null;
+    renderPreviewIdle();
     applyLangPlaceholder();
     applyI18nDom(next);
     if (inputEl.value) refilter();
@@ -2191,6 +2011,5 @@ OBR.onReady(async () => {
 
   setTimeout(() => {
     loadIndex().catch(() => {});
-    loadBooks().catch(() => {});
   }, 250);
 });

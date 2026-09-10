@@ -16,13 +16,18 @@ import {
 } from "../../utils/statEdit";
 import { mountResourcePanel } from "../resourceTracker/panel";
 import { groupSpellcastingByDisplay } from "./spellcasting-display";
-import { getLocalLang, onLangChange } from "../../state";
+import { getLocalLang, onLangChange, getState, startSceneSync, refreshFromScene, onStateChange } from "../../state";
+import { fetchLocalizedMonster, clearMonsterDetailCache } from "./detail-data";
+import { contentConfigurationKey } from "../../utils/contentLocale";
+import { createContentRequestGuard } from "../../utils/contentRequests";
+import { BC_LOCAL_CONTENT_CHANGED, forceReloadLocalContent } from "../../utils/localContent";
+const displayRequests = createContentRequestGuard();
 
 // 2026-05-10: language-aware section titles, ability labels, save /
 // check labels, etc. Foreign players using the kiwee Chinese mirror
 // were stuck seeing Chinese chrome around the Chinese-prose entries;
-// labels at least are now in their language. The actual prose stays
-// in whatever language the data-source ships.
+// Labels follow the player; detail-data selects the preferred enabled source
+// for prose while retaining local or edited saved content.
 let _curLang: "zh" | "en" = (() => {
   try { return (getLocalLang() as "zh" | "en") ?? "zh"; } catch { return "zh"; }
 })();
@@ -66,121 +71,6 @@ let liveBubbles: BubblesData = {};
 
 const SHOW_MSG = "com.bestiary/info-show";
 const BESTIARY_DATA_KEY = "com.bestiary/monsters";
-const DEFAULT_BASE = "https://5e.kiwee.top";
-
-// Read enabled-library bases from suite state at call time. Same
-// pattern as bestiary/data.ts — falls back to the kiwee mirror
-// when state isn't populated yet.
-function getBases(): string[] {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getState } = require("../../state") as typeof import("../../state");
-    const libs = getState().libraries || [];
-    const bases = libs
-      .filter((l) => l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim().length > 0)
-      .map((l) => l.baseUrl.replace(/\/+$/, ""));
-    return bases.length > 0 ? bases : [DEFAULT_BASE];
-  } catch {
-    return [DEFAULT_BASE];
-  }
-}
-
-// Index cache is per-base now; a custom Cloudflare lib has its own
-// `bestiary/index.json` that may list different sources than kiwee.
-const indexCacheByBase = new Map<string, Record<string, string>>();
-async function loadBestiaryIndexFor(base: string): Promise<Record<string, string>> {
-  const cached = indexCacheByBase.get(base);
-  if (cached) return cached;
-  try {
-    const res = await fetch(`${base}/data/bestiary/index.json`, { cache: "no-cache" });
-    if (!res.ok) {
-      indexCacheByBase.set(base, {});
-      return {};
-    }
-    const idx = (await res.json()) as Record<string, string>;
-    indexCacheByBase.set(base, idx);
-    return idx;
-  } catch {
-    indexCacheByBase.set(base, {});
-    return {};
-  }
-}
-
-// File cache key: `${base}|${filename}` so the same source from
-// different libraries doesn't collide.
-const fileCache = new Map<string, any[]>();
-async function fetchMonsterFile(base: string, filename: string): Promise<any[]> {
-  const key = `${base}|${filename}`;
-  const cached = fileCache.get(key);
-  if (cached) return cached;
-  try {
-    const res = await fetch(`${base}/data/bestiary/${filename}`, { cache: "no-cache" });
-    if (!res.ok) {
-      fileCache.set(key, []);
-      return [];
-    }
-    const data = await res.json();
-    const list = (data.monster || []) as any[];
-    fileCache.set(key, list);
-    return list;
-  } catch {
-    fileCache.set(key, []);
-    return [];
-  }
-}
-
-// Walk every enabled library until we find the monster. Custom libs
-// usually win because they're narrower; if not found there, falls
-// through to kiwee.
-async function findMonster(source: string, engName: string): Promise<any | null> {
-  for (const base of getBases()) {
-    const index = await loadBestiaryIndexFor(base);
-    const filename = index[source];
-    if (!filename) continue;
-    const list = await fetchMonsterFile(base, filename);
-    const hit = list.find((x) => (x.ENG_name || x.name) === engName);
-    if (hit) return hit;
-  }
-  return null;
-}
-
-// Resolve 5etools _copy by fetching the parent source file and merging. Same
-// shape as the panel's resolveCopy but does its own async fetch for fallback.
-async function resolveFetchedCopy(m: any, stack: Set<string>): Promise<any> {
-  if (!m || !m._copy) return m;
-  const pSrc = m._copy.source;
-  const pEn = m._copy.ENG_name || m._copy.name;
-  const pSlug = `${pSrc}::${pEn}`;
-  if (stack.has(pSlug)) return m;
-  stack.add(pSlug);
-  let parent = await findMonster(pSrc, pEn);
-  if (!parent) return m;
-  if (parent._copy) parent = await resolveFetchedCopy(parent, stack);
-  const merged: any = JSON.parse(JSON.stringify(parent));
-  for (const [k, v] of Object.entries(m)) {
-    if (k === "_copy" || k === "_mod") continue;
-    if (v !== undefined && v !== null) merged[k] = v;
-  }
-  return merged;
-}
-
-// Fetch a monster's raw JSON directly from the 5etools mirror, used as a
-// fallback when the scene-metadata shared table doesn't have this slug.
-async function fetchMonsterBySlug(slug: string): Promise<any | null> {
-  const sep = slug.indexOf("::");
-  if (sep === -1) return null;
-  const source = slug.slice(0, sep);
-  const engName = slug.slice(sep + 2);
-  try {
-    let m = await findMonster(source, engName);
-    if (!m) return null;
-    if (m._copy) m = await resolveFetchedCopy(m, new Set());
-    return m;
-  } catch {
-    return null;
-  }
-}
-
 const root = document.getElementById("root") as HTMLDivElement;
 
 const ABBR: Record<string, string> = {
@@ -611,7 +501,11 @@ function render(m: any) {
   const cr = m.cr?.cr ?? m.cr ?? "?";
   const size = parseSizeStr(m.size);
   const type = parseType(m.type);
-  const sub = [size, type, eng].filter(Boolean).join(" · ");
+  const sub = [size, type, eng !== name ? eng : ""].filter(Boolean).join(" · ");
+  const contentNote = m._suiteDisplayNote === "saved"
+    ? (en ? "Saved content kept unchanged" : "保留已保存的原始内容")
+    : m._suiteContent?.language && m._suiteContent.language !== "auto" && m._suiteContent.language !== _curLang
+      ? (en ? "Original: Chinese" : "原文：英语") : "";
 
   const hp = parseHp(m.hp);
   const ac = parseAc(m.ac);
@@ -791,8 +685,8 @@ function render(m: any) {
   };
 
   // 2026-05-10 i18n — section titles + ability/save labels switch on
-  // user language. The actual entry prose stays whatever the data
-  // source provides (kiwee mirror = Chinese). `en` was captured at
+  // user language. Entry prose comes from the selected enabled source
+  // or a preserved authored snapshot. `en` was captured at
   // the top of render().
   const sectTitles = en
     ? { traits: "Traits", actions: "Actions", bonus: "Bonus Actions",
@@ -896,6 +790,7 @@ function render(m: any) {
         ${renderNameButton(name, !!currentItemId)}
       </div>
       <div class="sub">${escapeHtml(sub)}</div>
+      ${contentNote ? `<div class="sub content-language">${escapeHtml(contentNote)}</div>` : ""}
     </div>
     ${stickyTop}
     ${contentBlock}
@@ -1215,8 +1110,12 @@ function bindStatRowInputs(): void {
 }
 
 async function showMonster(slug: string, itemId: string | null = currentItemId) {
+  const isCurrent = displayRequests.next();
+  resourceMountHandle?.unmount();
+  resourceMountHandle = null;
   currentSlug = slug;
   currentItemId = itemId;
+  root.innerHTML = `<div class="loading">${_curLang === "en" ? "Loading monster…" : "正在读取怪物资料…"}</div>`;
   // Resolve ownership of the bound token in parallel with everything
   // else: a player who CREATED this token owns it and may edit its HP.
   // Mirror bestiary/index.ts's check: item.createdUserId === myId.
@@ -1238,14 +1137,15 @@ async function showMonster(slug: string, itemId: string | null = currentItemId) 
       liveP,
       ownP,
     ]);
-    liveBubbles = live;
+    if (!isCurrent()) return;
     // Update ownership BEFORE render() → its trailing applyRoleGating()
     // (called inside render) picks up the correct editable state.
     isOwner = owns;
     const table = (meta[BESTIARY_DATA_KEY] as Record<string, any>) || {};
-    let m = table[slug];
-    if (!m) m = await fetchMonsterBySlug(slug);
-    if (currentSlug !== slug) return;
+    const m = await fetchLocalizedMonster(slug, table[slug]);
+    if (!isCurrent()) return;
+    liveBubbles = itemId ? await readBubbles(itemId).catch(() => live) : live;
+    if (!isCurrent()) return;
     if (!m) {
       root.innerHTML = `<div class="err">${_curLang === "en" ? "Monster data not found" : "未找到怪物数据"}</div>`;
       await adjustHeight();
@@ -1254,7 +1154,7 @@ async function showMonster(slug: string, itemId: string | null = currentItemId) 
     render(m);
     await adjustHeight();
   } catch (e: any) {
-    if (currentSlug !== slug) return;
+    if (!isCurrent()) return;
     root.innerHTML = `<div class="err">${_curLang === "en" ? "Load failed: " : "加载失败："}${escapeHtml(e?.message ?? e)}</div>`;
     await adjustHeight();
   }
@@ -1329,6 +1229,29 @@ bindRollableClickPopup(
 OBR.onReady(async () => {
   installDebugOverlay();
   subscribeToSfx();
+  startSceneSync();
+  await refreshFromScene().catch(() => {});
+  _curLang = getLocalLang() === "en" ? "en" : "zh";
+  let contentSignature = contentConfigurationKey(getState().libraries ?? [], getLocalLang());
+  onStateChange(() => {
+    const next = contentConfigurationKey(getState().libraries ?? [], getLocalLang());
+    if (next === contentSignature) return;
+    contentSignature = next;
+    clearMonsterDetailCache();
+    if (currentSlug) void showMonster(currentSlug, currentItemId);
+  });
+  OBR.broadcast.onMessage(BC_LOCAL_CONTENT_CHANGED, () => {
+    displayRequests.invalidate();
+    clearMonsterDetailCache();
+    void forceReloadLocalContent().then(() => { if (currentSlug) return showMonster(currentSlug, currentItemId); }).catch(() => {});
+  });
+  OBR.scene.onReadyChange((ready) => {
+    displayRequests.invalidate(); clearMonsterDetailCache();
+    if (!ready) {
+      resourceMountHandle?.unmount(); resourceMountHandle = null;
+      currentSlug = null; currentItemId = null; root.innerHTML = "";
+    }
+  });
   // Capture the popover's opened height as the ceiling for future resizes.
   if (window.innerHeight > 0) INFO_MAX_HEIGHT = window.innerHeight;
   // 2026-05-16 — scale text + spacing with panel size. Baseline
@@ -1344,6 +1267,8 @@ OBR.onReady(async () => {
     const norm: "zh" | "en" = next === "en" ? "en" : "zh";
     if (norm === _curLang) return;
     _curLang = norm;
+    contentSignature = contentConfigurationKey(getState().libraries ?? [], getLocalLang());
+    clearMonsterDetailCache();
     if (currentSlug) {
       const slug = currentSlug;
       // Re-fire showMonster — looks the slug up again from cache /
@@ -1406,4 +1331,9 @@ OBR.onReady(async () => {
   // Local commits go through patchBubbles and call refreshStatInputs
   // synchronously already, so they're not double-painted by this.
   OBR.scene.items.onChange(() => { void syncFromExternal(); });
+});
+
+window.addEventListener("pagehide", () => {
+  displayRequests.invalidate(); clearMonsterDetailCache();
+  resourceMountHandle?.unmount(); resourceMountHandle = null;
 });

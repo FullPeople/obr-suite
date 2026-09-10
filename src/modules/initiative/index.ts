@@ -1,3 +1,4 @@
+import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
 // 2026-05-14 — drag-in auto-roll uses broadcastDiceRoll directly so
 // the dice value lands on canvas (visual animation + history entry)
@@ -250,7 +251,7 @@ async function openPanel(expanded: boolean) {
       disableClickAway: true,
       hidePaper: true,
     });
-    panelIsOpen = true;
+    panelIsOpen = true; setPanelOpen("initiative", true);
   } catch (e) {
     console.error("[obr-suite/initiative] openPanel failed", e);
   }
@@ -258,7 +259,7 @@ async function openPanel(expanded: boolean) {
 
 async function closePanel() {
   try { await OBR.popover.close(POPOVER_ID); } catch {}
-  panelIsOpen = false;
+  panelIsOpen = false; setPanelOpen("initiative", false);
 }
 
 async function initKnownItems() {

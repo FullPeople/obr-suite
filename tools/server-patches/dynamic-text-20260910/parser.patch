@@ -1,0 +1,119 @@
+--- a/parser.py
++++ b/parser.py
+@@ -1743,7 +1743,11 @@
+     # cell-parsed value. See `_overlay_embedded_json` for the field
+     # mapping rules.
+     if embedded_json is not None:
+-        _overlay_embedded_json(data, embedded_json)
++        _overlay_embedded_json(
++            data, embedded_json,
++            preserve_sheet_identity=("Export" in wb.sheetnames and _is_compiled_template_export(
++                xlsx_path, L["sheets"]["main"], embedded_json)),
++        )
+ 
+     # Last pass: re-derive core stats that came back zero/None from the
+     # underlying ability scores + armor + skill data. This catches the
+@@ -1848,7 +1852,60 @@
+         cs["passive_perception"] = 10 + perception_bonus
+ 
+ 
+-def _overlay_embedded_json(data: dict, ej: dict) -> None:
++def _is_compiled_template_export(xlsx_path: Path, main_name: str, ej: dict) -> bool:
++    """Recognize our bounded Export-sheet compiler, not arbitrary AV1 overrides.
++
++    Some spreadsheet engines flatten referenced multiline constants in formula
++    results. Their source cells remain intact, so generated identity text must
++    not replace the already parsed cell text. Handwritten JSON and other
++    formulas keep their existing override behavior.
++    """
++    from openpyxl.formula.tokenizer import Tokenizer, TokenizerError
++
++    meta = ej.get("meta")
++    ruleset = meta.get("ruleset") if isinstance(meta, dict) else None
++    limits = {"5E2014": 863, "5E2024": 966}
++    if ej.get("schema") != "obr-suite-card/v1" or not isinstance(ruleset, str) or ruleset not in limits:
++        return False
++    last = limits[ruleset]
++    def quoted(value):
++        return '"' + value.replace('"', '""') + '"'
++    message = "ERROR: OBR_EXPORT_OUTPUT_TOO_LONG (maximum 32767 characters); no JSON exported."
++    prefix = '{"schema":"obr-suite-card/v1","meta":{"template":"'
++    suffix = '","ruleset":"' + ruleset + '"},"identity":{"character_name":"'
++    expected = (f'=IF(Export!A{last}>32767,{quoted(message)},'
++                f'{quoted(prefix)}&Export!A3&{quoted(suffix)}&Export!A{last-1})')
++
++    def tokens(formula):
++        result = []
++        for token in Tokenizer(formula).items:
++            if token.type == "WHITE-SPACE":
++                continue
++            value = token.value
++            if token.type == "OPERAND" and token.subtype == "RANGE":
++                # Excel/Calc differ in optional quoting and absolute markers.
++                match = re.fullmatch(r"(?:Export|'Export')!\$?A\$?(\d+)", value, re.I)
++                if match:
++                    value = "Export!A" + match.group(1)
++            elif token.type == "FUNC":
++                value = value.upper()
++            result.append((token.type, token.subtype, value))
++        return result
++
++    formulas = load_workbook(xlsx_path, data_only=False, read_only=True)
++    try:
++        cell = formulas[main_name]["AV1"]
++        if cell.data_type != "f" or not isinstance(cell.value, str):
++            return False
++        try:
++            return tokens(cell.value) == tokens(expected)
++        except (ValueError, IndexError, TokenizerError):
++            return False
++    finally:
++        formulas.close()
++
++
++def _overlay_embedded_json(data: dict, ej: dict, *, preserve_sheet_identity: bool = False) -> None:
+     """Merge a user-supplied embedded JSON (xlsx 主要!AV1 formula output)
+     into the cell-parsed character data IN PLACE. Accepts both flat
+     primitives and nested sub-objects:
+@@ -1955,22 +2012,25 @@
+             if v is not None:
+                 sk["total"] = v
+ 
+-    # Identity tweaks — name / race / class / level. Useful when the
+-    # user generates a fresh JSON without touching the identity cells.
+-    iden = data.get("identity", {})
+-    name = _str_or_none(ej.get("name") or _g(ej, "identity", "display_name") or _g(ej, "identity", "character_name"))
+-    if name:
+-        iden["display_name"] = name
+-        if not iden.get("character_name"): iden["character_name"] = name
+-    race = _str_or_none(ej.get("race") or _g(ej, "identity", "race"))
+-    if race:
+-        if not isinstance(iden.get("race"), dict): iden["race"] = {}
+-        iden["race"]["name"] = race
+-    cls = _str_or_none(ej.get("class") or _g(ej, "classes", 0, "name"))
+-    if cls:
+-        classes = data.get("classes") or []
+-        if classes and isinstance(classes[0], dict):
+-            classes[0]["name"] = cls
++    # A recognized generated export repeats the sheet's own text. Keep its
++    # complete source values; explicit JSON/unknown formulas still override.
++    if not preserve_sheet_identity:
++        # Identity tweaks — name / race / class / level. Useful when the
++        # user generates a fresh JSON without touching the identity cells.
++        iden = data.get("identity", {})
++        name = _str_or_none(ej.get("name") or _g(ej, "identity", "display_name") or _g(ej, "identity", "character_name"))
++        if name:
++            iden["display_name"] = name
++            if not iden.get("character_name"): iden["character_name"] = name
++        race = _str_or_none(ej.get("race") or _g(ej, "identity", "race"))
++        if race:
++            if not isinstance(iden.get("race"), dict): iden["race"] = {}
++            iden["race"]["name"] = race
++        cls = _str_or_none(ej.get("class") or _g(ej, "classes", 0, "name"))
++        if cls:
++            classes = data.get("classes") or []
++            if classes and isinstance(classes[0], dict):
++                classes[0]["name"] = cls
+     lvl = _int_or_none(ej.get("level") or ej.get("total_level"))
+     if lvl is not None:
+         data["total_level"] = lvl

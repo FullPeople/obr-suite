@@ -48,6 +48,7 @@ import { bindPanelDrag } from "./utils/panelDrag";
 import { PANEL_IDS } from "./utils/panelLayout";
 import { t, applyI18nDom } from "./i18n";
 import { getLocalLang, onLangChange } from "./state";
+import { statusName, statusGroup } from "./modules/statusTracker/localization";
 
 // i18n — most text here is built dynamically in JS, so read the active
 // language fresh on each render via T(). (Group/category names are
@@ -171,7 +172,7 @@ function showBuffPreview(buffId: string): void {
     previewMediaEl.appendChild(img);
   }
   previewLabelEl.innerHTML =
-    `<span class="bp-name">${escapeHtml(b.name)}</span>` +
+    `<span class="bp-name">${escapeHtml(statusName(b, getLocalLang()))}</span>` +
     `<span class="bp-hint">${b.group ? escapeHtml(groupLabel(b.group)) + " · " : ""}${T("stHoverPreview")}</span>`;
   previewEl.classList.add("is-active");
 }
@@ -217,7 +218,7 @@ const UNCATEGORIZED = "未分类";
 // value (saved catalogs / presets reference it literally). This helper
 // maps it to a localized DISPLAY label only; user-defined group names
 // pass through unchanged.
-const groupLabel = (g: string): string => (g === UNCATEGORIZED ? T("stCatUncategorized") : g);
+const groupLabel = (g: string): string => (g === UNCATEGORIZED ? T("stCatUncategorized") : statusGroup(g, buffs, getLocalLang()));
 
 // Per-client persistence of the active category filter. The user's
 // reasonable expectation is that picking "Buffs" stays selected
@@ -1177,7 +1178,7 @@ function renderGrid(): void {
                   data-id="${escapeHtml(b.id)}"
                   ${dragAttr}
                   style="--bubble-bg:${escapeHtml(b.color)};color:${escapeHtml(fg)}">
-               ${iconHtml}${escapeHtml(stripEmoji(b.name))}
+               ${iconHtml}${escapeHtml(stripEmoji(statusName(b, getLocalLang())))}
              </div>`;
   }
   if (editMode) {
@@ -1282,6 +1283,7 @@ const EFFECT_LABELS: Array<{ id: BuffEffect; labelKey: I18nKey; hintKey: I18nKey
 function openEditPopup(id: string, anchor: HTMLElement): void {
   const buff = buffs.find((b) => b.id === id);
   if (!buff) return;
+  const displayedName = statusName(buff, getLocalLang());
   popupBuffId = id;
   // Pending state for the segmented picker — read on save.
   let pendingEffect: BuffEffect = buff.effect ?? "default";
@@ -1343,7 +1345,7 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
   popupEl.innerHTML = `
     <div class="pop-row">
       <input class="pop-color" type="color" value="${escapeHtml(buff.color)}"/>
-      <input class="pop-name" type="text" maxlength="20" value="${escapeHtml(buff.name)}" placeholder="${escapeHtml(T("stNamePh"))}"/>
+      <input class="pop-name" type="text" maxlength="20" value="${escapeHtml(displayedName)}" placeholder="${escapeHtml(T("stNamePh"))}"/>
     </div>
     <div class="pop-row rounds">
       <span class="pop-rounds-label">${escapeHtml(T("stRoundsLabel"))}</span>
@@ -1473,7 +1475,7 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
     newlyCreatedBuffIds.delete(id);
     const target = buffs.find((b) => b.id === id);
     if (target) {
-      target.name = name;
+      target.name = name === displayedName.trim() ? buff.name : name;
       target.color = colorInp.value;
       const rounds = Math.floor(Number(roundsInp.value));
       if (Number.isFinite(rounds) && rounds > 0) target.rounds = rounds;
@@ -1514,7 +1516,7 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
   });
   cancel.addEventListener("click", close);
   del.addEventListener("click", async () => {
-    if (!window.confirm(T("stDeleteBuffConfirm").replace("{name}", buff.name))) return;
+    if (!window.confirm(T("stDeleteBuffConfirm").replace("{name}", statusName(buff, getLocalLang())))) return;
     buffs = buffs.filter((b) => b.id !== id);
     await saveCatalog();
     close();
@@ -1906,15 +1908,9 @@ OBR.onReady(async () => {
   } catch (e) {
     console.warn("[status/palette] player.onChange subscribe failed", e);
   }
-  // i18n — translate the static toolbar chrome once, then re-translate
-  // + re-render every dynamic surface whenever the language flips.
-  applyI18nDom(getLocalLang());
-  onLangChange((l) => {
-    applyI18nDom(l);
-    refreshRenderModeLabel();
-    renderPresets();
-    render();
-  });
+  refreshLanguage();
+  const offLanguage = onLangChange(refreshLanguage);
+  window.addEventListener("pagehide", offLanguage, { once: true });
   // 2026-05-16 — scale text + buff icons with palette size. Baseline
   // = PALETTE_W × PALETTE_H from statusTracker/index.ts.
   installPanelZoom({ baseWidth: 340, baseHeight: 544 });
@@ -1929,3 +1925,43 @@ OBR.onReady(async () => {
     if (e.key === LS_PRESETS) { loadPresets(); renderPresets(); }
   });
 });
+
+/** Translate existing nodes: render() closes the popup and replaces category
+ * inputs, so language changes must never call it or commit a user's draft. */
+function refreshLanguage(): void {
+  const lang = getLocalLang();
+  document.documentElement.lang = lang; document.title = T("stPaletteTitle");
+  applyI18nDom(lang); refreshRenderModeLabel();
+  const text = (selector: string, key: Parameters<typeof T>[0]) => document.querySelectorAll<HTMLElement>(selector).forEach(el => { el.textContent = T(key); });
+  const attribute = (selector: string, name: string, key: Parameters<typeof T>[0]) => document.querySelectorAll<HTMLElement>(selector).forEach(el => el.setAttribute(name, T(key)));
+  filtersEl.querySelectorAll<HTMLElement>(".cat-btn").forEach(el => { const group = el.dataset.g; el.textContent = group ? groupLabel(group) : T("stCatAll"); });
+  attribute("#cat-add-input", "placeholder", "stNewCatPh"); attribute("#cat-add-btn", "title", "stAddCat");
+  gridEl.querySelectorAll<HTMLElement>(".bubble[data-id]").forEach(el => {
+    const id = el.dataset.id;
+    if (id === "__clear__") el.innerHTML = SVG_CROSS + T("stClearAllBuffs");
+    else if (id === "__manage__") el.innerHTML = SVG_WRENCH + T("stManageBuffs");
+    else { const buff = buffs.find(b => b.id === id); if (buff) el.textContent = stripEmoji(statusName(buff, lang)); }
+  });
+  text("#add-buff-pill", "stNewBuffPill"); text(".presets-lbl", "stPresetsLbl"); text(".presets-empty", "stPresetsEmpty"); text("#presetSave", "stPresetSave");
+  attribute("#presetSave", "title", "stPresetSaveTitle"); attribute(".preset-chip", "title", "stPresetChipTitle");
+  for (const [action, key] of [["overwrite", "stPresetOverwrite"], ["merge", "stPresetMerge"], ["rename", "stPresetRename"], ["delete", "stPresetDelete"]] as const) text(`.preset-menu [data-act="${action}"]`, key);
+  attribute(".pop-name", "placeholder", "stNamePh"); attribute(".pop-img-url", "placeholder", "stFxParticleUrlPh"); attribute(".pop-img-pick", "title", "stFxPickFromLib");
+  text(".pop-del", "stDelete"); text(".pop-cancel", "stCancel"); text(".pop-save", "stSave");
+  text('.pop-webm-seg[data-webm="none"]', "stWebmNone"); text('.pop-webm-seg[data-webm="default"]', "stWebmDefault");
+  const roundsLabels = popupEl.querySelectorAll<HTMLElement>(".pop-rounds-label");
+  if (roundsLabels[0]) roundsLabels[0].textContent = T("stRoundsLabel");
+  if (roundsLabels[1]) roundsLabels[1].textContent = T("stRoundsUnlimited");
+  const fxLabels = popupEl.querySelectorAll<HTMLElement>(".pop-fx-label");
+  fxLabels.forEach((el, index) => { el.textContent = T(STATUS_EFFECTS_ENABLED && index === 0 ? "stFxLabel" : "stEffectLabel"); });
+  text(".pop-webm-hint", popupEl.querySelector(".pop-webm-seg") ? "stWebmHintBuiltin" : "stWebmHintCustom");
+  for (const effect of EFFECT_LABELS) { text(`.pop-fx-seg[data-fx="${effect.id}"]`, effect.labelKey); attribute(`.pop-fx-seg[data-fx="${effect.id}"]`, "title", effect.hintKey); }
+  if (_previewActiveId) {
+    const buff = buffs.find(b => b.id === _previewActiveId);
+    if (buff && previewLabelEl) {
+      const name = previewLabelEl.querySelector(".bp-name"), hint = previewLabelEl.querySelector(".bp-hint");
+      if (name) name.textContent = statusName(buff, lang);
+      if (hint) hint.textContent = (buff.group ? groupLabel(buff.group) + " · " : "") + T("stHoverPreview");
+    }
+  }
+  setFooter(editMode ? footEditLines() : footApplyLines());
+}

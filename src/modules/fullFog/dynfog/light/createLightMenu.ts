@@ -50,6 +50,7 @@ export async function createLightMenu(): Promise<void> {
       },
     ],
     async onClick(context) {
+      if ((await OBR.player.getRole()) !== "GM") return;
       let dpi = 150;
       try {
         dpi = await OBR.scene.grid.getDpi();
@@ -87,9 +88,8 @@ export async function createLightMenu(): Promise<void> {
     ],
     embed: {
       url: SETTINGS_URL,
-      // Upstream uses 194 for its four controls; we also show the core
-      // radius + falloff sliders, so the panel is taller.
-      height: 176,
+      // Basic light controls plus the single ownership selector.
+      height: 254,
     },
   });
 }

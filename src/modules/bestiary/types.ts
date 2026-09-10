@@ -24,6 +24,11 @@ export interface Monster {
 export type MonsterEdition = "2014" | "2024" | "other";
 
 export interface ParsedMonster {
+  /** Display-only provenance; binding still uses source + engName. */
+  contentLanguage?: "zh" | "en" | "auto";
+  authored?: boolean;
+  aliases?: string[];
+  sizeCode?: string;
   name: string;
   engName: string;
   source: string;

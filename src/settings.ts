@@ -1,3 +1,4 @@
+import { mountPortalDefault } from "./modules/portals/default-image";
 import OBR from "@owlbear-rodeo/sdk";
 import {
   startSceneSync,
@@ -44,6 +45,16 @@ import {
 } from "./utils/localContent";
 import { repairLegacyHiddenBubbles } from "./modules/bubbles";
 import { repairLegacyBestiaryImages } from "./modules/bestiary/repair-legacy-images";
+import { SettingsContent } from "./utils/settingsContent";
+import { renderSettingsModuleStatus } from "./utils/settingsModuleStatus";
+import { renderFogSettings } from "./utils/fogSettingsView";
+import { getLibraryLanguage } from "./utils/contentLocale";
+import { getBossPreferences, setBossPreferences, BOSS_PREFERENCES_CHANGED, BOSS_PREFERENCES_KEY } from "./modules/bossBar/preferences";
+import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
+import {
+  BC_MODULE_STATUS_QUERY, BC_MODULE_STATUS, BC_MODULE_RETRY,
+  type ModuleLifecycleSnapshot,
+} from "./utils/moduleLifecycleProtocol";
 
 // Merged Settings + About panel.
 //
@@ -91,8 +102,8 @@ interface TabDef {
 
 let activeTab = "support";
 let isGM = false;
-// True while the bestiary legacy-image repair is running. renderContent()
-// rebuilds the tab's innerHTML on any state change, which would otherwise
+// True while the bestiary legacy-image repair is running. A relevant refresh
+// can rebuild the tab's innerHTML, which would otherwise
 // resurrect an enabled idle button mid-repair (the handler's disabled flag
 // only lives on the detached old node) and allow a concurrent second run.
 let bestiaryImageRepairInFlight = false;
@@ -268,16 +279,16 @@ const IMPORTANT_NOTES: BilingualHtml = {
     <div class="step">
       <div class="step-title">第 1 步：开启 Character「Owner Only」权限</div>
       <p>左侧 Players 面板中，点 <b>盾牌图标</b>（Player Permissions）。</p>
-      <img src="/suite/owner-step1.png" alt="Players 面板的盾牌按钮">
+      <img src="${assetUrl("owner-step1.png")}" alt="Players 面板的盾牌按钮">
       <p>展开 Map → <b>Character</b> 行，在下拉里勾上 <b>Owner Only</b>，然后 SAVE。</p>
-      <img src="/suite/owner-step2.png" alt="勾选 Owner Only">
+      <img src="${assetUrl("owner-step2.png")}" alt="勾选 Owner Only">
       <p class="tip-line">含义：被指派为某角色 Owner 的玩家，才能修改/操作那个角色（DM 仍可操作所有角色）。</p>
     </div>
 
     <div class="step">
       <div class="step-title">第 2 步：把角色 Owner 指派给玩家</div>
       <p>在地图上<b>左键点选</b>一个角色 Token，悬浮工具栏里点 <b>人形图标</b>（Set Owner），从列表里选玩家即可。</p>
-      <img src="/suite/owner-step3.png" alt="角色工具栏的 Set Owner 按钮">
+      <img src="${assetUrl("owner-step3.png")}" alt="角色工具栏的 Set Owner 按钮">
       <p class="tip-line">每个 Token 单独指派；一个玩家可以拥有多个角色（PC + 召唤物等）。</p>
     </div>
 
@@ -298,16 +309,16 @@ const IMPORTANT_NOTES: BilingualHtml = {
     <div class="step">
       <div class="step-title">Step 1: Enable Character "Owner Only" permission</div>
       <p>In the left Players panel, click the <b>shield icon</b> (Player Permissions).</p>
-      <img src="/suite/owner-step1.png" alt="Shield button in Players panel">
+      <img src="${assetUrl("owner-step1.png")}" alt="Shield button in Players panel">
       <p>Expand Map → <b>Character</b> row, select <b>Owner Only</b> in the dropdown, then SAVE.</p>
-      <img src="/suite/owner-step2.png" alt="Select Owner Only">
+      <img src="${assetUrl("owner-step2.png")}" alt="Select Owner Only">
       <p class="tip-line">This means: only the player assigned as a token's Owner can edit/move it (DM still has full control).</p>
     </div>
 
     <div class="step">
       <div class="step-title">Step 2: Assign Owner to a player</div>
       <p>On the map, <b>left-click</b> a token, then click the <b>person icon</b> (Set Owner) in the floating toolbar and pick a player.</p>
-      <img src="/suite/owner-step3.png" alt="Set Owner button on token toolbar">
+      <img src="${assetUrl("owner-step3.png")}" alt="Set Owner button on token toolbar">
       <p class="tip-line">Per-token assignment; one player can own multiple tokens (PC + summons, etc.).</p>
     </div>
 
@@ -377,7 +388,7 @@ const CHARCARD_DESC: BilingualHtml = {
   <li><b>武器属性</b>（轻型 / 灵巧 / 精通词条）也可点击 → 直接查搜索定义</li>
 </ul>
 <p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>📱 手机端</b>：全屏面板按钮被隐藏（小屏不可用 + 内存吃紧）。手机玩家仍可通过绑定 token 的小信息框查看。</p>`,
-  en: `<p><b>${ICONS.warning} Designed for the Chinese D&amp;D community's xlsx sheet (悲灵 v1.0.12). Generic English sheets will not parse.</b></p>
+  en: `<p>Use the suite's <b>2014 or 2024 XLSX template</b> below. These downloads currently contain Chinese content; full English sheets are being prepared.</p>
 <ul>
   <li>cluster's <b>Character Card Panel</b> / <kbd>CapsLock</kbd> opens the fullscreen view</li>
   <li><b>Drag</b> an xlsx onto the side panel / click 📁 to upload</li>
@@ -823,9 +834,8 @@ My content follows:
 
 // Both templates are module constants and `escapeAttr` is pure, so the
 // escaped form can never differ between renders. Escaping them inline
-// meant re-scanning ~9 kB of prompt text on every render of the
-// libraries tab — and renderContent() rebuilds the tab's innerHTML on
-// any state change, not just on open.
+// meant re-scanning ~9 kB of prompt text on every render comparison of
+// the libraries tab, not just on open.
 const AI_PROMPT_TEMPLATE_ESC: Record<Language, string> = {
   zh: escapeAttr(AI_PROMPT_TEMPLATE.zh),
   en: escapeAttr(AI_PROMPT_TEMPLATE.en),
@@ -1122,8 +1132,8 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
     : `📚 Sources${disabledCount > 0 ? ` (${disabledCount} off)` : ""}`;
   return `
     <div class="lib-row" data-lib-id="${escapeAttr(lib.id)}">
-      <div class="lib-row-head">
-        <input class="lib-name" data-field="name" type="text" value="${escapeAttr(lib.name)}" ${editable ? "" : "readonly"} ${disable}>
+      <div class="lib-row-head" data-settings-line>
+        <input class="lib-name" data-field="name" data-settings-draft="${escapeAttr(JSON.stringify([lib.id, "name"]))}" type="text" value="${escapeAttr(lib.name)}" ${editable ? "" : "readonly"} ${disable}>
         ${builtinLock}
         <button class="tog ${lib.enabled ? "on" : ""}" data-field="enabled" type="button" ${disable}
           aria-pressed="${lib.enabled}" title="${lang === "zh" ? "启用 / 禁用此库" : "Enable / disable"}"></button>
@@ -1136,11 +1146,17 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
             : ""
         }
       </div>
-      <div class="lib-row-url">
+      <div class="lib-row-url" data-settings-line>
         <span class="lib-row-label">URL:</span>
-        <input class="lib-url" data-field="baseUrl" type="text" value="${escapeAttr(lib.baseUrl)}" ${editable ? "" : "readonly"} ${disable}
+        <input class="lib-url" data-field="baseUrl" data-settings-draft="${escapeAttr(JSON.stringify([lib.id, "baseUrl"]))}" type="text" value="${escapeAttr(lib.baseUrl)}" ${editable ? "" : "readonly"} ${disable}
           placeholder="https://example.com">
       </div>
+      <label class="lib-row-language">${lang === "zh" ? "资料语言" : "Content language"}
+        <select data-field="language" ${disable} aria-label="${lang === "zh" ? "资料语言" : "Content language"}">
+          ${([['auto', lang === 'zh' ? '混合 / 未指定' : 'Mixed / unspecified'], ['zh', lang === 'zh' ? '中文' : 'Chinese'], ['en', lang === 'zh' ? '英文' : 'English']] as const).map(([value, label]) => `<option value="${value}" ${getLibraryLanguage(lib) === value ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+        <span role="status" class="lib-language-status"></span>
+      </label>
       <div class="lib-preview" hidden></div>
       <div class="lib-sources" hidden></div>
     </div>
@@ -1209,8 +1225,8 @@ function renderRemoteSubsBlock(lang: Language): string {
       <p class="lib-local-desc">Paste the <b>raw URL</b> of a single-file 5etools-shape JSON (e.g. a GitHub raw link or jsDelivr mirror). The suite downloads it and <b>re-fetches</b> on every session boot so author updates flow to your table automatically. Each client caches independently. On fetch failure the previous cached content is kept and the row shows the error.</p>
     `;
   const inputRow = isGM ? `
-    <div class="lib-local-actions" style="gap:6px;flex-wrap:wrap">
-      <input class="lib-sub-input" type="url" placeholder="${lang === "zh" ? "https://example.com/homebrew.json" : "https://example.com/homebrew.json"}" style="flex:1 1 240px;min-width:180px;padding:4px 6px">
+    <div class="lib-local-actions" data-settings-line style="gap:6px;flex-wrap:wrap">
+      <input class="lib-sub-input" data-settings-draft="subscription-url" data-settings-local type="url" placeholder="${lang === "zh" ? "https://example.com/homebrew.json" : "https://example.com/homebrew.json"}" style="flex:1 1 240px;min-width:180px;padding:4px 6px">
       <button class="lib-sub-add" type="button">${lang === "zh" ? "+ 添加订阅" : "+ Add subscription"}</button>
       <button class="lib-sub-kiwee" type="button" title="${lang === "zh" ? "从 homebrew.kiwee.top 拉取中文社区精选自制内容索引（约 26 个包），逐一加入订阅。已经订阅的会跳过。" : "Pull the curated Chinese-community homebrew index from homebrew.kiwee.top (~26 packs) and subscribe to each. Already-subscribed URLs are skipped."}">${lang === "zh" ? "+ kiwee 推荐自制" : "+ kiwee curated"}</button>
       ${subs.length > 0 ? `<button class="lib-sub-refresh-all" type="button">${lang === "zh" ? "🔄 刷新全部" : "🔄 Refresh all"}</button>` : ""}
@@ -1335,13 +1351,8 @@ function buildKindLabel(f: LocalFileMeta, lang: Language): string {
   return primary;
 }
 
-// One-click preset: the official 5etools ENGLISH source repo, served via
-// jsDelivr (which sends `Access-Control-Allow-Origin: *`). 5e.tools itself is
-// now behind a Cloudflare bot challenge that returns 403 to programmatic
-// fetch(), and never sent CORS headers anyway — so it cannot be used as a
-// library base directly. This mirror exposes the canonical 5etools layout
-// (search/index.json + data/bestiary/index.json + data/spells/... + items),
-// is pure English (no translation), and matches our fetch paths exactly.
+// Third-party English data mirror served through jsDelivr. The browser
+// fetches its public JSON endpoints rather than a challenged website page.
 const EN_5ETOOLS_BASE = "https://cdn.jsdelivr.net/gh/5etools-mirror-3/5etools-src@main";
 
 function renderLibrariesBody(lang: Language): string {
@@ -1350,9 +1361,8 @@ function renderLibrariesBody(lang: Language): string {
   const head = lang === "zh"
     ? `
       <div class="lib-warn">
-        ⚠ <b>数据格式按 5etools 规范适配。</b>当前内置库为 kiwee.top（5etools 中文镜像）。你可以添加自己的库（自托管 / 公开 URL）。库必须提供与 5etools 相同的 JSON 结构（<code>search/index.json</code> + <code>data/&lt;file&gt;.json</code>）。所有启用的库会在搜索/图鉴里合并显示。<br>
-        <b>要英文原版？</b>点下方绿色 <b>「+ 英文原版 (5etools)」</b> 一键添加。注意：<code>5e.tools</code> 官网现已被 Cloudflare 人机验证拦截、且从不发送跨域头，<b>无法直接当库地址连接</b>；此预设走 jsDelivr 官方镜像（自带跨域，纯英文）。<br>
-        <b>数据来源与协议：</b>内置库数据来自 5et 中文站 —— 代码主体与英文数据采用 MIT 协议，中文译文采用 CC BY-NC-SA 4.0 协议。使用其数据时请遵守协议并注明来源（署名 / 非商业 / 相同方式共享）。
+        <b>选择同桌使用的资料库。</b>内置中文库使用 kiwee.top；「+ 英文资料」添加经 jsDelivr 提供 JSON 的第三方 5etools 英文镜像。<br>
+        已启用的资料会合并显示，并优先使用与当前界面语言匹配的版本。没有对应译本时显示原文；自定义内容不会被自动翻译。
       </div>
       <div class="lib-studio">
         <span class="lib-studio-txt">不想手写 JSON？<b>Monster Studio</b> 是一个在线可视化怪物编辑器：导入 / 表单编辑 / 实时预览 / 导出。导出的 JSON 可直接「本地导入」或放进你的库。</span>
@@ -1361,9 +1371,8 @@ function renderLibrariesBody(lang: Language): string {
     `
     : `
       <div class="lib-warn">
-        ⚠ <b>Library data must follow the 5etools JSON schema.</b> The default built-in is kiwee.top (Chinese mirror). You can add custom libraries (self-hosted or public URLs) that expose the same shape (<code>search/index.json</code> + <code>data/&lt;file&gt;.json</code>). All enabled libraries are merged in search / bestiary results.<br>
-        <b>Need the English original?</b> Click the green <b>"+ English (5etools)"</b> button below. Note: <code>5e.tools</code> itself is now behind a Cloudflare bot challenge and never sends CORS headers, so it <b>cannot be used as a library URL directly</b>; this preset uses the official jsDelivr mirror (CORS-enabled, pure English).<br>
-        <b>Source &amp; license:</b> the built-in library's data comes from the 5etools CN site — the code base and English data are under MIT, Chinese translations under CC BY-NC-SA 4.0. Follow the license and attribute the source when using its data (attribution / non-commercial / share-alike).
+        <b>Choose the libraries for your table.</b> The built-in Chinese library uses kiwee.top. “+ English data” adds a third-party 5etools English mirror served as JSON through jsDelivr.<br>
+        Enabled libraries are combined, with versions matching your interface language preferred. When no translation is available, the original is shown. Custom content is not translated automatically.
       </div>
       <div class="lib-studio">
         <span class="lib-studio-txt">Don't want to hand-write JSON? <b>Monster Studio</b> is an online visual monster editor — import / form-edit / live preview / export. The exported JSON imports directly via "Local content" or drops into your library.</span>
@@ -1374,7 +1383,7 @@ function renderLibrariesBody(lang: Language): string {
   const hasEn = libs.some((l) => l.baseUrl?.replace(/\/+$/, "") === EN_5ETOOLS_BASE);
   const enBtn = hasEn
     ? ""
-    : `<button class="lib-add-en-btn" type="button" title="${lang === "zh" ? "一键添加 5etools 官方英文源（jsDelivr 镜像，自带跨域，纯英文）。注：5e.tools 官网已被 Cloudflare 拦截，无法直接连接。" : "One-click add the official 5etools English source (jsDelivr mirror, CORS-enabled, pure English). Note: 5e.tools itself is now Cloudflare-blocked and cannot be used directly."}">${lang === "zh" ? "+ 英文原版 (5etools)" : "+ English (5etools)"}</button>`;
+    : `<button class="lib-add-en-btn" type="button" title="${lang === "zh" ? "添加 5etools 第三方英文镜像" : "Add the third-party English 5etools mirror"}">${lang === "zh" ? "+ 英文资料" : "+ English data"}</button>`;
   const addBtn = isGM
     ? `<button class="lib-add-btn" type="button">${lang === "zh" ? "+ 添加库" : "+ Add library"}</button>${enBtn}`
     : `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>`;
@@ -1546,16 +1555,43 @@ function wireLibrariesBody(root: HTMLElement): void {
     const urlInp = row.querySelector<HTMLInputElement>('input[data-field="baseUrl"]');
     const enableBtn = row.querySelector<HTMLButtonElement>('button[data-field="enabled"]');
     const delBtn = row.querySelector<HTMLButtonElement>(".lib-del-btn");
+    const languageSelect = row.querySelector<HTMLSelectElement>('select[data-field="language"]');
 
     const commit = async (patch: Partial<LibraryConfig>) => {
       if (!isGM) return;
       const next = (getState().libraries ?? []).map((l) => (l.id === id ? { ...l, ...patch } : l));
       await setState({ libraries: next });
     };
-    nameInp?.addEventListener("change", () => commit({ name: nameInp.value.trim() || id }));
-    urlInp?.addEventListener("change", () =>
-      commit({ baseUrl: urlInp.value.trim().replace(/\/+$/, "") })
-    );
+    const saveField = async (field: "name" | "baseUrl") => {
+      const key = JSON.stringify([id, field]);
+      const input = settingsContent.field(key);
+      if (!isGM || !input || input.disabled || input.readOnly) return;
+      input.value = field === "name" ? input.value.trim() || id : input.value.trim().replace(/\/+$/, "");
+      settingsContent.clearNote(key);
+      try {
+        await commit({ [field]: input.value });
+      } catch (error) {
+        console.warn("[settings] library field save failed", error);
+        settingsContent.showSaveError(key, () => { void saveField(field); });
+      }
+    };
+    nameInp?.addEventListener("change", () => { void saveField("name"); });
+    urlInp?.addEventListener("change", () => { void saveField("baseUrl"); });
+    languageSelect?.addEventListener("change", async () => {
+      if (!isGM || languageSelect.disabled) return;
+      const language = languageSelect.value;
+      if (language !== "zh" && language !== "en" && language !== "auto") return;
+      const status = row.querySelector<HTMLElement>(".lib-language-status");
+      if (status) status.textContent = "";
+      languageSelect.disabled = true;
+      try { await commit({ language }); }
+      catch (error) {
+        console.warn("[settings] library language save failed", error);
+        const saved = getState().libraries.find(lib => lib.id === id);
+        if (saved) languageSelect.value = getLibraryLanguage(saved);
+        if (status) status.textContent = getLocalLang() === "zh" ? "未保存，请再次选择重试。" : "Not saved. Choose again to retry.";
+      } finally { languageSelect.disabled = !isGM; }
+    });
     enableBtn?.addEventListener("click", async () => {
       if (!isGM) return;
       const cur = getState().libraries.find((l) => l.id === id);
@@ -1563,7 +1599,7 @@ function wireLibrariesBody(root: HTMLElement): void {
     });
     delBtn?.addEventListener("click", async () => {
       if (!isGM) return;
-      if (!confirm("删除此库？这不会影响数据本身，只会从设置里移除。")) return;
+      if (!confirm(getLocalLang() === "zh" ? "删除此库？这不会影响数据本身，只会从设置里移除。" : "Remove this library from settings? Its source data will be kept.")) return;
       const next = (getState().libraries ?? []).filter((l) => l.id !== id);
       await setState({ libraries: next });
     });
@@ -1709,9 +1745,9 @@ function wireLibrariesBody(root: HTMLElement): void {
   // Add new library
   root.querySelector<HTMLButtonElement>(".lib-add-btn")?.addEventListener("click", async () => {
     if (!isGM) return;
-    const name = window.prompt("新库名称（任意）：", "我的自定义库");
+    const name = window.prompt(getLocalLang() === "zh" ? "新库名称：" : "Library name:", getLocalLang() === "zh" ? "我的自定义库" : "My library");
     if (!name) return;
-    const baseUrl = window.prompt("基础 URL（不带末尾 /）：", "https://example.com");
+    const baseUrl = window.prompt(getLocalLang() === "zh" ? "基础 URL（不带末尾 /）：" : "Base URL (without a trailing /):", "https://example.com");
     if (!baseUrl) return;
     const id = `custom-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
     const cur = getState().libraries ?? [];
@@ -1728,7 +1764,7 @@ function wireLibrariesBody(root: HTMLElement): void {
     await setState({ libraries: next });
   });
 
-  // One-click preset: add the official 5etools English source. Idempotent —
+  // One-click preset: add the third-party English data mirror. Idempotent —
   // bail if a library with this exact baseUrl already exists.
   root.querySelector<HTMLButtonElement>(".lib-add-en-btn")?.addEventListener("click", async () => {
     if (!isGM) return;
@@ -1741,6 +1777,7 @@ function wireLibrariesBody(root: HTMLElement): void {
         id: `en5e-${Date.now()}`,
         name: lang === "zh" ? "5etools 英文原版" : "5etools (English)",
         baseUrl: EN_5ETOOLS_BASE,
+        language: "en",
         enabled: true,
         builtin: false,
       },
@@ -2387,12 +2424,12 @@ const TABS: TabDef[] = [
            </div>`
         : `<div class="dl-row">
              <a class="dl-btn" href="${tpl2014}"
-                download="DND5E-Character-Sheet-Belling-FullPeople-OwlbearAdapted.xlsx" target="_blank" rel="noopener">
-               ⬇ 5E2014 sheet (Belling · FullPeople · Owlbear-adapted)
+                download="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx" target="_blank" rel="noopener">
+               ⬇ 2014 sheet (Chinese)
              </a>
              <a class="dl-btn" href="${tpl2024}"
-                download="DND5R-Character-Sheet-Belling-FullPeople-OwlbearAdapted.xlsx" target="_blank" rel="noopener">
-               ⬇ 5E2024 sheet (Belling · FullPeople · Owlbear-adapted)
+                download="DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx" target="_blank" rel="noopener">
+               ⬇ 2024 sheet (Chinese)
              </a>
            </div>`;
       return `${desc}${btns}`;
@@ -2597,10 +2634,10 @@ const TABS: TabDef[] = [
         } catch {}
         return true;
       })();
-      const lbl = lang === "zh" ? "传送眨眼特效" : "Teleport Blink Effect";
+      const lbl = lang === "zh" ? "默认传送眨眼特效" : "Default teleport blink";
       const desc = lang === "zh"
-        ? "本机偏好。开启后传送瞬间播放闭眼/睁眼动画，闭眼时刻执行实际传送，因此略慢；关闭则直接平滑过场。"
-        : "Per-client preference. When on, picking a destination plays a close-eye / open-eye animation with the actual teleport happening at the closed moment — slightly slower. Off = immediate smooth pan.";
+        ? "本机偏好，供设置为「使用默认」的传送门使用。DM 可在每扇传送门的编辑窗口中单独选择无特效、眨眼或淡入淡出。"
+        : "Your preference for portals set to Use default. The GM can choose no effect, blink or fade separately in each portal's editor.";
       return `
         <h3>${lang === "zh" ? "选项" : "Options"}</h3>
         <div class="row">
@@ -2612,10 +2649,13 @@ const TABS: TabDef[] = [
             blinkOn ? "on" : ""
           }" data-key="portalBlinkEnabled" type="button" aria-pressed="${blinkOn}"></button>
         </div>
+        <div id="portal-default-host"></div>
         ${PORTALS_DESC[lang]}
       `;
     },
     afterRender: (root) => {
+      const defaultHost = root.querySelector<HTMLElement>("#portal-default-host");
+      if (defaultHost && isGM) mountPortalDefault(defaultHost, lang);
       root
         .querySelector<HTMLButtonElement>('.tog[data-key="portalBlinkEnabled"]')
         ?.addEventListener("click", (e) => {
@@ -2631,6 +2671,29 @@ const TABS: TabDef[] = [
           btn.classList.toggle("on", next);
           btn.setAttribute("aria-pressed", String(next));
         });
+    },
+  },
+  {
+    id: "transitions",
+    zh: `${ICONS.sparkles} 转场`,
+    en: `${ICONS.sparkles} Transitions`,
+    moduleId: "transitions",
+    dynamicBody: (lang, gm) => `<h3>${lang === "zh" ? "休息与场景提示" : "Rest and scene cues"}</h3>
+      <p>${lang === "zh"
+        ? "打开转场面板，一键呈现短休、长休或自定义提示。也可直接使用常用栏的「转场」按钮。"
+        : "Open the transition panel for short rests, long rests or a custom message. The quick bar also has a Transitions button."}</p>
+      <button id="openTransitions" class="layout-editor-btn" type="button" ${getState().enabled.transitions ? "" : "disabled"}>${lang === "zh" ? "打开转场面板" : "Open transition panel"}</button>
+      <p class="meta">${lang === "zh"
+        ? (gm ? "可选择全部玩家或指定玩家；预览只显示在自己的屏幕。转场不会修改角色卡的生命值或资源。" : "玩家可以在自己的屏幕预览。面向其他玩家的转场由 DM 发起，不会修改角色卡的生命值或资源。")
+        : (gm ? "Choose everyone or selected players; previews appear only on your screen. Cues do not change character HP or resources." : "Players can preview on their own screen. The GM sends cues to other players. Cues do not change character HP or resources.")}</p>`,
+    afterRender: (root) => {
+      root.querySelector<HTMLButtonElement>("#openTransitions")?.addEventListener("click", async () => {
+        try { await OBR.broadcast.sendMessage(BC_TRANSITIONS_OPEN, {}, { destination: "LOCAL" }); }
+        catch (error) {
+          console.warn("[settings] opening transitions failed", error);
+          void OBR.notification.show(lang === "zh" ? "转场面板暂时无法打开，请重试。" : "Could not open transitions. Please try again.", "ERROR");
+        }
+      });
     },
   },
   {
@@ -2660,6 +2723,48 @@ const TABS: TabDef[] = [
     en: `${ICONS.follow} Follow`,
     moduleId: "follow",
     body: FOLLOW_DESC,
+  },
+  {
+    id: "bossBar",
+    zh: `${ICONS.heart} Boss 血条`,
+    en: `${ICONS.heart} Boss Health`,
+    moduleId: "bossBar",
+    dynamicBody: (lang) => {
+      const zh = lang === "zh";
+      const prefs = getBossPreferences();
+      const row = (key: string, label: string, on: boolean) => `<div class="row"><div class="lbl">${label}</div><button class="tog ${on ? "on" : ""}" data-boss-pref="${key}" type="button" aria-label="${label}" aria-pressed="${on}"></button></div>`;
+      return `<h3>${zh ? "个人显示" : "Your display"}</h3>
+        ${row("reducedMotion", zh ? "减少血条动画" : "Reduce health bar motion", prefs.reducedMotion)}
+        <label class="row"><span>${zh ? "距离底部" : "Bottom spacing"}</span><input id="boss-bottom-inset" type="number" min="88" max="360" step="8" value="${prefs.bottomInset}" style="width:84px"> px</label>
+        <p>${zh ? "透明血条显示在下方居中，自动避让本插件的已打开面板，鼠标可直接穿过。显示阈值沿用普通血条设置；开启后隐藏该单位的普通生命值条。关闭请右键该单位。" : "Transparent, click-through bars sit at the bottom center and avoid open suite panels. They follow normal health-bar thresholds and replace that token’s normal HP bar. Disable a bar from its token’s context menu."}</p>
+        <details><summary>${zh ? "DM 使用帮助" : "GM setup"}</summary><p>${zh
+          ? "右键有生命值的角色单位 →「显示为 Boss」。名称优先使用 Accessibility 设置。在「Boss 显示选项」中设置阶段名称、分段和具体数值；选择「隐藏 Boss 血条」可关闭。"
+          : "Right-click a character token with HP → Show as Boss. The Accessibility name takes precedence. Boss display options set the phase, segments and exact values; choose Hide Boss bar to disable it."}</p></details>`;
+    },
+    afterRender: (root) => {
+      root.querySelector<HTMLInputElement>("#boss-bottom-inset")?.addEventListener("change", async event => {
+        const input = event.currentTarget as HTMLInputElement, value = Number(input.value);
+        if (!Number.isFinite(value)) return;
+        input.value = String(Math.max(88, Math.min(360, value)));
+        try { await setBossPreferences({ bottomInset: Number(input.value) }); }
+        catch { void OBR.notification.show(lang === "zh" ? "显示位置未能保存，请重试。" : "Could not save the position. Please retry.", "ERROR"); }
+      });
+      root.querySelectorAll<HTMLButtonElement>("[data-boss-pref]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          const prefs = getBossPreferences();
+          try {
+            await setBossPreferences({ reducedMotion: !prefs.reducedMotion });
+          } catch (error) {
+            console.warn("[settings] Boss preference update failed", error);
+            void OBR.notification.show(lang === "zh" ? "Boss 显示设置未能同步，请重试。" : "Could not sync Boss display settings. Please try again.", "ERROR");
+          } finally {
+            button.disabled = false;
+            if (activeTab === "bossBar") renderContent();
+          }
+        });
+      });
+    },
   },
   {
     id: "bubbles",
@@ -2769,13 +2874,13 @@ const TABS: TabDef[] = [
                  style="flex:1 1 auto;align-self:center;max-width:160px"/>
           <span data-key="bubblesScaleVal" style="flex:0 0 50px;text-align:right;color:#9aa0b3;font-size:11px;font-variant-numeric:tabular-nums">${bubbleScale.toFixed(2)}×</span>
         </div>
-        <div class="row">
+        <div class="row" data-settings-line>
           <div class="lbl">
             ${offsetLbl}
             <div class="desc"><em>${offsetDesc}</em></div>
           </div>
           <input type="number" step="1" value="${offset}"
-                 data-key="bubblesVerticalOffset"
+                 data-key="bubblesVerticalOffset" data-settings-draft="bubblesVerticalOffset"
                  ${(offsetByText || !isGM) ? "disabled" : ""}
                  style="flex:0 0 80px;align-self:center;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:3px 6px;color:#fff;font:inherit;text-align:right${(offsetByText || !isGM) ? ";opacity:0.45" : ""}"/>
           <span style="flex:0 0 28px;text-align:right;color:#9aa0b3;font-size:11px">px</span>
@@ -2824,13 +2929,13 @@ const TABS: TabDef[] = [
                   ${isGM ? "" : "disabled"}
                   aria-pressed="${bubbleAutoScaleText ? "true" : "false"}"></button>
         </div>
-        <div class="row">
+        <div class="row" data-settings-line>
           <div class="lbl">
             ${thresholdLbl}
             <div class="desc"><em>${thresholdDesc}</em></div>
           </div>
           <input type="number" min="0" max="100" step="5" value="${threshold}"
-                 data-key="bubblesPlayerThreshold"
+                 data-key="bubblesPlayerThreshold" data-settings-draft="bubblesPlayerThreshold"
                  ${isGM ? "" : "disabled"}
                  style="flex:0 0 80px;align-self:center;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:3px 6px;color:#fff;font:inherit;text-align:right"/>
           <span style="flex:0 0 28px;text-align:right;color:#9aa0b3;font-size:11px">%</span>
@@ -3134,127 +3239,7 @@ const TABS: TabDef[] = [
     zh: `${ICONS.eye} 动态迷雾`,
     en: `${ICONS.eye} Dynamic Fog`,
     moduleId: "dynamicFog",
-    dynamicBody: (lang) => {
-      const s = getState();
-      const zh = lang === "zh";
-      return `
-        <h3>${zh ? "动态迷雾（墙 / 门 / 窗 / 光源）" : "Dynamic Fog (walls · doors · windows · lights)"}</h3>
-        <p>${
-          zh
-            ? "迷雾工具画出的<b>任何</b> FOG 图层图形（矩形 / 圆 / 曲线 / 直线 / Path），以及迷雾编辑器自动描出的轮廓，都会在每个客户端生成原生 <b>Wall</b>，用来遮挡视线。选中 OBR 的迷雾工具后可以看到四个新模式："
-            : "<b>Every</b> FOG-layer shape the fog tool draws (rectangle / circle / curve / line / path), plus the outline the fog editor traces, becomes native <b>Wall</b> items on each client and blocks vision. Selecting Owlbear's fog tool reveals four new modes:"
-        }</p>
-        <ul>
-          <li><b>${zh ? "直线墙" : "Line"}</b>${zh ? "：拖出一段直墙，方便在上面挂门窗。" : ": drag a straight wall segment to hang openings on."}</li>
-          <li><b>${zh ? "门（快捷键 O）" : "Door (shortcut O)"}</b>${
-            zh
-              ? "：沿墙拖动即可挖出一道门。默认<span style=\"color:#ff4d4d\">红色 = 关闭</span>（挡视线），点击切换为<span style=\"color:#85ff66\">绿色 = 打开</span>。Alt+点击或双击删除。"
-              : ": drag along a wall to carve a door. <span style=\"color:#ff4d4d\">Red = closed</span> (blocks vision); click to open (<span style=\"color:#85ff66\">green</span>). Alt-click or double-click deletes."
-          }</li>
-          <li><b>${zh ? "窗户（快捷键 I）" : "Window (shortcut I)"}</b>${
-            zh
-              ? "：同样的拖动方式。窗户<b>无论开关都能看见外面</b> —— 关着是<span style=\"color:#5dade2\">玻璃（青色）</span>，开着是<span style=\"color:#66ffd9\">敞开（蓝绿）</span>，两种状态挖出的洞完全一样。开 / 关表达的是「能不能<b>钻过去</b>」。"
-              : ": same gesture. A window is see-through in BOTH states — <span style=\"color:#5dade2\">glazed (cyan)</span> when shut, <span style=\"color:#66ffd9\">open (aqua)</span> when swung out, and the hole it cuts is identical either way. The toggle says whether a creature can <b>pass</b>, not whether you can see."
-          }</li>
-          <li><b>${zh ? "密门（快捷键 U）" : "Secret door (shortcut U)"}</b>${
-            zh
-              ? "：视线上和普通门完全一样，但<b>玩家端不会生成任何指示器</b>，玩家也无法开关它（DM 端会二次校验，伪造广播同样无效）。DM 看到的是<span style=\"color:#b06bff\">紫色虚线</span>。"
-              : ": identical to a door for vision, but <b>no indicator is ever built on a player's client</b> and a player cannot operate one (the GM re-checks, so a hand-rolled broadcast fails too). The GM sees a <span style=\"color:#b06bff\">dashed purple</span> marker."
-          }</li>
-        </ul>
-        <p style="color:var(--text-dim);font-size:11.5px">${
-          zh
-            ? "注：OBR 的墙只影响<b>视线</b>，不影响<b>移动</b>，所以「关着的窗爬不过去」这一半在引擎层面无法强制，只能靠指示器颜色 / 图标传达、由桌面约定。密门的元数据存在共享场景里（OBR 没有仅 DM 可读的存储），玩家翻元数据理论上能发现它 —— 但游戏画面里没有任何可见痕迹。"
-            : "Note: Owlbear walls affect VISION only, never movement, so the \"you can't climb through a shut window\" half can't be enforced by the engine — the indicator's colour and icon carry it and the table honours it. Secret-door metadata lives in the shared scene (Owlbear has no GM-only storage), so a player digging through raw metadata could find one — but nothing in the rendered game gives it away."
-        }</p>
-        <div style="margin-top:12px;padding:10px 12px;border-radius:6px;border:1px solid #7a5c12;background:rgba(245,166,35,.09)">
-          <div style="color:#f5a623;font-weight:600;font-size:12.5px;margin-bottom:4px">${
-            zh ? "⚠ 请关闭官方 Dynamic Fog 扩展" : "⚠ Turn off the official Dynamic Fog extension"
-          }</div>
-          <p style="margin:0;font-size:11.5px;line-height:1.65;color:var(--text-dim)">${
-            zh
-              ? "本套件<b>已经完整包含</b>官方 <b>Dynamic Fog</b> 的全部功能（墙、门、光源），并在此之上多做了三件官方没有的事：<b>窗户</b>（开关都能看穿）、<b>玩家可开关的门</b>、以及<b>玩家看不见的密门</b>。<br>两个同时开着不会报错，但两边都会从同一批迷雾图形推导墙和光，<b>每面墙、每盏灯都会建两遍</b>，白白翻倍开销。<br>官方扩展里已经画好的<b>门会自动继承</b>过来，关掉它不会丢；<b>光源需要重新添加一次</b>。"
-              : "This suite <b>already contains everything</b> the official <b>Dynamic Fog</b> does — walls, doors, lights — and adds three things it doesn't have: <b>windows</b> (see-through open or shut), <b>doors players can work themselves</b>, and <b>secret doors players never see</b>.<br>Running both is not an error, but both derive walls and lights from the same fog shapes, so <b>every wall and every light is built twice</b> for nothing.<br>Doors you already drew with the official extension are <b>imported automatically</b>, so turning it off won't lose them; <b>lights need adding again</b>."
-          }</p>
-        </div>
-        <p style="color:var(--text-dim);font-size:11.5px;margin-top:10px">${
-          zh
-            ? "⚠ 同理，<b>测试版和稳定版也不要装在同一个房间</b>：两者现在共用同一套场景元数据与工具 id，同时装会互相覆盖设置、并把墙和光建两遍。"
-            : "⚠ For the same reason, <b>don't install the dev and stable channels in one room</b>: they now share one set of scene metadata and tool ids, so they would overwrite each other's settings and build every wall and light twice."
-        }</p>
-
-        <h4 style="margin-top:12px">${zh ? "光源" : "Lights"}</h4>
-        <p>${
-          zh
-            ? "右键任意图片或圆形 → <b>添加光源</b>，再右键 → <b>光源设置</b> 调整照明范围 / 角度（全向或锥形）/ 边缘（硬或柔）/ 类型（主光源或次光源）。锥形光源会额外获得一圈自照明，持灯人不会站在自己的暗区里。光源由原生引擎渲染，会被墙遮挡、能穿过打开的门窗。"
-            : "Right-click any image or circle → <b>Add Light</b>, then right-click → <b>Light Settings</b> for range / angle (full or cone) / edge (hard or soft) / type (primary or secondary). Cone lights get a small self light so the bearer isn't standing in their own dark spot. Lights are rendered by Owlbear's own engine, so walls clip them and open doors let them through."
-        }</p>
-        <p>${
-          zh
-            ? "光源设置面板刻意和官方 dynamic-fog 的一模一样：<b>照明范围 / 角度 / 边缘 / 类型</b>，外加旋转与移除。唯一的加法不额外占位 —— 类型里多了第三个选项<b>环境光</b>：这盏灯对所有人永远可见、不参与下面的遮挡判定，用于墙上的火把、天光这类固定照明。"
-            : "The Light Settings panel is deliberately identical to the official dynamic-fog one: <b>Range / Angle / Edge / Type</b>, plus Rotate and Remove. The single addition costs no extra field — Type carries a third option, <b>Ambient</b>: always visible to everyone and exempt from the occlusion rule below, for fixed lighting like wall sconces or daylight."
-        }</p>
-
-        <h3 style="margin-top:14px">${zh ? "选项" : "Options"}</h3>
-        <div class="row">
-          <div class="lbl">
-            ${zh ? "整张地图铺满迷雾" : "Fill The Map With Fog"}
-            <div class="desc">${
-              zh
-                ? "这是 <b>OBR 场景本身</b>的开关（等同于迷雾工具里的「填充」），不是套件设置。<b>没打开它，墙和光源都不会有任何可见效果</b> —— 玩家本来就能看到整张图，也就无所谓「被墙挡住」。如果你觉得「灯光和墙壁不识别」，先检查这里。"
-                : "This is an <b>Owlbear scene</b> setting (the fog tool's Fill option), not a suite one. <b>With it off, walls and lights have no visible effect at all</b> — players can already see the whole map, so there is nothing for a wall to block. Check this first if lighting and walls seem to be ignored."
-            }</div>
-          </div>
-          <button class="tog" data-key="fogFilled" type="button" ${isGM ? "" : "disabled"} aria-pressed="false"></button>
-        </div>
-        <div class="row">
-          <div class="lbl">
-            ${zh ? "玩家可开关门窗" : "Players Can Work Doors"}
-            <div class="desc">${
-              zh
-                ? "默认开启。仅 DM 可设。开启后玩家会看到门窗指示线，<b>门</b>还会带一个可点的按钮，配合工具栏的「开关门窗」工具一点就开关；指示器画在迷雾<b>下方</b>，没探索到的区域不会提前泄露门的位置。关闭后玩家既看不到指示器也没有该工具，门只能由 DM 操作。<br><b>窗户只有线、没有按钮</b>：窗户开着关着都能看穿，玩家去点它不会有任何可见变化，所以按钮只留给 DM。<b>密门永远不受这个开关影响</b>，玩家在任何情况下都看不到、开不了。"
-                : "On by default. DM-only setting. When on, players see the door and window indicator lines, and <b>doors</b> also get a clickable button that the toolbar's toggle tool works. Indicators render BELOW the fog, so undiscovered doors don't leak the floor plan. When off, players get neither the indicators nor the tool and only the DM can work the doors.<br><b>Windows get a line but no button</b>: a window is see-through whether it is shut or open, so a player clicking one would see nothing change — the shutters stay a DM control. <b>Secret doors ignore this switch entirely</b> — players never see or operate one under any setting."
-            }</div>
-          </div>
-          <button class="tog ${
-            s.fogPlayerDoors ? "on" : ""
-          }" data-key="fogPlayerDoors" type="button" ${isGM ? "" : "disabled"} aria-pressed="${
-            s.fogPlayerDoors
-          }"></button>
-        </div>
-        <div class="row">
-          <div class="lbl">
-            ${zh ? "始终显示门窗指示器（DM）" : "Always Show Indicators (DM)"}
-            <div class="desc">${
-              zh
-                ? "默认关闭。开启后即使没有选中迷雾工具，DM 也能一直看到门窗指示器（上游 dynamic-fog 只在选中迷雾工具时显示）。"
-                : "Off by default. When on, the DM keeps seeing door/window indicators even without the fog tool selected (upstream dynamic-fog only shows them with the fog tool active)."
-            }</div>
-          </div>
-          <button class="tog ${
-            s.fogDoorOverlayAlways ? "on" : ""
-          }" data-key="fogDoorOverlayAlways" type="button" ${isGM ? "" : "disabled"} aria-pressed="${
-            s.fogDoorOverlayAlways
-          }"></button>
-        </div>
-        <div class="row">
-          <div class="lbl">
-            ${zh ? "光源遮挡（玩家看不见别人的灯）" : "Light Occlusion"}
-            <div class="desc">${
-              zh
-                ? "默认开启。玩家<b>不拥有</b>的光源（DM 放的 NPC 火把等）默认不可见；只有当玩家自己某盏灯到那盏灯之间<b>没有墙阻挡</b>时，它才会亮起来。只看有没有墙、不看距离 —— 空旷野地上的远处火堆是看得见的。判定不传递：一串火把会随着你逐个获得视线依次点亮。标记为<b>环境光</b>的光源不受影响，DM 永远看到全部。<br>⚠ 副作用：身上一盏灯都没有的玩家，除环境光外什么光源都看不到。固定照明记得勾「环境光」。"
-                : "On by default. Lights a player does NOT own (the DM's NPC torches and so on) are hidden; one becomes visible only when a straight line from one of that player's own lights reaches it <b>without crossing a wall</b>. Walls only — distance is not part of it, so a distant campfire across open ground is visible. It is not transitive: a row of torches lights up one at a time as you gain line of sight to each. Lights flagged <b>Ambient</b> are exempt, and the DM is never occluded.<br>⚠ Side effect: a player carrying no light of their own sees no lights except ambient ones. Flag fixed lighting as Ambient."
-            }</div>
-          </div>
-          <button class="tog ${
-            s.fogLightOcclusion ? "on" : ""
-          }" data-key="fogLightOcclusion" type="button" ${isGM ? "" : "disabled"} aria-pressed="${
-            s.fogLightOcclusion
-          }"></button>
-        </div>
-        ${!isGM ? `<p class="role-notice">${zh ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>` : ""}
-      `;
-    },
+    dynamicBody: (lang, gm) => renderFogSettings(getState(), lang, gm, !STABLE_HIDES),
     afterRender: (root) => {
       // "Fill the map with fog" reads/writes the OBR SCENE, not suite
       // state, so it can't be rendered synchronously with the rest.
@@ -3277,8 +3262,8 @@ const TABS: TabDef[] = [
             paint(await OBR.scene.fog.getFilled());
           })
           .catch(() => {});
-        // renderContent() replaces contentEl's innerHTML on every state
-        // change, so this listener is dropped with the node it was
+        // A relevant settings refresh can replace contentEl's innerHTML,
+        // so this listener is dropped with the node it was
         // attached for; unsubscribe when the button leaves the DOM.
         let unsubscribe: (() => void) | null = null;
         try {
@@ -3308,7 +3293,8 @@ const TABS: TabDef[] = [
         key:
           | "fogPlayerDoors"
           | "fogDoorOverlayAlways"
-          | "fogLightOcclusion",
+          | "fogLightOcclusion"
+          | "fogShareVision",
       ) => {
         root
           .querySelector<HTMLButtonElement>(`.tog[data-key="${key}"]`)
@@ -3320,71 +3306,47 @@ const TABS: TabDef[] = [
       bind("fogPlayerDoors");
       bind("fogDoorOverlayAlways");
       bind("fogLightOcclusion");
+      bind("fogShareVision");
     },
   },
   {
-    // 2026-05-23 — RETIRED with project closure. The in-plugin module
-    // (popover + background audio engine + PeerJS pairing) is no longer
-    // registered in background.ts's modules map, so the toggle has
-    // been dropped (no `moduleId` here). The entry is kept visible so
-    // users can still find the link to the standalone web tool, which
-    // continues to work on its own.
     id: "musicBoard",
+    moduleId: "musicBoard",
     zh: `${ICONS.music} 音乐板`,
     en: `${ICONS.music} Music Board`,
-    body: {
-      zh: `<div style="margin:4px 0 14px;padding:14px 16px;border-radius:10px;
-            background:linear-gradient(180deg, rgba(245,166,35,0.16), rgba(231,76,60,0.08));
-            border:1px solid rgba(245,166,35,0.55);font-size:13px;line-height:1.75">
-  <div style="color:#f5a623;font-weight:700;font-size:13.5px;margin-bottom:6px">插件内的音乐板已停止维护</div>
-  <div style="color:var(--text)">
-    <b>插件内嵌</b>的音乐板（侧栏图标 + 配对弹窗 + 后台音频引擎）已退役下线，不再随插件一起加载，也不会再消耗任何资源。<b>独立的网页版音乐板继续可用</b>，可作为一个普通网页播放器使用，不依赖本插件。
-  </div>
-</div>
-
-<h4 style="margin-top:14px">网页版音乐板（独立运行）</h4>
-<p>下面这个地址依然可以正常访问，<b>无需配对、无需插件</b>，浏览器打开即用：</p>
-<p style="margin:10px 0">
-  <a href="https://obr.dnd.center/studio/music-studio/" target="_blank" rel="noopener"
-     style="display:inline-block;padding:8px 14px;border-radius:8px;
-            background:linear-gradient(180deg, var(--accent), var(--accent-dim));
-            color:#fff;text-decoration:none;font-weight:600;font-size:13px">
-    🎵 打开网页版音乐板 →
-  </a>
-</p>
-<ul style="line-height:1.8;color:var(--text-dim);font-size:12px">
-  <li>整理 BGM / SFX 曲库（在线直链 + 本地文件均可）</li>
-  <li>WebAudio 引擎：淡入淡出、单曲循环边界平滑、SFX 自动 ducking</li>
-  <li>本地播放：开语音时可直接共享电脑音频给玩家，不再走 OBR 同步</li>
-  <li>原有「与插件配对让所有玩家同步」的功能不再可用；如需此能力请自行下载源码自行部署</li>
-</ul>
-<p style="color:var(--text-dim);font-size:11.5px;margin-top:10px">如确实希望恢复插件内嵌的同步功能，可在 GitHub 仓库自行编译部署（参考开源协议）。</p>`,
-      en: `<div style="margin:4px 0 14px;padding:14px 16px;border-radius:10px;
-            background:linear-gradient(180deg, rgba(245,166,35,0.16), rgba(231,76,60,0.08));
-            border:1px solid rgba(245,166,35,0.55);font-size:13px;line-height:1.7">
-  <div style="color:#f5a623;font-weight:700;font-size:13.5px;margin-bottom:6px">In-plugin Music Board is retired</div>
-  <div style="color:var(--text)">
-    With the project closure, the <b>in-plugin</b> music board (sidebar tool + pairing popover + background audio engine) is no longer wired in; it doesn't load and consumes no resources. The <b>standalone web tool</b> still works as a regular browser-side player, independent of this plugin.
-  </div>
-</div>
-
-<h4 style="margin-top:14px">Web Music Board (standalone)</h4>
-<p>The link below still works — <b>no pairing, no plugin needed</b>, just open it in a browser:</p>
-<p style="margin:10px 0">
-  <a href="https://obr.dnd.center/studio/music-studio/" target="_blank" rel="noopener"
-     style="display:inline-block;padding:8px 14px;border-radius:8px;
-            background:linear-gradient(180deg, var(--accent), var(--accent-dim));
-            color:#fff;text-decoration:none;font-weight:600;font-size:13px">
-    🎵 Open Web Music Board →
-  </a>
-</p>
-<ul style="line-height:1.8;color:var(--text-dim);font-size:12px">
-  <li>Organize BGM / SFX library (online links + local files)</li>
-  <li>WebAudio engine: fade in/out, seamless loop boundaries, SFX-triggered ducking</li>
-  <li>Local playback: share your computer audio over voice chat — no OBR sync needed</li>
-  <li>The "pair-with-plugin so all players hear sync'd audio" feature is no longer available; self-host from source if you need it</li>
-</ul>
-<p style="color:var(--text-dim);font-size:11.5px;margin-top:10px">If you really want the in-plugin sync back, you can self-build from the GitHub repo (follow the license terms).</p>`,
+    dynamicBody: (lang) => {
+      const zh = lang === "zh", enabled = getState().enabled.musicBoard;
+      return `
+        <p>${zh ? "和同桌玩家一起播放音乐。关闭或缩小控制面板后，音乐继续播放。" : "Play music with your table. Music continues when you close or minimize the controls."}</p>
+        <button id="openMusicBoard" class="layout-editor-btn" type="button" ${enabled ? "" : "disabled"}>${zh ? "打开音乐板" : "Open Music Board"}</button>
+        ${!enabled ? `<p class="role-notice">${zh ? (isGM ? "先打开本页的模块开关。" : "请 DM 打开音乐板模块。") : (isGM ? "Enable this module above first." : "Ask your GM to enable the Music Board module.")}</p>` : ""}
+        <p>${zh ? "首次使用时，每个人在音乐板点一次「启用声音」。默认全员可选曲、暂停和管理队列，DM 可改成仅 DM 控制。音量和静音只影响自己。" : "Each person clicks Enable sound on first use. Everyone can choose tracks, pause and manage the queue by default; the GM can limit shared controls to GMs. Volume and mute only affect you."}</p>
+        <details class="lib-tut"><summary>${zh ? "曲库与音乐工作室" : "Library and Music Studio"}</summary>
+          <p>${zh ? "可以直接添加音频网址、导入分享码或从默认曲库选曲。整理更大的曲库、裁剪或转换本地音频时，可使用音乐工作室并输入配对码。共享播放需要所有玩家都能访问的音频网址，本地文件需先托管。" : "Add an audio URL, import a share code or choose tracks from the default library. Use Music Studio to organize a larger library or trim and convert local audio, then connect with a pairing code. Shared playback needs audio URLs accessible to everyone; host local files before sharing."}</p>
+          <a href="https://obr.dnd.center/studio/music-studio/" target="_blank" rel="noopener">${zh ? "打开音乐工作室 ↗" : "Open Music Studio ↗"}</a>
+        </details>`;
+    },
+    afterRender: (root) => {
+      root.querySelector("#openMusicBoard")?.addEventListener("click", () => {
+        if (!getState().enabled.musicBoard) return;
+        void OBR.broadcast.sendMessage("com.obr-suite/music-board:toggle", {}, { destination: "LOCAL" });
+      });
+    },
+  },
+  {
+    id: "threeDragonAnte",
+    zh: `${ICONS.box} 三龙牌`,
+    en: `${ICONS.box} Three-Dragon Ante`,
+    dynamicBody: (lang) => {
+      const en = lang === "en";
+        // The independently deployed table is currently in public testing.
+        // Both Suite channels must link to the actual published manifest.
+        const url = "https://obr.dnd.center/three-dragon-ante-dev/manifest.json";
+      return `<h3>${en ? "A separate card table" : "独立的酒馆牌桌"}</h3>
+        <p>${en ? "Install Three-Dragon Ante in this room when your table wants to play. It has its own entry and does not need Full Suite to stay open." : "想打牌时，由 DM 将三龙牌安装到房间。它有自己的入口，无需依赖套件窗口。"}</p>
+          <a class="layout-editor-btn" href="${url}" target="_blank" rel="noopener">${en ? "Three-Dragon Ante extension address (Dev)" : "三龙牌插件地址（测试版）"}</a>
+        <p><code>${url}</code></p>
+        <p>${en ? "Legendary Edition base game for 2–6 players, with a guided practice table. Uses Owlbear room messages; the host browser runs and saves the game." : "Legendary Edition 基础版，2–6 人，含新手实战引导。通过枭熊房间消息联网，主持人的浏览器运行和保存牌局。"}</p>`;
     },
   },
   {
@@ -3598,17 +3560,9 @@ const TABS: TabDef[] = [
   },
 ];
 
-// Stable channel hides modules still in dev; dev keeps them visible.
-// 2026-05-14 — `follow` is hidden EVERYWHERE (retired from the dev
-// build per user request).
-// 2026-08-25 — `fullFog` split into `fogEditor` + `dynamicFog`. The
-// EDITOR ships in both channels (it has since 2026-05-26); the ENGINE
-// tab is dev-only for now, matching the `authoring` gate in
-// modules/fullFog/index.ts. The engine still RUNS on stable — only its
-// settings tab and its authoring tools are withheld there.
-const HIDDEN_TAB_IDS = new Set<string>(
-  STABLE_HIDES ? ["dynamicFog", "follow"] : ["follow"],
-);
+// Basic vision/light controls ship in both channels. Only extra opening
+// authoring remains dev-gated. Follow stays hidden pending feasibility work.
+const HIDDEN_TAB_IDS = new Set<string>(["follow"]);
 const VISIBLE_TABS = TABS.filter((t) => !HIDDEN_TAB_IDS.has(t.id));
 
 // --- DOM refs ---
@@ -3618,11 +3572,17 @@ const topBarEl = document.getElementById("topBar") as HTMLElement;
 const contentEl = document.getElementById("content") as HTMLElement;
 const langZhEl = document.getElementById("langZh") as HTMLButtonElement;
 const langEnEl = document.getElementById("langEn") as HTMLButtonElement;
+const settingsContent = new SettingsContent(contentEl);
+let topBarMarkup = "";
+const moduleStatuses = new Map<string, ModuleLifecycleSnapshot>();
 
 let lang: Language = "zh";
 
+function availableTabs(): TabDef[] {
+  return VISIBLE_TABS.filter(tab => isGM || tab.id !== "transitions");
+}
 function findTab(id: string): TabDef {
-  return VISIBLE_TABS.find((t) => t.id === id) ?? VISIBLE_TABS[0];
+  return availableTabs().find((t) => t.id === id) ?? availableTabs()[0];
 }
 
 
@@ -3644,7 +3604,8 @@ function broadcastOverlayVisibility(visible: boolean): void {
 }
 
 function renderTabs() {
-  tabsEl.innerHTML = VISIBLE_TABS.map((tab) => {
+  if (!availableTabs().some(tab => tab.id === activeTab)) activeTab = availableTabs()[0].id;
+  tabsEl.innerHTML = availableTabs().map((tab) => {
     const text = lang === "zh" ? tab.zh : tab.en;
     return `<button class="tab ${
       activeTab === tab.id ? "on" : ""
@@ -3665,7 +3626,7 @@ function renderContent() {
   const s = getState();
 
   // ---- Top bar (title + per-plugin toggle if applicable) ----
-  let topBar = `<h2>${lang === "zh" ? tab.zh : tab.en}</h2>`;
+  let topBar = `<h2>${lang === "zh" ? tab.zh : tab.en}</h2><span id="moduleStatus" role="status" style="flex:1;min-width:0;font-size:12px;color:var(--text-dim)"></span>`;
   if (tab.moduleId) {
     const on = !!s.enabled[tab.moduleId];
     topBar += `<button class="tog ${
@@ -3678,15 +3639,19 @@ function renderContent() {
       lang === "zh" ? "" : ""
     }</span>`;
   }
-  topBarEl.innerHTML = topBar;
-  topBarEl
-    .querySelector<HTMLButtonElement>(".tog[data-mod]")
-    ?.addEventListener("click", async () => {
-      if (!isGM) return;
-      const id = tab.moduleId as ModuleId;
-      const cur = getState().enabled[id];
-      await setState({ enabled: { [id]: !cur } as any });
-    });
+  if (topBarMarkup !== topBar) {
+    topBarMarkup = topBar;
+    topBarEl.innerHTML = topBar;
+    topBarEl
+      .querySelector<HTMLButtonElement>(".tog[data-mod]")
+      ?.addEventListener("click", async () => {
+        if (!isGM) return;
+        const id = tab.moduleId as ModuleId;
+        const cur = getState().enabled[id];
+        await setState({ enabled: { [id]: !cur } as any });
+      });
+  }
+  renderModuleStatus();
 
   // ---- Body ----
   // 2026-05-04 fix: render BOTH `body` and `dynamicBody` when both
@@ -3698,8 +3663,20 @@ function renderContent() {
   const parts: string[] = [];
   if (tab.body) parts.push(tab.body[lang] || "");
   if (tab.dynamicBody) parts.push(tab.dynamicBody(lang, isGM) || "");
-  contentEl.innerHTML = parts.join("");
-  if (tab.afterRender) tab.afterRender(contentEl, isGM);
+  settingsContent.render({
+    scope: tab.id, html: parts.join(""), language: lang, editable: isGM,
+    afterRender: () => tab.afterRender?.(contentEl, isGM),
+  });
+}
+
+function renderModuleStatus(): void {
+  const slot = topBarEl.querySelector<HTMLElement>("#moduleStatus");
+  if (!slot) return;
+  const id = findTab(activeTab).moduleId;
+  renderSettingsModuleStatus(slot, id ? moduleStatuses.get(id) : undefined, lang,
+    async (moduleId) => {
+      await OBR.broadcast.sendMessage(BC_MODULE_RETRY, { id: moduleId }, { destination: "LOCAL" });
+    });
 }
 
 function setLang(l: Language) {
@@ -3724,6 +3701,22 @@ langEnEl.addEventListener("click", () => {
 });
 
 OBR.onReady(async () => {
+  const refreshBossPreferences = () => { if (activeTab === "bossBar") renderContent(); };
+  OBR.broadcast.onMessage(BOSS_PREFERENCES_CHANGED, refreshBossPreferences);
+  window.addEventListener("storage", (event) => {
+    if (event.key === BOSS_PREFERENCES_KEY || event.key === null) refreshBossPreferences();
+  });
+  OBR.broadcast.onMessage(BC_MODULE_STATUS, (event) => {
+    const modules = (event.data as { modules?: ModuleLifecycleSnapshot[] } | null)?.modules;
+    if (!Array.isArray(modules)) return;
+    moduleStatuses.clear();
+    for (const snapshot of modules) {
+      if (snapshot && typeof snapshot.id === "string") moduleStatuses.set(snapshot.id, snapshot);
+    }
+    renderModuleStatus();
+  });
+  void OBR.broadcast.sendMessage(BC_MODULE_STATUS_QUERY, {}, { destination: "LOCAL" })
+    .catch((error) => console.warn("[settings] module status query failed", error));
   try {
     isGM = (await OBR.player.getRole()) === "GM";
   } catch (e) {
@@ -3784,9 +3777,9 @@ OBR.onReady(async () => {
       if (activeTab === "bubbles") renderContent();
     }
   });
-  // Re-render content (including the per-tab toggles + dynamic body) on
-  // any suite state change. Language changes are handled separately so the
-  // panel reflects another iframe (e.g. cluster) toggling lang.
+  // Compare rendered settings, not the whole suite state: unrelated changes
+  // keep existing DOM and async controls alive. Relevant changes still refresh
+  // immediately, preserving keyed drafts while showing current saved values.
   onStateChange(() => renderContent());
   onLangChange((l) => setLang(l));
   setLang(getLocalLang());

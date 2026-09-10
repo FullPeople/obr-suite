@@ -1,12 +1,13 @@
 {
   "name": "Full Suite",
-  "version": "1.2.2",
+  "version": "1.3.1",
   "manifest_version": 1,
   "author": "FullPeople",
   "homepage_url": "https://github.com/FullPeople/obr-suite",
   "description": "All-in-one TRPG suite / TRPG 全能套装：动态迷雾、骰子、先攻、怪物图鉴、角色卡、搜索、时停、视口、传送门、变身",
   "icon": "/suite/exe_icon.png",
   "background_url": "/suite/background.html",
+  "permissions": [{ "name": "autoplay", "reason": "Play shared music in the persistent background after the player enables sound." }],
   "action": {
     "title": "骰子 / Dice",
     "icon": "/suite/d20.png",

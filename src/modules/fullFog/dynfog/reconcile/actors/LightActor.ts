@@ -5,12 +5,9 @@
 // and reveals fog exactly like the built-in system. Port of upstream
 // `LightActor`, plus the state `light/occlusion.ts` needs.
 //
-// VISIBLE attachment inheritance is deliberately DISABLED here. Two
-// things decide whether this light renders — the parent token being
-// visible, and (for a player) the light being reachable from one of
-// their own lights without a wall in between — and Owlbear only knows
-// about the first. So the actor owns `visible` outright and computes it
-// from both.
+// Visibility and revealing type are owned by the access pass. Attachment
+// visibility inheritance is disabled so hidden ancestors, ownership and
+// optional illumination reachability are evaluated together before submission.
 
 import {
   buildLight,
@@ -18,6 +15,7 @@ import {
   type Item,
   type Light,
   type Vector2,
+  type LightType,
 } from "@owlbear-rodeo/sdk";
 import { Actor } from "../Actor";
 import type { Reconciler } from "../Reconciler";
@@ -38,37 +36,40 @@ export class LightActor extends Actor {
   /** Parent's world position — the origin of every line-of-sight query
    *  in `light/occlusion.ts`. */
   position: Vector2;
-  /** Whoever owns the parent item. In Owlbear this IS the permission
-   *  boundary: a player may edit only what they created. */
-  ownerId: string;
+  /** Configured type; unauthorized revealing lights become SECONDARY locally. */
+  lightType: LightType;
   /** Parent's own `visible` flag. */
   parentVisible: boolean;
   /** `LightConfig.ambient` — exempt from occlusion. */
   ambient: boolean;
-  /** Set by the occlusion pass. Starts true so a client with occlusion
-   *  switched off behaves exactly as before. */
-  allowed = true;
+  /** Authorization is fail-closed until the after-hook has run. */
+  allowed = false;
+  reveals = false;
 
   constructor(reconciler: Reconciler, parent: Item) {
     super(reconciler);
     this.parentId = parent.id;
     this.position = { ...parent.position };
-    this.ownerId = parent.createdUserId;
+    this.lightType = readConfig(parent).lightType ?? "PRIMARY";
     this.parentVisible = parent.visible;
     this.ambient = readConfig(parent).ambient === true;
     const item = this.parentToLight(parent);
     this.light = item.id;
+    this.reconciler.patcher.protectItem(this.light, item => this.applyAccess(item));
     this.reconciler.patcher.addItems(item);
   }
 
   delete(): void {
+    this.allowed = false;
+    this.reveals = false;
+    this.reconciler.patcher.restrictItems(this.light);
     this.reconciler.patcher.deleteItems(this.light);
   }
 
   update(parent: Item): void {
     const config = readConfig(parent);
     this.position = { ...parent.position };
-    this.ownerId = parent.createdUserId;
+    this.lightType = config.lightType ?? "PRIMARY";
     this.parentVisible = parent.visible;
     this.ambient = config.ambient === true;
     const visible = this.parentVisible && this.allowed;
@@ -84,16 +85,21 @@ export class LightActor extends Actor {
 
   /** Called by the occlusion pass. Only stages a patch when the answer
    *  actually moved, so a scene with nothing changing costs nothing. */
-  setAllowed(allowed: boolean): void {
-    if (this.allowed === allowed) return;
+  setAccess(allowed: boolean, reveals: boolean): void {
+    if (this.allowed === allowed && this.reveals === reveals) return;
+    if ((this.allowed && !allowed) || (this.reveals && !reveals)) this.reconciler.patcher.restrictItems(this.light);
     this.allowed = allowed;
-    const visible = this.parentVisible && allowed;
+    this.reveals = reveals;
     this.reconciler.patcher.updateItems([
       this.light,
-      (item) => {
-        if (isLight(item) && item.visible !== visible) item.visible = visible;
-      },
+      (item) => { this.applyAccess(item); },
     ]);
+  }
+
+  private applyAccess(item: Item): void {
+    if (!isLight(item)) return;
+    item.visible = this.parentVisible && this.allowed;
+    item.lightType = this.lightType !== "SECONDARY" && !this.reveals ? "SECONDARY" : this.lightType;
   }
 
   private parentToLight(parent: Item): Light {

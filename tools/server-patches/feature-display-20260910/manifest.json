@@ -1,0 +1,11 @@
+{
+  "format": "obr-renderer-template/v1",
+  "source_file": "renderer/template.html",
+  "before_sha256": "78910737c85ed6e22e276728a694a323af88956254c6fc03edd10aaf7a790934",
+  "before_bytes": 14123,
+  "after_sha256": "dd7fcbeaf38fe8adb0232f15dad6901168517c6023f023d2260c6d0c16132c5b",
+  "after_bytes": 14922,
+  "patch_sha256": "ac41215aa8e755891da48f798e192b09e82f4fc488e09fcbd19975783c395e60",
+  "server_deployed": false,
+  "independent_of_parser_patches": true
+}

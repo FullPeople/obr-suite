@@ -1,0 +1,50 @@
+// Actual module + installed ToolApi/ContextMenuApi; only host and visual boundaries are controlled.
+import assert from "node:assert/strict";
+import { build } from "rolldown";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { resolve, join } from "node:path";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
+const out = mkdtempSync(join(tmpdir(), "status-entry-locale-"));
+globalThis.window = new EventTarget(); window.location = globalThis.location = { origin: "https://fixture.invalid" };
+const storage = new Map(); globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)) };
+const host = resolve("tools/fixtures/status-entry-sdk.ts");
+await build({ input: "status-entry-probe", platform: "node", plugins: [{ name: "entry-boundaries", resolveId(id, importer) {
+  if (id === "status-entry-probe") return "\0entry";
+  if (id === "@owlbear-rodeo/sdk" || /(^|\/)state$|\/feature-flags$|\/utils\/panelLayout$/.test(id)) return host;
+  if (importer?.replaceAll("\\", "/").endsWith("/statusTracker/index.ts") && ["./bubbles", "./circles"].includes(id)) return host;
+}, load(id) { if (id === "\0entry") return `export * from ${JSON.stringify(resolve("src/modules/statusTracker/index.ts"))}; export {fixture} from ${JSON.stringify(host)};`; }, transform(code) { return code.replaceAll("import.meta.env.BASE_URL", '"/"'); } }], output: { file: join(out, "probe.mjs"), format: "esm" } });
+const { setupStatusTracker, teardownStatusTracker, fixture: f } = await import(pathToFileURL(join(out, "probe.mjs")).href);
+const TOOL = "com.obr-suite/status-tracker-tool", ACTION = "com.obr-suite/status-tracker-toggle", MENU = "com.obr-suite/status/ctx-create-status";
+const delay = ms => new Promise(done => setTimeout(done, ms));
+async function until(fn) { const end = Date.now() + 2000; while (!fn()) { assert.ok(Date.now() < end, "host boundary timed out"); await delay(2); } }
+let passed = 0; const checks = []; function check(value, message) { assert.ok(value, message); passed++; checks.push(message); }
+const labelsAre = label => f.tools.size === 3 && [...f.tools.values()].every(def => def.icons[0].label === label);
+await setupStatusTracker();
+check(labelsAre("状态追踪") && !f.menus.size, "initial Chinese labels include tool, mode and shortcut; inactive menu stays absent");
+await f.event("OBR_TOOL_EVENT_CLICK", { id: TOOL, context: { activeTool: f.activeTool, metadata: {} } }); await until(() => f.menus.has(MENU));
+check(f.activeTool === TOOL && f.popovers.size === 1, "installed SDK click invokes actual activation and opens the palette");
+const baseline = { opens: f.opens, closes: f.closes, removes: f.calls.filter(call => /REMOVE/.test(call.type)).length };
+await f.language("en"); await until(() => labelsAre("Status Tracker") && f.menus.get(MENU)?.icons[0].label === "Create status from this");
+check(f.opens === baseline.opens && f.closes === baseline.closes && f.calls.filter(call => /REMOVE/.test(call.type)).length === baseline.removes && f.activeTool === TOOL, "live English update does not unregister, reactivate or reopen any window");
+const englishMenu = f.menus.get(MENU), action = f.tools.get(ACTION);
+check(englishMenu.icons[0].filter.max === 1 && englishMenu.icons[0].filter.every[1].operator === "!=" && !englishMenu.icons[0].filter.roles && action.shortcut === "BracketRight" && action.icons[0].filter.activeTools.join() === `rodeo.owlbear.tool/select,${TOOL}`, "original native filters, shortcut and player access are preserved");
+for (const name of ["作者自定义名称", ""]) await f.event("OBR_CONTEXT_MENU_EVENT_CLICK", { id: MENU, context: { items: [{ name, image: { url: "https://fixture.invalid/custom.png", mime: "image/png", width: 128, height: 64 }, scale: { x: 2 }, rotation: 45 }] } });
+const catalog = JSON.parse(storage.get("obr-suite/status/buff-catalog"));
+check(catalog.buffs.at(-2).name === "作者自定义名称" && catalog.buffs.at(-1).name === "New status" && catalog.buffs.at(-1).webmScale === 2 && catalog.buffs.at(-1).rotation === 45, "real context callback preserves author text/image transform and localizes only the unnamed fallback");
+await f.event("com.obr-suite/status/select-apply", { data: { kind: "buff", key: "custom", buff: { id: "custom", name: "自定义状态", color: "#ffffff" } } });
+await until(() => f.modal !== null); const capture = f.modal;
+await f.language("zh"); await until(() => labelsAre("状态追踪") && f.menus.get(MENU)?.icons[0].label === "以此创建状态");
+check(f.modal === capture && f.opens === baseline.opens, "language switch preserves the selected status and current capture window");
+await f.event("OBR_TOOL_MODE_EVENT_TOOL_CLICK", { id: `${TOOL}/mode`, context: {}, event: { target: f.item, pointerPosition: { x: 0, y: 0 } } }); await until(() => f.writes === 1);
+check(f.item.name === "自定义角色" && f.item.metadata["com.obr-suite/status/buffs"].join() === "custom", "updated installed SDK mode callback applies the existing selection using unchanged IDs and token name");
+await f.event("OBR_TOOL_ACTION_EVENT_CLICK", { id: ACTION, context: {} }); await until(() => !f.menus.size);
+check(f.activeTool === "rodeo.owlbear.tool/move" && !f.popovers.size, "updated shortcut callback still exits using the existing Move fallback");
+await f.language("en"); await until(() => labelsAre("Status Tracker")); check(!f.menus.size, "language change while inactive does not recreate the context menu");
+const count = f.calls.length; await f.language("en"); await delay(8); check(f.calls.length === count, "unchanged language produces no host calls");
+f.hold = "OBR_TOOL_CREATE"; await f.language("zh"); await until(() => f.release !== null); const closing = teardownStatusTracker(); await delay(5); f.release(); await closing;
+const stopped = f.calls.length; await f.language("en"); await f.event("OBR_TOOL_ACTION_EVENT_CLICK", { id: ACTION, context: {} }); await f.event("OBR_TOOL_MODE_EVENT_TOOL_CLICK", { id: `${TOOL}/mode`, context: {}, event: { target: f.item } }); await delay(10);
+check(!f.tools.size && !f.menus.size && f.calls.length === stopped && f.writes === 1, "delayed refresh drains before removal, and retained SDK action/mode callbacks are inert after teardown");
+await setupStatusTracker(); check(labelsAre("Status Tracker"), "re-enabling reads the current language after an interrupted refresh"); await teardownStatusTracker();
+writeFileSync(join(out, "result.json"), JSON.stringify({ passed, checks, actualSDK: "ToolApi + ContextMenuApi 3.1.0", realOwlbearUat: false }, null, 2));
+console.log(`PASS: ${passed} native status entry checks. Evidence: ${out}`);

@@ -1,305 +1,315 @@
-import OBR from "@owlbear-rodeo/sdk";
-import { getLocalLang } from "../state";
+import OBR, { type Image } from "@owlbear-rodeo/sdk";
+import { getLocalLang, onLangChange } from "../state";
 import { assetUrl } from "../asset-base";
-import { interruptInFlightDrag } from "../utils/interruptDrag";
+import { TIME_STOP_META, TIME_STOP_MODAL, TIME_STOP_READY, TIME_STOP_VIEW, TIME_STOP_HIDE, TIME_STOP_HIDDEN,
+  TIME_STOP_RETRY, CG_FADE_MS, readTimeStop, validCgUrl } from "./timeStopProtocol";
 
-// "Time Stop" / 时停模式 module — migrated from time-stop plugin.
-//
-// Trigger paths:
-//   1. Right-click empty space → context menu "开启/关闭时停"
-//   2. Cluster button → broadcasts BC_TIMESTOP_TOGGLE (handled here)
-//
-// State persisted in scene metadata so mid-scene joiners auto-enter time
-// stop. Player tokens are locked when on, unlocked (only those WE locked)
-// when off.
-
-const PLUGIN_ID = "com.time-stop"; // backward-compat scene-meta key
-const META_KEY = `${PLUGIN_ID}/state`;
-const LOCK_TAG = `${PLUGIN_ID}/locked-by-timestop`;
-const MODAL_ID = `${PLUGIN_ID}/overlay`;
-const BROADCAST_ON = `${PLUGIN_ID}/on`;
-const BROADCAST_OFF = `${PLUGIN_ID}/off`;
-const BC_TOGGLE = "com.obr-suite/timestop-toggle";
-const BC_STATE = "com.obr-suite/timestop-state";
-// LOCAL broadcast → background ensures the cluster-row popover is open
-// (idempotent, in-sync). Fired by the GM on turn-on so the 时停 off-
-// switch stays reachable behind the fullscreen overlay — especially
-// for the CG path, which is triggered from a right-click menu while
-// the row may be closed. Routing through background's openClusterRow
-// keeps clusterRowIsOpen + the trigger glow synced (the user warned
-// against bypassing the trigger and desyncing the toggle state).
-const BC_CLUSTER_ROW_OPEN = "com.obr-suite/cluster-row-open";
-
-const MENU_ID = `${PLUGIN_ID}/toggle`;
-// 2026-05-14 (#7) — "显示为 CG" right-click menu on MAP items.
-const CG_MENU_ID = `${PLUGIN_ID}/show-as-cg`;
-const ICON_URL = assetUrl("timestop-icon.svg");
-const OVERLAY_URL = assetUrl("timestop-overlay.html");
-
-const unsubs: Array<() => void> = [];
-let isGM = false;
-
-async function isTimeStopActive(): Promise<boolean> {
-  try {
-    const meta = await OBR.scene.getMetadata();
-    return !!(meta[META_KEY] as any)?.active;
-  } catch { return false; }
+const LEGACY_LOCK = "com.time-stop/locked-by-timestop";
+const DRAG_LOCK = "com.time-stop/drag-lock";
+const MENU = "com.time-stop/show-as-cg";
+const ON = "com.time-stop/on", OFF = "com.time-stop/off";
+const TOGGLE = "com.obr-suite/timestop-toggle", STATE = "com.obr-suite/timestop-state";
+type State = ReturnType<typeof readTimeStop>;
+type Session = {
+  alive: boolean; ready: boolean | undefined; epoch: number; role: "GM" | "PLAYER"; roleRevision: number;
+  connection: string; id: string; initialized: boolean; readRevision: number; hasMetadata: boolean;
+  state: State; displayRevision: number; desiredKey: string; busy: boolean; menuTouched: boolean; menuLabel?: string;
+  unsubs: Array<() => void>; drags: Set<Promise<void>>; startup?: Promise<void>;
+};
+type WindowLease = {
+  owner: Session; id: string; nonce: string; key: string; opening: Promise<void>; closing?: Promise<void>;
+  wantsClose: boolean; hidden?: () => void; forceHidden?: () => void; failed: boolean;
+};
+let session: Session | undefined;
+const windows = new Set<WindowLease>(), retired = new Set<Session>();
+let menuQueue = Promise.resolve();
+const current = (own: Session) => own.alive && session === own;
+const sceneCurrent = (own: Session, epoch: number) => current(own) && own.ready === true && own.epoch === epoch;
+const log = (error: unknown) => console.warn("[timeStop]", error);
+const local = (channel: string, data: unknown) => OBR.broadcast.sendMessage(channel, data, { destination: "LOCAL" });
+const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+function menuWork(work: () => Promise<void>): Promise<void> {
+  const result = menuQueue.then(work); menuQueue = result.catch(log); return result;
+}
+async function role(own: Session) {
+  const revision = own.roleRevision;
+  const value = await OBR.player.getRole();
+  if (current(own) && revision === own.roleRevision) own.role = value;
+  return own.role;
+}
+async function notify(own: Session) {
+  if (current(own)) await local(STATE, { active: own.ready === true && own.state.active }).catch(log);
 }
 
-// 2026-05-14 (#7) — full time-stop state including the optional CG
-// image url. The scene-metadata value is `{ active, cgUrl? }`;
-// cgUrl present → the overlay shows that image fullscreen instead of
-// the cinematic bars.
-async function getTimeStopState(): Promise<{ active: boolean; cgUrl: string | null }> {
-  try {
-    const meta = await OBR.scene.getMetadata();
-    const s = meta[META_KEY] as { active?: unknown; cgUrl?: unknown } | undefined;
-    return {
-      active: !!s?.active,
-      cgUrl: typeof s?.cgUrl === "string" && s.cgUrl ? s.cgUrl : null,
-    };
-  } catch {
-    return { active: false, cgUrl: null };
-  }
-}
-
-// Track local overlay state so we don't re-issue OBR.modal.open on a
-// modal that's already shown — that re-fires the iframe's CSS
-// transition and the user sees the cinematic letterbox bars
-// "flicker" / re-animate. Reproed on the GM client when scene
-// metadata changes during an active time stop (state-sync triggers
-// a re-checkState which would call showOverlay a second time).
-let overlayShown = false;
-let overlayPassThrough = false;
-// 2026-05-14 (#7) — currently-displayed CG url (null = cinematic-bars
-// mode). Part of the dedupe key so a state-sync re-check doesn't
-// needlessly reload the iframe, but a switch INTO / OUT OF cg mode
-// (or a different cg image) does reopen it.
-let overlayCgUrl: string | null = null;
-
-async function showOverlay(passThrough: boolean, cgUrl: string | null = null) {
-  // Already visible with the exact same gating + cg url? No-op.
-  if (overlayShown && overlayPassThrough === passThrough && overlayCgUrl === cgUrl) return;
-  // Switching cg state / image → close first so the iframe reloads
-  // cleanly with the new URL params (OBR.modal.open on the same id
-  // doesn't reliably re-navigate the iframe).
-  if (overlayShown && overlayCgUrl !== cgUrl) {
-    await hideOverlay();
-  }
-  try {
-    // CG mode encodes the image url + (for the GM) a `dm=1` flag so
-    // the overlay renders the image at 0.1 opacity behind the
-    // pass-through modal.
-    const url = cgUrl
-      ? `${OVERLAY_URL}?cg=${encodeURIComponent(cgUrl)}${isGM ? "&dm=1" : ""}`
-      : OVERLAY_URL;
-    await OBR.modal.open({
-      id: MODAL_ID,
-      url,
-      fullScreen: true,
-      hidePaper: true,
-      hideBackdrop: true,
-      disablePointerEvents: passThrough,
-    });
-    overlayShown = true;
-    overlayPassThrough = passThrough;
-    overlayCgUrl = cgUrl;
-  } catch {}
-}
-
-async function hideOverlay() {
-  try { await OBR.modal.close(MODAL_ID); } catch {}
-  overlayShown = false;
-  overlayCgUrl = null;
-}
-
-
-// Per user feedback (2026-04-30): time stop should ONLY block player
-// input via the full-screen overlay + force-deselect. We no longer
-// lock individual tokens — that was belt-and-suspenders that also
-// unhelpfully prevented the GM from moving anything during the
-// effect. Kept unlockOldLockedItems() as a one-time migration so any
-// tokens still carrying the legacy LOCK_TAG from older versions get
-// unlocked the next time time stop fires (or scene loads).
-async function unlockOldLockedItems() {
-  try {
-    const items = await OBR.scene.items.getItems(
-      (item) => item.metadata[LOCK_TAG] === true
-    );
-    if (items.length === 0) return;
-    const ids = items.map((i) => i.id);
-    await OBR.scene.items.updateItems(ids, (drafts) => {
-      for (const d of drafts) {
-        d.locked = false;
-        delete d.metadata[LOCK_TAG];
-      }
-    });
-  } catch (e) {
-    console.warn("[obr-suite/timeStop] legacy unlock skipped", e);
-  }
-}
-
-function notifyClusterState(active: boolean) {
-  try {
-    OBR.broadcast.sendMessage(BC_STATE, { active }, { destination: "LOCAL" });
-  } catch {}
-}
-
-// `cgUrl` non-null → "显示为 CG" variant: every client shows that
-// image fullscreen instead of the cinematic bars. The GM still gets
-// a pass-through overlay (so they can keep working — the image just
-// sits at 0.1 opacity on the GM client); players get a blocking
-// overlay (handled in the BROADCAST_ON listener).
-async function turnOn(cgUrl: string | null = null) {
-  await OBR.scene.setMetadata({
-    [META_KEY]: { active: true, ...(cgUrl ? { cgUrl } : {}) },
-  });
-  await OBR.broadcast.sendMessage(BROADCAST_ON, { cgUrl: cgUrl ?? undefined });
-  await showOverlay(true, cgUrl); // GM gets pass-through overlay
-  // Belt-and-suspenders: scrub any legacy locked tokens left over
-  // from the old "lock all characters" behaviour so they don't stay
-  // un-movable by the GM during this time stop.
-  await unlockOldLockedItems();
-  notifyClusterState(true);
-  // DM only: pop the cluster-row open so the 时停 off-switch is right
-  // there behind the overlay. Idempotent via background's
-  // clusterRowIsOpen guard; LOCAL so it only affects the DM that
-  // triggered it. (Players don't get the row — they can't close time
-  // stop anyway.)
-  if (isGM) {
-    try {
-      OBR.broadcast.sendMessage(BC_CLUSTER_ROW_OPEN, {}, { destination: "LOCAL" });
-    } catch {}
-  }
-}
-
-/** Programmatic entry point for other modules (e.g. trickster) to
- *  force-on time stop without going through the user toggle. Only the
- *  GM client should call this — players don't have scene-write
- *  permission for the time-stop scene metadata key. Idempotent: if
- *  time stop is already active, returns without re-firing. */
-export async function turnOnTimeStop(): Promise<void> {
-  if (!isGM) return;
-  if (await isTimeStopActive()) return;
-  await turnOn();
-}
-
-async function turnOff() {
-  await OBR.scene.setMetadata({ [META_KEY]: { active: false } });
-  await OBR.broadcast.sendMessage(BROADCAST_OFF, {});
-  await hideOverlay();
-  await unlockOldLockedItems();
-  notifyClusterState(false);
-}
-
-async function toggle() {
-  if (!isGM) return;
-  if (await isTimeStopActive()) await turnOff();
-  else await turnOn();
-}
-
-export async function setupTimeStop(): Promise<void> {
-  isGM = (await OBR.player.getRole()) === "GM";
-  const en = getLocalLang() === "en";
-
-  // The 开启/关闭时停 right-click menu was removed earlier — the
-  // cluster's 时停 button is the toggle entry point.
-  //
-  // 2026-05-14 (#7) — but we DO add a GM-only "显示为 CG" menu on MAP
-  // items: right-click a map image → every client time-stops AND the
-  // overlay paints that image fullscreen (aspect-correct, letterboxed
-  // black, no cinematic bars). The GM's copy is pass-through + 0.1
-  // opacity so they can keep running the game behind it. Turn it off
-  // with the normal 时停 cluster button (turnOff clears cgUrl too).
-  if (isGM) {
-    try {
-      await OBR.contextMenu.create({
-        id: CG_MENU_ID,
-        icons: [
-          {
-            icon: ICON_URL,
-            label: en ? "Show as CG" : "显示为 CG",
-            filter: {
-              roles: ["GM"],
-              every: [
-                { key: "type", value: "IMAGE" },
-                { key: "layer", value: "MAP" },
-              ],
-              max: 1,
-            },
-          },
-        ],
-        onClick: async (ctx) => {
-          const item = ctx.items[0] as { image?: { url?: unknown } } | undefined;
-          const url = item?.image?.url;
-          if (typeof url !== "string" || !url) return;
-          // turnOn() with a cgUrl works whether or not time-stop is
-          // already active — re-firing just switches the overlay to
-          // (or between) CG image(s).
-          await turnOn(url);
-        },
+/** Exact per-window ownership: old close/open replies never target a newer CG. */
+function closeWindow(lease: WindowLease, animate = true): Promise<void> {
+  lease.wantsClose = true;
+  if (!animate) lease.forceHidden?.();
+  if (lease.closing) return lease.closing;
+  const work = (async () => {
+    if (animate && !lease.failed) {
+      await new Promise<void>(resolve => {
+        let done = false;
+        const finish = () => { if (done) return; done = true; clearTimeout(timer); lease.hidden = undefined; lease.forceHidden = undefined; resolve(); };
+        const timer = setTimeout(finish, CG_FADE_MS + 300);
+        lease.hidden = finish; lease.forceHidden = finish;
+        void local(TIME_STOP_HIDE, { nonce: lease.nonce }).catch(finish);
       });
-    } catch (e) {
-      console.warn("[obr-suite/timeStop] CG menu create failed", e);
     }
-  }
-
-  unsubs.push(
-    OBR.broadcast.onMessage(BC_TOGGLE, async () => {
-      if (!isGM) return;
-      await toggle();
-    })
-  );
-
-  // Players: on ON broadcast, interrupt any in-flight drag (lock+
-  // deselect+unlock) + show overlay (modal blocks pointer). The
-  // interrupt is critical — bare deselect doesn't kill an active
-  // drag, so a player mid-drag at the moment of time-stop would
-  // happily fly their token across the map.
-  // 2026-05-14 (#7) — the payload may carry `cgUrl`; when set the
-  // player's overlay shows that image fullscreen instead of the bars.
-  unsubs.push(
-    OBR.broadcast.onMessage(BROADCAST_ON, async (event) => {
-      const cgUrl = (event.data as { cgUrl?: string } | undefined)?.cgUrl ?? null;
-      if (!isGM) {
-        await interruptInFlightDrag();
-        await showOverlay(false, cgUrl);
-      }
-      notifyClusterState(true);
-    })
-  );
-
-  unsubs.push(
-    OBR.broadcast.onMessage(BROADCAST_OFF, async () => {
-      await hideOverlay();
-      notifyClusterState(false);
-    })
-  );
-
-  // Mid-scene join: re-apply state — including the CG image if the
-  // current time-stop is a "显示为 CG" one.
-  const checkState = async () => {
-    if (!(await OBR.scene.isReady())) return;
-    const st = await getTimeStopState();
-    if (st.active) {
-      if (!isGM) await interruptInFlightDrag();
-      await showOverlay(isGM, st.cgUrl);
-      notifyClusterState(true);
-    } else {
-      notifyClusterState(false);
+    await lease.opening.catch(() => {});
+    try {
+      await OBR.modal.close(lease.id);
+      windows.delete(lease);
+      lease.failed = false;
+    } catch (error) {
+      // Keep the exact ID for lifecycle retry; a close error is not success.
+      lease.failed = true;
+      await local(TIME_STOP_VIEW, { nonce: lease.nonce, error: true }).catch(log);
+      throw error;
     }
-  };
-  await checkState();
-  // OBR.scene.onReadyChange is added at the shell level — when scene ready
-  // flips and modules need to re-check their state, the shell calls
-  // teardownTimeStop / setupTimeStop. So no need for our own listener.
+  })();
+  lease.closing = work.finally(() => { lease.closing = undefined; });
+  return lease.closing;
+}
+async function syncOverlay(own: Session, force = false) {
+  if (!current(own) || !own.initialized) return;
+  const key = own.ready === true && own.state.active ? JSON.stringify([own.role, own.state.cgUrl]) : "";
+  const existing = [...windows].find(w => w.owner === own && !w.wantsClose && w.key === key);
+  if (!force && own.desiredKey === key && (key === "" ? ![...windows].some(w => w.owner === own) : existing)) return;
+  own.desiredKey = key;
+  const revision = ++own.displayRevision;
+  const closing = [...windows].filter(w => w.owner === own);
+  for (const lease of closing) await closeWindow(lease, own.ready === true);
+  if (!current(own) || revision !== own.displayRevision || !key || own.ready !== true) return;
+  const epoch = own.epoch, nonce = crypto.randomUUID();
+  const url = new URL(assetUrl("timestop-overlay.html"));
+  url.searchParams.set("window", nonce); url.searchParams.set("lang", getLocalLang());
+  if (own.state.cgUrl) url.searchParams.set("cg", own.state.cgUrl);
+  try { if (localStorage.getItem("com.obr-suite/transitions/reduced-motion") === "1") url.searchParams.set("reduced", "1"); } catch {}
+  const lease: WindowLease = { owner: own, id: TIME_STOP_MODAL + "/" + nonce, nonce, key,
+    opening: Promise.resolve(), wantsClose: false, failed: false };
+  windows.add(lease);
+  lease.opening = OBR.modal.open({ id: lease.id, url: url.href, fullScreen: true, hidePaper: true, hideBackdrop: true,
+    disablePointerEvents: own.role === "GM" });
+  try { await lease.opening; }
+  catch (error) { await closeWindow(lease, false).catch(log); throw error; }
+  if (!sceneCurrent(own, epoch) || revision !== own.displayRevision) await closeWindow(lease, false);
 }
 
+/** Interrupt only this player's in-flight selection and restore only our locks. */
+function interruptSelection(own: Session) {
+  const epoch = own.epoch;
+  const marker = crypto.randomUUID();
+  let locked: string[] = [];
+  const job = (async () => {
+    try {
+      const selected = await OBR.player.getSelection();
+      if (!sceneCurrent(own, epoch) || own.role !== "PLAYER" || !selected?.length) return;
+      await OBR.scene.items.updateItems(selected, drafts => {
+        if (!sceneCurrent(own, epoch) || own.role !== "PLAYER") return;
+        for (const item of drafts) if (!item.locked) {
+          locked.push(item.id); item.locked = true;
+          item.metadata[DRAG_LOCK] = { marker, at: Date.now() };
+        }
+      }).catch(log);
+      if (sceneCurrent(own, epoch) && own.role === "PLAYER") await OBR.player.deselect().catch(log);
+      await delay(250);
+    } finally {
+      // During same-scene teardown, the ready listener remains attached until
+      // these restorations drain. A scene switch invalidates the old draft.
+      if (own.ready === true && own.epoch === epoch && locked.length) {
+        await OBR.scene.items.updateItems(locked, drafts => {
+          if (own.ready !== true || own.epoch !== epoch) return;
+          for (const item of drafts) if ((item.metadata[DRAG_LOCK] as any)?.marker === marker) {
+            item.locked = false; delete item.metadata[DRAG_LOCK];
+          }
+        }).catch(log);
+      }
+    }
+  })().catch(log);
+  own.drags.add(job); void job.finally(() => own.drags.delete(job));
+}
+async function cleanLegacyLocks(own: Session) {
+  const epoch = own.epoch, revision = own.roleRevision;
+  if (!sceneCurrent(own, epoch) || own.role !== "GM") return;
+  const expired = (value: unknown) => {
+    const tag = value as { marker?: unknown; at?: unknown } | undefined;
+    return typeof tag?.marker === "string" && typeof tag.at === "number" && tag.at < Date.now() - 1_000;
+  };
+  const items = await OBR.scene.items.getItems(item => item.metadata[LEGACY_LOCK] === true || expired(item.metadata[DRAG_LOCK]));
+  if (!sceneCurrent(own, epoch) || revision !== own.roleRevision || own.role !== "GM" || !items.length) return;
+  await OBR.scene.items.updateItems(items.map(i => i.id), drafts => {
+    if (!sceneCurrent(own, epoch) || revision !== own.roleRevision || own.role !== "GM") return;
+    for (const item of drafts) if (item.metadata[LEGACY_LOCK] === true || expired(item.metadata[DRAG_LOCK])) {
+      item.locked = false; delete item.metadata[LEGACY_LOCK]; delete item.metadata[DRAG_LOCK];
+    }
+  });
+}
+function applyState(own: Session, metadata: Record<string, unknown>) {
+  const wasActive = own.state.active;
+  own.state = readTimeStop(metadata[TIME_STOP_META]); own.hasMetadata = true;
+  if (!current(own) || own.ready !== true) return;
+  if (own.state.active && !wasActive && own.role === "PLAYER") interruptSelection(own);
+  void syncOverlay(own).catch(log); void notify(own);
+}
+async function refreshState(own: Session) {
+  const epoch = own.epoch, revision = ++own.readRevision;
+  const metadata = await OBR.scene.getMetadata();
+  if (!sceneCurrent(own, epoch) || own.readRevision !== revision) return;
+  applyState(own, metadata);
+}
+async function writeState(own: Session, mode: "toggle" | "on" | "cg", itemId?: string) {
+  if (!current(own) || own.busy || own.ready !== true) return;
+  own.busy = true;
+  const epoch = own.epoch, roleRevision = own.roleRevision;
+  const valid = () => sceneCurrent(own, epoch) && own.roleRevision === roleRevision && own.role === "GM";
+  try {
+    if (await role(own) !== "GM" || !valid()) return;
+    let cgUrl: string | null = null;
+    if (mode === "cg") {
+      const items = await OBR.scene.items.getItems([itemId!]);
+      if (!valid()) return;
+      const item = items[0] as Image | undefined;
+      if (!item || item.id !== itemId || item.type !== "IMAGE" || item.layer === "CHARACTER" || !validCgUrl(item.image?.url)) return;
+      cgUrl = item.image.url;
+    }
+    const metadata = await OBR.scene.getMetadata();
+    if (!valid()) return;
+    const previous = readTimeStop(metadata[TIME_STOP_META]);
+    if (mode === "on" && previous.active) return;
+    const active = mode === "toggle" ? !previous.active : true;
+    await OBR.scene.setMetadata({ [TIME_STOP_META]: { active, ...(cgUrl ? { cgUrl } : {}) } });
+    if (!valid()) return;
+    await OBR.broadcast.sendMessage(active ? ON : OFF, {}, { destination: "REMOTE" });
+    if (!valid()) return;
+    await refreshState(own);
+    if (active && valid()) {
+      await cleanLegacyLocks(own).catch(log);
+      if (valid()) await local("com.obr-suite/cluster-row-open", {}).catch(log);
+    }
+  } catch (error) { log(error); }
+  finally { own.busy = false; }
+}
+async function refreshMenu(own: Session) {
+  if (!current(own) || !own.initialized || own.role !== "GM") return;
+  const label = getLocalLang() === "en" ? "Show as CG" : "显示为 CG";
+  if (own.menuLabel === label) return;
+  own.menuTouched = true; own.menuLabel = undefined;
+  await OBR.contextMenu.create({ id: MENU,
+    icons: [{ icon: assetUrl("timestop-icon.svg"), label,
+      filter: { roles: ["GM"], every: [{ key: "type", value: "IMAGE" }, { key: "layer", value: "CHARACTER", operator: "!=" }], min: 1, max: 1 } }],
+    onClick: async context => {
+      if (!current(own) || own.role !== "GM" || context.items.length !== 1) return;
+      await writeState(own, "cg", context.items[0].id);
+    } });
+  own.menuLabel = label;
+}
+async function remoteHint(own: Session, sender: string) {
+  const epoch = own.epoch;
+  if (!sceneCurrent(own, epoch)) return;
+  const peers = await OBR.party.getPlayers();
+  if (!sceneCurrent(own, epoch) || !peers.some(peer => peer.connectionId === sender && peer.role === "GM")) return;
+  // The broadcast is a wake-up hint; image/active values come from the scene.
+  await refreshState(own);
+}
+export async function turnOnTimeStop(): Promise<void> {
+  const own = session;
+  if (own) await writeState(own, "on");
+}
+export async function setupTimeStop(): Promise<void> {
+  if (session) return session.startup;
+  const own: Session = { alive: true, ready: undefined, epoch: 0, role: "PLAYER", roleRevision: 0,
+    connection: "", id: "", initialized: false, readRevision: 0, hasMetadata: false, state: { active: false, cgUrl: null },
+    displayRevision: 0, desiredKey: "", busy: false, menuTouched: false, unsubs: [], drags: new Set() };
+  session = own;
+  own.unsubs.push(OBR.scene.onReadyChange(next => {
+    own.epoch++; own.ready = next; own.readRevision++; own.hasMetadata = false;
+    own.state = { active: false, cgUrl: null };
+    if (!current(own)) return;
+    void syncOverlay(own, true).catch(log);
+    if (next && own.initialized) void refreshState(own).catch(log);
+    void notify(own);
+  }), OBR.scene.onMetadataChange(metadata => {
+    if (!current(own) || own.ready === false) return;
+    own.readRevision++; applyState(own, metadata);
+  }), OBR.player.onChange(player => {
+    if (!current(own)) return;
+    const identityChanged = !!own.id && own.id !== player.id;
+    const permissionChanged = identityChanged || own.role !== player.role;
+    if (permissionChanged) own.roleRevision++;
+    own.role = player.role;
+    if (identityChanged) { own.state = { active: false, cgUrl: null }; own.hasMetadata = false; }
+    own.id = player.id;
+    if (permissionChanged) void syncOverlay(own, true).catch(log);
+    if (identityChanged && own.ready === true && own.initialized) void refreshState(own).catch(log);
+    void menuWork(() => refreshMenu(own)).catch(log);
+  }), onLangChange(() => { if (current(own)) void menuWork(() => refreshMenu(own)).catch(log); }));
+  own.startup = (async () => {
+    await cleanupRetired();
+    if (!current(own)) return;
+    const roleRevision = own.roleRevision, epoch = own.epoch;
+    const [initialRole, connection, id, ready] = await Promise.all([
+      OBR.player.getRole(), OBR.player.getConnectionId(), OBR.player.getId(), OBR.scene.isReady(),
+    ]);
+    if (!current(own)) return;
+    own.connection = connection;
+    if (!own.id) own.id = id;
+    if (own.roleRevision === roleRevision) own.role = initialRole;
+    if (own.epoch === epoch) own.ready = ready;
+    if (!connection) throw new Error("Missing time-stop connection");
+    own.initialized = true;
+    const windowMessage = (event: { connectionId: string; data: unknown }) => {
+      if (!current(own) || event.connectionId !== own.connection) return undefined;
+      const nonce = (event.data as { nonce?: unknown })?.nonce;
+      return [...windows].find(w => w.owner === own && w.nonce === nonce);
+    };
+    own.unsubs.push(
+      OBR.broadcast.onMessage(TOGGLE, event => { if (current(own) && event.connectionId === own.connection) void writeState(own, "toggle"); }),
+      OBR.broadcast.onMessage(ON, event => { void remoteHint(own, event.connectionId).catch(log); }),
+      OBR.broadcast.onMessage(OFF, event => { void remoteHint(own, event.connectionId).catch(log); }),
+      OBR.broadcast.onMessage(TIME_STOP_READY, event => {
+        const lease = windowMessage(event); if (!lease) return;
+        void local(lease.wantsClose || own.ready !== true ? TIME_STOP_HIDE : TIME_STOP_VIEW, { nonce: lease.nonce }).catch(log);
+      }),
+      OBR.broadcast.onMessage(TIME_STOP_HIDDEN, event => { windowMessage(event)?.hidden?.(); }),
+      OBR.broadcast.onMessage(TIME_STOP_RETRY, event => {
+        const lease = windowMessage(event); if (!lease?.failed) return;
+        void closeWindow(lease, false).then(() => syncOverlay(own, true)).catch(log);
+      }),
+    );
+    await menuWork(() => refreshMenu(own));
+    if (!current(own)) return;
+    if (own.ready === true) {
+      if (!own.hasMetadata) await refreshState(own);
+      else {
+        if (own.state.active && own.role === "PLAYER") interruptSelection(own);
+        await syncOverlay(own); await notify(own);
+      }
+      await cleanLegacyLocks(own).catch(log);
+    }
+  })();
+  return own.startup;
+}
+async function cleanupRetired() {
+  const pending = [...retired];
+  const results = await Promise.allSettled([
+    menuWork(async () => {
+      for (const own of pending) if (own.menuTouched) {
+        await OBR.contextMenu.remove(MENU); own.menuTouched = false;
+      }
+    }),
+    ...pending.map(async own => {
+      for (const lease of [...windows].filter(w => w.owner === own)) await closeWindow(lease, false);
+      await Promise.allSettled([...own.drags]);
+      own.unsubs.splice(0).forEach(off => off());
+    }),
+  ]);
+  for (const own of pending) if (!own.menuTouched && ![...windows].some(w => w.owner === own) && !own.unsubs.length) retired.delete(own);
+  const errors = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+  if (errors.length) throw new AggregateError(errors.map(r => r.reason), "Time-stop cleanup failed");
+}
 export async function teardownTimeStop(): Promise<void> {
-  // MENU_ID was removed in an earlier version but we still try in case
-  // an old listener lingered. CG_MENU_ID is the live one (#7).
-  try { await OBR.contextMenu.remove(MENU_ID); } catch {}
-  try { await OBR.contextMenu.remove(CG_MENU_ID); } catch {}
-  for (const u of unsubs.splice(0)) u();
-  await hideOverlay();
+  const own = session;
+  if (own) { session = undefined; own.alive = false; own.displayRevision++; own.readRevision++; retired.add(own); }
+  await cleanupRetired();
 }

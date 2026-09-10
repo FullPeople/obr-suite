@@ -156,8 +156,11 @@ const TR = {
   muDefaultsFail: { zh: "无法加载默认曲库：{err}", en: "Couldn't load the default library: {err}" },
 
   // local-mute banner
-  muMutedBanner: { zh: "本地已静音 · 音乐正在枭熊（OBR）内播放给所有人", en: "Muted locally · music is playing for everyone inside OBR" },
-  muAudibleBanner: { zh: "本地也在播放 · 已同步到枭熊（你会听到两份声音）", en: "Also playing locally · synced to OBR (you'll hear two copies)" },
+  muMutedBanner: { zh: "仅网页静音 · 不影响枭熊音量或暂停状态", en: "Website muted only · Owlbear volume and playback are unchanged" },
+  muAudibleBanner: { zh: "网页声音已启用 · 与枭熊共享播放状态", en: "Website sound enabled · playback state is shared with Owlbear" },
+  muLocalSoundBlocked: { zh: "网页声音被浏览器拦截，请点击「在本地也播放」重试；枭熊播放不受影响。", en: "Website sound was blocked. Click Play locally too to retry; Owlbear playback is unaffected." },
+  muRoomPermission: { zh: "当前没有房间音乐控制权限，已恢复房间状态。", en: "You cannot control room music right now. Room playback was restored." },
+  muRoomCommandFailed: { zh: "房间音乐未确认此操作，请查看枭熊连接后重试。", en: "Room music did not confirm this action. Check the Owlbear connection, then retry." },
   muPlayLocal: { zh: "在本地也播放", en: "Play locally too" },
   muMuteLocal: { zh: "本地静音", en: "Mute locally" },
 
@@ -166,12 +169,12 @@ const TR = {
   muPairCopied: { zh: "配对码 {code} 已复制", en: "Pairing code {code} copied" },
   muPairCopyManual: { zh: "配对码：{code}（手动复制）", en: "Pairing code: {code} (copy manually)" },
   muPairReady: { zh: "配对码 {code} 已就绪，等枭熊插件连接…", en: "Pairing code {code} ready — waiting for the OBR plugin…" },
-  muXiongConnected: { zh: "枭熊已连接 · 已自动静音本地，音乐在枭熊内播放", en: "OBR connected · muted locally; music plays inside OBR" },
+  muXiongConnected: { zh: "枭熊已连接 · 已仅静音网页，枭熊音量不变", en: "OBR connected · website muted only; Owlbear volume unchanged" },
   muXiongDisconnected: { zh: "枭熊断开，回到等待", en: "OBR disconnected — back to waiting" },
   muChannelError: { zh: "通道错误：{err}", en: "Channel error: {err}" },
   muPairFail: { zh: "配对失败：{err}", en: "Pairing failed: {err}" },
   muPeerLoadFail: { zh: "加载 PeerJS 失败：{err}", en: "Failed to load PeerJS: {err}" },
-  muLeaveConfirm: { zh: "已配对的枭熊插件会失去同步。确定离开？", en: "The paired OBR plugin will lose sync. Leave anyway?" },
+  muLeaveConfirm: { zh: "离开后网页控制会断开，枭熊后台继续播放。确定离开？", en: "Leaving disconnects website controls. Owlbear background keeps playing. Leave?" },
   muLibLoadFail: { zh: "库加载失败：{err}", en: "Library failed to load: {err}" },
 
   // share.js

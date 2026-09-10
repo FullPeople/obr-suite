@@ -1,35 +1,23 @@
-<!DOCTYPE html>
-<html lang="zh">
-<head>
-<meta charset="UTF-8">
+<!doctype html>
+<html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cinematic view</title>
 <style>
-*{margin:0;padding:0}
-html,body{height:100%;overflow:hidden;background:transparent}
-/* Cinematic letterbox bars — the default time-stop look. */
-.cinema{position:fixed;left:0;right:0;height:18vh;background:rgba(0,0,0,0.75);pointer-events:none;opacity:0;transition:opacity 1.2s ease}
-.cinema.show{opacity:1}
-.top{top:0}
-.bottom{bottom:0}
-/* 2026-05-14 (#7) — "显示为 CG" mode. A fullscreen black field with
-   the chosen image centred + aspect-correct (object-fit:contain →
-   letterboxed black where the image doesn't reach). When `.dm` is
-   set the whole field drops to 0.1 opacity so the DM can keep
-   working behind it (the modal is also opened pass-through for the
-   DM). Mutually exclusive with the cinematic bars — CG mode never
-   shows them. */
-.cg-wrap{position:fixed;inset:0;background:#000;display:none;align-items:center;justify-content:center}
-.cg-wrap.on{display:flex}
-.cg-wrap.dm{opacity:0.1}
-/* width/height:100% (NOT max-*) so even a smaller-than-screen image
-   scales UP to fill the viewport as much as possible; object-fit:
-   contain keeps aspect ratio and letterboxes the remainder black. */
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:transparent;font-family:system-ui,sans-serif}
+.cinema{position:fixed;left:0;right:0;height:18vh;background:#000c;pointer-events:none;opacity:0;transition:opacity .55s ease;z-index:2}
+.cinema.show{opacity:1}.top{top:0}.bottom{bottom:0}
+.cg-wrap{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .6s ease;pointer-events:none;z-index:3}
+.cg-wrap.visible{opacity:1}.cg-wrap.visible.dm{opacity:.1}
 .cg-img{width:100%;height:100%;object-fit:contain;display:block}
-</style>
-</head>
-<body>
-<div class="cinema top" id="top"></div>
-<div class="cinema bottom" id="bottom"></div>
+#notice,#retry,#exit{position:fixed;z-index:4;left:50%;transform:translateX(-50%);color:#f2f2f2;background:#10131de6;font-size:14px;text-align:center}
+#notice{bottom:7%;padding:0 14px;line-height:2;border-radius:6px}#notice:empty{display:none}
+#retry,#exit{bottom:2%;border:1px solid #d5dbe588;border-radius:6px;padding:7px 12px;cursor:pointer}#retry[hidden],#exit[hidden]{display:none}
+.connection-error #notice{bottom:auto;top:36%;width:min(440px,88%);padding:12px}
+.connection-error #retry{bottom:auto;top:55%}.connection-error #exit{bottom:auto;top:66%}
+.reduced .cinema,.reduced .cg-wrap{transition-duration:.1s}
+@media(prefers-reduced-motion:reduce){.cinema,.cg-wrap{transition-duration:.1s}}
+</style></head><body>
+<div class="cinema top" id="top"></div><div class="cinema bottom" id="bottom"></div>
 <div class="cg-wrap" id="cgWrap"><img class="cg-img" id="cgImg" alt=""></div>
+<p id="notice" role="status"></p><button id="retry" hidden></button><button id="exit" hidden></button>
 <script type="module" src="/src/timestop-overlay.ts"></script>
-</body>
-</html>
+</body></html>

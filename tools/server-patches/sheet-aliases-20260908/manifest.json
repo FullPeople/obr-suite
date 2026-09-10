@@ -1,0 +1,48 @@
+{
+  "format": "obr-server-parser-patch/v1",
+  "file": "parser.py",
+  "encoding": "utf-8",
+  "line_endings": "LF",
+  "before_sha256": "b7f73c7fc06e11679b696b7b08e528ae9aaf455518a4f03bcb2eb1c645b6c9c1",
+  "after_sha256": "9791888eddaac50e771baaff0cc7e738ef1b5cb18b52a954344ccd2224512c34",
+  "before_bytes": 74279,
+  "after_bytes": 78470,
+  "patch_sha256": "6d6adf180d67beb1449757c7f559983d4606fe653df353eaa60d07e03d81fd43",
+  "patch_bytes": 10954,
+  "historical_crlf_after_sha256": "ee726e820e2ae07a89f8ae08dd142bda0e91fdd9b5e4a97a934939a98f035d26",
+  "tests": [
+    {
+      "file": "test_sheet_aliases.py",
+      "sha256": "d7d518221838dd826017f94fd5a5da75f38f4569c9fda365a4cf8c8bbfdb6df8",
+      "source_sha256": "119f334d956e284060a25a03535e89f27ae15883cfa9dd0174aca0d6721b3c99",
+      "bytes": 13981
+    },
+    {
+      "file": "test_sheet_aliases_mutations.py",
+      "sha256": "12af7420fd0b60833e4e0a410d88608e38e23a1393ebe517c8d037fda95073ca",
+      "source_sha256": "12af7420fd0b60833e4e0a410d88608e38e23a1393ebe517c8d037fda95073ca",
+      "bytes": 3220
+    },
+    {
+      "file": "test_auto_resources.py",
+      "sha256": "8df1c3c1f5d09515e274d28f3de2395334d9e3204a0e72446b8bcb64415b3db2",
+      "source_sha256": "8df1c3c1f5d09515e274d28f3de2395334d9e3204a0e72446b8bcb64415b3db2",
+      "bytes": 3698
+    }
+  ],
+  "expected_tests": 26,
+  "expected_mutations": 5,
+  "workbooks": [
+    {
+      "name": "DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx",
+      "version": "2014",
+      "sha256": "94444fda4206d579125418b0007b89c414b86c27d6b98655f81f3f1ce65e8fe6"
+    },
+    {
+      "name": "DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx",
+      "version": "2024",
+      "sha256": "264fc65569e3e80932544af548830ca70f10ee308493c8b0234608fcd01c9b04"
+    }
+  ],
+  "deployed": false
+}

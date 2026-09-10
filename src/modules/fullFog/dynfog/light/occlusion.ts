@@ -1,46 +1,24 @@
-// Which lights may this client see?
-//
-// Owlbear renders every `Light` item in the local scene, so without
-// this pass a player sees the glow of every torch in the dungeon —
-// including the one an ambushing NPC is carrying three rooms away. Ugly
-// in the best case, an information leak in the worst.
-//
-// The rule, per the GM's brief: a light belonging to someone else is
-// hidden UNLESS a straight line from one of your own lights to it is
-// unobstructed by a wall. Distance is deliberately not part of it —
-// "can I see that lit thing from here" is a line-of-sight question, and
-// a torch across a wide-open field is a torch you can see.
-//
-//   own light                    always visible
-//   ambient light                always visible (fixed room lighting —
-//                                sconces, braziers, daylight; the GM
-//                                sets the flag per light)
-//   any other light              visible iff some own, visible light
-//                                has clear line of sight to it
-//
-// Consequences worth knowing:
-//   * A player carrying no light sees no foreign lights at all, except
-//     ambient ones. That is the intended reading of the rule, and it is
-//     why `ambient` exists.
-//   * Reachability is NOT transitive: a chain of NPC torches down a
-//     corridor lights up one link at a time as you get line of sight to
-//     each. The GM signed off on that simplification.
-//   * The GM is exempt — they see everything, always.
-//
-// The pass runs after every reconcile (see `Reconciler.onAfterReconcile`),
-// which is once per committed token move; Owlbear does not publish item
-// changes mid-drag, so nothing here runs on a per-frame path.
+// Per-client authorization and illumination are separate. PRIMARY and
+// AUXILIARY can reveal only authorized personal/team sources. Other lights
+// become SECONDARY: they may illuminate an already authorized PRIMARY view,
+// with optional non-transitive wall reachability filtering. An automatic
+// ambient light keeps its deliberate public vision exemption; explicit owner
+// restrictions and private cards take precedence. Hidden ancestors never
+// reveal. The GM sees visible sources. This pass runs on committed changes,
+// not per frame, and does not approximate or record historical fog.
 
 import type { Reconciler } from "../reconcile/Reconciler";
 import { LightReactor, SelfLightReactor } from "../reconcile/reactors/LightReactor";
 import { WallReactor } from "../reconcile/reactors/WallReactor";
 import {
   getLightOcclusionEnabled,
-  getPlayerId,
   getSceneDpi,
+  getShareVisionEnabled,
+  getVisionContext,
   isGM,
 } from "../runtime";
 import { EMPTY_WALL_INDEX, WallIndex } from "./wallIndex";
+import { resolveVisionSource } from "./visionPolicy";
 
 /**
  * How far into the sight line to ignore walls, as a fraction of one
@@ -75,38 +53,42 @@ export class LightOcclusion {
     const selfLights = this.reconciler.find(SelfLightReactor)?.getActors() ?? [];
     if (actors.length === 0 && selfLights.length === 0) return;
 
-    // GM sees everything; so does everyone when the feature is off.
-    // Both paths must actively re-allow, not just skip — the setting
-    // can be turned off while lights are already hidden.
-    if (isGM() || !getLightOcclusionEnabled()) {
-      for (const actor of actors) actor.setAllowed(true);
-      for (const actor of selfLights) actor.setAllowed(true);
-      this.reset();
-      return;
-    }
-
-    const me = getPlayerId();
-    const own = actors.filter(
-      (actor) => actor.ownerId === me && actor.parentVisible,
-    );
-    const index = this.ensureIndex();
+    const context = getVisionContext();
+    const shared = getShareVisionEnabled();
+    const gm = isGM();
+    const occlude = getLightOcclusionEnabled();
+    const sources = new Map(actors.map(actor => {
+      const parent = this.reconciler.getItem(actor.parentId);
+      const source = parent ? resolveVisionSource(parent, context, id => this.reconciler.getItem(id))
+        : { visible: false, personal: false, team: false, publicAmbient: false };
+      return [actor, source] as const;
+    }));
+    // SECONDARY illuminates a PRIMARY's field; AUXILIARY reveals but does
+    // not activate SECONDARY. Neither is an extra primary sight-line anchor.
+    const own = actors.filter(actor => {
+      const source = sources.get(actor)!;
+      return source.visible && actor.lightType === "PRIMARY" && (source.personal || (context.playerIds.has(context.playerId) && shared && source.team));
+    });
+    const index = !gm && occlude ? this.ensureIndex() : EMPTY_WALL_INDEX;
+    if (gm || !occlude) this.reset();
     const trim = getSceneDpi() * TRIM_CELLS;
 
     const verdict = new Map<string, boolean>();
     for (const actor of actors) {
-      const allowed =
-        actor.ownerId === me ||
-        actor.ambient ||
-        own.some((source) => !index.blocked(source.position, actor.position, trim));
-      actor.setAllowed(allowed);
-      verdict.set(actor.parentId, allowed);
+      const source = sources.get(actor)!;
+      const authorized = gm || source.personal || (context.playerIds.has(context.playerId) && shared && source.team) || (actor.ambient && source.publicAmbient);
+      const reveals = source.visible && authorized && actor.lightType !== "SECONDARY";
+      const allowed = source.visible && (gm || authorized || !occlude ||
+        own.some(origin => !index.blocked(origin.position, actor.position, trim)));
+      // Foreign revealing lights may still illuminate an authorized PRIMARY's
+      // view. Turning off light occlusion never grants them independent vision.
+      actor.setAccess(allowed, reveals);
+      verdict.set(actor.parentId, allowed && reveals);
     }
 
-    // A self light has no config of its own — it rides on whatever its
-    // parent's main light was allowed. Defaulting to true covers the
-    // impossible case of a self light without a main light.
+    // A self light reveals fog too: illumination-only permission is not enough.
     for (const actor of selfLights) {
-      actor.setAllowed(verdict.get(actor.parentId) ?? true);
+      actor.setAllowed(verdict.get(actor.parentId) ?? false);
     }
   }
 

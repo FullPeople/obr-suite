@@ -16,7 +16,7 @@
 // Anything else returns null and the caller should leave the value
 // unchanged (input box reverts).
 
-import OBR from "@owlbear-rodeo/sdk";
+import OBR, { type Item } from "@owlbear-rodeo/sdk";
 
 export const BUBBLES_META_KEY = "com.obr-suite/bubbles/data";
 export const EXTERNAL_BUBBLES_META_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
@@ -89,11 +89,13 @@ export async function readBubbles(itemId: string): Promise<BubblesData> {
 export async function patchBubbles(
   itemId: string,
   patch: Partial<BubblesData>,
+  shouldApply?: (item: Item) => boolean,
 ): Promise<BubblesData> {
   let finalState: BubblesData = {};
   try {
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       for (const d of drafts) {
+        if (shouldApply && !shouldApply(d)) continue;
         // Read each namespace independently — they may carry
         // different sets of fields (esp. when the upstream extension
         // owns the token).
