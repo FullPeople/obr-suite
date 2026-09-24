@@ -40,6 +40,7 @@
 
 import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "./asset-base";
+import { renderInlineNoSpan } from "./announcement-inline";
 
 const MODAL_ID = "com.obr-suite/dm-announcement";
 
@@ -160,24 +161,6 @@ function renderInline(text: string): string {
   return out;
 }
 
-function renderInlineNoSpan(text: string): string {
-  let out = escapeHtml(text);
-  // **bold**
-  out = out.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
-  // `code`
-  out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
-  // bare email → mailto link
-  out = out.replace(
-    /([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g,
-    '<a href="mailto:$1">$1</a>'
-  );
-  // bare URL -> clickable link
-  out = out.replace(
-    /(https?:\/\/[^\s<]+)/g,
-    '<a href="$1" target="_blank" rel="noopener">$1</a>'
-  );
-  return out;
-}
 
 function renderSection(s: Section): string {
   if (s.kind === "release" || s.kind === "history") {

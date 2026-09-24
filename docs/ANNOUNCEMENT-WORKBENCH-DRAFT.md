@@ -1,3 +1,7 @@
+# 稳定版引流公告定稿
+
+2026-09-24：作者已确认原文并授权发布；实际内容位于 `public/announcement.md`。
+
 # DM 公告
 
 ## 新版 Full Suite [notice]

@@ -361,8 +361,12 @@ function chronologicalFlow(): GroupedRow[] {
   return out;
 }
 
+let renderedRolls=new Set<string>();
 function render(): void {
   const rows = chronologicalFlow();
+  const nextRolls=new Set(rows.flatMap(row=>row.members.map(entry=>entry.rollId)));
+  const newContent=[...nextRolls].some(id=>!renderedRolls.has(id));
+  renderedRolls=nextRolls;
   if (!rows.length) {
     rowsEl.innerHTML = `<div class="empty">${tt("diceHistEmpty")}</div>`;
     if (headHint) headHint.textContent = "";
@@ -410,6 +414,8 @@ function render(): void {
       </div>
     `;
   }).join("");
+
+  if(WORKBENCH_DEV&&newContent)document.dispatchEvent(new Event('suite-dice-content'));
 
   rowsEl.querySelectorAll<HTMLDivElement>(".row").forEach((row) => {
     row.addEventListener("click", () => {

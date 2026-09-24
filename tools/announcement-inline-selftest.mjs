@@ -1,0 +1,17 @@
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+import ts from 'typescript';
+const source=readFileSync(new URL('../src/announcement-inline.ts',import.meta.url),'utf8');
+const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {renderInlineNoSpan:render}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
+const links=render('[**安装测试版**](https://obr.dnd.center/suite-dev/manifest-dev.json) · [**打开单机版**](https://obr.dnd.center/card/)');
+assert.equal((links.match(/<a /g)||[]).length,2);
+assert.ok(links.includes('<b>安装测试版</b></a>'));
+assert.ok(links.includes('href="https://obr.dnd.center/card/"'));
+assert.ok(!links.includes('json)'));
+assert.ok(!render('[恶意](javascript:alert(1))').includes('<a'));
+assert.ok(!render('<img src=x onerror=alert(1)>').includes('<img'));
+assert.ok(render('[链接](https://example.test/"onclick="x)').includes('&quot;'));
+assert.equal(render('`https://example.test`'),'<code>https://example.test</code>');
+assert.equal((render('https://example.test mail@example.test').match(/<a /g)||[]).length,2);
+console.log('Announcement inline: 9 assertions passed');

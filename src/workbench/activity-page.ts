@@ -49,7 +49,9 @@ export function setupActivityPage(){
  function display(data:WorkbenchNotice):WorkbenchNotice{
   return allowed(data)?data:{noticeId:data.noticeId,tokenId:'',summary:data.privateSummary||'有人调整了资源',resource:{id:'private',name:data.privateSummary||'有人调整了资源',current:0,max:0,type:'number',icon:'gem'},delta:0,prevValue:0};
  }
- function render(){
+ const newest=()=>{flow.scrollTop=flow.scrollHeight;requestAnimationFrame(()=>{flow.scrollTop=flow.scrollHeight;});};
+ document.addEventListener('suite-dice-content',newest);
+ function render(followNew=false){
   const atBottom=flow.scrollHeight-flow.clientHeight-flow.scrollTop<12;
   clearTimeout(timer);const now=Date.now();for(const [id,row] of active)if(row.expires<=now)active.delete(id);
   notices.replaceChildren();
@@ -67,8 +69,8 @@ export function setupActivityPage(){
    const bar=document.createElement('span');bar.className='activity-countdown';bar.setAttribute('aria-hidden','true');el.append(bar);notices.append(el);
    const total=data.shared?20000:8000;bar.animate([{transform:`scaleX(${Math.min(1,(row.expires-now)/total)})`},{transform:'scaleX(0)'}],{duration:row.expires-now,fill:'forwards'});
   }
-  if(atBottom)flow.scrollTop=flow.scrollHeight;
-  persist();if(active.size)timer=setTimeout(render,Math.max(1,Math.min(...[...active.values()].map(v=>v.expires))-Date.now()));
+  if(followNew||atBottom)newest();
+  persist();if(active.size)timer=setTimeout(()=>render(),Math.max(1,Math.min(...[...active.values()].map(v=>v.expires))-Date.now()));
  }
  const announce=()=>{if(instance)void OBR.broadcast.sendMessage(PREFIX+'ready',{instance},{destination:'LOCAL'}).catch(()=>{});};
  // Subscribe before SDK identity reads: fast repeated edits must not wait for audio or paint.
@@ -79,7 +81,7 @@ export function setupActivityPage(){
   if(!seen.has(id)){
    if(data.entry)try{data.entry=sharedEntry(data.entry);}catch{delete data.entry;}
    seen.set(id,Date.now());if(seen.size>256)seen.delete(seen.keys().next().value!);
-   active.set(id,{data:{...data,noticeId:id},expires:Date.now()+(data.shared?20000:8000)});while(active.size>50)active.delete(active.keys().next().value!);render();
+   active.set(id,{data:{...data,noticeId:id},expires:Date.now()+(data.shared?20000:8000)});while(active.size>50)active.delete(active.keys().next().value!);render(true);
    setTimeout(()=>{try{sfxResourceToast();}catch{}},0);
   }
   void OBR.broadcast.sendMessage(PREFIX+'ack',{id,instance},{destination:'LOCAL'}).catch(()=>{});
@@ -87,5 +89,5 @@ export function setupActivityPage(){
  OBR.scene.onReadyChange(value=>{if(!value){active.clear();render();}});
  OBR.player.onChange(value=>{identityChanged=true;role=value.role;player=value.id;render();});
  void Promise.all([OBR.player.getConnectionId(),OBR.player.getRole(),OBR.player.getId()]).then(([id,r,p])=>{connection=id;if(!identityChanged){role=r;player=p;}render();void OBR.broadcast.sendMessage(PREFIX+'mounted',{}, {destination:'LOCAL'}).catch(()=>{});announce();}).catch(()=>{});
- subscribeToSfx();render();
+ subscribeToSfx();render(true);
 }

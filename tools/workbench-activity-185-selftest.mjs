@@ -43,10 +43,15 @@ try{
  results.push('shared rule reaches local and remote users; markup remains inert');
  await player.frameLocator('#activity').locator('[data-notice-id="share"]').click();await expect.poll(()=>player.evaluate(()=>messages.filter(m=>m.channel.endsWith('/open-wiki')).length)).toBe(1);assert.equal(await gm.evaluate(()=>messages.filter(m=>m.channel.endsWith('/open-wiki')).length),0);results.push('click requests only the clicking user Wiki');
  const before=await gm.evaluate(()=>opens);const start=Date.now();await Promise.all(Array.from({length:8},(_,i)=>publish(notice('burst-'+i,{prevValue:i,resource:{id:'points',name:'连续调整',current:i+1,max:10,type:'number',icon:'gem'},delta:1}))));await expect(gm.frameLocator('#activity').locator('.activity-notice')).toHaveCount(9);assert.equal(await gm.evaluate(()=>opens),before);results.push({name:'8 rapid edits keep one panel and distinct notices',elapsedMs:Date.now()-start});
+ const flow=gm.frameLocator('#activity').locator('.activity-flow');
+ await flow.evaluate(el=>{el.scrollTop=0;});await publish(notice('scroll186'));await expect.poll(()=>flow.evaluate(el=>el.scrollHeight-el.clientHeight-el.scrollTop)).toBeLessThan(2);results.push('new notice returns a manually scrolled panel to its bottom');
+ await flow.evaluate(el=>{el.scrollTop=0;});await publish(notice('scroll186'));assert.equal(await flow.evaluate(el=>el.scrollTop),0);results.push('duplicate notice does not interrupt reading older messages');
  await publish(notice('share',{entry:rule,shared:true}));await expect(gm.frameLocator('#activity').locator('[data-notice-id="share"]')).toHaveCount(1);results.push('duplicate delivery does not duplicate or reset notice');
  await publish(notice('private',{privateFor:['owner'],privateSummary:'有人恢复了资源',entry:{...rule,name:'秘密词条'},summary:'秘密角色恢复了秘密词条'}));await expect(player.frameLocator('#activity').locator('[data-notice-id="private"]')).not.toContainText('秘密');const remote=await gm.evaluate(()=>messages.find(m=>m.channel==='com.obr-suite/resources/changed'&&m.data.noticeId==='private').data);assert.equal(remote.entry,undefined);assert(!JSON.stringify(remote).includes('秘密'));results.push('locked notices redact entry and values before remote delivery');
  const roll={itemId:null,dice:[{type:'d20',value:12}],winnerIdx:0,modifier:3,label:'骰子保留验收',total:15,rollerId:'GM',rollerName:'GM',rollerColor:'#aaa',rollId:'dice-forever',ts:Date.now()};
+ await flow.evaluate(el=>{el.scrollTop=0;});
  await gm.evaluate(roll=>{emit('com.obr-suite/dice-roll',roll);emit('com.obr-suite/dice-history-reveal',{rollId:roll.rollId});},roll);await expect(gm.frameLocator('#activity').locator('#rows .row')).toHaveCount(1);
+ await expect.poll(()=>flow.evaluate(el=>el.scrollHeight-el.clientHeight-el.scrollTop)).toBeLessThan(2);results.push('new dice history content scrolls the unified container to the bottom');
  await gm.screenshot({path:join(out,'activity-panel.png')});
  // Force an iframe replacement as Owlbear may do on viewport/layout changes.
  await gm.evaluate(()=>{reopen=true;emit('com.obr-suite/panel-reset',{});});
