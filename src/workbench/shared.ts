@@ -3,7 +3,7 @@ import {getState} from '../state';
 import type {Relay} from './relay';
 import {workbenchObservation} from './observation';
 const KEY='com.obr-suite/workbench/shared',CHANGED='com.obr-suite/workbench/shared-changed';
-export const defaultRules=()=>({edition:'2024',sourceMode:'both',profile:{enabledSources:['PHB','XPHB'],optional:{feats:true,multiclass:false,legacy:false},exceptions:{}},packs:[],customEntries:[]});
+export const defaultRules=()=>({edition:'2024',sourceMode:'both',profile:{enabledSources:['PHB','XPHB'],autoSourceDefaults:['PHB','XPHB'],optional:{feats:true,multiclass:false,legacy:false},exceptions:{}},packs:[],customEntries:[]});
 export function sharedDocuments(relay:Relay){
  let cache:{key:string;revision:number;data:any}|undefined;
  const room=(OBR.room.id||'default').replace(/[^a-zA-Z0-9_-]/g,'_');
