@@ -1,0 +1,13 @@
+import {build} from 'rolldown';
+import {readFileSync,writeFileSync,mkdirSync,copyFileSync} from 'node:fs';
+import {resolve,join} from 'node:path';
+const root=resolve(import.meta.dirname,'..');
+const template=resolve(process.argv[2]||join(root,'dm-announcement.html'));
+const output=resolve(process.argv[3]||join(root,'dist-announcement'));
+mkdirSync(output,{recursive:true});
+const bundle=await build({input:join(root,'src/dm-announcement.ts'),plugins:[{name:'stable-base',transform(code){return code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/suite/'));}}],output:{dir:join(output,'assets'),entryFileNames:'announcement186-[hash].js',chunkFileNames:'announcement186-[name]-[hash].js',format:'esm'}});
+const main=bundle.output.find(c=>c.type==='chunk'&&c.isEntry).fileName;
+const html=readFileSync(template,'utf8').replace(/\s*<link[^>]+rel="modulepreload"[^>]*>/g,'').replace(/<script type="module"[^>]*src="[^"]+"[^>]*><\/script>/,`<script type="module" crossorigin src="/suite/assets/${main}"></script>`);
+writeFileSync(join(output,'dm-announcement.html'),html);
+copyFileSync(join(root,'public/announcement.md'),join(output,'announcement.md'));
+console.log('Stable announcement ready: '+main);
