@@ -1,11 +1,11 @@
 # Full Suite 开发版
 
-角色卡与 Wiki、总览、资源与公共仓库、投骰、音乐及三龙牌的枭熊集成版。当前发布 **1.0.186-dev**。稳定版仓库与部署保持独立。
+角色卡与 Wiki、总览、资源与公共仓库、投骰、音乐及三龙牌的枭熊集成版。当前发布 **1.0.187-dev**。稳定版仓库与部署保持独立。
 
 - [安装开发版](https://obr.dnd.center/suite-dev/manifest-dev.json)
 - [角色卡与单机版源码](https://github.com/FullPeople/DND-card-web)
 - [单机角色卡与 Wiki](https://fullpeople.github.io/DND-card-web/)
-- [最终发布记录](docs/WORKBENCH_RELEASE_186.md)
+- [最终发布记录](docs/WORKBENCH_RELEASE_187.md)
 - [连续修改资源的183修复与验证边界](docs/WORKBENCH_RESOURCE_183.md)
 
 ## 构建
