@@ -24,12 +24,21 @@ export interface Monster {
 export type MonsterEdition = "2014" | "2024" | "other";
 
 export interface ParsedMonster {
+  /** Display-only provenance; binding still uses source + engName. */
+  contentLanguage?: "zh" | "en" | "auto";
+  authored?: boolean;
+  aliases?: string[];
+  sizeCode?: string;
   name: string;
   engName: string;
   source: string;
   ac: number;
   hp: number;
   dexMod: number;
+  /** The stat block's own 先攻 bonus. Usually the DEX modifier, but 2024-era
+   *  records print their own (`initiative` / `initiative.proficiency`), so the
+   *  initiative tracker must use this rather than `dexMod`. */
+  initiative: number;
   cr: string;
   size: string;
   type: string;

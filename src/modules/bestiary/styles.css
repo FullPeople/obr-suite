@@ -54,6 +54,140 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.transform-policy {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  background: rgba(245, 166, 35, 0.10);
+  border-bottom: 1px solid rgba(245, 166, 35, 0.28);
+}
+
+.transform-policy-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #f5d76e;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.transform-policy-title span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transform-policy-chip,
+.transform-policy-note {
+  color: var(--text2);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.transform-policy-chip {
+  flex-shrink: 0;
+  max-width: 54%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transform-policy-note {
+  margin-top: 4px;
+}
+
+.transform-hp-mode {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+.transform-hp-mode-label {
+  flex-shrink: 0;
+  color: var(--text2);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.transform-hp-mode-btn {
+  height: 22px;
+  min-width: 0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.transform-hp-mode-btn:hover {
+  border-color: rgba(245, 166, 35, 0.55);
+  color: var(--text);
+}
+
+.transform-hp-mode-btn.on {
+  background: rgba(245, 166, 35, 0.18);
+  border-color: rgba(245, 166, 35, 0.65);
+  color: #f5d76e;
+}
+
+.transform-policy-controls {
+  display: grid;
+  grid-template-columns: auto minmax(92px, 1fr) 64px 64px auto auto;
+  gap: 5px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.transform-policy-input {
+  min-width: 0;
+  height: 22px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 0 6px;
+  font-size: 10.5px;
+  font-family: inherit;
+  outline: none;
+}
+
+.transform-policy-input:focus {
+  border-color: var(--gold);
+}
+
+.transform-policy-input::placeholder {
+  color: var(--text2);
+  opacity: 0.75;
+}
+
+.transform-policy-save {
+  height: 22px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+.transform-policy-save:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 430px) {
+  .transform-policy-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+  .transform-policy-type {
+    grid-column: span 2;
+  }
+}
+
 .header-top {
   display: flex;
   align-items: center;
@@ -281,6 +415,30 @@ body {
 
 .list::-webkit-scrollbar { width: 3px; }
 .list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Row-window status and the paging control. The library holds thousands of
+   monsters, so the panel always states the real total and grows the rendered
+   window on scroll — a fully loaded library must never look like it stopped. */
+.list-count {
+  flex: 0 0 auto;
+  padding: 2px 9px 4px;
+  color: var(--text2);
+  font-size: 11px;
+}
+.list-more {
+  display: block;
+  width: 100%;
+  margin: 6px 0 10px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text2);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.list-more:hover { border-color: var(--text); color: var(--text); }
 
 /* Monster card */
 .card {

@@ -27,6 +27,8 @@ import OBR from "@owlbear-rodeo/sdk";
 import {
   BC_PANEL_DRAG_END,
   BC_PANEL_DRAG_CANCEL,
+  BC_PANEL_DRAG_INPUT,
+  BC_PANEL_DRAG_READY,
   getPanelOffset,
   setPanelOffset,
   type PanelOffset,
@@ -35,6 +37,7 @@ import {
 
 interface StartPayload {
   panelId: string;
+  gestureId?:string;
   startScreenX: number;
   startScreenY: number;
   bbox: PanelBbox;
@@ -46,6 +49,7 @@ const ghostLabel = document.getElementById("ghost-label") as HTMLSpanElement;
 
 let session: {
   panelId: string;
+  gestureId?:string;
   startScreenX: number;
   startScreenY: number;
   bbox: PanelBbox;
@@ -99,6 +103,7 @@ function applyGhost(left: number, top: number): void {
 function startSession(payload: StartPayload): void {
   session = {
     panelId: payload.panelId,
+    gestureId:payload.gestureId,
     startScreenX: payload.startScreenX,
     startScreenY: payload.startScreenY,
     bbox: payload.bbox,
@@ -149,7 +154,7 @@ function endSession(persist: boolean, dx: number, dy: number): void {
     try {
       OBR.broadcast.sendMessage(
         BC_PANEL_DRAG_END,
-        { panelId: cur.panelId, offset: next },
+        { panelId: cur.panelId, gestureId:cur.gestureId, offset: next },
         { destination: "LOCAL" },
       );
     } catch {}
@@ -157,7 +162,7 @@ function endSession(persist: boolean, dx: number, dy: number): void {
     try {
       OBR.broadcast.sendMessage(
         BC_PANEL_DRAG_CANCEL,
-        { panelId: cur.panelId },
+        { panelId: cur.panelId, gestureId:cur.gestureId },
         { destination: "LOCAL" },
       );
     } catch {}
@@ -176,6 +181,10 @@ OBR.onReady(() => {
   } catch (e) {
     console.warn("[drag-preview] failed to parse hash payload", e);
   }
+  // Browsers may keep an active pointer in the source iframe after a modal
+  // mounts. Accept that frame's actual move/up events as well as native ones.
+  OBR.broadcast.onMessage(BC_PANEL_DRAG_INPUT,event=>{const data=event.data as any;if(!session||data?.gestureId!==session.gestureId||data?.panelId!==session.panelId||!Number.isFinite(data.screenX)||!Number.isFinite(data.screenY))return;const dx=data.screenX-session.startScreenX,dy=data.screenY-session.startScreenY;if(data.phase==='end')endSession(true,dx,dy);else if(data.phase==='move')applyGhost(session.bbox.left+dx,session.bbox.top+dy);});
+  const initial=session as StartPayload|null;if(initial)void OBR.broadcast.sendMessage(BC_PANEL_DRAG_READY,{panelId:initial.panelId,gestureId:initial.gestureId},{destination:'LOCAL'});
 
   // Pointer tracking on the document so we don't depend on which
   // exact element happens to be under the cursor — blocker covers

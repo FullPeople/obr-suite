@@ -1,5 +1,11 @@
+import {setupPanelDragHost} from './utils/panelDragHost';
+import {WORKBENCH_DEV} from './workbench/channel';
+import {setupWorkbench} from './workbench/background';
+import { openPanelIds, onPanelGeometryChange, notifyPanelGeometry, setPanelOpen } from "./utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
-import { startSceneSync, getState, onStateChange, getLocalLang } from "./state";
+import { startSceneSync, refreshFromScene, getState, onStateChange, onStateRefreshed, onStateRefreshFailed, getLocalLang } from "./state";
+import { ModuleLifecycle, SceneModuleCoordinator, type ModuleHooks } from "./utils/moduleLifecycle";
+import { BC_MODULE_STATUS, BC_MODULE_STATUS_QUERY, BC_MODULE_RETRY } from "./utils/moduleLifecycleProtocol";
 import { setupTimeStop, teardownTimeStop } from "./modules/timeStop";
 import { setupFocus, teardownFocus } from "./modules/focus";
 import { setupSearch, teardownSearch } from "./modules/search";
@@ -20,14 +26,21 @@ import { setupResourceTracker, teardownResourceTracker } from "./modules/resourc
 import { setupBubbles, teardownBubbles } from "./modules/bubbles";
 import { setupStatusTracker, teardownStatusTracker } from "./modules/statusTracker";
 import { setupHpBar, teardownHpBar } from "./modules/hpBar";
+import { setupBossBar, teardownBossBar, setBossBarObstacles } from "./modules/bossBar";
+import { setupTransitions, teardownTransitions } from "./modules/transitions";
 import { setupMetadataInspector, teardownMetadataInspector } from "./modules/metadata-inspector";
-import { setupFullFog, teardownFullFog } from "./modules/fullFog";
+import {
+  setupDynamicFog,
+  setupFogEditor,
+  teardownDynamicFog,
+  teardownFogEditor,
+} from "./modules/fullFog";
 import { setupMusicBoard, teardownMusicBoard } from "./modules/musicBoard";
+import { setupTransform, teardownTransform } from "./modules/transform";
 import { setupCrossSceneCards } from "./modules/cross-scene-cards";
 import { setupPerfWindow } from "./modules/perfWindow";
 import { assetUrl } from "./asset-base";
 import { onViewportResize } from "./utils/viewportAnchor";
-import { STABLE_HIDES } from "./feature-flags";
 import {
   PANEL_IDS,
   getPanelOffset,
@@ -45,6 +58,10 @@ import {
   LAYOUT_EDITOR_MODAL_ID,
   type DragEndPayload,
 } from "./utils/panelLayout";
+import {
+  refreshStaleSubscriptions,
+  BC_LOCAL_CONTENT_CHANGED,
+} from "./utils/localContent";
 
 // Helper used everywhere a popover opens with a side-aware drag handle.
 // Computes which half of the viewport the panel center sits in and
@@ -91,11 +108,89 @@ const CLUSTER_URL = assetUrl("cluster.html");
 const CLUSTER_ROW_URL = assetUrl("cluster-row.html");
 const BC_CLUSTER_ROW_TOGGLE = "com.obr-suite/cluster-row-toggle";
 const BC_CLUSTER_ROW_STATE = "com.obr-suite/cluster-row-state";
+// Idempotent "ensure row open" — time-stop broadcasts this so the DM
+// keeps the off-switch visible behind the cinematic / CG overlay.
+const BC_CLUSTER_ROW_OPEN = "com.obr-suite/cluster-row-open";
 
 // DM-only announcement modal. Opened from the megaphone button inside
-// the cluster row (left of the gear); auto-popup-on-scene-ready was
-// removed earlier. Cluster-row blinks the megaphone while there's an
-// unseen announcement.
+// the cluster row (left of the gear), and — since 2026-08-25 — shown
+// automatically the first time a GM loads the suite on any given day.
+// Cluster-row blinks the megaphone while there's an unseen announcement.
+const ANNOUNCE_MODAL_ID = "com.obr-suite/dm-announcement";
+const ANNOUNCE_URL = assetUrl("dm-announcement.html");
+const ANNOUNCE_MD_URL = assetUrl("announcement.md");
+/** YYYY-MM-DD of the last day the announcement auto-opened here. */
+const LS_ANNOUNCE_DAILY = "obr-suite/announce-daily-date";
+/** Version string of the announcement the DM has acknowledged. Shared
+ *  with cluster-row.ts, which uses it to blink the megaphone. */
+const LS_ANNOUNCE_SEEN_VERSION = "obr-suite/announce-seen-version";
+
+/** Local calendar day, not UTC — "first time today" should mean the
+ *  DM's today, not a date that rolls over mid-session in Asia. */
+function localDayStamp(): string {
+  const d = new Date();
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/**
+ * Show the announcement once a day, to GMs only.
+ *
+ * Deliberately NOT gated on the announcement version: the point is a
+ * daily "here's what changed" like a game's patch notes, so it shows
+ * again the next day even if nothing was published in between. The
+ * version key is still written, so acknowledging here also stops the
+ * megaphone blinking.
+ *
+ * Players never see it — it carries DM-facing notes, and a modal
+ * appearing unprompted mid-session for a player would be worse than
+ * useless.
+ */
+async function maybeShowDailyAnnouncement(): Promise<void> {
+  try {
+    if ((await OBR.player.getRole()) !== "GM") return;
+  } catch {
+    return;
+  }
+  const today = localDayStamp();
+  try {
+    if (localStorage.getItem(LS_ANNOUNCE_DAILY) === today) return;
+  } catch {
+    // No localStorage (private mode / blocked) — better to skip than to
+    // reopen this on every single load.
+    return;
+  }
+  try {
+    localStorage.setItem(LS_ANNOUNCE_DAILY, today);
+  } catch {}
+
+  // Mark the current announcement acknowledged so the megaphone stops
+  // blinking; failing to read the version is not a reason to skip the
+  // popup.
+  try {
+    const res = await fetch(ANNOUNCE_MD_URL, { cache: "no-cache" });
+    if (res.ok) {
+      const m = (await res.text()).match(
+        /^\s*-\s*(\d+\.\d+\.\d+(?:[-.][\w]+)*)\s*[·\-—]/m,
+      );
+      if (m) localStorage.setItem(LS_ANNOUNCE_SEEN_VERSION, m[1]);
+    }
+  } catch {}
+
+  try {
+    await OBR.modal.open({
+      id: ANNOUNCE_MODAL_ID,
+      url: ANNOUNCE_URL,
+      // Same box the megaphone button opens, so the auto-popup and the
+      // manual open are visually identical.
+      width: 560,
+      height: 580,
+    });
+  } catch (e) {
+    console.warn("[obr-suite] daily announcement failed to open", e);
+  }
+}
 
 // Trigger geometry. Anchored bottom-LEFT so it sits in the lower-left
 // quadrant without competing with the global-search popover (top-right)
@@ -153,31 +248,6 @@ const IS_MOBILE = isMobileDevice();
 //   • 全局搜索 / Global Search           (popover not registered)
 const BC_MOBILE_PRESENCE = "com.obr-suite/mobile-presence";
 const seenMobilePlayers = new Set<string>();
-const ANNOUNCEMENT_MODAL_ID = "com.obr-suite/dm-announcement";
-const LS_ANNOUNCEMENT_AUTO_DATE = "obr-suite/announcement-auto-date";
-
-function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-async function openDailyAnnouncement(): Promise<void> {
-  const today = todayKey();
-  try {
-    if (localStorage.getItem(LS_ANNOUNCEMENT_AUTO_DATE) === today) return;
-    localStorage.setItem(LS_ANNOUNCEMENT_AUTO_DATE, today);
-  } catch {}
-  try {
-    await OBR.modal.open({
-      id: ANNOUNCEMENT_MODAL_ID,
-      url: assetUrl("dm-announcement.html?auto=1"),
-      width: 560,
-      height: 580,
-    });
-  } catch (e) {
-    console.warn("[obr-suite] daily announcement open failed", e);
-  }
-}
-
 function disabledFeaturesText(lang: "zh" | "en"): string {
   return lang === "zh"
     ? "角色卡全屏面板、全局搜索、状态追踪、元数据检查"
@@ -229,8 +299,18 @@ function getTriggerW(): number { return IS_MOBILE ? MOBILE_TRIGGER_W : TRIGGER_W
 function getTriggerH(): number { return IS_MOBILE ? MOBILE_TRIGGER_H : TRIGGER_H; }
 
 async function openCluster() {
+  if (WORKBENCH_DEV) return;
   try {
-    const vh = await OBR.viewport.getHeight();
+    // The viewport height and the side computation are independent, and
+    // each is a postMessage round trip to the host. Awaiting them in
+    // sequence put two of them in front of first paint; Promise.all
+    // makes it one. The side broadcast that computePanelSideAndBroadcast
+    // fires can only land EARLIER as a result, and its consumer is the
+    // popover iframe, which is not open yet either way.
+    const [vh, side] = await Promise.all([
+      OBR.viewport.getHeight(),
+      computePanelSideAndBroadcast(PANEL_IDS.cluster),
+    ]);
     const userOff = getPanelOffset(PANEL_IDS.cluster);
     const left = getTriggerLeft() + userOff.dx;
     // DY SIGN: anchorOrigin=BOTTOM so anchorPosition.top = vh - bottom
@@ -241,10 +321,9 @@ async function openCluster() {
     // against the top edge of the viewport so subsequent vertical
     // drags had no effect — the user-reported "only horizontal" bug.
     const bottom = getTriggerBottom() - userOff.dy;
-    // Side-aware drag handle — compute up front so the iframe can
-    // render its handle on the correct edge from first paint instead
-    // of relying on the post-broadcast flip.
-    const side = await computePanelSideAndBroadcast(PANEL_IDS.cluster);
+    // `side` (resolved above) makes the iframe render its drag handle on
+    // the correct edge from first paint, instead of flipping after the
+    // broadcast arrives.
     await OBR.popover.open({
       id: CLUSTER_POPOVER_ID,
       url: `${CLUSTER_URL}?side=${side}${IS_MOBILE ? "&mobile=1" : ""}`,
@@ -257,7 +336,7 @@ async function openCluster() {
       hidePaper: true,
       disableClickAway: true,
     });
-    clusterIsOpen = true;
+    clusterIsOpen = true; setPanelOpen("cluster", true);
   } catch (e) {
     console.error("[obr-suite] openCluster failed", e);
   }
@@ -265,13 +344,14 @@ async function openCluster() {
 
 async function closeCluster() {
   try { await OBR.popover.close(CLUSTER_POPOVER_ID); } catch {}
-  clusterIsOpen = false;
+  clusterIsOpen = false; setPanelOpen("cluster", false);
   // Closing the trigger should also close the row (it's anchored
   // relative to the trigger; orphan rows look awful).
   await closeClusterRow();
 }
 
 async function openClusterRow() {
+  if (WORKBENCH_DEV) return;
   try {
     const vh = await OBR.viewport.getHeight();
     // Cluster-row position is INDEPENDENT of the cluster trigger's
@@ -297,7 +377,7 @@ async function openClusterRow() {
       hidePaper: true,
       disableClickAway: true,
     });
-    clusterRowIsOpen = true;
+    clusterRowIsOpen = true; setPanelOpen("cluster-row", true);
     broadcastRowState(true);
   } catch (e) {
     console.error("[obr-suite] openClusterRow failed", e);
@@ -306,7 +386,7 @@ async function openClusterRow() {
 
 async function closeClusterRow() {
   try { await OBR.popover.close(CLUSTER_ROW_POPOVER_ID); } catch {}
-  clusterRowIsOpen = false;
+  clusterRowIsOpen = false; setPanelOpen("cluster-row", false);
   broadcastRowState(false);
 }
 
@@ -326,9 +406,33 @@ function broadcastRowState(open: boolean) {
 let clusterIsOpen = false;
 let clusterRowIsOpen = false;
 
+// Recompute only on actual panel open/close/move. Never poll scene items or all panels.
+let obstacleRequest = 0, obstacleTimer: ReturnType<typeof setTimeout> | undefined, obstacleAlive = true;
+function refreshBossObstacles() {
+  if (!obstacleAlive) return;
+  const request = ++obstacleRequest;
+  if (obstacleTimer) clearTimeout(obstacleTimer);
+  obstacleTimer = setTimeout(async () => {
+    obstacleTimer = undefined;
+    const boxes = await Promise.all(openPanelIds().map(id => computePanelBbox(id)));
+    if (obstacleAlive && request === obstacleRequest) setBossBarObstacles(boxes.filter((box): box is NonNullable<typeof box> => box !== null));
+  }, 40);
+}
+const offBossObstaclePanels = onPanelGeometryChange(refreshBossObstacles);
+const onBossObstacleStorage = (event: StorageEvent) => {
+  if (event.key === null || event.key.startsWith("obr-suite/panel-offset/") || event.key.startsWith("obr-suite/panel-size/")) refreshBossObstacles();
+};
+window.addEventListener("storage", onBossObstacleStorage);
+const offBossObstacleViewport = onViewportResize(refreshBossObstacles);
+window.addEventListener("pagehide", () => {
+  obstacleAlive = false; obstacleRequest++; if (obstacleTimer) clearTimeout(obstacleTimer);
+  offBossObstaclePanels(); offBossObstacleViewport(); window.removeEventListener("storage", onBossObstacleStorage);
+}, { once: true });
+
 // Cluster bbox provider — bottom-LEFT, fixed-size trigger.
 // Sign convention matches openCluster (subtract dy from bottom-distance).
 registerPanelBbox(PANEL_IDS.cluster, async () => {
+  if (WORKBENCH_DEV) return null;
   try {
     const vh = await OBR.viewport.getHeight();
     const userOff = getPanelOffset(PANEL_IDS.cluster);
@@ -348,6 +452,7 @@ registerPanelBbox(PANEL_IDS.cluster, async () => {
 // cluster trigger no longer drags the row along with it, and vice
 // versa.
 registerPanelBbox(PANEL_IDS.clusterRow, async () => {
+  if (WORKBENCH_DEV) return null;
   try {
     const vh = await OBR.viewport.getHeight();
     const rowOff = getPanelOffset(PANEL_IDS.clusterRow);
@@ -377,6 +482,7 @@ OBR.onReady(() => {
   // independent stored offsets so a drag on one doesn't drag the
   // other along.
   OBR.broadcast.onMessage(BC_PANEL_DRAG_END, async (event) => {
+    notifyPanelGeometry();
     const payload = event.data as DragEndPayload | undefined;
     if (payload?.panelId === PANEL_IDS.cluster) {
       if (clusterIsOpen) await openCluster();
@@ -397,6 +503,17 @@ OBR.onReady(() => {
     else await openClusterRow();
   });
 
+  // Programmatic "ensure the row is OPEN" — used by time-stop so the
+  // DM always has the off-switch (时停 button) visible while the
+  // cinematic / CG overlay covers the screen (esp. CG, triggered from
+  // a right-click menu while the row is closed). Goes through the SAME
+  // openClusterRow() the trigger uses, so clusterRowIsOpen + the
+  // trigger glow stay in sync — the next trigger click correctly
+  // toggles it CLOSED. Idempotent: no-op when already open.
+  OBR.broadcast.onMessage(BC_CLUSTER_ROW_OPEN, async () => {
+    if (!clusterRowIsOpen) await openClusterRow();
+  });
+
   // Cluster-row iframe broadcasts its measured natural width on every
   // render (renderRow → requestAnimationFrame → broadcast). We resize
   // the popover so its physical click-blocking area matches the
@@ -405,9 +522,13 @@ OBR.onReady(() => {
   OBR.broadcast.onMessage("com.obr-suite/cluster-row-width", async (event) => {
     const data = event.data as { width?: number } | undefined;
     if (!clusterRowIsOpen) return;
-    if (typeof data?.width !== "number") return;
-    const w = Math.max(120, Math.min(960, Math.round(data.width)));
-    try { await OBR.popover.setWidth(CLUSTER_ROW_POPOVER_ID, w); } catch {}
+    if (typeof data?.width !== "number" || !Number.isFinite(data.width)) return;
+    try {
+      const viewportWidth = await OBR.viewport.getWidth();
+      if (!clusterRowIsOpen) return;
+      const w = Math.max(120, Math.min(960, viewportWidth - 24, Math.round(data.width)));
+      await OBR.popover.setWidth(CLUSTER_ROW_POPOVER_ID, w);
+    } catch {}
   });
 
   // Settings panel asked us to open the layout-editor modal. We
@@ -432,15 +553,30 @@ OBR.onReady(() => {
     PANEL_IDS.ccInfo,
     PANEL_IDS.portalEdit,
     PANEL_IDS.statusPalette,
+    PANEL_IDS.hpBar,
+    PANEL_IDS.musicBoard,
   ];
   async function collectLayoutEditorBboxes(): Promise<Record<string, { left: number; top: number; width: number; height: number }>> {
+    // One round trip per panel, and there are 13 of them — awaited in
+    // sequence that was 13 sequential bridge hops before the editor
+    // modal could open. They are independent reads, so gather them at
+    // once. Insertion order into bboxMap is preserved by iterating
+    // layoutEditorPanelIds rather than settle order, and a provider that
+    // throws still just drops out, exactly as the try/catch did.
     const bboxMap: Record<string, { left: number; top: number; width: number; height: number }> = {};
-    for (const id of layoutEditorPanelIds) {
-      try {
-        const bbox = await computePanelBbox(id);
-        if (bbox) bboxMap[id] = bbox;
-      } catch {}
-    }
+    const results = await Promise.all(
+      layoutEditorPanelIds.map(async (id) => {
+        try {
+          return await computePanelBbox(id);
+        } catch {
+          return null;
+        }
+      }),
+    );
+    layoutEditorPanelIds.forEach((id, i) => {
+      const bbox = results[i];
+      if (bbox) bboxMap[id] = bbox;
+    });
     return bboxMap;
   }
   OBR.broadcast.onMessage(BC_OPEN_LAYOUT_EDITOR, async () => {
@@ -478,80 +614,7 @@ OBR.onReady(() => {
     } catch {}
   });
 
-  // ----- Drag-preview modal lifecycle ---------------------------------
-  // BC_PANEL_DRAG_START arrives from whichever panel iframe the user
-  // started dragging. We open the fullscreen drag-preview modal with
-  // the start payload baked into its URL hash so the modal can render
-  // the ghost rectangle on first paint. BC_PANEL_DRAG_END /
-  // BC_PANEL_DRAG_CANCEL close it.
-  let dragModalOpen = false;
-  let dragSafetyTimer: ReturnType<typeof setTimeout> | null = null;
-  const DRAG_PREVIEW_URL = assetUrl("drag-preview.html");
-  const closeDragModal = async () => {
-    if (dragSafetyTimer) {
-      clearTimeout(dragSafetyTimer);
-      dragSafetyTimer = null;
-    }
-    if (!dragModalOpen) return;
-    dragModalOpen = false;
-    try { await OBR.modal.close(DRAG_PREVIEW_MODAL_ID); } catch {}
-  };
-  OBR.broadcast.onMessage(BC_PANEL_DRAG_START, async (event) => {
-    const startData = event.data as
-      | { panelId?: string; startScreenX?: number; startScreenY?: number }
-      | undefined;
-    if (!startData?.panelId) return;
-    if (
-      typeof startData.startScreenX !== "number" ||
-      typeof startData.startScreenY !== "number"
-    ) return;
-
-    // Look up the panel's CURRENT bbox in OBR-viewport coordinates via
-    // the registry. The iframe can't compute this itself: window.screenX
-    // is identical for every iframe in the same browser window, so any
-    // attempt at relative coords from the iframe side returns 0,0.
-    let bbox;
-    try {
-      bbox = await computePanelBbox(startData.panelId);
-    } catch {
-      bbox = null;
-    }
-    if (!bbox) {
-      console.warn("[obr-suite/drag-preview] no bbox for", startData.panelId);
-      return;
-    }
-
-    const payload = {
-      panelId: startData.panelId,
-      startScreenX: startData.startScreenX,
-      startScreenY: startData.startScreenY,
-      bbox,
-    };
-    const url = `${DRAG_PREVIEW_URL}#${encodeURIComponent(JSON.stringify(payload))}`;
-    try {
-      if (dragModalOpen) await OBR.modal.close(DRAG_PREVIEW_MODAL_ID);
-      await OBR.modal.open({
-        id: DRAG_PREVIEW_MODAL_ID,
-        url,
-        fullScreen: true,
-        hidePaper: true,
-      });
-      dragModalOpen = true;
-      // Background-side safety: even if every modal-side cancel path
-      // somehow misfires (browser quirk, broadcast lost, iframe
-      // unmount during gesture, etc.), force-close after 35s. Prevents
-      // the "stuck drag, must refresh tab" failure mode the user hit.
-      if (dragSafetyTimer) clearTimeout(dragSafetyTimer);
-      dragSafetyTimer = setTimeout(() => {
-        console.warn("[obr-suite/drag-preview] background safety: force-closing stuck modal");
-        void closeDragModal();
-      }, 35_000);
-    } catch (e) {
-      console.warn("[obr-suite/drag-preview] open failed", e);
-    }
-  });
-  OBR.broadcast.onMessage(BC_PANEL_DRAG_END, () => { void closeDragModal(); });
-  OBR.broadcast.onMessage(BC_PANEL_DRAG_CANCEL, () => { void closeDragModal(); });
+  setupPanelDragHost(DRAG_PREVIEW_MODAL_ID);
 });
 
 // (HTTP-cache prewarm experiment removed — 不全书 is fronted by a
@@ -565,7 +628,6 @@ OBR.onReady(() => {
 // flips ON, teardown() when it flips OFF. Modules register OBR listeners
 // (context menu, broadcast, popover, etc.) at setup and clean up at
 // teardown. The shell is responsible for state-based dispatching.
-type ModuleHooks = { setup: () => Promise<void>; teardown: () => Promise<void> };
 
 // Module setup order matters — OBR's popover layer warms up after the
 // first few popovers are opened, and the LAST popover to be opened
@@ -585,6 +647,8 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   portals: { setup: setupPortals, teardown: teardownPortals },
   bubbles: { setup: setupBubbles, teardown: teardownBubbles },
   hpBar: { setup: setupHpBar, teardown: teardownHpBar },
+  bossBar: { setup: setupBossBar, teardown: teardownBossBar },
+  transitions: { setup: setupTransitions, teardown: teardownTransitions },
   metadataInspector: {
     setup: async () => { await setupMetadataInspector(); },
     teardown: async () => { teardownMetadataInspector(); },
@@ -595,89 +659,61 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   // Trickster + circle-image promoted from dev to stable on 2026-05-08.
   trickster: { setup: setupTrickster, teardown: teardownTrickster },
   circleImage: { setup: setupCircleImage, teardown: teardownCircleImage },
-  // Music board promoted to stable 2026-05-19 — studio web tool +
-  // default catalog + persistent background engine + settings panel
-  // entry are all in place. Anyone on either channel can use it.
-  musicBoard: {
-    setup: async () => { await setupMusicBoard(); },
-    teardown: async () => { teardownMusicBoard(); },
+  musicBoard: { setup: setupMusicBoard, teardown: teardownMusicBoard },
+  // 2026-08-25 — `fullFog` split into two independently switchable
+  // modules. `fogEditor` is the right-click map tracer and has no
+  // runtime; `dynamicFog` is the engine that turns FOG-layer drawings
+  // into per-client walls and owns doors / windows / lights. The
+  // engine's AUTHORING surface (light context menu, fog-tool modes,
+  // indicators, player toggle tool, occlusion) is gated
+  // behind !STABLE_HIDES inside the module; the wall derivation
+  // itself runs in both channels, because the editor's output is
+  // worthless without it. See modules/fullFog/index.ts.
+  fogEditor: {
+    setup: async () => { await setupFogEditor(); },
+    teardown: async () => { await teardownFogEditor(); },
   },
-  // fullFog stays dev-only — door / window cutting still in design.
-  ...(STABLE_HIDES
-    ? {}
-    : {
-        fullFog: {
-          setup: async () => { await setupFullFog(); },
-          teardown: async () => { await teardownFullFog(); },
-        },
-        // 2026-05-14 — `follow` removed here per user request.
-      }),
+  dynamicFog: {
+    setup: async () => { await setupDynamicFog(); },
+    teardown: async () => { await teardownDynamicFog(); },
+  },
+  // Transform (变身) — stable: right-click CHARACTER token, pick a
+  // bestiary form, swap image + bestiary/bubbles metadata, and revert
+  // from the transform stack. DM can configure per-token owner limits
+  // in the picker header.
+  transform: {
+    setup: async () => { await setupTransform(); },
+    teardown: async () => { teardownTransform(); },
+  },
 };
 
-// Module lifecycle states: "off" (not running), "starting" (setup in
-// flight), "on" (setup completed), "stopping" (teardown in flight).
-// Tracking the in-flight states prevents concurrent syncModules calls
-// from issuing duplicate setup() invocations on the same module — which
-// is what was causing search.setup to be retried 4 times when scene
-// metadata changes fired in rapid succession during initial load.
-type ModuleState = "off" | "starting" | "on" | "stopping";
-const moduleStatus = new Map<string, ModuleState>();
-
-async function syncModules(onlyIds?: Set<string>) {
-  const state = getState();
-  for (const [id, hooks] of Object.entries(modules)) {
-    if (!hooks) continue;
-    if (onlyIds && !onlyIds.has(id)) continue;
-    const wantOn = !!state.enabled[id as keyof typeof state.enabled];
-    const status = moduleStatus.get(id) ?? "off";
-    if (wantOn && status === "off") {
-      moduleStatus.set(id, "starting");
-      try {
-        await hooks.setup();
-        moduleStatus.set(id, "on");
-      } catch (e) {
-        // Mark as "on" anyway — the module's own setup catches its own
-        // errors normally; if something escapes here we don't want an
-        // infinite retry loop. The user can manually toggle in Settings.
-        console.error(`[obr-suite] ${id} setup escaped:`, e);
-        moduleStatus.set(id, "on");
-      }
-    } else if (!wantOn && status === "on") {
-      moduleStatus.set(id, "stopping");
-      try {
-        await hooks.teardown();
-      } catch (e) {
-        console.error(`[obr-suite] ${id} teardown escaped:`, e);
-      }
-      moduleStatus.set(id, "off");
-    }
-    // status "starting" or "stopping" → another syncModules is already
-    // handling this module; let it finish.
-  }
-}
-
-let lastEnabledSnapshot: Record<string, boolean> | null = null;
-function changedEnabledIds(): Set<string> | undefined {
-  const enabled = getState().enabled as Record<string, boolean>;
-  if (!lastEnabledSnapshot) {
-    lastEnabledSnapshot = { ...enabled };
-    return undefined;
-  }
-  const changed = new Set<string>();
-  for (const id of Object.keys(enabled)) {
-    if (enabled[id] !== lastEnabledSnapshot[id]) changed.add(id);
-  }
-  lastEnabledSnapshot = { ...enabled };
-  return changed.size > 0 ? changed : new Set<string>();
+const lifecycle = new ModuleLifecycle(modules, {
+  onChange: (modules) => {
+    if (OBR.isReady) void OBR.broadcast.sendMessage(
+      BC_MODULE_STATUS, { modules }, { destination: "LOCAL" },
+    ).catch(() => {});
+  },
+  onError: (id, operation, error) => console.error(`[obr-suite] ${id} ${operation} failed:`, error),
+});
+// Modules retain their scene listeners across switches. Only registration
+// work waits until scene settings arrive; desired changes are never skipped.
+void lifecycle.setPaused(true);
+function syncModules() {
+  return lifecycle.setDesired(getState().enabled);
 }
 
 OBR.onReady(async () => {
+  setupWorkbench();
   // Sync state, then open cluster + activate all enabled modules.
   startSceneSync();
-  onStateChange(() => {
-    const changed = changedEnabledIds();
-    if (changed && changed.size === 0) return;
-    void syncModules(changed);
+  onStateChange(() => { void syncModules(); });
+  OBR.broadcast.onMessage(BC_MODULE_STATUS_QUERY, () => {
+    void OBR.broadcast.sendMessage(BC_MODULE_STATUS,
+      { modules: lifecycle.snapshot() }, { destination: "LOCAL" }).catch(() => {});
+  });
+  OBR.broadcast.onMessage(BC_MODULE_RETRY, (event) => {
+    const id = (event.data as { id?: unknown } | undefined)?.id;
+    if (typeof id === "string") void lifecycle.retry(id);
   });
 
   // Mobile-presence: every client listens; phones additionally
@@ -695,6 +731,37 @@ OBR.onReady(async () => {
   // we always run it; it's a no-op when the user hasn't enabled it.
   void setupPerfWindow();
 
+  // Patch notes, once a day, GM only. Fire-and-forget so a slow fetch
+  // can't hold up module startup.
+  void maybeShowDailyAnnouncement();
+
+  // URL-subscribed homebrew packs — re-fetch every stale subscription
+  // (lastFetchedAt older than SUB_STALE_MS) so updates the upstream
+  // author published since last session appear automatically.
+  // Non-blocking: fetches run in the background; the suite continues
+  // to use the previously-cached content until each refresh lands,
+  // then broadcasts BC_LOCAL_CONTENT_CHANGED so search / bestiary
+  // pick up the new data without a page reload.
+  void (async () => {
+    try {
+      const { refreshed, failed } = await refreshStaleSubscriptions();
+      if (refreshed > 0) {
+        try {
+          await OBR.broadcast.sendMessage(
+            BC_LOCAL_CONTENT_CHANGED,
+            { source: "subscription-refresh" },
+            { destination: "LOCAL" },
+          );
+        } catch {}
+      }
+      if (failed > 0) {
+        console.warn(`[obr-suite/background] subscription refresh: ${refreshed} ok, ${failed} failed (check Settings → 库设置 for details)`);
+      }
+    } catch (e) {
+      console.warn("[obr-suite/background] subscription auto-refresh failed", e);
+    }
+  })();
+
   // (resourceTracker is now wired through the module registry above —
   // its enable flag lives in state.enabled.resourceTracker and is
   // toggled in Settings → 资源追踪.)
@@ -703,32 +770,22 @@ OBR.onReady(async () => {
   // its enable flag lives in state.enabled.metadataInspector and is
   // toggled in Settings → 元数据检查.)
 
-  const showIfReady = async () => {
-    try {
-      if (await OBR.scene.isReady()) {
-        await openCluster();
-        changedEnabledIds();
-        await syncModules();
-        void announceMobilePresence();
-        void openDailyAnnouncement();
-        // (Auto-show removed — the cluster's megaphone button drives
-      // the announcement modal now; see cluster.ts.)
-      } else {
-        await closeCluster();
-      }
-    } catch {}
-  };
-  await showIfReady();
-  OBR.scene.onReadyChange(async (ready) => {
-    if (ready) {
-      await openCluster();
-      await syncModules();
-      void announceMobilePresence();
-      void openDailyAnnouncement();
-      // (Auto-show removed — the cluster's megaphone button drives
-      // the announcement modal now; see cluster.ts.)
-    } else {
-      await closeCluster();
-    }
+  const sceneCoordinator = new SceneModuleCoordinator({
+    lifecycle, syncModules, refreshSettings: refreshFromScene,
+    openCluster, closeCluster, onReady: announceMobilePresence,
+    onError: (operation, error) => console.warn(`[obr-suite] scene ${operation} failed`, error),
+    onSettingsUnavailable: () => {
+      const message = getLocalLang() === "zh"
+        ? "场景设置读取失败，已暂停新功能启动。稍后重新打开场景可重试。"
+        : "Scene settings could not be loaded. New module startup is paused. Reopen the scene later to retry.";
+      void OBR.notification.show(message, "ERROR").catch(error => console.warn("[obr-suite] settings failure notice failed", error));
+    },
   });
+  onStateRefreshed(() => sceneCoordinator.settingsRefreshed());
+  onStateRefreshFailed(error => sceneCoordinator.settingsFailed(error));
+  // Subscribe before the initial read so a rapid scene switch is not missed.
+  OBR.scene.onReadyChange(ready => { sceneCoordinator.handleReady(ready); });
+  const initialRevision = sceneCoordinator.revision;
+  const ready = await OBR.scene.isReady().catch(() => false);
+  if (initialRevision === sceneCoordinator.revision) sceneCoordinator.handleReady(ready);
 });

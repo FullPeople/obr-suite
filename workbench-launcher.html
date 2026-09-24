@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>角色卡与常用工具</title>
+<style>
+*{box-sizing:border-box}body{margin:16px;background:#eee;color:#252525;font:14px system-ui}h2{font-size:18px;margin:0 0 12px}
+#open{display:block;padding:11px;width:100%;border:1px solid #777;background:#fafafa;color:inherit;text-align:center;text-decoration:underline;text-underline-offset:3px}
+#open:hover,.btn:hover{background:#fff;border-color:#252525}#open[aria-disabled]{opacity:.5;cursor:wait}a:focus-visible,button:focus-visible{outline:2px solid #444;outline-offset:3px}
+#row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:12px 0 16px}.btn{min-height:36px;padding:6px;border:1px solid #aaa;background:#fafafa;color:inherit;font:inherit;cursor:pointer}.btn.timestop-active{background:#ddd2a3;border-color:#70612d}.btn.blink{box-shadow:inset 0 -3px #857444}
+.tips{border-top:1px solid #ccc;padding-top:10px;font-size:12px;line-height:1.55;color:#555}.tips strong{color:#333}.tips p{margin:6px 0}.tips ol{margin:6px 0 12px;padding-left:20px}.tips li{margin:4px 0}
+</style></head>
+<body data-surface="action">
+<h2>角色卡 · 规则资料 · 投骰</h2>
+<a id="open" rel="opener" aria-disabled="true">打开角色卡与 Wiki</a><p id="status" role="status">正在连接枭熊…</p>
+
+<section class="tips" aria-label="拆分视图提示"><strong>Tips · Chrome 电脑端拆分视图</strong>
+<p>可<b>右键上方链接</b>，选择浏览器的拆分视图选项。刷新枭熊后，此页会自动重连。</p><p>若菜单没有拆分选项：</p><ol><li><b>左键点击</b>上方链接，打开角色卡，等待连接成功。</li><li>点击浏览器顶部的<b>枭熊标签页</b>，回到枭熊，让它成为当前页面。</li><li>保持枭熊为当前页面，<b>右键点击顶部的角色卡标签页</b>（不要先左键切换过去）。</li><li>选择<b>“使用当前标签页创建新的拆分视图”</b>。</li></ol>
+<strong>平板分屏</strong><p>先在同一浏览器中点开角色卡并建立连接。Android Chrome 可长按角色卡标签并拖到屏幕边缘；iPad Safari 可将两个窗口并排。平板分屏后的同步还需实机确认。</p>
+</section><script type="module" src="/src/workbench/launcher.ts"></script></body></html>

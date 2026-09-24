@@ -1,8 +1,8 @@
 // Status Tracker — palette popover.
 //
-// APPLY mode (default): flat grid of buff bubbles. Left/right
-// pointer-down on a bubble fires the capture overlay (drag = apply
-// or paint-toggle on tokens).
+// APPLY mode (default): flat grid of buff bubbles. Left-click a bubble
+// to select it, then left-click tokens on the canvas to apply/toggle.
+// Right-click cancels the current selection.
 //
 // EDIT mode (toggle ✎ in the toolbar): same flat grid, but every
 // element morphs into an editable affordance:
@@ -36,8 +36,6 @@ import {
   STATUS_BUFFS_KEY,
   STATUS_EFFECTS_ENABLED,
   DEFAULT_BUFFS,
-  DEFAULT_BUFF_RETIRED_IDS,
-  matchesOldDefault,
   BuffDef,
   BuffEffect,
   textColorFor,
@@ -45,21 +43,28 @@ import {
   setStatusRenderMode,
   type StatusRenderMode,
 } from "./modules/statusTracker/types";
+import { DEFAULT_BUFF_RETIRED_IDS } from "./modules/statusTracker/defaultsMigration";
 import { bindPanelDrag } from "./utils/panelDrag";
 import { PANEL_IDS } from "./utils/panelLayout";
+import { t, applyI18nDom } from "./i18n";
+import { getLocalLang, onLangChange } from "./state";
+import { statusName, statusGroup } from "./modules/statusTracker/localization";
+
+// i18n — most text here is built dynamically in JS, so read the active
+// language fresh on each render via T(). (Group/category names are
+// user/stored data and are intentionally NOT translated.)
+const T = (k: Parameters<typeof t>[1]) => t(getLocalLang(), k);
 import { assetUrl } from "./asset-base";
 
 const BC_DRAG_START = `${PLUGIN_ID}/drag-start`;
 const BC_DRAG_END = `${PLUGIN_ID}/drag-end`;
 const BC_TOGGLE = `${PLUGIN_ID}/toggle`;
 const BC_REFRESH_TOKEN = `${PLUGIN_ID}/refresh-token`;
+const BC_SELECT_APPLY = `${PLUGIN_ID}/select-apply`;
+const BC_SELECT_CANCEL = `${PLUGIN_ID}/select-cancel`;
+const BC_SELECT_STATE = `${PLUGIN_ID}/select-state`;
 
-// Mode of the most recent BC_DRAG_START. The safety-net pointerup
-// handler skips its BC_DRAG_END broadcast while this is
-// "click-place" — in that mode the button release is part of the
-// pickup gesture (the buff is now carried on the cursor), never an
-// abort. paint-toggle still gets the safety-net broadcast.
-let lastDragStartMode: "click-place" | "paint-toggle" | null = null;
+let selectedApplyKey: string | null = null;
 
 const dragHandle = document.getElementById("dragHandle") as HTMLDivElement;
 const btnClose = document.getElementById("btnClose") as HTMLButtonElement;
@@ -167,8 +172,8 @@ function showBuffPreview(buffId: string): void {
     previewMediaEl.appendChild(img);
   }
   previewLabelEl.innerHTML =
-    `<span class="bp-name">${escapeHtml(b.name)}</span>` +
-    `<span class="bp-hint">${b.group ? escapeHtml(b.group) + " · " : ""}悬停预览效果</span>`;
+    `<span class="bp-name">${escapeHtml(statusName(b, getLocalLang()))}</span>` +
+    `<span class="bp-hint">${b.group ? escapeHtml(groupLabel(b.group)) + " · " : ""}${T("stHoverPreview")}</span>`;
   previewEl.classList.add("is-active");
 }
 
@@ -208,6 +213,12 @@ interface CatalogFile {
 }
 
 const UNCATEGORIZED = "未分类";
+
+// "未分类" is the STORED group sentinel — never translate the stored
+// value (saved catalogs / presets reference it literally). This helper
+// maps it to a localized DISPLAY label only; user-defined group names
+// pass through unchanged.
+const groupLabel = (g: string): string => (g === UNCATEGORIZED ? T("stCatUncategorized") : statusGroup(g, buffs, getLocalLang()));
 
 // Per-client persistence of the active category filter. The user's
 // reasonable expectation is that picking "Buffs" stays selected
@@ -310,10 +321,9 @@ function migrateDefaultsInPlace(
   existing: BuffDef[],
   existingOrder: string[],
 ): { buffs: BuffDef[]; groupOrder: string[] } {
-  // Reference for tooling — matchesOldDefault is now informational
-  // only (the migration is no longer signature-gated) but the export
-  // is kept available for any future diagnostics.
-  void matchesOldDefault;
+  // An explicitly saved empty catalog is a user choice, including on
+  // clients whose old migration stamp is missing.
+  if (existing.length === 0) return { buffs: [], groupOrder: [...existingOrder] };
   // Pass 1: drop every retired-default id.
   const kept = existing.filter((b) => !DEFAULT_BUFF_RETIRED_IDS.has(b.id));
   // Pass 2: append new defaults that aren't already there (by id) AND
@@ -424,12 +434,12 @@ async function loadCatalog(): Promise<void> {
 function parseCatalog(v: unknown): { buffs: BuffDef[]; groupOrder: string[] } | null {
   if (Array.isArray(v)) {
     const list = parseBuffArray(v);
-    if (list.length === 0) return null;
+    if (list.length === 0 && v.length > 0) return null;
     return { buffs: list, groupOrder: deriveGroupOrder(list) };
   }
   if (v && typeof v === "object" && Array.isArray((v as any).buffs)) {
     const list = parseBuffArray((v as any).buffs);
-    if (list.length === 0) return null;
+    if (list.length === 0 && (v as any).buffs.length > 0) return null;
     const order = Array.isArray((v as any).groupOrder)
       ? (v as any).groupOrder.filter((g: any): g is string => typeof g === "string")
       : deriveGroupOrder(list);
@@ -503,6 +513,10 @@ function parseBuffArray(arr: any[]): BuffDef[] {
     // turned off". Lets the re-seed below distinguish "user disabled
     // it" from "an old catalog never stored the asset".
     if ((e as any).webmOff === true) (def as any).webmOff = true;
+    // 2026-09-17 — webmBelow (draw the effect under the token). Restored together
+    // with the other late fields after the re-seed below, so there is a single
+    // place that knows how a saved entry converges on the built-in definition.
+    if ((e as any).webmBelow === true) (def as any).webmBelow = true;
     // Re-seed a built-in buff's default WebM effect when the stored
     // catalog lacks it. Older catalogs (saved before webmAsset was
     // persisted) would otherwise show every built-in status as 无 even
@@ -513,6 +527,32 @@ function parseBuffArray(arr: any[]): BuffDef[] {
       const bwa = builtin && (builtin as any).webmAsset;
       if (typeof bwa === "string" && bwa.length > 0) {
         (def as any).webmAsset = bwa;
+      }
+    }
+    // 2026-09-17 — fill in every WebM field this build knows about, one guard per
+    // field. This parser and the background one both have to reach the same
+    // result: isDefaultStatus() deep-compares a parsed entry against the built-in
+    // definition, so a field dropped here alone is enough to make a built-in read
+    // as "customized" (English labels stop) and to strip the setting on save.
+    // `webmScale` in particular was parsed but never re-seeded, so an older
+    // catalog lost it in the palette while the background quietly put it back.
+    if (!(def as any).webmOff) {
+      const builtin = DEFAULT_BUFFS.find((b) => b.id === def.id) as any;
+      if (builtin) {
+        if (!(def as any).webmScale && builtin.webmScale) (def as any).webmScale = builtin.webmScale;
+        if ((def as any).webmBelow === undefined && builtin.webmBelow !== undefined) {
+          (def as any).webmBelow = builtin.webmBelow;
+        }
+        // Size describes the asset, so inherit it only while the entry still
+        // points at the built-in asset.
+        if ((def as any).webmAsset && (def as any).webmAsset === builtin.webmAsset) {
+          if ((def as any).webmIntrinsicW === undefined && builtin.webmIntrinsicW) {
+            (def as any).webmIntrinsicW = builtin.webmIntrinsicW;
+          }
+          if ((def as any).webmIntrinsicH === undefined && builtin.webmIntrinsicH) {
+            (def as any).webmIntrinsicH = builtin.webmIntrinsicH;
+          }
+        }
       }
     }
     // 2026-05-14 (#2) — same round-trip preservation for the static
@@ -640,18 +680,18 @@ function newPresetId(): string {
 
 function renderPresets(): void {
   if (!presetsBarEl) return;
-  let html = `<span class="presets-lbl">预设</span>`;
+  let html = `<span class="presets-lbl">${T("stPresetsLbl")}</span>`;
   if (presets.length === 0) {
-    html += `<span class="presets-empty">还没有预设。先在过滤栏选一个分组，再点右边「+ 保存当前为预设」。</span>`;
+    html += `<span class="presets-empty">${T("stPresetsEmpty")}</span>`;
   } else {
     html += presets.map((p) => {
       const count = p.buffIds.length;
       return `<button class="preset-chip" type="button" draggable="true"
                       data-preset-id="${escapeHtml(p.id)}"
-                      title="点击：应用 / 删除 · 拖拽：拖到 token 上应用">${escapeHtml(p.name)}<span class="pre-count">${count}</span></button>`;
+                      title="${escapeHtml(T("stPresetChipTitle"))}">${escapeHtml(p.name)}<span class="pre-count">${count}</span></button>`;
     }).join("");
   }
-  html += `<button class="preset-save" id="presetSave" type="button" title="把当前过滤分组的所有 buffs 保存为一个新预设">+ 保存当前为预设</button>`;
+  html += `<button class="preset-save" id="presetSave" type="button" title="${escapeHtml(T("stPresetSaveTitle"))}">${T("stPresetSave")}</button>`;
   presetsBarEl.innerHTML = html;
 }
 
@@ -664,10 +704,10 @@ function openPresetMenu(chip: HTMLElement, preset: BuffPreset): void {
   const menu = document.createElement("div");
   menu.className = "preset-menu";
   menu.innerHTML =
-    `<button data-act="overwrite">覆盖应用到所有角色卡 token</button>` +
-    `<button data-act="merge">叠加应用到所有角色卡 token</button>` +
-    `<button data-act="rename">重命名预设</button>` +
-    `<button class="danger" data-act="delete">删除预设</button>`;
+    `<button data-act="overwrite">${T("stPresetOverwrite")}</button>` +
+    `<button data-act="merge">${T("stPresetMerge")}</button>` +
+    `<button data-act="rename">${T("stPresetRename")}</button>` +
+    `<button class="danger" data-act="delete">${T("stPresetDelete")}</button>`;
   document.body.appendChild(menu);
   const r = chip.getBoundingClientRect();
   menu.style.left = `${Math.round(r.left)}px`;
@@ -683,19 +723,22 @@ function openPresetMenu(chip: HTMLElement, preset: BuffPreset): void {
       const count = await applyPresetToCharacterCardTokens(preset, mode);
       try {
         await OBR.notification.show(
-          `预设「${preset.name}」已${mode === "overwrite" ? "覆盖" : "叠加"}应用到 ${count} 个角色卡 token`,
+          T("stPresetApplied")
+            .replace("{name}", preset.name)
+            .replace("{mode}", mode === "overwrite" ? T("stModeOverwrite") : T("stModeMerge"))
+            .replace("{count}", String(count)),
           "SUCCESS",
         );
       } catch { /* notification best-effort */ }
     } else if (act === "rename") {
-      const next = window.prompt("新名字：", preset.name);
+      const next = window.prompt(T("stRenamePromptNew"), preset.name);
       if (next && next.trim()) {
         preset.name = next.trim();
         savePresets();
         renderPresets();
       }
     } else if (act === "delete") {
-      if (window.confirm(`删除预设「${preset.name}」？`)) {
+      if (window.confirm(T("stPresetDeleteConfirm").replace("{name}", preset.name))) {
         presets = presets.filter((p) => p.id !== preset.id);
         savePresets();
         renderPresets();
@@ -784,11 +827,11 @@ if (presetsBarEl) {
         : buffs.filter((b) => (b.group ?? UNCATEGORIZED) === activeFilter);
       const ids = list.filter((b) => b.name.trim() !== "").map((b) => b.id);
       if (ids.length === 0) {
-        window.alert("当前过滤分组里没有可用的 buff，无法保存为预设。");
+        window.alert(T("stPresetNoBuffs"));
         return;
       }
-      const def = activeFilter ?? "全部";
-      const name = window.prompt(`给这个预设起个名字（${ids.length} 个 buff）：`, def);
+      const def = activeFilter === null ? T("stCatAll") : groupLabel(activeFilter);
+      const name = window.prompt(T("stPresetNamePrompt").replace("{count}", String(ids.length)), def);
       if (!name || !name.trim()) return;
       presets.push({ id: newPresetId(), name: name.trim(), buffIds: ids });
       savePresets();
@@ -844,11 +887,18 @@ try {
     await applyPresetToToken(p, data.tokenId);
     try {
       await OBR.notification.show(
-        `预设「${p.name}」已应用到 token（叠加）`, "SUCCESS",
+        T("stPresetAppliedMerge").replace("{name}", p.name), "SUCCESS",
       );
     } catch {}
   });
 } catch { /* OBR not ready yet — listener attaches when palette mounts */ }
+
+try {
+  OBR.broadcast.onMessage(BC_SELECT_STATE, (msg) => {
+    const data = msg.data as { key?: string | null } | undefined;
+    setSelectedApplyKey(data?.key ?? null);
+  });
+} catch { /* OBR not ready yet — palette can still set its local state */ }
 
 function mergedGroupOrder(prior: string[], list: BuffDef[]): string[] {
   // Preserve every group the user has explicitly added to `prior`,
@@ -903,6 +953,43 @@ function stripEmoji(s: string): string {
           .trim();
 }
 
+function setSelectedApplyKey(key: string | null): void {
+  selectedApplyKey = key;
+  if (!editMode) renderGrid();
+}
+
+async function cancelApplySelection(): Promise<void> {
+  if (!selectedApplyKey) return;
+  selectedApplyKey = null;
+  renderGrid();
+  try {
+    await OBR.broadcast.sendMessage(BC_SELECT_CANCEL, {}, { destination: "LOCAL" });
+  } catch {}
+}
+
+async function selectApplyBubble(id: string): Promise<void> {
+  if (editMode) return;
+  popupEl.classList.remove("open");
+  hideBuffPreviewDeferred();
+  let payload: any | null = null;
+  if (id === "__clear__") {
+    payload = { kind: "clear", key: "__clear__" };
+  } else if (id === "__manage__") {
+    payload = { kind: "manage", key: "__manage__" };
+  } else {
+    const buff = buffs.find((b) => b.id === id) ?? null;
+    if (!buff) return;
+    payload = { kind: "buff", key: id, buff };
+  }
+  selectedApplyKey = id;
+  renderGrid();
+  try {
+    await OBR.broadcast.sendMessage(BC_SELECT_APPLY, payload, { destination: "LOCAL" });
+  } catch (err) {
+    console.warn("[status/palette] BC_SELECT_APPLY failed", err);
+  }
+}
+
 // Inline SVG icons used in place of emoji in the user-visible UI.
 // All are 14px stroke-based monochrome and inherit `currentColor`
 // so they pick up the surrounding bubble/text colour.
@@ -933,22 +1020,22 @@ function renderFilters(): void {
   // we drop it because edit mode shows all buffs anyway (no filter).
   let html = "";
   if (!editMode) {
-    html += `<button class="cat-btn ${activeFilter === null ? "on" : ""}" data-g="">全部</button>`;
+    html += `<button class="cat-btn ${activeFilter === null ? "on" : ""}" data-g="">${T("stCatAll")}</button>`;
   }
   for (const g of groups) {
     // Category-button drag (re-order categories) is edit-mode only,
     // and so is the buff-drop receiver. The 2026-05-08 attempt to
-    // also accept buff drops in apply mode broke drag-to-token and
-    // got reverted (see renderGrid + onBubblePointerDown comments).
+    // also accept buff drops in apply mode broke the old token-apply
+    // gesture and got reverted.
     const dragAttr = editMode ? `draggable="true"` : "";
     const isOn = (!editMode && activeFilter === g) ? "on" : "";
-    html += `<button class="cat-btn ${isOn}" data-g="${escapeHtml(g)}" ${dragAttr}>${escapeHtml(g)}</button>`;
+    html += `<button class="cat-btn ${isOn}" data-g="${escapeHtml(g)}" ${dragAttr}>${escapeHtml(groupLabel(g))}</button>`;
   }
   if (editMode) {
     if (addCatPending) {
-      html += `<input class="cat-input" id="cat-add-input" type="text" placeholder="新分类名" maxlength="16"/>`;
+      html += `<input class="cat-input" id="cat-add-input" type="text" placeholder="${escapeHtml(T("stNewCatPh"))}" maxlength="16"/>`;
     } else {
-      html += `<button class="cat-add" id="cat-add-btn" type="button" title="添加分类">+</button>`;
+      html += `<button class="cat-add" id="cat-add-btn" type="button" title="${escapeHtml(T("stAddCat"))}">+</button>`;
     }
   }
   filtersEl.innerHTML = html;
@@ -1084,12 +1171,13 @@ function renderGrid(): void {
 
   let html = "";
   if (!editMode) {
-    html += `<div class="bubble eraser" data-id="__clear__">${SVG_CROSS}清除该角色全部 buff</div>`;
-    // Manage pill: drag onto a token, on release the capture
-    // overlay broadcasts BC_OPEN_MANAGE → background opens a popover
-    // anchored on the token listing its current buffs. From there
-    // each buff is independently draggable to remove or transfer.
-    html += `<div class="bubble manage" data-id="__manage__">${SVG_WRENCH}管理该角色 buff</div>`;
+    const eraserSelected = selectedApplyKey === "__clear__" ? " selected" : "";
+    const manageSelected = selectedApplyKey === "__manage__" ? " selected" : "";
+    html += `<div class="bubble eraser${eraserSelected}" data-id="__clear__">${SVG_CROSS}${T("stClearAllBuffs")}</div>`;
+    // Manage pill: select it, then click a token to open that token's
+    // management popover. From there each buff is independently
+    // draggable to remove or transfer.
+    html += `<div class="bubble manage${manageSelected}" data-id="__manage__">${SVG_WRENCH}${T("stManageBuffs")}</div>`;
   }
   for (const b of list) {
     const fg = textColorFor(b.color);
@@ -1106,7 +1194,8 @@ function renderGrid(): void {
     // different gesture (right-click menu, long-press, modifier
     // key, etc.) which we'll revisit separately.
     const dragAttr = editMode ? `draggable="true"` : "";
-    const cls = editMode ? "bubble editable" : "bubble";
+    const selectedCls = !editMode && selectedApplyKey === b.id ? " selected" : "";
+    const cls = editMode ? "bubble editable" : `bubble${selectedCls}`;
     // 2026-05-18 — REVERTED the inline thumbnails (both <img> for
     // iconAsset and <video> for webmAsset). The <video> element
     // renders a solid BLACK fill until its first frame paints, which
@@ -1122,11 +1211,11 @@ function renderGrid(): void {
                   data-id="${escapeHtml(b.id)}"
                   ${dragAttr}
                   style="--bubble-bg:${escapeHtml(b.color)};color:${escapeHtml(fg)}">
-               ${iconHtml}${escapeHtml(stripEmoji(b.name))}
+               ${iconHtml}${escapeHtml(stripEmoji(statusName(b, getLocalLang())))}
              </div>`;
   }
   if (editMode) {
-    html += `<div class="bubble add-pill" id="add-buff-pill">+ 新 buff</div>`;
+    html += `<div class="bubble add-pill" id="add-buff-pill">${T("stNewBuffPill")}</div>`;
   }
   gridEl.innerHTML = html;
 
@@ -1149,8 +1238,16 @@ function renderGrid(): void {
     }
 
     if (!editMode) {
-      el.addEventListener("pointerdown", (e) => onBubblePointerDown(e, el));
-      el.addEventListener("contextmenu", (e) => e.preventDefault());
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void selectApplyBubble(id);
+      });
+      el.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void cancelApplySelection();
+      });
       return;
     }
     if (id === "__clear__") return; // shouldn't render in edit mode
@@ -1202,115 +1299,24 @@ function renderGrid(): void {
   });
 }
 
-// === Apply-mode pointer (drag start) ========================================
-
-async function onBubblePointerDown(e: PointerEvent, el: HTMLElement): Promise<void> {
-  if (editMode) return;
-  if (e.button !== 0 && e.button !== 2) return;
-  // preventDefault is critical here: it stops the browser from
-  // initiating an HTML5 drag (which would fire pointercancel and
-  // cause the global handler to broadcast BC_DRAG_END, slamming the
-  // capture overlay shut before the user finishes dragging onto a
-  // token). The trade-off is that apply-mode bubbles can't use
-  // HTML5 drag for cross-group moves; that gesture needs a separate
-  // mechanism (TODO: long-press / right-click menu).
-  e.preventDefault();
-  e.stopPropagation();
-  const id = el.dataset.id ?? "";
-  if (!id) return;
-  const isEraser = id === "__clear__";
-  const isManage = id === "__manage__";
-  const buff = (isEraser || isManage) ? null : buffs.find((b) => b.id === id) ?? null;
-  if (!isEraser && !isManage && !buff) return;
-  // Both eraser AND buff bubbles split by mouse button:
-  //   left  → "click-place"   pick the buff up onto the cursor; the
-  //           NEXT click places it — on a token's ring = apply, on
-  //           empty space = discard. No button-hold / drag needed.
-  //   right → "paint-toggle"  press-drag: apply / clear EVERY token
-  //           the cursor's path crosses. Unchanged.
-  // Manage pill is click-place only — paint-toggle would open a
-  // popover for every token the cursor passes, which is not useful.
-  const mode: "click-place" | "paint-toggle" =
-    (isManage || e.button !== 2) ? "click-place" : "paint-toggle";
-  // Record the mode so the safety-net pointerup handler knows whether
-  // the imminent button release should broadcast BC_DRAG_END (it
-  // should NOT for click-place — the release is the pickup gesture).
-  lastDragStartMode = mode;
-  try {
-    let payload: any;
-    if (isEraser)      payload = { kind: "clear", mode };
-    else if (isManage) payload = { kind: "manage", mode };
-    else               payload = { kind: "buff", buff, mode };
-    await OBR.broadcast.sendMessage(BC_DRAG_START, payload, { destination: "LOCAL" });
-  } catch (err) {
-    console.warn("[status/palette] BC_DRAG_START failed", err);
-  }
-}
-
-// === Stuck-cursor safety net (palette side) =================================
-//
-// The capture overlay opens asynchronously after BC_DRAG_START is
-// broadcast. If the user releases the click BEFORE the modal is
-// listening (very short tap on a buff with no drag), the pointerup
-// can land on this palette popover instead of the modal — and the
-// modal then never sees a release event, so it sticks open until
-// browser refresh.
-//
-// Mitigation: ANY pointerup on the palette also broadcasts
-// BC_DRAG_END as a "just in case" message. The capture overlay's
-// background handler closes the modal regardless of who broadcast
-// the end. If no modal is open, the broadcast is harmless.
-//
-// Exception: in click-place mode the button release is part of the
-// pickup gesture (the buff is now carried on the cursor), NOT an
-// abort — skip the BC_DRAG_END so the carry survives.
-window.addEventListener("pointerup", async () => {
-  if (lastDragStartMode === "click-place") return;
-  try {
-    await OBR.broadcast.sendMessage(BC_DRAG_END, {}, { destination: "LOCAL" });
-  } catch {}
-});
-window.addEventListener("pointercancel", async () => {
-  try {
-    await OBR.broadcast.sendMessage(BC_DRAG_END, {}, { destination: "LOCAL" });
-  } catch {}
-});
-
-// 2026-05-16 — safety-net Escape handler on the PALETTE too. The
-// capture-page modal already listens for Esc, but if it lost focus
-// mid-gesture (popover stole focus, browser tab-switched, modal
-// failed to open in time, etc.) the user could be left with a buff
-// "stuck on the cursor" with no way out short of refreshing. Esc on
-// the palette broadcasts BC_DRAG_END so the background closes the
-// capture overlay regardless. Also resets lastDragStartMode so the
-// next gesture starts clean. User report: "状态追踪中拖拽状态时常
-// 会卡住，没办法脱离拖拽状态，黏在手上，除非刷新界面否则取消不了."
-window.addEventListener("keydown", async (e) => {
-  if (e.key !== "Escape") return;
-  e.preventDefault();
-  e.stopPropagation();
-  lastDragStartMode = null;
-  try {
-    await OBR.broadcast.sendMessage(BC_DRAG_END, {}, { destination: "LOCAL" });
-  } catch {}
-}, true);
-
 // === Edit popup =============================================================
 
 // Display labels for the experimental effect modes. Drives both the
 // segmented picker in the popup AND the persistence on save.
-const EFFECT_LABELS: Array<{ id: BuffEffect; label: string; hint: string }> = [
-  { id: "default", label: "默认", hint: "静态气泡（不带特效）" },
-  { id: "float",   label: "漂浮", hint: "粒子从角色脚下随机漂浮上升" },
-  { id: "drop",    label: "下降", hint: "粒子从角色头顶随机降落" },
-  { id: "flicker", label: "闪烁", hint: "随机位置闪烁淡入淡出" },
-  { id: "curve",   label: "悠扬", hint: "曲线从角色背后散播（渲染于角色下方）" },
-  { id: "spread",  label: "扩散", hint: "同心圆扩散（渲染于角色下方）" },
+type I18nKey = Parameters<typeof t>[1];
+const EFFECT_LABELS: Array<{ id: BuffEffect; labelKey: I18nKey; hintKey: I18nKey }> = [
+  { id: "default", labelKey: "stFxDefault", hintKey: "stFxDefaultHint" },
+  { id: "float",   labelKey: "stFxFloat",   hintKey: "stFxFloatHint" },
+  { id: "drop",    labelKey: "stFxDrop",    hintKey: "stFxDropHint" },
+  { id: "flicker", labelKey: "stFxFlicker", hintKey: "stFxFlickerHint" },
+  { id: "curve",   labelKey: "stFxCurve",   hintKey: "stFxCurveHint" },
+  { id: "spread",  labelKey: "stFxSpread",  hintKey: "stFxSpreadHint" },
 ];
 
 function openEditPopup(id: string, anchor: HTMLElement): void {
   const buff = buffs.find((b) => b.id === id);
   if (!buff) return;
+  const displayedName = statusName(buff, getLocalLang());
   popupBuffId = id;
   // Pending state for the segmented picker — read on save.
   let pendingEffect: BuffEffect = buff.effect ?? "default";
@@ -1334,7 +1340,7 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
     <button class="pop-fx-seg ${pendingEffect === e.id ? "on" : ""}"
             data-fx="${e.id}"
             type="button"
-            title="${escapeHtml(e.hint)}">${escapeHtml(e.label)}</button>
+            title="${escapeHtml(T(e.hintKey))}">${escapeHtml(T(e.labelKey))}</button>
   `).join("");
   const showImg = pendingEffect !== "default";
   // Effects UI is gated on STATUS_EFFECTS_ENABLED. While the
@@ -1345,13 +1351,13 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
   // restores everything.
   const effectsBlock = STATUS_EFFECTS_ENABLED
     ? `
-    <div class="pop-fx-label">实验性 · 视觉特效（仅 GM / 桌面端）</div>
+    <div class="pop-fx-label">${escapeHtml(T("stFxLabel"))}</div>
     <div class="pop-fx-row">${fxButtons}</div>
     <div class="pop-row pop-img-row" style="${showImg ? "" : "display:none"}">
       <input class="pop-img-url" type="text"
              value="${escapeHtml(pendingImageUrl)}"
-             placeholder="粒子图片 URL（留空 = 默认）"/>
-      <button class="pop-img-pick" type="button" title="从 OBR 资源库选择">${SVG_FOLDER}</button>
+             placeholder="${escapeHtml(T("stFxParticleUrlPh"))}"/>
+      <button class="pop-img-pick" type="button" title="${escapeHtml(T("stFxPickFromLib"))}">${SVG_FOLDER}</button>
     </div>`
     : "";
   // 2026-05 — WebM effect. Built-in buffs: a 2-way 无 / 默认特效
@@ -1360,33 +1366,33 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
   // scene → right-click → 以此创建状态" flow for arbitrary WebMs.
   const webmBlock = isBuiltInFx
     ? `
-    <div class="pop-fx-label">特效</div>
+    <div class="pop-fx-label">${escapeHtml(T("stEffectLabel"))}</div>
     <div class="pop-webm-seg-row">
-      <button class="pop-webm-seg ${pendingWebmAsset ? "" : "on"}" data-webm="none" type="button">无</button>
-      <button class="pop-webm-seg ${pendingWebmAsset ? "on" : ""}" data-webm="default" type="button">默认特效</button>
+      <button class="pop-webm-seg ${pendingWebmAsset ? "" : "on"}" data-webm="none" type="button">${escapeHtml(T("stWebmNone"))}</button>
+      <button class="pop-webm-seg ${pendingWebmAsset ? "on" : ""}" data-webm="default" type="button">${escapeHtml(T("stWebmDefault"))}</button>
     </div>
-    <div class="pop-webm-hint">想用其它预制 webm 当特效？把 webm 拖进场景，状态追踪打开时右键它选「以此创建状态」。</div>`
+    <div class="pop-webm-hint">${escapeHtml(T("stWebmHintBuiltin"))}</div>`
     : `
-    <div class="pop-fx-label">特效</div>
-    <div class="pop-webm-hint">自定义状态没有内置特效。想加特效？把 webm / 图片拖进场景，状态追踪打开时右键它选「以此创建状态」。</div>`;
+    <div class="pop-fx-label">${escapeHtml(T("stEffectLabel"))}</div>
+    <div class="pop-webm-hint">${escapeHtml(T("stWebmHintCustom"))}</div>`;
   popupEl.innerHTML = `
     <div class="pop-row">
       <input class="pop-color" type="color" value="${escapeHtml(buff.color)}"/>
-      <input class="pop-name" type="text" maxlength="20" value="${escapeHtml(buff.name)}" placeholder="名称"/>
+      <input class="pop-name" type="text" maxlength="20" value="${escapeHtml(displayedName)}" placeholder="${escapeHtml(T("stNamePh"))}"/>
     </div>
     <div class="pop-row rounds">
-      <span class="pop-rounds-label">持续轮数</span>
+      <span class="pop-rounds-label">${escapeHtml(T("stRoundsLabel"))}</span>
       <input class="pop-rounds" type="number" min="0" max="99" step="1"
              value="${buff.rounds ?? ""}" placeholder="0"/>
-      <span class="pop-rounds-label">0=不限</span>
+      <span class="pop-rounds-label">${escapeHtml(T("stRoundsUnlimited"))}</span>
     </div>
     ${effectsBlock}
     ${webmBlock}
     <div class="pop-row pop-actions">
-      <button class="pop-del" type="button">删除</button>
+      <button class="pop-del" type="button">${escapeHtml(T("stDelete"))}</button>
       <span style="flex:1"></span>
-      <button class="pop-cancel" type="button">取消</button>
-      <button class="pop-save" type="button">保存</button>
+      <button class="pop-cancel" type="button">${escapeHtml(T("stCancel"))}</button>
+      <button class="pop-save" type="button">${escapeHtml(T("stSave"))}</button>
     </div>
   `;
   // Position popup just below the anchor bubble, clamped inside the
@@ -1502,7 +1508,7 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
     newlyCreatedBuffIds.delete(id);
     const target = buffs.find((b) => b.id === id);
     if (target) {
-      target.name = name;
+      target.name = name === displayedName.trim() ? buff.name : name;
       target.color = colorInp.value;
       const rounds = Math.floor(Number(roundsInp.value));
       if (Number.isFinite(rounds) && rounds > 0) target.rounds = rounds;
@@ -1543,7 +1549,7 @@ function openEditPopup(id: string, anchor: HTMLElement): void {
   });
   cancel.addEventListener("click", close);
   del.addEventListener("click", async () => {
-    if (!window.confirm(`删除「${buff.name}」？`)) return;
+    if (!window.confirm(T("stDeleteBuffConfirm").replace("{name}", statusName(buff, getLocalLang())))) return;
     buffs = buffs.filter((b) => b.id !== id);
     await saveCatalog();
     close();
@@ -1581,20 +1587,17 @@ window.addEventListener("click", handleOutsidePopupClick, true);
 // === Edit-mode actions ======================================================
 
 async function onRenameCategory(oldName: string): Promise<void> {
-  const next = window.prompt(`重命名分类「${oldName}」（留空=删除）`, oldName);
+  const next = window.prompt(T("stRenameCatPrompt").replace("{name}", oldName), oldName);
   if (next === null) return;
   const trimmed = next.trim();
   if (trimmed === "") {
-    // Refuse to delete the last named group — the user must always
-    // have somewhere to drop new buffs into. (UNCATEGORIZED still
-    // exists implicitly but isn't a "named" group the user can
-    // rename / reorder, so leaving zero named groups breaks the
-    // create-buff-into-active-filter UX.)
-    if (groupOrder.length <= 1) {
-      window.alert(`至少保留一个分组，无法删除「${oldName}」。`);
-      return;
-    }
-    if (!window.confirm(`删除分类「${oldName}」？该分类下的 buff 会移到「${UNCATEGORIZED}」。`)) return;
+    // Deleting the last named group is allowed: UNCATEGORIZED is an
+    // implicit bucket that always exists, so an empty groupOrder is a
+    // valid state (and "delete every group" has to be possible, or a
+    // cleared catalog could never stay cleared). New buffs created with
+    // no active filter go back to UNCATEGORIZED and the "+" button is
+    // still there to add a named group again.
+    if (!window.confirm(T("stCatDeleteConfirm").replace("{name}", oldName).replace("{uncat}", T("stCatUncategorized")))) return;
     for (const b of buffs) if ((b.group ?? UNCATEGORIZED) === oldName) b.group = undefined;
     groupOrder = groupOrder.filter((g) => g !== oldName);
     if (activeFilter === oldName) activeFilter = null;
@@ -1716,20 +1719,26 @@ function cssEscape(value: string): string {
 // Footer text is split into one line per affordance so each
 // reads on its own row inside the cramped 340px panel — much less
 // eye-strain than a long " · "-joined run-on string.
-const FOOT_APPLY_LINES = [
-  `<b>左键</b>拖到目标释放 = 应用 buff`,
-  `<b>右键</b>拖过角色 = 路径切换 (有则去)`,
-  `<b>左键</b>拖红色 ${SVG_CROSS}= 单个清除`,
-  `<b>右键</b>拖红色 ${SVG_CROSS}= 路径全清`,
-  `<kbd>]</kbd> 关闭面板`,
-];
-const FOOT_EDIT_LINES = [
-  `<b>点击</b>分类 = 重命名（清空 = 删除）`,
-  `<b>拖</b>分类 = 排序`,
-  `<b>点击</b> buff = 颜色 / 名字 / 特效编辑`,
-  `<b>拖</b> buff 到分类 = 切换分组`,
-  `<kbd>]</kbd> 退出编辑`,
-];
+// Built fresh per render() so a live language switch is reflected.
+// {x} = the inline red-cross SVG icon.
+function footApplyLines(): string[] {
+  return [
+    T("stFootApply1"),
+    T("stFootApply2"),
+    T("stFootApply3").replace("{x}", SVG_CROSS),
+    T("stFootApply4").replace("{x}", SVG_CROSS),
+    T("stFootApply5"),
+  ];
+}
+function footEditLines(): string[] {
+  return [
+    T("stFootEdit1"),
+    T("stFootEdit2"),
+    T("stFootEdit3"),
+    T("stFootEdit4"),
+    T("stFootEdit5"),
+  ];
+}
 
 function setFooter(lines: string[]): void {
   footEl.innerHTML = lines.map((l) => `<div class="foot-line">${l}</div>`).join("");
@@ -1740,13 +1749,13 @@ function render(): void {
     btnEdit.classList.add("on");
     document.body.classList.add("edit-mode");
     footEl.classList.add("edit-foot");
-    setFooter(FOOT_EDIT_LINES);
+    setFooter(footEditLines());
   } else {
     btnEdit.classList.remove("on");
     document.body.classList.remove("edit-mode");
     footEl.classList.remove("edit-foot");
     addCatPending = false;
-    setFooter(FOOT_APPLY_LINES);
+    setFooter(footApplyLines());
   }
   renderFilters();
   renderGrid();
@@ -1758,12 +1767,16 @@ function render(): void {
 
 btnEdit.addEventListener("click", () => {
   editMode = !editMode;
+  if (editMode) void cancelApplySelection();
   render();
 });
 
 // === Toolbar / shortcuts ====================================================
 
-window.addEventListener("contextmenu", (e) => e.preventDefault());
+window.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  void cancelApplySelection();
+});
 
 bindPanelDrag(dragHandle, PANEL_IDS.statusPalette);
 
@@ -1780,9 +1793,9 @@ function refreshRenderModeLabel(): void {
   if (!btnRenderMode) return;
   const mode = getStatusRenderMode();
   btnRenderMode.textContent =
-    mode === "effect" ? "特效" :
-    mode === "text"   ? "文字" :
-                        "自动";
+    mode === "effect" ? T("stRenderEffect") :
+    mode === "text"   ? T("stRenderText") :
+                        T("stRenderAuto");
   btnRenderMode.dataset.mode = mode;
 }
 refreshRenderModeLabel();
@@ -1795,20 +1808,30 @@ if (btnRenderMode) {
                          "auto";
     setStatusRenderMode(next);
     refreshRenderModeLabel();
-    // Force-resync visible tokens so the mode flip lands right away.
+    // Force-resync so the mode flip lands right away. ONE coalesced
+    // full pass via the catalog-changed handler (which clears the
+    // background's sig snapshot before syncing — required because
+    // tokenSyncKey doesn't encode the render mode). The old per-token
+    // BC_REFRESH_TOKEN loop spawned N concurrent un-serialized
+    // refreshes on a 30-token scene.
     try {
-      const items = await OBR.scene.items.getItems();
-      for (const it of items) {
-        if ((it as any).type !== "IMAGE") continue;
-        try {
-          OBR.broadcast.sendMessage(BC_REFRESH_TOKEN, { tokenId: it.id }, { destination: "LOCAL" });
-        } catch {}
-      }
-    } catch {}
+      await OBR.broadcast.sendMessage(
+        "com.obr-suite/status/catalog-changed",
+        {},
+        { destination: "LOCAL" },
+      );
+    } catch (e) {
+      console.warn("[status/palette] render-mode resync broadcast failed", e);
+    }
   });
 }
 window.addEventListener("keydown", async (e) => {
   if (e.key === "]" || e.key === "Escape") {
+    if (e.key === "Escape" && selectedApplyKey) {
+      e.preventDefault();
+      await cancelApplySelection();
+      return;
+    }
     if (popupBuffId) {
       popupBuffId = null;
       popupEl.classList.remove("open");
@@ -1863,7 +1886,7 @@ fileImport.addEventListener("change", async () => {
     const json = JSON.parse(text);
     const parsed = parseCatalog(json);
     if (!parsed) {
-      window.alert("JSON 文件格式错误：应为 buff 数组或 { buffs, groupOrder } 对象。");
+      window.alert(T("stImportBadJson"));
       return;
     }
     buffs = parsed.buffs;
@@ -1888,7 +1911,7 @@ fileImport.addEventListener("change", async () => {
     }
     render();
   } catch (e: any) {
-    window.alert(`导入失败：${e?.message ?? String(e)}`);
+    window.alert(T("stImportFailed").replace("{err}", e?.message ?? String(e)));
   }
 });
 
@@ -1896,6 +1919,28 @@ fileImport.addEventListener("change", async () => {
 
 OBR.onReady(async () => {
   installDebugOverlay();
+  // Bubble items are rendered by the GM client only (sole-writer
+  // design in modules/statusTracker) — a player flipping the
+  // per-client render mode would see the label cycle and nothing
+  // change on canvas. Hide the button for players instead of leaving
+  // a dead control.
+  try {
+    const role = await OBR.player.getRole();
+    if (role !== "GM" && btnRenderMode) btnRenderMode.style.display = "none";
+  } catch (e) {
+    console.warn("[status/palette] getRole failed — leaving render-mode button visible", e);
+  }
+  try {
+    OBR.player.onChange((p) => {
+      if (!btnRenderMode) return;
+      if (p.role) btnRenderMode.style.display = p.role === "GM" ? "" : "none";
+    });
+  } catch (e) {
+    console.warn("[status/palette] player.onChange subscribe failed", e);
+  }
+  refreshLanguage();
+  const offLanguage = onLangChange(refreshLanguage);
+  window.addEventListener("pagehide", offLanguage, { once: true });
   // 2026-05-16 — scale text + buff icons with palette size. Baseline
   // = PALETTE_W × PALETTE_H from statusTracker/index.ts.
   installPanelZoom({ baseWidth: 340, baseHeight: 544 });
@@ -1910,3 +1955,43 @@ OBR.onReady(async () => {
     if (e.key === LS_PRESETS) { loadPresets(); renderPresets(); }
   });
 });
+
+/** Translate existing nodes: render() closes the popup and replaces category
+ * inputs, so language changes must never call it or commit a user's draft. */
+function refreshLanguage(): void {
+  const lang = getLocalLang();
+  document.documentElement.lang = lang; document.title = T("stPaletteTitle");
+  applyI18nDom(lang); refreshRenderModeLabel();
+  const text = (selector: string, key: Parameters<typeof T>[0]) => document.querySelectorAll<HTMLElement>(selector).forEach(el => { el.textContent = T(key); });
+  const attribute = (selector: string, name: string, key: Parameters<typeof T>[0]) => document.querySelectorAll<HTMLElement>(selector).forEach(el => el.setAttribute(name, T(key)));
+  filtersEl.querySelectorAll<HTMLElement>(".cat-btn").forEach(el => { const group = el.dataset.g; el.textContent = group ? groupLabel(group) : T("stCatAll"); });
+  attribute("#cat-add-input", "placeholder", "stNewCatPh"); attribute("#cat-add-btn", "title", "stAddCat");
+  gridEl.querySelectorAll<HTMLElement>(".bubble[data-id]").forEach(el => {
+    const id = el.dataset.id;
+    if (id === "__clear__") el.innerHTML = SVG_CROSS + T("stClearAllBuffs");
+    else if (id === "__manage__") el.innerHTML = SVG_WRENCH + T("stManageBuffs");
+    else { const buff = buffs.find(b => b.id === id); if (buff) el.textContent = stripEmoji(statusName(buff, lang)); }
+  });
+  text("#add-buff-pill", "stNewBuffPill"); text(".presets-lbl", "stPresetsLbl"); text(".presets-empty", "stPresetsEmpty"); text("#presetSave", "stPresetSave");
+  attribute("#presetSave", "title", "stPresetSaveTitle"); attribute(".preset-chip", "title", "stPresetChipTitle");
+  for (const [action, key] of [["overwrite", "stPresetOverwrite"], ["merge", "stPresetMerge"], ["rename", "stPresetRename"], ["delete", "stPresetDelete"]] as const) text(`.preset-menu [data-act="${action}"]`, key);
+  attribute(".pop-name", "placeholder", "stNamePh"); attribute(".pop-img-url", "placeholder", "stFxParticleUrlPh"); attribute(".pop-img-pick", "title", "stFxPickFromLib");
+  text(".pop-del", "stDelete"); text(".pop-cancel", "stCancel"); text(".pop-save", "stSave");
+  text('.pop-webm-seg[data-webm="none"]', "stWebmNone"); text('.pop-webm-seg[data-webm="default"]', "stWebmDefault");
+  const roundsLabels = popupEl.querySelectorAll<HTMLElement>(".pop-rounds-label");
+  if (roundsLabels[0]) roundsLabels[0].textContent = T("stRoundsLabel");
+  if (roundsLabels[1]) roundsLabels[1].textContent = T("stRoundsUnlimited");
+  const fxLabels = popupEl.querySelectorAll<HTMLElement>(".pop-fx-label");
+  fxLabels.forEach((el, index) => { el.textContent = T(STATUS_EFFECTS_ENABLED && index === 0 ? "stFxLabel" : "stEffectLabel"); });
+  text(".pop-webm-hint", popupEl.querySelector(".pop-webm-seg") ? "stWebmHintBuiltin" : "stWebmHintCustom");
+  for (const effect of EFFECT_LABELS) { text(`.pop-fx-seg[data-fx="${effect.id}"]`, effect.labelKey); attribute(`.pop-fx-seg[data-fx="${effect.id}"]`, "title", effect.hintKey); }
+  if (_previewActiveId) {
+    const buff = buffs.find(b => b.id === _previewActiveId);
+    if (buff && previewLabelEl) {
+      const name = previewLabelEl.querySelector(".bp-name"), hint = previewLabelEl.querySelector(".bp-hint");
+      if (name) name.textContent = statusName(buff, lang);
+      if (hint) hint.textContent = (buff.group ? groupLabel(buff.group) + " · " : "") + T("stHoverPreview");
+    }
+  }
+  setFooter(editMode ? footEditLines() : footApplyLines());
+}

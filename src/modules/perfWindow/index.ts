@@ -8,6 +8,7 @@
 // "1" = open on scene-ready, anything else = stay closed.
 
 import OBR from "@owlbear-rodeo/sdk";
+import { setPanelOpen } from "../../utils/panelObstacles";
 import { assetUrl } from "../../asset-base";
 import { onViewportResize } from "../../utils/viewportAnchor";
 import {
@@ -75,7 +76,7 @@ async function openPerf(): Promise<void> {
     // popover stays at the previous coordinates. Closing first
     // guarantees the new position lands.
     if (isOpen) {
-      try { await OBR.popover.close(POPOVER_ID); } catch {}
+      try { await OBR.popover.close(POPOVER_ID); isOpen = false; setPanelOpen(PANEL_IDS.perfWindow, false); } catch {}
     }
     await OBR.popover.open({
       id: POPOVER_ID,
@@ -89,15 +90,14 @@ async function openPerf(): Promise<void> {
       hidePaper: true,
       disableClickAway: true,
     });
-    isOpen = true;
+    isOpen = true; setPanelOpen(PANEL_IDS.perfWindow, true);
   } catch (e) {
     console.warn("[obr-suite/perf] open failed", e);
   }
 }
 
 async function closePerf(): Promise<void> {
-  try { await OBR.popover.close(POPOVER_ID); } catch {}
-  isOpen = false;
+  try { await OBR.popover.close(POPOVER_ID); isOpen = false; setPanelOpen(PANEL_IDS.perfWindow, false); } catch {}
 }
 
 export async function setupPerfWindow(): Promise<void> {

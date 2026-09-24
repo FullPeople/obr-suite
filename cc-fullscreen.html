@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>角色卡</title>
+<title>角色卡 / Character Card</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}
@@ -547,6 +547,13 @@ body{
   grid-column:1/-1;font-size:11.5px;color:var(--ink-mute);
   font-style:normal;line-height:1.5;
 }
+/* Edit-mode weapon/inventory rows use minmax() tracks (inline style on
+   the row) — their inputs must fill the track and be allowed to shrink
+   below their ~170px intrinsic width, or the row overflows and .sec's
+   overflow:hidden clips the 3rd+ inputs into unclickability. Scoped to
+   .weap-edit: putting width:100% on the global .cc-edit-text would
+   reflow the bio/tag/HP layouts that share the class. */
+.weap.weap-edit > .cc-edit-text{min-width:0;width:100%}
 
 /* === Spells === */
 .spell-slots{
@@ -753,8 +760,8 @@ body{
   outline:none;
   transition:border-color .12s;
 }
-.cc-edit-num{width:60px;text-align:center;font-variant-numeric:tabular-nums}
-.cc-edit-text{width:auto}
+.cc-edit-num{width:60px;text-align:center;font-variant-numeric:tabular-nums;min-width:0}
+.cc-edit-text{width:auto;min-width:0}
 .cc-edit-num:focus,.cc-edit-text:focus{border-color:var(--gold, #d4a056)}
 /* Hide spinner arrows so the number input looks like the static spans
    it's replacing — keeps the stat banner / abilities grid visually
@@ -901,7 +908,7 @@ body{
 </head>
 <body>
 <div id="app">
-  <div class="cc-loading">加载角色卡…</div>
+  <div class="cc-loading">Loading… 加载角色卡…</div>
 </div>
 <input type="file" class="cc-file-input" id="ccFileInput" accept=".json,application/json,.xlsx" multiple>
 <script type="module" src="/src/modules/characterCards/fullscreen-page.tsx"></script>

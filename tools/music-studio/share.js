@@ -30,6 +30,8 @@
  * to export blob-only entries with a clear toast.
  */
 
+import { t as T } from "./i18n.js";
+
 const PREFIX = "obrm1:";
 
 function encJson(obj) {
@@ -51,11 +53,11 @@ function decJson(text) {
 function trackToCompact(t) {
   // Pick out the fields the OBR side needs; reject blob-only entries.
   if (!t.url) {
-    throw new Error(`「${t.name}」是本地压缩文件，需要先上传到某个直链地址才能分享。`);
+    throw new Error(T("muShareLocalErr", { name: t.name }));
   }
   const out = {
     v: 1,
-    n: t.name || "未命名",
+    n: t.name || T("muUnnamed"),
     u: t.url,
     b: t.bus === "sfx" ? "sfx" : "bgm",
     l: t.loop !== false,
@@ -88,7 +90,7 @@ export function decodeShareCode(text) {
   }
   const arr = Array.isArray(obj) ? obj : [obj];
   return arr.map((c) => ({
-    name:     typeof c.n === "string" ? c.n : "未命名",
+    name:     typeof c.n === "string" ? c.n : T("muUnnamed"),
     url:      typeof c.u === "string" ? c.u : "",
     bus:      c.b === "sfx" ? "sfx" : "bgm",
     loop:     c.l !== false,

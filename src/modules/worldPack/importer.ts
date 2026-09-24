@@ -25,6 +25,8 @@
 
 import OBR from "@owlbear-rodeo/sdk";
 import { FobrManifest, EMBED_PREFIX, unpackFobr } from "./format";
+import { migrateLegacyImageUrl } from "../bestiary/repair-legacy-images";
+import { TRANSFORM_STACK_KEY } from "../transform/shared";
 
 export interface ImportProgress {
   phase: "parsing" | "rewriting" | "applying-metadata" | "applying-items" | "done" | "error";
@@ -141,19 +143,48 @@ export async function importPackFromBlob(
 
   // Pass 1: rewrite embedded URLs back to data: URLs + re-stamp audit
   // fields so OBR's validator accepts the items.
+  let legacyUrlsMigrated = 0;
   for (const it of items) {
-    if (it && it.image && typeof it.image.url === "string" &&
-        it.image.url.startsWith(EMBED_PREFIX)) {
-      const hash = it.image.url.slice(EMBED_PREFIX.length);
-      const rec = manifest.images[hash];
-      if (rec) {
-        it.image.url = embeddedToDataUrl(rec);
-        it.image.mime = rec.mime;
+    if (it && it.image && typeof it.image.url === "string") {
+      if (it.image.url.startsWith(EMBED_PREFIX)) {
+        const hash = it.image.url.slice(EMBED_PREFIX.length);
+        const rec = manifest.images[hash];
+        if (rec) {
+          it.image.url = embeddedToDataUrl(rec);
+          it.image.mime = rec.mime;
+        }
+        // Orphan reference (hash not in images) — leave the sentinel.
+        // OBR will render a broken image and the user can spot it.
+      } else {
+        // Packs exported before the kiwee image migration (stable
+        // 1.1.10) carry the retired obr.dnd.center proxy verbatim in
+        // their items — rewrite on the way in so imported tokens
+        // don't resurrect dead image URLs the in-scene repair button
+        // already fixed.
+        const migrated = migrateLegacyImageUrl(it.image.url);
+        if (migrated) {
+          it.image.url = migrated;
+          legacyUrlsMigrated++;
+        }
       }
-      // Orphan reference (hash not in images) — leave the sentinel.
-      // OBR will render a broken image and the user can spot it.
+    }
+    // Transform snapshots inside item metadata bake image URLs too.
+    const stack = it?.metadata?.[TRANSFORM_STACK_KEY];
+    if (Array.isArray(stack)) {
+      for (const snap of stack) {
+        const migrated = migrateLegacyImageUrl(snap?.image?.url);
+        if (migrated) {
+          snap.image.url = migrated;
+          legacyUrlsMigrated++;
+        }
+      }
     }
     reauditItem(it, currentUserId, nowIso);
+  }
+  if (legacyUrlsMigrated > 0) {
+    console.info(
+      `[obr-suite/worldPack] import: migrated ${legacyUrlsMigrated} legacy obr.dnd.center image URL(s) to the kiwee mirror`,
+    );
   }
 
   // Pass 2: regenerate ids (both modes) and remap attachedTo so

@@ -212,12 +212,21 @@ async function readActiveSkinsRaw(): Promise<DiceSkins> {
   return {};
 }
 
-async function readActiveSkinsForPlayerRaw(playerId: string): Promise<DiceSkins> {
+/** Party snapshot shared by the two per-player readers, so one roll
+ *  costs one `getId` and one `getPlayers` rather than two of each. */
+interface PlayerLookup {
+  myId: string;
+  /** Only fetched when the roller is someone else. */
+  players: { id: string; metadata?: Record<string, unknown> }[] | null;
+}
+
+async function readActiveSkinsForPlayerRaw(
+  playerId: string,
+  lookup: PlayerLookup,
+): Promise<DiceSkins> {
   try {
-    const myId = await OBR.player.getId();
-    if (playerId === myId) return readActiveSkinsRaw();
-    const players = await OBR.party.getPlayers();
-    const p = players.find((pl) => pl.id === playerId);
+    if (playerId === lookup.myId) return readActiveSkinsRaw();
+    const p = lookup.players?.find((pl) => pl.id === playerId);
     return normalizeSkins(p?.metadata?.[SKINS_KEY]);
   } catch {
     return {};
@@ -244,12 +253,13 @@ async function readLibraryRaw(): Promise<DiceSkinLibrary> {
   return emptyLibrary();
 }
 
-async function readLibraryForPlayerRaw(playerId: string): Promise<DiceSkinLibrary> {
+async function readLibraryForPlayerRaw(
+  playerId: string,
+  lookup: PlayerLookup,
+): Promise<DiceSkinLibrary> {
   try {
-    const myId = await OBR.player.getId();
-    if (playerId === myId) return readLibraryRaw();
-    const players = await OBR.party.getPlayers();
-    const p = players.find((pl) => pl.id === playerId);
+    if (playerId === lookup.myId) return readLibraryRaw();
+    const p = lookup.players?.find((pl) => pl.id === playerId);
     return normalizeLibrary(p?.metadata?.[SKIN_LIB_KEY]);
   } catch {
     return emptyLibrary();
@@ -284,9 +294,32 @@ export async function readMySkins(): Promise<DiceSkins> {
 /** Read any player's effective skins by id. Used by the effect modal to
  *  render a roll with the roller's skins. */
 export async function readSkinsForPlayer(playerId: string): Promise<DiceSkins> {
+  // Both readers used to fetch the player id AND the party list for
+  // themselves, so every received roll cost four host round trips for
+  // two distinct values. They run concurrently, so they were already
+  // reading the same instant — sharing one snapshot is the same answer
+  // from strictly less traffic, and rules out the two of them
+  // disagreeing about the party.
+  let myId = "";
+  try {
+    myId = await OBR.player.getId();
+  } catch {
+    // Same failure shape as before: each reader's own try/catch used to
+    // swallow this and fall back. An empty id matches no player, so the
+    // foreign-player branch is taken and returns the empty default.
+  }
+  let players: PlayerLookup["players"] = null;
+  if (playerId !== myId) {
+    try {
+      players = (await OBR.party.getPlayers()) as PlayerLookup["players"];
+    } catch {
+      players = null;
+    }
+  }
+  const lookup: PlayerLookup = { myId, players };
   const [active, lib] = await Promise.all([
-    readActiveSkinsForPlayerRaw(playerId),
-    readLibraryForPlayerRaw(playerId),
+    readActiveSkinsForPlayerRaw(playerId, lookup),
+    readLibraryForPlayerRaw(playerId, lookup),
   ]);
   return resolveEffective(active, lib);
 }

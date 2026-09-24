@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>角色卡面板</title>
+<title data-i18n="ccPanelTitle">角色卡面板</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#eee}
@@ -99,15 +99,19 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
   outline-color:#3498db;
 }
 .side.busy::after{
+  pointer-events:none;
   content:"⏳ 上传中…";
   position:absolute;inset:0;background:rgba(0,0,0,0.6);
   display:flex;align-items:center;justify-content:center;
   color:#fff;font-size:16px;font-weight:600;z-index:20;
 }
+html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
 
-.side-head{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:space-between;gap:6px}
+.side-head{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.08);display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px}
 .side-head .title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;flex:1;min-width:0}
-.side-head .head-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.side-head .head-actions{display:contents}
+#ccTplRow{display:flex;flex-wrap:wrap;gap:4px;grid-column:1 / -1;grid-row:2}
+.side-head .close{grid-column:2;grid-row:1}
 .side-head .icon-btn{background:transparent;border:1px solid rgba(255,255,255,0.1);color:#aaa;cursor:pointer;font-size:11px;padding:3px 8px;font-family:inherit;border-radius:4px;line-height:1.3;text-decoration:none;display:inline-block}
 .side-head .icon-btn:hover{background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.25)}
 .side-head .icon-btn.off{color:#666;text-decoration:line-through;opacity:.7}
@@ -142,11 +146,38 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
 .card{padding:9px 10px;margin-bottom:3px;border-radius:6px;background:rgba(255,255,255,0.04);border:1px solid transparent;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;gap:2px;position:relative}
 .card:hover{background:rgba(255,255,255,0.08)}
 .card.active{background:rgba(52,152,219,0.18);border-color:rgba(52,152,219,0.5)}
-.card-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:42px}
+.card-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:60px}
 .card-sub{font-size:10px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card-del{position:absolute;top:4px;right:4px;background:transparent;border:none;color:#666;cursor:pointer;width:18px;height:18px;font-size:13px;display:none;border-radius:3px;font-family:inherit;padding:0;line-height:1}
 .card:hover .card-del{display:block}
 .card-del:hover{background:rgba(231,76,60,0.25);color:#e74c3c}
+
+/* Collapsible folder header (2026-09-14). One per group plus the derived
+   旧版本 / Older versions section; the ungrouped bucket is rendered last. */
+.group-head{
+  display:flex;align-items:center;gap:5px;
+  padding:5px 6px;margin:6px 2px 3px;
+  font-size:11px;font-weight:600;color:#9fb0c8;
+  border-radius:5px;cursor:pointer;user-select:none;
+  background:rgba(255,255,255,0.03);
+}
+.group-head:hover{background:rgba(255,255,255,0.08);color:#fff}
+.group-head .group-chevron{font-size:10px;line-height:1;opacity:.8;width:9px;text-align:center}
+.group-head .group-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.group-head[data-collapsed="1"]{color:#7d8ba1}
+.group-head-older{color:#b08a5a;background:rgba(245,166,35,0.06)}
+.group-head-older:hover{background:rgba(245,166,35,0.14);color:#f5d76e}
+
+/* 📁 move-to-folder action. Same hidden-until-hover stack as ↻ / ×. */
+.card-group{
+  position:absolute;top:4px;right:60px;
+  background:transparent;border:none;color:#9fb0c8;cursor:pointer;
+  width:18px;height:18px;font-size:11px;line-height:1;display:none;
+  border-radius:3px;font-family:inherit;padding:0;opacity:0.55;
+  transition:opacity .12s, background .12s;
+}
+.card:hover .card-group{display:block}
+.card-group:hover{background:rgba(52,152,219,0.25);opacity:1}
 
 /* Visibility toggle (DM only). Sits next to the refresh button at
    the right edge of the card row. Hidden until row hover or "active"
@@ -188,7 +219,7 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
     <div class="empty-state" id="emptyState">
       <div class="big">📇</div>
       <div id="emptyText" data-i18n="ccPanelEmpty">从右侧选择一张角色卡</div>
-      <div style="font-size:11px;opacity:.7" data-i18n="ccPanelEmpty2">拖拽 xlsx 到右侧栏上传</div>
+      <div style="font-size:11px;opacity:.7" data-i18n="ccPanelEmpty2">拖拽 xlsx / JSON 到右侧栏上传</div>
     </div>
   </div>
   <aside class="res-col" id="resCol" style="display:none"></aside>
@@ -202,6 +233,9 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
              with one rule set. -->
         <!-- Relative hrefs so dev (/suite-dev/) and stable (/suite/)
              installs each download their own deploy's templates. -->
+        <!-- Keep both downloads available in either UI language. English
+             labels identify the current workbooks as Chinese content. -->
+        <span id="ccTplRow">
         <a
           class="icon-btn"
           href="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx"
@@ -222,16 +256,30 @@ body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-fi
           data-i18n-title="ccPanelDownloadTpl2024Title"
           title="下载 5E2024（5e 修订）角色卡模板"
         >2024 模板</a>
+        </span>
         <button class="close" id="closeBtn" data-i18n-title="ccPanelClose" title="关闭 (Esc)">✕</button>
       </div>
     </div>
     <div class="side-hint">
-      <span data-i18n="ccPanelDragHint">拖拽 xlsx 到此处上传，或</span>
+      <span data-i18n="ccPanelDragHint">拖拽 xlsx / JSON 到此处上传，或</span>
       <button id="btnLinkLocal" class="link-local-btn" type="button"
               data-i18n="ccPanelChooseFile"
               data-i18n-title="ccPanelChooseFileTitle"
-              title="打开本地文件选择器上传 xlsx">
+              title="打开本地文件选择器上传 xlsx / JSON 角色卡">
         📁 选择文件
+      </button>
+      <!-- The example is read-only. Pasted JSON creates a scene card after confirmation. -->
+      <button id="btnViewSample" class="link-local-btn" type="button"
+              data-i18n="ccPanelViewSample"
+              data-i18n-title="ccPanelViewSampleTitle"
+              title="打开一份内置的示例角色卡（只读）">
+        👁 查看示例
+      </button>
+      <button id="btnPasteJson" class="link-local-btn" type="button"
+              data-i18n="ccPanelPasteJson"
+              data-i18n-title="ccPanelPasteJsonTitle"
+              title="粘贴角色卡 JSON，确认后上传并添加到当前场景">
+        📋 粘贴 JSON
       </button>
       <div class="side-hint-sub" data-i18n="ccPanelRefreshHint">每张卡片旁的 ↻ 可重新选择 xlsx 覆盖更新</div>
     </div>

@@ -3,6 +3,17 @@ import { DiceType, DieResult, sidesOf } from "./types";
 import { subscribeToSfx } from "./sfx-broadcast";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
+import {
+  readFixedRoll,
+  armFixedRoll,
+  disarmFixedRoll,
+  consumeFixedRoll,
+  distributeFaces,
+  faceBounds,
+  randIntInclusive,
+  FIXED_ROLL_LS_KEY,
+  type DieSpec,
+} from "./fixed-roll";
 import { assetUrl } from "../../asset-base";
 import {
   writeSkin, isVideoSkin, type DiceSkins, type DiceSkin,
@@ -1524,7 +1535,8 @@ function buildRepeatStripHtml(entry: DiceRollPayload): string {
     const end = r + 1 < rows.length ? rows[r + 1] : entry.dice.length;
     const rowDice = entry.dice.slice(start, end);
     const kept = rowDice.filter((d) => !d.loser);
-    const rowTotal = kept.reduce((a, d) => a + d.value, 0) + entry.modifier;
+    // §9 consistency fix: subtraction dice count negative in row totals.
+    const rowTotal = kept.reduce((a, d) => a + (d.subtract ? -d.value : d.value), 0) + entry.modifier;
     out.push(buildRepeatRowCard(entry, r, rowDice, rowTotal));
   }
   return `<div class="repeat-strip is-flow">${out.join("")}</div>`;
@@ -2423,6 +2435,355 @@ function buildOneRollDice(parsed: ParsedExpr): BuiltRoll {
   return { dice: allDice, winnerIdx, sameHighlight };
 }
 
+// ---- §9 (2026-08-21): DM fixed-result building (panel grammar) -----
+//
+// Produces REAL die faces whose kept sum + modifier equals the target.
+// Supported: plain sums (subtraction dice included), max/min clamps,
+// reset/resetmin/resetmax (a triggered reroll can land on any face, so
+// every final face is reachable), same (visual-only), repeat (grand
+// total = faces + modifier × rows), and ONE outermost adv/dis per
+// segment — losing sets get real faces constrained to the losing side
+// of rollExpr's raw-sum comparison, so replaying the comparison yields
+// the same winner. Refused: burst (faces are structurally coupled to
+// spawned child dice) and nested / non-outermost adv-dis. A refusal
+// falls back to a true random roll with a WARNING; the fix stays armed.
+
+type FixedBuild =
+  | { ok: BuiltRoll }
+  | { err: "unsupported" }
+  | { err: "bounds"; min: number; max: number };
+
+// Final-face range of one die after its value-wrapper chain, applied
+// in rollExpr order (array order = innermost first). Returns null for
+// unsupported wrappers or clamp params outside the die's face range
+// (e.g. max(1d6,10) — the broadcast layer would re-clamp such faces
+// and break consistency, so we refuse instead).
+function clampRangeForWrappers(
+  sides: number,
+  wrappers: Wrapper[],
+): { lo: number; hi: number } | null {
+  let lo = 1;
+  let hi = sides;
+  for (const w of wrappers) {
+    switch (w.kind) {
+      case "max": {
+        const X = w.param ?? 1;
+        if (X < 1 || X > sides) return null;
+        lo = Math.max(lo, X);
+        hi = Math.max(hi, X);
+        break;
+      }
+      case "min": {
+        const X = w.param ?? 1;
+        if (X < 1 || X > sides) return null;
+        lo = Math.min(lo, X);
+        hi = Math.min(hi, X);
+        break;
+      }
+      case "reset":
+      case "resetmin":
+      case "resetmax":
+        lo = 1;
+        hi = sides;
+        break;
+      case "same":
+        break;
+      default:
+        return null;
+    }
+  }
+  return { lo, hi };
+}
+
+function buildFixedRollDice(parsed: ParsedExpr, target: number): FixedBuild {
+  if (!Number.isInteger(target)) return { err: "unsupported" };
+  const sameHighlight = parsed.segments.some((s) =>
+    s.wrappers.some((w) => w.kind === "same"),
+  );
+
+  // Kept dice accumulate here in creation order; faces are assigned in
+  // one distributeFaces pass, then loser sets are generated against
+  // the now-known kept sums.
+  const keptSpecs: DieSpec[] = [];
+  const keptDice: DieResult[] = [];
+
+  const addPlainKept = (
+    plain: PlainExpr,
+    valueWrappers: Wrapper[],
+    into: DieResult[],
+  ): boolean => {
+    for (const g of plain.groups) {
+      const sides = sidesOf(g.type);
+      const range = clampRangeForWrappers(sides, valueWrappers);
+      if (!range) return false;
+      const subtract = g.count < 0;
+      const n = Math.abs(g.count);
+      for (let i = 0; i < n; i++) {
+        const d: DieResult = { type: g.type as DiceType, value: 0 };
+        if (subtract) d.subtract = true;
+        keptSpecs.push({ sides, lo: range.lo, hi: range.hi, subtract });
+        keptDice.push(d);
+        into.push(d);
+      }
+    }
+    return true;
+  };
+
+  const repeatSegIdx = parsed.segments.findIndex((s) =>
+    s.wrappers.some((w) => w.kind === "repeat"),
+  );
+  const outerHasDice = parsed.outerPlain.groups.some((g) => g.count !== 0);
+
+  // --- repeat path (mirrors buildOneRollDice's支持范围) ---
+  if (repeatSegIdx >= 0) {
+    if (parsed.segments.length !== 1 || outerHasDice) return { err: "unsupported" };
+    const seg = parsed.segments[0];
+    const inner = seg.wrappers.filter((w) => w.kind !== "same" && w.kind !== "repeat");
+    if (inner.some((w) => w.kind === "adv" || w.kind === "dis" || w.kind === "burst")) {
+      return { err: "unsupported" };
+    }
+    const repeatW = seg.wrappers.find((w) => w.kind === "repeat")!;
+    const N = Math.max(1, repeatW.param ?? 1);
+    const all: DieResult[] = [];
+    const rowStarts: number[] = [];
+    for (let i = 0; i < N; i++) {
+      rowStarts.push(all.length);
+      if (!addPlainKept(seg.plain, inner, all)) return { err: "unsupported" };
+    }
+    if (!keptDice.length) return { err: "unsupported" };
+    const mod = totalModifier(parsed) * N;
+    const faces = distributeFaces(keptSpecs, target - mod);
+    if (!faces) {
+      const { low, high } = faceBounds(keptSpecs);
+      return { err: "bounds", min: low + mod, max: high + mod };
+    }
+    faces.forEach((f, i) => { keptDice[i].value = f; });
+    return { ok: { dice: all, winnerIdx: -1, rowStarts, sameHighlight } };
+  }
+
+  // --- segments + outer plain ---
+  interface SegPlan {
+    keptSet: DieResult[];
+    keptStart: number;
+    kind: "adv" | "dis" | null;
+    loserSets: Array<{ dice: DieResult[]; specs: DieSpec[] }>;
+  }
+  const plans: SegPlan[] = [];
+  for (const seg of parsed.segments) {
+    const wr = seg.wrappers.filter((w) => w.kind !== "same" && w.kind !== "repeat");
+    if (wr.some((w) => w.kind === "burst")) return { err: "unsupported" };
+    const advPositions: number[] = [];
+    wr.forEach((w, i) => {
+      if (w.kind === "adv" || w.kind === "dis") advPositions.push(i);
+    });
+    if (advPositions.length > 1) return { err: "unsupported" };
+    if (advPositions.length === 1 && advPositions[0] !== wr.length - 1) {
+      return { err: "unsupported" };
+    }
+
+    if (advPositions.length === 0) {
+      const keptSet: DieResult[] = [];
+      const keptStart = keptDice.length;
+      if (!addPlainKept(seg.plain, wr, keptSet)) return { err: "unsupported" };
+      plans.push({ keptSet, keptStart, kind: null, loserSets: [] });
+      continue;
+    }
+
+    const advW = wr[wr.length - 1];
+    const inner = wr.slice(0, -1);
+    const keptSet: DieResult[] = [];
+    const keptStart = keptDice.length;
+    if (!addPlainKept(seg.plain, inner, keptSet)) return { err: "unsupported" };
+    const loserSets: Array<{ dice: DieResult[]; specs: DieSpec[] }> = [];
+    const extraSets = Math.max(1, advW.param ?? 1);
+    for (let s = 0; s < extraSets; s++) {
+      // Loser faces are RAW: rollExpr compares sets by raw value sum
+      // (subtract flags don't negate there) and applyValueClamp skips
+      // loser-marked dice, so their reachable range is [1, sides].
+      const dice: DieResult[] = [];
+      const specs: DieSpec[] = [];
+      for (const g of seg.plain.groups) {
+        const sides = sidesOf(g.type);
+        const subtract = g.count < 0;
+        const n = Math.abs(g.count);
+        for (let i = 0; i < n; i++) {
+          const d: DieResult = { type: g.type as DiceType, value: 0, loser: true };
+          if (subtract) d.subtract = true;
+          dice.push(d);
+          specs.push({ sides, lo: 1, hi: sides });
+        }
+      }
+      loserSets.push({ dice, specs });
+    }
+    plans.push({ keptSet, keptStart, kind: advW.kind as "adv" | "dis", loserSets });
+  }
+
+  const outerChunk: DieResult[] = [];
+  if (!addPlainKept(parsed.outerPlain, [], outerChunk)) return { err: "unsupported" };
+  if (!keptDice.length) return { err: "unsupported" };
+
+  // Assign every kept face in one pass.
+  const mod = totalModifier(parsed);
+  const faces = distributeFaces(keptSpecs, target - mod);
+  if (!faces) {
+    const { low, high } = faceBounds(keptSpecs);
+    return { err: "bounds", min: low + mod, max: high + mod };
+  }
+  faces.forEach((f, i) => { keptDice[i].value = f; });
+
+  // Generate loser sets + assemble chunks. The kept set lands at a
+  // random position among its sets; sets BEFORE it must be STRICTLY
+  // worse (rollExpr's scan keeps the first max/min, so an earlier tie
+  // would steal the win), sets after it may tie.
+  const allDice: DieResult[] = [];
+  let winnerIdx = -1;
+  for (const plan of plans) {
+    if (!plan.kind) {
+      for (const d of plan.keptSet) allDice.push(d);
+      continue;
+    }
+    const keptRaw = plan.keptSet.reduce((a, d) => a + d.value, 0);
+    const setsCount = plan.loserSets.length + 1;
+    let pos = Math.floor(Math.random() * setsCount);
+    // Strict feasibility for sets placed before the kept one.
+    const rawLo = plan.loserSets[0]?.specs.reduce((a, s) => a + s.lo, 0) ?? 0;
+    const rawHi = plan.loserSets[0]?.specs.reduce((a, s) => a + s.hi, 0) ?? 0;
+    if (plan.kind === "adv" && keptRaw - 1 < rawLo) pos = 0;
+    if (plan.kind === "dis" && keptRaw + 1 > rawHi) pos = 0;
+
+    const segStartInAll = allDice.length;
+    let keptStartInAll = -1;
+    let loserPtr = 0;
+    for (let s = 0; s < setsCount; s++) {
+      if (s === pos) {
+        keptStartInAll = allDice.length;
+        for (const d of plan.keptSet) allDice.push(d);
+        continue;
+      }
+      const ls = plan.loserSets[loserPtr++];
+      const strict = s < pos;
+      let lo = rawLo;
+      let hi = rawHi;
+      if (plan.kind === "adv") hi = Math.min(hi, keptRaw - (strict ? 1 : 0));
+      else lo = Math.max(lo, keptRaw + (strict ? 1 : 0));
+      if (hi < lo) return { err: "unsupported" };
+      const sum = randIntInclusive(lo, hi);
+      const lfaces = distributeFaces(ls.specs, sum);
+      if (!lfaces) return { err: "unsupported" };
+      lfaces.forEach((f, i) => { ls.dice[i].value = f; });
+      for (const d of ls.dice) allDice.push(d);
+    }
+    // rollExpr reports winnerIdx only for single-die winning sets, and
+    // buildOneRollDice surfaces it only for a lone segment without
+    // outer dice — mirror both conditions.
+    if (
+      plan.keptSet.length === 1 &&
+      parsed.segments.length === 1 &&
+      outerChunk.length === 0 &&
+      segStartInAll === 0
+    ) {
+      winnerIdx = keptStartInAll;
+    }
+  }
+  for (const d of outerChunk) allDice.push(d);
+  return { ok: { dice: allDice, winnerIdx, sameHighlight } };
+}
+
+// §9 — panel-side consume: verify GM with a FRESH getRole at this
+// execution entry (the armed flag is client-local state, not proof of
+// role), enforce the single-target policy, build the fixed dice, and
+// only then burn the one-shot arm. Every refusal keeps the arm and
+// tells the DM why.
+async function maybeConsumeFixedForPanel(
+  parsed: ParsedExpr,
+  targetCount: number,
+  entry: string,
+): Promise<BuiltRoll | null> {
+  const armed = readFixedRoll();
+  if (!armed) return null;
+  let role = "PLAYER";
+  try {
+    role = await OBR.player.getRole();
+  } catch (e) {
+    console.warn("[obr-suite/dice-panel] fixed-roll role verify failed — rolling for real", e);
+    return null;
+  }
+  if (role !== "GM") {
+    // Demoted client with a stale arm — clear it.
+    disarmFixedRoll();
+    refreshFixedRollUi();
+    return null;
+  }
+  const zh = lang !== "en";
+  if (targetCount > 1) {
+    OBR.notification
+      .show(
+        zh
+          ? "固定结果仅支持单目标投掷，本次真实投掷（保持已固定）"
+          : "Fixed results support a single target only — rolled for real (still armed)",
+        "WARNING",
+      )
+      .catch(() => {});
+    console.warn("[obr-suite/dice-panel] fixed roll not applied", {
+      entry, target: armed.value, reason: "multi-target", targetCount,
+    });
+    return null;
+  }
+  const built = buildFixedRollDice(parsed, armed.value);
+  if ("ok" in built) {
+    consumeFixedRoll();
+    refreshFixedRollUi();
+    console.info("[obr-suite/dice-panel] fixed roll applied", {
+      entry, expression: formatExpr(parsed), target: armed.value,
+    });
+    return built.ok;
+  }
+  if (built.err === "bounds") {
+    OBR.notification
+      .show(
+        zh
+          ? `固定值 ${armed.value} 超出该公式范围 [${built.min}, ${built.max}]，本次真实投掷（保持已固定）`
+          : `Fixed value ${armed.value} is outside this formula's range [${built.min}, ${built.max}] — rolled for real (still armed)`,
+        "WARNING",
+      )
+      .catch(() => {});
+  } else {
+    OBR.notification
+      .show(
+        zh
+          ? "该公式不支持固定结果（burst/嵌套优劣势），本次真实投掷（保持已固定）"
+          : "This formula doesn't support fixed results (burst / nested adv-dis) — rolled for real (still armed)",
+        "WARNING",
+      )
+      .catch(() => {});
+  }
+  console.warn("[obr-suite/dice-panel] fixed roll not applied", {
+    entry, expression: formatExpr(parsed), target: armed.value, reason: built.err,
+  });
+  return null;
+}
+
+// §9 — arm/disarm UI. Row is DM-only (shown in the onReady role block);
+// the button reflects the armed state, which can also change from the
+// BACKGROUND iframe consuming the arm (quick-roll) — hence the
+// `storage` listener wired below.
+function refreshFixedRollUi(): void {
+  const row = document.getElementById("fixedRollRow") as HTMLElement | null;
+  const btn = document.getElementById("btnFixedRoll") as HTMLButtonElement | null;
+  const inp = document.getElementById("fixedRollValue") as HTMLInputElement | null;
+  if (!row || !btn || !inp) return;
+  row.style.display = isDM ? "flex" : "none";
+  const armed = readFixedRoll();
+  const zh = lang !== "en";
+  if (armed) {
+    btn.classList.add("on");
+    btn.textContent = zh ? `已固定：${armed.value}（点击取消）` : `Fixed: ${armed.value} (click to cancel)`;
+  } else {
+    btn.classList.remove("on");
+    btn.textContent = zh ? "固定下次：关" : "Fix next: off";
+  }
+}
+
 async function performRoll(opts: { hidden: boolean }): Promise<void> {
   // The button to shake — for the main panel that's btnRoll, for the
   // dark-roll variant it's btnDarkRoll (visible only to DM).
@@ -2472,10 +2833,14 @@ async function performRoll(opts: { hidden: boolean }): Promise<void> {
   // unique to it, not shared. All emitted broadcasts share a single
   // collectiveId so history can group them as one entry and the
   // click-to-replay overlay can find every member of the group.
+  // §9 — non-null only when armed + GM-verified + single target; the
+  // loop below then has exactly one iteration.
+  const fixedBuilt = await maybeConsumeFixedForPanel(parsed, targetTokens.length, "panel-roll");
+
   const collectiveId = `col-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   let sent = 0;
   for (const tokenId of targetTokens) {
-    const built = buildOneRollDice(parsed);
+    const built = fixedBuilt ?? buildOneRollDice(parsed);
     if (!built.dice.length) continue;
     await emitOneRoll({
       dice: built.dice,
@@ -2562,10 +2927,15 @@ async function rollFromCombo(
   const focusIds = targetTokens.filter((id) => id);
   if (focusIds.length) focusCameraOnTokens(focusIds);
 
+  // §9 — same single-target fixed-result hook as performRoll (combo
+  // 投掷/暗骰/重击 all land here; 重击 already doubled the counts in
+  // `expr`, so the fixed build sees the doubled structure).
+  const fixedBuilt = await maybeConsumeFixedForPanel(parsed, targetTokens.length, "combo-roll");
+
   const collectiveId = `col-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   let sent = 0;
   for (const tokenId of targetTokens) {
-    const built = buildOneRollDice(parsed);
+    const built = fixedBuilt ?? buildOneRollDice(parsed);
     if (!built.dice.length) continue;
     await emitOneRoll({
       dice: built.dice,
@@ -2804,6 +3174,34 @@ btnDarkRollGlobal?.addEventListener("click", () => {
 });
 refreshDarkRollGlobalBtn();
 
+// §9 — 固定下次 arm/disarm. GM-only row (visibility set in the onReady
+// role block). Clicking with a value arms the one-shot fix; clicking
+// while armed cancels it. The background iframe consumes the arm for
+// quick-rolls, which fires a cross-iframe `storage` event → refresh.
+const btnFixedRoll = document.getElementById("btnFixedRoll") as HTMLButtonElement | null;
+btnFixedRoll?.addEventListener("click", () => {
+  if (!isDM) return;
+  const inp = document.getElementById("fixedRollValue") as HTMLInputElement | null;
+  if (readFixedRoll()) {
+    disarmFixedRoll();
+    console.info("[obr-suite/dice-panel] fixed roll disarmed");
+    refreshFixedRollUi();
+    return;
+  }
+  const v = inp ? Math.floor(Number(inp.value)) : NaN;
+  if (!Number.isInteger(v)) {
+    shakeButtonWithReason(btnFixedRoll, lang !== "en" ? "请输入整数目标" : "Enter an integer target");
+    return;
+  }
+  if (armFixedRoll(v)) {
+    console.info("[obr-suite/dice-panel] fixed roll armed", { value: v });
+  }
+  refreshFixedRollUi();
+});
+window.addEventListener("storage", (e) => {
+  if (e.key === FIXED_ROLL_LS_KEY) refreshFixedRollUi();
+});
+
 // 上一次: refill expression with the last successfully-rolled expr.
 // Does NOT auto-roll — user must click 投掷.
 btnLastRoll.addEventListener("click", () => {
@@ -2905,6 +3303,8 @@ OBR.onReady(async () => {
   // local-only (history is in localStorage), but exposing the button
   // to players invites accidental clears of their own scrollback.
   if (btnClearHist) btnClearHist.style.display = isDM ? "" : "none";
+  // §9 — fixed-roll row mirrors the DM-only gating above.
+  refreshFixedRollUi();
   // Re-render combos so the per-card 暗骰 button shows up for DM
   // (initial paint ran before isDM was resolved).
   renderCombos();
@@ -2919,8 +3319,22 @@ OBR.onReady(async () => {
   // calls faster than Chrome could reclaim WebMediaPlayer slots from
   // the previous render's active-thumb videos, blowing the 75-slot
   // cap. The 80 ms scheduler window coalesces bursts into one paint.
-  OBR.player.onChange(() => {
+  OBR.player.onChange((p) => {
     if (activeTab === "skins") scheduleRenderSkinsTab();
+    // §9/§7-family — keep the role LIVE. A demoted DM loses the
+    // dark-roll + fixed-roll controls immediately, and a stale fixed
+    // arm is cleared (consume sites re-verify with a fresh getRole
+    // anyway; this is the UI layer catching up).
+    const nowDM = p.role === "GM";
+    if (nowDM !== isDM) {
+      isDM = nowDM;
+      if (!isDM) disarmFixedRoll();
+      if (btnDark) btnDark.style.display = isDM ? "" : "none";
+      if (btnDarkGlobal) btnDarkGlobal.style.display = isDM ? "" : "none";
+      if (btnClearHist) btnClearHist.style.display = isDM ? "" : "none";
+      refreshFixedRollUi();
+      renderCombos();
+    }
   });
 
   OBR.broadcast.onMessage(BROADCAST_DICE_ROLL, (event) => {

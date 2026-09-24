@@ -51,11 +51,23 @@ export function itemToInitiativeItem(item: Item): InitiativeItem | null {
   // Pull HP fields from the shared bubbles-extension metadata namespace
   // so the panel can render a small numberless HP track above each
   // count chip without standing up an independent data source.
+  // Two namespaces, same precedence as modules/bubbles/readBubbleData:
+  // the suite's OWN key first, the upstream Bubbles extension's key as
+  // the fallback. Reading only the upstream key (as this did until
+  // 2026-08-23) meant the strip found no HP at all on every token whose
+  // stats the suite wrote itself — bestiary spawns, character-card
+  // binds, HP-bar components — because writeBubbleStats only mirrors
+  // into the upstream namespace when that extension already put data
+  // there. Those tokens render a bar over the token but had none in the
+  // strip.
+  const SUITE_BUBBLES_KEY = "com.obr-suite/bubbles/data";
   const BUBBLES_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
-  const bm = (item.metadata as any)?.[BUBBLES_KEY];
+  const meta = (item.metadata as any) ?? {};
+  const bm = meta[SUITE_BUBBLES_KEY] ?? meta[BUBBLES_KEY];
   let hp = -1;
   let maxHp = -1;
   let bubblesLocked = true;
+  let bubblesHide = false;
   if (bm && typeof bm === "object") {
     const hpRaw = Number(bm["health"]);
     const maxRaw = Number(bm["max health"]);
@@ -64,6 +76,7 @@ export function itemToInitiativeItem(item: Item): InitiativeItem | null {
       hp = Number.isFinite(hpRaw) ? Math.max(0, Math.min(hpRaw, maxRaw)) : maxRaw;
     }
     bubblesLocked = bm["locked"] === undefined ? true : !!bm["locked"];
+    bubblesHide = !!bm["hide"];
   }
   return {
     id: item.id,
@@ -85,6 +98,7 @@ export function itemToInitiativeItem(item: Item): InitiativeItem | null {
     hp,
     maxHp,
     bubblesLocked,
+    bubblesHide,
   };
 }
 

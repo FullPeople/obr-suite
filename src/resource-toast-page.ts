@@ -1,9 +1,12 @@
+import {WORKBENCH_DEV} from './workbench/channel';
+import './workbench/tone';
 // Resource toast — bottom-center fullscreen overlay that pops a
 // card every time someone in the room changes a resource value.
 //
 // Hosted in a fullScreen + disablePointerEvents OBR.modal opened by
-// the bg (resourceTracker setup). Listens for `BC_RESOURCE_CHANGED`
-// LOCAL+REMOTE; renders ONE toast per change. Multiple concurrent
+// the workbench background (prewarmed for the active scene). Stable builds
+// listen for `BC_RESOURCE_CHANGED`; dev uses a READY/ACK delivery lane.
+// Renders ONE toast per change. Multiple concurrent
 // toasts arrange horizontally at the bottom-center.
 //
 // 2026-05-12 — toast now renders the SAME WIDGET as the panel row
@@ -23,6 +26,7 @@ const TOAST_FADE_MS = 280;
 const MAX_VISIBLE = 6;
 
 interface ResourceToastPayload {
+  privateFor?:string[];privateSummary?:string;redacted?:boolean;summary?:string;
   tokenId: string;
   tokenName?: string;
   resource: Resource;
@@ -31,6 +35,8 @@ interface ResourceToastPayload {
 }
 
 const stackEl = document.getElementById("stack") as HTMLDivElement;
+if(WORKBENCH_DEV){const style=document.createElement('style');style.textContent='.toast{background:color-mix(in srgb,var(--suite-tone,#50525B) 94%,transparent);border-color:#ffffff50;color:#fff}.toast .head,.toast .name,.toast .who{color:#fff}.toast .rt-num-widget{background:#ffffff12}';document.head.append(style);}
+
 
 function escapeHtml(s: string): string {
   return String(s ?? "")
@@ -57,7 +63,7 @@ function deltaText(delta: number): string {
 // the cards read as static notifications.
 
 function renderCountWidget(r: Resource): string {
-  const max = Math.max(0, Math.floor(r.max));
+  const max = Math.min(40, Math.max(0, Math.floor(r.max)));
   const cur = Math.max(0, Math.min(max, Math.floor(r.current)));
   const cells: string[] = [];
   for (let i = 1; i <= max; i++) {
@@ -118,14 +124,18 @@ function showToast(p: ResourceToastPayload): void {
   const r = p.resource;
   const el = document.createElement("div");
   el.className = `toast ${cls}`;
+  if(p.summary){
+    el.innerHTML=`<div class="head"><span class="name">${escapeHtml(p.summary)}</span></div>`;
+  }else{
   el.innerHTML = `
     <div class="head">
       <span class="name">${escapeHtml(r.name || "(未命名)")}</span>
       ${p.tokenName ? `<span class="who">· ${escapeHtml(p.tokenName)}</span>` : ""}
       <span class="delta">${escapeHtml(deltaText(p.delta))}</span>
     </div>
-    <div class="widget">${renderWidget(r)}</div>
+    ${p.redacted?'':`<div class="widget">${renderWidget(r)}</div>`}
   `;
+  }
 
   // Cap the on-screen count.
   while (stackEl.children.length >= MAX_VISIBLE) {
@@ -146,7 +156,11 @@ function showToast(p: ResourceToastPayload): void {
   }, TOAST_HOLD_MS);
 }
 
-OBR.onReady(() => {
+OBR.onReady(async () => {
+  let role='PLAYER',roleObserved=false;
+  OBR.player.onChange(player=>{roleObserved=true;role=player.role;});
+  const [playerId,initialRole]=await Promise.all([OBR.player.getId().catch(()=>OBR.player.id),OBR.player.getRole().catch(()=>'PLAYER')]);
+  if(!roleObserved)role=initialRole;
   // 2026-05-15 — also subscribe to BC_SFX so the toast iframe's own
   // audio context (if it ever wakes up) can play sounds. The toast
   // iframe runs with disablePointerEvents:true, so its AudioContext
@@ -155,16 +169,49 @@ OBR.onReady(() => {
   // also subscribes to BC_SFX and receives the LOCAL broadcast.
   subscribeToSfx();
 
-  OBR.broadcast.onMessage(BC_RESOURCE_CHANGED, (event) => {
-    const data = event.data as ResourceToastPayload | undefined;
-    if (!data || !data.resource || typeof data.delta !== "number") return;
-    showToast(data);
+  const seenKey=`com.obr-suite/resources/toast-seen:${OBR.room.id}`;
+  // A replaced iframe must not replay already displayed notices when its last
+  // acknowledgement was lost. Store identities only, never private contents.
+  const seen=new Map<string,number>();
+  if(WORKBENCH_DEV)try{for(const [id,at] of JSON.parse(sessionStorage.getItem(seenKey)||'[]'))if(typeof id==='string'&&typeof at==='number'&&Date.now()-at<120000)seen.set(id,at);}catch{}
+  const receive=(data:ResourceToastPayload|undefined)=>{
+    if (!data || !data.resource || !Number.isFinite(data.delta)) return false;
+    if(data.privateFor&&role!=='GM'&&!data.privateFor.includes(playerId))showToast({...data,summary:undefined,redacted:true,tokenName:'',delta:0,resource:{...data.resource,name:data.privateSummary||'有人调整了资源'}});else showToast(data);
     // 2026-05-15 — quick chime for all participants. BC_RESOURCE_CHANGED
     // arrives on LOCAL+REMOTE, so this fires once per client. Inside,
     // sfxResourceToast() broadcasts BC_SFX LOCAL — any user-gestured
     // iframe on the same client (typically the cluster) plays the
     // synth chime. Net effect: one soft "blip" per resource change,
     // heard by everyone in the room.
-    try { sfxResourceToast(); } catch {}
-  });
+    const sound=()=>{try{sfxResourceToast();}catch{}};
+    // Creating the first AudioContext can occupy the main thread for hundreds
+    // of milliseconds. Paint and acknowledge the notification before that
+    // optional work; background tabs still dispatch sound without waiting rAF.
+    if(WORKBENCH_DEV){
+      if(document.visibilityState==='visible')requestAnimationFrame(()=>setTimeout(sound,0));
+      else setTimeout(sound,0);
+    }else sound();
+    return true;
+  };
+  if(WORKBENCH_DEV){
+    const instance=new URLSearchParams(location.search).get('noticeInstance')||'';
+    const announceReady=()=>OBR.broadcast.sendMessage('com.obr-suite/resources/toast-ready',{instance}, {destination:'LOCAL'}).catch(()=>{});
+    OBR.broadcast.onMessage('com.obr-suite/resources/toast-deliver',event=>{
+      const {id,data,instance:deliveryInstance}=(event.data as any)||{};
+      if(typeof id!=='string'||instance&&deliveryInstance!==instance)return;
+      if(!seen.has(id)){
+        if(!receive(data))return;
+        seen.set(id,Date.now());
+        if(seen.size>256)seen.delete(seen.keys().next().value!);
+        try{sessionStorage.setItem(seenKey,JSON.stringify([...seen]));}catch{}
+      }
+      // Acknowledge accepted DOM work, not the next animation frame. An
+      // inactive browser tab may throttle rAF without delaying this receipt.
+      void OBR.broadcast.sendMessage('com.obr-suite/resources/toast-ack',{id,instance:instance||deliveryInstance},{destination:'LOCAL'}).catch(()=>{});
+    });
+    OBR.broadcast.onMessage('com.obr-suite/resources/toast-probe',event=>{
+      if((event.data as {instance?:string})?.instance===instance)void announceReady();
+    });
+    await announceReady();
+  }else OBR.broadcast.onMessage(BC_RESOURCE_CHANGED,event=>receive(event.data as ResourceToastPayload));
 });

@@ -45,6 +45,7 @@ export type IconId =
 
 export interface Resource {
   /** Stable id — `${Date.now()}-${Math.random()}` works. */
+  unlimited?:boolean;locked?:boolean;
   id: string;
   name: string;
   type: ResourceType;

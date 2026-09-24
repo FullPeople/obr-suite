@@ -1,0 +1,13 @@
+.practice-home{box-sizing:border-box;max-width:780px;margin:0 auto;padding:clamp(28px,7vw,80px) max(24px,env(safe-area-inset-right)) 40px max(24px,env(safe-area-inset-left));line-height:1.8;color:#e9dfca}
+.practice-home[hidden]{display:none}
+.practice-home .practice-eyebrow{font-size:12px;letter-spacing:.15em;color:#cbb181}
+.practice-home h1{font-size:clamp(36px,7vw,64px);line-height:1.25;letter-spacing:.08em;margin:28px 0}
+.practice-home h1 span{display:block;font-size:18px;letter-spacing:.25em;color:#cbb181;margin-top:16px}
+.practice-actions{display:flex;gap:12px;flex-wrap:wrap;margin:28px 0 12px}
+.practice-actions button{min-height:48px;padding:12px 20px;font-size:16px;cursor:pointer}
+.practice-home section{border-top:1px solid #735b38;margin-top:28px;padding-top:20px;font-size:14px;color:#c3b69f}
+.practice-home h2{font-size:17px;color:#e9dfca}
+.practice-home a{color:#e4c584;text-underline-offset:4px}
+.practice-home :focus-visible{outline:3px solid #e4c584;outline-offset:4px}
+#practice-status{min-height:1.8em;font-size:14px}
+@media(max-width:480px){.practice-actions{flex-direction:column}.practice-actions button{width:100%}}

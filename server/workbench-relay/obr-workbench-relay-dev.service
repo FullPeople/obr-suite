@@ -1,0 +1,23 @@
+[Unit]
+Description=Full Suite dev workbench reconnect relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/obr-workbench-relay-dev
+ExecStart=/usr/local/bin/node /opt/obr-workbench-relay-dev/server.mjs
+Environment=PORT=5012
+Environment=RELAY_ORIGIN=https://obr.dnd.center
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

@@ -74,6 +74,9 @@ const PANEL_LABELS: Record<string, string> = {
   [PANEL_IDS.ccInfo]: "角色卡信息",
   [PANEL_IDS.search]: "搜索栏",
   [PANEL_IDS.portalEdit]: "传送门编辑",
+  [PANEL_IDS.statusPalette]: "状态调色板",
+  [PANEL_IDS.hpBar]: "血条组件",
+  [PANEL_IDS.musicBoard]: "音乐板",
 };
 
 // Cluster + initiative auto-fit their inner content; runtime size
@@ -121,6 +124,7 @@ const PANEL_ANCHOR: Record<string, { h: AnchorH; v: AnchorV }> = {
   [PANEL_IDS.perfWindow]:     { h: "left",  v: "top" },    // perfWindow/index.ts
   [PANEL_IDS.statusPalette]:  { h: "left",  v: "top" },    // statusTracker/index.ts
   [PANEL_IDS.hpBar]:          { h: "left",  v: "top" },    // hpBar/index.ts
+  [PANEL_IDS.musicBoard]:     { h: "right", v: "top" },    // musicBoard/index.ts — right-anchored
   [PANEL_IDS.portalEdit]:     { h: "left",  v: "top" },    // portals/index.ts (CENTER → treat as left)
 };
 
@@ -144,6 +148,7 @@ const PANEL_MIN: Record<string, { w: number; h: number }> = {
   [PANEL_IDS.perfWindow]:    { w: 220, h: 140 }, // small fps / mem readout
   [PANEL_IDS.statusPalette]: { w: 220, h: 200 }, // buff palette grid
   [PANEL_IDS.hpBar]:         { w: 200, h: 60 },  // single-line bar
+  [PANEL_IDS.musicBoard]:    { w: 300, h: 200 }, // now-playing + volume + pair
   [PANEL_IDS.portalEdit]:    { w: 260, h: 200 }, // form fields
 };
 function minFor(panelId: string): { w: number; h: number } {
@@ -433,6 +438,9 @@ OBR.onReady(() => {
     PANEL_IDS.bestiaryInfo,
     PANEL_IDS.ccInfo,
     PANEL_IDS.portalEdit,
+    PANEL_IDS.statusPalette,
+    PANEL_IDS.hpBar,
+    PANEL_IDS.musicBoard,
   ];
   for (const panelId of order) {
     const bbox = bboxMap[panelId];

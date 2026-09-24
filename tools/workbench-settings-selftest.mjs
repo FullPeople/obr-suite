@@ -1,0 +1,34 @@
+import {join} from 'node:path';
+export async function auditSettings({page,bg,check,out,expect}){
+ await page.getByRole('button',{name:'设置',exact:true}).click();
+ const settings=page.frameLocator('iframe[title="Full Suite 设置"]');
+ await settings.locator('body[data-bridge-ready=true]').waitFor();
+ check(await settings.locator('[data-tab=basics],[data-tab=libraries],[data-tab=characterCards],[data-tab=transitions],[data-tab=version]').count()===0,'settings exclude duplicated rules, downloads and obsolete launchers');
+ await settings.locator('#ui-tone').fill('#987044');await settings.locator('#ui-tone').dispatchEvent('change');
+ await expect.poll(()=>page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--suite-tone').trim())).toBe('#987044');
+ await page.getByRole('button',{name:'总览',exact:true}).click();await page.getByRole('button',{name:'设置',exact:true}).click();
+ await settings.locator('body[data-bridge-ready=true]').waitFor();check(await settings.locator('#ui-tone').inputValue()==='#987044','UI tone affects the shell immediately and persists when settings reopen');
+ await settings.locator('#tone-reset').click();await expect(settings.locator('#tone-hex')).toHaveValue('#50525B');await settings.locator('[data-tone="#667464"]').click();await expect(settings.locator('#tone-hex')).toHaveValue('#667464');await settings.locator('#tone-hex').fill('#50525B');await settings.locator('#tone-hex').dispatchEvent('change');check(true,'named palette, hex input and graphite default agree');
+ for(const [tab,key,storage] of [['dice','sfxDice','obr-suite/sfx-dice'],['initiative','sfxInitiative','obr-suite/sfx-initiative']]){
+  await settings.locator(`[data-tab=${tab}]`).click();const toggle=settings.locator(`[data-key=${key}]`);const before=await toggle.getAttribute('aria-pressed');await toggle.click();
+  await bg.waitForFunction(([key,value])=>localStorage.getItem(key)===value,[storage,before==='true'?'0':'1']);check(true,`${tab} personal sound setting reaches the Owlbear host`);await toggle.click();
+ }
+ await settings.locator('[data-tab=bossBar]').click();await settings.locator('#boss-bottom-inset').fill('160');await settings.locator('#boss-bottom-inset').dispatchEvent('change');await bg.waitForFunction(()=>JSON.parse(localStorage.getItem('obr-suite/boss-bar/preferences')||'{}').bottomInset===160);check(true,'Boss position preference reaches the original host storage');
+ await settings.locator('[data-tab=bubbles]').click();await settings.locator('[data-key=bubblesScale]').fill('1.5');await settings.locator('[data-key=bubblesScale]').dispatchEvent('input');await settings.locator('[data-key=bubblesScale]').dispatchEvent('change');await bg.waitForFunction(()=>localStorage.getItem('com.obr-suite/bubbles/scale')==='1.5');check(true,'bubble size preference reaches the host');
+ for(const tab of ['scope','portals','dynamicFog','worldPack']){await settings.locator(`[data-tab=${tab}]`).click();check(await settings.locator('.content input,.content button').count()>0,`${tab} has actual controls`);}
+ await settings.locator('[data-tab=support]').click();await page.locator('iframe[title="鸣谢特效"]').waitFor();await page.frameLocator('iframe[title="鸣谢特效"]').locator('.name').first().waitFor();await page.waitForTimeout(1100);await page.screenshot({path:join(out,'settings-support-169.png')});check(await page.locator('iframe[title="鸣谢特效"]').evaluate(el=>{const r=el.getBoundingClientRect();return r.top===0&&r.height<=190&&getComputedStyle(el).pointerEvents==='none';}),'supporter captions stay in the top strip without intercepting settings input');check((await settings.locator('.content').innerText()).includes('项目非商用共享许可'),'supporter page distinguishes the current web license');check(true,'original supporter names effect is retained');
+ await settings.locator('[data-tab=appearance]').click();await expect(page.locator('iframe[title="鸣谢特效"]')).toHaveCount(0);
+ await page.getByRole('button',{name:'功能开关',exact:true}).click();const features=page.frameLocator('iframe[title="Full Suite 功能开关"]');await features.locator('body[data-bridge-ready=true]').waitFor();
+ check(await features.locator('[data-feature]').count()>=20,'feature switches cover original modules and new warehouse/table modules');
+ for(const [id,selector] of [['musicBoard','.workbench-mode:text-is("音乐板")'],['dice','.workbench-mode:text-is("投骰")'],['characterCards','.workbench-cards [role=tab]'],['threeDragonAnte','.header-tools button:text-is("三龙牌")'],['search','.wiki-pane']]){
+  const toggle=features.locator(`[data-feature=${id}]`);await toggle.click();await bg.waitForFunction(id=>window.wbMock.metadata['com.obr-suite/state']?.enabled?.[id]===false,id);
+  if(id==='dice')await expect(page.locator(selector)).toBeDisabled();else await expect(page.locator(selector)).toHaveCount(0);
+  await toggle.click();await bg.waitForFunction(id=>window.wbMock.metadata['com.obr-suite/state']?.enabled?.[id]===true,id);await expect(page.locator(selector).first()).toBeVisible();check(true,`${id} switch changes workbench behavior and restores the module`);
+ }
+ await features.locator('[data-feature=inventory]').click();await bg.waitForFunction(()=>window.wbMock.metadata['com.obr-suite/state']?.enabled?.inventory===false);await page.getByRole('button',{name:'总览',exact:true}).click();await expect(page.locator('.public-stock')).toHaveCount(0);await page.getByRole('button',{name:'功能开关',exact:true}).click();await features.locator('body[data-bridge-ready=true]').waitFor();await features.locator('[data-feature=inventory]').click();await bg.waitForFunction(()=>window.wbMock.metadata['com.obr-suite/state']?.enabled?.inventory===true);await page.getByRole('button',{name:'总览',exact:true}).click();await page.locator('.public-stock').waitFor();check(true,'inventory feature switch hides and restores the shared warehouse');
+ await page.getByRole('tab',{name:/阿明/}).click();await page.locator('.paper').waitFor();await page.waitForTimeout(200);await page.evaluate(()=>{window.paperBefore=document.querySelector('.paper');window.scaleBefore=getComputedStyle(window.paperBefore).transform;});await page.getByRole('tab',{name:/贝拉/}).click();await page.getByRole('button',{name:'贝拉',exact:true}).waitFor();
+ check(await page.evaluate(()=>window.paperBefore===document.querySelector('.paper')&&window.scaleBefore===getComputedStyle(document.querySelector('.paper')).transform&&!document.querySelector('.cell-sheen')),'switching cards preserves the A4 element and scale without fill flashes');
+ await page.getByRole('tab',{name:/阿明/}).click();await page.getByRole('button',{name:'阿明',exact:true}).waitFor();
+ check(await page.locator('.header-tools a').count()===0&&await page.getByRole('button',{name:'帮助',exact:true}).count()===0,'duplicate source link and help button are absent');
+ await page.getByRole('button',{name:'总览',exact:true}).click();
+}

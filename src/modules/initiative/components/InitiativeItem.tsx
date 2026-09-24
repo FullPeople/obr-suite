@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from "preact/compat";
 import { RollType } from "../hooks/useInitiative";
+import { type Lang, t } from "../utils/i18n";
 // (D20 icons removed — roll buttons are now plain colored brackets.)
 
 interface Props {
+  lang: Lang;
   id: string;
   name: string;
   count: number;
@@ -42,8 +44,8 @@ interface Props {
   invisible?: boolean;
   onFocus: (id: string) => void;
   onHover?: (id: string | null) => void;
-  onUpdateCount: (id: string, count: number) => void;
-  onUpdateModifier: (id: string, mod: number) => void;
+  onUpdateCount: (id: string, count: number) => void | Promise<void>;
+  onUpdateModifier: (id: string, mod: number) => void | Promise<void>;
   onRoll: (id: string, type: RollType) => void;
   onEndTurn?: () => void;
   endTurnLabel?: string;
@@ -58,7 +60,7 @@ export function InitiativeItemRow({
   inCombat, preparing, isGM, canEdit, canShowDice, diceRolling,
   displayMode, hpRatio, ownerColor, invisible,
   onFocus, onHover, onUpdateCount, onUpdateModifier, onRoll,
-  onEndTurn, endTurnLabel,
+  onEndTurn, endTurnLabel, lang,
 }: Props) {
   const [editingCount, setEditingCount] = useState(false);
   const [editingMod, setEditingMod] = useState(false);
@@ -67,6 +69,9 @@ export function InitiativeItemRow({
   const countRef = useRef<HTMLInputElement>(null);
   const modRef = useRef<HTMLInputElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
+  const countSession = useRef(false), modSession = useRef(false);
+  if (!canEdit) { countSession.current = false; modSession.current = false; }
+  useEffect(() => { if (!canEdit) { setEditingCount(false); setEditingMod(false); } }, [canEdit]);
 
   // Scroll active item into view horizontally when it becomes active
   useEffect(() => {
@@ -76,15 +81,19 @@ export function InitiativeItemRow({
   }, [active, inCombat]);
 
   const commitCount = () => {
+    if (!countSession.current) return;
+    countSession.current = false;
     setEditingCount(false);
     const p = parseFloat(countVal);
-    if (!isNaN(p) && p !== count) onUpdateCount(id, p);
+    if (canEdit && !isNaN(p) && p !== count) void Promise.resolve(onUpdateCount(id, p)).catch(error => console.warn("[initiative] count save failed; reopen the value to retry", error));
   };
 
   const commitMod = () => {
+    if (!modSession.current) return;
+    modSession.current = false;
     setEditingMod(false);
     const p = parseInt(modVal);
-    if (!isNaN(p) && p !== modifier) onUpdateModifier(id, p);
+    if (canEdit && !isNaN(p) && p !== modifier) void Promise.resolve(onUpdateModifier(id, p)).catch(error => console.warn("[initiative] modifier save failed; reopen the value to retry", error));
   };
 
   const isActive = active && inCombat;
@@ -134,12 +143,14 @@ export function InitiativeItemRow({
         className="item-mod"
         onClick={(e) => {
           e.stopPropagation();
+          if (!canEdit) return;
+          modSession.current = true;
           setModVal(String(modifier));
           setEditingMod(true);
           setTimeout(() => modRef.current?.select(), 0);
         }}
       >
-        {editingMod ? (
+        {editingMod && canEdit ? (
           <input
             ref={modRef}
             type="number"
@@ -147,7 +158,7 @@ export function InitiativeItemRow({
             value={modVal}
             onInput={(e) => setModVal((e.target as HTMLInputElement).value)}
             onBlur={commitMod}
-            onKeyDown={(e) => { if (e.key === "Enter") commitMod(); if (e.key === "Escape") setEditingMod(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") commitMod(); if (e.key === "Escape") { modSession.current = false; setEditingMod(false); } }}
           />
         ) : (
           <span>{modStr}</span>
@@ -182,6 +193,7 @@ export function InitiativeItemRow({
         onClick={(e) => {
           e.stopPropagation();
           if (!canEdit) return;
+          countSession.current = true;
           // Round here too — the manual-edit input shouldn't surface a
           // reorder-produced fraction. Typing a whole number overrides
           // the precise value, which is the expected manual-edit
@@ -199,7 +211,7 @@ export function InitiativeItemRow({
             value={countVal}
             onInput={(e) => setCountVal((e.target as HTMLInputElement).value)}
             onBlur={commitCount}
-            onKeyDown={(e) => { if (e.key === "Enter") commitCount(); if (e.key === "Escape") setEditingCount(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") commitCount(); if (e.key === "Escape") { countSession.current = false; setEditingCount(false); } }}
           />
         ) : displayMode === "final" ? (
           <>
@@ -228,22 +240,22 @@ export function InitiativeItemRow({
             className="roll-btn roll-dis"
             onClick={() => onRoll(id, "disadvantage")}
             disabled={disableRoll}
-            title="劣势 / Disadvantage (2d20 取较低)"
-            aria-label="劣势"
+            title={t(lang, "rollDisadvantageTitle")}
+            aria-label={t(lang, "rollDisadvantage")}
           />
           <button
             className="roll-btn roll-normal"
             onClick={() => onRoll(id, "normal")}
             disabled={disableRoll}
-            title="正常 / Normal (1d20)"
-            aria-label="正常"
+            title={t(lang, "rollNormalTitle")}
+            aria-label={t(lang, "rollNormal")}
           />
           <button
             className="roll-btn roll-adv"
             onClick={() => onRoll(id, "advantage")}
             disabled={disableRoll}
-            title="优势 / Advantage (2d20 取较高)"
-            aria-label="优势"
+            title={t(lang, "rollAdvantageTitle")}
+            aria-label={t(lang, "rollAdvantage")}
           />
         </div>
       )}
@@ -254,9 +266,9 @@ export function InitiativeItemRow({
         <button
           className="end-turn-btn"
           onClick={(e) => { e.stopPropagation(); onEndTurn?.(); }}
-          title="结束当前回合，进入下一个"
+          title={t(lang, "endTurnTitle")}
         >
-          {endTurnLabel ?? "结束回合"}
+          {endTurnLabel ?? t(lang, "endTurn")}
         </button>
       )}
     </div>

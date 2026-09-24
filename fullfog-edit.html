@@ -350,57 +350,69 @@
       }
       .output-mode-btn + .output-mode-btn { border-left: 1px solid var(--border-strong); }
     </style>
-  </head>
+</head>
   <body>
     <div id="app">
       <header>
-        <button id="btn-cancel">取消</button>
-        <span class="title">编辑地图迷雾</span>
-        <span class="meta" id="map-meta">加载中…</span>
+        <button id="btn-cancel" data-en="Cancel">取消</button>
+        <span class="title" data-en="Edit map fog">编辑地图迷雾</span>
+        <span class="meta" id="map-meta" data-en="Loading…">加载中…</span>
         <span class="spacer"></span>
-        <button id="btn-undo" title="撤销 (Ctrl+Z)">↶ 撤销</button>
-        <button id="btn-redo" title="重做 (Ctrl+Shift+Z)">↷ 重做</button>
-        <button id="btn-import" title="从 JSON 文件导入之前导出的 mask（含所有滑块设置）。当前 mask 会被覆盖（可撤销）。">📤 导入</button>
-        <button id="btn-export" title="把当前 mask + 所有参数导出为 JSON 文件下载到本地。RLE 压缩，4K 地图大概 30KB。重新部署 / 刷新 / 关闭 modal 都不会丢这份备份。">📥 导出</button>
-        <button id="btn-snap" title="网格吸附：开启后多边形/矩形/直线的端点会自动吸附到地图网格交点。按住 Ctrl 临时反转吸附状态。">⊞ 吸附</button>
-        <button id="btn-fit" title="缩放至适合 (F)">⊕ 适合</button>
-        <button id="btn-clear" class="danger">清空 mask</button>
-        <button id="btn-save" class="primary" id="btn-save" title="保存 (Ctrl+S)">✓ 保存</button>
+        <button id="btn-undo" title="撤销 (Ctrl+Z)" data-en="↶ Undo" data-en-title="Undo (Ctrl+Z)">↶ 撤销</button>
+        <button id="btn-redo" title="重做 (Ctrl+Shift+Z)" data-en="↷ Redo" data-en-title="Redo (Ctrl+Shift+Z)">↷ 重做</button>
+        <button id="btn-import" data-en="📤 Import" data-en-title="Import a previously-exported mask (with all slider settings) from a JSON file. The current mask is overwritten (undoable)." title="从 JSON 文件导入之前导出的 mask（含所有滑块设置）。当前 mask 会被覆盖（可撤销）。">📤 导入</button>
+        <button id="btn-export" data-en="📥 Export" data-en-title="Export the current mask + all params to a JSON file. RLE-compressed, ~30 KB for a 4K map. Survives redeploy / refresh / closing the modal." title="把当前 mask + 所有参数导出为 JSON 文件下载到本地。RLE 压缩，4K 地图大概 30KB。重新部署 / 刷新 / 关闭 modal 都不会丢这份备份。">📥 导出</button>
+        <button id="btn-snap" data-en="⊞ Snap" data-en-title="Grid snap: polygon / rect / line endpoints snap to map grid intersections. Hold Ctrl to temporarily invert." title="网格吸附：开启后多边形/矩形/直线的端点会自动吸附到地图网格交点。按住 Ctrl 临时反转吸附状态。">⊞ 吸附</button>
+        <button id="btn-fit" title="缩放至适合 (F)" data-en="⊕ Fit" data-en-title="Zoom to fit (F)">⊕ 适合</button>
+        <button id="btn-clear" class="danger" data-en="Clear mask">清空 mask</button>
+        <button id="btn-save" class="primary" id="btn-save" title="保存 (Ctrl+S)" data-en="✓ Save" data-en-title="Save (Ctrl+S)">✓ 保存</button>
       </header>
 
       <div id="toolbox">
-        <button class="tool-btn" data-tool="pan" title="拖动地图（按住空格也可以临时切换）">
-          <span class="ico">✋</span><span>拖动</span>
+        <button class="tool-btn" data-tool="pan" data-en-title="Pan the map (hold Space to toggle temporarily)" title="拖动地图（按住空格也可以临时切换）">
+          <span class="ico">✋</span><span data-en="Pan">拖动</span>
         </button>
         <div class="tool-divider"></div>
-        <button class="tool-btn on" data-tool="brush" title="画笔（快捷键 1）：在地图上手动添加墙体。光标会变成圆圈，圈大小就是画笔半径。">
-          <span class="ico">🖌</span><span>画笔</span>
+        <button class="tool-btn on" data-tool="brush" data-en-title="Brush (shortcut 1): manually add walls. The cursor becomes a circle whose size is the brush radius." title="画笔（快捷键 1）：在地图上手动添加墙体。光标会变成圆圈，圈大小就是画笔半径。">
+          <span class="ico">🖌</span><span data-en="Brush">画笔</span>
         </button>
-        <button class="tool-btn" data-tool="eraser" title="橡皮（2）：擦除已经标为墙的地方。光标圆圈带虚线。">
-          <span class="ico">🧽</span><span>橡皮</span>
-        </button>
-        <div class="tool-divider"></div>
-        <button class="tool-btn" data-tool="lasso" title="自由套索（3）：圈起来的区域按当前模式填/擦。右键此按钮切换填/擦。">
-          <span class="ico">⚪</span><span>套索</span>
-        </button>
-        <button class="tool-btn" data-tool="polygon" title="多边形（4）：依次点击加角点，双击闭合。右键此按钮切换填/擦。">
-          <span class="ico">⬡</span><span>多边</span>
-        </button>
-        <button class="tool-btn" data-tool="rectangle" title="矩形（5）：拖出矩形按当前模式填/擦其内部。右键此按钮切换填/擦。">
-          <span class="ico">▭</span><span>矩形</span>
-        </button>
-        <button class="tool-btn" data-tool="line" title="直线（6）：从起点拖到终点，按画笔半径粗细画一条直线。右键此按钮切换填/擦。">
-          <span class="ico">／</span><span>直线</span>
+        <button class="tool-btn" data-tool="eraser" data-en-title="Eraser (2): erase places already marked as wall. The cursor circle is dashed." title="橡皮（2）：擦除已经标为墙的地方。光标圆圈带虚线。">
+          <span class="ico">🧽</span><span data-en="Eraser">橡皮</span>
         </button>
         <div class="tool-divider"></div>
-        <button class="tool-btn" data-tool="magicWand" title="魔棒（7）：点一个像素，把所有跟它颜色相近的连成一片的像素一起加进 mask。">
-          <span class="ico">🪄</span><span>魔棒</span>
+        <button class="tool-btn" data-tool="lasso" data-en-title="Free lasso (3): the enclosed area is filled / erased per the current mode. Right-click this button to toggle fill / erase." title="自由套索（3）：圈起来的区域按当前模式填/擦。右键此按钮切换填/擦。">
+          <span class="ico">⚪</span><span data-en="Lasso">套索</span>
         </button>
-        <button class="tool-btn" data-tool="paintBucket" title="油漆桶（8）：在 mask 上做 flood-fill；点空心轮廓内部把整个房间填实。">
-          <span class="ico">🪣</span><span>油漆</span>
+        <button class="tool-btn" data-tool="polygon" data-en-title="Polygon (4): click to add vertices, double-click to close. Right-click this button to toggle fill / erase." title="多边形（4）：依次点击加角点，双击闭合。右键此按钮切换填/擦。">
+          <span class="ico">⬡</span><span data-en="Polygon">多边</span>
         </button>
-        <button class="tool-btn" data-tool="picker" title="取色器（9）：在地图上吸一个颜色，自动切到『颜色距离』算法以这个颜色为目标识别。">
-          <span class="ico">💧</span><span>取色</span>
+        <button class="tool-btn" data-tool="rectangle" data-en-title="Rectangle (5): drag a rect to fill / erase its interior per the current mode. Right-click this button to toggle fill / erase." title="矩形（5）：拖出矩形按当前模式填/擦其内部。右键此按钮切换填/擦。">
+          <span class="ico">▭</span><span data-en="Rect">矩形</span>
+        </button>
+        <button class="tool-btn" data-tool="line" data-en-title="Line (6): drag from start to end to draw a line at the brush-radius thickness. Right-click this button to toggle fill / erase." title="直线（6）：从起点拖到终点，按画笔半径粗细画一条直线。右键此按钮切换填/擦。">
+          <span class="ico">／</span><span data-en="Line">直线</span>
+        </button>
+        <div class="tool-divider"></div>
+        <button class="tool-btn" data-tool="magicWand" data-en-title="Magic wand (7): click a pixel to add all connected pixels of a similar color to the mask." title="魔棒（7）：点一个像素，把所有跟它颜色相近的连成一片的像素一起加进 mask。">
+          <span class="ico">🪄</span><span data-en="Wand">魔棒</span>
+        </button>
+        <button class="tool-btn" data-tool="paintBucket" data-en-title="Paint bucket (8): flood-fill on the mask; click inside a hollow outline to fill the whole room solid." title="油漆桶（8）：在 mask 上做 flood-fill；点空心轮廓内部把整个房间填实。">
+          <span class="ico">🪣</span><span data-en="Fill">油漆</span>
+        </button>
+        <button class="tool-btn" data-tool="picker" data-en-title="Color picker (9): pick a color from the map; auto-switches to the “Color distance” algorithm targeting it." title="取色器（9）：在地图上吸一个颜色，自动切到『颜色距离』算法以这个颜色为目标识别。">
+          <span class="ico">💧</span><span data-en="Pick">取色</span>
+        </button>
+        <!-- 2026-05-26 (Phase D) — Door tool. Two-click placement of a
+             straight line. Red = closed (default), green = open. On
+             save each door becomes a tiny FOG-layer Path with
+             dynamic-fog door metadata covering ~100% of its length;
+             the official dynamic-fog plugin then auto-handles wall
+             slicing on open/close. Doors are SEPARATE from the mask
+             — brush / algorithm can't erase them. -->
+        <button class="tool-btn" data-tool="door"
+                data-en-title="Door (D): two-click to place a straight-line door — first click sets one endpoint, second click commits. Default closed (red). With the tool active, click a door to select; drag endpoint or whole line to move; right-click for toggle open/close + delete. Doors are saved as dynamic-fog-compatible door segments — they need the official dynamic-fog plugin to actually function as doors in OBR vision."
+                title="门（D）：两次点击落一段直线门，第一次点定起点，第二次点定终点。默认关闭（红色）。门工具激活时点击门可选中；拖端点或整段移动；右键弹菜单（开/关 + 删除）。门与 mask 分开存储，画笔和算法擦不掉。保存后会生成兼容 dynamic-fog 插件的门段——需要 OBR 里安装 dynamic-fog 插件才能让门实际起作用。">
+          <span class="ico">🚪</span><span data-en="Door">门</span>
         </button>
       </div>
 
@@ -410,52 +422,87 @@
       </div>
 
       <aside id="right-pane">
-        <h3>显示模式</h3>
+        <h3 data-en="Display mode">显示模式</h3>
         <div class="display-mode">
           <button class="display-mode-btn on" data-mode="color"
-                  title="显示原始彩色地图。mask 以橙色覆盖在上面，方便对照地图标墙。">原图</button>
+                  title="显示原始彩色地图。mask 以橙色覆盖在上面，方便对照地图标墙。"
+                  data-en="Original"
+                  data-en-title="Show the original color map. The mask is overlaid in orange so you can trace walls against the map.">原图</button>
           <button class="display-mode-btn" data-mode="threshold"
-                  title="显示当前算法生成的纯黑白结果（黑=墙，白=空），所见即所得。算法滑块改变时实时更新。手动画笔依然在 mask 上工作。">灰白预览</button>
+                  title="显示当前算法生成的纯黑白结果（黑=墙，白=空），所见即所得。算法滑块改变时实时更新。手动画笔依然在 mask 上工作。"
+                  data-en="B/W preview"
+                  data-en-title="Show the pure black-and-white result of the current algorithm (black = wall, white = empty), WYSIWYG. Updates live as you move the algorithm sliders. Manual brushing still works on the mask.">灰白预览</button>
         </div>
 
-        <h3>预处理</h3>
+        <!-- 2026-05-26 (Phase C) — B&W reference image. Import an
+             AI-generated black-line-on-white walls overlay; algorithms
+             run against it instead of the noisy original. Auto-
+             resampled to the original's pixel dimensions. -->
+        <h3 data-en="B&amp;W reference">黑白参考图
+          <span class="help" style="font-weight:normal;margin-left:6px"
+                title="把原图喂给 AI 让它生成「白底黑线」的纯墙体俯视图，导入这里。开启「显示」后会半透明叠在原图上，方便对齐和微调；点「应用算法」时会用这张黑白图作为输入（而不是原图），得到干净得多的迷雾。保存仍写到原图的绑定。"
+                data-en-title="Feed the original map to an AI and ask for a clean white-background / black-line walls-only top-down view. Import that here: when shown, it overlays semi-transparently on the original for alignment; when you click 'Apply algorithm', it's used as input instead of the noisy original. Save still binds to the original map.">?</span></h3>
+        <div class="row" style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="action" id="btn-bw-import" type="button"
+                  data-en="📂 Import B&amp;W">📂 导入黑白图</button>
+          <button class="action" id="btn-bw-clear" type="button" disabled
+                  data-en="✕ Clear">✕ 清除</button>
+        </div>
+        <div class="row">
+          <label class="lbl" style="flex-direction:row;align-items:center;gap:8px">
+            <input type="checkbox" id="bw-show" disabled checked />
+            <span data-en="Show overlay">显示叠加</span>
+          </label>
+        </div>
         <div class="row">
           <label class="lbl">
-            <span>降噪
-              <span class="help" title="给地图先做一次模糊去掉细小纹理（地砖纹路、网点等）再跑算法。高斯 3×3 轻度，5×5 较强；双边滤波保留边缘但目前没接入算法链。">?</span>
+            <span data-en="Opacity">不透明度</span>
+            <span class="val" id="bw-opacity-val">85%</span>
+          </label>
+          <input type="range" id="bw-opacity" min="0" max="100" value="85" disabled />
+        </div>
+
+        <h3 data-en="Pre-processing">预处理</h3>
+        <div class="row">
+          <label class="lbl">
+            <span><span data-en="Denoise">降噪</span>
+              <span class="help" title="给地图先做一次模糊去掉细小纹理（地砖纹路、网点等）再跑算法。高斯 3×3 轻度，5×5 较强；双边滤波保留边缘但目前没接入算法链。"
+                    data-en-title="Blur the map first to remove fine texture (floor-tile patterns, dot screens, etc.) before running the algorithm. Gaussian 3×3 is light, 5×5 stronger; bilateral preserves edges but isn't wired into the algorithm chain yet.">?</span>
             </span>
-            <span class="val" id="prefilter-val">关闭</span>
+            <span class="val" id="prefilter-val" data-en="Off">关闭</span>
           </label>
           <select id="prefilter">
-            <option value="none">关闭</option>
-            <option value="gauss3">高斯 3×3</option>
-            <option value="gauss5">高斯 5×5</option>
-            <option value="bilateral">双边滤波</option>
+            <option value="none" data-en-opt="Off">关闭</option>
+            <option value="gauss3" data-en-opt="Gaussian 3×3">高斯 3×3</option>
+            <option value="gauss5" data-en-opt="Gaussian 5×5">高斯 5×5</option>
+            <option value="bilateral" data-en-opt="Bilateral">双边滤波</option>
           </select>
         </div>
 
-        <h3>主算法</h3>
+        <h3 data-en="Main algorithm">主算法</h3>
         <div class="row">
           <label class="lbl">
-            <span>算法
-              <span class="help" title="选择把『哪些像素算成墙』的方法。Otsu 自动适合大多数室内地图；颜色排除适合外景手绘地图（自动跳过森林、土路）；颜色距离配合取色器最精准；自适应适合光照不均。">?</span>
+            <span><span data-en="Algorithm">算法</span>
+              <span class="help" title="选择把『哪些像素算成墙』的方法。Otsu 自动适合大多数室内地图；颜色排除适合外景手绘地图（自动跳过森林、土路）；颜色距离配合取色器最精准；自适应适合光照不均。"
+                    data-en-title="Choose how to decide which pixels count as wall. Otsu auto suits most indoor maps; Color exclude suits hand-drawn outdoor maps (auto-skips forests and dirt roads); Color distance with the eyedropper is most precise; Adaptive suits uneven lighting.">?</span>
             </span>
           </label>
           <select id="algorithm">
-            <option value="otsu">Otsu 自动阈值</option>
-            <option value="threshold">灰度阈值</option>
-            <option value="adaptive">自适应 Gaussian</option>
-            <option value="colorDistance">颜色距离</option>
-            <option value="colorExclude">颜色排除（HSV）</option>
-            <option value="satAware">饱和度感知</option>
+            <option value="otsu" data-en-opt="Otsu auto threshold">Otsu 自动阈值</option>
+            <option value="threshold" data-en-opt="Gray threshold">灰度阈值</option>
+            <option value="adaptive" data-en-opt="Adaptive Gaussian">自适应 Gaussian</option>
+            <option value="colorDistance" data-en-opt="Color distance">颜色距离</option>
+            <option value="colorExclude" data-en-opt="Color exclude (HSV)">颜色排除（HSV）</option>
+            <option value="satAware" data-en-opt="Saturation-aware">饱和度感知</option>
           </select>
         </div>
 
         <div id="params-threshold" class="param-group" style="display:none">
           <div class="row">
             <label class="lbl">
-              <span>阈值 T
-                <span class="help" title="灰度低于这个值的像素算墙。0 = 全白，255 = 全黑。建议 80-130 之间。">?</span>
+              <span><span data-en="Threshold T">阈值 T</span>
+                <span class="help" title="灰度低于这个值的像素算墙。0 = 全白，255 = 全黑。建议 80-130 之间。"
+                      data-en-title="Pixels darker than this gray value count as wall. 0 = all white, 255 = all black. 80-130 is a good range.">?</span>
               </span>
               <span class="val" id="thr-T-val">110</span>
             </label>
@@ -466,8 +513,9 @@
         <div id="params-otsu" class="param-group">
           <div class="row">
             <label class="lbl">
-              <span>偏移
-                <span class="help" title="在 Otsu 算法自动选出的阈值上加一个偏移。负数 = 更挑剔（只识深黑），正数 = 更宽松（识到中灰）。">?</span>
+              <span><span data-en="Offset">偏移</span>
+                <span class="help" title="在 Otsu 算法自动选出的阈值上加一个偏移。负数 = 更挑剔（只识深黑），正数 = 更宽松（识到中灰）。"
+                      data-en-title="Add an offset to the threshold Otsu picks automatically. Negative = pickier (only deep black), positive = looser (catches mid-gray too).">?</span>
               </span>
               <span class="val" id="otsu-off-val">0</span>
             </label>
@@ -478,8 +526,9 @@
         <div id="params-adaptive" class="param-group" style="display:none">
           <div class="row">
             <label class="lbl">
-              <span>窗口大小
-                <span class="help" title="每个像素跟周围 N×N 邻域的平均值比较，N 就是这个值。窗口太小 = 噪点多，太大 = 跟全局阈值差不多。建议 31-71，必须为奇数。">?</span>
+              <span><span data-en="Window size">窗口大小</span>
+                <span class="help" title="每个像素跟周围 N×N 邻域的平均值比较，N 就是这个值。窗口太小 = 噪点多，太大 = 跟全局阈值差不多。建议 31-71，必须为奇数。"
+                      data-en-title="Each pixel is compared with the average of its N×N neighborhood — N is this value. Too small = noisy, too large = behaves like a global threshold. 31-71 is good, must be odd.">?</span>
               </span>
               <span class="val" id="adp-blk-val">51</span>
             </label>
@@ -487,8 +536,9 @@
           </div>
           <div class="row">
             <label class="lbl">
-              <span>偏移 C
-                <span class="help" title="从局部均值减去 C 才算暗。C 越大越挑剔（只标特别黑的），越小越宽松。">?</span>
+              <span><span data-en="Offset C">偏移 C</span>
+                <span class="help" title="从局部均值减去 C 才算暗。C 越大越挑剔（只标特别黑的），越小越宽松。"
+                      data-en-title="A pixel counts as dark only if it's below the local mean minus C. Larger C = pickier (only very black), smaller = looser.">?</span>
               </span>
               <span class="val" id="adp-C-val">10</span>
             </label>
@@ -499,8 +549,9 @@
         <div id="params-colorDistance" class="param-group" style="display:none">
           <div class="row">
             <label class="lbl">
-              <span>目标色
-                <span class="help" title="把跟这个颜色接近的像素全部识别成墙。点取色器（💧 工具）可以从地图上直接吸取。">?</span>
+              <span><span data-en="Target color">目标色</span>
+                <span class="help" title="把跟这个颜色接近的像素全部识别成墙。点取色器（💧 工具）可以从地图上直接吸取。"
+                      data-en-title="Mark every pixel close to this color as wall. Use the eyedropper (💧 tool) to pick it straight off the map.">?</span>
               </span>
             </label>
             <div class="picker-row">
@@ -510,8 +561,9 @@
           </div>
           <div class="row">
             <label class="lbl">
-              <span>容差
-                <span class="help" title="离目标色多远还算同色。容差越大圈得越多。0 = 严格相同；80 = 默认；150+ = 很宽松。">?</span>
+              <span><span data-en="Tolerance">容差</span>
+                <span class="help" title="离目标色多远还算同色。容差越大圈得越多。0 = 严格相同；80 = 默认；150+ = 很宽松。"
+                      data-en-title="How far from the target color still counts as the same color. Higher tolerance catches more. 0 = exact match; 80 = default; 150+ = very loose.">?</span>
               </span>
               <span class="val" id="cd-tol-val">80</span>
             </label>
@@ -522,14 +574,16 @@
         <div id="params-colorExclude" class="param-group" style="display:none">
           <div class="row">
             <label class="lbl">
-              <span>暗度阈值 T
-                <span class="help" title="比这个亮度还要暗，且不属于绿色森林 / 棕色小路的像素被标墙。专为手绘外景地图设计。">?</span>
+              <span><span data-en="Darkness threshold T">暗度阈值 T</span>
+                <span class="help" title="比这个亮度还要暗，且不属于绿色森林 / 棕色小路的像素被标墙。专为手绘外景地图设计。"
+                      data-en-title="Pixels darker than this brightness — and not part of a green forest or brown road — get marked as wall. Designed for hand-drawn outdoor maps.">?</span>
               </span>
               <span class="val" id="ce-T-val">120</span>
             </label>
             <input type="range" id="ce-T" min="40" max="200" value="120" />
           </div>
-          <div style="font-size:11px;color:var(--text-dim);margin:4px 0 8px">
+          <div style="font-size:11px;color:var(--text-dim);margin:4px 0 8px"
+               data-en="Auto-excludes saturated green (forest) and brown (roads), keeps dark low-saturation (line art).">
             自动排除饱和绿（森林）和棕色（小路），保留暗低饱和（线稿）。
           </div>
         </div>
@@ -537,8 +591,9 @@
         <div id="params-satAware" class="param-group" style="display:none">
           <div class="row">
             <label class="lbl">
-              <span>暗度 T
-                <span class="help" title="V（亮度）低于这个值才能算墙。">?</span>
+              <span><span data-en="Darkness T">暗度 T</span>
+                <span class="help" title="V（亮度）低于这个值才能算墙。"
+                      data-en-title="A pixel can only be wall if its V (brightness) is below this value.">?</span>
               </span>
               <span class="val" id="sa-T-val">110</span>
             </label>
@@ -546,8 +601,9 @@
           </div>
           <div class="row">
             <label class="lbl">
-              <span>最大饱和度
-                <span class="help" title="同时还要『不太鲜艳』才算墙——线稿一般是黑灰色低饱和，森林、水面这些颜色饱和的会被剔除。">?</span>
+              <span><span data-en="Max saturation">最大饱和度</span>
+                <span class="help" title="同时还要『不太鲜艳』才算墙——线稿一般是黑灰色低饱和，森林、水面这些颜色饱和的会被剔除。"
+                      data-en-title="It must also be 'not too vivid' to count as wall — line art is usually black/gray low-saturation, while saturated colors like forest or water get excluded.">?</span>
               </span>
               <span class="val" id="sa-S-val">80</span>
             </label>
@@ -555,17 +611,19 @@
           </div>
         </div>
 
-        <label class="checkbox" title="勾上后『应用算法』不会清空已有的 mask，而是把新结果加进去——可以先 Otsu 一遍，再切到颜色距离补一些家具。">
+        <label class="checkbox" title="勾上后『应用算法』不会清空已有的 mask，而是把新结果加进去——可以先 Otsu 一遍，再切到颜色距离补一些家具。"
+               data-en-title="When checked, 'Apply algorithm' won't clear the existing mask — it adds the new result on top. You can run Otsu once, then switch to color distance to add some furniture.">
           <input type="checkbox" id="merge-mode" />
-          <span>叠加到现有 mask（不覆盖）</span>
+          <span data-en="Merge into existing mask (don't overwrite)">叠加到现有 mask（不覆盖）</span>
         </label>
-        <button class="action primary" id="btn-apply-algo">应用算法</button>
+        <button class="action primary" id="btn-apply-algo" data-en="Apply algorithm">应用算法</button>
 
-        <h3>清理 / 后处理</h3>
+        <h3 data-en="Cleanup / post-processing">清理 / 后处理</h3>
         <div class="row">
           <label class="lbl">
-            <span>细线剔除
-              <span class="help" title="去掉网格线、地砖缝这种 1-2px 宽的细线。值 = kernel 大小，比线宽大就行。0 = 关闭，2-3 = 网格线，4-5 = 较粗的线。原理：形态学开运算先腐蚀再膨胀。">?</span>
+            <span><span data-en="Thin-line removal">细线剔除</span>
+              <span class="help" title="去掉网格线、地砖缝这种 1-2px 宽的细线。值 = kernel 大小，比线宽大就行。0 = 关闭，2-3 = 网格线，4-5 = 较粗的线。原理：形态学开运算先腐蚀再膨胀。"
+                    data-en-title="Removes 1-2px-wide thin lines like grid lines and tile seams. Value = kernel size, just larger than the line width. 0 = off, 2-3 = grid lines, 4-5 = thicker lines. Method: morphological opening (erode then dilate).">?</span>
             </span>
             <span class="val" id="ref-thinline-val">0</span>
           </label>
@@ -573,8 +631,9 @@
         </div>
         <div class="row">
           <label class="lbl">
-            <span>开运算 kernel
-              <span class="help" title="去毛刺、断细噪。值越大去得越狠，但墙体细节也会变粗糙。0 = 关闭。">?</span>
+            <span><span data-en="Open kernel">开运算 kernel</span>
+              <span class="help" title="去毛刺、断细噪。值越大去得越狠，但墙体细节也会变粗糙。0 = 关闭。"
+                    data-en-title="Removes burrs and thin noise. Higher = more aggressive, but wall detail gets rougher too. 0 = off.">?</span>
             </span>
             <span class="val" id="ref-open-val">0</span>
           </label>
@@ -582,8 +641,9 @@
         </div>
         <div class="row">
           <label class="lbl">
-            <span>闭运算 kernel
-              <span class="help" title="把附近的墙线连起来填补断点。值越大连得越远，但可能误连不该连的（比如门洞）。0 = 关闭。">?</span>
+            <span><span data-en="Close kernel">闭运算 kernel</span>
+              <span class="help" title="把附近的墙线连起来填补断点。值越大连得越远，但可能误连不该连的（比如门洞）。0 = 关闭。"
+                    data-en-title="Joins nearby wall lines to fill gaps. Higher reaches further, but may wrongly join things that shouldn't be (like doorways). 0 = off.">?</span>
             </span>
             <span class="val" id="ref-close-val">0</span>
           </label>
@@ -591,8 +651,9 @@
         </div>
         <div class="row">
           <label class="lbl">
-            <span>面积过滤
-              <span class="help" title="把小于这个像素数的连通块全部删掉。把零散噪点扫干净，但建筑很小的细节也会丢。0 = 关闭。">?</span>
+            <span><span data-en="Area filter">面积过滤</span>
+              <span class="help" title="把小于这个像素数的连通块全部删掉。把零散噪点扫干净，但建筑很小的细节也会丢。0 = 关闭。"
+                    data-en-title="Deletes every connected blob smaller than this pixel count. Sweeps away scattered noise, but tiny building details get lost too. 0 = off.">?</span>
             </span>
             <span class="val" id="ref-area-val">200</span>
           </label>
@@ -600,20 +661,22 @@
         </div>
         <div class="row">
           <label class="lbl">
-            <span>选择性填洞
-              <span class="help" title="把面积小于这个值的封闭空腔自动填实——常用于把识别成空心轮廓的房间内部填成实心。0 = 关闭，5000-15000 适合大多数地图。注意：如果地图有外框装饰，背景可能也是巨型『洞』，所以建议小一点。">?</span>
+            <span><span data-en="Selective hole fill">选择性填洞</span>
+              <span class="help" title="把面积小于这个值的封闭空腔自动填实——常用于把识别成空心轮廓的房间内部填成实心。0 = 关闭，5000-15000 适合大多数地图。注意：如果地图有外框装饰，背景可能也是巨型『洞』，所以建议小一点。"
+                    data-en-title="Auto-fills enclosed cavities smaller than this value — handy for filling in rooms detected as hollow outlines. 0 = off, 5000-15000 suits most maps. Note: if the map has a decorative border, the background may be a giant 'hole' too, so keep it small.">?</span>
             </span>
             <span class="val" id="ref-hole-val">0</span>
           </label>
           <input type="range" id="ref-hole" min="0" max="20000" step="500" value="0" />
         </div>
-        <button class="action" id="btn-apply-refine">应用清理</button>
+        <button class="action" id="btn-apply-refine" data-en="Apply cleanup">应用清理</button>
 
-        <h3>工具参数</h3>
+        <h3 data-en="Tool parameters">工具参数</h3>
         <div class="row">
           <label class="lbl">
-            <span>画笔半径
-              <span class="help" title="画笔/橡皮的圆形半径，单位是图像像素。光标会显示真实尺寸（按当前缩放级别）。">?</span>
+            <span><span data-en="Brush radius">画笔半径</span>
+              <span class="help" title="画笔/橡皮的圆形半径，单位是图像像素。光标会显示真实尺寸（按当前缩放级别）。"
+                    data-en-title="The circular radius of the brush/eraser, in image pixels. The cursor shows the real size (at the current zoom level).">?</span>
             </span>
             <span class="val" id="brush-r-val">20</span>
           </label>
@@ -621,15 +684,16 @@
         </div>
         <div class="row">
           <label class="lbl">
-            <span>魔棒容差
-              <span class="help" title="魔棒往外扩散时『颜色相近』的容忍度。值越大扩得越远。">?</span>
+            <span><span data-en="Wand tolerance">魔棒容差</span>
+              <span class="help" title="魔棒往外扩散时『颜色相近』的容忍度。值越大扩得越远。"
+                    data-en-title="How tolerant the wand is about 'similar color' as it spreads outward. Higher spreads further.">?</span>
             </span>
             <span class="val" id="wand-tol-val">24</span>
           </label>
           <input type="range" id="wand-tol" min="0" max="120" value="24" />
         </div>
 
-        <h3>输出</h3>
+        <h3 data-en="Output">输出</h3>
 
         <!-- 毛边整理 kernel: hidden — rounds sharp corners away even
              at low values (e.g. right-angle map edges become beveled).
@@ -637,30 +701,38 @@
              DOM but force value="0" and display:none. -->
         <div class="row" style="display:none">
           <label class="lbl">
-            <span>毛边整理 kernel</span>
+            <span data-en="Burr-trim kernel">毛边整理 kernel</span>
             <span class="val" id="out-smooth-k-val">0</span>
           </label>
           <input type="range" id="out-smooth-k" min="0" max="10" value="0" />
         </div>
 
         <label class="lbl">
-          <span>输出类型
+          <span><span data-en="Output type">输出类型</span>
             <span class="help" title="
 墙体（Wall）：OBR 原生线段 item，会被 OBR 自带的动态迷雾系统当作视野阻挡。看不见但起作用。
 路径（Path）：彩色描边的多边形/曲线，仅作视觉确认用，不影响视野。
-双输出：墙体（驱动迷雾）+ 路径（GM 看到橙色描边确认范围）。推荐。">?</span>
+双输出：墙体（驱动迷雾）+ 路径（GM 看到橙色描边确认范围）。推荐。"
+                  data-en-title="
+Wall: native OBR line-segment items, treated as vision blockers by OBR's built-in dynamic fog. Invisible but functional.
+Path: colored-stroke polygons/curves, for visual confirmation only — doesn't affect vision.
+Both: Wall (drives the fog) + Path (GM sees the orange stroke to confirm the area). Recommended.">?</span>
           </span>
         </label>
         <div class="output-mode">
-          <button class="output-mode-btn" data-mode="wall" title="只保存为 OBR 原生 Wall items（视野阻挡）。">墙体</button>
-          <button class="output-mode-btn" data-mode="path" title="只保存为 Path（视觉描边，不阻挡视野）。">路径</button>
-          <button class="output-mode-btn" data-mode="both" title="同时输出 Path（视觉）+ Wall（视野）。推荐。">双输出</button>
+          <button class="output-mode-btn" data-mode="wall" title="只保存为 OBR 原生 Wall items（视野阻挡）。"
+                  data-en="Wall" data-en-title="Save only as native OBR Wall items (vision blockers).">墙体</button>
+          <button class="output-mode-btn" data-mode="path" title="只保存为 Path（视觉描边，不阻挡视野）。"
+                  data-en="Path" data-en-title="Save only as Path (visual stroke, doesn't block vision).">路径</button>
+          <button class="output-mode-btn" data-mode="both" title="同时输出 Path（视觉）+ Wall（视野）。推荐。"
+                  data-en="Both" data-en-title="Output both Path (visual) + Wall (vision). Recommended.">双输出</button>
         </div>
 
         <div class="row">
           <label class="lbl">
-            <span>墙体外扩
-              <span class="help" title="负数 = 墙向墙体材质内部推（玩家视野穿入墙体一点点，看到墙的厚度）；正数 = 墙向地板侧外扩（玩家视野在到达视觉边界前就被挡，看不到墙的精确轮廓）；0 = 阻挡墙与视觉描边重合。GM 看到的橙色描边始终在视觉边界。开启『预览』后橙色描边外的紫红虚线就是实际派生的 Wall 位置，可以直接看出方向。">?</span>
+            <span><span data-en="Wall expansion">墙体外扩</span>
+              <span class="help" title="负数 = 墙向墙体材质内部推（玩家视野穿入墙体一点点，看到墙的厚度）；正数 = 墙向地板侧外扩（玩家视野在到达视觉边界前就被挡，看不到墙的精确轮廓）；0 = 阻挡墙与视觉描边重合。GM 看到的橙色描边始终在视觉边界。开启『预览』后橙色描边外的紫红虚线就是实际派生的 Wall 位置，可以直接看出方向。"
+                    data-en-title="Negative = pushes the wall into the wall material (players' vision enters the wall slightly, seeing its thickness); positive = pushes the wall toward the floor side (players' vision is blocked before reaching the visual edge, hiding the wall's exact outline); 0 = the blocking wall coincides with the visual stroke. The orange stroke the GM sees always sits on the visual edge. With 'Preview' on, the magenta dashed line outside the orange stroke is the actual derived Wall position, so you can see the direction directly.">?</span>
             </span>
             <span class="val" id="wall-expand-val">0</span>
           </label>
@@ -675,46 +747,48 @@
              working without conditional checks. -->
         <div class="row" style="display:none">
           <label class="lbl">
-            <span>平滑张力</span>
+            <span data-en="Smoothing tension">平滑张力</span>
             <span class="val" id="smooth-tension-val">0.00</span>
           </label>
           <input type="range" id="smooth-tension" min="0" max="100" value="0" />
         </div>
         <div class="row" style="display:none">
           <label class="lbl">
-            <span>切角次数</span>
+            <span data-en="Corner-cut passes">切角次数</span>
             <span class="val" id="chaikin-iters-val">0</span>
           </label>
           <input type="range" id="chaikin-iters" min="0" max="4" value="0" />
         </div>
         <div class="row" style="display:none">
           <label class="lbl">
-            <span>路径简化</span>
+            <span data-en="Path simplify">路径简化</span>
             <span class="val" id="simp-val">0.0</span>
           </label>
           <input type="range" id="simp" min="0" max="10" step="0.5" value="0" />
         </div>
 
         <button class="action" id="btn-preview"
-                title="把保存时会输出的曲线/线段直接画在画布上：青色 = Path（贝塞尔曲线），洋红虚线 = Wall 段（OBR 原生迷雾用的）。开启后调平滑/切角/简化滑块会自动刷新预览。">
+                title="把保存时会输出的曲线/线段直接画在画布上：青色 = Path（贝塞尔曲线），洋红虚线 = Wall 段（OBR 原生迷雾用的）。开启后调平滑/切角/简化滑块会自动刷新预览。"
+                data-en="📐 Preview output"
+                data-en-title="Draws the curves/segments that will be output on save directly onto the canvas: cyan = Path (Bézier curves), magenta dashed = Wall segments (used by OBR's native fog). With it on, moving the smooth/corner/simplify sliders auto-refreshes the preview.">
           📐 预览输出
         </button>
         <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="cc-hint">
-          将识别到 <span id="cc-count" style="color:var(--text)">0</span> 段独立墙体，共
-          <span id="cc-points" style="color:var(--text)">—</span> 个点。
+          <span data-en="Will detect">将识别到</span> <span id="cc-count" style="color:var(--text)">0</span> <span data-en="separate wall segments,">段独立墙体，共</span>
+          <span id="cc-points" style="color:var(--text)">—</span> <span data-en="points total.">个点。</span>
           <div style="margin-top:3px">
-            <span style="color:var(--text-dim)">建议总点数 &lt; 5000 一定能保存；6000 以上点数会被自动简化（状态栏会提示）。</span>
+            <span style="color:var(--text-dim)" data-en="A total under 5000 points always saves; above 6000 gets auto-simplified (the status bar will say so).">建议总点数 &lt; 5000 一定能保存；6000 以上点数会被自动简化（状态栏会提示）。</span>
           </div>
         </div>
       </aside>
 
       <footer>
-        <span class="item"><span class="k">工具</span> <span class="v" id="st-tool">画笔</span></span>
-        <span class="item"><span class="k">缩放</span> <span class="v" id="st-zoom">1.00×</span></span>
-        <span class="item"><span class="k">坐标</span> <span class="v" id="st-pos">—</span></span>
+        <span class="item"><span class="k" data-en="Tool">工具</span> <span class="v" id="st-tool" data-en="Brush">画笔</span></span>
+        <span class="item"><span class="k" data-en="Zoom">缩放</span> <span class="v" id="st-zoom">1.00×</span></span>
+        <span class="item"><span class="k" data-en="Pos">坐标</span> <span class="v" id="st-pos">—</span></span>
         <span class="item"><span class="k">mask</span> <span class="v" id="st-mask">0px</span></span>
         <span class="spacer"></span>
-        <span class="info" id="st-info">就绪</span>
+        <span class="info" id="st-info" data-en="Ready">就绪</span>
       </footer>
     </div>
 

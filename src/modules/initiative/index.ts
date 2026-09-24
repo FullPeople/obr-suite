@@ -1,3 +1,4 @@
+import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
 // 2026-05-14 — drag-in auto-roll uses broadcastDiceRoll directly so
 // the dice value lands on canvas (visual animation + history entry)
@@ -10,9 +11,11 @@ import {
   COMBAT_STATE_KEY,
   BROADCAST_OPEN_PANEL,
   BROADCAST_CLOSE_PANEL,
+  BROADCAST_TURN_CHANGE,
   CTX_INVISIBLE,
   CTX_INVISIBLE_ADD,
 } from "./utils/constants";
+import type { TurnChangePayload } from "./types";
 // 2026-05-14 — auto-roll initiative on drag-in needs the dex-mod
 // metadata key that bind-page seeds when binding a character card.
 // Source-of-truth is utils/metadata.ts; we inline the string here to
@@ -34,7 +37,21 @@ import { assetUrl } from "../../asset-base";
 // `syncStealthOverlays` is no longer called — see the inline comment in
 // setupInitiative() about retiring the shader path in favour of native
 // `item.visible = false`.
-import { clearStealthOverlays } from "./utils/visualEffects";
+// DYNAMIC, not static. visualEffects.ts is 545 lines of SKSL shaders
+// and ring rendering, and `initiative/index.ts` is in background.ts's
+// import graph — so a static import put all 8.8 kB gzip of it on the
+// boot path that every client pays, for one cleanup sweep.
+//
+// The panel (initiative/panel-page.tsx, its own entry) is what actually
+// uses the ring functions, and it still imports them statically. This
+// only takes the module off the BACKGROUND's critical path.
+//
+// All three call sites are already async, inside try/catch, and none is
+// latency-critical: two run at scene-ready, one at teardown.
+async function clearStealthOverlays(): Promise<void> {
+  const mod = await import("./utils/visualEffects");
+  await mod.clearStealthOverlays();
+}
 import { onViewportResize } from "../../utils/viewportAnchor";
 // 2026-05-14 — defer the gather move into the portals module's blink
 // handshake so the position update happens AT eyelid apex. Without
@@ -234,7 +251,7 @@ async function openPanel(expanded: boolean) {
       disableClickAway: true,
       hidePaper: true,
     });
-    panelIsOpen = true;
+    panelIsOpen = true; setPanelOpen("initiative", true);
   } catch (e) {
     console.error("[obr-suite/initiative] openPanel failed", e);
   }
@@ -242,7 +259,7 @@ async function openPanel(expanded: boolean) {
 
 async function closePanel() {
   try { await OBR.popover.close(POPOVER_ID); } catch {}
-  panelIsOpen = false;
+  panelIsOpen = false; setPanelOpen("initiative", false);
 }
 
 async function initKnownItems() {
@@ -613,6 +630,51 @@ export async function setupInitiative(): Promise<void> {
     OBR.broadcast.onMessage(BROADCAST_CLOSE_PANEL, async () => {
       await openPanel(false);
     })
+  );
+
+  // §8 — turn-change notifications ("你的回合" / "做好准备"), sent by
+  // the advancing client (see notifyTurnChange in useInitiative.ts).
+  // OBR.notification is the host's own toast layer: it never captures
+  // pointers and never blacks out the canvas, which is exactly the §8
+  // overlay contract. An invisible active entry arrives with a null
+  // name — its OWNER still gets a (generic) your-turn prompt, everyone
+  // else gets nothing here.
+  unsubs.push(
+    OBR.broadcast.onMessage(BROADCAST_TURN_CHANGE, async (event) => {
+      const p = event.data as TurnChangePayload | undefined;
+      if (!p || typeof p !== "object") return;
+      let myId: string;
+      try {
+        myId = await OBR.player.getId();
+      } catch (e) {
+        console.warn(
+          "[obr-suite/initiative] turn-change getId failed — notification skipped",
+          { payload: p, error: e },
+        );
+        return;
+      }
+      const zh = ((getLocalLang() as Lang) ?? "zh") === "zh";
+      try {
+        if (p.activeOwnerId && p.activeOwnerId === myId) {
+          const label = p.activeInvisible
+            ? (zh ? "你的回合（隐身单位）" : "Your turn (hidden unit)")
+            : p.activeName
+              ? (zh ? `你的回合：${p.activeName}` : `Your turn: ${p.activeName}`)
+              : (zh ? "你的回合" : "Your turn");
+          await OBR.notification.show(label, "INFO");
+        } else if (p.nextOwnerId && p.nextOwnerId === myId) {
+          const label = p.nextName
+            ? (zh ? `做好准备，即将轮到：${p.nextName}` : `Get ready — up next: ${p.nextName}`)
+            : (zh ? "做好准备，即将轮到你" : "Get ready — you're up next");
+          await OBR.notification.show(label, "DEFAULT");
+        }
+      } catch (e) {
+        console.warn("[obr-suite/initiative] turn-change notification failed", {
+          payload: p,
+          error: e,
+        });
+      }
+    }),
   );
 
   // Hover-ring auto-hide poll. See `tickHoverAutoHide` comment above.

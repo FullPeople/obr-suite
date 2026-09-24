@@ -213,7 +213,7 @@ OBR.onReady(async () => {
       try {
         await OBR.broadcast.sendMessage(
           BROADCAST_TELEPORT,
-          { destPortalId, tokenIds: payload.tokenIds },
+          { destPortalId, tokenIds: payload.tokenIds, entryId: payload.entryId },
           { destination: "LOCAL" }
         );
       } catch (e) { console.error("[portals] teleport broadcast", e); }

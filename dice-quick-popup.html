@@ -215,35 +215,35 @@ html,body{
 <body>
 <div class="popup">
   <div class="popup-hdr">
-    <button class="close-x" id="closeBtn" type="button" title="关闭 / Close" aria-label="关闭">×</button>
+    <button class="close-x" id="closeBtn" type="button" title="关闭 / Close" data-lt="close" aria-label="Close">×</button>
   </div>
   <!-- 7-dice picker — left=+1, right=-1. -->
   <div class="dice-row" id="diceRow">
-    <button class="dice-btn" data-type="d4"   type="button" title="左键 +1，右键 −1"><img src="/suite/d4.png"   alt="d4"   draggable="false"><span class="lbl">d4</span><span class="badge">0</span></button>
-    <button class="dice-btn" data-type="d6"   type="button" title="左键 +1，右键 −1"><img src="/suite/d6.png"   alt="d6"   draggable="false"><span class="lbl">d6</span><span class="badge">0</span></button>
-    <button class="dice-btn" data-type="d8"   type="button" title="左键 +1，右键 −1"><img src="/suite/d8.png"   alt="d8"   draggable="false"><span class="lbl">d8</span><span class="badge">0</span></button>
-    <button class="dice-btn" data-type="d10"  type="button" title="左键 +1，右键 −1"><img src="/suite/d10.png"  alt="d10"  draggable="false"><span class="lbl">d10</span><span class="badge">0</span></button>
-    <button class="dice-btn" data-type="d12"  type="button" title="左键 +1，右键 −1"><img src="/suite/d12.png"  alt="d12"  draggable="false"><span class="lbl">d12</span><span class="badge">0</span></button>
-    <button class="dice-btn" data-type="d20"  type="button" title="左键 +1，右键 −1"><img src="/suite/d20.png"  alt="d20"  draggable="false"><span class="lbl">d20</span><span class="badge">0</span></button>
-    <button class="dice-btn" data-type="d100" type="button" title="左键 +1，右键 −1"><img src="/suite/d100.png" alt="d100" draggable="false"><span class="lbl">d100</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d4"   type="button" title="左键 +1，右键 −1" data-lt="diceTitle"><img src="/d4.png"   alt="d4"   draggable="false"><span class="lbl">d4</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d6"   type="button" title="左键 +1，右键 −1" data-lt="diceTitle"><img src="/d6.png"   alt="d6"   draggable="false"><span class="lbl">d6</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d8"   type="button" title="左键 +1，右键 −1" data-lt="diceTitle"><img src="/d8.png"   alt="d8"   draggable="false"><span class="lbl">d8</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d10"  type="button" title="左键 +1，右键 −1" data-lt="diceTitle"><img src="/d10.png"  alt="d10"  draggable="false"><span class="lbl">d10</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d12"  type="button" title="左键 +1，右键 −1" data-lt="diceTitle"><img src="/d12.png"  alt="d12"  draggable="false"><span class="lbl">d12</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d20"  type="button" title="左键 +1，右键 −1" data-lt="diceTitle"><img src="/d20.png"  alt="d20"  draggable="false"><span class="lbl">d20</span><span class="badge">0</span></button>
+    <button class="dice-btn" data-type="d100" type="button" title="左键 +1，右键 −1" data-lt="diceTitle"><img src="/d100.png" alt="d100" draggable="false"><span class="lbl">d100</span><span class="badge">0</span></button>
     <span></span><!-- empty cell -->
   </div>
 
   <div class="expr-row">
-    <input class="expr-input" id="exprInput" type="text" spellcheck="false" placeholder="例如 2d6 + 1d20 + 5">
+    <input class="expr-input" id="exprInput" type="text" spellcheck="false" placeholder="例如 2d6 + 1d20 + 5" data-lp="exprPh">
     <div class="expr-mod">
-      <button id="btnModDec" type="button" title="加值 -1">−</button>
-      <button id="btnModInc" type="button" title="加值 +1">＋</button>
+      <button id="btnModDec" type="button" title="加值 -1" data-lt="modDec">−</button>
+      <button id="btnModInc" type="button" title="加值 +1" data-lt="modInc">＋</button>
     </div>
   </div>
 
-  <input class="label-input" id="labelInput" type="text" placeholder="备注（可选）">
+  <input class="label-input" id="labelInput" type="text" placeholder="备注（可选）" data-lp="labelPh">
 
   <div class="actions">
     <button class="btn-act dis"    data-act="dis"    type="button"><span class="ico">▼</span><span data-l="dis">劣势</span></button>
     <button class="btn-act normal" data-act="roll"   type="button"><span class="ico">⚀</span><span data-l="roll">普通</span></button>
     <button class="btn-act adv"    data-act="adv"    type="button"><span class="ico">▲</span><span data-l="adv">优势</span></button>
-    <button class="btn-act crit"   data-act="crit"   type="button" title="重击 = 表达式中所有骰子翻倍"><span class="ico">✦</span><span data-l="crit">重击</span></button>
+    <button class="btn-act crit"   data-act="crit"   type="button" title="重击 = 表达式中所有骰子翻倍" data-lt="critTitle"><span class="ico">✦</span><span data-l="crit">重击</span></button>
   </div>
 
   <!-- DM-only dark variants — one per mode, flush under the row above.
@@ -251,10 +251,10 @@ html,body{
        result stays on the DM client only. Player clients never see
        this row (CSS is `display:none` until JS adds .is-dm). -->
   <div class="actions-dark" id="darkActions">
-    <button class="btn-dark-mini dis"    data-act="dark-dis"    type="button" title="暗劣势"><span class="ico">●</span><span data-l="dis">劣势</span></button>
-    <button class="btn-dark-mini normal" data-act="dark-roll"   type="button" title="暗普通"><span class="ico">●</span><span data-l="roll">普通</span></button>
-    <button class="btn-dark-mini adv"    data-act="dark-adv"    type="button" title="暗优势"><span class="ico">●</span><span data-l="adv">优势</span></button>
-    <button class="btn-dark-mini crit"   data-act="dark-crit"   type="button" title="暗重击"><span class="ico">●</span><span data-l="crit">重击</span></button>
+    <button class="btn-dark-mini dis"    data-act="dark-dis"    type="button" title="暗劣势" data-lt="darkDis"><span class="ico">●</span><span data-l="dis">劣势</span></button>
+    <button class="btn-dark-mini normal" data-act="dark-roll"   type="button" title="暗普通" data-lt="darkRoll"><span class="ico">●</span><span data-l="roll">普通</span></button>
+    <button class="btn-dark-mini adv"    data-act="dark-adv"    type="button" title="暗优势" data-lt="darkAdv"><span class="ico">●</span><span data-l="adv">优势</span></button>
+    <button class="btn-dark-mini crit"   data-act="dark-crit"   type="button" title="暗重击" data-lt="darkCrit"><span class="ico">●</span><span data-l="crit">重击</span></button>
   </div>
 </div>
 
@@ -272,11 +272,23 @@ const LANG = (() => {
   return "zh";
 })();
 const L = {
-  zh: { roll: "普通", adv: "优势", dis: "劣势", crit: "重击", dark: "暗骰（仅 DM 可见结果）" },
-  en: { roll: "Normal", adv: "Adv", dis: "Dis", crit: "Crit", dark: "Dark (DM-only result)" },
+  zh: { roll: "普通", adv: "优势", dis: "劣势", crit: "重击", dark: "暗骰（仅 DM 可见结果）",
+    diceTitle: "左键 +1，右键 −1", exprPh: "例如 2d6 + 1d20 + 5", modDec: "加值 -1", modInc: "加值 +1",
+    labelPh: "备注（可选）", close: "关闭", critTitle: "重击 = 表达式中所有骰子翻倍",
+    darkDis: "暗劣势", darkRoll: "暗普通", darkAdv: "暗优势", darkCrit: "暗重击" },
+  en: { roll: "Normal", adv: "Adv", dis: "Dis", crit: "Crit", dark: "Dark (DM-only result)",
+    diceTitle: "Left-click +1, right-click −1", exprPh: "e.g. 2d6 + 1d20 + 5", modDec: "Modifier −1", modInc: "Modifier +1",
+    labelPh: "Note (optional)", close: "Close", critTitle: "Critical = double every die in the expression",
+    darkDis: "Dark dis", darkRoll: "Dark normal", darkAdv: "Dark adv", darkCrit: "Dark crit" },
 }[LANG];
 document.querySelectorAll("[data-l]").forEach((el) => {
   el.textContent = L[el.dataset.l] ?? el.textContent;
+});
+document.querySelectorAll("[data-lt]").forEach((el) => {
+  const v = L[el.dataset.lt]; if (v) el.title = v;
+});
+document.querySelectorAll("[data-lp]").forEach((el) => {
+  const v = L[el.dataset.lp]; if (v) el.placeholder = v;
 });
 document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
 

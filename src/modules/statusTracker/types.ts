@@ -117,6 +117,12 @@ export interface BuffDef {
    *  effect so multiple stacked buffs don't visually fight each
    *  other. */
   webmScale?: number;
+  /** 2026-09-17 — render this buff's WebM on OBR's DRAWING layer, i.e. UNDER
+   *  the token instead of over it. Used by 专注 / 隐身, which are ground rings
+   *  the character stands inside: the token art covers the inner half, so the
+   *  band reads as encircling the character rather than as a decal on top of it.
+   *  The item is attached, locked and hit-disabled either way. */
+  webmBelow?: boolean;
   /** 2026-05-18 — actual intrinsic pixel dimensions of the webm file.
    *  Used by bubbles.ts to set ImageContent.width / height AND
    *  ImageGrid.offset = (intrinsicW/2, intrinsicH/2). OBR interprets
@@ -212,218 +218,7 @@ export function hexToRgb01(hex: string): [number, number, number] {
 // without touching user customisations (renamed buffs, recoloured
 // buffs, replaced webms, etc. — anything the user actually edited).
 
-// Every id we've shipped as a default in any prior version. Combined
-// with OLD_DEFAULT_SIGNATURES below so the migration matches on
-// FULL shape (not just id) — a user who renamed "魅惑 💘" → "魅惑术"
-// keeps theirs even if "charmed" is in this set.
-export const DEFAULT_BUFF_RETIRED_IDS = new Set<string>([
-  // === Original 32 built-ins (pre-2026-05-18) ===
-  "paralyzed", "charmed", "invisible", "bardic", "vicious", "advantage",
-  "stunned", "wet", "poisoned", "haste", "flying", "frozen",
-  "innate_spell", "wild_shape", "blessing", "frightened", "unconscious",
-  "guidance", "hunters_mark", "focused", "deafened", "incapacitated",
-  "prone", "slowed", "blinded", "exhaustion", "dead", "petrified",
-  "restrained", "grappled", "raging", "frozen_stiff",
-  // === 2026-05-18 batch (76 entries from /public/buff-fx/*.webm) ===
-  // custom-* group
-  "disadvantage",
-  // fade-* group
-  "fade_broken_heart", "fade_ghost", "fade_sparkles",
-  // flash-* group
-  "flash_boom", "flash_clown", "flash_fire", "flash_lightning",
-  "flash_sparkles", "flash_star",
-  // float-* group
-  "float_dove", "float_musical_note", "float_sparkles",
-  "float_sparkling_heart", "float_tulip", "float_wind", "float_zzz",
-  // orbit-* group
-  "orbit_dizzy", "orbit_snowflake", "orbit_sparkles", "orbit_star",
-  // pulse-* group
-  "pulse_brain", "pulse_crystal_ball", "pulse_sloth",
-  "pulse_sparkling_heart", "pulse_sun", "pulse_target", "pulse_thumbs_up",
-  // radial-* group
-  "radial_fire", "radial_moon", "radial_snowflake", "radial_sparkles",
-  "radial_star", "radial_sun",
-  // rain-* group
-  "rain_cherry_blossom", "rain_drop", "rain_hourglass", "rain_leaves",
-  "rain_snake", "rain_snowflake", "rain_test_tube",
-  // shake-* group
-  "shake_angry", "shake_cold_face", "shake_rage", "shake_screaming",
-  // static-* group
-  "static_broken_heart", "static_chains", "static_crystal_ball",
-  "static_headphones", "static_moai", "static_otter",
-  "static_people_hugging", "static_red_envelope", "static_skull",
-  "static_sunglasses", "static_thumbs_up",
-]);
 
-// Migration signature for each old-default id → the shape it had
-// before the regeneration. Used to detect "user hasn't touched this
-// built-in buff" — a match on every field means we can safely retire.
-// Buffs whose new default has the SAME id will be re-added under the
-// new defaults (with potentially different color / group), so the
-// effect of the migration on those is "refresh to new defaults".
-interface OldDefaultSignature {
-  name: string; color: string; group?: string;
-  webmAsset?: string; webmScale?: number;
-}
-export const OLD_DEFAULT_SIGNATURES: Record<string, OldDefaultSignature> = {
-  // === Pre-2026-05-18 ===
-  paralyzed:    { name: "麻痹 ⚡",      color: "#ffff00", group: "异常",  webmAsset: "buff-fx/flash-lightning.webm" },
-  charmed:      { name: "魅惑 💘",      color: "#ff00d0", group: "异常",  webmAsset: "buff-fx/custom-charmed.webm",      webmScale: 1.6 },
-  invisible:    { name: "隐形 👻",      color: "#cccccc", group: "Buffs", webmAsset: "buff-fx/fade-ghost.webm",          webmScale: 1.0 },
-  bardic:       { name: "诗人激励 🎵",  color: "#7300ff", group: "Buffs", webmAsset: "buff-fx/custom-bardic.webm",       webmScale: 1.4 },
-  vicious:      { name: "劣势 ⬇",      color: "#3b82f6", group: "异常",  webmAsset: "buff-fx/custom-disadvantage.webm", webmScale: 1.0 },
-  advantage:    { name: "优势 ⬆",      color: "#ffcc00", group: "Buffs", webmAsset: "buff-fx/custom-advantage.webm",    webmScale: 1.0 },
-  stunned:      { name: "眩晕 💫",      color: "#f5deb3", group: "异常",  webmAsset: "buff-fx/orbit-dizzy.webm" },
-  wet:          { name: "濡湿 💧",      color: "#87cefa", group: "异常",  webmAsset: "buff-fx/rain-drop.webm" },
-  poisoned:     { name: "中毒 🤢",      color: "#008000", group: "异常",  webmAsset: "buff-fx/rain-test_tube.webm" },
-  haste:        { name: "急速术 💨",    color: "#04a3ff", group: "Buffs", webmAsset: "buff-fx/float-wind.webm" },
-  flying:       { name: "飞行术 🕊️",   color: "#d5d5d5", group: "Buffs", webmAsset: "buff-fx/custom-flying.webm",       webmScale: 1.4 },
-  frozen:       { name: "冰冻 ❄️",     color: "#0000ff", group: "异常",  webmAsset: "buff-fx/custom-frozen.webm",       webmScale: 1.0 },
-  innate_spell: { name: "先天术法 ⚡️", color: "#08fdfd", group: "Extra", webmAsset: "buff-fx/radial-star.webm" },
-  wild_shape:   { name: "野性形态 💥",  color: "#ff0000", group: "Extra", webmAsset: "buff-fx/flash-boom.webm" },
-  blessing:     { name: "祝福术 🧧",    color: "#ffff00", group: "Buffs", webmAsset: "buff-fx/radial-sparkles.webm" },
-  frightened:   { name: "恐慌 😱",      color: "#2f4f4f", group: "异常",  webmAsset: "buff-fx/shake-screaming.webm" },
-  unconscious:  { name: "昏迷 💤",      color: "#4b0082", group: "异常",  webmAsset: "buff-fx/float-zzz.webm" },
-  guidance:     { name: "神导术 👍",    color: "#ffff00", group: "Buffs", webmAsset: "buff-fx/pulse-thumbs_up.webm" },
-  hunters_mark: { name: "猎人印记 🎯",  color: "#00ff26", group: "Extra", webmAsset: "buff-fx/custom-hunters_mark.webm", webmScale: 1.0 },
-  focused:      { name: "专注 🧠",      color: "#4682b4", group: "Extra", webmAsset: "buff-fx/custom-focused.webm",      webmScale: 1.0 },
-  deafened:     { name: "耳聋 🎧",      color: "#c0c0c0", group: "异常",  webmAsset: "buff-fx/custom-deafened.webm",     webmScale: 1.0 },
-  incapacitated:{ name: "失能 💔",      color: "#708090", group: "异常",  webmAsset: "buff-fx/custom-incapacitated.webm",webmScale: 1.0 },
-  prone:        { name: "倒地 🦦",      color: "#cd853f", group: "异常",  webmAsset: "buff-fx/custom-prone.webm",        webmScale: 1.0 },
-  slowed:       { name: "缓慢术 ⌛",    color: "#e805f4", group: "异常",  webmAsset: "buff-fx/custom-slowed.webm",       webmScale: 1.0 },
-  blinded:      { name: "目盲 🕶️",     color: "#4a4a4a", group: "异常",  webmAsset: "buff-fx/custom-blinded.webm",      webmScale: 1.0 },
-  exhaustion:   { name: "力竭 🦥",      color: "#ff0000", group: "异常",  webmAsset: "buff-fx/custom-exhaustion.webm",   webmScale: 1.0 },
-  dead:         { name: "死亡 💀",      color: "#000000", group: "Extra", webmAsset: "buff-fx/custom-dead.webm",         webmScale: 1.0 },
-  petrified:    { name: "石化 🗿",      color: "#8b7d6b", group: "异常",  webmAsset: "buff-fx/custom-petrified.webm",    webmScale: 1.0 },
-  restrained:   { name: "束缚 🔗",      color: "#8b4513", group: "异常",  webmAsset: "buff-fx/custom-restrained.webm",   webmScale: 1.0 },
-  grappled:     { name: "擒抱 🫂",      color: "#d2691e", group: "异常",  webmAsset: "buff-fx/custom-grappled.webm",     webmScale: 1.0 },
-  raging:       { name: "狂暴 😠",      color: "#f20808", group: "Extra", webmAsset: "buff-fx/custom-raging.webm",       webmScale: 1.0 },
-  frozen_stiff: { name: "冻僵 🥶",      color: "#00ffff", group: "异常",  webmAsset: "buff-fx/custom-frozen_stiff.webm", webmScale: 1.0 },
-
-  // === 2026-05-18 batch (signatures match what was shipped that day;
-  //     allows the same matchesOldDefault guard to retire them now
-  //     that user said "回退" — only entries the user never touched
-  //     get auto-removed). ===
-  // The custom-* ids that overlap with the pre-2026-05-18 entries
-  // above ALSO had a v2 shape (different name/group/scale). Both
-  // shapes count as "old defaults" so signature matching is still
-  // one-keyed-by-id but the comparator runs against this version
-  // first; if not byte-equal we fall through to the previous shape.
-  // Implementation in `matchesOldDefault` below tries both.
-
-  // === Brand-new 2026-05-18 ids (no pre-existing entry) ===
-  disadvantage:        { name: "劣势 ⬇",     color: "#3b82f6", group: "异常", webmAsset: "buff-fx/custom-disadvantage.webm" },
-  fade_broken_heart:   { name: "心碎(渐隐) 💔", color: "#ff4d6d", group: "特效", webmAsset: "buff-fx/fade-broken_heart.webm" },
-  fade_ghost:          { name: "幽灵 👻",        color: "#cccccc", group: "特效", webmAsset: "buff-fx/fade-ghost.webm" },
-  fade_sparkles:       { name: "渐隐光辉 ✨",    color: "#f0e68c", group: "特效", webmAsset: "buff-fx/fade-sparkles.webm" },
-  flash_boom:          { name: "爆裂 💥",      color: "#ff4500", group: "特效", webmAsset: "buff-fx/flash-boom.webm" },
-  flash_clown:         { name: "小丑 🤡",      color: "#ff69b4", group: "特效", webmAsset: "buff-fx/flash-clown.webm" },
-  flash_fire:          { name: "火焰闪 🔥",    color: "#ff4500", group: "特效", webmAsset: "buff-fx/flash-fire.webm" },
-  flash_lightning:     { name: "闪电 ⚡",      color: "#ffff00", group: "特效", webmAsset: "buff-fx/flash-lightning.webm" },
-  flash_sparkles:      { name: "闪光 ✨",      color: "#fff8a0", group: "特效", webmAsset: "buff-fx/flash-sparkles.webm" },
-  flash_star:          { name: "闪星 ⭐",      color: "#ffd700", group: "特效", webmAsset: "buff-fx/flash-star.webm" },
-  float_dove:          { name: "飘鸽 🕊",      color: "#dfe6ee", group: "特效", webmAsset: "buff-fx/float-dove.webm" },
-  float_musical_note:  { name: "飘音符 🎵",    color: "#7b61ff", group: "特效", webmAsset: "buff-fx/float-musical_note.webm" },
-  float_sparkles:      { name: "飘闪光 ✨",    color: "#ffd97a", group: "特效", webmAsset: "buff-fx/float-sparkles.webm" },
-  float_sparkling_heart:{name: "飘闪心 💖",    color: "#ff5ea8", group: "特效", webmAsset: "buff-fx/float-sparkling_heart.webm" },
-  float_tulip:         { name: "飘郁金香 🌷",  color: "#ff7eb3", group: "特效", webmAsset: "buff-fx/float-tulip.webm" },
-  float_wind:          { name: "飘风 💨",      color: "#04a3ff", group: "特效", webmAsset: "buff-fx/float-wind.webm" },
-  float_zzz:           { name: "睡眠 💤",      color: "#4b0082", group: "特效", webmAsset: "buff-fx/float-zzz.webm" },
-  orbit_dizzy:         { name: "眩晕 💫",     color: "#f5deb3", group: "特效", webmAsset: "buff-fx/orbit-dizzy.webm" },
-  orbit_snowflake:     { name: "环雪 ❄",     color: "#a0e8ff", group: "特效", webmAsset: "buff-fx/orbit-snowflake.webm" },
-  orbit_sparkles:      { name: "环闪光 ✨",   color: "#ffd97a", group: "特效", webmAsset: "buff-fx/orbit-sparkles.webm" },
-  orbit_star:          { name: "环星 ⭐",     color: "#ffd700", group: "特效", webmAsset: "buff-fx/orbit-star.webm" },
-  pulse_brain:         { name: "脉动 🧠",     color: "#9b6dff", group: "特效", webmAsset: "buff-fx/pulse-brain.webm" },
-  pulse_crystal_ball:  { name: "占卜 🔮",     color: "#a685e2", group: "特效", webmAsset: "buff-fx/pulse-crystal_ball.webm" },
-  pulse_sloth:         { name: "缓动 🦥",     color: "#bda08a", group: "特效", webmAsset: "buff-fx/pulse-sloth.webm" },
-  pulse_sparkling_heart:{name:"心搏 💖",      color: "#ff5ea8", group: "特效", webmAsset: "buff-fx/pulse-sparkling_heart.webm" },
-  pulse_sun:           { name: "日辉 ☀",     color: "#ffcc33", group: "特效", webmAsset: "buff-fx/pulse-sun.webm" },
-  pulse_target:        { name: "标靶 🎯",     color: "#ff4d4d", group: "特效", webmAsset: "buff-fx/pulse-target.webm" },
-  pulse_thumbs_up:     { name: "神导 👍",     color: "#ffff00", group: "特效", webmAsset: "buff-fx/pulse-thumbs_up.webm" },
-  radial_fire:         { name: "火辐 🔥",     color: "#ff4500", group: "特效", webmAsset: "buff-fx/radial-fire.webm" },
-  radial_moon:         { name: "月辉 🌙",     color: "#b8c4ff", group: "特效", webmAsset: "buff-fx/radial-moon.webm" },
-  radial_snowflake:    { name: "雪辐 ❄",     color: "#a0e8ff", group: "特效", webmAsset: "buff-fx/radial-snowflake.webm" },
-  radial_sparkles:     { name: "祝福 🧧",     color: "#ffff00", group: "特效", webmAsset: "buff-fx/radial-sparkles.webm" },
-  radial_star:         { name: "星辐 ⭐",     color: "#ffd700", group: "特效", webmAsset: "buff-fx/radial-star.webm" },
-  radial_sun:          { name: "日光 ☀",     color: "#ffcc33", group: "特效", webmAsset: "buff-fx/radial-sun.webm" },
-  rain_cherry_blossom: { name: "樱花雨 🌸",   color: "#ffb7d5", group: "特效", webmAsset: "buff-fx/rain-cherry_blossom.webm" },
-  rain_drop:           { name: "濡湿 💧",     color: "#87cefa", group: "特效", webmAsset: "buff-fx/rain-drop.webm" },
-  rain_hourglass:      { name: "沙漏 ⌛",     color: "#c5a880", group: "特效", webmAsset: "buff-fx/rain-hourglass.webm" },
-  rain_leaves:         { name: "落叶 🍃",     color: "#5db762", group: "特效", webmAsset: "buff-fx/rain-leaves.webm" },
-  rain_snake:          { name: "蛇雨 🐍",     color: "#8fbc8f", group: "特效", webmAsset: "buff-fx/rain-snake.webm" },
-  rain_snowflake:      { name: "雪雨 ❄",     color: "#a0e8ff", group: "特效", webmAsset: "buff-fx/rain-snowflake.webm" },
-  rain_test_tube:      { name: "中毒 🤢",     color: "#008000", group: "特效", webmAsset: "buff-fx/rain-test_tube.webm" },
-  shake_angry:         { name: "愤怒 😠",     color: "#cc0000", group: "特效", webmAsset: "buff-fx/shake-angry.webm" },
-  shake_cold_face:     { name: "寒颤 🥶",     color: "#00ffff", group: "特效", webmAsset: "buff-fx/shake-cold_face.webm" },
-  shake_rage:          { name: "暴怒 😡",     color: "#ff0000", group: "特效", webmAsset: "buff-fx/shake-rage.webm" },
-  shake_screaming:     { name: "恐慌 😱",     color: "#2f4f4f", group: "特效", webmAsset: "buff-fx/shake-screaming.webm" },
-  static_broken_heart: { name: "心碎 💔",     color: "#ff4d6d", group: "图标", webmAsset: "buff-fx/static-broken_heart.webm" },
-  static_chains:       { name: "锁链 🔗",     color: "#8b4513", group: "图标", webmAsset: "buff-fx/static-chains.webm" },
-  static_crystal_ball: { name: "水晶球 🔮",   color: "#a685e2", group: "图标", webmAsset: "buff-fx/static-crystal_ball.webm" },
-  static_headphones:   { name: "耳机 🎧",     color: "#c0c0c0", group: "图标", webmAsset: "buff-fx/static-headphones.webm" },
-  static_moai:         { name: "石像 🗿",     color: "#8b7d6b", group: "图标", webmAsset: "buff-fx/static-moai.webm" },
-  static_otter:        { name: "水獭 🦦",     color: "#cd853f", group: "图标", webmAsset: "buff-fx/static-otter.webm" },
-  static_people_hugging:{name: "拥抱 🫂",     color: "#d2691e", group: "图标", webmAsset: "buff-fx/static-people_hugging.webm" },
-  static_red_envelope: { name: "红包 🧧",     color: "#e53935", group: "图标", webmAsset: "buff-fx/static-red_envelope.webm" },
-  static_skull:        { name: "骷髅 💀",     color: "#222222", group: "图标", webmAsset: "buff-fx/static-skull.webm" },
-  static_sunglasses:   { name: "墨镜 🕶",    color: "#4a4a4a", group: "图标", webmAsset: "buff-fx/static-sunglasses.webm" },
-  static_thumbs_up:    { name: "拇指 👍",     color: "#ffd700", group: "图标", webmAsset: "buff-fx/static-thumbs_up.webm" },
-};
-
-// Some IDs (custom-* group from 2026-05-18) had a SECOND shape that
-// also counts as "auto-shipped default" for the purposes of the
-// signature matcher. Listed separately so matchesOldDefault below
-// can try the primary signature, and if that doesn't match, fall
-// back to this alternate.
-const OLD_DEFAULT_SIGNATURES_ALT: Record<string, OldDefaultSignature> = {
-  advantage:     { name: "优势 ⬆",      color: "#ffcc00", group: "增益", webmAsset: "buff-fx/custom-advantage.webm" },
-  bardic:        { name: "诗人激励 🎵", color: "#7300ff", group: "增益", webmAsset: "buff-fx/custom-bardic.webm",       webmScale: 1.4 },
-  blinded:       { name: "目盲 🕶",     color: "#4a4a4a", group: "异常", webmAsset: "buff-fx/custom-blinded.webm" },
-  charmed:       { name: "魅惑 💘",     color: "#ff00d0", group: "异常", webmAsset: "buff-fx/custom-charmed.webm",      webmScale: 1.6 },
-  dead:          { name: "死亡 💀",     color: "#000000", group: "异常", webmAsset: "buff-fx/custom-dead.webm" },
-  deafened:      { name: "耳聋 🎧",     color: "#c0c0c0", group: "异常", webmAsset: "buff-fx/custom-deafened.webm" },
-  exhaustion:    { name: "力竭 🦥",     color: "#ff6347", group: "异常", webmAsset: "buff-fx/custom-exhaustion.webm" },
-  flying:        { name: "飞行 🕊",    color: "#d5d5d5", group: "增益", webmAsset: "buff-fx/custom-flying.webm",       webmScale: 1.4 },
-  focused:       { name: "专注 🧠",     color: "#4682b4", group: "增益", webmAsset: "buff-fx/custom-focused.webm" },
-  frozen:        { name: "冰冻 ❄",     color: "#0000ff", group: "异常", webmAsset: "buff-fx/custom-frozen.webm" },
-  frozen_stiff:  { name: "冻僵 🥶",     color: "#00ffff", group: "异常", webmAsset: "buff-fx/custom-frozen_stiff.webm" },
-  grappled:      { name: "擒抱 🫂",     color: "#d2691e", group: "异常", webmAsset: "buff-fx/custom-grappled.webm" },
-  hunters_mark:  { name: "猎人印记 🎯", color: "#00ff26", group: "增益", webmAsset: "buff-fx/custom-hunters_mark.webm" },
-  incapacitated: { name: "失能 💔",     color: "#708090", group: "异常", webmAsset: "buff-fx/custom-incapacitated.webm" },
-  invisible:     { name: "隐形 👻",     color: "#cccccc", group: "增益", webmAsset: "buff-fx/custom-invisible.webm" },
-  petrified:     { name: "石化 🗿",     color: "#8b7d6b", group: "异常", webmAsset: "buff-fx/custom-petrified.webm" },
-  prone:         { name: "倒地 🦦",     color: "#cd853f", group: "异常", webmAsset: "buff-fx/custom-prone.webm" },
-  raging:        { name: "狂暴 😠",     color: "#f20808", group: "增益", webmAsset: "buff-fx/custom-raging.webm" },
-  restrained:    { name: "束缚 🔗",     color: "#8b4513", group: "异常", webmAsset: "buff-fx/custom-restrained.webm" },
-  slowed:        { name: "缓慢 ⌛",     color: "#e805f4", group: "异常", webmAsset: "buff-fx/custom-slowed.webm" },
-};
-
-// Returns true when `buff` matches its old-default signature byte-for-byte.
-// Other fields (effect, effectParams, iconAsset, rounds…) are ignored
-// — if the user added any of those, that's a user customisation and
-// the buff should NOT be auto-migrated away. Tries the primary
-// signature first, then the alternate (for ids that shipped under
-// two slightly different shapes across versions).
-function matchesSig(buff: BuffDef, sig: OldDefaultSignature): boolean {
-  if (buff.name !== sig.name) return false;
-  if (buff.color !== sig.color) return false;
-  if ((buff.group ?? undefined) !== (sig.group ?? undefined)) return false;
-  if ((buff.webmAsset ?? undefined) !== (sig.webmAsset ?? undefined)) return false;
-  const a = typeof buff.webmScale === "number" ? buff.webmScale : undefined;
-  const b = typeof sig.webmScale === "number" ? sig.webmScale : undefined;
-  if (a !== b) return false;
-  if (buff.iconAsset) return false;
-  if (buff.effect && buff.effect !== "default") return false;
-  if (buff.webmOff) return false;
-  return true;
-}
-export function matchesOldDefault(buff: BuffDef): boolean {
-  const sig = OLD_DEFAULT_SIGNATURES[buff.id];
-  if (sig && matchesSig(buff, sig)) return true;
-  const alt = OLD_DEFAULT_SIGNATURES_ALT[buff.id];
-  if (alt && matchesSig(buff, alt)) return true;
-  return false;
-}
 
 // 2026-05-18 — the user curates the default buff set at the project
 // root (E:\枭熊插件\*.webm); those 12 files are copied into
@@ -446,7 +241,10 @@ export const DEFAULT_BUFFS: BuffDef[] = [
   { id: "u_paralyzed",   name: "麻痹 ⚡",      color: "#ffff00", group: "异常", webmAsset: "buff-fx/user-paralyzed.webm" },
   { id: "u_stunned",     name: "眩晕 💫",      color: "#f5deb3", group: "异常", webmAsset: "buff-fx/user-stunned.webm" },
   { id: "u_charmed",     name: "魅惑 💘",      color: "#ff00d0", group: "异常", webmAsset: "buff-fx/user-charmed.webm" },
-  { id: "u_invisible",   name: "隐形 👻",      color: "#cccccc", group: "增益", webmAsset: "buff-fx/user-invisible.webm" },
+  // 专注 / 隐身 are ground rings, not overlay bubbles: 256px assets drawn
+  // UNDER the token at 1.35x its footprint so the character stands inside them.
+  // The intrinsic size must match the files or OBR mis-anchors the centre.
+  { id: "u_invisible",   name: "隐形 👻",      color: "#cccccc", group: "增益", webmAsset: "buff-fx/user-invisible.webm", webmScale: 1.35, webmIntrinsicW: 256, webmIntrinsicH: 256, webmBelow: true },
   { id: "u_bardic",      name: "诗人激励 🎵",  color: "#7300ff", group: "增益", webmAsset: "buff-fx/user-bardic.webm" },
   { id: "u_disadvantage",name: "劣势 ⬇",      color: "#3b82f6", group: "异常", webmAsset: "buff-fx/user-disadvantage.webm" },
   { id: "u_advantage",   name: "优势 ⬆",      color: "#ffcc00", group: "增益", webmAsset: "buff-fx/user-advantage.webm" },
@@ -454,5 +252,5 @@ export const DEFAULT_BUFFS: BuffDef[] = [
   { id: "u_blessing",    name: "祝福 🧧",      color: "#ffff00", group: "增益", webmAsset: "buff-fx/user-blessing.webm" },
   { id: "u_guidance",    name: "神导术 👍",    color: "#ffff00", group: "增益", webmAsset: "buff-fx/user-guidance.webm" },
   { id: "u_hex",         name: "侵扰 😈",      color: "#7a1e9c", group: "异常", webmAsset: "buff-fx/user-hex.webm" },
-  { id: "u_focused",     name: "专注 🧠",      color: "#4682b4", group: "增益", webmAsset: "buff-fx/user-focused.webm" },
+  { id: "u_focused",     name: "专注 🧠",      color: "#4682b4", group: "增益", webmAsset: "buff-fx/user-focused.webm", webmScale: 1.35, webmIntrinsicW: 256, webmIntrinsicH: 256, webmBelow: true },
 ];

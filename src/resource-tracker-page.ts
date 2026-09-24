@@ -28,6 +28,72 @@ import {
   RESOURCES_KEY,
 } from "./modules/resourceTracker/types";
 import { writeResources, readResources } from "./modules/resourceTracker/storage";
+import { isDegenerateResourceId, stableResourceId } from "./modules/resourceTracker/id";
+
+/** Merge preset resources into a token's current array without letting
+ *  id collisions cross-link rows (checklist §2): a preset entry whose
+ *  id is degenerate, or already taken by a DIFFERENT-named resource on
+ *  the token, falls back to NAME matching (occurrence-aware) against
+ *  the token's rows — only when no same-named row exists is it inserted
+ *  under a fresh deterministic id. Idempotent: re-applying the same
+ *  preset never grows the array (the old degenerate-id fallthrough
+ *  pushed a new copy on EVERY apply). */
+function mergePresetResources(cur: Resource[], preset: Resource[]): Resource[] {
+  const next = cur.map((r) => ({ ...r }));
+  const byId = new Map(next.map((r) => [r.id, r]));
+  const usedIds = new Set(next.map((r) => r.id));
+  const byNameQueue = new Map<string, Resource[]>();
+  for (const r of next) {
+    const list = byNameQueue.get(r.name) ?? [];
+    list.push(r);
+    byNameQueue.set(r.name, list);
+  }
+  const nameConsumed = new Map<string, number>();
+  for (const r of preset) {
+    const clash = byId.get(r.id);
+    if (clash && clash.name === r.name) continue; // already present — keep live state
+    if (!clash && !isDegenerateResourceId(r.id)) {
+      // Trustworthy unique id not on the token — plain insert.
+      next.push({ ...r });
+      byId.set(r.id, next[next.length - 1]);
+      usedIds.add(r.id);
+      continue;
+    }
+    // Untrustworthy id (degenerate, or taken by a different-named
+    // row): match by name + occurrence. A same-named row already on
+    // the token — including one pushed by a PREVIOUS apply of this
+    // preset — absorbs the entry (keep live state, no insert).
+    const queue = byNameQueue.get(r.name) ?? [];
+    const idx = nameConsumed.get(r.name) ?? 0;
+    nameConsumed.set(r.name, idx + 1);
+    if (idx < queue.length) continue;
+    const reid = { ...r, id: stableResourceId(r.name, usedIds) };
+    console.info("[obr-suite/resources] preset entry re-id'd to avoid collision", {
+      name: r.name, oldId: r.id, newId: reid.id,
+    });
+    next.push(reid);
+    byId.set(reid.id, reid);
+    queue.push(reid);
+    byNameQueue.set(r.name, queue);
+  }
+  return next;
+}
+import { applyI18nDom, t } from "./i18n";
+import { getLocalLang, onLangChange } from "./state";
+
+// i18n: static text via data-i18n attributes (applyI18nDom); dynamic
+// strings (names, preset dialogs, toasts) via T(). Module script is
+// deferred (DOM ready), so translate static chrome immediately + on
+// language change.
+let lang = getLocalLang();
+const T = (k: Parameters<typeof t>[1]) => t(lang, k);
+try { applyI18nDom(lang); } catch {}
+onLangChange((l) => {
+  lang = l;
+  try { applyI18nDom(lang); } catch {}
+  try { scheduleRender(); } catch {}
+  try { renderPresetsBar(); } catch {}
+});
 
 const PANEL_MODAL_ID = "com.obr-suite/resources/tracker-panel";
 // Shared open-state key — the background's toolbar tool reads it to
@@ -42,6 +108,10 @@ const PANEL_OPEN_KEY = "com.obr-suite/resources/panel-open";
 // The suite writes its own key; some tokens still carry the legacy
 // external one, so read both.
 const BUBBLES_KEY = "com.obr-suite/bubbles/data";
+// Character-card binding marker — a token counts as a "玩家" (player
+// character) only when it's player-owned AND carries this. Same key
+// the character-cards module + status tracker use.
+const CC_BIND_KEY = "com.character-cards/boundCardId";
 const EXTERNAL_BUBBLES_KEY = "com.owlbear-rodeo-bubbles-extension/metadata";
 
 // 2026-05-15 (#11) — initiative-tracker metadata. GM-owned tokens
@@ -55,6 +125,18 @@ const INITIATIVE_METADATA_KEY = "com.initiative-tracker/data";
 const bodyEl = document.getElementById("rtBody") as HTMLDivElement;
 const subEl = document.getElementById("rtSub") as HTMLSpanElement;
 const closeBtn = document.getElementById("rtClose") as HTMLButtonElement;
+const tabPlayerBtn = document.getElementById("rtTabPlayer") as HTMLButtonElement | null;
+const tabMonsterBtn = document.getElementById("rtTabMonster") as HTMLButtonElement | null;
+const tabPlayerN = document.getElementById("rtTabPlayerN") as HTMLSpanElement | null;
+const tabMonsterN = document.getElementById("rtTabMonsterN") as HTMLSpanElement | null;
+
+// Player/Monster tab — which group is shown. Persisted per DM.
+const LS_RT_TAB = "obr-suite/resources/active-tab";
+let activeTab: "player" | "monster" = "player";
+try { if (localStorage.getItem(LS_RT_TAB) === "monster") activeTab = "monster"; } catch {}
+// Cache of the latest gather() result so a tab switch re-renders WITHOUT
+// re-querying the scene (and without re-mounting the live components).
+let lastChars: CharEntry[] = [];
 
 let myId = "";
 
@@ -77,51 +159,70 @@ async function gather(): Promise<CharEntry[]> {
   let items: Item[] = [];
   try { items = await OBR.scene.items.getItems(); } catch { return []; }
 
-  // Currently-connected players, for the owner badge.
+  // Classify the connected party by role so we can tell a player-owned
+  // token from a GM/monster token by its createdUserId. getPlayers()
+  // returns the OTHER connected members (not self); self is the GM.
   const nameById = new Map<string, string>();
+  const playerIds = new Set<string>();
+  let partyKnown = false;
   try {
     const players = await OBR.party.getPlayers();
+    partyKnown = true;
     for (const p of players) {
-      if (p.role === "PLAYER") nameById.set(p.id, p.name || "玩家");
+      if (p.role === "PLAYER") {
+        playerIds.add(p.id);
+        nameById.set(p.id, p.name || "玩家");
+      }
     }
-  } catch { /* offline / no party — owner badge falls back to "玩家" */ }
+  } catch { /* offline / no party — fall back to the "not me" heuristic */ }
+
+  // "Has player permission" = the token is owned by a non-GM player.
+  // When the party is known we match the owner against the connected
+  // PLAYER ids precisely (this is what keeps GM scenery / stale-import
+  // tokens OUT of the panel — the loose `owner !== myId` test used to
+  // let them in). If the party call failed we degrade to that old
+  // heuristic so the panel still works offline.
+  const hasPlayerPermission = (owner: string | undefined): boolean => {
+    if (!owner) return false;
+    if (partyKnown) return playerIds.has(owner);
+    return owner !== myId;
+  };
 
   const out: CharEntry[] = [];
   for (const it of items) {
     if (!isImage(it)) continue;
     if (it.layer !== "CHARACTER") continue;
     const owner = it.createdUserId;
-    // 2026-05-15 (#11) — inclusion rules:
-    //   1. Player-owned tokens (different createdUserId than this GM)
-    //      — always shown (the legacy behavior).
-    //   2. GM-owned tokens (including bestiary monsters) that are
-    //      CURRENTLY in the initiative tracker — also shown, so the
-    //      DM can edit their HP / resources in one place during
-    //      combat. When the GM removes the token from initiative
-    //      (the metadata key disappears) the next gather() call will
-    //      drop it; render() then unmounts the card.
-    // An empty createdUserId (very old items) counts as "not player-
-    // owned" — falls through to the initiative gate.
-    const isPlayerOwned = !!owner && owner !== myId;
+    const playerOwned = hasPlayerPermission(owner);
     const inInitiative = it.metadata[INITIATIVE_METADATA_KEY] != null;
-    if (!isPlayerOwned && !inInitiative) continue;
+    const hasCard = typeof it.metadata[CC_BIND_KEY] === "string"
+      && (it.metadata[CC_BIND_KEY] as string).length > 0;
+    // Inclusion (per user spec 2026-05-21): any token that has a
+    // character card, OR is player-owned, OR is in the current
+    // initiative. Everything else (GM scenery, untracked decorations)
+    // is excluded.
+    if (!hasCard && !playerOwned && !inInitiative) continue;
+    // Categorisation (per user spec): ANY token with a bound character
+    // card is a "玩家" — even a GM-made NPC with a card. Everything else
+    // (player-owned but card-less, or an initiative monster) is "怪物".
+    const isPlayerChar = hasCard;
     const live = ((it.metadata[BUBBLES_KEY] ?? it.metadata[EXTERNAL_BUBBLES_KEY]) as
       BubblesData | undefined) ?? {};
     // Name follows the same priority as the character panel —
     // 角色卡名 > 怪物图鉴绑定名 > 图片名 — by reusing panel.ts's own
     // resolver, so the standalone tracker and cc-info never disagree.
-    const name = (await resolveTokenDisplayName(it.id)) || it.name || "(未命名)";
-    // Owner badge — "怪物" for GM-tokens-in-initiative, the player
-    // display name otherwise. Lets the DM spot which row is a monster
-    // at a glance.
-    const ownerLabel = isPlayerOwned
-      ? (nameById.get(owner!) || "玩家")
-      : "怪物";
+    const name = (await resolveTokenDisplayName(it.id)) || it.name || T("rtUnnamed");
+    // Owner badge: the owning player's display name when we know it
+    // (player-owned card token); "角色卡" for a GM-owned card NPC;
+    // "怪物" for the monster group.
+    const ownerLabel = isPlayerChar
+      ? (nameById.get(owner!) || T("rtOwnerCardNpc"))
+      : T("rtTabMonsters");
     out.push({
       id: it.id,
       name,
       owner: ownerLabel,
-      kind: isPlayerOwned ? "player" : "monster",
+      kind: isPlayerChar ? "player" : "monster",
       live,
     });
   }
@@ -162,7 +263,7 @@ function createCard(c: CharEntry): CardState {
     `<div class="rt-char-head">` +
       `<span class="rt-char-name"></span>` +
       `<span class="rt-char-owner"></span>` +
-      `<button class="rt-char-save-preset" type="button" title="把该角色当前所有资源存为一个预设">+ 存为预设</button>` +
+      `<button class="rt-char-save-preset" type="button" title="${rtEsc(T("rtSavePresetTitle"))}">${rtEsc(T("rtSavePreset"))}</button>` +
     `</div>` +
     `<div class="rt-stat-mount"></div>` +
     `<div class="rt-res-mount"></div>`;
@@ -199,59 +300,66 @@ function unmountCard(st: CardState): void {
 }
 
 function render(chars: CharEntry[]): void {
-  if (chars.length === 0) {
-    for (const [, st] of cards) unmountCard(st);
-    cards.clear();
-    bodyEl.innerHTML = `<div class="rt-empty">没有找到玩家拥有的角色 token。<br>玩家把自己的角色拖进场景后，这里会列出他们的资源。</div>`;
-    subEl.textContent = "全员资源总览";
-    return;
-  }
-  // The empty-state notice isn't a card — drop it before reconciling.
-  bodyEl.querySelector(".rt-empty")?.remove();
+  lastChars = chars;
+  const players = chars.filter((c) => c.kind === "player");
+  const monsters = chars.filter((c) => c.kind === "monster");
 
-  const seen = new Set<string>();
+  // Tab badges + active state.
+  if (tabPlayerN) tabPlayerN.textContent = String(players.length);
+  if (tabMonsterN) tabMonsterN.textContent = String(monsters.length);
+  tabPlayerBtn?.classList.toggle("on", activeTab === "player");
+  tabMonsterBtn?.classList.toggle("on", activeTab === "monster");
+
+  // Reconcile the card POOL against ALL chars (both tabs) so switching
+  // tabs only detaches/re-attaches DOM — the live stat-banner + resource
+  // components are never torn down + re-created (no flicker, no refetch).
+  const seen = new Set(chars.map((c) => c.id));
   for (const c of chars) {
-    seen.add(c.id);
     let st = cards.get(c.id);
-    if (!st) {
-      st = createCard(c);
-      cards.set(c.id, st);
-    }
+    if (!st) { st = createCard(c); cards.set(c.id, st); }
     st.nameEl.textContent = c.name;
     st.ownerEl.textContent = c.owner;
-    // The stat banner + resource panel are live components — they
-    // self-sync on scene changes, so render() only touches the head.
   }
-  // Drop cards for characters no longer in the scene — unmount their
-  // components so the scene-change subscriptions don't leak.
+  // Drop cards for tokens no longer present at all — unmount so their
+  // scene subscriptions don't leak.
   for (const [id, st] of cards) {
-    if (!seen.has(id)) {
-      unmountCard(st);
-      st.el.remove();
-      cards.delete(id);
-    }
+    if (!seen.has(id)) { unmountCard(st); st.el.remove(); cards.delete(id); }
   }
-  // 2026-05-16 — re-attach in sorted order WITH section dividers
-  // between player and monster groups. Dividers are simple DOM nodes
-  // that span the full grid row (CSS sets grid-column: 1/-1). We
-  // rebuild divider nodes every render (cheap, content-free) so
-  // group transitions stay accurate as tokens come and go.
-  bodyEl.querySelectorAll(".rt-section-divider").forEach((d) => d.remove());
-  let lastKind: "player" | "monster" | null = null;
-  for (const c of chars) {
-    if (c.kind !== lastKind) {
-      const divider = document.createElement("div");
-      divider.className = "rt-section-divider";
-      divider.dataset.kind = c.kind;
-      divider.textContent = c.kind === "player" ? "玩家" : "先攻中的怪物";
-      bodyEl.appendChild(divider);
-      lastKind = c.kind;
-    }
+
+  // Detach non-card leftovers + every card, then re-attach only the
+  // active tab's cards (kept mounted while detached).
+  bodyEl.querySelectorAll(".rt-empty, .rt-section-divider").forEach((d) => d.remove());
+  for (const [, st] of cards) st.el.remove();
+
+  const shown = activeTab === "player" ? players : monsters;
+  for (const c of shown) {
     const st = cards.get(c.id);
     if (st) bodyEl.appendChild(st.el);
   }
-  subEl.textContent = `${chars.length} 个角色 · 血量 / 资源可直接增删改，与角色面板实时同步`;
+
+  if (chars.length === 0) {
+    const e = document.createElement("div");
+    e.className = "rt-empty";
+    e.innerHTML = T("rtEmptyAll");
+    bodyEl.appendChild(e);
+  } else if (shown.length === 0) {
+    const e = document.createElement("div");
+    e.className = "rt-empty";
+    e.textContent = activeTab === "player" ? T("rtEmptyPlayers") : T("rtEmptyMonsters");
+    bodyEl.appendChild(e);
+  }
+
+  subEl.textContent = `${T("rtTabPlayers")} ${players.length} · ${T("rtTabMonsters")} ${monsters.length} · ${T("rtSubTail")}`;
 }
+
+function setRtTab(tab: "player" | "monster"): void {
+  if (activeTab === tab) return;
+  activeTab = tab;
+  try { localStorage.setItem(LS_RT_TAB, tab); } catch {}
+  render(lastChars); // re-render from cache — no re-gather, no re-mount
+}
+tabPlayerBtn?.addEventListener("click", () => setRtTab("player"));
+tabMonsterBtn?.addEventListener("click", () => setRtTab("monster"));
 
 // ---- Presets (2026-05-15) -------------------------------------------------
 //
@@ -321,7 +429,7 @@ function renderPresetsBar(): void {
   presetsListEl.innerHTML = rtPresets.map((p) =>
     `<button class="rt-preset-chip" type="button" draggable="true"
              data-preset-id="${rtEsc(p.id)}"
-             title="点击：应用菜单（覆盖/叠加全员）· 拖到角色卡：仅给那一张">${rtEsc(p.name)}<span class="pre-count">${p.resources.length}</span></button>`
+             title="${rtEsc(T("rtPresetChipTitle"))}">${rtEsc(p.name)}<span class="pre-count">${p.resources.length}</span></button>`
   ).join("");
 }
 
@@ -337,14 +445,14 @@ async function saveCharacterAsPreset(tokenId: string): Promise<void> {
   if (!item) return;
   const resources = readResources(item);
   if (resources.length === 0) {
-    window.alert("该角色当前没有可保存的资源。先在卡片上添加几个资源再来。");
+    window.alert(T("rtPresetNoRes"));
     return;
   }
   const defaultName = await resolveTokenDisplayName(tokenId)
     .catch(() => "")
-    || "我的预设";
+    || T("rtPresetDefaultName");
   const name = window.prompt(
-    `保存为预设（${resources.length} 个资源）。给它起个名字：`,
+    T("rtPresetSavePrompt").replace("{n}", String(resources.length)),
     defaultName,
   );
   if (!name || !name.trim()) return;
@@ -365,10 +473,10 @@ function openPresetMenu(chip: HTMLElement, preset: ResourcePreset): void {
   const menu = document.createElement("div");
   menu.className = "rt-preset-menu";
   menu.innerHTML =
-    `<button data-act="overwrite">覆盖应用到全员（替换现有资源）</button>` +
-    `<button data-act="merge">叠加应用到全员（按 id 去重合并）</button>` +
-    `<button data-act="rename">重命名预设</button>` +
-    `<button class="danger" data-act="delete">删除预设</button>`;
+    `<button data-act="overwrite">${rtEsc(T("rtPresetMenuOverwrite"))}</button>` +
+    `<button data-act="merge">${rtEsc(T("rtPresetMenuMerge"))}</button>` +
+    `<button data-act="rename">${rtEsc(T("rtPresetMenuRename"))}</button>` +
+    `<button class="danger" data-act="delete">${rtEsc(T("rtPresetMenuDelete"))}</button>`;
   document.body.appendChild(menu);
   const r = chip.getBoundingClientRect();
   menu.style.left = `${Math.round(r.left)}px`;
@@ -382,19 +490,22 @@ function openPresetMenu(chip: HTMLElement, preset: ResourcePreset): void {
       const count = await applyPresetToAll(preset, act);
       try {
         await OBR.notification.show(
-          `预设「${preset.name}」已${act === "overwrite" ? "覆盖" : "叠加"}应用到 ${count} 个角色`,
+          T("rtPresetAppliedZh")
+            .replace("{name}", preset.name)
+            .replace("{act}", act === "overwrite" ? T("rtActOverwrite") : T("rtActMerge"))
+            .replace("{count}", String(count)),
           "SUCCESS",
         );
       } catch { /* notification best-effort */ }
     } else if (act === "rename") {
-      const next = window.prompt("新名字：", preset.name);
+      const next = window.prompt(T("rtPresetRenamePrompt"), preset.name);
       if (next && next.trim()) {
         preset.name = next.trim();
         saveRtPresets();
         renderPresetsBar();
       }
     } else if (act === "delete") {
-      if (window.confirm(`删除预设「${preset.name}」？`)) {
+      if (window.confirm(T("rtPresetDeleteConfirm").replace("{name}", preset.name))) {
         rtPresets = rtPresets.filter((p) => p.id !== preset.id);
         saveRtPresets();
         renderPresetsBar();
@@ -429,13 +540,7 @@ async function applyPresetToAll(preset: ResourcePreset, mode: "overwrite" | "mer
     const cur = readResources(item);
     const next = mode === "overwrite"
       ? preset.resources.map((r) => ({ ...r }))
-      : (() => {
-          const byId = new Map(cur.map((r) => [r.id, r]));
-          for (const r of preset.resources) {
-            if (!byId.has(r.id)) byId.set(r.id, { ...r });
-          }
-          return [...byId.values()];
-        })();
+      : mergePresetResources(cur, preset.resources);
     try { await writeResources(tid, next); n++; } catch {}
   }
   return n;
@@ -451,14 +556,12 @@ async function applyPresetToToken(preset: ResourcePreset, tokenId: string): Prom
   // Drop-on-card is always MERGE — overwriting a single character via
   // drag would be too surprising. "覆盖" lives in the click-menu only.
   const cur = readResources(item);
-  const byId = new Map(cur.map((r) => [r.id, r]));
-  for (const r of preset.resources) {
-    if (!byId.has(r.id)) byId.set(r.id, { ...r });
-  }
-  try { await writeResources(tokenId, [...byId.values()]); } catch {}
+  try { await writeResources(tokenId, mergePresetResources(cur, preset.resources)); } catch {}
   try {
     await OBR.notification.show(
-      `预设「${preset.name}」已合并到 ${(await resolveTokenDisplayName(tokenId)) || "该角色"}`,
+      T("rtPresetMergedTo")
+        .replace("{name}", preset.name)
+        .replace("{target}", (await resolveTokenDisplayName(tokenId)) || T("rtThisChar")),
       "SUCCESS",
     );
   } catch {}
@@ -546,7 +649,7 @@ presetFileInput.addEventListener("change", async () => {
     const arr = Array.isArray(json) ? json
       : (json && Array.isArray(json.presets) ? json.presets : null);
     if (!arr) {
-      window.alert("JSON 格式错误：应为预设数组，或包含 { presets: [...] }。");
+      window.alert(T("rtImportErrFormat"));
       return;
     }
     const incoming: ResourcePreset[] = [];
@@ -561,7 +664,7 @@ presetFileInput.addEventListener("change", async () => {
       });
     }
     if (incoming.length === 0) {
-      window.alert("JSON 里没有有效的预设条目。");
+      window.alert(T("rtImportErrEmpty"));
       return;
     }
     // Merge by name — don't silently overwrite the user's existing
@@ -573,11 +676,11 @@ presetFileInput.addEventListener("change", async () => {
     renderPresetsBar();
     try {
       await OBR.notification.show(
-        `已导入 ${incoming.length} 个预设`, "SUCCESS",
+        T("rtImportOk").replace("{n}", String(incoming.length)), "SUCCESS",
       );
     } catch {}
   } catch (e: any) {
-    window.alert(`导入失败：${e?.message ?? String(e)}`);
+    window.alert(T("rtImportFail").replace("{e}", e?.message ?? String(e)));
   }
 });
 

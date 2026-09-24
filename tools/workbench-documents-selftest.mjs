@@ -1,0 +1,15 @@
+import {mkdtemp,readFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import assert from 'node:assert/strict';
+import {documentStore} from '../server/workbench-relay/documents.mjs';
+const root=await mkdtemp(join(tmpdir(),'workbench-docs-')),store=documentStore(root),key='room_scene';
+assert.deepEqual(await store({key,operation:'read'}),{revision:0,data:null});
+await store({key,operation:'write',expected:0,data:{rules:{edition:'2024'},inventory:{items:[]}}});
+const outcomes=await Promise.allSettled([1,2].map(n=>store({key,operation:'write',expected:1,data:{rules:{edition:'2014',writer:n}}})));
+assert.equal(outcomes.filter(r=>r.status==='fulfilled').length,1);assert.equal(outcomes.find(r=>r.status==='rejected').reason.status,409);
+const saved=JSON.parse(await readFile(join(root,key+'.json'),'utf8'));assert.equal(saved.revision,2);
+assert.deepEqual(await documentStore(root)({key,operation:'read'}),saved);
+assert.deepEqual(await store({key:'room_other_scene',operation:'read'}),{revision:0,data:null});
+await assert.rejects(store({key:'../../outside',operation:'write',expected:0,data:{}}),e=>e.status===400);
+console.log('PASS shared documents: durable restart, concurrent CAS, isolated scopes, invalid paths');

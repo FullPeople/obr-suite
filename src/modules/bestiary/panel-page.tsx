@@ -1,15 +1,27 @@
 import { render } from "preact";
-import { useEffect, useState, useCallback, useRef } from "preact/compat";
+import { useEffect, useState, useCallback, useMemo, useRef, memo } from "preact/compat";
 import OBR from "@owlbear-rodeo/sdk";
 import { installDebugOverlay } from "../../utils/debugOverlay";
 import { installPanelZoom } from "../../utils/panelZoom";
 import { ParsedMonster, MonsterEdition } from "./types";
-import { loadAllMonsters, searchMonsters, getRawMonster, makeSlug } from "./data";
+import { contentConfigurationKey } from "../../utils/contentLocale";
+import { loadAllMonsters, clearMonsterCache, refreshRemoteContent, searchMonsters, getRawMonster, makeSlug } from "./data";
+import { BC_LOCAL_CONTENT_CHANGED, forceReloadLocalContent } from "../../utils/localContent";
 import { spawnMonster } from "./spawn";
 import { t } from "../../i18n";
 import { getLocalLang, onLangChange, startSceneSync, refreshFromScene, getState, setState, onStateChange } from "../../state";
 import { bindPanelDrag } from "../../utils/panelDrag";
 import { PANEL_IDS } from "../../utils/panelLayout";
+import {
+  DEFAULT_TRANSFORM_POLICY,
+  TRANSFORM_POLICY_KEY,
+  TRANSFORM_STACK_KEY,
+  normalizeTransformHpMode,
+  normalizeTransformPolicy,
+  transformPolicyAllowsMonster,
+  type TransformHpMode,
+  type TransformPolicy,
+} from "../transform/shared";
 import "./styles.css";
 
 // Drag-spawn broadcast IDs. Mirrored in:
@@ -24,8 +36,8 @@ const _tt = (k: Parameters<typeof t>[1]) => t(_lang, k);
 
 // Bubbles + initiative metadata keys — same constants as spawn.ts. The
 // picker mode (?pickerForItemId=…) writes to these so the bound token
-// gets the chosen monster's HP / AC / DEX-mod alongside the slug
-// reference.
+// gets the chosen monster's HP / AC / initiative bonus alongside the
+// slug reference.
 const BUBBLES_META = "com.obr-suite/bubbles/data";
 const BUBBLES_NAME = "com.owlbear-rodeo-bubbles-extension/name";
 const INITIATIVE_MODKEY = "com.initiative-tracker/dexMod";
@@ -50,6 +62,37 @@ const PICKER_TARGET_ITEM_IDS: string[] = (() => {
 })();
 const PICKER_TARGET_ITEM = PICKER_TARGET_ITEM_IDS[0] || null;
 const PICKER_IS_GROUP = PICKER_TARGET_ITEM_IDS.length > 1;
+// 2026-05-21 — 变身 (transform) mode: the panel is opened by the
+// transform module with ?transformForItemId=<id>. Picking a monster
+// here does NOT bind/spawn — it hands the chosen monster's token image
+// + size to the transform module, which snapshots the token and swaps
+// it (revertible). Reuses the whole monster-search UI for free.
+const TRANSFORM_TARGET_ITEM_ID = URL_PARAMS.get("transformForItemId") || null;
+const BC_TRANSFORM_PICK = "com.obr-suite/transform:pick";
+
+function formatCrRange(policy: TransformPolicy, lang: "zh" | "en"): string {
+  const parts: string[] = [];
+  if (policy.typeQuery) {
+    parts.push(lang === "zh" ? `类型：${policy.typeQuery}` : `Type: ${policy.typeQuery}`);
+  }
+  if (policy.minCr !== null || policy.maxCr !== null) {
+    if (policy.minCr !== null && policy.maxCr !== null) {
+      parts.push(`CR ${policy.minCr}-${policy.maxCr}`);
+    } else if (policy.maxCr !== null) {
+      parts.push(lang === "zh" ? `CR ${policy.maxCr} 以下` : `CR up to ${policy.maxCr}`);
+    } else if (policy.minCr !== null) {
+      parts.push(lang === "zh" ? `CR ${policy.minCr} 以上` : `CR ${policy.minCr}+`);
+    }
+  }
+  return parts.join(" · ") || (lang === "zh" ? "全部怪物" : "All monsters");
+}
+
+function numberOrNull(value: string): number | null {
+  const text = value.trim();
+  if (!text) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? Math.max(0, n) : null;
+}
 
 async function ensureSharedMonsterData(slug: string, raw: any): Promise<void> {
   if (!raw) return;
@@ -120,7 +163,7 @@ async function bindMonsterToTokens(mon: ParsedMonster, itemIds: string[]): Promi
             locked: true,
           };
           d.metadata[BUBBLES_NAME] = mon.name;
-          d.metadata[INITIATIVE_MODKEY] = mon.dexMod;
+          d.metadata[INITIATIVE_MODKEY] = mon.initiative;
           d.name = mon.name;
         }
       }
@@ -201,6 +244,7 @@ const readLS = (k: string, d: string) => {
 const writeLS = (k: string, v: string) => {
   try { localStorage.setItem(LS_PREFIX + k, v); } catch {}
 };
+const LS_TRANSFORM_HP_MODE = "transformHpMode";
 
 // Suite state lives in scene metadata under "com.obr-suite/state". When the
 // suite is installed, its Settings panel writes dataVersion ("2014" / "2024"
@@ -229,9 +273,13 @@ function dvToEditionSet(dv: SuiteDataVersion): Set<MonsterEdition> {
   return new Set<MonsterEdition>(["2014", "2024", "other"]);
 }
 
+// How many monster cards are mounted at once. Small enough that the first paint
+// stays quick on a slow device, large enough to fill a tall popover; the list
+// grows by this amount on scroll until the whole library is reachable.
+const PAGE_SIZE = 120;
+
 function App() {
   const [monsters, setMonsters] = useState<ParsedMonster[]>([]);
-  const [filtered, setFiltered] = useState<ParsedMonster[]>([]);
   const [query, setQuery] = useState(() => readLS("query", ""));
   const [sortDesc, setSortDesc] = useState(() => readLS("sortDesc", "0") === "1");
   // Source-code filter (e.g. "PHB", "MYHB", "kiwee"). Free-text;
@@ -240,10 +288,34 @@ function App() {
   // every panel reopen.
   const [sourceFilter, setSourceFilter] = useState(() => readLS("sourceFilter", ""));
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(true);
+  const [loadedFiles, setLoadedFiles] = useState(0);
+  const [failedFiles, setFailedFiles] = useState(0);
+  const [loadError, setLoadError] = useState(false);
+  // Rendered-row window. The library holds thousands of monsters, so the list is
+  // paged instead of truncated: this is the ONLY cap now, it grows on scroll, and
+  // the real total is always on screen so a loaded library cannot look empty.
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const moreRef = useRef<HTMLButtonElement | null>(null);
+  const retryLoadRef = useRef<() => void>(() => {});
+  const refreshContentRef = useRef<() => void>(() => {});
   const [role, setRole] = useState<"GM" | "PLAYER">("PLAYER");
+  const [playerId, setPlayerId] = useState("");
   // Edition gate now flows from suite scene metadata (via dataVersion).
   const [dataVersion, setDataVersion] = useState<SuiteDataVersion>("all");
   const [lang, setLang] = useState(_lang);
+  const [transformPolicy, setTransformPolicy] = useState<TransformPolicy>(() => ({
+    ...DEFAULT_TRANSFORM_POLICY,
+  }));
+  const [transformBlocked, setTransformBlocked] = useState(false);
+  const [transformAccess, setTransformAccess] = useState<"loading" | "allowed" | "denied">(
+    TRANSFORM_TARGET_ITEM_ID ? "loading" : "allowed",
+  );
+  const [transformTargetName, setTransformTargetName] = useState("");
+  const [transformSaving, setTransformSaving] = useState(false);
+  const [transformHpMode, setTransformHpMode] = useState<TransformHpMode>(() =>
+    normalizeTransformHpMode(readLS(LS_TRANSFORM_HP_MODE, "monster")),
+  );
   // Auto-add-to-initiative toggle — moved from Settings → 怪物图鉴 into
   // this popover so the GM can flip it inline while spawning. Mirrors
   // suite state via startSceneSync; the spawn pipeline reads from
@@ -266,41 +338,79 @@ function App() {
   const [autoName, setAutoName] = useState<boolean>(() =>
     getState().bestiaryAutoName === true,
   );
+  // 2026-09-14 — card-art toggle. When OFF, MonsterCard renders the
+  // initial-letter placeholder instead of the remote thumbnail, so a
+  // 200-card result page stops fetching and decoding 200 webp images.
+  // Default ON (current behaviour); the spawn path is unaffected.
+  const [cardImages, setCardImages] = useState<boolean>(() =>
+    getState().bestiaryCardImages !== false,
+  );
+
+  useEffect(() => {
+    if (!TRANSFORM_TARGET_ITEM_ID) return;
+    let alive = true;
+    let unsubItems: (() => void) | undefined;
+    let unsubPlayer: (() => void) | undefined;
+
+    const refreshTransformAccess = async () => {
+      try {
+        const [nextRole, nextPlayerId, items] = await Promise.all([
+          OBR.player.getRole().catch(() => "PLAYER" as const),
+          OBR.player.getId().catch(() => ""),
+          OBR.scene.items.getItems([TRANSFORM_TARGET_ITEM_ID]),
+        ]);
+        if (!alive) return;
+        const item = items[0] as any;
+        const policy = normalizeTransformPolicy(item?.metadata?.[TRANSFORM_POLICY_KEY]);
+        const owns = !!(nextPlayerId && item?.createdUserId === nextPlayerId);
+        // Nested transforms are forbidden — a stale picker left open
+        // while another client transformed this token must refuse
+        // (live-refreshed via the items.onChange subscription below).
+        const stack = item?.metadata?.[TRANSFORM_STACK_KEY];
+        const alreadyTransformed = Array.isArray(stack) && stack.length > 0;
+        setRole(nextRole as "GM" | "PLAYER");
+        setPlayerId(nextPlayerId);
+        setTransformPolicy(policy);
+        setTransformTargetName(String(item?.name ?? ""));
+        setTransformBlocked(alreadyTransformed);
+        setTransformAccess(nextRole === "GM" || (owns && policy.enabled) ? "allowed" : "denied");
+      } catch (e) {
+        console.warn("[bestiary] transform access refresh failed", e);
+        if (alive) setTransformAccess("denied");
+      }
+    };
+
+    void refreshTransformAccess();
+    try {
+      unsubItems = OBR.scene.items.onChange(() => {
+        void refreshTransformAccess();
+      });
+    } catch {}
+    try {
+      unsubPlayer = OBR.player.onChange((p) => {
+        if (p.id) setPlayerId(p.id);
+        if (p.role) setRole(p.role as "GM" | "PLAYER");
+        void refreshTransformAccess();
+      });
+    } catch {}
+
+    return () => {
+      alive = false;
+      try { unsubItems?.(); } catch {}
+      try { unsubPlayer?.(); } catch {}
+    };
+  }, []);
+
   useEffect(() => {
     const unsub = onStateChange(() => {
       setAutoInit(getState().bestiaryAutoInitiative !== false);
       setAutoHide(getState().bestiaryAutoHide !== false);
       setAutoName(getState().bestiaryAutoName === true);
+      setCardImages(getState().bestiaryCardImages !== false);
     });
     return unsub;
   }, []);
 
-  // Refetch monster data when the library configuration changes
-  // (add / delete / edit URL / enable / disable). Without this the
-  // panel keeps showing the old set even though `index.ts` has
-  // already invalidated the underlying cache. Per user spec:
-  // "删除和修改库时也要删除数据" — the panel reflects deletion
-  // immediately rather than the next time the panel reopens.
-  useEffect(() => {
-    let lastLibSig = JSON.stringify(
-      (getState().libraries || []).map((l) => `${l.id}|${l.enabled}|${l.baseUrl}`),
-    );
-    const unsub = onStateChange(() => {
-      const sig = JSON.stringify(
-        (getState().libraries || []).map((l) => `${l.id}|${l.enabled}|${l.baseUrl}`),
-      );
-      if (sig === lastLibSig) return;
-      lastLibSig = sig;
-      setLoading(true);
-      loadAllMonsters()
-        .then((all) => {
-          setMonsters(all);
-          setLoading(false);
-        })
-        .catch(() => setLoading(false));
-    });
-    return unsub;
-  }, []);
   const inputRef = useRef<HTMLInputElement>(null);
   // Mirror of `monsters` for closures that need the latest list (e.g.
   // the BC_MONSTER_DROP handler — it can't use the state value
@@ -316,64 +426,140 @@ function App() {
   }, []);
 
   useEffect(() => {
-    OBR.player.getRole().then(setRole);
-    readSuiteDataVersion().then(setDataVersion);
-    const unsub = onStateChange((s) => setDataVersion(s.dataVersion));
-
-    // Pull suite state (scene metadata → suite cache) BEFORE
-    // loadAllMonsters so getEnabledLibraryBases() inside data.ts
-    // sees the user's custom library list. Without this prime the
-    // panel iframe reads DEFAULT_STATE (just kiwee) and homebrew
-    // monsters from URL libraries silently disappear.
-    startSceneSync();
-    refreshFromScene()
-      .catch(() => undefined)
-      .then(() => loadAllMonsters())
-      .then((all) => {
+    let alive = true;
+    let requestId = 0;
+    let primed = false;
+    const librarySignature = () => contentConfigurationKey(getState().libraries ?? [], getLocalLang());
+    let lastSignature = librarySignature();
+    const load = (reset = false) => {
+      const id = ++requestId;
+      if (reset) clearMonsterCache();
+      loadingRef.current = true;
+      setLoading(true);
+      setLoadError(false);
+      setFailedFiles(0);
+      setLoadedFiles(0);
+      if (reset) setMonsters([]);
+      void loadAllMonsters((progress) => {
+        if (!alive || id !== requestId) return;
+        setMonsters(progress.preview);
+        setLoadedFiles(progress.loadedFiles);
+        setFailedFiles(progress.failedFiles);
+      }).then((all) => {
+        if (!alive || id !== requestId) return;
         setMonsters(all);
+        loadingRef.current = false;
         setLoading(false);
-        // 2026-05-10: heal-pass for the scene-meta `monsters` table.
-        // Past versions of the bestiary spawn / bind paths could
-        // leave a token with a `slug` metadata reference whose entry
-        // never made it into the scene-shared `monsters` table —
-        // typically because `getRawMonster(slug)` returned null at
-        // spawn time (rawBySlug not yet hydrated) so
-        // `ensureSharedMonsterData` early-returned. Symptom: group
-        // saves / group initiative skips that token because
-        // `buildSelectedMonster` requires `table[slug]` to exist.
-        //
-        // Now that loadAllMonsters has resolved, rawBySlug is full.
-        // Walk every scene token with a bestiary slug, look up its
-        // raw record locally, and fill any missing table entries in
-        // a single batched setMetadata write.
+        // Shared stats only use the final inheritance-resolved snapshot.
         void healSceneMonsterTable();
+      }).catch((error) => {
+        if (!alive || id !== requestId) return;
+        console.warn("[bestiary] list load failed", error);
+        // Preview rows have not passed the final inheritance merge.
+        loadingRef.current = true;
+        setLoading(false);
+        setLoadError(true);
       });
-    return unsub;
+    };
+    retryLoadRef.current = () => load(true);
+    // Drop the on-disk payload first, then reload: the only path that is meant
+    // to re-download 11 MB on purpose.
+    refreshContentRef.current = () => { void refreshRemoteContent().then(() => { if (alive) load(); }); };
+    const unsubState = onStateChange((state) => {
+      setDataVersion(state.dataVersion);
+      if (!primed) return;
+      const signature = librarySignature();
+      if (signature !== lastSignature) {
+        lastSignature = signature;
+        load(true);
+      }
+    });
+    const unsubLanguage = onLangChange(() => {
+      if (!primed) return;
+      lastSignature = librarySignature();
+      load(true);
+    });
+    const unsubContent = OBR.broadcast.onMessage(BC_LOCAL_CONTENT_CHANGED, () => {
+      // Stop old UI results immediately; IDB hydration can finish later.
+      requestId++;
+      loadingRef.current = true;
+      setLoading(true);
+      void forceReloadLocalContent().then(() => {
+        if (alive) load(true);
+      }).catch((error) => {
+        console.warn("[bestiary] local content refresh failed", error);
+        if (alive) { setLoading(false); setLoadError(true); }
+      });
+    });
+    void OBR.player.getRole().then((value) => { if (alive) setRole(value); });
+    void OBR.player.getId().then((value) => { if (alive) setPlayerId(value); }).catch(() => {});
+    void readSuiteDataVersion().then((value) => { if (alive) setDataVersion(value); });
+    startSceneSync();
+    void refreshFromScene().catch((error) => {
+      console.warn("[bestiary] initial library settings read failed", error);
+    }).then(() => {
+      if (!alive) return;
+      primed = true;
+      lastSignature = librarySignature();
+      load();
+    });
+    return () => {
+      alive = false;
+      requestId++;
+      unsubState();
+      unsubLanguage();
+      unsubContent();
+      retryLoadRef.current = () => {};
+      refreshContentRef.current = () => {};
+    };
   }, []);
 
-  const editions = dvToEditionSet(dataVersion);
+  const visibleMonsters = useMemo(() => {
+    if (!TRANSFORM_TARGET_ITEM_ID || role === "GM") return monsters;
+    if (transformAccess !== "allowed") return [];
+    return monsters.filter((mon) => transformPolicyAllowsMonster(transformPolicy, mon));
+  }, [monsters, role, transformAccess, transformPolicy]);
 
-  // Re-filter when the data version changes (suite settings flipped).
+  // 2026-09-14 — derived, not state + effect. The list used to be searched
+  // twice per keystroke (the input handler ran searchMonsters AND stored the
+  // query, then this effect ran searchMonsters again on the new query), and a
+  // state write from an effect costs one extra render pass over all 200
+  // result cards. A memo runs the search exactly once per relevant change,
+  // in the same render that the change produced, so the shown results are
+  // identical to before.
+  const filtered = useMemo(() => {
+    if (monsters.length === 0) return [];
+    return searchMonsters(visibleMonsters, query, sortDesc, dvToEditionSet(dataVersion), sourceFilter);
+  }, [dataVersion, monsters, visibleMonsters, query, sortDesc, sourceFilter]);
+
+  // A new search / sort / edition / source set starts from the first page again.
+  // Deliberately not keyed on `monsters`: the progressive preview rewrites that
+  // every second while loading, and a reader who has paged in must not be yanked
+  // back to the top by it.
+  useEffect(() => { setPageSize(PAGE_SIZE); }, [query, sortDesc, sourceFilter, dataVersion]);
+  const shown = useMemo(() => filtered.slice(0, pageSize), [filtered, pageSize]);
+  const hasMore = filtered.length > shown.length;
+
+  // Grow the window when the sentinel reaches the viewport. The sentinel is also
+  // a real button, so paging still works where IntersectionObserver is absent or
+  // the scroll position never intersects.
   useEffect(() => {
-    if (monsters.length === 0) return;
-    setFiltered(searchMonsters(monsters, query, sortDesc, dvToEditionSet(dataVersion), sourceFilter));
-  }, [dataVersion, monsters, sourceFilter]);
-
-  const doSearch = useCallback(
-    (q: string, desc: boolean, eds: Set<MonsterEdition>, src: string) => {
-      setFiltered(searchMonsters(monsters, q, desc, eds, src));
-    },
-    [monsters]
-  );
+    const node = moreRef.current;
+    if (!node || !hasMore || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setPageSize((size) => size + PAGE_SIZE);
+    }, { rootMargin: "600px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, shown.length]);
 
   const handleSearch = useCallback(
     (e: Event) => {
       const val = (e.target as HTMLInputElement).value;
       setQuery(val);
       writeLS("query", val);
-      doSearch(val, sortDesc, editions, sourceFilter);
     },
-    [doSearch, sortDesc, editions, sourceFilter]
+    []
   );
 
   const handleSourceChange = useCallback(
@@ -381,28 +567,125 @@ function App() {
       const val = (e.target as HTMLInputElement).value;
       setSourceFilter(val);
       writeLS("sourceFilter", val);
-      doSearch(query, sortDesc, editions, val);
     },
-    [doSearch, query, sortDesc, editions],
+    [],
   );
 
   const clearSourceFilter = useCallback(() => {
     setSourceFilter("");
     writeLS("sourceFilter", "");
-    doSearch(query, sortDesc, editions, "");
-  }, [doSearch, query, sortDesc, editions]);
+  }, []);
 
   const toggleSort = useCallback(() => {
     const newDesc = !sortDesc;
     setSortDesc(newDesc);
     writeLS("sortDesc", newDesc ? "1" : "0");
-    doSearch(query, newDesc, editions, sourceFilter);
-  }, [sortDesc, query, doSearch, editions, sourceFilter]);
+  }, [sortDesc]);
+
+  const saveTransformPolicy = useCallback(async (nextPolicy: TransformPolicy) => {
+    if (!TRANSFORM_TARGET_ITEM_ID || role !== "GM") return;
+    const clean = normalizeTransformPolicy(nextPolicy);
+    setTransformSaving(true);
+    try {
+      await OBR.scene.items.updateItems([TRANSFORM_TARGET_ITEM_ID], (drafts) => {
+        for (const d of drafts) {
+          if (clean.enabled) {
+            (d.metadata as any)[TRANSFORM_POLICY_KEY] = clean;
+          } else {
+            delete (d.metadata as any)[TRANSFORM_POLICY_KEY];
+          }
+        }
+      });
+      setTransformPolicy(clean);
+      try {
+        await OBR.notification.show(
+          clean.enabled
+            ? (lang === "zh" ? "已保存变身授权" : "Transform permission saved")
+            : (lang === "zh" ? "已关闭变身授权" : "Transform permission disabled"),
+          "SUCCESS",
+        );
+      } catch {}
+    } catch (e) {
+      console.error("[bestiary] save transform policy failed", e);
+      try {
+        await OBR.notification.show(
+          lang === "zh" ? "保存变身授权失败" : "Failed to save transform permission",
+          "ERROR",
+        );
+      } catch {}
+    } finally {
+      setTransformSaving(false);
+    }
+  }, [role, lang]);
+
+  const chooseTransformHpMode = useCallback((mode: TransformHpMode) => {
+    setTransformHpMode(mode);
+    writeLS(LS_TRANSFORM_HP_MODE, mode);
+  }, []);
 
   // 2014/2024 toggle buttons removed — versioning is centrally controlled
   // from the suite Settings panel (dataVersion in scene metadata).
 
   const handleSpawn = useCallback(async (mon: ParsedMonster) => {
+    if (loadingRef.current) return;
+    if (TRANSFORM_TARGET_ITEM_ID) {
+      // 变身 mode — hand the monster's token image + size to the
+      // transform module (it snapshots the token, swaps, and closes
+      // this picker). It also receives bestiary slug + HP/AC metadata
+      // so the transformed token is bound like a spawned monster.
+      if (transformBlocked) {
+        console.warn("[bestiary] transform pick refused: token already transformed", { itemId: TRANSFORM_TARGET_ITEM_ID });
+        try {
+          await OBR.notification.show(
+            lang === "zh" ? "该 token 已处于变身状态，请先解除变身" : "This token is already transformed — revert it first",
+            "WARNING",
+          );
+        } catch {}
+        return;
+      }
+      if (role !== "GM" && !transformPolicyAllowsMonster(transformPolicy, mon)) {
+        try {
+          await OBR.notification.show(
+            lang === "zh" ? "该形态不在 DM 授权范围内" : "That form is outside the DM-approved range",
+            "WARNING",
+          );
+        } catch {}
+        return;
+      }
+      if (!mon.tokenUrl) {
+        try {
+          await OBR.notification.show(
+            lang === "zh" ? "该怪物没有可用 token 图片" : "This monster has no token image",
+            "WARNING",
+          );
+        } catch {}
+        return;
+      }
+      const slug = makeSlug(mon.source, mon.engName);
+      await ensureSharedMonsterData(slug, getRawMonster(slug));
+      try {
+        await OBR.broadcast.sendMessage(
+          BC_TRANSFORM_PICK,
+          {
+            itemId: TRANSFORM_TARGET_ITEM_ID,
+            tokenUrl: mon.tokenUrl,
+            size: mon.size || "",
+            name: mon.name || mon.engName || "变身形态",
+            bestiarySlug: slug,
+            hp: mon.hp,
+            ac: mon.ac,
+            initiativeMod: mon.initiative,
+            hpMode: transformHpMode,
+            type: mon.type,
+            cr: mon.cr,
+          },
+          { destination: "LOCAL" },
+        );
+      } catch (e) {
+        console.warn("[bestiary] transform-pick broadcast failed", e);
+      }
+      return;
+    }
     if (PICKER_TARGET_ITEM_IDS.length > 0) {
       // Both single-bind and group-bind paths come through here. The
       // group-bind URL ships >1 id and we apply the chosen monster to
@@ -411,7 +694,7 @@ function App() {
     } else {
       await spawnMonster(mon);
     }
-  }, []);
+  }, [role, transformPolicy, transformHpMode, lang, transformBlocked]);
 
   // Drag-spawn DROP handler. The monster-drag-preview modal broadcasts
   // BC_MONSTER_DROP with the slug + scene-coord drop position; we
@@ -419,8 +702,9 @@ function App() {
   // mode (cc-bind etc.) doesn't accept drag-spawn — only the regular
   // bestiary panel does.
   useEffect(() => {
-    if (PICKER_TARGET_ITEM_IDS.length > 0) return;
+    if (PICKER_TARGET_ITEM_IDS.length > 0 || TRANSFORM_TARGET_ITEM_ID) return;
     const unsub = OBR.broadcast.onMessage(BC_MONSTER_DROP, async (event) => {
+      if (loadingRef.current) return;
       const data = event.data as
         | { slug?: string; sceneX?: number; sceneY?: number }
         | undefined;
@@ -477,22 +761,11 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  if (role !== "GM") {
-    return (
-      <div class="app">
-        <div class="empty">{t(lang, "bestiaryPanelOnlyDM")}</div>
-      </div>
-    );
-  }
-
   const handleClearSearch = useCallback(() => {
     setQuery("");
     writeLS("query", "");
-    doSearch("", sortDesc, editions, sourceFilter);
     inputRef.current?.focus();
-  }, [doSearch, sortDesc, editions, sourceFilter]);
-
-  // "About" button removed — the suite About panel covers all modules.
+  }, []);
 
   // Drag grip — sits inline inside .header-top before the search input.
   // Skipped while in picker mode (popover is a transient single-shot,
@@ -500,12 +773,177 @@ function App() {
   const dragHandleRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = dragHandleRef.current;
-    if (!el || PICKER_TARGET_ITEM) return;
+    if (!el || PICKER_TARGET_ITEM || TRANSFORM_TARGET_ITEM_ID) return;
     return bindPanelDrag(el, PANEL_IDS.bestiaryPanel);
   }, []);
 
+  if (TRANSFORM_TARGET_ITEM_ID && transformAccess === "loading") {
+    return (
+      <div class="app">
+        <div class="empty">{t(lang, "bestiaryLoading")}</div>
+      </div>
+    );
+  }
+
+  if (TRANSFORM_TARGET_ITEM_ID && transformAccess === "denied") {
+    return (
+      <div class="app">
+        <div class="empty">
+          {lang === "zh"
+            ? "这个 token 尚未为你开启变身权限。"
+            : "Transform permission has not been enabled for you on this token."}
+        </div>
+      </div>
+    );
+  }
+
+  // Players get a hard block; the GM keeps the full picker so the
+  // transform-POLICY editor (only reachable through this modal) stays
+  // usable while a player transform is active — actually PICKING a
+  // monster is still refused in handleSpawn + the background guards.
+  if (TRANSFORM_TARGET_ITEM_ID && transformBlocked && role !== "GM") {
+    return (
+      <div class="app">
+        <div class="empty">
+          {lang === "zh"
+            ? "该 token 已处于变身状态，请先解除变身。"
+            : "This token is already transformed — revert it first."}
+        </div>
+      </div>
+    );
+  }
+
+  if (role !== "GM" && !TRANSFORM_TARGET_ITEM_ID) {
+    return (
+      <div class="app">
+        <div class="empty">{t(lang, "bestiaryPanelOnlyDM")}</div>
+      </div>
+    );
+  }
+
+  // "About" button removed — the suite About panel covers all modules.
+
   return (
     <div class="app">
+      {TRANSFORM_TARGET_ITEM_ID && (
+        <div class="transform-policy">
+          <div class="transform-policy-title">
+            <span>
+              {lang === "zh" ? "变身" : "Transform"}
+              {transformTargetName ? ` · ${transformTargetName}` : ""}
+            </span>
+            {role !== "GM" && (
+              <span class="transform-policy-chip">
+                {formatCrRange(transformPolicy, lang)}
+              </span>
+            )}
+          </div>
+          <div
+            class="transform-hp-mode"
+            role="group"
+            aria-label={lang === "zh" ? "血量计算方式" : "HP mode"}
+          >
+            <span class="transform-hp-mode-label">
+              {lang === "zh" ? "血量" : "HP"}
+            </span>
+            <button
+              class={`transform-hp-mode-btn ${transformHpMode === "monster" ? "on" : ""}`}
+              type="button"
+              onClick={() => chooseTransformHpMode("monster")}
+              aria-pressed={transformHpMode === "monster"}
+              title={lang === "zh"
+                ? "独立计算：变身期间使用图鉴怪物 HP；解除变身时恢复原本角色卡 HP"
+                : "Independent: use the monster HP while transformed; revert restores the previous character-card HP"}
+            >
+              {lang === "zh" ? "独立计算" : "Monster HP"}
+            </button>
+            <button
+              class={`transform-hp-mode-btn ${transformHpMode === "card" ? "on" : ""}`}
+              type="button"
+              onClick={() => chooseTransformHpMode("card")}
+              aria-pressed={transformHpMode === "card"}
+              title={lang === "zh"
+                ? "以角色卡为准：绑定角色卡时保留角色卡 HP，忽略怪物 HP；没有角色卡时自动使用怪物 HP"
+                : "Character card: keep card HP when a card is bound and ignore monster HP; falls back to monster HP without a card"}
+            >
+              {lang === "zh" ? "角色卡为准" : "Card HP"}
+            </button>
+          </div>
+          {role === "GM" ? (
+            <div class="transform-policy-controls">
+              <button
+                class={`auto-init-toggle ${transformPolicy.enabled ? "on" : "off"}`}
+                type="button"
+                onClick={() => setTransformPolicy({
+                  ...transformPolicy,
+                  enabled: !transformPolicy.enabled,
+                })}
+                aria-pressed={transformPolicy.enabled}
+                title={lang === "zh"
+                  ? "开启后，该 token 的 Owner 玩家可在右键菜单中使用变身"
+                  : "When on, this token's owner can use Transform from the context menu"}
+              >
+                {lang === "zh" ? "授权玩家" : "Owner access"}
+              </button>
+              <input
+                class="transform-policy-input transform-policy-type"
+                type="text"
+                value={transformPolicy.typeQuery}
+                placeholder={lang === "zh" ? "类型：野兽" : "Type: beast"}
+                onInput={(e) => setTransformPolicy({
+                  ...transformPolicy,
+                  typeQuery: (e.currentTarget as HTMLInputElement).value,
+                })}
+              />
+              <input
+                class="transform-policy-input transform-policy-cr"
+                type="number"
+                min="0"
+                step="0.125"
+                value={transformPolicy.minCr ?? ""}
+                placeholder={lang === "zh" ? "最低CR" : "Min CR"}
+                onInput={(e) => setTransformPolicy({
+                  ...transformPolicy,
+                  minCr: numberOrNull((e.currentTarget as HTMLInputElement).value),
+                })}
+              />
+              <input
+                class="transform-policy-input transform-policy-cr"
+                type="number"
+                min="0"
+                step="0.125"
+                value={transformPolicy.maxCr ?? ""}
+                placeholder={lang === "zh" ? "最高CR" : "Max CR"}
+                onInput={(e) => setTransformPolicy({
+                  ...transformPolicy,
+                  maxCr: numberOrNull((e.currentTarget as HTMLInputElement).value),
+                })}
+              />
+              <button
+                class="sort-btn transform-policy-save"
+                type="button"
+                disabled={transformSaving}
+                onClick={() => void saveTransformPolicy(transformPolicy)}
+              >
+                {transformSaving ? (lang === "zh" ? "保存中" : "Saving") : (lang === "zh" ? "保存" : "Save")}
+              </button>
+              <button
+                class="sort-btn transform-policy-save"
+                type="button"
+                disabled={transformSaving}
+                onClick={() => void saveTransformPolicy({ ...DEFAULT_TRANSFORM_POLICY })}
+              >
+                {lang === "zh" ? "关闭" : "Disable"}
+              </button>
+            </div>
+          ) : (
+            <div class="transform-policy-note">
+              {lang === "zh" ? "可选择范围：" : "Available forms: "}
+              {formatCrRange(transformPolicy, lang)}
+            </div>
+          )}
+        </div>
+      )}
       {PICKER_TARGET_ITEM && (
         <div
           style="background:rgba(93,173,226,0.18);border-bottom:1px solid rgba(93,173,226,0.40);padding:8px 14px;font-size:12px;color:#7ec8f0;font-weight:600;text-align:center;"
@@ -522,7 +960,7 @@ function App() {
       )}
       <div class="header">
         <div class="header-top">
-          {!PICKER_TARGET_ITEM && (
+          {!PICKER_TARGET_ITEM && !TRANSFORM_TARGET_ITEM_ID && (
             <div
               ref={dragHandleRef}
               class="drag-handle"
@@ -544,7 +982,7 @@ function App() {
               libraries disabled / empty), monsters.length === 0 and
               the bar would just be a no-op input. Per user spec:
               "有新数据时搜索框也要启用，无数据时搜索框也要消失". */}
-          {monsters.length > 0 && (
+          {visibleMonsters.length > 0 && (
             <div class="search-wrap">
               <input
                 ref={inputRef}
@@ -570,9 +1008,11 @@ function App() {
         </div>
         <div class="header-row">
           <span class="count">
-            {loading ? t(lang, "bestiaryLoading") : `${filtered.length} / ${monsters.length}`}
+            {loading
+              ? `${t(lang, "bestiaryLoading")} · ${lang === "zh" ? `已读取 ${loadedFiles} 份资料` : `${loadedFiles} files read`}`
+              : `${filtered.length} / ${visibleMonsters.length}`}
           </span>
-          {monsters.length > 0 && (
+          {visibleMonsters.length > 0 && (
           <div class="source-filter-wrap">
             <input
               type="text"
@@ -596,7 +1036,7 @@ function App() {
             )}
           </div>
           )}
-          {role === "GM" && (
+          {role === "GM" && !TRANSFORM_TARGET_ITEM_ID && (
             <button
               class={`auto-init-toggle ${autoHide ? "on" : "off"}`}
               onClick={async () => {
@@ -610,7 +1050,7 @@ function App() {
               {lang === "zh" ? "自动隐藏" : "Auto-hide"}
             </button>
           )}
-          {role === "GM" && (
+          {role === "GM" && !TRANSFORM_TARGET_ITEM_ID && (
             <button
               class={`auto-init-toggle ${autoInit ? "on" : "off"}`}
               onClick={async () => {
@@ -624,7 +1064,7 @@ function App() {
               {lang === "zh" ? "自动先攻" : "Auto-init"}
             </button>
           )}
-          {role === "GM" && (
+          {role === "GM" && !TRANSFORM_TARGET_ITEM_ID && (
             <button
               class={`auto-init-toggle ${autoName ? "on" : "off"}`}
               onClick={async () => {
@@ -638,16 +1078,62 @@ function App() {
               {lang === "zh" ? "自动命名" : "Auto-name"}
             </button>
           )}
+          {role === "GM" && !TRANSFORM_TARGET_ITEM_ID && (
+            <button
+              class={`auto-init-toggle ${cardImages ? "on" : "off"}`}
+              onClick={async () => {
+                await setState({ bestiaryCardImages: !cardImages });
+              }}
+              title={t(lang, "bestiaryCardArtTip")}
+              aria-pressed={cardImages}
+            >
+              {t(lang, "bestiaryCardArt")}
+            </button>
+          )}
           <button class="sort-btn" onClick={toggleSort} title={t(lang, "bestiarySortByCR")}>
             CR {sortDesc ? "↓" : "↑"}
           </button>
+          {/* The library is kept on disk between opens, so a user who believes
+              the mirror has newer content needs one way to force a download. */}
+          <button class="sort-btn" disabled={loading} onClick={() => refreshContentRef.current()} title={t(lang, "bestiaryRefresh")} aria-label={t(lang, "bestiaryRefresh")}>
+            ⟳
+          </button>
         </div>
       </div>
-      <div class="list">
-        {filtered.map((mon) => (
-          <MonsterCard key={`${mon.source}-${mon.engName}`} monster={mon} onSpawn={handleSpawn} />
+      {(failedFiles > 0 || loadError) && (
+        <div role="status" style={{ padding: "6px 12px", fontSize: "12px" }}>
+          {lang === "zh"
+            ? `部分资料未能加载${failedFiles > 0 ? `（${failedFiles} 份）` : ""}。`
+            : `Some content could not be loaded${failedFiles > 0 ? ` (${failedFiles})` : ""}. `}
+          <button type="button" disabled={loading} onClick={() => retryLoadRef.current()}>
+            {lang === "zh" ? "重试" : "Retry"}
+          </button>
+        </div>
+      )}
+      {loading && monsters.length > 0 && (
+        <div role="status" style={{ padding: "6px 12px", fontSize: "12px" }}>
+          {lang === "zh" ? "可先筛选浏览，资料准备完成后即可使用。" : "Browse and filter while the remaining details are prepared."}
+        </div>
+      )}
+      {!loadError && filtered.length > 0 && (
+        <div class="list-count" role="status">
+          {lang === "zh"
+            ? `共 ${filtered.length} 只怪物 · 已显示 ${shown.length} 只`
+            : `${filtered.length} monsters · showing ${shown.length}`}
+        </div>
+      )}
+      <div class="list" aria-busy={loading}>
+        {shown.map((mon) => (
+          <MonsterCard key={`${mon.source}-${mon.engName}`} monster={mon} onSpawn={handleSpawn} disabled={loading || loadError} showImages={cardImages} />
         ))}
-        {!loading && filtered.length === 0 && (
+        {hasMore && (
+          <button class="list-more" ref={moreRef} type="button" onClick={() => setPageSize((size) => size + PAGE_SIZE)}>
+            {lang === "zh"
+              ? `显示更多（还有 ${filtered.length - shown.length} 只）`
+              : `Show more (${filtered.length - shown.length} left)`}
+          </button>
+        )}
+        {!loading && !loadError && filtered.length === 0 && (
           <div class="empty">{t(lang, "bestiaryNoMatch")}</div>
         )}
       </div>
@@ -676,7 +1162,7 @@ async function startMonsterDrag(monster: ParsedMonster, e: PointerEvent): Promis
       OBR.scene.grid.getDpi().catch(() => 150),
       OBR.viewport.getScale().catch(() => 1),
     ]);
-    const sz = (monster.size || "M").toUpperCase();
+    const sz = (monster.sizeCode || monster.size || "M").toUpperCase();
     const cellScale = SIZE_CELL_SCALE[sz] ?? 1;
     ghostSize = Math.max(36, Math.min(360, dpi * vpScale * cellScale));
   } catch {}
@@ -696,12 +1182,23 @@ async function startMonsterDrag(monster: ParsedMonster, e: PointerEvent): Promis
   } catch {}
 }
 
-function MonsterCard({
+// Memoised: the list re-renders on every progress tick while the library loads
+// (the 「已读取 N 份资料」 counter), and each card mounts a remote thumbnail.
+// Re-running up to 200 card bodies per tick was pure waste — their props only
+// move when the card itself does.
+const MonsterCard = memo(function MonsterCard({
   monster,
   onSpawn,
+  disabled,
+  showImages,
 }: {
   monster: ParsedMonster;
   onSpawn: (m: ParsedMonster) => void;
+  disabled: boolean;
+  /** Card-art toggle (`bestiaryCardImages`). When false the remote
+   *  thumbnail is never requested — a 200-row result page renders the
+   *  initial-letter placeholder instead. Spawning is unaffected. */
+  showImages: boolean;
 }) {
   const [imgErr, setImgErr] = useState(false);
 
@@ -719,7 +1216,7 @@ function MonsterCard({
   // before → spawn at viewport center. Drag past threshold: we
   // suppress the trailing click so we don't double-spawn.
   const onPointerDown = useCallback((e: PointerEvent) => {
-    if (e.button !== 0) return;
+    if (disabled || e.button !== 0) return;
     const cardEl = e.currentTarget as HTMLElement;
     const pointerId = e.pointerId;
     try { cardEl.setPointerCapture(pointerId); } catch {}
@@ -774,12 +1271,12 @@ function MonsterCard({
     cardEl.addEventListener("pointermove", onMove);
     cardEl.addEventListener("pointerup", onUp);
     cardEl.addEventListener("pointercancel", onUp);
-  }, [monster]);
+  }, [monster, disabled]);
 
   return (
-    <div class="card" onPointerDown={onPointerDown} onClick={() => onSpawn(monster)}>
+    <div class="card" aria-disabled={disabled} onPointerDown={onPointerDown} onClick={() => { if (!disabled) onSpawn(monster); }}>
       <div class="card-left">
-        {!imgErr && monster.tokenUrl ? (
+        {showImages && !imgErr && monster.tokenUrl ? (
           <img
             src={monster.tokenUrl}
             alt=""
@@ -796,7 +1293,8 @@ function MonsterCard({
       </div>
       <div class="card-info">
         <div class="card-name">{monster.name}</div>
-        <div class="card-sub">{monster.engName}</div>
+        {monster.engName !== monster.name && <div class="card-sub">{monster.engName}</div>}
+        {monster.contentLanguage && monster.contentLanguage !== "auto" && monster.contentLanguage !== _lang && <div class="card-sub">{_lang === "en" ? "Original: Chinese" : "原文：英语"}</div>}
         <div class="card-tags">
           <span class="tag">{monster.size}</span>
           <span class="tag">{monster.type}</span>
@@ -819,7 +1317,7 @@ function MonsterCard({
       </div>
     </div>
   );
-}
+});
 
 function PluginGate() {
   const [ready, setReady] = useState(false);

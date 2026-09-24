@@ -6,9 +6,8 @@ import { getState } from "../state";
 // When `state.crossSceneSyncCards` is ON in suite state, this module
 // keeps the character-card list (`com.character-cards/list` in scene
 // metadata) mirrored into ROOM metadata under
-// `com.character-cards/list-room`. Every scene-load checks the room
-// mirror first; if it exists, the scene's card list is overwritten
-// with the room copy so all scenes show the same deck.
+// `com.character-cards/list-room`. A scene that has NEVER had a card
+// list of its own adopts the room copy once; see hydrateOnSceneReady.
 //
 // When the flag flips OFF, the room mirror is cleared so other
 // scenes stop hydrating from it.
@@ -41,12 +40,16 @@ async function writeRoomCards(cards: any[] | null): Promise<void> {
   }
 }
 
-async function readSceneCards(): Promise<any[]> {
+/** The scene's own card list, or null when the scene has never had one.
+ *  The difference matters: an EMPTY ARRAY is a deliberate "no cards here"
+ *  (that is exactly what deleting the last card writes), while a missing
+ *  key means this scene has no list of its own yet. */
+async function readSceneCards(): Promise<any[] | null> {
   try {
     const m = await OBR.scene.getMetadata();
     const v = m[SCENE_CARDS_KEY];
-    return Array.isArray(v) ? v : [];
-  } catch { return []; }
+    return Array.isArray(v) ? v : null;
+  } catch { return null; }
 }
 
 async function writeSceneCards(cards: any[]): Promise<void> {
@@ -57,17 +60,21 @@ async function writeSceneCards(cards: any[]): Promise<void> {
   }
 }
 
-// On scene-ready: if sync is on AND room has a mirror, hydrate the
-// scene from the room copy. Always before the cc panel reads scene
-// metadata.
+// On scene-ready: adopt the room mirror ONLY into a scene that has no card
+// list of its own yet. Hydration used to overwrite the scene list with the
+// room copy on every scene-ready, which made the mirror destructive: any
+// scene with its own deck lost it, and a card deleted in the current scene
+// came straight back from another client's older mirror. Both are now
+// impossible, because a scene whose key exists (even as []) is never
+// written to by this path — so a deletion (which writes []) is final, and a
+// scene's independent list is never overwritten.
 async function hydrateOnSceneReady(): Promise<void> {
   const s = getState();
   if (!s.crossSceneSyncCards) return;
-  const roomCards = await readRoomCards();
-  if (!roomCards) return;
-  // Avoid no-op writes that cause unnecessary re-renders.
   const sceneCards = await readSceneCards();
-  if (JSON.stringify(sceneCards) === JSON.stringify(roomCards)) return;
+  if (sceneCards !== null) return;
+  const roomCards = await readRoomCards();
+  if (!roomCards || roomCards.length === 0) return;
   await writeSceneCards(roomCards);
 }
 
@@ -78,6 +85,7 @@ async function mirrorCardsIfChanged(): Promise<void> {
   const s = getState();
   if (!s.crossSceneSyncCards) return;
   const sceneCards = await readSceneCards();
+  if (sceneCards === null) return;  // this scene has no list of its own to mirror
   const json = JSON.stringify(sceneCards);
   if (json === lastSceneCardsJson) return;
   lastSceneCardsJson = json;
@@ -86,11 +94,12 @@ async function mirrorCardsIfChanged(): Promise<void> {
 
 // When the user flips crossSceneSyncCards from OFF → ON we ALSO want
 // to immediately seed the room mirror with the current scene's
-// cards so other scenes hydrate from it. The settings UI handles the
-// confirmation prompt; this just exports a primitive the UI can call
-// at the right moment.
+// cards so scenes without a list of their own adopt it. The settings
+// UI handles the confirmation prompt; this just exports a primitive
+// the UI can call at the right moment.
 export async function seedRoomCardsFromCurrentScene(): Promise<void> {
   const sceneCards = await readSceneCards();
+  if (sceneCards === null) return;  // nothing to seed; never clear the mirror here
   await writeRoomCards(sceneCards);
   lastSceneCardsJson = JSON.stringify(sceneCards);
 }
@@ -110,9 +119,7 @@ export async function setupCrossSceneCards(): Promise<void> {
     OBR.scene.onReadyChange(async (ready) => {
       if (ready) {
         await hydrateOnSceneReady();
-        // Reset dedup so the next mirror cycle compares against the
-        // freshly hydrated list (else we'd skip the first real change).
-        lastSceneCardsJson = JSON.stringify(await readSceneCards());
+        await rememberSceneCards();
       }
     }),
   );
@@ -126,9 +133,17 @@ export async function setupCrossSceneCards(): Promise<void> {
   try {
     if (await OBR.scene.isReady()) {
       await hydrateOnSceneReady();
-      lastSceneCardsJson = JSON.stringify(await readSceneCards());
+      await rememberSceneCards();
     }
   } catch {}
+}
+
+/** Reset dedup so the next mirror cycle compares against the freshly
+ *  hydrated list (else we'd skip the first real change). "" means "this
+ *  scene has no list of its own" and never equals a real array's JSON. */
+async function rememberSceneCards(): Promise<void> {
+  const sceneCards = await readSceneCards();
+  lastSceneCardsJson = sceneCards === null ? "" : JSON.stringify(sceneCards);
 }
 
 export async function teardownCrossSceneCards(): Promise<void> {

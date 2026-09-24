@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../../asset-base";
 import { DieResult, sidesOf } from "./types";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
@@ -119,8 +120,9 @@ function commitPending(rollId: string): void {
   }
 }
 
-let history: HistoryEntry[] = loadHistory();
 let myRole: "GM" | "PLAYER" | "" = "";
+let myPlayerId = "";
+let history: HistoryEntry[] = loadHistory();
 
 const rowsEl = document.getElementById("rows") as HTMLDivElement;
 // headHint was removed when the title bar was dropped from
@@ -144,7 +146,7 @@ function loadHistory(): HistoryEntry[] {
     const v = localStorage.getItem(LS_HISTORY);
     if (!v) return [];
     const p = JSON.parse(v);
-    if (Array.isArray(p)) return p;
+    if (Array.isArray(p)) return p.filter(row=>row&&(!row.hidden||myRole==='GM'||row.rollerId===myPlayerId));
   } catch {}
   return [];
 }
@@ -203,7 +205,7 @@ function chipsHtml(dice: DieResult[]): string {
     const valueStr = d.subtract ? `−${d.value}` : String(d.value);
     parts.push(
       `<span class="die-chip ${cls}${subtractCls}">` +
-      `<img src="/suite/${imgFor(d.type)}.png" alt="${escapeHtml(d.type)}" draggable="false">` +
+      `<img src="${assetUrl(`${imgFor(d.type)}.png`)}" alt="${escapeHtml(d.type)}" draggable="false">` +
       `<span>${valueStr}</span>` +
       `</span>`,
     );
@@ -305,7 +307,8 @@ function buildRepeatStripHtml(entry: HistoryEntry, layout: "flow" | "stack" = "s
     const end = r + 1 < rows.length ? rows[r + 1] : entry.dice.length;
     const rowDice = entry.dice.slice(start, end);
     const kept = rowDice.filter((d) => !d.loser);
-    const rowTotal = kept.reduce((a, d) => a + d.value, 0) + entry.modifier;
+    // §9 consistency fix: subtraction dice count negative in row totals.
+    const rowTotal = kept.reduce((a, d) => a + (d.subtract ? -d.value : d.value), 0) + entry.modifier;
     out.push(buildRepeatRowCard(entry, r, rowDice, rowTotal));
   }
   const cls = layout === "flow" ? "repeat-strip is-flow" : "repeat-strip is-stack";
@@ -760,8 +763,6 @@ function myRoleIsDM(entry: HistoryEntry): boolean {
   return myRole === "GM" && entry.rollerId === myPlayerId;
 }
 
-let myPlayerId = "";
-
 // (Removed — row click now opens the in-popover detail view instead
 // of bouncing to the dice panel's history tab.)
 
@@ -784,7 +785,9 @@ OBR.onReady(async () => {
     const role = await OBR.player.getRole();
     myRole = role === "GM" ? "GM" : "PLAYER";
     myPlayerId = await OBR.player.getId();
+    history = loadHistory();
   } catch {}
+  OBR.player.onChange(player=>{myRole=player.role==='GM'?'GM':'PLAYER';myPlayerId=player.id;history=loadHistory();for(const [id,pending] of pendingEntries)if(pending.entry.hidden&&myRole!=='GM'&&pending.entry.rollerId!==myPlayerId){clearTimeout(pending.timer);pendingEntries.delete(id);}render();});
 
   // Drag grip in the title bar — releases broadcast to dice/index.ts
   // which re-issues OBR.popover.open() with the new offset.

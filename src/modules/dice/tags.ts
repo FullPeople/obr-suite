@@ -31,7 +31,24 @@ const BC_QUICK_ROLL = "com.obr-suite/dice-quick-roll";
 // player's language. Read at parse time so a mid-session lang flip
 // reflects on the next render. Returned values are unicode-safe.
 type Lang = "zh" | "en";
+/**
+ * Language for the CURRENT formatting pass.
+ *
+ * `getLocalLang` reads localStorage, and `parseTagPayload` asks for the
+ * language once or twice per `{@...}` tag — so rendering one stat block
+ * did hundreds of localStorage reads to resolve a value that cannot
+ * change while a synchronous pass is running.
+ *
+ * The cache is therefore scoped to a pass, not to the module: it is
+ * primed by `formatTagsClickable` and cleared in its `finally`, so a
+ * user switching language between renders still gets the new value.
+ * Anything calling `curLang` outside a pass falls through to a live
+ * read, exactly as before.
+ */
+let passLang: Lang | null = null;
+
 function curLang(): Lang {
+  if (passLang !== null) return passLang;
   try {
     const v = getLocalLang();
     return v === "en" ? "en" : "zh";
@@ -170,7 +187,7 @@ function parseTagPayload(tag: string, payload: string):
         kind: "roll",
         spec: {
           expression: expr,
-          label: "命中",
+          label: getLocalLang() === "en" ? "Hit" : "命中",
           display: bonus >= 0 ? `+${bonus}` : `${bonus}`,
         },
       };
@@ -393,6 +410,18 @@ function escapeAttr(s: string): string {
 // text segments only (between matched tag spans) so tag attributes
 // can't be re-interpreted as markdown.
 export function formatTagsClickable(s: string): string {
+  // Prime the per-pass language cache. `finally` rather than a trailing
+  // assignment so a throw mid-format cannot leave a stale value pinned
+  // for every later pass.
+  passLang = curLang();
+  try {
+    return formatTagsClickableInner(s);
+  } finally {
+    passLang = null;
+  }
+}
+
+function formatTagsClickableInner(s: string): string {
   if (typeof s !== "string") return "";
   // Process the string in two passes so tag arg / display content
   // gets escaped while the wrapping HTML stays raw. The regex also

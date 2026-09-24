@@ -2,6 +2,8 @@ import OBR from "@owlbear-rodeo/sdk";
 import { ICONS } from "../../icons";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang } from "../../state";
+import { isDegenerateResourceId, stableResourceId } from "../resourceTracker/id";
+import { restoreResourceIdBackup } from "../resourceTracker/storage";
 
 const lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -138,9 +140,29 @@ async function fetchCardAutoResources(cardId: string): Promise<AutoResource[] | 
 }
 
 const RESOURCES_KEY = "com.obr-suite/resources/data";
+// One-time snapshot of a token's resource array taken before the id
+// repair rewrites degenerate/duplicate ids — the rollback (撤销 ID 修复)
+// restores from it. Written only when absent so re-binds never clobber
+// the true pre-repair original.
+const RESOURCES_BACKUP_KEY = "com.obr-suite/resources/backup-pre-idfix";
 
 const BUBBLES_META = "com.obr-suite/bubbles/data";
 const EXTERNAL_BUBBLES_META = "com.owlbear-rodeo-bubbles-extension/metadata";
+
+/** Old data.json files (JSON-upload path stores auto_resources verbatim,
+ *  never re-parsed) can carry degenerate "auto-" ids forever — repair the
+ *  fetched list before it touches any token. Deterministic: the same
+ *  card list always sanitizes to the same ids. */
+function sanitizeAutoResources(arr: AutoResource[]): AutoResource[] {
+  const seen = new Set<string>();
+  return arr.map((ar) => {
+    if (!isDegenerateResourceId(ar.id) && !seen.has(ar.id!)) {
+      seen.add(ar.id!);
+      return ar;
+    }
+    return { ...ar, id: stableResourceId(ar.name, seen) };
+  });
+}
 
 async function bindTo(cardId: string | null) {
   if (!itemId) return;
@@ -157,7 +179,11 @@ async function bindTo(cardId: string | null) {
       fetchCardBubblesSeed(cardId),
       fetchCardAutoResources(cardId),
     ]);
+    if (autoResources) autoResources = sanitizeAutoResources(autoResources);
   }
+  // Filled inside the updateItems mutator (sync), logged after it
+  // resolves — evidence per project discipline.
+  const repairLog: Array<{ name: string; oldId: string; newId: string }> = [];
   try {
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       const d = drafts[0];
@@ -194,19 +220,92 @@ async function bindTo(cardId: string | null) {
           d.metadata[BUBBLES_META] = seed;
           if (d.metadata[EXTERNAL_BUBBLES_META] != null) d.metadata[EXTERNAL_BUBBLES_META] = seed;
         }
+        // 2026-08-20 (checklist §2) — repair legacy degenerate/duplicate
+        // resource ids on the token BEFORE merging. Runs on the RAW
+        // array (readResources hides empty-id entries but they still
+        // occupy metadata). Original array is backed up once as audit
+        // evidence; each repaired entry keeps its old id in `legacyId`,
+        // which is what the 撤销 ID 修复 rollback inverts. Doing the
+        // repair+merge in ONE updateItems keeps them consistent with
+        // each other, but note OBR updateItems is a client-side
+        // read-modify-write with whole-metadata last-write-wins — a
+        // pill click racing this bind can still be lost either way
+        // (pre-existing limitation, not introduced here).
+        {
+          const cur = Array.isArray(d.metadata[RESOURCES_KEY])
+            ? (d.metadata[RESOURCES_KEY] as any[])
+            : [];
+          const usedIds = new Set<string>();
+          for (const r of cur) {
+            if (r && typeof r === "object" && !isDegenerateResourceId(r.id) && !usedIds.has(r.id)) {
+              usedIds.add(r.id);
+            }
+          }
+          const seenGood = new Set<string>();
+          for (const r of cur) {
+            if (!r || typeof r !== "object") continue;
+            const bad = isDegenerateResourceId(r.id) || seenGood.has(r.id);
+            if (!bad) {
+              seenGood.add(r.id);
+              continue;
+            }
+            if (repairLog.length === 0 && !(RESOURCES_BACKUP_KEY in d.metadata)) {
+              d.metadata[RESOURCES_BACKUP_KEY] = {
+                ts: Date.now(),
+                resources: JSON.parse(JSON.stringify(cur)),
+              };
+            }
+            // Prefer the card's canonical id for this name so the same
+            // ability gets the same id on every token; fall back to the
+            // deterministic name-derived id.
+            const canonical = (autoResources ?? []).find(
+              (ar) => ar.name === r.name && typeof ar.id === "string" && !usedIds.has(ar.id),
+            );
+            const oldId = typeof r.id === "string" ? r.id : "";
+            let newId: string;
+            if (canonical) {
+              newId = canonical.id!;
+              usedIds.add(newId);
+            } else {
+              newId = stableResourceId(String(r.name ?? ""), usedIds);
+            }
+            r.legacyId = oldId;
+            r.id = newId;
+            seenGood.add(newId);
+            repairLog.push({ name: String(r.name ?? "?"), oldId, newId });
+          }
+        }
         // 2026-05-15 — auto-resource merge. Spec: only NAME + MAX is
         // applied; if a resource with the same name already exists
         // we update ITS MAX only (preserve current). New names get a
         // full insert with current=max and the parser's icon hint.
         // This way a player who's used 2/4 spell slots keeps the
         // "2 left" state when the DM re-binds / re-parses the card.
+        //
+        // 2026-08-20 — occurrence-aware: matching is name + occurrence
+        // index (Nth same-named card entry pairs with the Nth same-named
+        // token entry), so two same-named abilities survive as two
+        // independent trackers instead of collapsing in a by-name Map.
         if (autoResources && autoResources.length > 0) {
           const cur = Array.isArray(d.metadata[RESOURCES_KEY])
             ? (d.metadata[RESOURCES_KEY] as any[]).slice()
             : [];
-          const byName = new Map<string, any>(cur.map((r) => [r?.name, r]));
+          const usedIds = new Set<string>(
+            cur.filter((r) => r && typeof r.id === "string").map((r) => r.id as string),
+          );
+          const byNameQueue = new Map<string, any[]>();
+          for (const r of cur) {
+            if (!r || typeof r !== "object") continue;
+            const list = byNameQueue.get(r.name) ?? [];
+            list.push(r);
+            byNameQueue.set(r.name, list);
+          }
+          const consumed = new Map<string, number>();
           for (const ar of autoResources) {
-            const existing = byName.get(ar.name);
+            const queue = byNameQueue.get(ar.name) ?? [];
+            const idx = consumed.get(ar.name) ?? 0;
+            const existing = idx < queue.length ? queue[idx] : undefined;
+            consumed.set(ar.name, idx + 1);
             if (existing) {
               // Only update max. Clamp `current` down if it now
               // exceeds the new max (e.g. multi-class re-level dropped
@@ -216,8 +315,11 @@ async function bindTo(cardId: string | null) {
                 existing.current = ar.max;
               }
             } else {
-              byName.set(ar.name, {
-                id: ar.id || `auto-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+              const id = typeof ar.id === "string" && !isDegenerateResourceId(ar.id) && !usedIds.has(ar.id)
+                ? (usedIds.add(ar.id), ar.id)
+                : stableResourceId(ar.name, usedIds);
+              cur.push({
+                id,
                 name: ar.name,
                 type: ar.type || "count",
                 current: typeof ar.current === "number" ? ar.current : ar.max,
@@ -226,7 +328,7 @@ async function bindTo(cardId: string | null) {
               });
             }
           }
-          d.metadata[RESOURCES_KEY] = [...byName.values()];
+          d.metadata[RESOURCES_KEY] = cur;
         }
       } else {
         delete d.metadata[BIND_META];
@@ -238,8 +340,16 @@ async function bindTo(cardId: string | null) {
         delete d.metadata[INIT_DEXMOD_META];
       }
     });
+    if (repairLog.length > 0) {
+      for (const rep of repairLog) {
+        console.info("[character-cards] resource-id repair", { itemId, ...rep });
+      }
+      console.info(
+        `[character-cards] resource-id repair: ${repairLog.length} entr${repairLog.length === 1 ? "y" : "ies"} repaired on ${itemId} (backup at ${RESOURCES_BACKUP_KEY})`,
+      );
+    }
     // Toast removed per user feedback — actions are visible enough on
-     // the modal that closes itself.
+    // the modal that closes itself.
   } catch (e) {
     console.error("[character-cards] bind failed", e);
   }
@@ -249,6 +359,43 @@ async function bindTo(cardId: string | null) {
 OBR.onReady(async () => {
   applyI18nDom(lang);
   const [cards, boundId] = await Promise.all([getCards(), getCurrentBinding()]);
+
+  // 撤销 ID 修复 — shown only when this token carries the pre-repair
+  // backup written by a previous bind's resource-id repair.
+  if (itemId) {
+    try {
+      const [tok] = await OBR.scene.items.getItems([itemId]);
+      const hasBackup = !!(tok?.metadata as any)?.[RESOURCES_BACKUP_KEY];
+      if (hasBackup) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.id = "undo-idfix";
+        btn.textContent = lang === "zh" ? "撤销 ID 修复" : "Undo ID repair";
+        btn.title = lang === "zh"
+          ? "仅把资源 ID 恢复为修复前的旧 ID（含旧的重复/空 ID）；当前数值、修复后新增的资源全部保留。"
+          : "Reverts only the resource IDs to their pre-repair values (including the old duplicate/empty ids); current values and resources added since the repair are kept.";
+        btn.style.cssText = unbindBtn.style.cssText;
+        btn.addEventListener("click", async () => {
+          const confirmMsg = lang === "zh"
+            ? "确认撤销 ID 修复？\n\n仅恢复资源 ID 为旧值（旧的重复/空 ID 会回来，相关计数可能重新串联）。数值和新增资源不受影响。"
+            : "Undo the ID repair?\n\nOnly resource IDs revert to their old values (the old duplicate/empty ids return, so affected trackers may cross-link again). Values and added resources are untouched.";
+          if (!window.confirm(confirmMsg)) return;
+          btn.disabled = true;
+          const n = await restoreResourceIdBackup(itemId);
+          const msg = n === null
+            ? (lang === "zh" ? "撤销失败，请查看控制台。" : "Undo failed — see console.")
+            : (lang === "zh" ? `已恢复 ${n} 条资源的旧 ID。` : `Reverted ${n} resource id${n === 1 ? "" : "s"}.`);
+          try { await OBR.notification.show(msg, n === null ? "ERROR" : "SUCCESS"); } catch {}
+          if (n !== null) btn.remove();
+          else btn.disabled = false;
+        });
+        unbindBtn.insertAdjacentElement("afterend", btn);
+        btn.style.display = "inline-block";
+      }
+    } catch (e) {
+      console.warn("[character-cards] backup-key probe failed", e);
+    }
+  }
 
   if (boundId) {
     const boundCard = cards.find((c) => c.id === boundId);

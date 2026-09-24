@@ -24,6 +24,10 @@ import { assetUrl } from "./asset-base";
 interface Supporter { name: string; amount: number; }
 
 const BC_VISIBILITY = "com.obr-suite/supporter-overlay/visibility";
+const workbenchMarquee = new URLSearchParams(location.search).get('workbench') === '1';
+const MARQUEE_SPEED = 150;
+const MARQUEE_LANES = 4;
+const marqueeNextAt = Array.from({length:MARQUEE_LANES},()=>0);
 
 // === Tier / size helpers (mirror of settings.ts) ===================
 
@@ -90,6 +94,8 @@ const SUPPORTER_AVATARS: Record<string, string> = {
   "蚀星ErosionStar":             "supporter-avatars/蚀星Erosionstar.png",
   "跑冰风谷水群被抓的某位":      "supporter-avatars/跑冰风谷水群被抓的某位.png",
   "鱼喵":                        "supporter-avatars/鱼喵.png",
+  "克雷锰特":                    "supporter-avatars/克雷锰特.png",
+  "xhchi_小火车":                "supporter-avatars/xhchi_小火车.png",
 };
 
 function findSupporterAvatar(name: string): string | null {
@@ -228,6 +234,7 @@ function estimateBox(s: Supporter): { w: number; h: number } {
 // flash.
 
 const sceneEl = document.getElementById("scene") as HTMLDivElement;
+if (workbenchMarquee) { sceneEl.style.background='none'; sceneEl.style.transition='none';for(const id of ['stars','hole-vignette'])document.getElementById(id)?.remove(); }
 
 interface Slot {
   el: HTMLDivElement;
@@ -235,6 +242,8 @@ interface Slot {
   stateUntil: number;       // ms timestamp
   current: Supporter | null;
   rect: { x: number; y: number; w: number; h: number } | null;
+  animation?: Animation;
+  lane?: number;
 }
 
 const slots: Slot[] = [];
@@ -315,7 +324,7 @@ function placeSlot(slot: Slot, s: Supporter): void {
     w: Math.max(60, Math.ceil(measured.width) + 8),
     h: Math.max(Math.ceil(measured.height), 24),
   };
-  const pos = pickPosition(box.w, box.h, activeRects(slot)) ?? { x: 20, y: 20 };
+  const pos = workbenchMarquee ? {x:innerWidth+12,y:6+(slot.lane||0)*68} : pickPosition(box.w, box.h, activeRects(slot)) ?? { x: 20, y: 20 };
 
   slot.el.style.left = `${pos.x}px`;
   slot.el.style.top = `${pos.y}px`;
@@ -325,10 +334,20 @@ function placeSlot(slot: Slot, s: Supporter): void {
 
 function tickSlot(slot: Slot, now: number): void {
   if (slot.state === "void") {
+    if (now < slot.stateUntil) return;
+    if(workbenchMarquee){const lane=marqueeNextAt.indexOf(Math.min(...marqueeNextAt));if(marqueeNextAt[lane]>now)return;slot.lane=lane;}
     // Pick a new supporter, place it, start fade-in.
     const s = pickSupporter();
     if (!s) return;
     placeSlot(slot, s);
+    if (workbenchMarquee) {
+      slot.el.style.transition='none';slot.el.style.opacity='1';slot.state='in';
+      const distance=innerWidth+24+(slot.rect?.w||200);
+      marqueeNextAt[slot.lane!]=now+((slot.rect?.w||200)+42)/MARQUEE_SPEED*1000;
+      slot.animation=slot.el.animate([{transform:'translateX(0)'},{transform:`translateX(-${distance}px)`}],{duration:distance/MARQUEE_SPEED*1000,easing:'linear'});
+      slot.animation.onfinish=()=>{slot.el.style.opacity='0';slot.state='void';slot.stateUntil=performance.now()+100;slot.current=null;slot.rect=null;};
+      return;
+    }
     // Force a reflow so the opacity transition kicks in from 0 → 1.
     void slot.el.offsetWidth;
     slot.el.style.opacity = "1";
@@ -395,14 +414,16 @@ function setVisible(visible: boolean): void {
     // "out" state with a random stateUntil makes the rAF loop trigger
     // spawn (void state) at a randomised time.
     const now = performance.now();
+    if(workbenchMarquee)marqueeNextAt.fill(now);
     for (const s of slots) {
       s.state = "out";
-      s.stateUntil = now + Math.random() * 3500;
+      s.stateUntil = now + Math.random() * (workbenchMarquee?450:3500);
       s.el.style.opacity = "0";
     }
     startLoop();
   } else {
     sceneEl.classList.remove("visible");
+    if (workbenchMarquee) {stopLoop();for(const s of slots){s.animation?.cancel();s.el.style.opacity='0';s.state='void';s.current=null;s.rect=null;}return;}
     setTimeout(() => {
       if (!sceneEl.classList.contains("visible")) {
         stopLoop();
@@ -469,7 +490,7 @@ function startHeartbeatWatchdog(): void {
 
 // === Boot =========================================================
 
-const SLOT_COUNT = 100;   // 100 names visible+cycling simultaneously
+const SLOT_COUNT = workbenchMarquee ? 16 : 100;
 
 OBR.onReady(async () => {
   // Default to ZH; broadcast carries the actual choice from settings.

@@ -19,6 +19,7 @@
 
 import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
+import { getLocalLang } from "../../state";
 import { IS_MOBILE } from "../../feature-flags";
 
 const TOOL_ID = "com.obr-suite/metadata-inspector";
@@ -210,6 +211,7 @@ export async function setupMetadataInspector(): Promise<void> {
   }
   const role = await OBR.player.getRole().catch(() => "PLAYER");
   if (role !== "GM") return;
+  const en = getLocalLang() === "en";
 
   // Tool entry — left sidebar.
   try {
@@ -218,7 +220,7 @@ export async function setupMetadataInspector(): Promise<void> {
       defaultMode: MODE_DEFAULT,
       icons: [{
         icon: ICON_URL,
-        label: "元数据检查 (DM)",
+        label: en ? "Metadata inspector (DM)" : "元数据检查 (DM)",
         filter: { roles: ["GM"] },
       }],
       onClick: async () => {
@@ -236,7 +238,7 @@ export async function setupMetadataInspector(): Promise<void> {
       id: MODE_DEFAULT,
       icons: [{
         icon: ICON_URL,
-        label: "选物体（默认） — 选中物体即弹出，取消选中则收起",
+        label: en ? "Select item (default) — popover follows selection" : "选物体（默认） — 选中物体即弹出，取消选中则收起",
         filter: { activeTools: [TOOL_ID] },
       }],
       cursors: [{ cursor: "help" }],
@@ -257,7 +259,7 @@ export async function setupMetadataInspector(): Promise<void> {
       id: MODE_SCENE,
       icons: [{
         icon: ICON_SCENE_URL,
-        label: "场景元数据 (OBR.scene.getMetadata)",
+        label: en ? "Scene metadata (OBR.scene.getMetadata)" : "场景元数据 (OBR.scene.getMetadata)",
         filter: { activeTools: [TOOL_ID] },
       }],
       cursors: [{ cursor: "help" }],
@@ -275,7 +277,7 @@ export async function setupMetadataInspector(): Promise<void> {
       id: MODE_ROOM,
       icons: [{
         icon: ICON_ROOM_URL,
-        label: "房间元数据 (OBR.room.getMetadata)",
+        label: en ? "Room metadata (OBR.room.getMetadata)" : "房间元数据 (OBR.room.getMetadata)",
         filter: { activeTools: [TOOL_ID] },
       }],
       cursors: [{ cursor: "help" }],
@@ -293,7 +295,7 @@ export async function setupMetadataInspector(): Promise<void> {
       id: MODE_PERFORMANCE,
       icons: [{
         icon: ICON_PERFORMANCE_URL,
-        label: "性能指标 (FPS 和内存)",
+        label: en ? "Performance (FPS & memory)" : "性能指标 (FPS 和内存)",
         filter: { activeTools: [TOOL_ID] },
       }],
       cursors: [{ cursor: "help" }],

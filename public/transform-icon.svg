@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <!-- Polymorph / 变身 — a magic sparkle (large 4-point star) with two
+       smaller sparkles, reading as a transformation burst. White so it
+       shows on OBR's dark context menu. -->
+  <path d="M12 2.5 C12.7 7.2 13.8 8.3 18.5 9 C13.8 9.7 12.7 10.8 12 15.5 C11.3 10.8 10.2 9.7 5.5 9 C10.2 8.3 11.3 7.2 12 2.5 Z"
+        fill="#ffffff"/>
+  <path d="M18 14 C18.3 16 18.8 16.5 20.8 16.8 C18.8 17.1 18.3 17.6 18 19.6 C17.7 17.6 17.2 17.1 15.2 16.8 C17.2 16.5 17.7 16 18 14 Z"
+        fill="#ffffff" opacity="0.9"/>
+  <path d="M6.5 14.5 C6.7 16 7.1 16.4 8.6 16.6 C7.1 16.8 6.7 17.2 6.5 18.7 C6.3 17.2 5.9 16.8 4.4 16.6 C5.9 16.4 6.3 16 6.5 14.5 Z"
+        fill="#ffffff" opacity="0.8"/>
+</svg>

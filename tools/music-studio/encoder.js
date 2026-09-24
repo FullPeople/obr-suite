@@ -20,6 +20,8 @@
  * sounds notably worse on BGM.
  */
 
+import { t as T } from "./i18n.js";
+
 let _ffmpegPromise = null;
 
 async function getFfmpeg() {
@@ -93,7 +95,7 @@ export async function encodeOpus(file, opts = {}) {
   const channels  = opts.channels === 2 ? 2 : 1;
   const onProg    = typeof opts.onProgress === "function" ? opts.onProgress : null;
 
-  if (onProg) onProg(0.02, "加载 ffmpeg…");
+  if (onProg) onProg(0.02, T("muEncLoadFfmpeg"));
   const { ffmpeg } = await getFfmpeg();
 
   const ext = pickExt(file);
@@ -104,12 +106,12 @@ export async function encodeOpus(file, opts = {}) {
   // relative to the input's total duration — for trimmed clips this
   // can overshoot 1.0, so clamp.
   const onProgEvt = ({ progress }) => {
-    if (onProg) onProg(Math.min(0.98, 0.05 + Math.max(0, progress) * 0.92), "编码中…");
+    if (onProg) onProg(Math.min(0.98, 0.05 + Math.max(0, progress) * 0.92), T("muEncEncoding"));
   };
   ffmpeg.on("progress", onProgEvt);
 
   try {
-    if (onProg) onProg(0.05, "写入文件…");
+    if (onProg) onProg(0.05, T("muEncWriting"));
     const ab = await file.arrayBuffer();
     await ffmpeg.writeFile(inName, new Uint8Array(ab));
 
@@ -130,10 +132,10 @@ export async function encodeOpus(file, opts = {}) {
 
     await ffmpeg.exec(args);
 
-    if (onProg) onProg(0.99, "读取结果…");
+    if (onProg) onProg(0.99, T("muEncReading"));
     const data = await ffmpeg.readFile(outName);
     const out = new Blob([data.buffer], { type: "audio/ogg; codecs=opus" });
-    if (onProg) onProg(1, "完成");
+    if (onProg) onProg(1, T("muEncDone"));
     return out;
   } finally {
     // Always try to clean up the FS so repeat encodes don't accumulate.

@@ -147,6 +147,104 @@ function rayHitDistance(
   return t;
 }
 
+/**
+ * Uniform grid over a contour's edges, so a vertex can ask "which
+ * edges are near me" instead of testing all of them.
+ *
+ * The clamp below only cares about a hit closer than `targetDist * 2`.
+ * `miteredTargets` caps `targetDist` at MITER_LIMIT × |distance|, but
+ * that worst case only happens at sharp convex corners — the typical
+ * vertex moves about |distance|, so its useful reach is about
+ * 2 × |distance|, four times smaller than the global bound.
+ *
+ * Cells are therefore sized to |distance| and each vertex queries only
+ * as many rings as ITS OWN reach needs. Sizing them to the global bound
+ * instead made every query sweep a 144×144 area to serve a ray that
+ * usually travels 12.
+ *
+ * This returns a SUPERSET of the edges that could qualify, and the
+ * clamp takes a MIN over whatever qualifies. Min is order-independent
+ * and exact in floating point, so testing a superset in a different
+ * order gives the identical answer to testing all of them — the
+ * selftest fuzzes that against the brute-force version.
+ */
+class EdgeGrid {
+  private cells: Map<number, number[]> = new Map();
+  private stamps: Int32Array;
+  private pass = 0;
+  private cell: number;
+  private minX: number;
+  private minY: number;
+  private cols: number;
+
+  constructor(poly: Vec2[], cellSize: number) {
+    const n = poly.length;
+    this.stamps = new Int32Array(n);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of poly) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    this.cell = Math.max(cellSize, 1e-6);
+    this.minX = minX;
+    this.minY = minY;
+    this.cols = Math.max(1, Math.ceil((maxX - minX) / this.cell) + 1);
+    const rows = Math.max(1, Math.ceil((maxY - minY) / this.cell) + 1);
+    // Register each edge in every cell its bounding box touches.
+    for (let j = 0; j < n; j++) {
+      const a = poly[j];
+      const b = poly[(j + 1) % n];
+      const c0 = this.col(Math.min(a.x, b.x));
+      const c1 = this.col(Math.max(a.x, b.x));
+      const r0 = this.row(Math.min(a.y, b.y));
+      const r1 = this.row(Math.max(a.y, b.y));
+      for (let r = r0; r <= r1; r++) {
+        if (r < 0 || r >= rows) continue;
+        for (let c = c0; c <= c1; c++) {
+          if (c < 0 || c >= this.cols) continue;
+          const key = r * this.cols + c;
+          const bucket = this.cells.get(key);
+          if (bucket) bucket.push(j);
+          else this.cells.set(key, [j]);
+        }
+      }
+    }
+  }
+
+  private col(x: number): number {
+    return Math.floor((x - this.minX) / this.cell);
+  }
+  private row(y: number): number {
+    return Math.floor((y - this.minY) / this.cell);
+  }
+
+  /** Edge indices within `reach` of (x, y), each yielded once.
+   *
+   *  The ring count is derived from `reach`, so the query covers at
+   *  least a `reach`-radius disc around the point — a superset of what
+   *  the ray can hit, which is what makes the result exact. */
+  near(x: number, y: number, reach: number, out: number[]): void {
+    out.length = 0;
+    this.pass++;
+    const c = this.col(x);
+    const r = this.row(y);
+    const rings = Math.max(1, Math.ceil(reach / this.cell));
+    for (let rr = r - rings; rr <= r + rings; rr++) {
+      for (let cc = c - rings; cc <= c + rings; cc++) {
+        const bucket = this.cells.get(rr * this.cols + cc);
+        if (!bucket) continue;
+        for (const j of bucket) {
+          if (this.stamps[j] === this.pass) continue;
+          this.stamps[j] = this.pass;
+          out.push(j);
+        }
+      }
+    }
+  }
+}
+
 /** Clamp each vertex's motion based on the nearest non-adjacent
  *  edge along its move direction. Vertices in thick regions of the
  *  polygon move the full distance; vertices near a thin pinch stop
@@ -155,9 +253,16 @@ function perVertexRaycastClamp(
   poly: Vec2[],
   targets: Vec2[],
   minPx: number,
+  cellSize: number,
+  useIndex: boolean,
 ): Vec2[] {
   const n = poly.length;
   if (targets.length !== n) return poly.slice();
+  // Below this the grid costs more than it saves, and the O(n²) loop
+  // is already trivial. `useIndex` false forces the brute-force path,
+  // which the selftest uses as the reference to fuzz the grid against.
+  const grid = useIndex && n >= 64 ? new EdgeGrid(poly, cellSize) : null;
+  const candidates: number[] = [];
   const result: Vec2[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const orig = poly[i];
@@ -173,22 +278,41 @@ function perVertexRaycastClamp(
     const dirY = dy / targetDist;
 
     let maxAllowed = targetDist;
-    for (let j = 0; j < n; j++) {
-      // Skip the two edges adjacent to vertex i (i-1→i and i→i+1).
-      if (j === i || j === (i - 1 + n) % n) continue;
-      const A = poly[j];
-      const B = poly[(j + 1) % n];
-      const t = rayHitDistance(
-        orig.x, orig.y, dirX, dirY,
-        A.x, A.y, B.x, B.y,
-      );
-      // Allow the raycast to reach up to 2× targetDist before
-      // clamping — this is the "is there an opposite wall within
-      // our reachable range" test. Past that, the obstacle is too
-      // far to constrain us.
-      if (t > 0 && t < targetDist * 2) {
-        const safe = Math.max(0, t / 2 - minPx);
-        if (safe < maxAllowed) maxAllowed = safe;
+    const prevEdge = (i - 1 + n) % n;
+    if (grid) {
+      grid.near(orig.x, orig.y, targetDist * 2, candidates);
+      for (let k = 0; k < candidates.length; k++) {
+        const j = candidates[k];
+        // Skip the two edges adjacent to vertex i (i-1→i and i→i+1).
+        if (j === i || j === prevEdge) continue;
+        const A = poly[j];
+        const B = poly[(j + 1) % n];
+        const t = rayHitDistance(
+          orig.x, orig.y, dirX, dirY,
+          A.x, A.y, B.x, B.y,
+        );
+        if (t > 0 && t < targetDist * 2) {
+          const safe = Math.max(0, t / 2 - minPx);
+          if (safe < maxAllowed) maxAllowed = safe;
+        }
+      }
+    } else {
+      for (let j = 0; j < n; j++) {
+        if (j === i || j === prevEdge) continue;
+        const A = poly[j];
+        const B = poly[(j + 1) % n];
+        const t = rayHitDistance(
+          orig.x, orig.y, dirX, dirY,
+          A.x, A.y, B.x, B.y,
+        );
+        // Allow the raycast to reach up to 2× targetDist before
+        // clamping — this is the "is there an opposite wall within
+        // our reachable range" test. Past that, the obstacle is too
+        // far to constrain us.
+        if (t > 0 && t < targetDist * 2) {
+          const safe = Math.max(0, t / 2 - minPx);
+          if (safe < maxAllowed) maxAllowed = safe;
+        }
       }
     }
     result[i] = {
@@ -211,6 +335,11 @@ export function safeWallOffset(
   polys: Vec2[][],
   userExpand: number,
   minPx: number = 1,
+  /** Testing hook. `false` skips the edge grid and tests every vertex
+   *  against every edge, which is what this used to do unconditionally.
+   *  The grid is supposed to be an exact optimisation of that, and the
+   *  selftest fuzzes the two against each other to keep it honest. */
+  useIndex: boolean = true,
 ): Vec2[][] {
   if (!Number.isFinite(userExpand) || userExpand === 0) {
     return polys.map((p) => p.slice());
@@ -222,7 +351,11 @@ export function safeWallOffset(
     if (p.length < 3) { out[i] = p.slice(); continue; }
     const distance = outer[i] ? +userExpand : -userExpand;
     const targets = miteredTargets(p, distance);
-    out[i] = perVertexRaycastClamp(p, targets, minPx);
+    // Grid resolution, not a bound: a typical vertex moves about
+    // |distance| and so reaches about 2 × that. Each vertex widens its
+    // own query when it needs to.
+    const cellSize = Math.abs(distance);
+    out[i] = perVertexRaycastClamp(p, targets, minPx, cellSize, useIndex);
   }
   return out;
 }

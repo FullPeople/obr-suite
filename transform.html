@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>变身</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0c14; --bg-1:#11141d; --bg-2:#181c27; --bg-3:#1f2433;
+  --line:rgba(255,255,255,0.08); --line-2:rgba(255,255,255,0.16);
+  --text:#eaeef5; --text-2:#adb3c1; --text-3:#6e7588;
+  --accent:#b07cff; --accent-2:#c79bff;
+  --green:#5cd97c; --red:#ff6b6b; --yellow:#ffd66b;
+}
+html,body{
+  margin:0;height:100%;background:transparent;color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  font-size:13px;line-height:1.5;
+}
+.app{
+  padding:14px;display:flex;flex-direction:column;gap:12px;
+  background:radial-gradient(circle at 12% 0%, rgba(176,124,255,0.06), transparent 55%), var(--bg);
+  border:1px solid var(--line);border-radius:12px;min-height:100%;
+}
+.head{display:flex;align-items:center;gap:8px}
+.head .title{flex:1;font-size:14px;font-weight:600;letter-spacing:.3px}
+.head .vinyl{
+  width:22px;height:22px;border-radius:50%;
+  background:radial-gradient(circle at 35% 35%,var(--accent-2),var(--accent) 70%);
+  box-shadow:0 0 8px rgba(176,124,255,0.5);
+}
+.icon-btn{
+  width:26px;height:26px;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:5px;color:var(--text-3);font-size:14px;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.icon-btn:hover{background:var(--bg-3);color:var(--text)}
+
+.section{
+  padding:12px;background:var(--bg-1);border:1px solid var(--line);
+  border-radius:10px;display:flex;flex-direction:column;gap:10px;
+}
+.section-title{font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text-3);text-transform:uppercase}
+label.field{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--text-2)}
+input[type=text]{
+  padding:8px 10px;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;
+  color:var(--text);font-size:13px;font-family:inherit;
+}
+input[type=text]:focus{outline:none;border-color:var(--accent)}
+
+.preview-row{display:flex;align-items:center;gap:12px}
+.preview{
+  width:64px;height:64px;flex-shrink:0;border-radius:8px;
+  background:var(--bg-2) center/cover no-repeat;
+  border:1px solid var(--line-2);
+  display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:10px;text-align:center;
+}
+.size-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.size-chip{
+  padding:7px 4px;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;
+  font-size:11.5px;text-align:center;cursor:pointer;color:var(--text-2);
+  transition:background .12s,border-color .12s,color .12s;
+}
+.size-chip:hover{background:var(--bg-3)}
+.size-chip.active{background:rgba(176,124,255,0.18);border-color:var(--accent);color:var(--accent-2)}
+
+.btn-row{display:flex;gap:8px;margin-top:2px}
+.btn{
+  flex:1;padding:9px 13px;background:var(--bg-3);color:var(--text);
+  border:1px solid var(--line-2);border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;
+}
+.btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn--primary{background:linear-gradient(180deg,var(--accent-2),var(--accent));color:#1a0a33;border-color:var(--accent);font-weight:600}
+.btn--primary:hover:not(:disabled){filter:brightness(1.1)}
+
+.hint{font-size:11px;color:var(--text-3);line-height:1.6}
+.todo{font-size:11px;color:var(--text-3);border-top:1px dashed var(--line);padding-top:8px}
+.toast-stack{position:fixed;bottom:12px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:5px;pointer-events:none}
+.toast{padding:6px 12px;background:var(--bg-3);border:1px solid var(--line-2);border-radius:6px;font-size:11.5px}
+.toast.error{border-color:var(--red);color:var(--red)}
+.toast.warn{border-color:var(--yellow);color:var(--yellow)}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="head">
+    <span class="vinyl"></span>
+    <span class="title" data-en="Transform">变身</span>
+    <button class="icon-btn" id="closeBtn" title="取消" data-en-title="Cancel">×</button>
+  </div>
+
+  <div class="section">
+    <div class="section-title" data-en="Instant transform">即时变身</div>
+    <label class="field">
+      <span data-en="Direct image URL">图片直链 URL</span>
+      <input type="text" id="imgUrl" placeholder="https://… .png / .webp / .gif">
+    </label>
+    <div class="preview-row">
+      <div class="preview" id="preview" data-en="Preview">预览</div>
+      <label class="field" style="flex:1">
+        <span data-en="New name (blank = keep current)">新名字（可留空＝沿用）</span>
+        <input type="text" id="formName" placeholder="例如：野熊形态" data-en-ph="e.g. Dire Bear form">
+      </label>
+    </div>
+    <div>
+      <div class="section-title" style="margin-bottom:6px" data-en="Size">体型</div>
+      <div class="size-grid" id="sizeGrid">
+        <div class="size-chip" data-fp="1" data-en="Tiny">超小型</div>
+        <div class="size-chip" data-fp="1" data-en="Small">小型</div>
+        <div class="size-chip active" data-fp="1" data-en="Medium">中型</div>
+        <div class="size-chip" data-fp="2" data-en="Large">大型</div>
+        <div class="size-chip" data-fp="3" data-en="Huge">巨型</div>
+        <div class="size-chip" data-fp="4" data-en="Gargantuan">超巨型</div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn--primary" id="applyBtn" disabled data-en="Transform">变身</button>
+    </div>
+    <div class="hint" data-en="Transforming saves the current form; later right-click the token → “Revert” to switch back in one click. The image swap is visible to everyone.">变身会保存当前形态，之后右键 token →「解除变身」可一键变回。换图对所有人可见。</div>
+    <div class="todo" data-en="Coming soon: preset form library · two-stage transform FX · sync bestiary data · camera focus.">即将到来：预设形态库 · 两段变身特效 · 同步怪物图鉴数据 · 镜头聚焦。</div>
+  </div>
+</div>
+<div class="toast-stack" id="toastStack"></div>
+<script type="module" src="./src/transform-page.ts"></script>
+</body>
+</html>

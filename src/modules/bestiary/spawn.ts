@@ -96,7 +96,7 @@ function probeImage(url: string): Promise<{ ok: boolean; w: number; h: number }>
   });
 }
 
-const FALLBACK_TOKEN_URL = `https://obr.dnd.center/5etools-img/bestiary/tokens/MM/Commoner.webp`;
+const FALLBACK_TOKEN_URL = `https://5e.kiwee.top/img/bestiary/tokens/MM/Commoner.webp`;
 
 /** Detect the right MIME type from a token URL extension. OBR's
  *  image-fetcher validates the ImageContent.mime field against the
@@ -129,7 +129,13 @@ export async function spawnMonster(
   // homebrew monsters whose auto-built kiwee URL doesn't exist),
   // fall back to the Commoner placeholder so the token still spawns
   // — DM can swap in a real image later via OBR's image picker.
+  //
+  // 2026-09-14 — the probe's own decode is reused as the token size.
+  // `getImageSize(tokenUrl)` used to start a SECOND `new Image()` for
+  // the same URL, so every click-spawn decoded the same remote webp
+  // twice. Only the fallback commoner still needs a fresh measurement.
   let tokenUrl = monster.tokenUrl || FALLBACK_TOKEN_URL;
+  let probed: { w: number; h: number } | null = null;
   if (tokenUrl !== FALLBACK_TOKEN_URL) {
     const probe = await probeImage(tokenUrl);
     if (!probe.ok) {
@@ -138,6 +144,8 @@ export async function spawnMonster(
         tokenUrl,
       );
       tokenUrl = FALLBACK_TOKEN_URL;
+    } else {
+      probed = { w: probe.w, h: probe.h };
     }
   }
 
@@ -152,7 +160,7 @@ export async function spawnMonster(
     OBR.viewport.getHeight(),
     OBR.viewport.getPosition(),
     OBR.viewport.getScale(),
-    getImageSize(tokenUrl),
+    probed ? Promise.resolve(probed) : getImageSize(tokenUrl),
   ]);
 
   let worldX: number;
@@ -224,7 +232,8 @@ export async function spawnMonster(
       "locked": true,
     },
     [BUBBLES_NAME]: monster.name,
-    [INITIATIVE_MODKEY]: monster.dexMod,
+    // The stat block's own 先攻 bonus — not always the DEX modifier.
+    [INITIATIVE_MODKEY]: monster.initiative,
     [BESTIARY_SLUG_KEY]: slug,
   };
   if (autoInit) {

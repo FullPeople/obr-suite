@@ -41,6 +41,22 @@ export const BC_LOCAL_CONTENT_CHANGED = "com.obr-suite/local-content-changed";
 const IDB_INDEX_KEY = "index";
 const IDB_FILE_PREFIX = "file:";
 
+/** IDB key for the URL-subscription list. Each entry is a
+ *  RemoteSubscription record; the actual fetched JSON is stored at
+ *  `file:<id>` exactly like a manual import (so search / bestiary
+ *  / character cards see it identically), linked via
+ *  RemoteSubscription.fileId. */
+const IDB_SUBS_KEY = "subscriptions";
+
+/** How long after a successful subscription fetch we treat the
+ *  cache as "fresh enough" and skip the boot-time auto-refresh.
+ *  1h is a deliberate trade-off — fast enough that a homebrew
+ *  author's update reaches the table within most sessions, slow
+ *  enough that reload-spamming a flaky host doesn't make us look
+ *  like an attacker. The per-row 🔄 button always force-refreshes
+ *  regardless of this window. */
+const SUB_STALE_MS = 60 * 60 * 1000;
+
 // Legacy localStorage keys — used ONLY by the one-shot migration in
 // initLocalContent(). After migration completes the legacy entries
 // are wiped.
@@ -105,15 +121,66 @@ const KIND_TO_CATEGORY: Record<LocalKind, number> = {
 export interface LocalFileMeta {
   id: string;
   filename: string;
+  /** Primary kind — kept for backward compat with files imported
+   *  before the multi-kind refactor (2026-05-27). For multi-kind
+   *  packs (e.g. kiwee homebrew with both `monster` and `spell`
+   *  top-level arrays), this is `kinds[0]` and the full set is in
+   *  `kinds`. */
   kind: LocalKind;
-  /** How many top-level entries the file contributed. */
+  /** Every recognised top-level kind in the file. Present for
+   *  multi-kind packs; absent on legacy single-kind imports. The
+   *  multi-kind refactor was added when we started subscribing to
+   *  kiwee homebrew, which routinely packs `class` +
+   *  `subclassFeature` + `creature` + `spell` etc into one file. */
+  kinds?: LocalKind[];
+  /** How many top-level entries the file contributed. For multi-kind
+   *  files this is the SUM across every recognised kind so the UI's
+   *  "X 类 · N" badge stays informative. */
   count: number;
   /** ms since epoch. Used to sort newest-first in the UI. */
   addedAt: number;
+  /** When this meta belongs to a URL subscription, the source URL
+   *  is mirrored here so the settings panel can mark the row with
+   *  a 🔗 badge and route deletes through removeRemoteSubscription
+   *  (which also drops the parent subscription record). Undefined
+   *  = manually imported by the user. */
+  remoteUrl?: string;
 }
 
 interface LocalIndexState {
   files: LocalFileMeta[];
+}
+
+/** A URL-based homebrew subscription. The plugin re-fetches the
+ *  URL on stale (see SUB_STALE_MS) so the table picks up the
+ *  author's updates without manual re-imports. The fetched JSON
+ *  lives in the same per-file slot a manual import would use; the
+ *  `fileId` here points at the corresponding LocalFileMeta. On
+ *  fetch failure we KEEP whatever was previously cached and
+ *  surface `lastError` so the settings UI can show a tooltip. */
+export interface RemoteSubscription {
+  /** Canonical URL — used as primary key and as the fetch target.
+   *  Stored verbatim minus surrounding whitespace; never further
+   *  normalised so we don't accidentally collapse two distinct
+   *  homebrew packs that share a path prefix. */
+  url: string;
+  /** ms since epoch when the user added the subscription. */
+  addedAt: number;
+  /** ms since epoch — last successful fetch. undefined = never
+   *  successfully fetched (first attempt failed; row appears in
+   *  the UI with a "未获取" badge so the user can retry). */
+  lastFetchedAt?: number;
+  /** Most recent error message — cleared on the next successful
+   *  fetch. Used by the settings UI to flag the row red and show
+   *  a tooltip with the error reason. */
+  lastError?: string;
+  /** LocalFileMeta.id holding this sub's last good content.
+   *  undefined = first fetch hasn't succeeded yet. */
+  fileId?: string;
+}
+
+interface RemoteSubsState {
+  list: RemoteSubscription[];
 }
 
 // === In-memory cache layer ===
@@ -125,6 +192,7 @@ interface LocalIndexState {
 // imported — typical homebrew packs are a few MB at most.
 let memIndex: LocalIndexState = { files: [] };
 const memFiles = new Map<string, any>();
+let memSubs: RemoteSubsState = { list: [] };
 
 let initPromise: Promise<void> | null = null;
 
@@ -214,6 +282,18 @@ async function doInit(): Promise<void> {
       console.warn("[obr-suite/localContent] legacy localStorage migration failed", e);
     }
   }
+
+  // 3. Warm the URL-subscription list. Independent of the files
+  //    warm-up — even if the files index is empty / corrupt, a
+  //    user may still have subscription records they want to keep.
+  try {
+    const subs = await idbGet<RemoteSubsState>(IDB_SUBS_KEY);
+    if (subs && Array.isArray(subs.list)) {
+      memSubs = { list: [...subs.list] };
+    }
+  } catch (e) {
+    console.warn("[obr-suite/localContent] subscriptions warm-up failed", e);
+  }
 }
 
 function readIndex(): LocalIndexState {
@@ -248,6 +328,16 @@ async function deleteFile(id: string): Promise<void> {
   try { await idbDelete(IDB_FILE_PREFIX + id); } catch {}
 }
 
+function readSubs(): RemoteSubsState {
+  return memSubs;
+}
+
+async function writeSubs(state: RemoteSubsState): Promise<void> {
+  memSubs = state;
+  try { await idbPut(IDB_SUBS_KEY, state); }
+  catch (e) { console.warn("[obr-suite/localContent] writeSubs failed", e); }
+}
+
 /** Public read: ordered list of imported files (newest first). */
 export function getLocalFiles(): LocalFileMeta[] {
   return [...readIndex().files].sort((a, b) => b.addedAt - a.addedAt);
@@ -262,16 +352,26 @@ export function getLocalContentSignature(): string {
   return `${idx.files.length}:${idx.files.map((f) => f.id).join("|")}`;
 }
 
-/** Public read: raw entry array of a given file. */
-export function getLocalFileEntries(id: string): any[] {
+/** Public read: raw entry array of a given file. When `kind` is
+ *  omitted, returns the concatenation of every recognised top-level
+ *  kind so multi-kind packs (kiwee homebrew etc.) surface ALL their
+ *  entries to the caller. When `kind` is given, returns only that
+ *  bucket. */
+export function getLocalFileEntries(id: string, kind?: LocalKind): any[] {
   const content = readFile(id);
   if (!content) return [];
-  // Extract the top-level array regardless of which key (monster /
-  // spell / item / ...) was used.
-  for (const key of Object.keys(content)) {
-    if (Array.isArray(content[key])) return content[key];
+  if (kind) {
+    return Array.isArray(content[kind]) ? content[kind] : [];
   }
-  return [];
+  // Concat every recognised kind. We iterate KIND_TO_CATEGORY keys in
+  // stable order so the synthetic search-index ids stay consistent
+  // across runs.
+  const out: any[] = [];
+  for (const k of Object.keys(KIND_TO_CATEGORY) as LocalKind[]) {
+    const arr = content[k];
+    if (Array.isArray(arr)) out.push(...arr);
+  }
+  return out;
 }
 
 /** Build a slug from a name that's safe to use as the `u` field. */
@@ -316,29 +416,37 @@ export function getLocalIndexFile(): SearchIndexFile {
   let nextSourceNum = 9000;
 
   for (const meta of idx.files) {
-    const cat = KIND_TO_CATEGORY[meta.kind];
-    if (typeof cat !== "number") continue;
-    const entries = getLocalFileEntries(meta.id);
-    for (const e of entries) {
-      if (!e || typeof e !== "object") continue;
-      const engName = String(e.ENG_name ?? e.name ?? "").trim();
-      const cnName = String(e.name ?? "").trim();
-      if (!engName && !cnName) continue;
-      const source = String(e.source ?? "HOMEBREW").trim() || "HOMEBREW";
-      if (!sourceNumByCode.has(source)) {
-        sourceNumByCode.set(source, nextSourceNum++);
-        out.m.s[source] = sourceNumByCode.get(source)!;
+    // Multi-kind files (post 2026-05-27 refactor) emit one search
+    // index batch per recognised kind. Legacy single-kind files fall
+    // back to `[meta.kind]` so older imports keep working unchanged.
+    const fileKinds: LocalKind[] = meta.kinds && meta.kinds.length > 0
+      ? meta.kinds
+      : [meta.kind];
+    for (const k of fileKinds) {
+      const cat = KIND_TO_CATEGORY[k];
+      if (typeof cat !== "number") continue;
+      const entries = getLocalFileEntries(meta.id, k);
+      for (const e of entries) {
+        if (!e || typeof e !== "object") continue;
+        const engName = String(e.ENG_name ?? e.name ?? "").trim();
+        const cnName = String(e.name ?? "").trim();
+        if (!engName && !cnName) continue;
+        const source = String(e.source ?? "HOMEBREW").trim() || "HOMEBREW";
+        if (!sourceNumByCode.has(source)) {
+          sourceNumByCode.set(source, nextSourceNum++);
+          out.m.s[source] = sourceNumByCode.get(source)!;
+        }
+        const u = e.u ? String(e.u) : slugify(engName || cnName);
+        out.x.push({
+          id: nextId++,
+          c: cat,
+          n: engName || cnName,
+          cn: cnName !== engName ? cnName : undefined,
+          s: source,
+          u,
+          __local: true,
+        });
       }
-      const u = e.u ? String(e.u) : slugify(engName || cnName);
-      out.x.push({
-        id: nextId++,
-        c: cat,
-        n: engName || cnName,
-        cn: cnName !== engName ? cnName : undefined,
-        s: source,
-        u,
-        __local: true,
-      });
     }
   }
   return out;
@@ -366,12 +474,15 @@ export function getLocalDataByKeySource(key: string, source: string): any[] {
 }
 
 /** Convenience: every locally imported monster across all files. Used
- *  by modules/bestiary/data.ts to merge into the bestiary panel. */
+ *  by modules/bestiary/data.ts to merge into the bestiary panel.
+ *  2026-05-27 — dropped the `meta.kind === "monster"` gate; multi-kind
+ *  packs (kiwee homebrew etc.) have `kind === "class"` or similar
+ *  while still carrying a `monster` array inside. We now always
+ *  inspect content.monster directly. */
 export function getAllLocalMonsters(): any[] {
   const idx = readIndex();
   const out: any[] = [];
   for (const meta of idx.files) {
-    if (meta.kind !== "monster") continue;
     const content = readFile(meta.id);
     if (!content) continue;
     const arr = Array.isArray(content.monster) ? content.monster : [];
@@ -381,13 +492,29 @@ export function getAllLocalMonsters(): any[] {
 }
 
 /** Detect which top-level kind a parsed JSON file represents. Returns
- *  null when no recognised key is found. */
+ *  null when no recognised key is found. Kept for backward compat
+ *  with code paths that still want a single primary kind; the
+ *  multi-kind enabled importer uses detectKinds() instead. */
 function detectKind(parsed: any): LocalKind | null {
   if (!parsed || typeof parsed !== "object") return null;
   for (const k of Object.keys(KIND_TO_CATEGORY) as LocalKind[]) {
     if (Array.isArray(parsed[k]) && parsed[k].length > 0) return k;
   }
   return null;
+}
+
+/** Detect EVERY recognised top-level kind in the file. Returns them
+ *  in KIND_TO_CATEGORY iteration order, which is stable across runs
+ *  so the synthesized search-index ids stay consistent. Empty array
+ *  when none of the known kinds appear — used to reject files that
+ *  don't look like 5etools data. */
+function detectKinds(parsed: any): LocalKind[] {
+  if (!parsed || typeof parsed !== "object") return [];
+  const out: LocalKind[] = [];
+  for (const k of Object.keys(KIND_TO_CATEGORY) as LocalKind[]) {
+    if (Array.isArray(parsed[k]) && parsed[k].length > 0) out.push(k);
+  }
+  return out;
 }
 
 /** Result from importLocalFile: ok=true with the new meta on success,
@@ -404,13 +531,14 @@ export async function importLocalJson(filename: string, jsonText: string): Promi
   } catch (e: any) {
     return { ok: false, error: `JSON 解析失败：${e?.message || String(e)}` };
   }
-  const kind = detectKind(parsed);
-  if (!kind) {
+  const kinds = detectKinds(parsed);
+  if (kinds.length === 0) {
     return {
       ok: false,
       error: "JSON 顶层缺少识别的内容键（应为 monster / spell / item / feat 等）",
     };
   }
+  const primaryKind = kinds[0];
   // 2026-05-12 — user request #8: re-importing the same filename
   // should REPLACE the previous file, not stack a second copy
   // alongside it. Previously the import always generated a new
@@ -418,9 +546,9 @@ export async function importLocalJson(filename: string, jsonText: string): Promi
   // two entries — the bestiary listing showed both, and bound
   // tokens kept showing the older monster data because slug lookups
   // hit whichever entry rawBySlug saw last. Now we look for a
-  // matching filename + kind and delete it first.
+  // matching filename + primary kind and delete it first.
   const existing = readIndex().files.filter(
-    (f) => f.filename === filename && f.kind === kind,
+    (f) => f.filename === filename && f.kind === primaryKind,
   );
   for (const stale of existing) {
     await deleteFile(stale.id);
@@ -428,7 +556,7 @@ export async function importLocalJson(filename: string, jsonText: string): Promi
   if (existing.length > 0) {
     const state = readIndex();
     state.files = state.files.filter(
-      (f) => !(f.filename === filename && f.kind === kind),
+      (f) => !(f.filename === filename && f.kind === primaryKind),
     );
     await writeIndex(state);
   }
@@ -438,8 +566,21 @@ export async function importLocalJson(filename: string, jsonText: string): Promi
   } catch (e: any) {
     return { ok: false, error: `存储失败 —— IndexedDB 写入异常：${e?.message || String(e)}` };
   }
-  const count = Array.isArray(parsed[kind]) ? parsed[kind].length : 0;
-  const meta: LocalFileMeta = { id, filename, kind, count, addedAt: Date.now() };
+  // Count = sum across every recognised kind so multi-kind packs
+  // (e.g. kiwee homebrew with `creature` + `spell` + `subclassFeature`)
+  // show a meaningful "N entries" badge in the UI.
+  let count = 0;
+  for (const k of kinds) {
+    if (Array.isArray(parsed[k])) count += parsed[k].length;
+  }
+  const meta: LocalFileMeta = {
+    id,
+    filename,
+    kind: primaryKind,
+    kinds: kinds.length > 1 ? kinds : undefined,
+    count,
+    addedAt: Date.now(),
+  };
   const state = readIndex();
   state.files.push(meta);
   await writeIndex(state);
@@ -663,6 +804,7 @@ export async function clearAllLocal(): Promise<void> {
   // imports whose meta got dropped but file content lingered).
   memFiles.clear();
   memIndex = { files: [] };
+  memSubs = { list: [] };
   try { await idbClear(); } catch (e) {
     console.warn("[obr-suite/localContent] clearAllLocal: idbClear failed", e);
   }
@@ -670,4 +812,202 @@ export async function clearAllLocal(): Promise<void> {
   // "idbHasData / fresh-but-touched" branch instead of attempting
   // a legacy localStorage migration.
   try { await idbPut(IDB_INDEX_KEY, memIndex); } catch {}
+}
+
+// ─── URL subscriptions ────────────────────────────────────────────
+//
+// Lets the user paste an HTTPS URL pointing at a single 5etools-shape
+// JSON (a homebrew "pack" — same format manual-import expects). The
+// suite caches the fetched JSON locally and re-fetches it on session
+// boot when the cache is stale, so updates the upstream author
+// publishes appear on the table without anyone re-importing by hand.
+//
+// On fetch failure we keep the cached content (graceful degradation)
+// and stash the error message on the subscription record so the
+// settings UI can flag the row.
+
+/** Result of an add / refresh subscription operation. On ok=true the
+ *  meta + sub are populated and the fetched content is already merged
+ *  into the local-content store; on ok=false an `error` string explains
+ *  what went wrong (sub may still be populated when the sub record
+ *  exists but the fetch / parse failed, so the UI can show the row). */
+export type SubscriptionResult =
+  | { ok: true; sub: RemoteSubscription; meta: LocalFileMeta }
+  | { ok: false; sub?: RemoteSubscription; error: string };
+
+/** Public read: ordered list of subscriptions (oldest-first to match
+ *  the order the user added them — the UI labels are stable across
+ *  refreshes). */
+export function getRemoteSubscriptions(): RemoteSubscription[] {
+  return [...readSubs().list].sort((a, b) => a.addedAt - b.addedAt);
+}
+
+function deriveSubFilename(url: string): string {
+  try {
+    const u = new URL(url);
+    const last = u.pathname.split("/").filter(Boolean).pop();
+    if (last) return decodeURIComponent(last);
+    return u.hostname || url;
+  } catch {
+    return url.length > 80 ? url.slice(0, 77) + "..." : url;
+  }
+}
+
+/** Add a new subscription and kick off the first fetch. The
+ *  subscription itself is persisted BEFORE the fetch, so even when
+ *  the URL is unreachable the row shows up in the UI (with a retry
+ *  button) instead of silently swallowing the user's input. */
+export async function addRemoteSubscription(url: string): Promise<SubscriptionResult> {
+  await initLocalContent();
+  const cleanUrl = url.trim();
+  if (!cleanUrl) return { ok: false, error: "URL 不能为空" };
+  if (!/^https?:\/\//i.test(cleanUrl)) {
+    return { ok: false, error: "URL 必须以 http:// 或 https:// 开头" };
+  }
+  const state = readSubs();
+  if (state.list.some((s) => s.url === cleanUrl)) {
+    return { ok: false, error: "该 URL 已经订阅过了 / Already subscribed" };
+  }
+  const sub: RemoteSubscription = { url: cleanUrl, addedAt: Date.now() };
+  state.list.push(sub);
+  await writeSubs(state);
+  return refreshRemoteSubscription(cleanUrl);
+}
+
+/** Force-fetch a single subscription. Replaces the previous file
+ *  entry (if any) so we never accumulate stale snapshots. Failures
+ *  leave the cached file intact and only update `lastError`. */
+export async function refreshRemoteSubscription(url: string): Promise<SubscriptionResult> {
+  await initLocalContent();
+  const state = readSubs();
+  const sub = state.list.find((s) => s.url === url);
+  if (!sub) return { ok: false, error: "未找到对应的订阅" };
+
+  let text: string;
+  try {
+    const res = await fetch(url, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    text = await res.text();
+  } catch (e: any) {
+    sub.lastError = `网络错误：${e?.message || String(e)}`;
+    await writeSubs(state);
+    return { ok: false, sub, error: sub.lastError };
+  }
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e: any) {
+    sub.lastError = `JSON 解析失败：${e?.message || String(e)}`;
+    await writeSubs(state);
+    return { ok: false, sub, error: sub.lastError };
+  }
+  const kinds = detectKinds(parsed);
+  if (kinds.length === 0) {
+    sub.lastError = "JSON 顶层缺少识别的内容键（应为 monster / spell / item / feat 等）";
+    await writeSubs(state);
+    return { ok: false, sub, error: sub.lastError };
+  }
+  const primaryKind = kinds[0];
+
+  // Replace any existing file for this subscription. We reuse the
+  // same fileId so that downstream references (search index cache
+  // keys, bestiary slug lookups) don't churn unnecessarily across
+  // refreshes — the contents change in place.
+  const idx = readIndex();
+  if (sub.fileId) {
+    await deleteFile(sub.fileId);
+    idx.files = idx.files.filter((f) => f.id !== sub.fileId);
+  }
+  const id = sub.fileId ?? `remote-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    await writeFile(id, parsed);
+  } catch (e: any) {
+    sub.lastError = `存储失败：${e?.message || String(e)}`;
+    await writeSubs(state);
+    return { ok: false, sub, error: sub.lastError };
+  }
+  let count = 0;
+  for (const k of kinds) {
+    if (Array.isArray(parsed[k])) count += parsed[k].length;
+  }
+  const meta: LocalFileMeta = {
+    id,
+    filename: deriveSubFilename(url),
+    kind: primaryKind,
+    kinds: kinds.length > 1 ? kinds : undefined,
+    count,
+    addedAt: Date.now(),
+    remoteUrl: url,
+  };
+  idx.files.push(meta);
+  await writeIndex(idx);
+
+  sub.fileId = id;
+  sub.lastFetchedAt = Date.now();
+  delete sub.lastError;
+  await writeSubs(state);
+  return { ok: true, sub, meta };
+}
+
+/** Remove a subscription AND its cached file together — a "delete"
+ *  on a subscribed row should drop the data too, otherwise the user
+ *  is left with an orphaned local file they didn't manually import. */
+export async function removeRemoteSubscription(url: string): Promise<void> {
+  await initLocalContent();
+  const state = readSubs();
+  const sub = state.list.find((s) => s.url === url);
+  if (!sub) return;
+  if (sub.fileId) {
+    await deleteFile(sub.fileId);
+    const idx = readIndex();
+    idx.files = idx.files.filter((f) => f.id !== sub.fileId);
+    await writeIndex(idx);
+  }
+  state.list = state.list.filter((s) => s.url !== url);
+  await writeSubs(state);
+}
+
+let refreshStalePromise: Promise<{ refreshed: number; failed: number }> | null = null;
+
+/** Sweep every subscription whose last successful fetch is older than
+ *  SUB_STALE_MS (or whose first fetch never succeeded) and try
+ *  fetching them. Within a single session this is memoised — repeat
+ *  callers get the same in-flight promise so we don't spam the
+ *  homebrew host when multiple iframes ask in parallel. Pass
+ *  `force=true` to bypass the memoisation (used by the "刷新全部"
+ *  button to retry within the same session). */
+export function refreshStaleSubscriptions(force = false): Promise<{ refreshed: number; failed: number }> {
+  if (!refreshStalePromise || force) {
+    refreshStalePromise = doRefreshStale(force);
+  }
+  return refreshStalePromise;
+}
+
+async function doRefreshStale(force: boolean): Promise<{ refreshed: number; failed: number }> {
+  await initLocalContent();
+  const now = Date.now();
+  const subs = [...readSubs().list];
+  let refreshed = 0;
+  let failed = 0;
+  for (const s of subs) {
+    if (!force && s.lastFetchedAt && now - s.lastFetchedAt < SUB_STALE_MS) continue;
+    const r = await refreshRemoteSubscription(s.url);
+    if (r.ok) refreshed++; else failed++;
+  }
+  return { refreshed, failed };
+}
+
+/** Drop and re-populate the in-memory mirror from IDB. Use this in
+ *  BC_LOCAL_CONTENT_CHANGED handlers so cross-iframe updates take
+ *  effect without a page reload — without this, each iframe's
+ *  `memFiles` was being held statically from its own init, which
+ *  meant the settings iframe could write fresh content into IDB but
+ *  the search / bestiary iframes would keep reading their old
+ *  snapshot. */
+export async function forceReloadLocalContent(): Promise<void> {
+  initPromise = null;
+  memIndex = { files: [] };
+  memFiles.clear();
+  memSubs = { list: [] };
+  await initLocalContent();
 }

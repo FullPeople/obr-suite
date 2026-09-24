@@ -37,7 +37,15 @@
 import OBR, { Item } from "@owlbear-rodeo/sdk";
 import { Resource, IconId, PLUGIN_ID } from "./types";
 import { ICON_LIBRARY } from "./icons";
-import { readResources, updateResource, writeResources } from "./storage";
+import { readResources, updateResource, reorderResources } from "./storage";
+import { t } from "../../i18n";
+import { getLocalLang, onLangChange } from "../../state";
+import { createInteractionGuard } from "./interaction";
+
+// Shared component (mounted in the resource-tracker DM panel AND in the
+// player-facing cc-info card), so read the language fresh on each call
+// — the host re-renders on data change and on language switch.
+const T = (k: Parameters<typeof t>[1]) => t(getLocalLang(), k);
 
 // 2026-05-14 — small expression parser for click-to-input on bar /
 // number rows. Accepts:
@@ -136,9 +144,11 @@ async function broadcastChanged(
   resource: Resource,
   delta: number,
   prevValue: number,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   if (delta === 0) return;
   const tokenName = await resolveTokenDisplayName(itemId);
+  if (!isCurrent()) return;
   try {
     const payload = { tokenId: itemId, tokenName, resource, delta, prevValue };
     await Promise.all([
@@ -167,6 +177,17 @@ export function mountResourcePanel(opts: MountOptions): {
 } {
   const { container, getItemId, onChange } = opts;
   let currentRender: Resource[] = [];
+  let displayedId: string | null = null, readRevision = 0;
+  const dragCleanups = new Set<() => void>();
+  const guard = createInteractionGuard(getItemId, () => container.isConnected, () => {
+    readRevision++;
+    for (const cleanup of [...dragCleanups]) cleanup();
+    void refresh();
+  });
+  const currentTarget = (itemId: string) => {
+    const target = guard.capture();
+    return target?.id === itemId ? target : null;
+  };
   let lastSnapshotJson = "";
   // 2026-05-12 — "we just touched it" window. Earlier round relied
   // solely on JSON.stringify equality between optimistic snapshot and
@@ -208,15 +229,23 @@ export function mountResourcePanel(opts: MountOptions): {
   }
 
   async function refresh(): Promise<void> {
+    const target = guard.capture(), own = ++readRevision;
     const id = getItemId();
+    if (!guard.alive()) return;
     if (!id) {
-      container.innerHTML = `<div class="rt-empty">未选中任何 token</div>`;
+      displayedId = null;
+      container.innerHTML = `<div class="rt-empty">${T("rpNoToken")}</div>`;
       currentRender = [];
       lastSnapshotJson = "";
       return;
     }
+    if (!target) return;
     let items: Item[] = [];
-    try { items = await OBR.scene.items.getItems([id]); } catch {}
+    try { items = await OBR.scene.items.getItems([id]); } catch { return; }
+    if (!target.current() || own !== readRevision) return;
+    if (displayedId !== id) {
+      displayedId = id; currentRender = []; lastSnapshotJson = ""; container.innerHTML = "";
+    }
     const item = items[0] ?? null;
     const next = readResources(item);
     const nextJson = JSON.stringify(next);
@@ -315,14 +344,14 @@ export function mountResourcePanel(opts: MountOptions): {
   function render(): void {
     const id = getItemId();
     if (!id) {
-      container.innerHTML = `<div class="rt-empty">未选中任何 token</div>`;
+      container.innerHTML = `<div class="rt-empty">${T("rpNoToken")}</div>`;
       return;
     }
     if (currentRender.length === 0) {
       container.innerHTML = `
         <div class="rt-empty-state">
-          <div class="rt-empty-msg">该 token 还没有任何资源</div>
-          <button class="rt-add-first" type="button">＋ 创建资源</button>
+          <div class="rt-empty-msg">${T("rpNoResources")}</div>
+          <button class="rt-add-first" type="button">${T("rpCreate")}</button>
         </div>
       `;
       container.querySelector<HTMLButtonElement>(".rt-add-first")
@@ -336,7 +365,7 @@ export function mountResourcePanel(opts: MountOptions): {
     });
     container.innerHTML = `
       <div class="rt-list">${sorted.map(renderResourceRow).join("")}</div>
-      <button class="rt-add" type="button">＋ 新增资源</button>
+      <button class="rt-add" type="button">${T("rpAdd")}</button>
     `;
     bindRowEvents();
   }
@@ -370,10 +399,10 @@ export function mountResourcePanel(opts: MountOptions): {
                 data-action="row-grip"
                 data-rid="${escapeAttr(r.id)}"
                 draggable="true"
-                title="拖动以重新排序">≡</span>
-          <div class="rt-row-name" title="${escapeAttr(r.name)}">${escapeHtml(r.name || "(未命名)")}</div>
+                title="${escapeAttr(T("rpReorder"))}">≡</span>
+          <div class="rt-row-name" title="${escapeAttr(r.name)}">${escapeHtml(r.name || T("rtUnnamed"))}</div>
           <div class="rt-row-meta" data-meta>${r.current} / ${r.max}</div>
-          <button class="rt-row-edit" type="button" data-edit-id="${escapeAttr(r.id)}" title="编辑">⚙</button>
+          <button class="rt-row-edit" type="button" data-edit-id="${escapeAttr(r.id)}" title="${escapeAttr(T("rpEdit"))}">⚙</button>
         </div>
         <div class="rt-pills">${pillsHtml}</div>
       </div>
@@ -391,13 +420,13 @@ export function mountResourcePanel(opts: MountOptions): {
               data-action="count-toggle"
               data-rid="${escapeAttr(r.id)}"
               data-pos="${i}"
-              title="${escapeAttr(r.name)} · 第 ${i} 格 · 点击赋值 ${i}（已为 ${i} 时减 1）· 右键归满">
+              title="${escapeAttr(T("rpPipTitle").replace("{name}", r.name).replace(/\{i\}/g, String(i)))}">
           ${ICON_LIBRARY[r.icon as IconId] ?? ICON_LIBRARY.gem}
         </span>
       `);
     }
     if (max === 0) {
-      cells.push(`<span class="rt-pill-empty">最大值为 0（点 ⚙ 设置）</span>`);
+      cells.push(`<span class="rt-pill-empty">${T("rpMaxZero")}</span>`);
     }
     return cells.join("");
   }
@@ -419,11 +448,11 @@ export function mountResourcePanel(opts: MountOptions): {
            data-bar-num
            data-action="value-edit"
            data-rid="${escapeAttr(r.id)}"
-           title="点击编辑：可输入数字 / +5 -3 / current+5 / max-2 等表达式">${cur} / ${max}</div>
+           title="${escapeAttr(T("rpEditExpr"))}">${cur} / ${max}</div>
       <div class="rt-bar"
            data-action="bar-drag"
            data-rid="${escapeAttr(r.id)}"
-           title="${escapeAttr(r.name)} · 左键拖动设置进度，右键 +1 / 归满">
+           title="${escapeAttr(T("rpBarTitle").replace("{name}", r.name))}">
         <div class="rt-bar-fill" data-bar-fill style="width:${ratio.toFixed(1)}%"></div>
         <span class="rt-bar-thumb"
               data-bar-thumb
@@ -449,7 +478,7 @@ export function mountResourcePanel(opts: MountOptions): {
     const cur = r.current;
     return `
       <div class="rt-num-bar">
-        <button class="rt-num-end" data-num-end="min" type="button" title="跳到最小（${min}）">${min}</button>
+        <button class="rt-num-end" data-num-end="min" type="button" title="${escapeAttr(T("rpJumpMin").replace("{min}", String(min)))}">${min}</button>
         <button class="rt-num-step rt-num-minus"
                 data-action="num-step"
                 data-rid="${escapeAttr(r.id)}"
@@ -464,7 +493,7 @@ export function mountResourcePanel(opts: MountOptions): {
                 data-num-val
                 data-action="value-edit"
                 data-rid="${escapeAttr(r.id)}"
-                title="点击编辑：可输入数字 / +5 -3 / current+5 / max-2 等表达式">${cur}</span>
+                title="${escapeAttr(T("rpEditExpr"))}">${cur}</span>
         </span>
         <button class="rt-num-step rt-num-plus"
                 data-action="num-step"
@@ -472,7 +501,7 @@ export function mountResourcePanel(opts: MountOptions): {
                 data-dir="+1"
                 type="button"
                 title="${escapeAttr(r.name)} +1">+</button>
-        <button class="rt-num-end" data-num-end="max" type="button" title="跳到最大（${max}）">${max}</button>
+        <button class="rt-num-end" data-num-end="max" type="button" title="${escapeAttr(T("rpJumpMax").replace("{max}", String(max)))}">${max}</button>
       </div>
     `;
   }
@@ -505,11 +534,11 @@ export function mountResourcePanel(opts: MountOptions): {
       const num = row.querySelector<HTMLElement>("[data-bar-num]");
       const thumb = row.querySelector<HTMLElement>("[data-bar-thumb]");
       if (fill) fill.style.width = `${ratio.toFixed(1)}%`;
-      if (num) num.textContent = `${cur} / ${max}`;
+      if (num && !num.querySelector("input")) num.textContent = `${cur} / ${max}`;
       if (thumb) thumb.style.left = `${ratio.toFixed(2)}%`;
     } else if (r.type === "number") {
       const val = row.querySelector<HTMLElement>("[data-num-val]");
-      if (val) val.textContent = String(r.current);
+      if (val && !val.querySelector("input")) val.textContent = String(r.current);
     }
     // Pulse the clicked element (or the row's primary icon if not given).
     if (pulseEl) firePulse(pulseEl);
@@ -697,7 +726,8 @@ export function mountResourcePanel(opts: MountOptions): {
   // pointer. We optimistically patch on every move (no scene-write
   // burst) and only persist on pointerup (single updateResource).
   function onBarPointerDown(itemId: string, el: HTMLElement, ev: PointerEvent): void {
-    if (ev.button !== 0) return;
+    const target = currentTarget(itemId);
+    if (ev.button !== 0 || !target) return;
     const rid = el.dataset.rid!;
     const r = currentRender.find((x) => x.id === rid);
     if (!r) return;
@@ -723,6 +753,7 @@ export function mountResourcePanel(opts: MountOptions): {
       }
     }
     const onMove = (e: PointerEvent) => {
+      if (!target.current()) { cleanup(); return; }
       const v = computeAt(e.clientX);
       if (v === lastApplied) return;
       const idx = currentRender.findIndex((x) => x.id === r.id);
@@ -732,28 +763,23 @@ export function mountResourcePanel(opts: MountOptions): {
       patchRow(nextRow, null);
       lastApplied = v;
     };
-    const onUp = (_e: PointerEvent) => {
+    const cleanup = () => {
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerup", onUp);
-      el.removeEventListener("pointercancel", onUp);
+      el.removeEventListener("pointercancel", onCancel);
       try { el.releasePointerCapture(ev.pointerId); } catch {}
-      // Persist final value if it differs from the start.
-      if (lastApplied !== startCurrent) {
-        const final = currentRender.find((x) => x.id === r.id);
-        if (final) {
-          lastSnapshotJson = JSON.stringify(currentRender);
-          // Open suppress-render window for the metadata echo.
-          suppressRenderUntil = Date.now() + SUPPRESS_RENDER_MS;
-          firePulse(el);
-          onChange?.({ resourceName: r.name || "(未命名)", delta: lastApplied - startCurrent, current: lastApplied, max: r.max });
-          void broadcastChanged(itemId, final, lastApplied - startCurrent, startCurrent);
-          void updateResource(itemId, r.id, () => final);
-        }
-      }
+      dragCleanups.delete(cleanup);
     };
+    const onCancel = () => { cleanup(); lastSnapshotJson = ""; if (target.current()) void refresh(); };
+    const onUp = () => {
+      cleanup();
+      if (!target.current() || lastApplied === startCurrent) return;
+      void applyChange(itemId, r, lastApplied, lastApplied - startCurrent, el, target);
+    };
+    dragCleanups.add(cleanup);
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerup", onUp);
-    el.addEventListener("pointercancel", onUp);
+    el.addEventListener("pointercancel", onCancel);
   }
   async function onBarRightClick(itemId: string, el: HTMLElement): Promise<void> {
     const rid = el.dataset.rid!;
@@ -808,6 +834,8 @@ export function mountResourcePanel(opts: MountOptions): {
   // expression. Enter commits, Esc cancels, blur commits. The input
   // is sized to the element it replaced so layout doesn't jump.
   async function openValueEditor(itemId: string, el: HTMLElement): Promise<void> {
+    const target = currentTarget(itemId);
+    if (!target) return;
     const rid = el.dataset.rid;
     if (!rid) return;
     const r = currentRender.find((x) => x.id === rid);
@@ -841,6 +869,7 @@ export function mountResourcePanel(opts: MountOptions): {
     const commit = async () => {
       if (committed) return;
       committed = true;
+      if (!target.current() || !el.isConnected || !el.contains(input)) return;
       const text = input.value;
       const parsed = parseValueExpression(text, r.current, r.max);
       restore();
@@ -852,7 +881,7 @@ export function mountResourcePanel(opts: MountOptions): {
       const clamped = Math.max(0, Math.min(r.max, Math.round(parsed * 100) / 100));
       if (clamped === r.current) return;
       const delta = clamped - r.current;
-      await applyChange(itemId, r, clamped, delta, null);
+      await applyChange(itemId, r, clamped, delta, null, target);
     };
     const cancel = () => {
       if (committed) return;
@@ -880,6 +909,8 @@ export function mountResourcePanel(opts: MountOptions): {
     targetId: string,
     position: "before" | "after",
   ): Promise<void> {
+    const target = currentTarget(itemId);
+    if (!target) return;
     const sorted = [...currentRender].sort((a, b) => {
       const oa = a.order ?? Number.MAX_SAFE_INTEGER;
       const ob = b.order ?? Number.MAX_SAFE_INTEGER;
@@ -914,7 +945,8 @@ export function mountResourcePanel(opts: MountOptions): {
     }
     // Persist.
     try {
-      await writeResources(itemId, next);
+      await reorderResources(itemId, next.map((resource) => resource.id), target.current);
+      if (target.current()) void refresh();
     } catch (e) {
       console.error("[obr-suite/resources] commitReorder failed", e);
     }
@@ -926,8 +958,10 @@ export function mountResourcePanel(opts: MountOptions): {
     next: number,
     delta: number,
     pulseEl: HTMLElement | null,
+    target = currentTarget(itemId),
   ): Promise<void> {
-    if (next === r.current) return;
+    if (!target?.current() || next === r.current) return;
+    readRevision++;
     // 1. Optimistically update local state.
     const idx = currentRender.findIndex((x) => x.id === r.id);
     if (idx < 0) return;
@@ -940,19 +974,25 @@ export function mountResourcePanel(opts: MountOptions): {
     suppressRenderUntil = Date.now() + SUPPRESS_RENDER_MS;
     // 2. Patch DOM in place + run pulse animation. No re-render.
     patchRow(nextRow, pulseEl);
-    // 3. Notifier hook + room-wide toast broadcast.
-    onChange?.({ resourceName: r.name || "(未命名)", delta, current: next, max: r.max });
-    void broadcastChanged(itemId, nextRow, delta, r.current);
-    // 4. Persist. items.onChange echoes back; refresh() runs but
-    //    skips render() because we're in the suppress window.
-    await updateResource(itemId, r.id, () => nextRow);
+    // Notify only after a guarded write actually lands; failures must not
+    // announce a resource change that never happened.
+    let previous = r.current;
+    const updated = await updateResource(itemId, r.id, (current) => {
+      previous = current.current;
+      return { ...current, current: next };
+    }, target.current);
+    if (!target.current()) return;
+    if (!updated) { void refresh(); return; }
+    onChange?.({ resourceName: updated.name || T("rtUnnamed"), delta: updated.current - previous, current: updated.current, max: updated.max });
+    void broadcastChanged(itemId, updated, updated.current - previous, previous, target.current);
   }
 
   // --- modal open dispatchers ---------------------------------------------
 
   function openCreate(): void {
-    const id = getItemId();
-    if (!id) return;
+    const target = guard.capture();
+    if (!target) return;
+    const id = target.id;
     try {
       OBR.broadcast.sendMessage(BC_OPEN_EDIT, { itemId: id }, { destination: "LOCAL" });
     } catch (e) {
@@ -961,8 +1001,9 @@ export function mountResourcePanel(opts: MountOptions): {
   }
 
   function openEdit(r: Resource): void {
-    const id = getItemId();
-    if (!id) return;
+    const target = guard.capture();
+    if (!target || displayedId !== target.id) return;
+    const id = target.id;
     try {
       OBR.broadcast.sendMessage(BC_OPEN_EDIT, { itemId: id, resource: r }, { destination: "LOCAL" });
     } catch (e) {
@@ -970,10 +1011,36 @@ export function mountResourcePanel(opts: MountOptions): {
     }
   }
 
+  function localize(): void {
+    if (!guard.alive()) return;
+    const text = (selector: string, key: Parameters<typeof t>[1]) => {
+      container.querySelector<HTMLElement>(selector)?.replaceChildren(document.createTextNode(T(key)));
+    };
+    text(".rt-empty", "rpNoToken"); text(".rt-empty-msg", "rpNoResources");
+    text(".rt-add-first", "rpCreate"); text(".rt-add", "rpAdd");
+    for (const resource of currentRender) {
+      const row = container.querySelector<HTMLElement>(`.rt-row[data-id="${cssEscape(resource.id)}"]`);
+      if (!row) continue;
+      const title = (selector: string, value: string) => row.querySelectorAll<HTMLElement>(selector).forEach((element) => {element.title=value;element.setAttribute("aria-label",value);});
+      title(".rt-row-grip", T("rpReorder")); title(".rt-row-edit", T("rpEdit"));
+      title('[data-action="value-edit"]', T("rpEditExpr"));
+      title('[data-action="bar-drag"]', T("rpBarTitle").replace("{name}",resource.name));
+      title('[data-num-end="min"]',T("rpJumpMin").replace("{min}","0"));
+      title('[data-num-end="max"]',T("rpJumpMax").replace("{max}",String(resource.max)));
+      row.querySelectorAll<HTMLElement>('[data-action="count-toggle"]').forEach((element) => {
+        element.title=T("rpPipTitle").replace("{name}",resource.name).replace(/\{i\}/g,element.dataset.pos ?? "");
+      });
+      row.querySelector<HTMLElement>(".rt-pill-empty")?.replaceChildren(document.createTextNode(T("rpMaxZero")));
+      if (!resource.name) row.querySelector<HTMLElement>(".rt-row-name")?.replaceChildren(document.createTextNode(T("rtUnnamed")));
+    }
+  }
+  const langUnsub = onLangChange(localize);
   return {
     refresh,
     unmount: () => {
-      try { itemsUnsub(); } catch {}
+      guard.dispose(); readRevision++;
+      for (const cleanup of [...dragCleanups]) cleanup();
+      try { itemsUnsub(); langUnsub(); } catch {}
       container.innerHTML = "";
     },
   };

@@ -1,4 +1,6 @@
+import {WORKBENCH_DEV} from '../../workbench/channel';
 import OBR from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../../asset-base";
 import { DiceType, DIE_SIDES, DIE_SIZE_FACTOR, sidesOf } from "./types";
 import * as sfx from "./sfx-broadcast";
 import { isVideoSkin, normalizeSkins, type DiceSkins } from "./dice-skins";
@@ -537,7 +539,7 @@ for (let i = 0; i < N_DICE; i++) {
       el.appendChild(artCustom);
     }
   } else {
-    const url = `/suite/${imgTypeFor(dice[i].type)}.png`;
+    const url = assetUrl(`${imgTypeFor(dice[i].type)}.png`);
     const artBase = document.createElement("div");
     artBase.className = "art-base";
     artBase.style.setProperty("-webkit-mask", `url("${url}") center/contain no-repeat`);
@@ -840,6 +842,17 @@ function frame(now: number): void {
   diceWrap.style.transform = `scale(${wrapScale})`;
   diceWrap.style.transformOrigin = "0 0";
 
+  // Frame constants. `getScaleXY` and `getAlpha` are pure functions of
+  // `elapsed` — which is computed once above and cannot change inside
+  // the loop — yet they were called once per die, and getScaleXY calls
+  // findArc on top of that. `getPos` and `getRotation` stay in the loop
+  // because they also take the per-die `anim`.
+  //
+  // Only meaningful during the bounce, but computing them
+  // unconditionally is cheaper than branching to decide whether to.
+  const frameScale = getScaleXY(elapsed);
+  const frameAlpha = getAlpha(elapsed);
+
   for (let i = 0; i < N_DICE; i++) {
     const el = diceEls[i];
     const anim = dieAnims[i];
@@ -880,9 +893,9 @@ function frame(now: number): void {
     if (elapsed < FLIGHT_MS) {
       // ── BOUNCING ── parabolic flight + spin + cartoon squash
       const pos = getPos(elapsed, anim);
-      const sc = getScaleXY(elapsed);
+      const sc = frameScale;
       const rot = getRotation(elapsed, anim);
-      const a = getAlpha(elapsed);
+      const a = frameAlpha;
       el.style.transform =
         `translate(${pos.x}px, ${pos.y}px) rotate(${rot}deg) scale(${sc.sx}, ${sc.sy})`;
       // Losers stay full-opacity through the bounce; only after rest
@@ -1067,7 +1080,9 @@ OBR.onReady(async () => {
       // itself when the fly completes. This replaces the old
       // "stay until cleared" model entirely.
       await delay(POST_LAND_HOLD_MS);
-      await flyToHistory();
+      // Workbench owns the history; there is no scene history panel to fly into.
+      if (WORKBENCH_DEV) await diceWrap.animate([{opacity:1},{opacity:0}],{duration:220,fill:"forwards"}).finished;
+      else await flyToHistory();
     } catch (e) {
       console.error("[obr-suite/dice] effect pipeline failed", e);
     } finally {
@@ -1207,9 +1222,15 @@ async function runRushSequence(): Promise<void> {
     if (dice[i].loser) continue;
     diePunchOnceWAA(i, Math.round(dieMs * 1.1)).catch(() => {});
     sfx.sfxNumFly();
-    await rushFly(numEls[i], dice[i].value, RUSH_ANTICIPATE_MS, dieMs);
+    // §9 consistency fix (2026-08-21): subtraction dice contribute
+    // NEGATIVE — the broadcast/history totals always negated them, but
+    // this rush previously added them, so 1d20-1d4 animated to a
+    // different number than everywhere else. Fly the signed value so
+    // the running total matches the wire total at every step.
+    const signedValue = dice[i].subtract ? -dice[i].value : dice[i].value;
+    await rushFly(numEls[i], signedValue, RUSH_ANTICIPATE_MS, dieMs);
     sfx.sfxNumLand();
-    runningTotal += dice[i].value;
+    runningTotal += signedValue;
     totalNumEl.textContent = String(runningTotal);
     shakeRunningTotal();
     // Crit/fail tint on this die if it was a d20 nat-20 / nat-1.
@@ -1610,7 +1631,8 @@ async function runRepeatRowRushes(): Promise<void> {
     for (let i = startIdx; i < endIdx; i++) {
       if (dice[i].loser) continue;
       indices.push(i);
-      final += dice[i].value;
+      // §9 consistency fix: subtraction dice count negative here too.
+      final += dice[i].subtract ? -dice[i].value : dice[i].value;
     }
     final += modifier;
     // Anchor the row total at the rightmost VISIBLE die in this row
@@ -1660,8 +1682,10 @@ async function runOneRowRush(row: {
   let dieMs = RUSH_PER_DIE_MS;
   for (const i of row.indices) {
     diePunchOnceWAA(i, Math.round(dieMs * 1.1)).catch(() => {});
-    await rushFlyToTarget(numEls[i], row.totalNum, dice[i].value, RUSH_ANTICIPATE_MS, dieMs);
-    row.runningSum += dice[i].value;
+    // §9 consistency fix: signed contribution for subtraction dice.
+    const signedValue = dice[i].subtract ? -dice[i].value : dice[i].value;
+    await rushFlyToTarget(numEls[i], row.totalNum, signedValue, RUSH_ANTICIPATE_MS, dieMs);
+    row.runningSum += signedValue;
     row.totalNum.textContent = String(row.runningSum);
     shakeRowTotal(row.totalEl);
     if (dice[i].type === "d20" && dice[i].value === 20) diceEls[i].classList.add("crit");

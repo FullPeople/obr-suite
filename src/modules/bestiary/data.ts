@@ -1,5 +1,11 @@
 import { Monster, ParsedMonster, MonsterEdition } from "./types";
+import { abilityModifier, monsterInitiativeBonus } from "./initiative";
+import { getState, getLocalLang } from "../../state";
+import { selectContentLibraries, contentConfigurationKey } from "../../utils/contentLocale";
+import { annotateMonster, canonicalMonsterKey, monsterFingerprint } from "./provenance";
+import { fetchContentJson, mapWithConcurrency, createContentIdleDeadline, CONTENT_REQUEST_LIMIT } from "../../utils/contentRequests";
 import { getAllLocalMonsters, initLocalContent } from "../../utils/localContent";
+import { readContentMeta, readContentFiles, writeContentCache, dropContentCache, type ContentCacheMeta } from "./contentCache";
 
 // "2014" = strictly PHB + MM (the original core books). "2024" = strictly
 // XPHB + XMM (the 2024 reprint). Every other source — DMG/XDMG, TCE, XGE,
@@ -9,80 +15,25 @@ const EDITION_2014_CORE = new Set(["PHB", "MM"]);
 const EDITION_2024_CORE = new Set(["XPHB", "XMM"]);
 
 function detectEdition(source: string): MonsterEdition {
+  source = source.trim().toUpperCase();
   if (EDITION_2014_CORE.has(source)) return "2014";
   if (EDITION_2024_CORE.has(source)) return "2024";
   return "other";
 }
 
-// Data source (JSON) — primary kiwee.top Chinese mirror, but the
-// suite's LibraryConfig (state.libraries) can add user-supplied
-// alternates (e.g. self-hosted Cloudflare worker). loadAllMonsters
-// fetches from EVERY enabled library and merges results, so
-// monsters from a custom library show up in the bestiary panel
-// alongside the default ones.
-const DEFAULT_BASE = "https://5e.kiwee.top";
-
-function getEnabledLibraryBases(): string[] {
-  // Read library list lazily at call time. We deliberately import
-  // through a runtime-resolved path (not top-level `import`) because
-  // bestiary/data.ts is also pulled in by background bundles where
-  // suite state may not be initialised yet — falling back to the
-  // hardcoded DEFAULT_BASE is the right behaviour there.
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getState } = require("../../state") as typeof import("../../state");
-    const libs = getState().libraries || [];
-    const bases = libs
-      .filter((l) => l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim().length > 0)
-      .map((l) => l.baseUrl.replace(/\/+$/, ""));
-    // Dedup — when two libraries share the same baseUrl (e.g. the
-    // partnered kiwee entry which differs only in its `indexPath`
-    // vs the main entry), the BESTIARY only knows about baseUrl,
-    // so fetching twice would just waste bandwidth and produce
-    // identical entries that the slug-dedup later collapses.
-    const seen = new Set<string>();
-    const unique = bases.filter((b) => {
-      if (seen.has(b)) return false;
-      seen.add(b);
-      return true;
-    });
-    // 2026-05-10: empty result means EMPTY (no fallback to kiwee).
-    // Lets users disable both built-in libraries and play with only
-    // local-content imports if they want a homebrew-only canvas.
-    return unique;
-  } catch {
-    return [];
-  }
+// Shared locale policy; disabled libraries are never silently restored.
+function getLibrarySources() {
+  return selectContentLibraries(getState().libraries ?? [], getLocalLang());
 }
-
-/** Union of every enabled library's `disabledSources` (lower-cased)
- *  used as a post-fetch blacklist against `monster.source`. Bestiary
- *  fetches by baseUrl which may not 1:1 with library entries (kiwee
- *  main + partnered share a base), so per-library filtering at fetch
- *  time isn't precise. The union is correct for the "I never want
- *  monsters from BOOKOFEBONTIDES regardless of which library shipped
- *  it" use case, which is what the user wants. */
-function getUnionDisabledSources(): Set<string> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getState } = require("../../state") as typeof import("../../state");
-    const libs = getState().libraries || [];
-    const out = new Set<string>();
-    for (const l of libs) {
-      if (!l.enabled) continue;
-      for (const s of l.disabledSources ?? []) {
-        const v = String(s).toLowerCase();
-        if (v) out.add(v);
-      }
-    }
-    return out;
-  } catch {
-    return new Set<string>();
-  }
+let cacheContext = "";
+function ensureMonsterContext() {
+  const next = contentConfigurationKey(getState().libraries ?? [], getLocalLang());
+  if (next !== cacheContext) { cacheContext = next; clearMonsterCache(); }
 }
-// Images: proxied through our own server so OBR can load them as WebGL textures
-// (5e.tools doesn't send CORS headers, so direct loading fails in scene rendering).
-const IMG_BASE = "https://obr.dnd.center/5etools-img";
+// Images: use the same CORS-enabled kiwee mirror as the default data source.
+// Do not route these through 5e.tools: its Cloudflare challenge can return
+// cacheable HTML/403 responses instead of image bytes to our reverse proxy.
+const IMG_BASE = "https://5e.kiwee.top/img";
 
 const SIZE_MAP: Record<string, string> = {
   T: "超小型", S: "小型", M: "中型", L: "大型", H: "巨型", G: "超巨型",
@@ -189,9 +140,14 @@ function parseMon(m: any): ParsedMonster | null {
       source,
       ac: parseAC(m.ac),
       hp: parseHpNumber(m.hp),
-      dexMod: Math.floor(((m.dex || 10) - 10) / 2),
+      dexMod: abilityModifier(m.dex),
+      initiative: monsterInitiativeBonus(m),
       cr: m.cr ?? "?",
-      size: SIZE_MAP[m.size?.[0]] || m.size?.[0] || "?",
+      size: (getLocalLang() === "en" ? { T: "Tiny", S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan" } as Record<string, string> : SIZE_MAP)[m.size?.[0]] || m.size?.[0] || "?",
+      sizeCode: m.size?.[0],
+      contentLanguage: m._suiteContent?.language ?? "auto",
+      authored: m._suiteContent?.authored === true,
+      aliases: m._suiteAliases ?? [],
       type: parseType(m.type),
       tokenUrl: buildTokenUrl(m),
       edition: detectEdition(source),
@@ -204,15 +160,62 @@ function parseMon(m: any): ParsedMonster | null {
 let cachedMonsters: ParsedMonster[] | null = null;
 let loadingPromise: Promise<ParsedMonster[]> | null = null;
 const rawBySlug = new Map<string, any>();
+let loadGeneration = 0;
+let activeLoadController: AbortController | null = null;
+const selectedFlights=new Map<string,Promise<any|null>>();
+let selectedDetailGeneration=-1;
+export interface MonsterLoadProgress {
+  loadedFiles: number;
+  failedFiles: number;
+  preview: ParsedMonster[];
+}
+let lastLoadProgress: MonsterLoadProgress = { loadedFiles: 0, failedFiles: 0, preview: [] };
+const progressListeners = new Set<(progress: MonsterLoadProgress) => void>();
+function reportProgress(progress: MonsterLoadProgress) {
+  lastLoadProgress = progress;
+  for (const listener of progressListeners) {
+    try { listener(progress); } catch (error) { console.warn("[bestiary] progress listener failed", error); }
+  }
+}
 
 /** Drop the cached monster list so the next loadAllMonsters() pulls
  *  fresh data. Called when the user imports / removes local content
  *  via the settings panel — the bestiary module subscribes to the
  *  BC_LOCAL_CONTENT_CHANGED broadcast and forwards it here. */
 export function clearMonsterCache(): void {
+  loadGeneration++;
+  activeLoadController?.abort();
+  activeLoadController = null;
+  selectedFlights.clear();
   cachedMonsters = null;
   loadingPromise = null;
   rawBySlug.clear();
+  lastLoadProgress = { loadedFiles: 0, failedFiles: 0, preview: [] };
+}
+
+/** Force the NEXT load to re-download the remote library instead of reusing the
+ *  on-disk payload. Only the explicit refresh control uses this: every other
+ *  reload path (a language switch, a local-content import) must keep the cache,
+ *  because the raw library does not depend on either. */
+export async function refreshRemoteContent(): Promise<void> {
+  clearMonsterCache();
+  await dropContentCache();
+}
+
+/** The cached raw payload for one source, or null when it cannot be trusted.
+ *  An empty validator (a host that sends none), a different index payload, a
+ *  moved validator, or a payload missing a file this library needs all fall
+ *  back to a real download. */
+async function cachedPayload(
+  key: string, files: readonly string[], indexMeta: ContentCacheMeta | null,
+): Promise<Record<string, unknown[]> | null> {
+  if (!indexMeta || (!indexMeta.etag && !indexMeta.lastModified)) return null;
+  const meta = await readContentMeta(key);
+  if (!meta || meta.index !== indexMeta.index) return null;
+  if (meta.etag ? meta.etag !== indexMeta.etag : meta.lastModified !== indexMeta.lastModified) return null;
+  const payload = await readContentFiles(key);
+  if (!payload) return null;
+  return files.every((name) => Array.isArray(payload[name])) ? payload : null;
 }
 
 // slug uniquely identifies a monster across sources: "MM::Goblin"
@@ -221,7 +224,26 @@ export function makeSlug(source: string, engName: string): string {
 }
 
 export function getRawMonster(slug: string): any | null {
-  return rawBySlug.get(slug) ?? null;
+  ensureMonsterContext();
+  return rawBySlug.get(slug) ?? rawBySlug.get(canonicalMonsterKey(slug)) ?? null;
+}
+
+/** Selected tokens share the original detail reader's source/language/copy
+ * rules. They never wait for the complete catalog or publish partial _copy data. */
+export async function loadMonsterBySlug(slug:string):Promise<any|null>{
+  const cached=getRawMonster(slug);if(cached)return cached;
+  const key=canonicalMonsterKey(slug);if(key.indexOf('::')<1)return null;
+  const existing=selectedFlights.get(key);if(existing)return existing;
+  const generation=loadGeneration;
+  const task=(async()=>{
+    const detail=await import('./detail-data');
+    if(generation!==loadGeneration)return null;
+    if(selectedDetailGeneration!==generation){selectedDetailGeneration=generation;detail.clearMonsterDetailCache();}
+    const monster=await detail.fetchLocalizedMonster(slug);
+    if(!monster||generation!==loadGeneration)return null;
+    for(const name of [monster.name,monster.ENG_name])if(name){rawBySlug.set(makeSlug(monster.source,name),monster);rawBySlug.set(canonicalMonsterKey(makeSlug(monster.source,name)),monster);}
+    return monster;
+  })();selectedFlights.set(key,task);try{return await task;}finally{if(selectedFlights.get(key)===task)selectedFlights.delete(key);}
 }
 
 // 5etools `_copy` support. A monster can be defined as a diff on top of another
@@ -266,7 +288,7 @@ function applyMod(target: any, field: string, spec: any) {
   // falls through to parent data, which is still better than zeros.
 }
 
-function resolveCopy(m: any, bySlug: Map<string, any>, stack: Set<string>): any {
+export function resolveCopy(m: any, bySlug: Map<string, any>, stack: Set<string>): any {
   if (!m || !m._copy) return m;
   const parentSource = m._copy.source;
   // Some homebrew sources (notably WTTHC) reference the parent by
@@ -281,7 +303,7 @@ function resolveCopy(m: any, bySlug: Map<string, any>, stack: Set<string>): any 
   let parent: any = null;
   for (const nm of candidateNames) {
     const slug = makeSlug(parentSource, nm);
-    const found = bySlug.get(slug);
+    const found = bySlug.get(slug) ?? bySlug.get(canonicalMonsterKey(slug));
     if (found) { parentSlug = slug; parent = found; break; }
   }
   if (!parent) return m;
@@ -298,6 +320,9 @@ function resolveCopy(m: any, bySlug: Map<string, any>, stack: Set<string>): any 
     if (k === "_copy" || k === "_mod") continue;
     if (v !== undefined && v !== null) merged[k] = v;
   }
+  // A new named child without an English alias must not inherit its parent's
+  // identity. This is common for locally authored variants of translated data.
+  if (!m.ENG_name && m.name !== resolvedParent.name) delete merged.ENG_name;
 
   if (m._copy._mod) {
     const mods = m._copy._mod;
@@ -309,171 +334,338 @@ function resolveCopy(m: any, bySlug: Map<string, any>, stack: Set<string>): any 
       }
     }
   }
+  if (merged._suiteContent) merged._suiteContent = { ...merged._suiteContent, fingerprint: monsterFingerprint(merged) };
   return merged;
 }
 
-export async function loadAllMonsters(): Promise<ParsedMonster[]> {
-  if (cachedMonsters) return cachedMonsters;
-  if (loadingPromise) return loadingPromise;
+/** Name-based edits must target the language they were authored against. */
+export function copyModTargetsAvailable(child: any, parent: any): boolean {
+  const draft = JSON.parse(JSON.stringify(parent));
+  for (const [field, values] of Object.entries(child?._copy?._mod ?? {})) {
+    for (const spec of Array.isArray(values) ? values : [values]) {
+      const entries = Array.isArray(draft[field]) ? draft[field] : [];
+      if (spec?.mode === "replaceArr") {
+        const needle = spec.replace;
+        if (!entries.some((entry: any) => typeof needle === "string"
+          ? entry?.name === needle || entry?.ENG_name === needle
+          : needle && (entry?.name === needle.name || entry?.ENG_name === needle.ENG_name))) return false;
+      }
+      if (spec?.mode === "removeArr") {
+        const names = Array.isArray(spec.names) ? spec.names : spec.names ? [spec.names] : [];
+        if (!names.every((name: string) => entries.some((entry: any) => entry?.name === name || entry?.ENG_name === name))) return false;
+      }
+      applyMod(draft, field, spec);
+    }
+  }
+  return true;
+}
 
-  loadingPromise = (async () => {
-    // 2026-05-10 — warm the IDB-backed local-content cache before
-    // we read getAllLocalMonsters() below. Idempotent.
+export async function loadAllMonsters(
+  onProgress?: (progress: MonsterLoadProgress) => void,
+): Promise<ParsedMonster[]> {
+  ensureMonsterContext();
+  if (onProgress) {
+    progressListeners.add(onProgress);
+    onProgress(lastLoadProgress);
+  }
+  try {
+    if (cachedMonsters) return cachedMonsters;
+    if (!loadingPromise) {
+      const generation = loadGeneration;
+      const controller = new AbortController();
+      activeLoadController = controller;
+      const pending = performMonsterLoad(generation, controller.signal);
+      loadingPromise = pending;
+      void pending.finally(() => {
+        if (loadingPromise === pending) loadingPromise = null;
+        if (activeLoadController === controller) activeLoadController = null;
+      }).catch(() => {});
+    }
+    return await loadingPromise;
+  } finally {
+    if (onProgress) progressListeners.delete(onProgress);
+  }
+}
+
+async function performMonsterLoad(generation: number, signal: AbortSignal): Promise<ParsedMonster[]> {
     await initLocalContent();
-    // Fetch from EVERY enabled library and merge. Libraries may
-    // disagree on which sources they ship (custom Cloudflare libs
-    // typically only have a handful of homebrew monsters); merging
-    // by makeSlug() naturally dedupes so the canonical 5etools
-    // monster wins for shared sources, and homebrew slugs from a
-    // custom library appear alongside.
-    const bases = getEnabledLibraryBases();
-    const perLibraryMonsters = await Promise.all(
-      bases.map(async (base) => {
-        // Try the canonical 5etools layout first: a `bestiary/index.json`
-        // mapping `bestiary-<SOURCE>.json` → SOURCE. If that's missing
-        // (most user-hosted homebrew sites don't ship one), fall back
-        // to the search index — extract every c=1 (monster) entry's
-        // source code and synthesise the file list ourselves.
+    if (generation !== loadGeneration) return [];
+    const sources = getLibrarySources();
+    const bases = [...new Set(sources.map((source) => source.base))];
+    const localMonsters = getAllLocalMonsters().map((monster) => annotateMonster(monster)) as Monster[];
+    const annotated = new WeakMap<object, Map<string, any>>();
+    const tag = (monster: any, source: typeof sources[number]) => {
+      if (!annotated.has(monster)) annotated.set(monster, new Map());
+      const versions = annotated.get(monster)!;
+      if (!versions.has(source.identity)) versions.set(source.identity, annotateMonster(monster, source));
+      return versions.get(source.identity);
+    };
+    const candidates = () => sources.map((source) => ({ source, monsters: (perLibraryMonsters[bases.indexOf(source.base)] ?? []).flat()
+      .filter((monster) => monster && typeof monster === "object" && !source.disabledSources.has(String(monster.source ?? "").trim().toLowerCase()))
+      .map((monster) => tag(monster, source)) }));
+    const perLibraryMonsters: Monster[][][] = bases.map(() => []);
+    const failed = new Set<string>();
+    let loadedFiles = 0;
+    let lastPreviewAt = 0;
+    let previewRows: ParsedMonster[] = [];
+    // Counters must move with every file — they are what the panel shows. The
+    // preview LIST, however, re-parses every monster loaded so far, which cost
+    // far more than the downloads did (it ran per file, every 200 ms). It is
+    // rebuilt on a coarse interval and otherwise reused by identity, so the
+    // panel's `setMonsters` sees the same array and skips the work.
+    const PREVIEW_INTERVAL_MS = 1000;
+    function publish(force = false) {
+      if (generation !== loadGeneration) return;
+      const now = Date.now();
+      if (force || now - lastPreviewAt >= PREVIEW_INTERVAL_MS) {
+        lastPreviewAt = now;
+        // Preview rows are read-only until the complete, ordered inheritance
+        // merge below. Incomplete _copy records must never be spawned.
+        const rows = [...localMonsters, ...candidates().flatMap((candidate) => candidate.monsters)]
+          .filter((m: any) => m && !m._copy)
+          .map(parseMon)
+          .filter((m): m is ParsedMonster => m !== null);
+        const seen = new Set<string>();
+        previewRows = rows.filter((m) => {
+          const key = `${m.source.trim().toUpperCase()}::${m.engName.trim().toLowerCase()}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
+      reportProgress({ loadedFiles, failedFiles: failed.size, preview: previewRows });
+    }
+    publish(true);
+    const cacheKey = (value: string) => `bestiary:${value}`;
+    const refreshed: Array<{ key: string; meta: ContentCacheMeta; files: Record<string, unknown[]> }> = [];
+    await Promise.all(bases.map(async (base, libraryIndex) => {
+      // This is an inactivity deadline, not a total time budget: large healthy
+      // libraries must finish even when their total load takes over 30 seconds.
+      const sourceDeadline = createContentIdleDeadline(30_000, signal);
+      const request = (path: string) => fetchContentJson(`${base}/${path}`, { cache: "no-cache", signal: sourceDeadline.signal });
+      const recordFailure = (path: string, error: unknown) => {
+        if (signal.aborted) return;
+        const key = sourceDeadline.signal.aborted ? `${base}/timeout` : `${base}/${path}`;
+        if (failed.has(key)) return;
+        failed.add(key);
+        console.warn("[obr-suite/bestiary] content unavailable", { base, path, error });
+      };
+      try {
+        if (signal.aborted) return;
+        let files: string[] | null = null;
+        let indexMeta: ContentCacheMeta | null = null;
         try {
-          const indexRes = await fetch(`${base}/data/bestiary/index.json`, { cache: "no-cache" });
-          if (indexRes.ok) {
-            const index = await indexRes.json() as Record<string, string>;
-            const files = Object.entries(index);
-            const results = await Promise.all(
-              files.map(async ([, filename]) => {
+          const response = await request("data/bestiary/index.json");
+          if (response.ok) {
+            const index = await response.json();
+            if (!index || typeof index !== "object" || Array.isArray(index)) throw new Error("Invalid bestiary index");
+            files = [...new Set(Object.entries(index).filter(([code, name]) => typeof name === "string" &&
+              sources.some((source) => source.base === base && !source.disabledSources.has(code.trim().toLowerCase())))
+              .map(([, name]) => name as string))];
+            // A stable serialisation of the index is the cheap half of the cache
+            // key; the response validator is the half that catches a mirror
+            // rebuild. Without a validator we simply never serve from cache.
+            indexMeta = {
+              at: Date.now(),
+              index: JSON.stringify(index),
+              etag: response.etag ?? "",
+              lastModified: response.lastModified ?? "",
+            };
+            sourceDeadline.progress();
+          } else if (response.status !== 404) recordFailure("data/bestiary/index.json", `HTTP ${response.status}`);
+        } catch (error) { recordFailure("data/bestiary/index.json", error); }
+        if (files !== null) {
+          const key = cacheKey(base);
+          const raw = await cachedPayload(key, files, indexMeta);
+          if (raw) {
+            // Everything this library needs is already on disk: no data-file
+            // request at all. This is the path every bind picker takes.
+            for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+              const monsters = raw[files[fileIndex]];
+              if (Array.isArray(monsters)) { perLibraryMonsters[libraryIndex][fileIndex] = monsters as Monster[]; loadedFiles++; }
+            }
+            publish(true);
+          } else {
+            const collected: Record<string, unknown[]> = {};
+            await mapWithConcurrency(files, CONTENT_REQUEST_LIMIT, async (filename, fileIndex) => {
+              let loaded: unknown[] | null = null;
+              let lastError: unknown = null;
+              // One bounded second try. A single timed-out or rejected file used
+              // to drop that whole source from the loaded library until the
+              // reader noticed the failure strip — which read as "the library
+              // did not download". Higher concurrency splits the same bandwidth
+              // more ways, so a slow link is exactly where this matters.
+              for (let attempt = 0; attempt < 2 && !loaded; attempt++) {
                 try {
-                  // No HTTP-cache so updates to library JSON show up
-                  // on the next loadAllMonsters() call (after the
-                  // user toggles libraries / re-opens the panel).
-                  const res = await fetch(`${base}/data/bestiary/${filename}`, { cache: "no-cache" });
-                  if (!res.ok) return [] as Monster[];
-                  const data = await res.json();
-                  return (data.monster || []) as Monster[];
-                } catch (e) {
-                  console.warn(`[obr-suite/bestiary] failed to load ${base}/data/bestiary/${filename}`, e);
-                  return [] as Monster[];
+                  const response = await request(`data/bestiary/${filename}`);
+                  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                  const data = await response.json();
+                  if (!Array.isArray(data.monster)) throw new Error("Invalid monster list");
+                  loaded = data.monster;
+                } catch (error) {
+                  lastError = error;
+                  if (signal.aborted || sourceDeadline.signal.aborted) break;
+                  await new Promise((done) => setTimeout(done, 400));
                 }
-              })
-            );
-            return results.flat();
-          }
-        } catch {}
-        // Fallback: read search/index.json, pick monster sources, fetch
-        // each `bestiary-<SOURCE>.json`. Lets a self-hosted homebrew
-        // library that only ships search/index.json + one bestiary file
-        // still appear in the bestiary panel.
-        try {
-          const idxRes = await fetch(`${base}/search/index.json`, { cache: "no-cache" });
-          if (!idxRes.ok) return [] as Monster[];
-          const idx = await idxRes.json() as { x?: any[] };
-          const xs = Array.isArray(idx.x) ? idx.x : [];
-          const monsterSources = new Set<string>();
-          for (const e of xs) {
-            if (!e || e.c !== 1) continue;
-            const s = typeof e.s === "string" ? e.s : null;
-            if (s) monsterSources.add(s);
-          }
-          if (monsterSources.size === 0) return [] as Monster[];
-          // Try each source under multiple case variants — GitHub
-          // Pages is case-sensitive but homebrew authors often use
-          // uppercase filenames while kiwee uses lowercase. We try
-          // them all and use whichever 200s.
-          const results = await Promise.all(
-            Array.from(monsterSources).map(async (src) => {
-              const cases = new Set<string>([src, src.toLowerCase(), src.toUpperCase()]);
-              for (const c of cases) {
-                try {
-                  const res = await fetch(`${base}/data/bestiary/bestiary-${c}.json`, { cache: "no-cache" });
-                  if (!res.ok) continue;
-                  const data = await res.json();
-                  const arr = (data.monster || []) as Monster[];
-                  return arr;
-                } catch {}
               }
-              console.warn(
-                `[obr-suite/bestiary] no working case variant for ${base}/data/bestiary/bestiary-${src}.json`,
-              );
-              return [] as Monster[];
-            })
-          );
-          return results.flat();
-        } catch (e) {
-          console.warn(`[obr-suite/bestiary] failed to derive bestiary list from ${base}`, e);
-          return [] as Monster[];
+              if (loaded) {
+                perLibraryMonsters[libraryIndex][fileIndex] = loaded as Monster[];
+                collected[filename] = loaded;
+                loadedFiles++;
+                sourceDeadline.progress();
+              } else recordFailure(`data/bestiary/${filename}`, lastError);
+              publish();
+            });
+            // Remember the whole payload for the next iframe that opens — but
+            // only when EVERY file arrived. A partial payload would otherwise
+            // turn one transient network failure into a permanently incomplete
+            // cached library.
+            if (indexMeta && !signal.aborted && Object.keys(collected).length === files.length) refreshed.push({ key, meta: indexMeta, files: collected });
+          }
+        } else {
+          const paths = [...new Set(sources.filter((source) => source.base === base).map((source) => source.indexPath))];
+          const sourceCodes = new Set<string>();
+          for (const path of paths) {
+            try {
+              const response = await request(path);
+              if (!response.ok) throw new Error(`Search index HTTP ${response.status}`);
+              const index = await response.json();
+              if (!Array.isArray(index.x)) throw new Error("Invalid search index");
+              sourceDeadline.progress();
+              const codesById = new Map<number, string>(Object.entries(index.m?.s ?? {}).map(([code, id]) => [Number(id), code]));
+              for (const entry of index.x) {
+                const code = typeof entry?.s === "string" ? entry.s : codesById.get(entry?.s);
+                if (entry?.c === 1 && typeof code === "string" && code) sourceCodes.add(code);
+              }
+            } catch (error) { recordFailure(path, error); }
+          }
+          const fallbackSources = [...sourceCodes];
+          await mapWithConcurrency(fallbackSources.filter((code) => sources.some((source) => source.base === base && !source.disabledSources.has(code.toLowerCase()))), CONTENT_REQUEST_LIMIT, async (source, fileIndex) => {
+            for (const variant of new Set([source, source.toLowerCase(), source.toUpperCase()])) {
+              try {
+                const response = await request(`data/bestiary/bestiary-${variant}.json`);
+                if (!response.ok) continue;
+                const data = await response.json();
+                if (!Array.isArray(data.monster)) throw new Error("Invalid monster list");
+                perLibraryMonsters[libraryIndex][fileIndex] = data.monster;
+                loadedFiles++;
+                sourceDeadline.progress();
+                publish();
+                return;
+              } catch (error) {
+                if (sourceDeadline.signal.aborted) break;
+              }
+            }
+            recordFailure(`data/bestiary/bestiary-${source}.json`, "No available case variant");
+            publish();
+          });
         }
-      })
-    );
-    // Imported local-content monsters get folded in alongside any
-    // URL-based libraries.
-    const localMonsters = getAllLocalMonsters() as Monster[];
-    const rawAll = [...perLibraryMonsters.flat(), ...localMonsters];
-    // Build slug → raw lookup so spawn/info can read full monster data
-    // (abilities, actions, etc.) without re-fetching. Index by BOTH
-    // ENG_name and name (zh) so `_copy` lookups succeed regardless of
-    // which form the child references — homebrew packs aren't always
-    // consistent with their parent references.
-    for (const m of rawAll) {
-      if (m && m.name) {
-        const eng = m.ENG_name;
-        if (eng) rawBySlug.set(makeSlug(m.source, eng), m);
-        if (!eng || eng !== m.name) {
-          // Don't overwrite an existing English-keyed entry with the
-          // zh slug — but DO add the zh slug for child _copy resolution.
-          const zhSlug = makeSlug(m.source, m.name);
-          if (!rawBySlug.has(zhSlug)) rawBySlug.set(zhSlug, m);
+      } catch (error) { recordFailure("index", error); }
+      finally {
+        sourceDeadline.dispose();
+        publish(true);
+      }
+    }));
+    if (generation !== loadGeneration) return [];
+    // Persist what this load downloaded, so the next panel / bind picker opens
+    // from disk instead of pulling ~11 MB again. Fire and forget: a cache write
+    // must never delay or fail the list that is already usable.
+    if (refreshed.length > 0) {
+      const keep = refreshed.map((entry) => entry.key);
+      for (const entry of refreshed) void writeContentCache(entry.key, entry.meta, entry.files, keep);
+    }
+    // Resolve inheritance before choosing translations. Same-library parents
+    // come first; compatible libraries can supply missing core dependencies.
+    const candidateGroups = candidates();
+    const remoteMonsters: any[] = [];
+    const allGroups = candidateGroups.map((group) => ({ monsters: group.monsters, parents: [
+      ...group.monsters,
+      // Homebrew libraries may depend on a separately configured core library.
+      // Keep known translations apart; unknown-language sources retain that
+      // cross-library dependency behavior without claiming translated prose.
+      ...candidateGroups.filter((other) => other !== group && (group.source.language === "auto" || other.source.language === "auto" || other.source.language === group.source.language))
+        .flatMap((other) => other.monsters),
+    ] }));
+    for (const group of allGroups) {
+      const candidatesBySlug = new Map<string, any[]>();
+      for (const monster of group.parents) {
+        if (!monster?.name) continue;
+        for (const name of [monster.ENG_name, monster.name]) if (name) {
+          const key = canonicalMonsterKey(makeSlug(monster.source, name));
+          const values = candidatesBySlug.get(key) ?? [];
+          if (!values.includes(monster)) values.push(monster);
+          candidatesBySlug.set(key, values);
         }
       }
-    }
-    // Resolve 5etools _copy inheritance so entries like BGDIA::Zariel
-    // (which only have diffs vs. MTF::Zariel) get full stats / actions.
-    for (const [slug, m] of rawBySlug) {
-      if (m && m._copy) {
-        rawBySlug.set(slug, resolveCopy(m, rawBySlug, new Set()));
+      const resolved = new Map<any, any>();
+      const resolveCandidate = (monster: any, stack = new Set<any>()): any | null => {
+        if (!monster._copy) return monster;
+        if (stack.has(monster)) return null;
+        if (resolved.has(monster)) return resolved.get(monster);
+        const copy = monster._copy, next = new Set(stack).add(monster);
+        const names = [copy.ENG_name, copy.name].filter((name): name is string => typeof name === "string" && !!name);
+        const parents = new Set(names.flatMap(name => candidatesBySlug.get(canonicalMonsterKey(makeSlug(copy.source, name))) ?? []));
+        for (const parent of parents) {
+          const candidate = resolveCandidate(parent, next);
+          if (!candidate || !copyModTargetsAvailable(monster, candidate)) continue;
+          const value = resolveCopy(monster, new Map(names.map(name => [makeSlug(copy.source, name), candidate])), new Set());
+          resolved.set(monster, value);
+          return value;
+        }
+        return null;
+      };
+      for (const m of group.monsters as any[]) {
+        if (!m?.name) continue;
+        const complete = resolveCandidate(m);
+        if (!complete) {
+          failed.add(`copy:${m._suiteContent?.libraryId ?? "local"}:${makeSlug(m.source, m.ENG_name || m.name)}`);
+          continue;
+        }
+        remoteMonsters.push(complete ?? m);
       }
     }
-    // Dedupe via identity Set — rawBySlug now keys some monsters
-    // under both their English and Chinese slugs (so `_copy` resolves
-    // either way). Iterating values() would emit duplicates without
-    // this guard.
-    const seenRaw = new Set<any>();
-    const uniqueRaw: any[] = [];
-    for (const m of rawBySlug.values()) {
-      if (seenRaw.has(m)) continue;
-      seenRaw.add(m);
-      uniqueRaw.push(m);
+    const matchesParent = (monster: any, copy: any) => [copy.ENG_name, copy.name].some((name) => typeof name === "string" &&
+      [monster.ENG_name, monster.name].some((candidate) => typeof candidate === "string" &&
+        canonicalMonsterKey(makeSlug(monster.source, candidate)) === canonicalMonsterKey(makeSlug(copy.source, name))));
+    const resolveLocal = (monster: any, stack = new Set<any>()): any | null => {
+      if (!monster._copy) return monster;
+      if (stack.has(monster)) return null;
+      const next = new Set(stack).add(monster), copy = monster._copy;
+      const localParent = localMonsters.find((candidate) => matchesParent(candidate, copy));
+      const parents = localParent ? [resolveLocal(localParent, next)].filter(Boolean)
+        : remoteMonsters.filter((candidate) => matchesParent(candidate, copy));
+      const parent = parents.find((candidate) => copyModTargetsAvailable(monster, candidate));
+      if (!parent) return null;
+      const names = [copy.ENG_name, copy.name].filter((value): value is string => typeof value === "string" && !!value);
+      return resolveCopy(monster, new Map(names.map((name) => [makeSlug(copy.source, name), parent])), new Set());
+    };
+    const readyMonsters: any[] = [];
+    for (const monster of localMonsters) {
+      const resolved = resolveLocal(monster);
+      if (resolved) readyMonsters.push(resolved);
+      else failed.add(`copy:local:${makeSlug(monster.source, monster.ENG_name || monster.name)}`);
     }
-    let all = uniqueRaw
-      .map(parseMon)
-      .filter((x): x is ParsedMonster => x !== null);
-    // Cross-library dedup: when two libraries (e.g. kiwee main +
-    // kiwee partnered) ship the same monster under slightly
-    // different source-code casing or whitespace, the slug-based
-    // dedup above misses them. Apply a final normalised-key pass
-    // here that combines source.toUpperCase() + engName.toLowerCase()
-    // + tokenUrl as a stricter identity. First occurrence wins
-    // (which respects the library order).
-    const seenKey = new Set<string>();
-    all = all.filter((m) => {
-      const src = (m.source || "").trim().toUpperCase();
-      const eng = (m.engName || m.name || "").trim().toLowerCase();
-      const key = `${src}::${eng}`;
-      if (seenKey.has(key)) return false;
-      seenKey.add(key);
-      return true;
-    });
+    readyMonsters.push(...remoteMonsters);
+    const chosen = new Map<string, any>();
+    const aliases = new Map<string, Set<string>>();
+    for (const monster of readyMonsters) {
+      const key = canonicalMonsterKey(makeSlug(monster.source, monster.ENG_name || monster.name));
+      if (!chosen.has(key)) chosen.set(key, monster);
+      if (!aliases.has(key)) aliases.set(key, new Set());
+      for (const name of [monster.ENG_name, monster.name]) if (name) aliases.get(key)!.add(name);
+    }
+    const resolvedBySlug = new Map<string, any>();
+    for (const [key, selected] of chosen) {
+      const monster = { ...selected, _suiteAliases: [...aliases.get(key)!] };
+      chosen.set(key, monster);
+      resolvedBySlug.set(key, monster);
+      for (const name of aliases.get(key)!) {
+        resolvedBySlug.set(makeSlug(monster.source, name), monster);
+        resolvedBySlug.set(canonicalMonsterKey(makeSlug(monster.source, name)), monster);
+      }
+    }
+    let all = [...chosen.values()].map(parseMon).filter((monster): monster is ParsedMonster => monster !== null);
 
-    // 2026-05-09: per-library source blacklist — drop any monster
-    // whose source code is in the union of every enabled library's
-    // disabledSources list. Lets the user disable e.g.
-    // BOOKOFEBONTIDES from showing up in the bestiary panel even
-    // though the kiwee partnered library still ships it.
-    const blacklist = getUnionDisabledSources();
-    if (blacklist.size > 0) {
-      all = all.filter((m) => {
-        const src = (m.source || "").trim().toLowerCase();
-        return !blacklist.has(src);
-      });
-    }
     // Sort by CR numerically, then by name
     all.sort((a, b) => {
       const crA = parseCR(a.cr);
@@ -482,11 +674,13 @@ export async function loadAllMonsters(): Promise<ParsedMonster[]> {
       return a.name.localeCompare(b.name);
     });
 
-    cachedMonsters = all;
-    return all;
-  })();
 
-  return loadingPromise;
+    if (generation !== loadGeneration) return [];
+    rawBySlug.clear();
+    for (const [slug, monster] of resolvedBySlug) rawBySlug.set(slug, monster);
+    cachedMonsters = all;
+    reportProgress({ loadedFiles, failedFiles: failed.size, preview: all });
+    return all;
 }
 
 function parseCR(cr: string): number {
@@ -494,6 +688,51 @@ function parseCR(cr: string): number {
   if (cr === "1/4") return 0.25;
   if (cr === "1/2") return 0.5;
   return parseFloat(cr) || 0;
+}
+
+/**
+ * Per-monster search keys, derived once and remembered on the monster
+ * object itself via a WeakMap.
+ *
+ * `searchMonsters` runs on every keystroke, every sort toggle and every
+ * source-filter keystroke, and it lowercased name / engName / type for
+ * every monster each time. The values depend only on the monster, and
+ * parsed monsters are long-lived objects that outlive any one query.
+ *
+ * Stored under a SYMBOL on the monster itself, not in a WeakMap. A
+ * WeakMap was the first attempt and it made the sort measurably WORSE
+ * (1.27 -> 2.39 ms on 6k monsters): two `WeakMap.get` calls per
+ * comparison cost more than the two `parseCR` calls they replaced. A
+ * symbol-keyed property is an ordinary property lookup, and it is
+ * invisible to `JSON.stringify`, `Object.keys` and `for...in`, so it
+ * cannot leak into anything that re-serialises a monster.
+ */
+interface SearchKeys {
+  name: string;
+  eng: string;
+  type: string;
+  source: string;
+  cr: number;
+}
+const SEARCH_KEYS = Symbol("bestiary.searchKeys");
+
+function keysFor(m: ParsedMonster): SearchKeys {
+  const existing = (m as any)[SEARCH_KEYS] as SearchKeys | undefined;
+  if (existing) return existing;
+  const k: SearchKeys = {
+    name: [m.name, ...(m.aliases ?? [])].filter(Boolean).join(" ").toLowerCase(),
+    eng: (m.engName || "").toLowerCase(),
+    type: String(m.type || "").toLowerCase(),
+    source: String((m as any).source ?? "").toLowerCase(),
+    cr: parseCR(m.cr),
+  };
+  Object.defineProperty(m, SEARCH_KEYS, {
+    value: k,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
+  return k;
 }
 
 export function searchMonsters(
@@ -515,32 +754,42 @@ export function searchMonsters(
   // source slug they used.
   const srcQ = sourceFilter.trim().toLowerCase();
   if (srcQ) {
-    result = result.filter((m) =>
-      String((m as any).source ?? "").toLowerCase().includes(srcQ),
-    );
+    result = result.filter((m) => keysFor(m).source.includes(srcQ));
   }
 
   if (query.trim()) {
     const q = query.toLowerCase().trim();
     result = result.filter((m) => {
-      const t = String(m.type || "");
+      const k = keysFor(m);
       return (
-        (m.name || "").toLowerCase().includes(q) ||
-        (m.engName || "").toLowerCase().includes(q) ||
+        k.name.includes(q) ||
+        k.eng.includes(q) ||
+        // Deliberately the RAW cr, not the parsed number: this is an
+        // exact-string match so typing "1/4" finds CR 1/4 monsters.
         m.cr === q ||
-        t.toLowerCase().includes(q)
+        k.type.includes(q)
       );
     });
   }
 
-  // Sort by CR
-  result = [...result].sort((a, b) => {
-    const diff = parseCR(a.cr) - parseCR(b.cr);
+  // Decorate / sort / undecorate. `parseCR` used to run twice per
+  // COMPARISON — O(n log n) parses — and even a cached lookup per
+  // comparison is slower than reading the value once per monster.
+  //
+  // `-diff` is kept verbatim rather than rewritten as `b.cr - a.cr`,
+  // and Array#sort is stable and the decorated array preserves input
+  // order, so the result is identical for ties as well.
+  const decorated = result.map((m) => ({ m, cr: keysFor(m).cr }));
+  decorated.sort((a, b) => {
+    const diff = a.cr - b.cr;
     return sortDesc ? -diff : diff;
   });
+  result = decorated.map((d) => d.m);
 
-  // Bumped from 80 → 200 (2026-05-04) so heavily-populated homebrew
-  // packs (e.g. WTTHC, MYHB) don't quietly hide entries behind the
-  // truncation. The panel scrolls fine with 200 cards.
-  return result.slice(0, 200);
+  // 2026-09-14 — the 200-row truncation lived here and was wrong in two ways: it
+  // capped the bind / transform pickers as well as the panel, and it made a
+  // fully loaded library look like it had not downloaded (4529 monsters, 200
+  // visible, nothing at all below them). The render cap now belongs to the
+  // panel, which pages the list and always reports the true total.
+  return result;
 }

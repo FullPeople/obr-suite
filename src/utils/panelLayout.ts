@@ -1,3 +1,4 @@
+import { notifyPanelGeometry } from "./panelObstacles";
 // Per-client custom panel positions for the 5 draggable suite popovers.
 //
 // Each panel has a built-in default anchor (e.g. cluster = bottom-right
@@ -78,12 +79,14 @@ export function getPanelOffset(panelId: string): PanelOffset {
 }
 
 export function setPanelOffset(panelId: string, offset: PanelOffset): void {
+  queueMicrotask(notifyPanelGeometry);
   try {
     localStorage.setItem(STORAGE_PREFIX + panelId, JSON.stringify(offset));
   } catch {}
 }
 
 export function clearPanelOffset(panelId: string): void {
+  queueMicrotask(notifyPanelGeometry);
   try {
     localStorage.removeItem(STORAGE_PREFIX + panelId);
   } catch {}
@@ -119,12 +122,14 @@ export function getPanelSize(panelId: string): PanelSize | null {
 }
 
 export function setPanelSize(panelId: string, size: PanelSize): void {
+  queueMicrotask(notifyPanelGeometry);
   try {
     localStorage.setItem(SIZE_PREFIX + panelId, JSON.stringify(size));
   } catch {}
 }
 
 export function clearPanelSize(panelId: string): void {
+  queueMicrotask(notifyPanelGeometry);
   try {
     localStorage.removeItem(SIZE_PREFIX + panelId);
   } catch {}
@@ -132,6 +137,7 @@ export function clearPanelSize(panelId: string): void {
 
 /** Reset every panel's stored offset AND size back to defaults. */
 export function resetAllPanelOffsets(): void {
+  queueMicrotask(notifyPanelGeometry);
   try {
     const toRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -168,6 +174,8 @@ export const BC_PANEL_DRAG_MOVE = "com.obr-suite/panel-drag-move";
 /** LOCAL broadcast: drag cancelled (pointercancel or escape). Modal
  *  closes itself, offset is NOT persisted. */
 export const BC_PANEL_DRAG_CANCEL = "com.obr-suite/panel-drag-cancel";
+export const BC_PANEL_DRAG_INPUT = "com.obr-suite/panel-drag-input";
+export const BC_PANEL_DRAG_READY = "com.obr-suite/panel-drag-ready";
 
 export interface DragEndPayload {
   panelId: string;

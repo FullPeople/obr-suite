@@ -30,10 +30,19 @@ import {
   ResourceType,
   PLUGIN_ID,
 } from "./types";
-import { ICON_LIBRARY, ICON_LABELS, ICON_IDS } from "./icons";
+import { ICON_LIBRARY, iconLabel, ICON_IDS } from "./icons";
+import { markEditSession, clearEditSession, editSessionOpen } from "./session";
+import { applyI18nDom, t } from "../../i18n";
+import { getLocalLang, onLangChange } from "../../state";
+
+// i18n — static text via data-i18n; dynamic strings via T().
+let lang = getLocalLang();
+const T = (k: Parameters<typeof t>[1]) => t(lang, k);
+try { applyI18nDom(lang); } catch {}
 
 interface HashPayload {
   itemId: string;
+  session: string;
   resource?: Resource;
 }
 
@@ -71,6 +80,8 @@ const cardEl = document.querySelector<HTMLElement>(".card");
 let selectedIcon: IconId = "gem";
 let editingResourceId: string | null = null;
 let itemId = "";
+let session = "", active = true;
+const isEditorCurrent = () => active && !!session && editSessionOpen(session);
 
 // Type toggle state. Lives outside the DOM so payload (re-)apply
 // doesn't fight with the .on class.
@@ -108,17 +119,18 @@ function escHtml(s: string): string {
 function renderPresets(): void {
   const arr = readPresets();
   if (!arr.length) {
-    chipsPresets.innerHTML = `<span class="empty">没有预设。改完后点右上角「+ 保存当前为预设」即可加进来。</span>`;
+    chipsPresets.innerHTML = `<span class="empty">${escHtml(T("rePresetsEmpty"))}</span>`;
     return;
   }
   // Each chip carries the icon SVG + name, plus a × delete button.
   // Click chip body → load this preset into the form. Click × → drop it.
   chipsPresets.innerHTML = arr.map((p, idx) => {
     const iconSvg = ICON_LIBRARY[p.icon] ?? ICON_LIBRARY.gem;
-    return `<span class="chip" data-idx="${idx}" title="${escHtml(p.name)} · ${p.type} · 上限 ${p.max}">
+    const typeName = T(p.type === "count" ? "reTypeCount" : p.type === "bar" ? "reTypeBar" : "reTypeNumber");
+    return `<span class="chip" data-idx="${idx}" title="${escHtml(p.name)} · ${escHtml(typeName)} · ${escHtml(T("rePresetMax"))} ${p.max}">
       <span class="ico">${iconSvg}</span>
       <span class="lab">${escHtml(p.name)}</span>
-      <button class="del" type="button" data-del="${idx}" title="删除该预设">×</button>
+      <button class="del" type="button" data-del="${idx}" title="${escHtml(T("rePresetDel"))}">×</button>
     </span>`;
   }).join("");
 }
@@ -160,7 +172,7 @@ chipsPresets.addEventListener("click", (e) => {
 });
 
 btnAddPreset.addEventListener("click", () => {
-  const name = inpName.value.trim() || "自定义";
+  const name = inpName.value.trim() || T("reDefaultName");
   const max = Number(inpMax.value);
   if (!Number.isFinite(max)) return;
   const next: ResourcePreset = {
@@ -197,8 +209,9 @@ typeToggle?.addEventListener("click", (e) => {
 });
 
 function broadcast(channel: string, data: unknown): void {
+  if (!isEditorCurrent()) return;
   try {
-    OBR.broadcast.sendMessage(channel, data, { destination: "LOCAL" });
+    void OBR.broadcast.sendMessage(channel, { ...(data as object), session }, { destination: "LOCAL" }).catch((error) => console.warn("[resource-edit] send failed", error));
   } catch (e) {
     console.warn("[resource-edit] broadcast failed", channel, e);
   }
@@ -206,6 +219,7 @@ function broadcast(channel: string, data: unknown): void {
 
 async function close(): Promise<void> {
   broadcast(BC_RESOURCE_CANCEL, {});
+  clearEditSession(session); active = false;
 }
 
 // ---------- icon grid -------------------------------------------------------
@@ -213,7 +227,7 @@ function renderIconGrid(): void {
   iconGrid.innerHTML = ICON_IDS.map((id) => `
     <div class="icon-pick ${id === selectedIcon ? "on" : ""}"
          data-icon-id="${id}"
-         title="${ICON_LABELS[id]}">
+         title="${escHtml(iconLabel(id, lang))}" role="button" tabindex="0" aria-label="${escHtml(iconLabel(id, lang))}" aria-pressed="${id === selectedIcon}">
       ${ICON_LIBRARY[id]}
     </div>
   `).join("");
@@ -224,8 +238,10 @@ function renderIconGrid(): void {
       selectedIcon = id;
       iconGrid.querySelectorAll(".icon-pick").forEach((x) => x.classList.remove("on"));
       el.classList.add("on");
+      iconGrid.querySelectorAll(".icon-pick").forEach((x) => x.setAttribute("aria-pressed", String(x === el)));
       updatePreview();
     });
+    el.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); el.click(); } });
   });
 }
 
@@ -233,16 +249,18 @@ function updatePreview(): void {
   previewIconEl.innerHTML = ICON_LIBRARY[selectedIcon] ?? ICON_LIBRARY.gem;
   const cur = inpCurrent.value || "0";
   const max = inpMax.value || "0";
-  const name = inpName.value.trim() || "(未命名)";
+  const name = inpName.value.trim() || T("rtUnnamed");
   previewLabelEl.textContent = `${name} · ${cur} / ${max}`;
 }
 
 // ---------- payload (initial paint) -----------------------------------------
 function applyPayload(p: HashPayload): void {
+  if (!p.session || !p.itemId) return;
+  session = p.session; markEditSession(session);
   itemId = p.itemId;
   if (p.resource) {
     editingResourceId = p.resource.id;
-    titleEl.textContent = "编辑资源";
+    titleEl.textContent = T("reEditTitle");
     btnDelete.style.display = "";
     inpName.value = p.resource.name;
     selectedType = p.resource.type;
@@ -251,11 +269,11 @@ function applyPayload(p: HashPayload): void {
     selectedIcon = p.resource.icon;
   } else {
     editingResourceId = null;
-    titleEl.textContent = "新建资源";
+    titleEl.textContent = T("reNewTitle");
     btnDelete.style.display = "none";
     // Default name "自定义" + auto-select on first focus → user can
     // start typing the real name without manually clearing the field.
-    inpName.value = "自定义";
+    inpName.value = T("reDefaultName");
     selectedType = "count";
     inpCurrent.value = "2";
     inpMax.value = "2";
@@ -265,10 +283,13 @@ function applyPayload(p: HashPayload): void {
   renderIconGrid();
   renderPresets();
   updatePreview();
+  document.title = titleEl.textContent ?? T("reEditTitle");
   // Auto-focus name on first paint — saves a click for the common
   // "+ 新建资源" flow. The focus handler below selects all text, so
   // typing immediately replaces "自定义".
-  setTimeout(() => inpName.focus(), 100);
+  setTimeout(() => {
+    if (isEditorCurrent() && (!document.activeElement || document.activeElement === document.body)) inpName.focus();
+  }, 100);
 }
 
 [inpName, inpCurrent, inpMax].forEach((el) => {
@@ -283,7 +304,7 @@ function applyPayload(p: HashPayload): void {
     // requestAnimationFrame so focus-set / blur-restore cycles settle
     // before the selection paints — without this, Chrome sometimes
     // deselects right after focus.
-    requestAnimationFrame(() => el.select());
+    requestAnimationFrame(() => { if (isEditorCurrent() && document.activeElement === el) el.select(); });
   });
 });
 
@@ -303,15 +324,16 @@ document.body.addEventListener("mousedown", (e) => {
 });
 
 btnDelete.addEventListener("click", () => {
-  if (!editingResourceId) return;
-  if (!confirm("删除该资源？此操作不可撤销。")) return;
+  if (!isEditorCurrent() || !editingResourceId) return;
+  if (!confirm(T("reConfirmDelete"))) return;
   broadcast(BC_RESOURCE_DELETE, { itemId, resourceId: editingResourceId });
 });
 
 btnSave.addEventListener("click", () => {
+  if (!isEditorCurrent()) return;
   const name = inpName.value.trim();
   if (!name) {
-    alert("名字不能为空");
+    alert(T("reErrNameEmpty"));
     inpName.focus();
     return;
   }
@@ -319,7 +341,7 @@ btnSave.addEventListener("click", () => {
   const current = Number(inpCurrent.value);
   const max = Number(inpMax.value);
   if (!Number.isFinite(current) || !Number.isFinite(max)) {
-    alert("当前 / 最大值需为数字");
+    alert(T("reErrNumbers"));
     return;
   }
   const resource: Resource = {
@@ -352,4 +374,19 @@ OBR.onReady(() => {
   } catch (e) {
     console.warn("[resource-edit] failed to parse hash payload", e);
   }
+});
+
+const languageUnsub = onLangChange((next) => {
+  if (!active) return;
+  lang = next; applyI18nDom(lang);
+  titleEl.textContent = T(editingResourceId ? "reEditTitle" : "reNewTitle");
+  document.title = titleEl.textContent;
+  iconGrid.querySelectorAll<HTMLElement>("[data-icon-id]").forEach((element) => {
+    const label = iconLabel(element.dataset.iconId as IconId, lang);
+    element.title = label; element.setAttribute("aria-label", label);
+  });
+  renderPresets(); updatePreview();
+});
+window.addEventListener("pagehide", () => {
+  clearEditSession(session); active = false; languageUnsub();
 });

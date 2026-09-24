@@ -1,11 +1,20 @@
-// Feature visibility for stable / dev channel split.
+// Feature visibility for the stable / dev channel split.
 //
-// Set STABLE_HIDES = true before building the stable channel (`/suite/`)
-// to hide features that aren't ready for the public listing yet.
-// Set STABLE_HIDES = false before building the dev channel
-// (`/suite-dev/`) so the full feature set shows up for ongoing
-// iteration / testing.
-export const STABLE_HIDES = true;
+// The deploy scripts rewrite this line before building: true hides
+// features not yet ready for the public listing, false ships the lot.
+//
+// As of 2026-08-25 BOTH channels build with false — dynamic fog was the
+// last thing behind the gate and it has now shipped to stable, so the
+// flag is currently a no-op rather than a live difference. It is kept
+// (along with its two call sites, `fullFog/index.ts`'s `authoring` and
+// `settings.ts`'s `HIDDEN_TAB_IDS`) because the next feature that wants
+// a dev-only soak will need exactly this machinery, and re-deriving it
+// costs more than leaving it in place.
+//
+// If you put something behind it again, flip deploy-suite.sh back to
+// true and say so in docs/DEV_VS_STABLE.md, which is what people
+// actually read to find out what the two channels differ on.
+export const STABLE_HIDES = false;
 
 // === Mobile detection (per-iframe) =====================================
 // Modules that run heavy WebGL / continuous rAF work (status tracker

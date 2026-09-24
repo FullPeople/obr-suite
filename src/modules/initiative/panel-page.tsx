@@ -159,6 +159,10 @@ function App() {
     if (item.maxHp <= 0) return null;
     const ratio = Math.max(0, Math.min(1, item.hp / item.maxHp));
     const ownsItem = !!myIdRef.current && item.ownerId === myIdRef.current;
+    // `hide` outranks ownership, exactly as in bubbles' computeViewMode:
+    // the DM marked these stats hidden, so no viewer but the DM sees a
+    // bar — not the owner, not during combat, not at any threshold.
+    if (item.bubblesHide && !isGM) return null;
     // GM and the token's owner always see the actual ratio. Other
     // viewers follow the bubbles rules: locked + idle → hidden;
     // locked + combat → quantise to threshold steps; unlocked → full.
@@ -666,7 +670,7 @@ function App() {
   if (!expanded) {
     return (
       <div className={`app-pill ${stateClass} ${transitioning ? "transitioning" : ""}`}>
-        <button className="pill-btn" onClick={toggleExpanded} title="展开先攻面板">
+        <button className="pill-btn" onClick={toggleExpanded} title={t(lang, "expandPanel")}>
           <span className="icon" dangerouslySetInnerHTML={{ __html: ICONS.swords }} />
           {combatState.inCombat && (
             <span className="pill-round">R{combatState.round}</span>
@@ -675,7 +679,7 @@ function App() {
             <span className="pill-round">{t(lang, "preparing")}</span>
           )}
         </button>
-        <div ref={dragHandleRef} className="drag-handle" title="拖动 / Drag" aria-label="拖动面板">
+        <div ref={dragHandleRef} className="drag-handle" title={t(lang, "dragPanel")} aria-label={t(lang, "dragPanel")}>
           {dragHandleSvg}
         </div>
       </div>
@@ -692,8 +696,8 @@ function App() {
             <button
               className="collapse-btn"
               onClick={toggleExpanded}
-              title="折叠"
-              aria-label="折叠"
+              title={t(lang, "collapsePanel")}
+              aria-label={t(lang, "collapsePanel")}
             >
               {/* Chevron-down "V" — panel will collapse downward into the pill */}
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
@@ -744,7 +748,7 @@ function App() {
             {/* Drag grip — last child of the cluster so it sits at the
                 visual far-right of the controls row, opposite the
                 collapse-btn on the left. */}
-            <div ref={dragHandleRef} className="drag-handle" title="拖动 / Drag" aria-label="拖动面板">
+            <div ref={dragHandleRef} className="drag-handle" title={t(lang, "dragPanel")} aria-label={t(lang, "dragPanel")}>
               {dragHandleSvg}
             </div>
           </div>
@@ -770,7 +774,7 @@ function App() {
             onUpdateModifier={updateModifier}
             onRoll={handleRoll}
             onEndTurn={requestEndTurn}
-            endTurnLabel={t(lang, "endTurn") || "结束回合"}
+            endTurnLabel={t(lang, "endTurn")}
             lang={lang}
             reorderMode={isGM && reorderMode}
             pickedId={pickedId}
@@ -785,8 +789,11 @@ function App() {
 }
 
 function PluginGate() {
+  const [lang, setLang] = useState<Lang>(() => getLocalLang());
   const [ready, setReady] = useState(false);
   const [sceneReady, setSceneReady] = useState(false);
+  useEffect(() => onLangChange(setLang), []);
+  useEffect(() => { document.documentElement.lang = lang; document.title = t(lang, "initiative"); }, [lang]);
 
   useEffect(() => {
     OBR.onReady(() => {
@@ -801,7 +808,7 @@ function PluginGate() {
   if (!ready || !sceneReady) {
     return (
       <div className="app-container">
-        <div className="loading-state">加载中...</div>
+        <div className="loading-state">{t(lang, "loading")}</div>
       </div>
     );
   }

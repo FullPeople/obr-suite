@@ -8,38 +8,67 @@
 </head>
 <body>
 
-<div class="dev-banner">
-  <span class="dev-tag">DEV</span>
-  <span>开发中工具 —— 未来连接「枭熊音乐板插件」用。暂未列入公开导航。</span>
-</div>
-
 <header class="topbar">
   <div class="brand">
     <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>
     </svg>
-    <span class="brand-name">OBR 音乐板</span>
+    <span class="brand-name" data-i18n="muBrand">OBR 音乐板</span>
   </div>
   <nav class="studio-tabs">
-    <a class="studio-tab" href="../monster-studio/index.html">怪物</a>
-    <a class="studio-tab" href="../buff-studio/index.html">Buff</a>
-    <a class="studio-tab" href="../dice-studio/index.html">骰子</a>
-    <a class="studio-tab active" href="./index.html">音乐</a>
+    <a class="studio-tab" href="../monster-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 6 L4 4 L6 6"/><path d="M10 6 L12 4 L14 6"/>
+        <path d="M4 8 Q8 12 12 8"/><circle cx="5.5" cy="9" r="0.7" fill="currentColor"/><circle cx="10.5" cy="9" r="0.7" fill="currentColor"/>
+      </svg>
+      <span data-i18n="navMonster">怪物编辑</span>
+    </a>
+    <a class="studio-tab" href="../buff-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 2 L8 14 M2 8 L14 8 M3.5 3.5 L12.5 12.5 M3.5 12.5 L12.5 3.5"/>
+      </svg>
+      <span data-i18n="navBuff">Buff 合成</span>
+    </a>
+    <a class="studio-tab" href="../dice-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="10" height="10" rx="1.6"/>
+        <circle cx="6" cy="6" r="0.8" fill="currentColor"/><circle cx="10" cy="10" r="0.8" fill="currentColor"/><circle cx="8" cy="8" r="0.8" fill="currentColor"/>
+      </svg>
+      <span data-i18n="navDice">骰子工坊</span>
+    </a>
+    <a class="studio-tab active" href="../music-studio/index.html">
+      <svg class="tab-ico" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="5" cy="12" r="2"/><circle cx="12" cy="10.5" r="2"/><path d="M7 12 V4 L14 2.5 V10.5"/>
+      </svg>
+      <span data-i18n="navMusic">音乐板</span>
+    </a>
   </nav>
   <div class="pair-widget" id="pairWidget">
-    <button class="btn btn--ghost btn--sm" id="pairBtn" title="生成配对码，让枭熊插件连接">配对枭熊</button>
-    <div class="pair-code-chip hidden" id="pairCodeChip" title="点击复制配对码">
-      <span class="pair-code-label">配对码</span>
+    <button class="btn btn--ghost btn--sm" id="pairBtn" data-i18n="muPairBtn" data-i18n-title="muPairBtnTitle" title="生成配对码，让枭熊插件连接">配对枭熊</button>
+    <div class="pair-code-chip hidden" id="pairCodeChip" data-i18n-title="muPairCopyTitle" title="点击复制配对码">
+      <span class="pair-code-label" data-i18n="muPairCodeLabel">配对码</span>
       <span class="pair-code-value" id="pairCodeValue">------</span>
-      <button class="pair-code-x" id="pairCancelBtn" title="取消配对">×</button>
+      <button class="pair-code-x" id="pairCancelBtn" data-i18n-title="muPairCancelTitle" title="取消配对">×</button>
     </div>
     <div class="pair-live-chip hidden" id="pairLiveChip">
       <span class="pair-live-dot"></span>
-      <span>已连接</span>
-      <button class="pair-code-x" id="pairUnpairBtn" title="断开">×</button>
+      <span data-i18n="muConnected">已连接</span>
+      <button class="pair-code-x" id="pairUnpairBtn" data-i18n-title="muDisconnect" title="断开">×</button>
     </div>
   </div>
 </header>
+
+<!-- Local-mute banner — only visible while paired with OBR. When the
+     studio is connected, the music ALSO plays inside the DM's枭熊
+     popover, so by default we silence the studio's LOCAL output to
+     avoid double audio. Transmission to OBR is unaffected (we send
+     play/pause COMMANDS, not audio). The DM can toggle local playback
+     back on here. -->
+<div class="local-mute-banner hidden" id="localMuteBanner" data-muted="1">
+  <span class="lmb-icon" id="lmbIcon" aria-hidden="true"></span>
+  <span class="lmb-text" id="lmbText"></span>
+  <button class="lmb-toggle" id="lmbToggle"></button>
+</div>
 
 <main class="page">
 
@@ -58,13 +87,13 @@
           <div class="arm-rod"><div class="arm-head"></div></div>
           <div class="arm-counter"></div>
         </div>
-        <div class="deck-drop-hint">拖卡片到这里播放</div>
+        <div class="deck-drop-hint" data-i18n="muDropToPlay">拖卡片到这里播放</div>
       </div>
 
       <div class="deck-info">
         <div class="deck-tag">
           <span class="badge badge--bgm">BGM</span>
-          <span class="deck-title" data-tt-name>-- 空闲 --</span>
+          <span class="deck-title" data-tt-name data-i18n="muIdle">-- 空闲 --</span>
         </div>
 
         <div class="deck-progress">
@@ -74,39 +103,39 @@
         </div>
 
         <div class="hist-row">
-          <button class="hist-btn hist-prev" data-act="prev" title="上一首">
+          <button class="hist-btn hist-prev" data-act="prev" data-i18n-title="muPrev" title="上一首">
             <svg viewBox="0 0 16 16" fill="currentColor"><path d="M11 4v8L5 8z M3.5 4v8h1V4z"/></svg>
-            <span class="hist-name" id="histPrevName">无</span>
+            <span class="hist-name" id="histPrevName" data-i18n="muNone">无</span>
           </button>
-          <button class="hist-btn hist-next" data-act="next" title="下一首">
-            <span class="hist-name" id="histNextName">无</span>
+          <button class="hist-btn hist-next" data-act="next" data-i18n-title="muNext" title="下一首">
+            <span class="hist-name" id="histNextName" data-i18n="muNone">无</span>
             <svg viewBox="0 0 16 16" fill="currentColor"><path d="M5 4v8L11 8z M11.5 4v8h1V4z"/></svg>
           </button>
         </div>
 
         <div class="deck-controls">
-          <button class="btn btn--play btn--icon" data-act="play" title="播放/暂停">
+          <button class="btn btn--play btn--icon" data-act="play" data-i18n-title="muPlayPause" title="播放/暂停">
             <svg class="ico-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
             <svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
           </button>
-          <button class="btn btn--icon btn--sm" data-act="stop" title="停止">
+          <button class="btn btn--icon btn--sm" data-act="stop" data-i18n-title="muStop" title="停止">
             <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
           </button>
-          <button class="toggle-btn" id="loopToggle" title="当前 BGM 是否单曲循环">
+          <button class="toggle-btn" id="loopToggle" data-i18n-title="muLoopTitle" title="当前 BGM 是否单曲循环">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M17 2 L21 6 L17 10"/>
               <path d="M3 12 V10 a4 4 0 0 1 4 -4 H21"/>
               <path d="M7 22 L3 18 L7 14"/>
               <path d="M21 12 V14 a4 4 0 0 1 -4 4 H3"/>
             </svg>
-            <span>单曲循环</span>
+            <span data-i18n="muLoop">单曲循环</span>
           </button>
-          <button class="toggle-btn on" id="fadeToggle" title="切歌/启停时是否淡入淡出">
+          <button class="toggle-btn on" id="fadeToggle" data-i18n-title="muFadeTitle" title="切歌/启停时是否淡入淡出">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 18 L12 6 L12 18 Z" fill="currentColor"/>
               <path d="M21 18 L12 6"/>
             </svg>
-            <span>淡入淡出</span>
+            <span data-i18n="muFade">淡入淡出</span>
           </button>
         </div>
 
@@ -129,7 +158,7 @@
           <div class="pad-vinyl"><div class="vinyl-label"></div></div>
           <div class="pad-info">
             <span class="badge badge--sfx">SFX 1</span>
-            <span class="pad-name" data-tt-name>空</span>
+            <span class="pad-name" data-tt-name data-i18n="muEmpty">空</span>
             <div class="pad-controls">
               <button class="btn btn--icon btn--xs btn--play" data-act="play"><svg class="ico-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg></button>
               <button class="btn btn--icon btn--xs" data-act="stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg></button>
@@ -140,7 +169,7 @@
           <div class="pad-vinyl"><div class="vinyl-label"></div></div>
           <div class="pad-info">
             <span class="badge badge--sfx">SFX 2</span>
-            <span class="pad-name" data-tt-name>空</span>
+            <span class="pad-name" data-tt-name data-i18n="muEmpty">空</span>
             <div class="pad-controls">
               <button class="btn btn--icon btn--xs btn--play" data-act="play"><svg class="ico-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg></button>
               <button class="btn btn--icon btn--xs" data-act="stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg></button>
@@ -151,7 +180,7 @@
           <div class="pad-vinyl"><div class="vinyl-label"></div></div>
           <div class="pad-info">
             <span class="badge badge--sfx">SFX 3</span>
-            <span class="pad-name" data-tt-name>空</span>
+            <span class="pad-name" data-tt-name data-i18n="muEmpty">空</span>
             <div class="pad-controls">
               <button class="btn btn--icon btn--xs btn--play" data-act="play"><svg class="ico-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg></button>
               <button class="btn btn--icon btn--xs" data-act="stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg></button>
@@ -162,7 +191,7 @@
           <div class="pad-vinyl"><div class="vinyl-label"></div></div>
           <div class="pad-info">
             <span class="badge badge--sfx">SFX 4</span>
-            <span class="pad-name" data-tt-name>空</span>
+            <span class="pad-name" data-tt-name data-i18n="muEmpty">空</span>
             <div class="pad-controls">
               <button class="btn btn--icon btn--xs btn--play" data-act="play"><svg class="ico-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg></button>
               <button class="btn btn--icon btn--xs" data-act="stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg></button>
@@ -189,24 +218,25 @@
        favorites. -->
   <section class="favorites-section" id="favoritesSection">
     <header class="fav-head">
-      <h2>常用 <span class="fav-count" id="favCount">0</span></h2>
-      <span class="fav-hint">拖入收藏 · 点击或拖到唱片台播放 · 右上 × 移除</span>
-      <button class="btn btn--ghost btn--xs" id="favClearBtn">清空</button>
+      <h2><span data-i18n="muFav">常用</span> <span class="fav-count" id="favCount">0</span></h2>
+      <span class="fav-hint" data-i18n="muFavHint">拖入收藏 · 点击或拖到唱片台播放 · 右上 × 移除</span>
+      <button class="btn btn--ghost btn--xs" id="favClearBtn" data-i18n="muClear">清空</button>
     </header>
     <div class="fav-grid" id="favGrid">
-      <div class="fav-empty">拖任意曲目到这里收藏</div>
+      <div class="fav-empty" data-i18n="muFavEmpty">拖任意曲目到这里收藏</div>
     </div>
   </section>
 
   <!-- ============ LIBRARY ============ -->
   <section class="library">
     <header class="lib-head">
-      <h2>曲库 <span class="lib-count" id="libCount">0</span></h2>
-      <input type="search" id="libSearch" placeholder="搜索…">
+      <h2><span data-i18n="muLibrary">曲库</span> <span class="lib-count" id="libCount">0</span></h2>
+      <input type="search" id="libSearch" data-i18n-ph="muSearchPh" placeholder="搜索…">
       <span class="spacer"></span>
-      <button class="btn btn--ghost btn--sm" id="loadDefaultsBtn" title="从服务器拉默认曲库（~108 MB）">默认曲库</button>
-      <button class="btn btn--ghost btn--sm" id="addUrlBtn">+ 外链</button>
-      <button class="btn btn--primary btn--sm" id="addFileBtn">+ 文件</button>
+      <button class="btn btn--ghost btn--sm" id="detailsToggle" data-i18n="muDetails" data-i18n-title="muDetailsTitle" title="显示/隐藏 时长·音质·大小（关闭可让卡片更紧凑）" aria-pressed="false">详细信息</button>
+      <button class="btn btn--ghost btn--sm" id="loadDefaultsBtn" data-i18n="muDefaults" data-i18n-title="muDefaultsTitle" title="从服务器拉默认曲库（~108 MB）">默认曲库</button>
+      <button class="btn btn--ghost btn--sm" id="addUrlBtn" data-i18n="muAddUrl">+ 外链</button>
+      <button class="btn btn--primary btn--sm" id="addFileBtn" data-i18n="muAddFile">+ 文件</button>
       <input type="file" id="hiddenFileInput" accept="audio/*" hidden multiple>
     </header>
 
@@ -220,8 +250,8 @@
               <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>
             </svg>
           </div>
-          <div class="empty-title">曲库是空的</div>
-          <div class="empty-hint">把音频文件拖到这里 → 自动打开编辑器<br>或点右上「+ 文件 / + 外链」<br>或点「默认曲库」拉服务器自带的 154 首</div>
+          <div class="empty-title" data-i18n="muLibEmptyTitle">曲库是空的</div>
+          <div class="empty-hint" data-i18n-html="muLibEmptyHint">把音频文件拖到这里 → 自动打开编辑器<br>或点右上「+ 文件 / + 外链」<br>或点「默认曲库」拉服务器自带的 154 首</div>
         </div>
       </div>
       <div class="drop-overlay">
@@ -229,7 +259,7 @@
           <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 5v14M5 12h14"/>
           </svg>
-          <div>松开导入并打开编辑器</div>
+          <div data-i18n="muDropImport">松开导入并打开编辑器</div>
         </div>
       </div>
     </div>
@@ -240,12 +270,12 @@
     <div class="modal-backdrop" data-close></div>
     <div class="modal-card modal-card--wide">
       <header class="modal-head">
-        <h3>编辑曲目</h3>
+        <h3 data-i18n="muEditTrack">编辑曲目</h3>
         <button class="modal-close" data-close>×</button>
       </header>
       <div class="modal-body">
         <div class="field-row">
-          <input type="text" id="trackName" class="input input--lg" placeholder="曲目名称">
+          <input type="text" id="trackName" class="input input--lg" data-i18n-ph="muTrackNamePh" placeholder="曲目名称">
           <span class="track-meta" id="trackMeta"></span>
         </div>
         <div class="waveform-wrap">
@@ -259,14 +289,14 @@
           </div>
         </div>
         <div class="trim-readout">
-          <label>起点 <input type="text" id="trimStartTxt" class="input input--time" maxlength="9"></label>
-          <label>终点 <input type="text" id="trimEndTxt" class="input input--time" maxlength="9"></label>
-          <span class="trim-len">截取 <b id="trimLenTxt">--</b></span>
-          <button class="btn btn--ghost btn--xs" id="resetTrimBtn">重置</button>
+          <label><span data-i18n="muStart">起点</span> <input type="text" id="trimStartTxt" class="input input--time" maxlength="9"></label>
+          <label><span data-i18n="muEnd">终点</span> <input type="text" id="trimEndTxt" class="input input--time" maxlength="9"></label>
+          <span class="trim-len"><span data-i18n="muTrimLen">截取</span> <b id="trimLenTxt">--</b></span>
+          <button class="btn btn--ghost btn--xs" id="resetTrimBtn" data-i18n="muReset">重置</button>
         </div>
         <div class="control-group">
           <label class="ctrl">
-            <span>码率</span>
+            <span data-i18n="muBitrate">码率</span>
             <div class="seg" id="bitrateSeg">
               <button class="seg-opt" data-br="24">24k</button>
               <button class="seg-opt" data-br="48">48k</button>
@@ -276,32 +306,32 @@
             </div>
           </label>
           <label class="ctrl">
-            <span>声道</span>
+            <span data-i18n="muChannel">声道</span>
             <div class="seg" id="channelSeg">
-              <button class="seg-opt on" data-ch="1">单</button>
-              <button class="seg-opt"    data-ch="2">立体</button>
+              <button class="seg-opt on" data-ch="1" data-i18n="muMono">单</button>
+              <button class="seg-opt"    data-ch="2" data-i18n="muStereo">立体</button>
             </div>
           </label>
           <label class="ctrl">
-            <span>归到</span>
+            <span data-i18n="muRouteTo">归到</span>
             <div class="seg" id="busSeg">
               <button class="seg-opt on" data-bus="bgm">BGM</button>
               <button class="seg-opt"    data-bus="sfx">SFX</button>
             </div>
           </label>
-          <label class="ctrl ctrl--check"><input type="checkbox" id="loopChk" checked><span>循环</span></label>
+          <label class="ctrl ctrl--check"><input type="checkbox" id="loopChk" checked><span data-i18n="muLoopChk">循环</span></label>
         </div>
         <div class="estimate">
-          <span>预计大小 <b id="sizeEstimate">--</b></span>
-          <span>原始大小 <b id="originalSize">--</b></span>
+          <span><span data-i18n="muSizeEst">预计大小</span> <b id="sizeEstimate">--</b></span>
+          <span><span data-i18n="muOrigSize">原始大小</span> <b id="originalSize">--</b></span>
         </div>
         <div class="action-row">
-          <button class="btn" id="previewBtn">预览截取段</button>
-          <button class="btn btn--primary" id="encodeBtn">压缩并加入库</button>
+          <button class="btn" id="previewBtn" data-i18n="muPreview">预览截取段</button>
+          <button class="btn btn--primary" id="encodeBtn" data-i18n="muEncode">压缩并加入库</button>
         </div>
         <div class="progress-row hidden" id="encodeProg">
           <div class="progress-track"><div class="progress-fill" id="encodeFill"></div></div>
-          <span id="encodeMsg">准备中…</span>
+          <span id="encodeMsg" data-i18n="muPreparing">准备中…</span>
         </div>
       </div>
     </div>
@@ -312,30 +342,33 @@
     <div class="modal-backdrop" data-close></div>
     <div class="modal-card">
       <header class="modal-head">
-        <h3>添加外链曲目</h3>
+        <h3 data-i18n="muUrlTitle">添加 / 批量导入外链</h3>
         <button class="modal-close" data-close>×</button>
       </header>
       <div class="modal-body">
-        <p class="hint">粘贴音频直链（.mp3/.ogg/.m4a 等）。</p>
-        <input type="url" id="urlInput" class="input input--lg" placeholder="https://…">
+        <p class="hint" data-i18n-html="muUrlHint">粘贴音频直链（.mp3/.ogg/.m4a 等）。<b>可一次粘贴多条</b>——用回车 / 逗号 / 空格分隔。也支持<b>网易云</b>分享链接或歌曲 id（自动转成可播放直链，仅限非 VIP 歌曲）。QQ 音乐需要动态 vkey，暂不支持静态链接。</p>
+        <textarea id="urlInput" class="input input--lg" rows="5"
+          style="min-height:104px;resize:vertical;font-family:inherit;line-height:1.6"
+          data-i18n-ph="muUrlPh"
+          placeholder="每行一条，例如：&#10;https://example.com/bgm.mp3&#10;https://music.163.com/song?id=33894312&#10;5264952"></textarea>
         <div class="control-group" style="margin-top:12px">
           <label class="ctrl">
-            <span>名称</span>
-            <input type="text" id="urlName" class="input" placeholder="自动从 URL 推断">
+            <span data-i18n="muName">名称</span>
+            <input type="text" id="urlName" class="input" data-i18n-ph="muUrlNamePh" placeholder="仅单条时生效；批量自动推断">
           </label>
           <label class="ctrl">
-            <span>归到</span>
+            <span data-i18n="muRouteTo">归到</span>
             <div class="seg" id="urlBusSeg">
               <button class="seg-opt on" data-bus="bgm">BGM</button>
               <button class="seg-opt"    data-bus="sfx">SFX</button>
             </div>
           </label>
-          <label class="ctrl ctrl--check"><input type="checkbox" id="urlLoopChk" checked><span>循环</span></label>
+          <label class="ctrl ctrl--check"><input type="checkbox" id="urlLoopChk" checked><span data-i18n="muLoopChk">循环</span></label>
         </div>
       </div>
       <footer class="modal-foot">
-        <button class="btn btn--primary" id="urlAddBtn" disabled>添加到库</button>
-        <button class="btn btn--ghost" data-close>取消</button>
+        <button class="btn btn--primary" id="urlAddBtn" data-i18n="muUrlAdd" disabled>添加到库</button>
+        <button class="btn btn--ghost" data-close data-i18n="muCancel">取消</button>
       </footer>
     </div>
   </div>
@@ -345,17 +378,17 @@
     <div class="modal-backdrop" data-close></div>
     <div class="modal-card">
       <header class="modal-head">
-        <h3>编辑标签</h3>
+        <h3 data-i18n="muTagTitle">编辑标签</h3>
         <button class="modal-close" data-close>×</button>
       </header>
       <div class="modal-body">
-        <p class="hint">空格 / 逗号 / 回车 分隔。</p>
-        <input type="text" id="tagInput" class="input input--lg" placeholder="紧张 战斗 Boss">
+        <p class="hint" data-i18n="muTagHint">空格 / 逗号 / 回车 分隔。</p>
+        <input type="text" id="tagInput" class="input input--lg" data-i18n-ph="muTagPh" placeholder="紧张 战斗 Boss">
         <div class="tag-suggestions" id="tagSuggestions"></div>
       </div>
       <footer class="modal-foot">
-        <button class="btn btn--primary" id="tagSaveBtn">保存</button>
-        <button class="btn btn--ghost" data-close>取消</button>
+        <button class="btn btn--primary" id="tagSaveBtn" data-i18n="muSave">保存</button>
+        <button class="btn btn--ghost" data-close data-i18n="muCancel">取消</button>
       </footer>
     </div>
   </div>
@@ -364,6 +397,6 @@
 
 </main>
 
-<script type="module" src="./app.js"></script>
+<script type="module" src="./app.js?v=20260910-storage"></script>
 </body>
 </html>

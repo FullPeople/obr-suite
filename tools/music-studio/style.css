@@ -86,15 +86,30 @@ input:focus, textarea:focus { outline: none; }
 .brand-mark { width: 20px; height: 20px; color: var(--accent); }
 .brand-name { font-weight: 600; font-size: 14px; }
 
-.studio-tabs { display: flex; gap: 4px; }
+/* 2026-05-23 — aligned tab dimensions / weight / icon-gap with
+ * monster-studio + buff-studio + dice-studio so the top tab strip
+ * looks visually identical across all four studio tools. Color
+ * tokens stay music-themed (cyan accent) so the brand is preserved;
+ * only the structural metrics (padding / font-weight / border /
+ * radius / icon size / inline-flex layout) match. */
+.studio-tabs { display: flex; gap: 4px; justify-self: center; }
 .studio-tab {
-  padding: 6px 13px; border-radius: var(--radius-sm);
-  color: var(--text-3); text-decoration: none;
-  font-size: 12.5px; font-weight: 500;
-  transition: background .15s, color .15s;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 700;
+  color: var(--text-3);
+  text-decoration: none;
+  padding: 6px 14px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  transition: background .12s, color .12s, border-color .12s;
 }
-.studio-tab:hover { background: var(--bg-2); color: var(--text); }
-.studio-tab.active { background: var(--bg-3); color: var(--accent); }
+.studio-tab .tab-ico { width: 15px; height: 15px; flex-shrink: 0; }
+.studio-tab:hover { color: var(--text); background: var(--bg-2); }
+.studio-tab.active {
+  color: var(--accent);
+  background: var(--bg-3);
+  border-color: var(--line-2);
+}
 
 /* ===== pair widget ===== */
 .pair-widget { margin-left: auto; display: flex; align-items: center; gap: 8px; }
@@ -148,6 +163,49 @@ input:focus, textarea:focus { outline: none; }
   animation: pair-pulse 1.5s ease-in-out infinite;
 }
 @keyframes pair-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* ===== local-mute banner ===== */
+.local-mute-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  border-bottom: 1px solid var(--line-2);
+  animation: lmb-slide .25s ease-out;
+}
+.local-mute-banner.hidden { display: none; }
+/* Muted (default while connected) — calm green: "all good, playing in
+   OBR, you won't hear double". */
+.local-mute-banner[data-muted="1"] {
+  background: linear-gradient(180deg, rgba(92,217,124,0.16), rgba(92,217,124,0.07));
+  color: var(--green);
+  border-bottom-color: rgba(92,217,124,0.35);
+}
+/* Audible — warm amber warning: "heads up, you're hearing two copies". */
+.local-mute-banner[data-muted="0"] {
+  background: linear-gradient(180deg, rgba(255,180,84,0.18), rgba(255,180,84,0.08));
+  color: var(--accent-warm);
+  border-bottom-color: rgba(255,180,84,0.40);
+}
+.lmb-icon { font-size: 16px; line-height: 1; flex-shrink: 0; }
+.lmb-text { flex: 1; min-width: 0; }
+.lmb-toggle {
+  flex-shrink: 0;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(0,0,0,0.28);
+  color: inherit;
+  border: 1px solid currentColor;
+  transition: background .15s, transform .08s;
+}
+.lmb-toggle:hover { background: rgba(0,0,0,0.45); }
+.lmb-toggle:active { transform: translateY(1px); }
+@keyframes lmb-slide { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ===== page ===== */
 .page {
@@ -725,8 +783,8 @@ input:focus, textarea:focus { outline: none; }
 
 .lib-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 6px;
 }
 .lib-empty {
   grid-column: 1/-1;
@@ -740,8 +798,8 @@ input:focus, textarea:focus { outline: none; }
 .empty-hint { font-size: 11.5px; line-height: 1.8; }
 
 .lib-card {
-  display: flex; flex-direction: column; gap: 5px;
-  padding: 8px 9px;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 6px 8px;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -794,12 +852,26 @@ input:focus, textarea:focus { outline: none; }
 }
 .card-name {
   flex: 1; min-width: 0;
-  font-size: 12px; font-weight: 500;
-  color: var(--text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 12px; font-weight: 600;
+  /* Brighter than body text + a soft shadow so titles "pop" and stay
+     legible over the card's tinted / playing-glow backgrounds. */
+  color: #f4f7fb;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  /* Up to 2 lines then ellipsis — a long name never overflows or breaks
+     the grid; the full text is in the title tooltip and on focus. */
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.28;
+  word-break: break-word;
+}
+.lib-card.is-playing .card-name {
+  color: #eafffb;
 }
 .card-name[contenteditable="true"]:focus {
-  background: var(--bg-1); border-radius: 3px; padding: 0 4px;
+  -webkit-line-clamp: unset; display: block; overflow: visible;
+  white-space: normal; word-break: break-word;
+  background: var(--bg-1); border-radius: 3px; padding: 1px 4px;
+  text-shadow: none;
 }
 .card-bus {
   flex-shrink: 0;
@@ -907,6 +979,52 @@ input:focus, textarea:focus { outline: none; }
 }
 .card-tag.add-tag { cursor: pointer; color: var(--text-3); border-style: dashed; }
 .card-tag.add-tag:hover { color: var(--accent); border-color: var(--accent); }
+
+/* Real tag pills get their bg / text / border colour inline from JS
+   (tagColorFor + contrast). These rules just bump readability + shape;
+   the add-tag "+" keeps its dashed look (no inline styles). */
+.card-tag:not(.add-tag) {
+  font-weight: 600; font-size: 10px; letter-spacing: .2px;
+  border-width: 1px; border-style: solid;
+}
+
+/* 详细信息 OFF → drop the meta row + tighten the cards a notch more. */
+.lib-grid.hide-details .card-meta { display: none; }
+.lib-grid.hide-details .lib-card { padding: 5px 7px; gap: 3px; }
+
+/* 详细信息 toggle active state. */
+#detailsToggle.on {
+  background: var(--accent); border-color: var(--accent); color: #062018;
+}
+
+/* ===== tag colour picker (right-click a tag) ===== */
+.tag-color-pop {
+  position: fixed; z-index: 300;
+  width: 192px; padding: 10px;
+  background: var(--bg-1); border: 1px solid var(--line-2);
+  border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+  display: flex; flex-direction: column; gap: 9px;
+}
+.tcp-title { font-size: 12px; color: var(--text-2); font-weight: 600; }
+.tcp-swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+.tcp-sw {
+  width: 100%; aspect-ratio: 1; border-radius: 6px;
+  border: 2px solid transparent; cursor: pointer; padding: 0;
+  transition: transform .08s;
+}
+.tcp-sw:hover { transform: scale(1.1); }
+.tcp-sw.on { border-color: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.45); }
+.tcp-row { display: flex; gap: 8px; align-items: center; }
+.tcp-custom {
+  width: 40px; height: 28px; padding: 0; cursor: pointer;
+  border: 1px solid var(--line-2); border-radius: 6px; background: none;
+}
+.tcp-reset {
+  flex: 1; padding: 6px 8px; font-size: 11.5px;
+  background: var(--bg-3); color: var(--text-2);
+  border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+}
+.tcp-reset:hover { color: var(--text); border-color: var(--line-2); }
 
 /* ===================== MODALS ===================== */
 .modal {

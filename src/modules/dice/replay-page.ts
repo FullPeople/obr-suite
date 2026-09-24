@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../../asset-base";
 import { DieResult, sidesOf } from "./types";
 
 // 2026-05-15 — i18n hint patch (was inline <script> in dice-replay.html,
@@ -95,7 +96,7 @@ function chipsFor(slice: DieResult[]): string {
       d.loser ? "loser" :
       d.value === sides ? "crit" :
       d.value === 1 ? "fail" : "";
-    return `<span class="die ${cls}"><img src="/suite/${imgFor(d.type)}.png" alt="">${d.value}</span>`;
+    return `<span class="die ${cls}"><img src="${assetUrl(`${imgFor(d.type)}.png`)}" alt="">${d.value}</span>`;
   }).join("");
 }
 
@@ -118,7 +119,8 @@ function buildBubbleInner(entry: HistoryEntry): string {
       const end = r + 1 < rows.length ? rows[r + 1] : entry.dice.length;
       const slice = entry.dice.slice(start, end);
       const kept = slice.filter((d) => !d.loser);
-      const rowSum = kept.reduce((a, d) => a + d.value, 0) + entry.modifier;
+      // §9 consistency fix: subtraction dice count negative in row totals.
+      const rowSum = kept.reduce((a, d) => a + (d.subtract ? -d.value : d.value), 0) + entry.modifier;
       out.push(
         `<div class="row1 repeat-row">` +
         `<span class="repeat-idx">#${r + 1}</span>` +

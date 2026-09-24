@@ -1,0 +1,14 @@
+import OBR,{mock} from './fixtures/workbench-sdk';
+import {setupWorkbenchNotices,publishWorkbenchNotice} from '../src/workbench/notices';
+import {setupWorkbenchDice} from '../src/workbench/dice';
+import {setPanelOffset,PANEL_IDS} from '../src/utils/panelLayout';
+import {setupPanelDragHost} from '../src/utils/panelDragHost';
+mock.popoverCloses=[];
+OBR.popover.close=async id=>{mock.popoverCloses.push(id);};
+const openModal=OBR.modal.open,closeModal=OBR.modal.close;
+OBR.modal.open=async options=>{await openModal(options);if(options.url.includes('drag-preview.html')){if(mock.dragMountDelay)await new Promise(resolve=>setTimeout(resolve,mock.dragMountDelay));const frame=parent.document.createElement('iframe');frame.id='drag';frame.src='/drag.html'+new URL(options.url).hash;frame.style.cssText='position:fixed;inset:0;width:100%;height:100%;border:0';parent.document.body.append(frame);}};
+OBR.modal.close=async id=>{await closeModal(id);if(id==='test-drag')parent.document.querySelector('#drag')?.remove();};
+setupPanelDragHost('test-drag');
+setupWorkbenchNotices();
+await setupWorkbenchDice();
+(window as any).scene179={publishWorkbenchNotice,setOffset:(dx:number,dy:number)=>setPanelOffset(PANEL_IDS.diceHistory,{dx,dy})};

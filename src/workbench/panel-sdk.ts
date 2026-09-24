@@ -1,0 +1,27 @@
+import './tone';
+import type OBRType from '@owlbear-rodeo/sdk';
+// Builders are local pure objects; all host API calls use the checked RPC bridge.
+export * from '@workbench/sdk-builders';
+const channel='workbench-panel-frame/v1';
+const pending=new Map<string,{resolve:(v:any)=>void;reject:(e:Error)=>void;timer:ReturnType<typeof setTimeout>}>(),listeners=new Map<string,Set<(v:any)=>void>>();
+let roomId='',playerId='',bootstrapReads:Record<string,any>={},bootstrapUntil=0;
+function rpc(method:string,...args:any[]):Promise<any>{if(performance.now()<bootstrapUntil&&Object.prototype.hasOwnProperty.call(bootstrapReads,method))return Promise.resolve(structuredClone(bootstrapReads[method]));if(/\.(set|apply|add|delete)/.test(method))bootstrapUntil=0;const id=crypto.randomUUID();return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error('枭熊连接超时'));},20000);pending.set(id,{resolve,reject,timer});parent.postMessage({channel,id,method,args},location.origin);});}
+function on(event:string,fn:(v:any)=>void,name?:string){const key=`${event}:${name||''}`;if(!listeners.has(key)){listeners.set(key,new Set());void rpc('subscribe',event,name).catch(report);}listeners.get(key)!.add(fn);return()=>listeners.get(key)?.delete(fn);}
+function report(error:unknown){parent.postMessage({channel,error:String(error)},location.origin);}
+export {rpc as workbenchPanelRequest};
+window.addEventListener('message',event=>{if(event.source!==parent||event.origin!==location.origin||event.data?.channel!==channel)return;const m=event.data;if(m.event){if(['sceneMetadata','roomMetadata','sceneReady','player'].includes(m.event))bootstrapUntil=0;listeners.get(`${m.event}:${m.name||''}`)?.forEach(fn=>fn(m.data));return;}const request=pending.get(m.id);if(request){clearTimeout(request.timer);pending.delete(m.id);m.error?request.reject(Error(m.error)):request.resolve(m.result);}});
+const call=(prefix:string,names:string[])=>Object.fromEntries(names.map(name=>[name,(...args:any[])=>rpc(prefix+'.'+name,...args)]));
+function items(prefix:string,event?:string){return {...call(prefix,['addItems','deleteItems']),getItems:async(filter:any)=>{const rows=await rpc(prefix+'.getItems',Array.isArray(filter)?filter:undefined);return typeof filter==='function'?rows.filter(filter):rows;},updateItems:async(ids:string[]|((item:any)=>boolean),update:(drafts:any[])=>void)=>{const previous=await rpc(prefix+'.getItems',Array.isArray(ids)?ids:undefined),selected=typeof ids==='function'?previous.filter(ids):previous,next=structuredClone(selected);update(next);return rpc(prefix+'.applyChanges',selected,next);},onChange:(fn:any)=>on(event||'items',fn)};}
+const personalKeys=new Set(['obr-suite/lang','obr-suite/sfx-dice','obr-suite/sfx-initiative','obr-suite/sfx-on','com.obr-suite/bubbles/scale','obr-suite/boss-bar/preferences']);
+let prefQueue=Promise.resolve();
+async function initialize(){for(;;){try{return await rpc('init');}catch(error){document.body.dataset.bridgeError=String(error);await new Promise(resolve=>setTimeout(resolve,1500));}}}
+const ready=initialize().then(data=>{delete document.body.dataset.bridgeError;roomId=data.roomId;playerId=data.playerId;bootstrapReads=data.reads||{};bootstrapUntil=performance.now()+1500;for(const [key,value] of Object.entries(data.preferences||{})){if(typeof value==='string')localStorage.setItem(key,value);else localStorage.removeItem(key);}if(location.pathname.endsWith('/settings.html')){const save=Storage.prototype.setItem,remove=Storage.prototype.removeItem;Storage.prototype.setItem=function(key,value){save.call(this,key,value);if(this===localStorage&&personalKeys.has(key))prefQueue=prefQueue.then(()=>rpc('preferences.write',key,value)).catch(report);};Storage.prototype.removeItem=function(key){remove.call(this,key);if(this===localStorage&&personalKeys.has(key))prefQueue=prefQueue.then(()=>rpc('preferences.write',key,null)).catch(report);};}});
+const api:any={isAvailable:true,isReady:true,onReady:(fn:()=>unknown)=>{void ready.then(fn).then(()=>{document.body.dataset.bridgeReady='true';}).catch(report);},
+ player:{get id(){return playerId;},...call('player',['getId','getConnectionId','getRole','getName','getColor','getMetadata','getSelection','setMetadata']),onChange:(fn:any)=>on('player',fn)},party:{...call('party',['getPlayers']),onChange:(fn:any)=>on('party',fn)},
+ room:{get id(){return roomId;},...call('room',['getMetadata','setMetadata']),onMetadataChange:(fn:any)=>on('roomMetadata',fn)},
+ scene:{...call('scene',['isReady','getMetadata','setMetadata']),onReadyChange:(fn:any)=>on('sceneReady',fn),onMetadataChange:(fn:any)=>on('sceneMetadata',fn),items:items('scene.items'),local:items('scene.local'),grid:{...call('scene.grid',['getDpi','getScale','getType']),onChange:(fn:any)=>on('grid',fn)},fog:{...call('scene.fog',['getFilled','setFilled']),onChange:(fn:any)=>on('fog',fn)}},
+ assets:call('assets',['downloadImages','uploadImages']),viewport:call('viewport',['getWidth','getHeight','getPosition','getScale']),notification:call('notification',['show']),
+ broadcast:{sendMessage:async(...args:any[])=>{await prefQueue;return rpc('broadcast.sendMessage',...args);},onMessage:(name:string,fn:any)=>on('broadcast',fn,name)},
+ popover:{open:(data:any)=>rpc('popover.open',data),close:async()=>parent.postMessage({channel,close:true},location.origin)},modal:{close:async()=>parent.postMessage({channel,close:true},location.origin)}
+};
+export default api as typeof OBRType;

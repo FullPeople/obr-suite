@@ -1,3 +1,5 @@
+import {WORKBENCH_DEV} from '../../workbench/channel';
+import { setPanelOpen } from "../../utils/panelObstacles";
 // Status Tracker — module lifecycle.
 //
 // Three OBR windows participate:
@@ -9,15 +11,16 @@
 //      via OBR.scene.local.addItems on layer POST_PROCESS, attached
 //      to its token. These follow tokens automatically; the user
 //      can pan / zoom freely while the rings stay locked on.
-//   3. Capture overlay modal (transient, opens on drag-start, closes
-//      on drag-end). Fullscreen, captures pointer events, paints
-//      buffs onto tokens as the cursor crosses each ring.
+//   3. Capture overlay modal (transient, still used by the manage
+//      popover transfer path). Palette application itself is now a
+//      click-select → canvas-click flow handled by this tool mode.
 //
 // Tool action (`]` shortcut on the Select tool) toggles the whole
 // thing on / off. Modal lifecycle is driven by broadcasts the
 // palette + capture iframes send back here.
 
-import OBR from "@owlbear-rodeo/sdk";
+import OBR, { type Item, type Tool, type ToolMode, type ToolAction } from "@owlbear-rodeo/sdk";
+import { getLocalLang, onLangChange } from "../../state";
 import { assetUrl } from "../../asset-base";
 import { IS_MOBILE } from "../../feature-flags";
 import {
@@ -33,12 +36,12 @@ import {
   readTokenBuffIds,
   readTokenBuffRounds,
   sweepAllOurItems,
+  invalidateAllBuffCaches,
 } from "./bubbles";
-// circles.ts is still imported by capture-page for getTokenCircleSpec
-// (hit-testing radius). The persistent local-Shape rings are no longer
-// rendered from the background — the helpers stay around so the
-// capture overlay's hit-test math reuses the exact same radius
-// formula.
+// getTokenCircleSpec is reused for invisible click hit-testing when a
+// palette status has been selected. The persistent local-Shape rings
+// are no longer rendered from the background.
+import { getTokenCircleSpec } from "./circles";
 import {
   PANEL_IDS,
   getPanelOffset,
@@ -68,6 +71,9 @@ const BC_DRAG_START = `${PLUGIN_ID}/drag-start`;
 const BC_DRAG_END = `${PLUGIN_ID}/drag-end`;
 const BC_TOGGLE = `${PLUGIN_ID}/toggle`;
 const BC_REFRESH_TOKEN = `${PLUGIN_ID}/refresh-token`;
+const BC_SELECT_APPLY = `${PLUGIN_ID}/select-apply`;
+const BC_SELECT_CANCEL = `${PLUGIN_ID}/select-cancel`;
+const BC_SELECT_STATE = `${PLUGIN_ID}/select-state`;
 // Sent by the capture overlay when the user drops the 🛠 manage
 // pill onto a token. Background opens a popover anchored to that
 // token listing the token's current buffs for direct manipulation.
@@ -90,11 +96,45 @@ const PALETTE_INSET_BOTTOM = 16;
 
 let active = false;
 let captureOpen = false;
+type SelectedPaletteApply =
+  | { kind: "buff"; key: string; buff: BuffDef }
+  | { kind: "clear"; key: "__clear__" }
+  | { kind: "manage"; key: "__manage__" };
+let selectedApply: SelectedPaletteApply | null = null;
 // Tool the user was on when they activated status tracker. Used so
 // the `]` shortcut can switch BACK to whatever they had selected
 // previously instead of always returning to the move tool.
 let previousTool: string | null = null;
 const unsubs: Array<() => void> = [];
+type EntrySession = { alive: boolean; tool?: Tool; mode?: ToolMode; action?: ToolAction };
+let entrySession: EntrySession | null = null;
+let entryQueue: Promise<void> = Promise.resolve();
+const entryText = (key: "tool" | "create" | "newStatus") => ({
+  en: { tool: "Status Tracker", create: "Create status from this", newStatus: "New status" },
+  zh: { tool: "状态追踪", create: "以此创建状态", newStatus: "新状态" },
+})[getLocalLang()][key];
+const isCurrentEntry = (own: EntrySession) => own.alive && entrySession === own;
+// The SDK exposes create-by-ID for replacing a tool's description, not a
+// setLabel API. Keep callbacks/IDs stable, never remove or activate on language
+// changes, and drain outstanding updates before teardown removes these IDs.
+function queueEntry(task: () => Promise<void>): Promise<void> {
+  const result = entryQueue.then(task);
+  entryQueue = result.catch(error => console.warn("[status] entry update failed", error));
+  return result;
+}
+async function refreshEntryLabels(own: EntrySession): Promise<void> {
+  if (WORKBENCH_DEV) return;
+  for (const [definition, create] of [
+    [own.tool, (value: Tool) => OBR.tool.create(value)],
+    [own.mode, (value: ToolMode) => OBR.tool.createMode(value)],
+    [own.action, (value: ToolAction) => OBR.tool.createAction(value)],
+  ] as const) {
+    if (!isCurrentEntry(own)) return;
+    if (definition) {
+      await create({ ...definition, icons: definition.icons.map(icon => ({ ...icon, label: entryText("tool") })) });
+    }
+  }
+}
 
 // Compute the palette's current world (= viewport) anchor: default
 // bottom-right corner inset, plus the user's stored offset (set by
@@ -130,13 +170,14 @@ async function openPalette(): Promise<void> {
       hidePaper: true,
       disableClickAway: true,
     });
+    setPanelOpen("status-palette", true);
   } catch (e) {
     console.warn("[status] open palette failed", e);
   }
 }
 
 async function closePalette(): Promise<void> {
-  try { await OBR.popover.close(POPOVER_PALETTE); } catch {}
+  try { await OBR.popover.close(POPOVER_PALETTE); setPanelOpen("status-palette", false); } catch {}
 }
 
 async function openCapture(payload: {
@@ -148,8 +189,9 @@ async function openCapture(payload: {
   kind: "buff" | "clear" | "manage" | "manage-transfer" | "preset";
   buff?: BuffDef;
   /** "drop" = apply to single token on pointerup (left click).
-   *  "paint-toggle" = drag-paint, toggling per-token (right click). */
-  mode: "drop" | "paint-toggle";
+   *  "paint-toggle" = drag-paint, toggling per-token (right click).
+   *  "click-place" = selected palette bubble carried by the cursor. */
+  mode: "drop" | "paint-toggle" | "click-place";
   /** Only set for kind="manage-transfer". The token the user dragged
    *  the buff FROM (= source). On drop on a target token we remove
    *  the buff from this source and add it to the target; on drop on
@@ -256,6 +298,127 @@ async function closeManagePopover(): Promise<void> {
   managePopoverOpen = false;
 }
 
+function isStatusTargetItem(item: any): boolean {
+  return item?.type === "IMAGE"
+    && (item.layer === "CHARACTER" || item.layer === "MOUNT" || item.layer === "PROP");
+}
+
+async function publishSelectedApplyState(): Promise<void> {
+  try {
+    await OBR.broadcast.sendMessage(
+      BC_SELECT_STATE,
+      { key: selectedApply?.key ?? null },
+      { destination: "LOCAL" },
+    );
+  } catch {}
+}
+
+async function cancelSelectedApply(): Promise<void> {
+  if (!selectedApply) return;
+  selectedApply = null;
+  await closeCapture();
+  await publishSelectedApplyState();
+}
+
+async function findClickedStatusTarget(event: any): Promise<string | null> {
+  const direct = event?.target;
+  if (isStatusTargetItem(direct)) return direct.id as string;
+
+  const p = event?.pointerPosition as { x?: number; y?: number } | undefined;
+  if (!p || typeof p.x !== "number" || typeof p.y !== "number") return null;
+
+  let items: any[] = [];
+  try { items = await OBR.scene.items.getItems(); } catch { return null; }
+  let sceneDpi = 150;
+  try { sceneDpi = await OBR.scene.grid.getDpi(); } catch {}
+
+  const candidates = items
+    .filter(isStatusTargetItem)
+    .map((item) => {
+      const spec = getTokenCircleSpec(item, sceneDpi);
+      const dx = p.x! - spec.cx;
+      const dy = p.y! - spec.cy;
+      return {
+        id: item.id as string,
+        zIndex: typeof item.zIndex === "number" ? item.zIndex : 0,
+        inside: dx * dx + dy * dy <= spec.radius * spec.radius,
+      };
+    })
+    .filter((x) => x.inside)
+    .sort((a, b) => b.zIndex - a.zIndex);
+  return candidates[0]?.id ?? null;
+}
+
+async function toggleBuffOnToken(tokenId: string, buff: BuffDef): Promise<void> {
+  try {
+    await OBR.scene.items.updateItems([tokenId], (drafts) => {
+      for (const d of drafts) {
+        const cur = (d.metadata as any)[STATUS_BUFFS_KEY];
+        const list: string[] = Array.isArray(cur)
+          ? cur.filter((x: any) => typeof x === "string")
+          : [];
+        const idx = list.indexOf(buff.id);
+        const curRounds = (d.metadata as any)[STATUS_BUFF_ROUNDS_KEY];
+        const roundsMap = curRounds && typeof curRounds === "object" && !Array.isArray(curRounds)
+          ? { ...(curRounds as Record<string, number>) }
+          : {};
+        if (idx >= 0) {
+          list.splice(idx, 1);
+          delete roundsMap[buff.id];
+        } else {
+          list.push(buff.id);
+          const rounds = Math.floor(Number(buff.rounds ?? 0));
+          if (Number.isFinite(rounds) && rounds > 0) roundsMap[buff.id] = rounds;
+        }
+        (d.metadata as any)[STATUS_BUFFS_KEY] = list;
+        (d.metadata as any)[STATUS_BUFF_ROUNDS_KEY] = roundsMap;
+      }
+    });
+    await refreshTokenBuffs(tokenId);
+  } catch (e) {
+    console.warn("[status] toggleBuffOnToken failed", { tokenId, buffId: buff.id, stage: "toggle", error: e });
+  }
+}
+
+async function clearAllBuffsOnToken(tokenId: string): Promise<void> {
+  try {
+    await OBR.scene.items.updateItems([tokenId], (drafts) => {
+      for (const d of drafts) {
+        (d.metadata as any)[STATUS_BUFFS_KEY] = [];
+        (d.metadata as any)[STATUS_BUFF_ROUNDS_KEY] = {};
+      }
+    });
+    await refreshTokenBuffs(tokenId);
+  } catch (e) {
+    console.warn("[status] clearAllBuffsOnToken failed", { tokenId, stage: "clear-all", error: e });
+  }
+}
+
+async function applySelectedToToken(tokenId: string): Promise<void> {
+  if (!selectedApply) return;
+  if (selectedApply.kind === "buff") {
+    await toggleBuffOnToken(tokenId, selectedApply.buff);
+  } else if (selectedApply.kind === "clear") {
+    await clearAllBuffsOnToken(tokenId);
+  } else if (selectedApply.kind === "manage") {
+    await openManagePopover(tokenId);
+    await cancelSelectedApply();
+  }
+}
+
+async function handleSelectedCanvasClick(event: any): Promise<boolean> {
+  const button = typeof event?.button === "number" ? event.button : 0;
+  if (button === 2) {
+    await cancelSelectedApply();
+    return false;
+  }
+  if (!selectedApply) return true;
+  const tokenId = await findClickedStatusTarget(event);
+  if (!tokenId) return false;
+  await applySelectedToToken(tokenId);
+  return false;
+}
+
 // 2026-05-14 (#2) — append a buff built from a canvas item into the
 // per-client localStorage catalog. The item's image becomes the
 // buff's icon (effectParams.imageUrl + dims). We write the same v2
@@ -265,22 +428,22 @@ async function closeManagePopover(): Promise<void> {
 // broadcast catalog-changed so the background bubble sync refreshes.
 function appendCatalogBuff(buff: BuffDef): void {
   let buffs: any[] = [];
+  let hasCatalog = false;
   let groupOrder: string[] | undefined;
   try {
     const raw = localStorage.getItem(LS_BUFF_CATALOG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) buffs = parsed;
+      if (Array.isArray(parsed)) { buffs = parsed; hasCatalog = true; }
       else if (parsed && Array.isArray(parsed.buffs)) {
         buffs = parsed.buffs;
+        hasCatalog = true;
         if (Array.isArray(parsed.groupOrder)) groupOrder = parsed.groupOrder;
       }
     }
   } catch {}
-  // If the catalog is still empty (user never customised), seed it
-  // from DEFAULT_BUFFS so we don't wipe the built-ins by writing a
-  // one-entry catalog.
-  if (buffs.length === 0) buffs = DEFAULT_BUFFS.map((b) => ({ ...b }));
+  // Only first use gets defaults. A deliberately cleared catalog stays empty.
+  if (!hasCatalog) buffs = DEFAULT_BUFFS.map((b) => ({ ...b }));
   buffs.push(buff);
   try {
     localStorage.setItem(
@@ -300,13 +463,20 @@ function appendCatalogBuff(buff: BuffDef): void {
 }
 
 async function registerCreateStatusMenu(): Promise<void> {
+  const own = entrySession;
+  if (!own) return;
+  return queueEntry(() => createStatusMenu(own));
+}
+
+async function createStatusMenu(own: EntrySession): Promise<void> {
+  if (!isCurrentEntry(own) || !active) return;
   try {
     await OBR.contextMenu.create({
       id: CTX_CREATE_STATUS,
       icons: [
         {
           icon: ICON_URL,
-          label: "以此创建状态",
+          label: entryText("create"),
           // Non-MAP image items only — turning a map/backdrop into a
           // buff icon makes no sense. No role filter: players can
           // build their own catalog (it's per-client localStorage).
@@ -320,6 +490,7 @@ async function registerCreateStatusMenu(): Promise<void> {
         },
       ],
       onClick: (ctx) => {
+        if (!isCurrentEntry(own) || !active) return;
         const item = ctx.items[0] as any;
         if (!item || !item.image?.url) return;
         // 2026-05-14 (#2 fix) — write the image into `iconAsset` (a
@@ -343,7 +514,7 @@ async function registerCreateStatusMenu(): Promise<void> {
           ? item.rotation : 0;
         const buff: BuffDef = {
           id: `custom-${Date.now()}-${Math.floor(Math.random() * 1e4)}`,
-          name: (item.name as string) || "新状态",
+          name: (item.name as string) || entryText("newStatus"),
           color: "#ffffff",
           iconAsset: item.image.url as string,
           ...(srcScale !== 1.0 ? { webmScale: srcScale } : {}),
@@ -367,10 +538,13 @@ async function registerCreateStatusMenu(): Promise<void> {
 }
 
 async function removeCreateStatusMenu(): Promise<void> {
-  try { await OBR.contextMenu.remove(CTX_CREATE_STATUS); } catch {}
+  await queueEntry(async () => {
+    try { await OBR.contextMenu.remove(CTX_CREATE_STATUS); } catch {}
+  });
 }
 
 async function activate(): Promise<void> {
+  if (WORKBENCH_DEV) return;
   if (active) return;
   active = true;
   await openPalette();
@@ -381,6 +555,7 @@ async function activate(): Promise<void> {
 async function deactivate(): Promise<void> {
   if (!active) return;
   active = false;
+  await cancelSelectedApply();
   await closeCapture();
   await closeManagePopover();
   await closePalette();
@@ -437,6 +612,17 @@ async function getCatalog(): Promise<BuffDef[]> {
       }
     } catch {}
   }
+  if (WORKBENCH_DEV) {
+    // Shared card states must render for peers even when they have a personal catalog.
+    // Personal entries win by ID, retaining that viewer's effect preferences.
+    try {
+      const shared = (await OBR.scene.getMetadata())["com.obr-suite/workbench/status-catalog"];
+      if (Array.isArray(shared)) {
+        const local = arr || DEFAULT_BUFFS;
+        arr = [...local, ...shared.filter(v => v && typeof v.id === "string" && !local.some(x => x.id === v.id))];
+      }
+    } catch {}
+  }
   try {
     if (arr) {
       const out: BuffDef[] = [];
@@ -478,6 +664,26 @@ async function getCatalog(): Promise<BuffDef[]> {
         if (typeof ws === "number" && Number.isFinite(ws) && ws > 0) {
           def.webmScale = ws;
         }
+        // 2026-09-17 — `webmBelow` (draw the effect under the token).
+        if ((e as any).webmBelow === true) def.webmBelow = true;
+        // 2026-09-17 — `webmIntrinsicW/H` and `rotation` were never parsed, so
+        // every catalog round-trip dropped them. Two consequences: a
+        // user-curated 256px WebM silently reverted to the 192px assumption and
+        // its centre drifted off the token, and a built-in whose definition
+        // carries them stopped matching DEFAULT_BUFFS — which is exactly what
+        // isDefaultStatus compares — so the palette showed it as a customized
+        // Chinese label instead of the built-in English one. Parsed now so an
+        // entry survives save/reload unchanged.
+        const wi = (e as any).webmIntrinsicW;
+        if (typeof wi === "number" && Number.isFinite(wi) && wi > 0) def.webmIntrinsicW = wi;
+        const wh = (e as any).webmIntrinsicH;
+        if (typeof wh === "number" && Number.isFinite(wh) && wh > 0) def.webmIntrinsicH = wh;
+        const rot = (e as any).rotation;
+        if (typeof rot === "number" && Number.isFinite(rot)) def.rotation = rot;
+        // Same field the manage page already keeps: a built-in or custom buff
+        // with a default round count must not lose it here.
+        const rnd = (e as any).rounds;
+        if (typeof rnd === "number" && Number.isFinite(rnd) && rnd > 0) def.rounds = rnd;
         // 2026-05 — `webmOff`: explicit "this built-in buff's effect is
         // turned OFF" marker, set by the catalog editor's 无 / 默认特效
         // toggle. MUST be parsed BEFORE the re-seed below — otherwise
@@ -512,20 +718,40 @@ async function getCatalog(): Promise<BuffDef[]> {
         // visual would clip / overlap.
         // …UNLESS the user explicitly turned the effect off (webmOff):
         // then we must NOT resurrect webmAsset / webmScale.
-        if (!def.webmOff && (!def.webmAsset || !def.webmScale)) {
+        // 2026-09-17 — one block per field, not one shared condition. Each of
+        // these keys was added at a different time, so a catalog saved between
+        // two of those times already satisfies the older test and would never
+        // pick up the newer field: `webmBelow` rode a guard that a
+        // webmAsset+webmScale pair already satisfied, and `webmIntrinsicW/H` had
+        // no guard at all.
+        if (!def.webmOff) {
           const fallback = DEFAULT_BUFFS.find((b) => b.id === def.id);
           if (fallback) {
-            if (!def.webmAsset && fallback.webmAsset) {
-              def.webmAsset = fallback.webmAsset;
+            if (!def.webmAsset && fallback.webmAsset) def.webmAsset = fallback.webmAsset;
+            if (!def.webmScale && fallback.webmScale) def.webmScale = fallback.webmScale;
+            if (def.webmBelow === undefined && fallback.webmBelow !== undefined) {
+              def.webmBelow = fallback.webmBelow;
             }
-            if (!def.webmScale && fallback.webmScale) {
-              def.webmScale = fallback.webmScale;
+            // The intrinsic size describes the ASSET, so it is inherited only
+            // while the entry still points at the built-in asset — someone who
+            // chose their own WebM keeps their own size rather than being handed
+            // one that does not fit their file. This is not cosmetic: OBR sizes
+            // AND anchors an Image by the file's real pixels, so a 256px ground
+            // ring left at the 192px default rendered 1.33x too large and
+            // shifted by the offset difference.
+            if (def.webmAsset && def.webmAsset === fallback.webmAsset) {
+              if (def.webmIntrinsicW === undefined && fallback.webmIntrinsicW) {
+                def.webmIntrinsicW = fallback.webmIntrinsicW;
+              }
+              if (def.webmIntrinsicH === undefined && fallback.webmIntrinsicH) {
+                def.webmIntrinsicH = fallback.webmIntrinsicH;
+              }
             }
           }
         }
         out.push(def);
       }
-      if (out.length > 0) return out;
+      if (out.length > 0 || arr.length === 0) return out;
     }
   } catch {}
   return DEFAULT_BUFFS;
@@ -581,28 +807,66 @@ function displayBuffsWithRounds(token: any, buffs: BuffDef[]): BuffDef[] {
   });
 }
 
-async function syncAllVisibleTokensImpl(): Promise<void> {
+// === Per-token write serialization =========================================
+//
+// syncTokenBuffs deletes/adds bubble items with STABLE ids — two
+// concurrent runs for the same token produce duplicate addItems and
+// late-delete-kills-fresh-add interleavings. Every syncTokenBuffs call
+// (full pass AND single-token refresh) chains on the token's promise
+// tail so writes for one token are strictly sequential; different
+// tokens still run in parallel.
+const tokenSyncTails = new Map<string, Promise<boolean>>();
+/** Serialized syncTokenBuffs for one token. Returns the sync's success
+ *  flag — callers must not record the token as synced on false. */
+async function syncOneToken(token: any, buffs: BuffDef[]): Promise<boolean> {
+  const prev = tokenSyncTails.get(token.id) ?? Promise.resolve(true);
+  // .catch on the previous tail: one failed sync must not wedge the
+  // token's queue forever.
+  const next = prev.catch(() => false).then(() => syncTokenBuffs(token, buffs));
+  tokenSyncTails.set(token.id, next);
+  try {
+    return await next;
+  } finally {
+    if (tokenSyncTails.get(token.id) === next) tokenSyncTails.delete(token.id);
+  }
+}
+
+async function syncAllVisibleTokensImpl(itemsSnapshot?: Item[]): Promise<void> {
   if (!isGM) return;
   try {
-    const items = await OBR.scene.items.getItems();
+    // onChange delivers the complete scene — reuse it instead of
+    // re-fetching the whole scene per pass (checklist §1).
+    const items = itemsSnapshot ?? await OBR.scene.items.getItems();
     const next = new Map<string, string>();
+    // First pass: cheap key compare, collect what actually changed.
+    const cleanups: any[] = [];
+    const changed: Array<{ token: any; ids: string[] }> = [];
     for (const it of items) {
       if (!(it as any).image || (it as any).type !== "IMAGE") continue;
       const ids = readTokenBuffIds(it);
       if (ids.length === 0) {
-        if (lastBuffSnapshot.has(it.id)) {
-          await syncTokenBuffs(it as any, []);
-        }
+        if (lastBuffSnapshot.has(it.id)) cleanups.push(it);
         continue;
       }
       const key = tokenSyncKey(it, ids);
       next.set(it.id, key);
       if (lastBuffSnapshot.get(it.id) === key) continue;
-      const cat = await getCatalog();
+      changed.push({ token: it, ids });
+    }
+    // Catalog parse once per pass, not once per changed token.
+    const cat = changed.length > 0 ? await getCatalog() : [];
+    const byId = new Map(cat.map((b) => [b.id, b]));
+    for (const it of cleanups) {
+      await syncOneToken(it, []);
+    }
+    for (const { token, ids } of changed) {
       const buffs = ids
-        .map((id) => cat.find((b) => b.id === id))
+        .map((id) => byId.get(id))
         .filter((b): b is BuffDef => !!b);
-      await syncTokenBuffs(it as any, displayBuffsWithRounds(it, buffs));
+      const ok = await syncOneToken(token, displayBuffsWithRounds(token, buffs));
+      // Failed scene write: drop the key so the next pass retries this
+      // token instead of key-skipping it forever.
+      if (!ok) next.delete(token.id);
     }
     lastBuffSnapshot = next;
   } catch (e) {
@@ -626,24 +890,64 @@ async function syncAllVisibleTokensImpl(): Promise<void> {
 // pending one (we always sync against current scene state anyway).
 let syncRunning = false;
 let syncQueued = false;
-async function syncAllVisibleTokens(): Promise<void> {
+// Newest scene snapshot delivered by items.onChange — the queued
+// coalesced rerun reuses it instead of re-fetching the whole scene.
+let latestItemsSnapshot: Item[] | null = null;
+// Sticky full-resync request (catalog edit / render-mode flip). A bare
+// lastBuffSnapshot.clear() from those handlers can be LOST when a pass
+// is in flight: the pass ends with `lastBuffSnapshot = next`, replacing
+// the map that was just cleared, and the queued rerun then key-skips
+// everything. The flag is consumed at the START of the next impl run,
+// which is serialized, so the clear always lands on a fresh pass.
+let forceFullResync = false;
+
+// Exclusive gate shared by the sync pass AND sweepAllOurItems. Without
+// it a sweep's cache-invalidate can be undone by a concurrent pass
+// whose hydrate read raced the sweep's deleteItems: the pass would
+// repopulate the sig caches from pre-sweep scene state, the sweep then
+// deletes the real items, and every later pass diffs to zero ops —
+// bubbles permanently missing after a scene switch (checklist §1).
+let exclusiveChain: Promise<void> = Promise.resolve();
+function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const run = exclusiveChain.then(fn, fn);
+  exclusiveChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+/** sweepAllOurItems, serialized against the sync pass. Every sweep in
+ *  this module must go through here. */
+function sweepExclusive(): Promise<void> {
+  return runExclusive(() => sweepAllOurItems());
+}
+
+async function syncAllVisibleTokens(itemsSnapshot?: Item[]): Promise<void> {
   if (syncRunning) {
     syncQueued = true;
     return;
   }
   syncRunning = true;
   try {
-    await syncAllVisibleTokensImpl();
+    await runExclusive(() => {
+      if (forceFullResync) {
+        forceFullResync = false;
+        lastBuffSnapshot.clear();
+      }
+      return syncAllVisibleTokensImpl(itemsSnapshot);
+    });
   } finally {
     syncRunning = false;
     if (syncQueued) {
       syncQueued = false;
-      void syncAllVisibleTokens();
+      void syncAllVisibleTokens(latestItemsSnapshot ?? undefined);
     }
   }
 }
 
 async function refreshTokenBuffs(tokenId: string): Promise<void> {
+  // GM is the sole bubble-item writer (same gate as the full pass) —
+  // a player client running this raced the GM's writes with the same
+  // stable item ids. Player metadata writes replicate to the GM whose
+  // onChange pass renders them.
+  if (!isGM) return;
   try {
     const items = await OBR.scene.items.getItems([tokenId]);
     const token = items[0];
@@ -653,9 +957,14 @@ async function refreshTokenBuffs(tokenId: string): Promise<void> {
     const buffs = ids
       .map((id) => cat.find((b) => b.id === id))
       .filter((b): b is BuffDef => !!b);
-    await syncTokenBuffs(token as any, displayBuffsWithRounds(token, buffs));
+    const ok = await syncOneToken(token, displayBuffsWithRounds(token, buffs));
+    // Keep the full pass' cache honest so it doesn't redo this token —
+    // but only on success; a failed write must stay retryable.
+    if (!ok) lastBuffSnapshot.delete(tokenId);
+    else if (ids.length === 0) lastBuffSnapshot.delete(tokenId);
+    else lastBuffSnapshot.set(tokenId, tokenSyncKey(token, ids));
   } catch (e) {
-    console.warn("[status] refreshTokenBuffs failed", e);
+    console.warn("[status] refreshTokenBuffs failed", { tokenId, error: e });
   }
 }
 
@@ -672,6 +981,7 @@ let tickingBuffRounds = false;
 async function decrementBuffRounds(): Promise<void> {
   if (!isGM || tickingBuffRounds) return;
   tickingBuffRounds = true;
+  let tickTokenIds: string[] = [];
   try {
     const tokens = await OBR.scene.items.getItems((item) => {
       const ids = item.metadata?.[STATUS_BUFFS_KEY];
@@ -679,6 +989,7 @@ async function decrementBuffRounds(): Promise<void> {
       return Array.isArray(ids) && !!rounds && typeof rounds === "object";
     });
     if (tokens.length === 0) return;
+    tickTokenIds = tokens.map((t) => t.id);
     await OBR.scene.items.updateItems(tokens.map((t) => t.id), (drafts) => {
       for (const d of drafts) {
         const ids = readTokenBuffIds(d as any);
@@ -705,7 +1016,7 @@ async function decrementBuffRounds(): Promise<void> {
       }
     });
   } catch (e) {
-    console.warn("[status] decrementBuffRounds failed", e);
+    console.warn("[status] decrementBuffRounds failed", { tokenIds: tickTokenIds, stage: "round-tick", error: e });
   } finally {
     tickingBuffRounds = false;
   }
@@ -723,6 +1034,8 @@ export async function setupStatusTracker(): Promise<void> {
     console.info("[status] mobile client — skipping setup");
     return;
   }
+  const own: EntrySession = { alive: true };
+  entrySession = own;
 
   // Toolbar tool — same model as Bestiary (item 2 in the user's
   // 2026-05-04 spec). Click the icon → activate the tool → palette
@@ -730,12 +1043,12 @@ export async function setupStatusTracker(): Promise<void> {
   // No role filter — anyone can manage their own / shared tokens
   // (item 4 in the same spec).
   try {
-    await OBR.tool.create({
+    own.tool = {
       id: TOOL_ID,
       icons: [
         {
           icon: ICON_URL,
-          label: "状态追踪",
+          label: entryText("tool"),
           // No `roles` filter — both GM and players see the icon.
           // Per-token permission for buff writes is enforced by the
           // OBR scene-items API itself: players can only modify
@@ -745,28 +1058,49 @@ export async function setupStatusTracker(): Promise<void> {
         },
       ],
       onClick: async () => {
+        if (!isCurrentEntry(own)) return false;
         await OBR.tool.activateTool(TOOL_ID);
         return false;
       },
-    });
+    };
+    await queueEntry(async () => { if (!WORKBENCH_DEV && isCurrentEntry(own)) await OBR.tool.create(own.tool!); });
   } catch (e) {
     console.warn("[status] tool.create failed", e);
   }
   try {
-    await OBR.tool.createMode({
+    own.mode = {
       id: `${TOOL_ID}/mode`,
       icons: [
         {
           icon: ICON_URL,
-          label: "状态追踪",
+          label: entryText("tool"),
           filter: { activeTools: [TOOL_ID] },
         },
       ],
       cursors: [{ cursor: "default" }],
-    });
+      onToolDown: async (_ctx, event) => {
+        if (!isCurrentEntry(own)) return;
+        if ((event as any).button === 2) await cancelSelectedApply();
+      },
+      onToolClick: async (_ctx, event) => {
+        if (!isCurrentEntry(own)) return false;
+        return handleSelectedCanvasClick(event as any);
+      },
+      onKeyDown: async (_ctx, event) => {
+        if (!isCurrentEntry(own)) return;
+        if (event.key !== "Escape") return;
+        await cancelSelectedApply();
+      },
+      onDeactivate: async () => {
+        if (!isCurrentEntry(own)) return;
+        await cancelSelectedApply();
+      },
+    };
+    await queueEntry(async () => { if (!WORKBENCH_DEV && isCurrentEntry(own)) await OBR.tool.createMode(own.mode!); });
   } catch (e) {
     console.warn("[status] createMode failed", e);
   }
+  if (!isCurrentEntry(own)) return;
 
   // Track which tool is active and open / close the palette in sync.
   // Activating the status-tracker tool calls `activate()`; switching
@@ -774,6 +1108,7 @@ export async function setupStatusTracker(): Promise<void> {
   // picks any other tool, matching Bestiary's UX.
   unsubs.push(
     OBR.tool.onToolChange(async (activeId) => {
+      if (!isCurrentEntry(own)) return;
       try {
         if (activeId === TOOL_ID) {
           if (!active) await activate();
@@ -794,8 +1129,11 @@ export async function setupStatusTracker(): Promise<void> {
   // rather than calling `toggle()` directly so the active tool
   // stays in sync with the palette state.
   const performShortcutToggle = async (): Promise<void> => {
+    if (WORKBENCH_DEV) return;
+    if (!isCurrentEntry(own)) return;
     try {
       const cur = await OBR.tool.getActiveTool();
+      if (!isCurrentEntry(own)) return;
       if (cur === TOOL_ID) {
         await OBR.tool.activateTool(previousTool ?? MOVE_TOOL);
       } else {
@@ -807,22 +1145,63 @@ export async function setupStatusTracker(): Promise<void> {
     }
   };
   try {
-    await OBR.tool.createAction({
+    own.action = {
       id: TOOL_ACTION_ID,
       shortcut: "BracketRight",
       icons: [{
         icon: ICON_URL,
-        label: "状态追踪",
+        label: entryText("tool"),
         // Available on Select + on the status tracker tool itself
         // (so pressing `]` again from inside the tool exits it).
         // No roles filter — players can press `]` too.
         filter: { activeTools: [SELECT_TOOL, TOOL_ID] },
       }],
       onClick: performShortcutToggle,
-    });
+    };
+    await queueEntry(async () => { if (!WORKBENCH_DEV && isCurrentEntry(own)) await OBR.tool.createAction(own.action!); });
   } catch (e) {
     console.warn("[status] createAction failed", e);
   }
+  if (!isCurrentEntry(own)) return;
+  let lastLang = getLocalLang();
+  unsubs.push(onLangChange((lang) => {
+    if (!isCurrentEntry(own) || lang === lastLang) return;
+    lastLang = lang;
+    void queueEntry(() => refreshEntryLabels(own)).catch(() => {});
+    if (active) void registerCreateStatusMenu();
+  }));
+  // Catch a language change while the initial host registrations were pending.
+  if ([own.tool, own.mode, own.action].some(def => def?.icons[0]?.label !== entryText("tool"))) {
+    await queueEntry(() => refreshEntryLabels(own));
+  }
+
+  unsubs.push(
+    OBR.broadcast.onMessage(BC_SELECT_APPLY, (event) => {
+      const data = event.data as
+        | { kind?: "buff"; buff?: BuffDef; key?: string }
+        | { kind?: "clear"; key?: "__clear__" }
+        | { kind?: "manage"; key?: "__manage__" }
+        | undefined;
+      if (!data?.kind) return;
+      let capturePayload: Parameters<typeof openCapture>[0] | null = null;
+      if (data.kind === "buff") {
+        if (!data.buff?.id) return;
+        selectedApply = { kind: "buff", key: data.key || data.buff.id, buff: data.buff };
+        capturePayload = { kind: "buff", buff: data.buff, mode: "click-place" };
+      } else if (data.kind === "clear") {
+        selectedApply = { kind: "clear", key: "__clear__" };
+        capturePayload = { kind: "clear", mode: "click-place" };
+      } else if (data.kind === "manage") {
+        selectedApply = { kind: "manage", key: "__manage__" };
+        capturePayload = { kind: "manage", mode: "click-place" };
+      }
+      void publishSelectedApplyState();
+      if (capturePayload) void openCapture(capturePayload);
+    }),
+  );
+  unsubs.push(
+    OBR.broadcast.onMessage(BC_SELECT_CANCEL, () => { void cancelSelectedApply(); }),
+  );
 
   // Palette → background broadcasts. The drag-start payload now
   // includes `mode` (drop / paint-toggle) so the capture overlay
@@ -896,7 +1275,7 @@ export async function setupStatusTracker(): Promise<void> {
       if (data?.panelId !== PANEL_IDS.statusPalette) return;
       if (!active) return;
       // Close + reopen at new anchor (OBR popover has no setAnchor).
-      try { await OBR.popover.close(POPOVER_PALETTE); } catch {}
+      await closePalette();
       await openPalette();
     }),
   );
@@ -904,7 +1283,7 @@ export async function setupStatusTracker(): Promise<void> {
   unsubs.push(
     OBR.broadcast.onMessage(BC_PANEL_RESET, async () => {
       if (!active) return;
-      try { await OBR.popover.close(POPOVER_PALETTE); } catch {}
+      await closePalette();
       await openPalette();
     }),
   );
@@ -926,14 +1305,16 @@ export async function setupStatusTracker(): Promise<void> {
       }
       if (wasGM && !isGM) {
         // Demoted — drop everything we created. New GM will rebuild.
-        void sweepAllOurItems();
+        void sweepExclusive();
       }
     }),
   );
 
-  // Token-bubble sync.
-  unsubs.push(OBR.scene.items.onChange(() => {
-    void syncAllVisibleTokens();
+  // Token-bubble sync. onChange delivers the complete scene snapshot —
+  // hand it to the sync pass so it never re-reads the whole scene.
+  unsubs.push(OBR.scene.items.onChange((items) => {
+    latestItemsSnapshot = items;
+    void syncAllVisibleTokens(items);
   }));
   // Catalog edits live in localStorage now (per-client, not shared).
   // When the user edits a buff's colour/effect via the palette ✎
@@ -958,13 +1339,14 @@ export async function setupStatusTracker(): Promise<void> {
   }));
   unsubs.push(
     OBR.broadcast.onMessage("com.obr-suite/status/catalog-changed", () => {
-      lastBuffSnapshot.clear();
+      // Sticky flag, not a bare clear() — see forceFullResync.
+      forceFullResync = true;
       void syncAllVisibleTokens();
     }),
   );
   const onLSChange = (e: StorageEvent): void => {
     if (e.key !== LS_BUFF_CATALOG_KEY) return;
-    lastBuffSnapshot.clear();
+    forceFullResync = true;
     void syncAllVisibleTokens();
   };
   window.addEventListener("storage", onLSChange);
@@ -976,9 +1358,10 @@ export async function setupStatusTracker(): Promise<void> {
     }
     // Sweep first — clears any items left by an older renderer
     // (e.g. legacy rectangle-style bubbles) before we start drawing
-    // the new curved bands. Awaited so syncAllVisibleTokens can't
-    // race it.
-    await sweepAllOurItems();
+    // the new curved bands. Serialized under the exclusive gate so no
+    // onChange-driven pass can hydrate mid-sweep and repopulate the
+    // sig caches from pre-sweep scene state.
+    await sweepExclusive();
     lastBuffSnapshot.clear();
     void syncAllVisibleTokens();
   };
@@ -988,19 +1371,36 @@ export async function setupStatusTracker(): Promise<void> {
   unsubs.push(
     OBR.scene.onReadyChange((ready) => {
       if (ready) void onSceneReady();
-      else lastBuffSnapshot.clear();
+      else {
+        lastBuffSnapshot.clear();
+        latestItemsSnapshot = null;
+        // Sig caches describe items of the scene we just LEFT — a
+        // stale hit here was the "return to a scene → bubbles never
+        // re-added" bug (checklist §1 scene-switch case).
+        invalidateAllBuffCaches();
+      }
     }),
   );
 }
 
 export async function teardownStatusTracker(): Promise<void> {
+  if (entrySession) entrySession.alive = false;
+  entrySession = null;
   for (const u of unsubs.splice(0)) {
     try { u(); } catch {}
   }
+  await entryQueue;
   try { await OBR.tool.removeAction(TOOL_ACTION_ID); } catch {}
   try { await OBR.tool.removeMode(`${TOOL_ID}/mode`); } catch {}
   try { await OBR.tool.remove(TOOL_ID); } catch {}
   await removeCreateStatusMenu();
-  await deactivate();
-  await sweepAllOurItems();
+  // Force-close every popover/modal UNCONDITIONALLY. We can't rely on
+  // deactivate() here — it early-returns when the status tool isn't the
+  // active tool (e.g. user switched to Select, then disabled the module
+  // in Settings), which would leave the capture / manage modal open.
+  active = false;
+  try { await closeCapture(); } catch {}
+  try { await closeManagePopover(); } catch {}
+  try { await closePalette(); } catch {}
+  await sweepExclusive();
 }

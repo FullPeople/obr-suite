@@ -54,6 +54,18 @@ interface CardEntry {
    *  sidebars" use case. */
   visibility?: "public" | "dm" | "owners";
   owner_ids?: string[];
+  /** Folder/group name (added 2026-09-14). OPTIONAL and never
+   *  migrated: an entry without it is simply "未分组" whenever it is
+   *  rendered. Every writer in this suite rewrites whole entry arrays
+   *  (`{...entry, x}` / `list.map` / `list.filter`), so the key
+   *  survives unchanged through the panel, bind-page, info-page,
+   *  cross-scene mirroring and the refresh path. */
+  group?: string;
+  /** Server-only: set by /upload, /refresh and /create-from-json when
+   *  the legacy Jinja index.html could not be rendered but data.json
+   *  was stored. Not persisted — acceptUploadedCard strips it before
+   *  the entry reaches scene metadata. */
+  render_warning?: string;
 }
 
 function canSeeCard(card: CardEntry, isGM: boolean, playerId: string): boolean {
@@ -96,7 +108,36 @@ let roomId = "";
 let playerName = "anonymous";
 let myPlayerId = "";
 let isGM = false;
+let profileReady = false;
+let profileRequest = 0;
+let panelAlive = true;
+let panelClosing = false;
+let sceneReady: boolean | undefined;
+let sceneEpoch = 0;
+let readinessRequest = 0;
+let metadataRequest = 0;
+let metadataLoaded = false;
+let cardReadRetry: (() => Promise<void>) | undefined;
+const panelSubscriptions: (() => void)[] = [];
+interface PanelWrite {
+  epoch: number;
+  room: string;
+  player: string;
+  gm: boolean;
+  cardId?: string;
+  kind: "upload" | "refresh" | "delete" | "visibility" | "group";
+  controller: AbortController;
+  metadataDispatched: boolean;
+  uploading: boolean;
+}
+const panelWrites = new Set<PanelWrite>();
+let metadataWriteQueue: Promise<unknown> = Promise.resolve();
 let cards: CardEntry[] = [];
+// Collapsed folder names ("" = the ungrouped bucket) and whether the
+// derived 旧版本 / Older versions section has been expanded. Restored from the
+// per-room panel state blob in loadState() and written back by saveState().
+let collapsedGroups = new Set<string>();
+let olderVersionsExpanded = false;
 let current: View = { type: "empty" };
 let maximized = false;
 const cardIframes = new Map<string, HTMLIFrameElement>();
@@ -134,7 +175,10 @@ function saveState() {
     } else if (current.type === "resource") {
       activeResource = current.slug;
     }
-    localStorage.setItem(stateKey(), JSON.stringify({ activeCardId, activeResource, scrollY, maximized }));
+    localStorage.setItem(stateKey(), JSON.stringify({ activeCardId, activeResource, scrollY, maximized,
+      // Collapsed folders + the expanded 旧版本 section ride the same
+      // per-room state blob the panel already persists.
+      collapsedGroups: [...collapsedGroups], olderVersionsExpanded }));
   } catch {}
 }
 
@@ -143,6 +187,9 @@ function loadState(): { activeCardId: string | null; activeResource: string | nu
     const raw = localStorage.getItem(stateKey());
     if (raw) {
       const o = JSON.parse(raw);
+      collapsedGroups = new Set(Array.isArray(o.collapsedGroups) ? o.collapsedGroups.filter((g: unknown): g is string => typeof g === "string") : []);
+      // Older versions stay collapsed unless the user expanded them.
+      olderVersionsExpanded = !!o.olderVersionsExpanded;
       return {
         activeCardId: o.activeCardId ?? null,
         activeResource: o.activeResource ?? null,
@@ -172,10 +219,19 @@ async function setMaximized(next: boolean) {
       // the root of the click-twice-to-reopen bug.
       try { localStorage.removeItem(PANEL_OPEN_KEY); } catch {}
       await OBR.modal.close(PANEL_MODAL_ID);
+      stopPanelReads();
       return;
     }
   } catch (e) {
     console.error("[character-cards] setMaximized failed", e);
+    if (panelAlive && panelClosing) {
+      panelClosing = false;
+      maximized = true;
+      document.body.classList.add("maximized");
+      try { localStorage.setItem(PANEL_OPEN_KEY, "1"); } catch {}
+      showError(tt("ccPanelCloseFailed"));
+      render();
+    }
   }
   saveState();
 }
@@ -206,102 +262,344 @@ function showStatus(msg: string) {
 }
 
 function minimize() {
+  if (!panelAlive || panelClosing) return;
+  panelClosing = true;
+  cancelPanelWrites();
+  render();
   saveState();
   setMaximized(false);
 }
 
 async function toggleCardVisibility(id: string) {
-  if (!isGM) return;
-  const next = cards.map((c) => {
-    if (c.id !== id) return c;
-    return { ...c, visibility: nextVisibilityLevel(c.visibility) };
-  });
-  cards = next;
-  await writeCardsToScene(next);
+  const op = beginPanelWrite("visibility", id);
+  if (!op) return;
+  // Capture the intended destination, so a second local click or an intervening
+  // update cannot turn a request to hide a card into a request to publish it.
+  const visibility = nextVisibilityLevel(cards.find(c => c.id === id)?.visibility);
+  try {
+    await mutateCardsInScene(op, list => list.map(c => c.id === id ? { ...c, visibility } : c));
+  } catch (error) { showWriteError(op, error); }
+  finally { finishPanelWrite(op); }
+}
+
+function writeIsCurrent(op: PanelWrite, list = cards): boolean {
+  if (!panelAlive || panelClosing || op.controller.signal.aborted || !profileReady || !metadataLoaded
+      || sceneReady !== true || op.epoch !== sceneEpoch || op.room !== roomId
+      || op.player !== myPlayerId || op.gm !== isGM) return false;
+  if (op.kind === "visibility" && !isGM) return false;
+  if (!op.cardId) return true;
+  const card = list.find(c => c.id === op.cardId);
+  return card ? canSeeCard(card, isGM, myPlayerId)
+    : op.kind === "delete" && op.metadataDispatched;
+}
+
+function assertWriteCurrent(op: PanelWrite, list = cards): void {
+  if (!writeIsCurrent(op, list)) throw new DOMException(tt("ccPanelWriteCancelled"), "AbortError");
+}
+
+function beginPanelWrite(kind: PanelWrite["kind"], cardId?: string): PanelWrite | undefined {
+  const op: PanelWrite = { epoch: sceneEpoch, room: roomId, player: myPlayerId,
+    gm: isGM, cardId, kind, controller: new AbortController(), metadataDispatched: false, uploading: false };
+  if (!writeIsCurrent(op)) {
+    if (panelAlive) showError(tt("ccPanelWriteUnavailable"));
+    return;
+  }
+  // A file picker is part of the operation. Do not open another picker or
+  // start a conflicting refresh/delete for that same card while it is pending.
+  if ([...panelWrites].some(p => !p.controller.signal.aborted &&
+      (cardId ? p.cardId === cardId : p.kind === "upload"))) return;
+  panelWrites.add(op);
+  render();
+  return op;
+}
+
+function finishPanelWrite(op: PanelWrite): void {
+  panelWrites.delete(op);
   render();
 }
 
-async function readCardsFromScene(): Promise<CardEntry[]> {
+function cancelPanelWrites(resetQueue = false): void {
+  for (const op of panelWrites) op.controller.abort();
+  panelWrites.clear();
+  // Keep same-scene writes serialized even if identity changes or closing
+  // fails. Only a new scene/lifetime may bypass the old scene's pending ACK.
+  if (resetQueue) metadataWriteQueue = Promise.resolve();
+}
+
+function showWriteError(op: PanelWrite, error: unknown, key: Parameters<typeof t>[1] = "ccPanelWriteFailed"): void {
+  if (!writeIsCurrent(op)) return;
+  showError(`${tt(key)}: ${describeServiceError(error)}`);
+}
+
+/** The service answers failures with `{"error": "..."}` JSON. The panel
+ *  used to throw that raw body at the user, so an upload failure read
+ *  "上传失败: {"error": "render failed: ..."}" in English JSON. Unwrap
+ *  the message; keep a non-JSON body verbatim as the detail. */
+function describeServiceError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const text = (raw || "").trim();
+  if (text.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
+      const message = typeof parsed?.error === "string" ? parsed.error
+        : typeof parsed?.message === "string" ? parsed.message : "";
+      if (message) return message;
+    } catch {}
+  }
+  return text || "HTTP error";
+}
+
+/** Read a failed response body once and turn it into an Error carrying
+ *  the service's own message (never the raw JSON blob). */
+async function serviceError(response: Response): Promise<Error> {
+  let body = "";
+  try { body = await response.text(); } catch {}
+  const text = (body || "").trim();
+  if (text.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
+      const message = typeof parsed?.error === "string" ? parsed.error
+        : typeof parsed?.message === "string" ? parsed.message : "";
+      if (message) return new Error(message);
+    } catch {}
+  }
+  return new Error(text || `HTTP ${response.status}`);
+}
+
+/** Upload/refresh failure: localized headline + the actionable hint that
+ *  used to be dead code, then the service's message as detail. Rendered
+ *  with pre-line whitespace so the lines stay separate. */
+function showSheetError(op: PanelWrite, error: unknown, key: Parameters<typeof t>[1]): void {
+  if (!writeIsCurrent(op)) return;
+  showError(`${tt(key)}: ${describeServiceError(error)}\n${tt("ccPanelUploadHint")}`);
+}
+
+/** Result of a bulk upload. Every file is attempted, so the user gets the
+ *  count plus which file failed and why instead of only the first error. */
+function showBatchResult(op: PanelWrite, succeeded: number, failures: { name: string; reason: string }[]): void {
+  if (!writeIsCurrent(op)) return;
+  if (failures.length === 0) {
+    showError("");
+    return;
+  }
+  const head = tt("ccPanelUploadResult")
+    .replace("{ok}", String(succeeded))
+    .replace("{fail}", String(failures.length));
+  const lines = failures.map((f) => `\n- ${f.name}: ${f.reason}`);
+  const title = succeeded > 0 ? head : `${tt("ccPanelUploadFailed")}: ${head}`;
+  showError(`${title}${lines.join("")}\n${tt("ccPanelUploadHint")}`);
+}
+
+function cardList(meta: Record<string, unknown>): CardEntry[] {
+  const list = meta[SCENE_META_KEY];
+  return Array.isArray(list) ? list.filter((card): card is CardEntry =>
+    !!card && typeof card === "object" && typeof card.id === "string") : [];
+}
+
+async function readWriteCards(op: PanelWrite): Promise<CardEntry[]> {
+  assertWriteCurrent(op);
+  const beforeRead = metadataRequest;
+  const meta = await OBR.scene.getMetadata();
+  assertWriteCurrent(op);
+  // A complete event received during this read takes precedence over a
+  // captured response. Check discovery permission against the latest list.
+  if (beforeRead === metadataRequest) applyCardSnapshot(meta);
+  const latest = cards;
+  assertWriteCurrent(op, latest);
+  return latest;
+}
+
+function mutateCardsInScene(op: PanelWrite, transform: (list: CardEntry[]) => CardEntry[]): Promise<void> {
+  const run = async () => {
+    const latest = await readWriteCards(op);
+    assertWriteCurrent(op, latest);
+    const next = transform(latest);
+    const beforeWrite = metadataRequest;
+    op.metadataDispatched = true;
+    await OBR.scene.setMetadata({ [SCENE_META_KEY]: next });
+    assertWriteCurrent(op);
+    // The host may deliver events before acknowledging this write. Never put
+    // an old proposal back over an event, especially after a scene change.
+    if (beforeWrite === metadataRequest) applyCardSnapshot({ [SCENE_META_KEY]: next });
+  };
+  const result = metadataWriteQueue.then(run);
+  metadataWriteQueue = result.catch(() => {});
+  return result;
+}
+
+function broadcastCardUpdate(op: PanelWrite, card: CardEntry): void {
+  if (!writeIsCurrent(op)) return;
+  // The service entry URL can end in index.html. Derive the canonical data
+  // address instead of concatenating onto that URL; full-sheet listeners
+  // deliberately reject relative or unrelated data URLs.
+  const payload = { cardId: card.id, roomId: op.room,
+    url: `https://obr.dnd.center/characters/${encodeURIComponent(op.room)}/${encodeURIComponent(card.id)}/data.json` };
+  for (const destination of ["LOCAL", "REMOTE"] as const) {
+    void OBR.broadcast.sendMessage(BC_CARD_UPDATED, payload, { destination }).catch(() => {});
+  }
+}
+
+function applyCardSnapshot(meta: Record<string, unknown>): void {
+  if (!panelAlive || sceneReady === false) return;
+  // Metadata events contain the complete current snapshot. Apply it now,
+  // without a second read that could finish after a newer event.
+  ++metadataRequest;
+  cards = cardList(meta);
+  metadataLoaded = true;
+  for (const op of panelWrites) if (!writeIsCurrent(op)) op.controller.abort();
+  if (cardReadRetry && (cardReadRetry !== readInitialSceneReadiness || sceneReady !== undefined)) {
+    cardReadRetry = undefined;
+    showError("");
+  }
+  render();
+}
+
+async function refreshFromScene(): Promise<void> {
+  if (!panelAlive || sceneReady === false) return;
+  const request = ++metadataRequest;
+  const epoch = sceneEpoch;
+  const valid = () => panelAlive && sceneReady !== false && epoch === sceneEpoch && request === metadataRequest;
   try {
     const meta = await OBR.scene.getMetadata();
-    const list = meta[SCENE_META_KEY];
-    if (Array.isArray(list)) return list as CardEntry[];
-  } catch {}
-  return [];
+    if (valid()) applyCardSnapshot(meta);
+  } catch {
+    if (!valid()) return;
+    showCardReadError(refreshFromScene);
+  }
 }
 
-async function writeCardsToScene(list: CardEntry[]) {
-  await OBR.scene.setMetadata({ [SCENE_META_KEY]: list });
-}
-
-async function refreshFromScene() {
-  cards = await readCardsFromScene();
-  // Clean up iframes for cards no longer in scene
-  for (const [id, frame] of cardIframes) {
-    if (!cards.find((c) => c.id === id)) {
-      frame.remove();
-      cardIframes.delete(id);
-    }
-  }
-  // If current card was deleted, fall back to empty
-  if (current.type === "card") {
-    const curId = current.id;
-    if (!cards.find((c) => c.id === curId)) current = { type: "empty" };
-  }
+function showCardReadError(action: () => Promise<void>): void {
+  cardReadRetry = action;
+  showError(tt("ccPanelLoadFailed"));
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "link-local-btn";
+  retry.textContent = tt("ccPanelRetry");
+  retry.addEventListener("click", () => { void action(); });
+  errEl.append(" ", retry);
   render();
 }
 
-async function uploadFile(file: File) {
-  showError("");
-  const sideEl = document.getElementById("side");
-  sideEl?.classList.add("busy");
+async function readInitialSceneReadiness(): Promise<void> {
+  const request = ++readinessRequest;
+  const epoch = sceneEpoch;
+  const snapshot = metadataRequest;
+  // A newer scene event or metadata snapshot takes precedence over this
+  // initial query. A rejected query means unknown, not "scene closed".
+  const sameScene = () => panelAlive && epoch === sceneEpoch && request === readinessRequest;
+  const valid = () => sameScene() && snapshot === metadataRequest;
   try {
-    const fd = new FormData();
-    fd.append("file", file);
-    const u = encodeURIComponent(playerName);
-    const r = await fetch(`${API_BASE}/upload?room=${roomId}&uploader=${u}`, {
-      method: "POST",
-      body: fd,
-    });
-    if (!r.ok) {
-      const err = await r.text();
-      throw new Error(err || `HTTP ${r.status}`);
+    const ready = await OBR.scene.isReady();
+    if (valid()) changeSceneReadiness(ready, true);
+    else if (sameScene() && sceneReady === undefined && metadataLoaded) {
+      // Early metadata may already have restored a card before isReady replies.
+      // Confirm this same scene without discarding its snapshot or iframe;
+      // otherwise the read UI works but all write buttons stay disabled forever.
+      if (ready) changeSceneReadiness(true, true);
+      else showCardReadError(readInitialSceneReadiness);
     }
-    const entry = (await r.json()) as CardEntry;
-    try {
-      const corrected = await reconcileUploadedCardShieldState({
-        apiBase: API_BASE,
-        roomId,
-        cardId: entry.id,
-        xlsx: file,
-      });
-      if (corrected) {
-        try {
-          // 2026-05-14 — LOCAL+REMOTE so this client's background
-          // also propagates the new stats to bound tokens. Without
-          // LOCAL, the uploader sees stale HP/AC on the canvas until
-          // they re-bind manually.
-          const payload = { cardId: entry.id, url: `${entry.url}data.json` };
-          OBR.broadcast.sendMessage(BC_CARD_UPDATED, payload, { destination: "LOCAL" });
-          OBR.broadcast.sendMessage(BC_CARD_UPDATED, payload, { destination: "REMOTE" });
-        } catch {}
-      }
-    } catch (e) {
-      console.warn("[cc-panel] shield equipped reconcile after upload failed", e);
-    }
-    const updated = [entry, ...cards];
-    await writeCardsToScene(updated);
-    cards = updated;
-    current = { type: "card", id: entry.id };
-    showStatus(`${ICONS.check} ${tt("ccPanelUploaded")}: ${escapeHtml(entry.name)}`);
-    render();
-  } catch (e: any) {
-    showError(
-      `${tt("ccPanelUploadFailed")}: ${e?.message || e}\n${tt("ccPanelUploadHint")}`,
-    );
-  } finally {
-    sideEl?.classList.remove("busy");
+  } catch {
+    if (valid() || (sameScene() && sceneReady === undefined)) showCardReadError(readInitialSceneReadiness);
   }
+}
+
+function changeSceneReadiness(ready: boolean, initial = false): void {
+  if (!panelAlive) return;
+  cancelPanelWrites(true);
+  ++sceneEpoch;
+  ++metadataRequest;
+  sceneReady = ready;
+  if (cardReadRetry) { cardReadRetry = undefined; showError(""); }
+  if (initial && ready && metadataLoaded) {
+    // The first ready event confirms a snapshot already received during
+    // initialization. Keep that selection and its live iframe intact.
+    render();
+    return;
+  }
+  metadataLoaded = false;
+  cards = [];
+  if (!initial || !ready) current = { type: "empty" };
+  for (const frame of cardIframes.values()) frame.remove();
+  cardIframes.clear();
+  render();
+  if (ready) void refreshFromScene();
+}
+
+async function acceptUploadedCard(op: PanelWrite, entry: CardEntry): Promise<void> {
+  assertWriteCurrent(op);
+  // render_warning is server-side information for this session only — the
+  // static index.html failed to render but data.json is good. Never store
+  // it in scene metadata.
+  const { render_warning: warning, ...stored } = entry;
+  await mutateCardsInScene(op, list => [stored, ...list.filter(c => c.id !== stored.id)]);
+  assertWriteCurrent(op);
+  // Another client may have removed or restricted the entry before our ACK.
+  const installed = cards.find(c => c.id === stored.id);
+  if (!installed || !canSeeCard(installed, isGM, myPlayerId)) return;
+  broadcastCardUpdate(op, installed);
+  current = { type: "card", id: installed.id };
+  showStatus(`${ICONS.check} ${tt("ccPanelUploaded")}: ${escapeHtml(installed.name)}`
+    + (warning ? ` · ${ICONS.warning} ${tt("ccPanelRenderWarn")}` : ""));
+  render();
+}
+
+async function uploadJsonAsCard(parsed: unknown, op: PanelWrite): Promise<void> {
+  assertWriteCurrent(op);
+  showError("");
+  op.uploading = true;
+  render();
+  const u = encodeURIComponent(playerName);
+  const response = await fetch(`${API_BASE}/create-from-json?room=${op.room}&uploader=${u}`, {
+    method: "POST", signal: op.controller.signal,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data: parsed }),
+  });
+  assertWriteCurrent(op);
+  if (!response.ok) throw await serviceError(response);
+  const entry = await response.json() as CardEntry;
+  await acceptUploadedCard(op, entry);
+}
+
+async function reconcileCardShield(op: PanelWrite, entry: CardEntry, file: File): Promise<void> {
+  assertWriteCurrent(op);
+  try {
+    await reconcileUploadedCardShieldState({ apiBase: API_BASE, roomId: op.room,
+      cardId: entry.id, xlsx: file, signal: op.controller.signal,
+      isCurrent: () => writeIsCurrent(op) });
+  } catch (error) {
+    assertWriteCurrent(op);
+    console.warn("[cc-panel] shield equipped reconciliation failed", error);
+  }
+  assertWriteCurrent(op);
+}
+
+// Accepts both formats the service /upload endpoint handles: the xlsx
+// sheet and the .json the suite's own export produces. The exported JSON
+// is what a user naturally drags back in, and it used to be rejected
+// here with a misleading "只支持 .xlsx 文件".
+function isSupportedSheet(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith(".xlsx") || lower.endsWith(".json");
+}
+
+async function uploadFile(file: File, op: PanelWrite): Promise<void> {
+  assertWriteCurrent(op);
+  showError("");
+  op.uploading = true;
+  render();
+  const fd = new FormData();
+  fd.append("file", file);
+  const u = encodeURIComponent(playerName);
+  const response = await fetch(`${API_BASE}/upload?room=${op.room}&uploader=${u}`, {
+    method: "POST", body: fd, signal: op.controller.signal,
+  });
+  assertWriteCurrent(op);
+  if (!response.ok) throw await serviceError(response);
+  const entry = await response.json() as CardEntry;
+  // Shield reconciliation needs the workbook itself; a JSON upload has
+  // no gear sheets to reconcile against.
+  if (file.name.toLowerCase().endsWith(".xlsx")) await reconcileCardShield(op, entry, file);
+  await acceptUploadedCard(op, entry);
 }
 
 // Open a native file picker dialog. Returns the chosen File or null
@@ -313,7 +611,7 @@ function pickXlsxFile(): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".xlsx";
+    input.accept = ".xlsx,.json";
     input.onchange = () => resolve(input.files?.[0] ?? null);
     // 'cancel' fires on modern Chromium when the user closes the
     // picker without choosing. On older browsers we fall back to
@@ -331,7 +629,7 @@ function pickXlsxFiles(): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".xlsx";
+    input.accept = ".xlsx,.json";
     input.multiple = true;
     input.onchange = () => {
       const out = input.files ? Array.from(input.files) : [];
@@ -353,97 +651,100 @@ function pickXlsxFiles(): Promise<File[]> {
 // each uploadFile() is awaited (the side-panel busy spinner stays up
 // for the whole batch).
 async function linkLocalFile(): Promise<void> {
-  const files = await pickXlsxFiles();
-  if (files.length === 0) return;
-  await uploadFilesBatch(files);
+  const op = beginPanelWrite("upload");
+  if (!op) return;
+  try {
+    const files = await pickXlsxFiles();
+    assertWriteCurrent(op);
+    await uploadFilesBatch(files, op);
+  } catch (error) { showSheetError(op, error, "ccPanelUploadFailed"); }
+  finally { finishPanelWrite(op); }
 }
 
-// Upload an array of xlsx files in series. Stops on the first failure
-// so the user can see WHICH file broke and why (the side-panel error
-// banner already surfaces messages from uploadFile).
-async function uploadFilesBatch(files: File[]): Promise<void> {
-  for (const f of files) {
-    if (!f.name.toLowerCase().endsWith(".xlsx")) {
-      showError(`${tt("ccPanelOnlyXlsx")} (跳过 ${f.name})`);
+// The entire batch belongs to its initiating scene, including the picker.
+// One bad file no longer discards the rest of the batch: every file is
+// attempted and the per-file outcome is reported. A scene change still
+// stops the batch immediately — a later file must not silently start in a
+// new scene.
+async function uploadFilesBatch(files: File[], op: PanelWrite): Promise<void> {
+  const failures: { name: string; reason: string }[] = [];
+  let succeeded = 0;
+  for (const file of files) {
+    if (!writeIsCurrent(op)) break;
+    if (!isSupportedSheet(file.name)) {
+      failures.push({ name: file.name, reason: tt("ccPanelOnlySheet") });
       continue;
     }
-    await uploadFile(f);
+    try {
+      await uploadFile(file, op);
+      succeeded++;
+    } catch (error) {
+      if (!writeIsCurrent(op)) break;
+      failures.push({ name: file.name, reason: describeServiceError(error) });
+    }
   }
+  showBatchResult(op, succeeded, failures);
 }
 
-// Refresh a card by re-picking the xlsx from disk. Cross-origin
-// iframes can't persist a FileSystemFileHandle, so the user has to
-// confirm the file each time — but the browser remembers the last
-// folder, so it's still a 2-click flow (pick + open).
 async function refreshCardFromPicker(card: CardEntry): Promise<void> {
-  const file = await pickXlsxFile();
-  if (!file) return;
-  if (!file.name.toLowerCase().endsWith(".xlsx")) {
-    showError(tt("ccPanelOnlyXlsx"));
-    return;
-  }
-  const row = document.querySelector<HTMLElement>(`.card[data-id="${card.id}"]`);
-  const btn = row?.querySelector<HTMLButtonElement>(".card-refresh");
-  btn?.classList.add("spinning");
+  const op = beginPanelWrite("refresh", card.id);
+  if (!op) return;
   try {
+    const file = await pickXlsxFile();
+    assertWriteCurrent(op);
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".xlsx")) throw new Error(tt("ccPanelRefreshOnlyXlsx"));
+    // Refresh overwrites server content. Re-read the target after the native
+    // picker, before sending that request, even if its metadata event is late.
+    await readWriteCards(op);
+    assertWriteCurrent(op);
     const fd = new FormData();
     fd.append("file", file);
-    const r = await fetch(
-      `${API_BASE}/refresh?room=${roomId}&card=${encodeURIComponent(card.id)}`,
-      { method: "POST", body: fd },
+    const response = await fetch(
+      `${API_BASE}/refresh?room=${op.room}&card=${encodeURIComponent(card.id)}`,
+      { method: "POST", body: fd, signal: op.controller.signal },
     );
-    if (!r.ok) throw new Error((await r.text()) || `HTTP ${r.status}`);
-    const updated = (await r.json()) as CardEntry;
-    try {
-      const corrected = await reconcileUploadedCardShieldState({
-        apiBase: API_BASE,
-        roomId,
-        cardId: updated.id,
-        xlsx: file,
-      });
-      if (corrected) {
-        try {
-          // 2026-05-14 — see same LOCAL+REMOTE comment in uploadFile.
-          const reconcilePayload = { cardId: updated.id, url: `${updated.url}data.json` };
-          OBR.broadcast.sendMessage(BC_CARD_UPDATED, reconcilePayload, { destination: "LOCAL" });
-          OBR.broadcast.sendMessage(BC_CARD_UPDATED, reconcilePayload, { destination: "REMOTE" });
-        } catch {}
-      }
-    } catch (e) {
-      console.warn("[cc-panel] shield equipped reconcile after refresh failed", e);
-    }
-    cards = cards.map((c) => (c.id === updated.id ? { ...c, ...updated } : c));
-    await writeCardsToScene(cards);
+    assertWriteCurrent(op);
+    if (!response.ok) throw await serviceError(response);
+    const updated = await response.json() as CardEntry;
+    assertWriteCurrent(op);
+    if (updated.id !== card.id) throw new Error(tt("ccPanelWriteFailed"));
+    await reconcileCardShield(op, updated, file);
+    await mutateCardsInScene(op, list => list.map(c => c.id === card.id ? {
+      ...c, name: updated.name, url: updated.url,
+      uploader: updated.uploader, uploaded_at: updated.uploaded_at,
+      // Visibility, owners and the folder belong to current scene
+      // metadata, not to the service response.
+    } : c));
+    assertWriteCurrent(op);
+    const installed = cards.find(c => c.id === card.id);
+    if (!installed) return;
     const iframe = cardIframes.get(card.id);
-    if (iframe) {
-      iframe.src = buildCardIframeSrc(card, true);
-    }
-    try {
-      // 2026-05-14 — LOCAL+REMOTE so this client's background propagates
-      // the refresh to bound tokens. Without LOCAL the refresher's own
-      // canvas still shows stale HP/AC until they re-bind manually.
-      const refreshPayload = { cardId: card.id, url: updated.url };
-      OBR.broadcast.sendMessage(BC_CARD_UPDATED, refreshPayload, { destination: "LOCAL" });
-      OBR.broadcast.sendMessage(BC_CARD_UPDATED, refreshPayload, { destination: "REMOTE" });
-    } catch {}
-    showStatus(`${ICONS.check} ${tt("ccPanelRefreshed")}: ${escapeHtml(updated.name)}`);
+    if (iframe) iframe.src = buildCardIframeSrc(installed, true);
+    broadcastCardUpdate(op, installed);
+    showStatus(`${ICONS.check} ${tt("ccPanelRefreshed")}: ${escapeHtml(installed.name)}`
+      + (updated.render_warning ? ` · ${ICONS.warning} ${tt("ccPanelRenderWarn")}` : ""));
     render();
-  } catch (e: any) {
-    showError(`${tt("ccPanelRefreshFailed")}: ${e?.message || e}`);
-  } finally {
-    btn?.classList.remove("spinning");
-  }
+  } catch (error) { showSheetError(op, error, "ccPanelRefreshFailed"); }
+  finally { finishPanelWrite(op); }
 }
 
 async function deleteCard(id: string) {
-  const updated = cards.filter((c) => c.id !== id);
-  await writeCardsToScene(updated);
-  cards = updated;
-  const f = cardIframes.get(id);
-  if (f) { f.remove(); cardIframes.delete(id); }
-  if (current.type === "card" && current.id === id) current = { type: "empty" };
-  render();
-  try { await fetch(`${API_BASE}/${roomId}/${id}`, { method: "DELETE" }); } catch {}
+  const op = beginPanelWrite("delete", id);
+  if (!op) return;
+  try {
+    await mutateCardsInScene(op, list => list.filter(c => c.id !== id));
+    assertWriteCurrent(op);
+    // Do not remove a server card that has been re-added while the ACK was pending.
+    if ((await readWriteCards(op)).some(c => c.id === id)) return;
+    assertWriteCurrent(op);
+    const response = await fetch(`${API_BASE}/${encodeURIComponent(op.room)}/${encodeURIComponent(id)}`, {
+      method: "DELETE", signal: op.controller.signal,
+    });
+    assertWriteCurrent(op);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  } catch (error) { showWriteError(op, error); }
+  finally { finishPanelWrite(op); }
 }
 
 function selectCard(id: string) {
@@ -522,14 +823,108 @@ function ensureResourceIframe(def: ResourceDef): HTMLIFrameElement {
   return f;
 }
 
+// --- folders ------------------------------------------------------------
+// A card's folder, or "" for the ungrouped bucket. Existing entries have no
+// `group` key at all and are simply ungrouped — no migration is performed.
+function cardGroup(card: CardEntry): string {
+  return typeof card.group === "string" ? card.group.trim() : "";
+}
+
+/** Collapsible folder header. `older` only changes the styling hook so the
+ *  derived older-versions section reads as secondary. */
+function buildGroupHeader(label: string, collapsed: boolean, onToggle: () => void, older = false): HTMLDivElement {
+  const head = document.createElement("div");
+  head.className = "group-head" + (older ? " group-head-older" : "");
+  head.dataset.collapsed = collapsed ? "1" : "0";
+  head.setAttribute("role", "button");
+  head.tabIndex = 0;
+  head.title = label;
+  const chevron = document.createElement("span");
+  chevron.className = "group-chevron";
+  chevron.textContent = collapsed ? "▸" : "▾";
+  const text = document.createElement("span");
+  text.className = "group-label";
+  text.textContent = label;
+  head.append(chevron, text);
+  const activate = (e: Event) => {
+    e.stopPropagation();
+    onToggle();
+  };
+  head.addEventListener("click", activate);
+  head.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    activate(e);
+  });
+  return head;
+}
+
+function toggleGroupCollapsed(group: string): void {
+  if (collapsedGroups.has(group)) collapsedGroups.delete(group);
+  else collapsedGroups.add(group);
+  // Persist right away: the panel's regular save points are a 5s interval
+  // plus close/unload, and an iframe load re-reads this same blob.
+  saveState();
+  render();
+}
+
+function toggleOlderVersions(): void {
+  olderVersionsExpanded = !olderVersionsExpanded;
+  saveState();
+  render();
+}
+
+/** "Ungrouped" is the absence of the key, so moving a card out of a folder
+ *  drops `group` instead of storing an empty string. */
+function withoutGroup(card: CardEntry): CardEntry {
+  const { group: _dropped, ...rest } = card;
+  return rest;
+}
+
+async function moveCardToGroup(card: CardEntry): Promise<void> {
+  const from = cardGroup(card);
+  const used = [...new Set(cards.map(cardGroup).filter((g) => g))];
+  const message = tt("ccPanelGroupPrompt")
+    .replace("{cur}", from || tt("ccPanelGroupNone"))
+    .replace("{list}", used.length > 0 ? used.join(", ") : tt("ccPanelGroupNone"));
+  const answer = prompt(message, from);
+  if (answer === null) return;  // cancelled — leave the card where it is
+  const next = answer.trim();
+  if (next === from) return;
+  const op = beginPanelWrite("group", card.id);
+  if (!op) return;
+  try {
+    await mutateCardsInScene(op, list => list.map(c => c.id === card.id
+      ? (next ? { ...c, group: next } : withoutGroup(c))
+      : c));
+    assertWriteCurrent(op);
+  } catch (error) { showWriteError(op, error); }
+  finally { finishPanelWrite(op); }
+}
+
 function render() {
+  if (!panelAlive) return;
+  const activeWrites = [...panelWrites].filter(op => !op.controller.signal.aborted);
+  const canWrite = !panelClosing && profileReady && metadataLoaded && sceneReady === true;
+  const uploading = activeWrites.some(op => op.kind === "upload");
+  document.getElementById("side")?.classList.toggle("busy", activeWrites.some(op => op.uploading));
+  for (const id of ["btnLinkLocal", "btnPasteJson"]) {
+    const button = document.getElementById(id) as HTMLButtonElement | null;
+    if (button) button.disabled = !canWrite || uploading;
+  }
   // Sidebar list — filter by visibility per requestor's role + id.
   // DM sees everything; players only see public + (owners they're in).
-  const visibleCards = cards.filter((c) => canSeeCard(c, isGM, myPlayerId));
+  const visibleCards = profileReady ? cards.filter((c) => canSeeCard(c, isGM, myPlayerId)) : [];
+  const visibleIds = new Set(visibleCards.map((card) => card.id));
+  // A revoked/deleted card must stop running, including while another card
+  // is selected. Merely hiding its iframe leaves its subscriptions alive.
+  for (const [id, frame] of cardIframes) {
+    if (!visibleIds.has(id)) { frame.remove(); cardIframes.delete(id); }
+  }
   // If the currently-active card was hidden by the DM and we're a
   // player, drop the view back to empty so the iframe doesn't keep
   // a stale reference visible.
-  if (current.type === "card") {
+  if (current.type === "card" && profileReady && metadataLoaded) {
     const currentId = current.id;
     if (!visibleCards.find((c) => c.id === currentId)) {
       current = { type: "empty" };
@@ -539,17 +934,40 @@ function render() {
   if (visibleCards.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-list";
-    empty.textContent = tt("ccPanelEmpty3");
+    empty.textContent = sceneReady === false ? tt("ccPanelOpenScene")
+      : cardReadRetry ? "" : !profileReady || !metadataLoaded ? tt("ccPanelLoading") : tt("ccPanelEmpty3");
     empty.style.whiteSpace = "pre-line";
     listEl.appendChild(empty);
   } else {
+    // Derived at RENDER time only — nothing here writes to the scene or the
+    // service, so stored data is never migrated:
+    //  * a name that appears more than once means the same sheet was
+    //    uploaded again (every upload mints a fresh id). Uploads are
+    //    prepended, so the first copy in list order is the current card and
+    //    the rest are older versions;
+    //  * cards are bucketed by their optional `group` ("" = ungrouped).
+    const seenNames = new Set<string>();
+    const currentCards: CardEntry[] = [];
+    const olderCards: CardEntry[] = [];
     for (const c of visibleCards) {
+      if (seenNames.has(c.name)) olderCards.push(c);
+      else { seenNames.add(c.name); currentCards.push(c); }
+    }
+    const buckets = new Map<string, CardEntry[]>();
+    for (const c of currentCards) {
+      const group = cardGroup(c);
+      const bucket = buckets.get(group);
+      if (bucket) bucket.push(c); else buckets.set(group, [c]);
+    }
+
+    const buildRow = (c: CardEntry) => {
       const card = document.createElement("div");
       const isActive = current.type === "card" && current.id === c.id;
       const v = c.visibility ?? "public";
       const isHidden = v !== "public";  // DM-only flag for visual dim
       card.className = "card" + (isActive ? " active" : "") + (isHidden ? " is-hidden" : "");
       card.dataset.id = c.id;
+      const changing = activeWrites.some(op => op.cardId === c.id);
       card.addEventListener("click", () => selectCard(c.id));
 
       const name = document.createElement("div");
@@ -559,7 +977,7 @@ function render() {
       const sub = document.createElement("div");
       sub.className = "card-sub";
       const visLabel = isHidden
-        ? (v === "dm" ? "仅 DM 可见" : `仅 ${(c.owner_ids || []).length + 1} 人可见`)
+        ? tt(v === "dm" ? "ccPanelVisibilityDm" : "ccPanelVisibilityOwners")
         : "";
       sub.textContent = `${c.uploader} · ${timeAgo(c.uploaded_at)}` + (visLabel ? ` · ${visLabel}` : "");
 
@@ -569,10 +987,11 @@ function render() {
       if (isGM) {
         const visBtn = document.createElement("button");
         visBtn.className = "card-vis";
+        visBtn.disabled = !canWrite || changing;
         visBtn.textContent = isHidden ? "🔒" : "👁";
-        visBtn.title = isHidden
-          ? "仅 DM 可见 — 点击改为公开"
-          : "公开 — 点击改为仅 DM 可见";
+        visBtn.title = nextVisibilityLevel(v) === "public"
+          ? `${visLabel} — ${tt("ccPanelMakePublic")}`
+          : `${visLabel || tt("ccPanelVisibilityPublic")} — ${tt("ccPanelMakePrivate")}`;
         visBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
           await toggleCardVisibility(c.id);
@@ -580,11 +999,27 @@ function render() {
         card.appendChild(visBtn);
       }
 
+      // 📁 move to a folder. Prompts for the name (blank = ungrouped) and
+      // offers the folders already in use. Metadata-only; the card and its
+      // files are untouched.
+      const groupBtn = document.createElement("button");
+      groupBtn.className = "card-group";
+      groupBtn.disabled = !canWrite || changing;
+      groupBtn.textContent = "📁";
+      groupBtn.title = tt("ccPanelGroupMove");
+      groupBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await moveCardToGroup(c);
+      });
+      card.appendChild(groupBtn);
+
       // ↻ refresh — every card row has one. Clicking opens a file
       // picker so the user can re-pick the (possibly newly-saved)
       // xlsx; the server overwrites the existing card's data.
       const refresh = document.createElement("button");
       refresh.className = "card-refresh";
+      refresh.disabled = !canWrite || changing;
+      refresh.classList.toggle("spinning", activeWrites.some(op => op.kind === "refresh" && op.cardId === c.id));
       refresh.textContent = "↻";
       refresh.title = tt("ccPanelRefreshTitle");
       refresh.addEventListener("click", async (e) => {
@@ -595,6 +1030,7 @@ function render() {
 
       const del = document.createElement("button");
       del.className = "card-del";
+      del.disabled = !canWrite || changing;
       del.textContent = "×";
       del.title = tt("ccPanelDeleteTitle");
       del.addEventListener("click", async (e) => {
@@ -606,7 +1042,30 @@ function render() {
       card.appendChild(name);
       card.appendChild(sub);
       card.appendChild(del);
-      listEl.appendChild(card);
+      return card;
+    };
+
+    const appendGroup = (group: string, list: CardEntry[]) => {
+      const label = group || tt("ccPanelGroupUngrouped");
+      listEl.appendChild(buildGroupHeader(`${label} (${list.length})`, collapsedGroups.has(group),
+        () => toggleGroupCollapsed(group)));
+      if (collapsedGroups.has(group)) return;
+      for (const c of list) listEl.appendChild(buildRow(c));
+    };
+    // Named folders first (in list order), the ungrouped bucket last.
+    for (const [group, list] of buckets) {
+      if (group) appendGroup(group, list);
+    }
+    const ungrouped = buckets.get("");
+    if (ungrouped) appendGroup("", ungrouped);
+
+    // Older versions of a re-uploaded sheet live in one collapsed section so
+    // they stop competing with the current card for attention. They are NOT
+    // deleted: each row keeps its own × (and ↻ / 📁).
+    if (olderCards.length > 0) {
+      const label = tt("ccPanelOlderVersions").replace("{n}", String(olderCards.length));
+      listEl.appendChild(buildGroupHeader(label, !olderVersionsExpanded, toggleOlderVersions, true));
+      if (olderVersionsExpanded) for (const c of olderCards) listEl.appendChild(buildRow(c));
     }
   }
 
@@ -619,7 +1078,7 @@ function render() {
 
   // Viewer: ensure the target iframe exists, then toggle visibility
   if (curView.type === "card") {
-    const c = cards.find((x) => x.id === curView.id);
+    const c = visibleCards.find((x) => x.id === curView.id);
     if (c) ensureCardIframe(c);
   } else if (curView.type === "resource") {
     const def = RESOURCES.find((r) => r.slug === curView.slug);
@@ -634,11 +1093,13 @@ function render() {
     f.style.display = show ? "block" : "none";
   });
 
-  const hasContent = current.type !== "empty";
+  const hasContent = current.type === "card" ? visibleIds.has(current.id) : current.type !== "empty";
   viewer.classList.toggle("is-empty", !hasContent);
   viewer.classList.toggle("has-content", hasContent);
   if (!hasContent) {
-    emptyText.textContent = cards.length > 0 ? tt("ccPanelEmpty") : tt("ccPanelNoCards");
+    emptyText.textContent = sceneReady === false ? tt("ccPanelOpenScene")
+      : cardReadRetry ? tt("ccPanelLoadFailed") : !profileReady || !metadataLoaded ? tt("ccPanelLoading")
+        : visibleCards.length > 0 ? tt("ccPanelEmpty") : tt("ccPanelNoCards");
   }
 }
 
@@ -678,29 +1139,196 @@ function timeAgo(isoZ: string): string {
   } catch { return ""; }
 }
 
+// The example opens a read-only preview. Pasted JSON uses the separate
+// creation dialog below and persists only after its explicit Create action.
+const PREVIEW_MODAL_ID = "com.obr-suite/cc-preview";
+const PREVIEW_LS_KEY = "obr-suite/cc-preview-payload";
+
+function setPreviewPayload(kind: "sample" | "paste", json: unknown): void {
+  try {
+    localStorage.setItem(PREVIEW_LS_KEY, JSON.stringify({ kind, json, ts: Date.now() }));
+  } catch (e) {
+    console.warn("[cc-panel/preview] localStorage write failed", e);
+  }
+}
+
+async function openPreviewModal(kind: "sample" | "paste"): Promise<void> {
+  const url = `${assetUrl("cc-fullscreen.html")}?preview=${kind}`;
+  try {
+    await OBR.modal.open({
+      id: PREVIEW_MODAL_ID,
+      url,
+      width: Math.min(1080, Math.floor(window.innerWidth * 0.92)),
+      height: Math.floor(window.innerHeight * 0.86),
+    });
+  } catch (e) {
+    console.warn("[cc-panel/preview] modal open failed", e);
+  }
+}
+
+async function openSamplePreview(): Promise<void> {
+  // 2026-05-26 — fetch the language-matched example. There's a
+  // dedicated EN translation (cc-example-card.en.json) since the
+  // schema-0.3 card body is heavy with Chinese D&D terminology
+  // (skill / weapon / class-feature / spell-description names) that
+  // wouldn't be useful to non-Chinese DMs as a reference. ZH UI gets
+  // 本杰明 (Sorcerer / Wild Magic); EN UI gets Benjamin Flamingo
+  // with all the canonical 5E translations applied.
+  const file = lang === "en" ? "cc-example-card.en.json" : "cc-example-card.json";
+  try {
+    const res = await fetch(assetUrl(file), { cache: "no-cache" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    setPreviewPayload("sample", json);
+    await openPreviewModal("sample");
+  } catch (e: any) {
+    showError(`${tt("ccPasteJsonInvalid")}: ${e?.message ?? e}`);
+  }
+}
+
+function openPasteJsonPreview(): void {
+  const existing = document.getElementById("ccPasteOverlay");
+  if (existing) { existing.querySelector("textarea")?.focus(); return; }
+  const openedInScene = sceneEpoch;
+  const openedBy = myPlayerId;
+  const openedAsGM = isGM;
+  let pending: PanelWrite | undefined;
+  const overlay = document.createElement("div");
+  overlay.id = "ccPasteOverlay";
+  overlay.style.cssText =
+    "position:fixed;inset:0;z-index:9999;background:rgba(8,10,14,0.78);" +
+    "display:flex;align-items:center;justify-content:center;padding:20px";
+  const panel = document.createElement("div");
+  panel.style.cssText =
+    "background:#161922;border:1px solid rgba(255,255,255,0.15);border-radius:10px;" +
+    "padding:16px 18px;max-width:680px;width:100%;max-height:80vh;display:flex;" +
+    "flex-direction:column;gap:10px;color:#e6e8ee;font-family:inherit;font-size:13px";
+  const title = document.createElement("div");
+  title.style.cssText = "font-size:14px;font-weight:600;color:#fff";
+  title.textContent = tt("ccPasteJsonModalTitle");
+  const hint = document.createElement("div");
+  hint.style.cssText = "font-size:11.5px;color:#9aa0b3;line-height:1.55";
+  hint.textContent = tt("ccPasteJsonHint");
+  const ta = document.createElement("textarea");
+  ta.style.cssText =
+    "flex:1 1 auto;min-height:280px;padding:9px 11px;border-radius:7px;" +
+    "background:#0d1018;border:1px solid rgba(255,255,255,0.12);color:#e6e8ee;" +
+    "font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;resize:vertical";
+  ta.placeholder = "{ \"schema_version\": \"0.3\", \"identity\": { ... }, \"abilities\": { ... }, ... }";
+  const errBox = document.createElement("div");
+  errBox.style.cssText = "font-size:12px;color:#e74c3c;min-height:18px;white-space:pre-line";
+  const btnRow = document.createElement("div");
+  btnRow.style.cssText = "display:flex;gap:8px;justify-content:flex-end";
+  const btnCancel = document.createElement("button");
+  btnCancel.type = "button";
+  btnCancel.textContent = tt("ccPasteJsonCancel");
+  btnCancel.style.cssText =
+    "padding:7px 14px;border-radius:6px;background:#262a38;color:#cfd3df;" +
+    "border:1px solid rgba(255,255,255,0.12);font-size:13px;cursor:pointer";
+  const btnApply = document.createElement("button");
+  btnApply.type = "button";
+  btnApply.textContent = tt("ccPasteJsonApply");
+  btnApply.style.cssText =
+    "padding:7px 14px;border-radius:6px;background:linear-gradient(180deg,#5dade2,#3b8fc5);" +
+    "color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer";
+  const close = () => {
+    pending?.controller.abort();
+    if (pending) finishPanelWrite(pending);
+    overlay.remove();
+    document.removeEventListener("keydown", onEsc);
+    window.removeEventListener("pagehide", close);
+    window.removeEventListener("beforeunload", close);
+  };
+  btnCancel.addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  function onEsc(e: KeyboardEvent) {
+    if (e.key === "Escape" && document.body.contains(overlay)) {
+      e.preventDefault();
+      close();
+    }
+  }
+  document.addEventListener("keydown", onEsc);
+  window.addEventListener("pagehide", close);
+  window.addEventListener("beforeunload", close);
+  btnApply.addEventListener("click", async () => {
+    errBox.textContent = "";
+    if (openedInScene !== sceneEpoch || openedBy !== myPlayerId || openedAsGM !== isGM) {
+      errBox.textContent = tt("ccPanelWriteCancelled");
+      return;
+    }
+    const raw = ta.value.trim();
+    if (!raw) { errBox.textContent = tt("ccPasteJsonInvalid"); return; }
+    let parsed: any;
+    try { parsed = JSON.parse(raw); } catch (e: any) {
+      errBox.textContent = `${tt("ccPasteJsonInvalid")}: ${e?.message ?? e}`;
+      return;
+    }
+    if (!parsed || typeof parsed !== "object" ||
+        !("abilities" in parsed || "identity" in parsed)) {
+      errBox.textContent = tt("ccPasteJsonInvalid");
+      return;
+    }
+    // 2026-05-26 — POST to /create-from-json (server endpoint added
+    // the same day). Mirrors the xlsx upload flow: server allocates a
+    // cardId, writes data.json, broadcasts card-list refresh via
+    // scene-metadata write. The new card appears in the panel like
+    // any other card. Errors stay in errBox so the user can fix the
+    // payload without losing what they pasted.
+    btnApply.disabled = true;
+    btnApply.textContent = tt("ccPasteJsonApplying");
+    const op = beginPanelWrite("upload");
+    if (!op) {
+      btnApply.disabled = false;
+      btnApply.textContent = tt("ccPasteJsonApply");
+      return;
+    }
+    pending = op;
+    try {
+      await uploadJsonAsCard(parsed, op);
+      close();
+    } catch (e: any) {
+      if (panelAlive && overlay.isConnected) errBox.textContent = writeIsCurrent(op)
+        ? `${tt("ccPanelUploadFailed")}: ${describeServiceError(e)}\n${tt("ccPanelUploadHint")}` : tt("ccPanelWriteCancelled");
+    } finally {
+      finishPanelWrite(op);
+      pending = undefined;
+      btnApply.disabled = false;
+      btnApply.textContent = tt("ccPasteJsonApply");
+    }
+  });
+  btnRow.append(btnCancel, btnApply);
+  panel.append(title, hint, ta, errBox, btnRow);
+  overlay.append(panel);
+  document.body.append(overlay);
+  setTimeout(() => { ta.focus(); }, 50);
+}
+
 // --- setup ---
-onLangChange((next) => {
+panelSubscriptions.push(onLangChange((next) => {
+  if (!panelAlive) return;
   lang = next;
   applyI18nDom(lang);
+  if (cardReadRetry) showCardReadError(cardReadRetry);
   render();
-});
+}));
 
-OBR.onReady(async () => {
+OBR.onReady(() => {
+  if (!panelAlive) return;
   applyI18nDom(lang);
   roomId = safeRoomId(OBR.room.id || "default");
-  try { playerName = (await OBR.player.getName()) || "anonymous"; } catch {}
-  try { myPlayerId = await OBR.player.getId(); } catch {}
-  try { isGM = (await OBR.player.getRole()) === "GM"; } catch {}
   // Watch for role / id changes (rare, but happens after disconnect-
   // reconnect or if the DM passes ownership). Re-render the list so
   // the visibility filter follows.
-  OBR.player.onChange(async (p) => {
-    const nextGM = p.role === "GM";
-    let changed = false;
-    if (nextGM !== isGM) { isGM = nextGM; changed = true; }
-    if (p.id && p.id !== myPlayerId) { myPlayerId = p.id; changed = true; }
-    if (changed) render();
-  });
+  panelSubscriptions.push(OBR.player.onChange((p) => {
+    if (!panelAlive) return;
+    if ((p.role === "GM") !== isGM || (p.id || "") !== myPlayerId) cancelPanelWrites();
+    ++profileRequest;
+    isGM = p.role === "GM";
+    myPlayerId = p.id || "";
+    playerName = p.name || "anonymous";
+    profileReady = true;
+    render();
+  }));
   // Resource column is visible to ALL players now (not just GM) — with only
   // 不全书 in the list it's lightweight enough to share. Pre-warm it so the
   // page is ready the moment anyone clicks the tab.
@@ -724,9 +1352,9 @@ OBR.onReady(async () => {
 
   // Re-trigger maximize on broadcast (idempotent — useful if the user opens
   // the panel again while it's already alive somehow).
-  OBR.broadcast.onMessage("com.character-cards/panel-open", () => {
-    setMaximized(true);
-  });
+  panelSubscriptions.push(OBR.broadcast.onMessage("com.character-cards/panel-open", () => {
+    if (panelAlive) void setMaximized(true);
+  }));
 
   // Drag-drop on the right sidebar ONLY
   const sideEl = document.getElementById("side") as HTMLElement;
@@ -746,12 +1374,13 @@ OBR.onReady(async () => {
   sideEl.addEventListener("drop", async (e) => {
     e.preventDefault();
     sideEl.classList.remove("drag-over");
-    // 2026-05-10: drop accepts multiple xlsx files; uploadFilesBatch
-    // sequences them and surfaces per-file errors without aborting
-    // the whole batch on one bad file.
     const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
     if (files.length === 0) return;
-    await uploadFilesBatch(files);
+    const op = beginPanelWrite("upload");
+    if (!op) return;
+    try { await uploadFilesBatch(files, op); }
+    catch (error) { showSheetError(op, error, "ccPanelUploadFailed"); }
+    finally { finishPanelWrite(op); }
   });
 
   document.addEventListener("dragover", (e) => { e.preventDefault(); });
@@ -765,19 +1394,27 @@ OBR.onReady(async () => {
     linkBtn.style.display = "";
     linkBtn.addEventListener("click", () => { void linkLocalFile(); });
   }
+  // 2026-05-26 — preview entry points (see openSamplePreview /
+  // openPasteJsonPreview above). Both open cc-fullscreen.html in an
+  // OBR modal with ?preview=…; nothing persists to the server.
+  const sampleBtn = document.getElementById("btnViewSample") as HTMLButtonElement | null;
+  sampleBtn?.addEventListener("click", () => { void openSamplePreview(); });
+  const pasteBtn = document.getElementById("btnPasteJson") as HTMLButtonElement | null;
+  pasteBtn?.addEventListener("click", () => { openPasteJsonPreview(); });
 
   // Listen for refresh broadcasts from other clients. When the DM (or
   // any other player) refreshes a linked card, we just bump our own
   // iframe's src with a cache-buster so the new index.html is fetched.
-  OBR.broadcast.onMessage(BC_CARD_UPDATED, (event) => {
-    const data = event.data as { cardId?: string; url?: string } | undefined;
-    if (!data?.cardId) return;
+  panelSubscriptions.push(OBR.broadcast.onMessage(BC_CARD_UPDATED, (event) => {
+    if (!panelAlive) return;
+    const data = event.data as { cardId?: string; roomId?: string; url?: string } | undefined;
+    if (!data?.cardId || (data.roomId !== undefined && data.roomId !== roomId)) return;
     const iframe = cardIframes.get(data.cardId);
     const card = cards.find((c) => c.id === data.cardId);
     if (iframe && card) {
       iframe.src = buildCardIframeSrc(card, true);
     }
-  });
+  }));
 
   // Close via X button in the sidebar header, Esc, or clicking backdrop.
   closeBtn?.addEventListener("click", minimize);
@@ -792,6 +1429,7 @@ OBR.onReady(async () => {
   document.addEventListener("keydown", (e) => {
     if (!maximized) return;
     if (e.key === "Escape") {
+      if (document.getElementById("ccPasteOverlay")) return;
       e.preventDefault();
       minimize();
       return;
@@ -832,18 +1470,33 @@ OBR.onReady(async () => {
   window.addEventListener("pagehide", onPanelUnload);
   window.addEventListener("beforeunload", onPanelUnload);
 
-  // Initial load + react to scene metadata changes
-  await refreshFromScene();
-  OBR.scene.onMetadataChange((meta) => {
-    if (SCENE_META_KEY in meta) refreshFromScene();
+  // Subscribe before the initial reads so role/scene events can invalidate
+  // them even while one host request is slow.
+  panelSubscriptions.push(OBR.scene.onMetadataChange(applyCardSnapshot));
+  panelSubscriptions.push(OBR.scene.onReadyChange((ready) => changeSceneReadiness(ready, sceneReady === undefined)));
+  const profile = ++profileRequest;
+  void Promise.allSettled([OBR.player.getName(), OBR.player.getId(), OBR.player.getRole()]).then(([name, id, role]) => {
+    if (!panelAlive || profile !== profileRequest) return;
+    playerName = name.status === "fulfilled" ? name.value || "anonymous" : "anonymous";
+    myPlayerId = id.status === "fulfilled" ? id.value : "";
+    isGM = role.status === "fulfilled" && role.value === "GM";
+    profileReady = true;
+    render();
   });
-
-  // Validate restored activeCardId still exists; otherwise clear
-  if (current.type === "card") {
-    const curId = current.id;
-    if (!cards.find((c) => c.id === curId)) {
-      current = { type: "empty" };
-      render();
-    }
-  }
+  render();
+  void readInitialSceneReadiness();
 });
+
+function stopPanelReads(): void {
+  panelAlive = false;
+  cancelPanelWrites(true);
+  ++profileRequest;
+  ++readinessRequest;
+  ++metadataRequest;
+  ++sceneEpoch;
+  for (const unsubscribe of panelSubscriptions.splice(0)) {
+    try { unsubscribe(); } catch {}
+  }
+}
+window.addEventListener("pagehide", stopPanelReads);
+window.addEventListener("beforeunload", stopPanelReads);

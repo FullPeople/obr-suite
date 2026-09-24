@@ -28,6 +28,7 @@
 //     focus.
 
 import OBR, { buildImage, Item } from "@owlbear-rodeo/sdk";
+import { getLocalLang } from "../../state";
 import { assetUrl } from "../../asset-base";
 import { turnOnTimeStop } from "../timeStop";
 import {
@@ -495,6 +496,7 @@ async function flagTricksterFired(trickster: Item, meta: TricksterMeta) {
 // --- Setup / teardown ---
 
 export async function setupTrickster(): Promise<void> {
+  const en = getLocalLang() === "en";
   try { role = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch {}
 
   // GM-only sweep — rewrites legacy trickster items (placed before
@@ -511,7 +513,7 @@ export async function setupTrickster(): Promise<void> {
       icons: [
         {
           icon: TOOL_ICON_URL,
-          label: "捣蛋鬼在哪？",
+          label: en ? "Where's the trickster?" : "捣蛋鬼在哪？",
           filter: { roles: ["GM"] },
         },
       ],
@@ -526,7 +528,7 @@ export async function setupTrickster(): Promise<void> {
       icons: [
         {
           icon: TOOL_ICON_URL,
-          label: "拖动绘制触发区",
+          label: en ? "Drag to draw trigger zone" : "拖动绘制触发区",
           filter: { activeTools: [TOOL_ID] },
         },
       ],

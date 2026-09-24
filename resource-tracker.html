@@ -36,31 +36,44 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
 .rt-close:hover{background:rgba(231,76,60,0.18);border-color:var(--red);color:#fff}
 
 /* ===== Body — the single scroll region ===== */
-/* 2026-05-16 — explicit `grid-auto-rows: max-content` + `align-items:
-   start` so each row sizes to its tallest card's natural content,
-   shorter cards align to row top (no forced stretch). Without these,
-   when there were many characters the rows would all share a single
-   tall row height and shorter cards looked squashed at the top with
-   weird whitespace; users with many resources saw later resources
-   clipped because `align-items:stretch` (default) plus
-   `overflow:hidden` on .rt-char silently truncated overflow. */
+/* 2026-05-21 — MASONRY via CSS multi-column. The old grid forced every
+   row to its tallest card's height, so a player with many resources
+   stretched the whole row and left big gaps under the shorter cards.
+   CSS columns let each card flow into the shortest column and pack
+   tightly regardless of neighbours' heights (`break-inside:avoid` keeps
+   a card whole). Vertical spacing is the card's margin-bottom since
+   column-gap only spaces columns horizontally. */
 .rt-body{
   flex:1;min-height:0;overflow-y:auto;
   padding:16px;
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
-  grid-auto-rows:max-content;
-  gap:14px;
-  align-items:start;
-  align-content:start;
+  column-width:300px;
+  column-gap:14px;
 }
 .rt-body::-webkit-scrollbar{width:8px}
 .rt-body::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:4px}
 
 .rt-empty{
-  grid-column:1/-1;
+  column-span:all;
   text-align:center;color:var(--text-mute);
   font-size:13px;line-height:1.9;padding:60px 20px;
+}
+
+/* ===== Player/Monster tab switcher (header right) ===== */
+.rt-tabs{display:flex;gap:0;flex-shrink:0;border:1px solid var(--border-strong);border-radius:7px;overflow:hidden}
+.rt-tab{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:5px 12px;
+  background:transparent;border:none;cursor:pointer;
+  color:var(--text-dim);font-family:inherit;font-size:12px;font-weight:700;
+  transition:background .12s,color .12s;
+}
+.rt-tab + .rt-tab{border-left:1px solid var(--border-strong)}
+.rt-tab:hover{background:rgba(255,255,255,0.06);color:var(--text)}
+.rt-tab.on[data-tab="player"]{background:rgba(245,166,35,0.18);color:var(--gold)}
+.rt-tab.on[data-tab="monster"]{background:rgba(93,173,226,0.18);color:var(--accent-dim)}
+.rt-tab-n{
+  font-family:ui-monospace,Consolas,monospace;font-size:10px;
+  padding:1px 6px;border-radius:999px;background:rgba(255,255,255,0.08);color:inherit;
 }
 
 /* 2026-05-16 — section divider between player + monster groups.
@@ -93,6 +106,12 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
   border-radius:10px;
   display:flex;flex-direction:column;
   overflow:hidden;
+  /* masonry: keep each card whole within a column + provide the
+     vertical gap (column-gap is horizontal-only). */
+  break-inside:avoid;
+  -webkit-column-break-inside:avoid;
+  margin-bottom:14px;
+  width:100%;
 }
 .rt-char-head{
   display:flex;align-items:center;gap:8px;
@@ -226,18 +245,22 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
       <svg viewBox="0 0 16 16" width="15" height="15" style="vertical-align:-3px;margin-right:6px" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
         <rect x="2" y="2" width="12" height="12" rx="1.5"/>
         <path d="M5 11L5 7M8 11L8 4M11 11L11 9"/>
-      </svg>资源追踪
+      </svg><span data-i18n="rtTitle">资源追踪</span>
     </span>
-    <span class="rt-sub" id="rtSub">全员资源总览</span>
+    <span class="rt-sub" id="rtSub"></span>
+    <div class="rt-tabs" id="rtTabs">
+      <button class="rt-tab on" data-tab="player" id="rtTabPlayer" type="button"><span data-i18n="rtTabPlayers">玩家</span> <span class="rt-tab-n" id="rtTabPlayerN">0</span></button>
+      <button class="rt-tab" data-tab="monster" id="rtTabMonster" type="button"><span data-i18n="rtTabMonsters">怪物</span> <span class="rt-tab-n" id="rtTabMonsterN">0</span></button>
+    </div>
     <button class="rt-close" id="rtClose" type="button" title="关闭">×</button>
   </header>
   <div class="rt-presets-bar" id="rtPresetsBar">
-    <span class="rt-presets-lbl">预设</span>
-    <span class="rt-presets-empty" id="rtPresetsEmpty">还没有预设。鼠标移到某张角色卡上点「+ 存为预设」可保存其当前资源；保存后这里出现的 chip：<b>点击</b>=覆盖/叠加给全员、<b>拖到角色卡上</b>=只给那一张。</span>
+    <span class="rt-presets-lbl" data-i18n="rtPresetsLbl">预设</span>
+    <span class="rt-presets-empty" id="rtPresetsEmpty" data-i18n-html="rtPresetsEmpty">还没有预设。鼠标移到某张角色卡上点「+ 存为预设」可保存其当前资源；保存后这里出现的 chip：<b>点击</b>=覆盖/叠加给全员、<b>拖到角色卡上</b>=只给那一张。</span>
     <span id="rtPresetsList" style="display:inline-flex;flex-wrap:wrap;gap:4px"></span>
     <span class="rt-preset-actions">
-      <button class="io" id="rtPresetExport" type="button" title="导出全部预设为 JSON">导出</button>
-      <button class="io" id="rtPresetImport" type="button" title="导入预设 JSON">导入</button>
+      <button class="io" id="rtPresetExport" type="button" data-i18n="rtExport">导出</button>
+      <button class="io" id="rtPresetImport" type="button" data-i18n="rtImport">导入</button>
       <input type="file" id="rtPresetFile" class="rt-file-import" accept=".json,application/json">
     </span>
   </div>

@@ -452,9 +452,12 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
   accent-color:#5dade2;
 }
 
-/* Panel-layout reset button — appears in 基础设置 → 面板布局 block.
-   Solid red since it's a destructive-ish action (wipes per-client
-   panel-position memory). Compact, fits next to the description text. */
+/* Shared destructive-action button. Despite the name it's used by
+   THREE buttons: the panel-layout reset (基础设置 → 面板布局), the
+   bubbles legacy-hide repair (血条), and the bestiary legacy-image
+   repair (怪物图鉴). Solid red to signal a mutating one-shot action;
+   compact, fits next to the description text. Restyle with care —
+   changes hit all three. */
 .reset-panels-btn{
   align-self:flex-start;
   height:28px;
@@ -561,6 +564,9 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
   font-family:ui-monospace,Consolas,monospace;
 }
 .lib-url:read-only{opacity:0.7}
+.lib-row-language{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px;color:var(--text-dim)}
+.lib-row-language select{min-width:0;max-width:100%;padding:3px 6px;background:var(--bg-strong);color:var(--text);border:1px solid var(--border);border-radius:4px;font:inherit}
+.lib-language-status{font-size:10px;color:var(--accent-warm)}
 .lib-tag{
   font-size:9px;font-weight:700;
   color:#7be0a0;background:rgba(46,204,113,0.18);
@@ -590,6 +596,18 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
   transition:background .12s;
 }
 .lib-add-btn:hover{background:rgba(52,152,219,0.30)}
+.lib-add-en-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  margin-left:8px;
+  padding:6px 14px;
+  background:rgba(46,204,113,0.16);
+  border:1px solid rgba(46,204,113,0.40);
+  color:#6fe0a0;font-weight:700;
+  border-radius:6px;font-size:11.5px;
+  cursor:pointer;font-family:inherit;
+  transition:background .12s;
+}
+.lib-add-en-btn:hover{background:rgba(46,204,113,0.28)}
 
 /* Preview button + diagnostic panel inside each library row */
 .lib-preview-btn{

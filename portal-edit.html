@@ -36,6 +36,12 @@ html,body{
   margin-bottom:12px;
   flex-shrink:0;
 }
+.hdr .grip{
+  cursor:grab;color:var(--text-dim);font-size:13px;line-height:1;
+  padding:0 4px 0 0;user-select:none;touch-action:none;letter-spacing:-2px;
+}
+.hdr .grip:hover{color:var(--text)}
+.hdr .grip.is-dragging{cursor:grabbing;color:var(--accent)}
 .hdr .ic{font-size:14px;color:var(--accent)}
 .hdr .ttl{font-size:14px;font-weight:700;flex:1;letter-spacing:0.2px}
 .hdr .x{
@@ -48,8 +54,14 @@ html,body{
 .body{
   flex:1;min-height:0;
   display:flex;flex-direction:column;gap:10px;
-  overflow:hidden;
+  overflow-y:auto;overflow-x:hidden;
 }
+.portal-art-row{display:flex;align-items:center;gap:10px}
+.portal-art-preview{width:44px;height:44px;object-fit:contain;border-radius:5px;background:var(--bg-strong);flex-shrink:0}
+.portal-art-actions{display:flex;flex-wrap:wrap;gap:5px}
+.portal-art-actions .btn{font-size:11px;padding:5px 7px}
+.portal-art-actions .btn:disabled{opacity:.5;cursor:default}
+.portal-art-status{font-size:10.5px;color:var(--text-dim);margin-top:5px;line-height:1.4}
 
 .row{flex-shrink:0}
 .row .lbl{
@@ -203,6 +215,7 @@ html,body{
 <body>
 <div class="card">
   <div class="hdr">
+    <span class="grip" id="drag-handle" title="拖动面板" aria-label="拖动面板">⠿</span>
     <span class="ic">◐</span>
     <span class="ttl" id="title" data-i18n="portalTitle">传送门</span>
     <button class="x" id="x">×</button>

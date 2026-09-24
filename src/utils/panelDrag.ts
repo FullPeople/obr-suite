@@ -1,30 +1,13 @@
-// Iframe-side drag handle binder.
-//
-// Each draggable popover's iframe entry script wires its grip element
-// once via `bindPanelDrag(handleEl, panelId)`. The grip's only job is
-// to detect the user's pointerdown intent and ask the background
-// module to open the fullscreen drag-preview modal — the modal then
-// owns the rest of the gesture (move, up, cancel).
-//
-// We do NOT try to track pointermove/pointerup inside the source
-// iframe. When OBR.modal.open mounts a new fullscreen iframe on top
-// of our popover, the OS / browser may release the source iframe's
-// pointer capture and route subsequent events to the modal layer
-// instead — a stuck gesture with no pointerup ever firing is the
-// observed bug. Letting the modal own everything sidesteps the
-// cross-iframe handoff entirely.
-//
-// Safety net: if the user releases or moves OUT of the iframe before
-// the modal has mounted, we still want the gesture to be observable
-// — so we attach a one-shot document-level pointerup listener that
-// broadcasts BC_PANEL_DRAG_CANCEL. The modal also handles cancel
-// independently via Esc / blocker click; the two paths converge in
-// background.ts which closes the modal idempotently.
-
+// The source grip captures and forwards actual pointer events. Some browsers
+// keep those events in the original iframe after the drag preview mounts;
+// others deliver them to the preview. Both paths share one gesture identity,
+// and the preview commits once. The host buffers an early pointerup until the
+// preview's ready message instead of treating a normal release as cancellation.
 import OBR from "@owlbear-rodeo/sdk";
 import {
   BC_PANEL_DRAG_START,
   BC_PANEL_DRAG_CANCEL,
+  BC_PANEL_DRAG_INPUT,
   computePanelBbox,
 } from "./panelLayout";
 
@@ -88,57 +71,23 @@ export function applyDragSide(handleEl: HTMLElement, side: DragSide): void {
 void computePanelBbox;
 
 export function bindPanelDrag(handleEl: HTMLElement, panelId: string): () => void {
-  const onPointerDown = (e: PointerEvent) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    handleEl.classList.add("is-dragging");
-    try {
-      OBR.broadcast.sendMessage(
-        BC_PANEL_DRAG_START,
-        {
-          panelId,
-          startScreenX: e.screenX,
-          startScreenY: e.screenY,
-        },
-        { destination: "LOCAL" },
-      );
-    } catch {}
-
-    // Pre-mount safety net: if the user releases before the modal
-    // mounts (unlikely but possible during the ~50ms open-modal
-    // window), broadcast a cancel so background can close any modal
-    // that did manage to open. This listener self-destructs on first
-    // pointerup or after 800ms — long enough for the modal to be up.
-    const cleanup = (cancelled: boolean) => {
-      handleEl.classList.remove("is-dragging");
-      document.removeEventListener("pointerup", onEarlyUp, true);
-      document.removeEventListener("pointercancel", onEarlyCancel, true);
-      clearTimeout(armTimer);
-      if (cancelled) {
-        try {
-          OBR.broadcast.sendMessage(
-            BC_PANEL_DRAG_CANCEL,
-            { panelId },
-            { destination: "LOCAL" },
-          );
-        } catch {}
-      }
-    };
-    const onEarlyUp = () => cleanup(true);
-    const onEarlyCancel = () => cleanup(true);
-    document.addEventListener("pointerup", onEarlyUp, true);
-    document.addEventListener("pointercancel", onEarlyCancel, true);
-    // Disarm after the modal should have mounted. Modal owns the
-    // gesture from then on; if its own pointerup never fires, modal-
-    // side safety nets (Esc, click blocker, 30s timeout in background)
-    // take over.
-    const armTimer = setTimeout(() => cleanup(false), 800);
+  let cancelActive:(()=>void)|undefined;
+  const onPointerDown = (event:PointerEvent) => {
+    if(event.button!==0)return;
+    cancelActive?.();event.preventDefault();event.stopPropagation();
+    const gestureId=crypto.randomUUID(),pointerId=event.pointerId;
+    handleEl.classList.add('is-dragging');
+    try{handleEl.setPointerCapture(pointerId);}catch{}
+    let frame=0,latest:PointerEvent|undefined,finished=false;
+    const send=(phase:'move'|'end',e:PointerEvent)=>void OBR.broadcast.sendMessage(BC_PANEL_DRAG_INPUT,{panelId,gestureId,phase,screenX:e.screenX,screenY:e.screenY},{destination:'LOCAL'}).catch(()=>{});
+    const cleanup=()=>{if(finished)return;finished=true;cancelAnimationFrame(frame);clearTimeout(safety);handleEl.classList.remove('is-dragging');document.removeEventListener('pointermove',move,true);document.removeEventListener('pointerup',up,true);document.removeEventListener('pointercancel',cancel,true);try{handleEl.releasePointerCapture(pointerId);}catch{}cancelActive=undefined;};
+    const move=(e:PointerEvent)=>{if(e.pointerId!==pointerId)return;latest=e;if(!frame)frame=requestAnimationFrame(()=>{frame=0;if(latest&&!finished)send('move',latest);});};
+    const up=(e:PointerEvent)=>{if(e.pointerId!==pointerId)return;send('end',e);cleanup();};
+    const cancel=()=>{cleanup();void OBR.broadcast.sendMessage(BC_PANEL_DRAG_CANCEL,{panelId,gestureId},{destination:'LOCAL'}).catch(()=>{});};
+    const safety=setTimeout(cancel,35000);cancelActive=cancel;
+    document.addEventListener('pointermove',move,true);document.addEventListener('pointerup',up,true);document.addEventListener('pointercancel',cancel,true);
+    void OBR.broadcast.sendMessage(BC_PANEL_DRAG_START,{panelId,gestureId,startScreenX:event.screenX,startScreenY:event.screenY},{destination:'LOCAL'}).catch(cancel);
   };
-
-  handleEl.addEventListener("pointerdown", onPointerDown);
-
-  return () => {
-    handleEl.removeEventListener("pointerdown", onPointerDown);
-  };
+  handleEl.addEventListener('pointerdown',onPointerDown);
+  return()=>{cancelActive?.();handleEl.removeEventListener('pointerdown',onPointerDown);};
 }

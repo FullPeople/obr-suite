@@ -1,0 +1,4 @@
+/* Keep the table artwork palette readable inside the workbench. */
+html,body{border:0;border-radius:0;box-shadow:none}.table-header{border-bottom:1px solid #b68d3866}.table-brand h1{color:#f2d99a}.window-controls button{border-radius:2px}
+
+:root{--suite-tone:#50525B;--gold:#d7d7de;--ink-muted:#babac2;color:#f4f4f6;background:color-mix(in srgb,var(--suite-tone) 50%,#191a1e)}.table-header{background:var(--suite-tone);border-color:#ffffff28}.table-brand h1{color:white}.window-controls button,button{background:color-mix(in srgb,var(--suite-tone) 80%,#202127);border-color:#8e8f98;color:#f6f6f8}button:hover:not(:disabled){background:#646671}.primary{background:#d9d9e0;color:#25262c;border-color:#fafafa}.seat{background:linear-gradient(#383a43ed,#25262dda)}

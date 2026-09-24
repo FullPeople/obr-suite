@@ -1,0 +1,46 @@
+import {build} from 'rolldown';
+import {resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import assert from 'node:assert/strict';
+const file=resolve('workbench-test-output/merge-test.mjs');
+await build({input:resolve('src/workbench/merge.ts'),output:{file,format:'esm'}});
+const {applyPatch,applyProjectionPatch,resourceSnapshot}=await import(pathToFileURL(file).href);
+const before={custom:{name:'气',current:3,max:4},dice:{name:'生命骰',current:1,max:3,automatic:true},slot:{name:'法术位',current:2,max:4,automatic:true}};
+const scene=[{id:'custom',name:'气',current:3,max:4}];
+const next=structuredClone(before);next.custom.current=2;
+const merged=applyPatch(resourceSnapshot(before,scene),before,next);
+assert.equal(merged.custom.current,2);assert.equal(merged.dice.current,1);assert.equal(merged.slot.current,2);assert(Object.values(merged).every(Boolean));
+assert.deepEqual(applyPatch({a:1},{a:1,removed:{name:'old'}},{a:2,removed:{name:'old'}}),{a:2});
+assert.deepEqual(applyPatch({x:3,y:2},{x:1,y:2},{x:1,y:4}),{x:3,y:4});
+assert.throws(()=>applyPatch({current:1},{current:2},{current:0}));
+assert.deepEqual(resourceSnapshot(before,[null,{id:'broken'},...scene]).custom,scene[0]);
+const observed={classes:[{name:'法师',level:2,legacy:'retain'}],hp:20,unknown:{text:'keep'}};
+const normalized={classes:[{name:'法师',level:2,source:'IMPORTED'}],hp:20};
+assert.deepEqual(applyProjectionPatch({...observed,hp:18},normalized,{...normalized,classes:[]},observed),{...observed,hp:18,classes:[]});
+assert.throws(()=>applyProjectionPatch({...observed,classes:[{name:'法师',level:3}]},normalized,{...normalized,classes:[]},observed));
+assert.deepEqual(applyProjectionPatch(observed,normalized,{...normalized,hp:15},observed),{...observed,hp:15});
+console.log('PASS legacy normalization does not cause false conflicts, overwrite unrelated fields or bypass actual concurrent edits');
+console.log('PASS sparse scene resource list preserves automatic resources and spent counts');
+console.log('PASS remote removal never materializes undefined map entries');
+console.log('PASS independent edits merge and same-field conflicts are rejected');
+console.log('PASS malformed metadata rows are ignored at the input boundary');
+
+assert.throws(()=>applyPatch([],[{id:'gone',level:1}],[{id:'gone',level:2}]),/移除/);
+assert.throws(()=>applyPatch({}, {resource:{current:1}}, {resource:{current:2}}),/移除/);
+console.log('PASS stale edits cannot resurrect remotely removed rows or resource fields');
+
+const stored={id:'s',entry:{id:'wiki:prone',kind:'condition',name:'倒地',raw:{}},level:1,quantity:1,equipped:false};
+const hydrated=structuredClone(stored);hydrated.entry.raw._suiteStatusId='web:wiki:prone';
+const observedNative={selections:[stored]},beforeNative={selections:[hydrated]},afterNative={selections:[]};
+assert.deepEqual(applyProjectionPatch(observedNative,beforeNative,afterNative,observedNative,'native'),afterNative);
+const unrelated={...stored,id:'other'};
+assert.deepEqual(applyProjectionPatch({selections:[stored,unrelated]},beforeNative,afterNative,observedNative,'native'),{selections:[unrelated]});
+assert.throws(()=>applyProjectionPatch({selections:[{...stored,level:2}]},beforeNative,afterNative,observedNative,'native'),e=>e.diagnostic.path==='native.selections[s]'&&e.diagnostic.differences.some(d=>d.path==='level'));
+assert.deepEqual(applyPatch([{value:2,id:'x'}],[{id:'x',value:2}],[]),[]);
+console.log('PASS offscene status hydration is not a conflict, concurrent additions survive, real row changes carry diagnostics');
+
+await build({input:resolve('src/workbench/conditions.ts'),output:{file:resolve('workbench-test-output/condition-test.mjs'),format:'esm'}});
+const {runtimeConditions}=await import(pathToFileURL(resolve('workbench-test-output/condition-test.mjs')).href);
+const liveRows=runtimeConditions([{...stored,level:3}],[hydrated],['web:wiki:prone'],[]);
+assert.equal(liveRows[0].level,3);assert.throws(()=>applyProjectionPatch({selections:liveRows},beforeNative,afterNative,observedNative,'native'),e=>e.diagnostic.differences.some(d=>d.path==='level'));
+console.log('PASS token hydration preserves newer stored counters and detects actual delete conflicts');

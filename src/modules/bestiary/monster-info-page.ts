@@ -15,13 +15,20 @@ import {
   type BubblesData,
 } from "../../utils/statEdit";
 import { mountResourcePanel } from "../resourceTracker/panel";
-import { getLocalLang, onLangChange } from "../../state";
+import { groupSpellcastingByDisplay } from "./spellcasting-display";
+import { getLocalLang, onLangChange, getState, startSceneSync, refreshFromScene, onStateChange } from "../../state";
+import { monsterInitiativeBonus } from "./initiative";
+import { fetchLocalizedMonster, clearMonsterDetailCache } from "./detail-data";
+import { contentConfigurationKey } from "../../utils/contentLocale";
+import { createContentRequestGuard } from "../../utils/contentRequests";
+import { BC_LOCAL_CONTENT_CHANGED, forceReloadLocalContent } from "../../utils/localContent";
+const displayRequests = createContentRequestGuard();
 
 // 2026-05-10: language-aware section titles, ability labels, save /
 // check labels, etc. Foreign players using the kiwee Chinese mirror
 // were stuck seeing Chinese chrome around the Chinese-prose entries;
-// labels at least are now in their language. The actual prose stays
-// in whatever language the data-source ships.
+// Labels follow the player; detail-data selects the preferred enabled source
+// for prose while retaining local or edited saved content.
 let _curLang: "zh" | "en" = (() => {
   try { return (getLocalLang() as "zh" | "en") ?? "zh"; } catch { return "zh"; }
 })();
@@ -48,7 +55,9 @@ function toggleMonsterInfoPinned(): void {
   if (btn) {
     btn.classList.toggle("pinned", next);
     btn.setAttribute("aria-pressed", String(next));
-    btn.title = next ? "已置顶（取消则恢复随选择关闭）" : "置顶面板（取消选中也保持显示）";
+    btn.title = next
+      ? (_curLang === "en" ? "Pinned (unpin to close on deselect again)" : "已置顶（取消则恢复随选择关闭）")
+      : (_curLang === "en" ? "Pin panel (stays open after deselect)" : "置顶面板（取消选中也保持显示）");
   }
 }
 
@@ -63,121 +72,6 @@ let liveBubbles: BubblesData = {};
 
 const SHOW_MSG = "com.bestiary/info-show";
 const BESTIARY_DATA_KEY = "com.bestiary/monsters";
-const DEFAULT_BASE = "https://5e.kiwee.top";
-
-// Read enabled-library bases from suite state at call time. Same
-// pattern as bestiary/data.ts — falls back to the kiwee mirror
-// when state isn't populated yet.
-function getBases(): string[] {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getState } = require("../../state") as typeof import("../../state");
-    const libs = getState().libraries || [];
-    const bases = libs
-      .filter((l) => l.enabled && typeof l.baseUrl === "string" && l.baseUrl.trim().length > 0)
-      .map((l) => l.baseUrl.replace(/\/+$/, ""));
-    return bases.length > 0 ? bases : [DEFAULT_BASE];
-  } catch {
-    return [DEFAULT_BASE];
-  }
-}
-
-// Index cache is per-base now; a custom Cloudflare lib has its own
-// `bestiary/index.json` that may list different sources than kiwee.
-const indexCacheByBase = new Map<string, Record<string, string>>();
-async function loadBestiaryIndexFor(base: string): Promise<Record<string, string>> {
-  const cached = indexCacheByBase.get(base);
-  if (cached) return cached;
-  try {
-    const res = await fetch(`${base}/data/bestiary/index.json`, { cache: "no-cache" });
-    if (!res.ok) {
-      indexCacheByBase.set(base, {});
-      return {};
-    }
-    const idx = (await res.json()) as Record<string, string>;
-    indexCacheByBase.set(base, idx);
-    return idx;
-  } catch {
-    indexCacheByBase.set(base, {});
-    return {};
-  }
-}
-
-// File cache key: `${base}|${filename}` so the same source from
-// different libraries doesn't collide.
-const fileCache = new Map<string, any[]>();
-async function fetchMonsterFile(base: string, filename: string): Promise<any[]> {
-  const key = `${base}|${filename}`;
-  const cached = fileCache.get(key);
-  if (cached) return cached;
-  try {
-    const res = await fetch(`${base}/data/bestiary/${filename}`, { cache: "no-cache" });
-    if (!res.ok) {
-      fileCache.set(key, []);
-      return [];
-    }
-    const data = await res.json();
-    const list = (data.monster || []) as any[];
-    fileCache.set(key, list);
-    return list;
-  } catch {
-    fileCache.set(key, []);
-    return [];
-  }
-}
-
-// Walk every enabled library until we find the monster. Custom libs
-// usually win because they're narrower; if not found there, falls
-// through to kiwee.
-async function findMonster(source: string, engName: string): Promise<any | null> {
-  for (const base of getBases()) {
-    const index = await loadBestiaryIndexFor(base);
-    const filename = index[source];
-    if (!filename) continue;
-    const list = await fetchMonsterFile(base, filename);
-    const hit = list.find((x) => (x.ENG_name || x.name) === engName);
-    if (hit) return hit;
-  }
-  return null;
-}
-
-// Resolve 5etools _copy by fetching the parent source file and merging. Same
-// shape as the panel's resolveCopy but does its own async fetch for fallback.
-async function resolveFetchedCopy(m: any, stack: Set<string>): Promise<any> {
-  if (!m || !m._copy) return m;
-  const pSrc = m._copy.source;
-  const pEn = m._copy.ENG_name || m._copy.name;
-  const pSlug = `${pSrc}::${pEn}`;
-  if (stack.has(pSlug)) return m;
-  stack.add(pSlug);
-  let parent = await findMonster(pSrc, pEn);
-  if (!parent) return m;
-  if (parent._copy) parent = await resolveFetchedCopy(parent, stack);
-  const merged: any = JSON.parse(JSON.stringify(parent));
-  for (const [k, v] of Object.entries(m)) {
-    if (k === "_copy" || k === "_mod") continue;
-    if (v !== undefined && v !== null) merged[k] = v;
-  }
-  return merged;
-}
-
-// Fetch a monster's raw JSON directly from the 5etools mirror, used as a
-// fallback when the scene-metadata shared table doesn't have this slug.
-async function fetchMonsterBySlug(slug: string): Promise<any | null> {
-  const sep = slug.indexOf("::");
-  if (sep === -1) return null;
-  const source = slug.slice(0, sep);
-  const engName = slug.slice(sep + 2);
-  try {
-    let m = await findMonster(source, engName);
-    if (!m) return null;
-    if (m._copy) m = await resolveFetchedCopy(m, new Set());
-    return m;
-  } catch {
-    return null;
-  }
-}
-
 const root = document.getElementById("root") as HTMLDivElement;
 
 const ABBR: Record<string, string> = {
@@ -200,7 +94,9 @@ function renderNameButton(name: string, clickable: boolean): string {
   if (!clickable) {
     return `<div class="name">${escapeHtml(name)}</div>`;
   }
-  const title = `点击 → 同步 / 清除 token 名字：${name}`;
+  const title = _curLang === "en"
+    ? `Click → set / clear token name: ${name}`
+    : `点击 → 同步 / 清除 token 名字：${name}`;
   return `<button class="name name-btn" type="button" data-name-text="${escapeHtml(name)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${escapeHtml(name)}</button>`;
 }
 
@@ -308,15 +204,17 @@ function hpToNumber(hp: any): number | null {
 // each as its own line so a monster with walk/fly/swim shows three lines.
 function parseSpeedParts(speed: any): string[] {
   if (!speed) return ["?"];
-  if (typeof speed === "number") return [`${speed}尺`];
+  const en = _curLang === "en";
+  const unit = en ? " ft." : "尺";
+  if (typeof speed === "number") return [`${speed}${unit}`];
   if (typeof speed !== "object") return ["?"];
   const v = (x: any) => typeof x === "number" ? x : (x?.number ?? "?");
   const parts: string[] = [];
-  if (speed.walk != null) parts.push(`${v(speed.walk)}尺`);
-  if (speed.fly != null) parts.push(`飞${v(speed.fly)}`);
-  if (speed.swim != null) parts.push(`泳${v(speed.swim)}`);
-  if (speed.climb != null) parts.push(`攀${v(speed.climb)}`);
-  if (speed.burrow != null) parts.push(`掘${v(speed.burrow)}`);
+  if (speed.walk != null) parts.push(`${v(speed.walk)}${unit}`);
+  if (speed.fly != null) parts.push(en ? `fly ${v(speed.fly)}` : `飞${v(speed.fly)}`);
+  if (speed.swim != null) parts.push(en ? `swim ${v(speed.swim)}` : `泳${v(speed.swim)}`);
+  if (speed.climb != null) parts.push(en ? `climb ${v(speed.climb)}` : `攀${v(speed.climb)}`);
+  if (speed.burrow != null) parts.push(en ? `burrow ${v(speed.burrow)}` : `掘${v(speed.burrow)}`);
   return parts.length ? parts : ["?"];
 }
 
@@ -425,7 +323,9 @@ function parseSizeStr(size: any): string {
   if (!size) return "?";
   const arr = Array.isArray(size) ? size : [size];
   const code = String(arr[0] || "").toUpperCase();
-  const map: Record<string, string> = { T: "超小", S: "小", M: "中", L: "大", H: "巨", G: "超巨" };
+  const map: Record<string, string> = _curLang === "en"
+    ? { T: "Tiny", S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan" }
+    : { T: "超小", S: "小", M: "中", L: "大", H: "巨", G: "超巨" };
   return map[code] || code || "?";
 }
 
@@ -449,22 +349,24 @@ function renderSpellList(arr: any): string {
   // whole formatted result in the chip so the chip fires search and
   // any nested .rollable inside fires its own roll first (closest()
   // resolves to the most-specific match).
+  const searchTip = _curLang === "en" ? "Search: " : "点击搜索: ";
   return arr.map((s) => {
     const display = formatTagsClickable(String(s));
     const cleanName = stripHtmlTags(display);
     if (!cleanName) return "";
-    return `<span class="spell-chip" data-q="${escapeHtml(cleanName)}" title="点击搜索: ${escapeHtml(cleanName)}">${display}</span>`;
-  }).filter(Boolean).join("、");
+    return `<span class="spell-chip" data-q="${escapeHtml(cleanName)}" title="${escapeHtml(searchTip)}${escapeHtml(cleanName)}">${display}</span>`;
+  }).filter(Boolean).join(_curLang === "en" ? ", " : "、");
 }
 
 function renderSpellLevels(spells: any): string {
   if (!spells || typeof spells !== "object") return "";
+  const en = _curLang === "en";
   const levels = Object.keys(spells).sort((a, b) => Number(a) - Number(b));
   return levels.map((lv) => {
     const slot = spells[lv];
     if (!slot) return "";
-    const label = lv === "0" ? "戏法" : `${lv}环`;
-    const slotInfo = typeof slot.slots === "number" ? ` (${slot.slots}次)` : "";
+    const label = lv === "0" ? (en ? "Cantrips" : "戏法") : (en ? `Level ${lv}` : `${lv}环`);
+    const slotInfo = typeof slot.slots === "number" ? (en ? ` (${slot.slots} slots)` : ` (${slot.slots}次)`) : "";
     const sp = renderSpellList(slot.spells);
     if (!sp) return "";
     return `<div class="spell-line"><span class="sl">${label}${slotInfo}</span>${sp}</div>`;
@@ -473,8 +375,11 @@ function renderSpellLevels(spells: any): string {
 
 function renderSpellDaily(daily: any): string {
   if (!daily || typeof daily !== "object") return "";
+  const en = _curLang === "en";
   return Object.entries(daily).map(([k, v]) => {
-    const label = k.endsWith("e") ? `${k.slice(0, -1)}次/日（每个）` : `${k}次/日`;
+    const label = k.endsWith("e")
+      ? (en ? `${k.slice(0, -1)}/day (each)` : `${k.slice(0, -1)}次/日（每个）`)
+      : (en ? `${k}/day` : `${k}次/日`);
     const sp = renderSpellList(v);
     if (!sp) return "";
     return `<div class="spell-line"><span class="sl">${label}</span>${sp}</div>`;
@@ -487,10 +392,12 @@ function renderSpellGroup(label: string, arr: any): string {
   return `<div class="spell-line"><span class="sl">${label}</span>${sp}</div>`;
 }
 
-function renderSpellcasting(sc: any): string {
+/** Body blocks only, no section header — the caller decides which
+ *  section (施法 or a displayAs-routed 动作/附赠动作/反应) hosts them. */
+function renderSpellcastingBlocks(sc: any): string {
   if (!Array.isArray(sc) || sc.length === 0) return "";
   const en = _curLang === "en";
-  const blocks = sc.map((entry: any) => {
+  return sc.map((entry: any) => {
     const name = entry.name || (en ? "Spellcasting" : "施法");
     const header = flattenEntries(entry.headerEntries);
     const leveled = renderSpellLevels(entry.spells);
@@ -502,8 +409,14 @@ function renderSpellcasting(sc: any): string {
       ${header ? `<div class="t">${formatTagsClickable(header)}</div>` : ""}
       ${will}${daily}${rest}${leveled}
     </div>`;
-  });
-  return `<div class="sect">${ICONS.sparkles} ${en ? "Spellcasting" : "施法"}</div>${blocks.join("")}`;
+  }).join("");
+}
+
+function renderSpellcasting(sc: any): string {
+  const blocks = renderSpellcastingBlocks(sc);
+  if (!blocks) return "";
+  const en = _curLang === "en";
+  return `<div class="sect">${ICONS.sparkles} ${en ? "Spellcasting" : "施法"}</div>${blocks}`;
 }
 
 function renderLegendary(m: any, displayName: string): string {
@@ -535,16 +448,29 @@ let INFO_MAX_HEIGHT = 340;
 // Role state — used to suppress DM-only affordances when the popover is
 // open for a player (allowPlayerMonsters in suite settings).
 let isGMRole = false;
+// Ownership of the currently-shown token. TRUE when the viewing player
+// CREATED (owns) this token — i.e. a familiar / polymorph form the GM
+// handed them. Such a token can carry BOTH a character card AND
+// bestiary data; when that happens the editable cc-info banner and the
+// monster-info banner BOTH open on selection. Before this flag,
+// monster-info forced every stat input read-only for any non-GM, so an
+// owner reaching for the prominent monster-info HP pill hit "玩家端只读"
+// and concluded HP editing was broken. Owners now edit here too —
+// both banners write the same com.obr-suite/bubbles/data key, so they
+// stay in sync. A player viewing a GM NPC (via allowPlayerMonsters)
+// still has isOwner=false → read-only, which is correct.
+let isOwner = false;
+let myPlayerId: string | null = null;
 function applyRoleGating() {
-  // Stat inputs become read-only for non-GM. The lock button is
-  // hidden via CSS based on the body class.
+  // Editable for the GM OR the token's owner; read-only for everyone
+  // else. The lock button stays GM-only (toggles whole-room
+  // visibility — not an owner concern).
+  const canEdit = isGMRole || isOwner;
   document.body.classList.toggle("is-gm", isGMRole);
   document.body.classList.toggle("is-player", !isGMRole);
   root.querySelectorAll<HTMLInputElement>(".stat-input").forEach((el) => {
-    el.readOnly = !isGMRole;
-    if (!isGMRole) {
-      el.title = "玩家端只读";
-    }
+    el.readOnly = !canEdit;
+    el.title = canEdit ? "" : (_curLang === "en" ? "Read-only for players" : "玩家端只读");
   });
   root.querySelectorAll<HTMLButtonElement>(".stat-lock").forEach((el) => {
     el.style.display = isGMRole ? "" : "none";
@@ -569,12 +495,20 @@ function render(m: any) {
   // mid-render via a broadcast (would otherwise produce mixed-lang
   // output for the same monster).
   const en = _curLang === "en";
+  // Stat-input syntax-help tooltip (set / +delta / -delta / set+delta).
+  const statTip = en ? "Supports 20 / +5 / -3 / 15+5" : "支持 20 / +5 / -3 / 15+5";
   const name = m.name || "???";
   const eng = m.ENG_name || "";
   const cr = m.cr?.cr ?? m.cr ?? "?";
+  // The stat block's printed 先攻 — not always the DEX modifier.
+  const initBonus = monsterInitiativeBonus(m);
   const size = parseSizeStr(m.size);
   const type = parseType(m.type);
-  const sub = [size, type, eng].filter(Boolean).join(" · ");
+  const sub = [size, type, eng !== name ? eng : ""].filter(Boolean).join(" · ");
+  const contentNote = m._suiteDisplayNote === "saved"
+    ? (en ? "Saved content kept unchanged" : "保留已保存的原始内容")
+    : m._suiteContent?.language && m._suiteContent.language !== "auto" && m._suiteContent.language !== _curLang
+      ? (en ? "Original: Chinese" : "原文：英语") : "";
 
   const hp = parseHp(m.hp);
   const ac = parseAc(m.ac);
@@ -620,36 +554,38 @@ function render(m: any) {
           <span class="prev-hint" data-prev></span>
           <input class="stat-input" type="text" inputmode="numeric"
                  data-field="health" value="${escapeHtml(String(liveHp ?? ""))}"
-                 title="支持 20 / +5 / -3 / 15+5">
+                 title="${statTip}">
         </span>
         <span class="slash">/</span>
         <span class="stat-cell">
           <span class="prev-hint" data-prev></span>
           <input class="stat-input" type="text" inputmode="numeric"
                  data-field="max health" value="${escapeHtml(String(liveMaxHp ?? ""))}"
-                 title="支持 20 / +5 / -3 / 15+5">
+                 title="${statTip}">
         </span>
       </div>
       <div class="temp-pill stat-cell">
         <span class="prev-hint" data-prev></span>
         <input class="stat-input" type="text" inputmode="numeric"
                data-field="temporary health" value="${escapeHtml(String(liveTempHp))}"
-               title="支持 20 / +5 / -3 / 15+5">
+               title="${statTip}">
       </div>
       <div class="ac-pill stat-cell">
         <span class="prev-hint" data-prev></span>
         <input class="stat-input" type="text" inputmode="numeric"
                data-field="armor class" value="${escapeHtml(String(liveAc))}"
-               title="支持 20 / +5 / -3 / 15+5">
+               title="${statTip}">
       </div>
       ${renderLockButton(liveBubbles.locked !== false)}
     </div>
   ` : "";
 
   // Compact CR / speed chips (HP & AC moved into stat-rows above).
+  const initLabel = en ? "Initiative" : "先攻";
   const chips = `
     <div class="chip cr"><span class="k">CR</span><span class="v">${escapeHtml(cr)}</span></div>
-    <div class="chip speed"><span class="k">速度</span><span class="v">${speedLines}</span></div>
+    <div class="chip speed"><span class="k">${en ? "Speed" : "速度"}</span><span class="v">${speedLines}</span></div>
+    <div class="chip init"><span class="k">${initLabel}</span><span class="v rollable" data-expr="1d20${fmtMod(initBonus)}" data-label="${escapeHtml(initLabel)}" title="${escapeHtml(initLabel)} 1d20${fmtMod(initBonus)}">${fmtMod(initBonus)}</span></div>
   `;
 
   // Meta block — skills, senses, languages, damage resistances /
@@ -754,19 +690,46 @@ function render(m: any) {
   };
 
   // 2026-05-10 i18n — section titles + ability/save labels switch on
-  // user language. The actual entry prose stays whatever the data
-  // source provides (kiwee mirror = Chinese). `en` was captured at
+  // user language. Entry prose comes from the selected enabled source
+  // or a preserved authored snapshot. `en` was captured at
   // the top of render().
   const sectTitles = en
     ? { traits: "Traits", actions: "Actions", bonus: "Bonus Actions",
         reactions: "Reactions" }
     : { traits: "特性", actions: "动作", bonus: "附赠动作", reactions: "反应" };
 
+  // displayAs routing (checklist §5): spellcasting entries flagged
+  // action/bonus/reaction render inside those sections (after the
+  // native rows); the rest stay under 施法. If the target section had
+  // no native rows, the routed blocks bring their own section header.
+  const scGroups = groupSpellcastingByDisplay(
+    m.spellcasting,
+    String(m.ENG_name || m.name || currentSlug || "?"),
+    "[monster-info]",
+  );
+  const appendSpellBlocks = (section: string, entries: any[], title: string) => {
+    const blocks = renderSpellcastingBlocks(entries);
+    if (!blocks) return section;
+    return `${section || `<div class="sect">${title}</div>`}${blocks}`;
+  };
+
   const traits = sectionHtml(m.trait, "trait", `${ICONS.sparkle4} ${sectTitles.traits}`);
-  const spellcasting = renderSpellcasting(m.spellcasting);
-  const actions = sectionHtml(m.action, "", `${ICONS.swords} ${sectTitles.actions}`);
-  const bonus = sectionHtml(m.bonus, "bonus", `${ICONS.zap} ${sectTitles.bonus}`);
-  const reactions = sectionHtml(m.reaction, "reaction", `${ICONS.shield} ${sectTitles.reactions}`);
+  const spellcasting = renderSpellcasting(scGroups.default);
+  const actions = appendSpellBlocks(
+    sectionHtml(m.action, "", `${ICONS.swords} ${sectTitles.actions}`),
+    scGroups.action,
+    `${ICONS.swords} ${sectTitles.actions}`,
+  );
+  const bonus = appendSpellBlocks(
+    sectionHtml(m.bonus, "bonus", `${ICONS.zap} ${sectTitles.bonus}`),
+    scGroups.bonus,
+    `${ICONS.zap} ${sectTitles.bonus}`,
+  );
+  const reactions = appendSpellBlocks(
+    sectionHtml(m.reaction, "reaction", `${ICONS.shield} ${sectTitles.reactions}`),
+    scGroups.reaction,
+    `${ICONS.shield} ${sectTitles.reactions}`,
+  );
   const legendary = renderLegendary(m, name);
 
   // Combined attribute pane content — chips / abilities / meta /
@@ -805,13 +768,13 @@ function render(m: any) {
   root.innerHTML = `
     <div class="hdr">
       <button class="reset-btn" id="bubbles-reset-btn" type="button"
-        title="重置画面血条 — 清缓存重画，修复偶发的位置漂移">
+        title="${en ? "Reset on-screen HP bar — clear cache + redraw, fixes occasional drift" : "重置画面血条 — 清缓存重画，修复偶发的位置漂移"}">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 8 a5 5 0 1 0 1.5 -3.5"/>
           <path d="M3.2 3 V5.5 H5.5"/>
         </svg>
       </button>
-      <div class="drag-handle" id="drag-handle" title="拖动 / Drag" aria-label="拖动面板">
+      <div class="drag-handle" id="drag-handle" title="${en ? "Drag" : "拖动 / Drag"}" aria-label="${en ? "Drag panel" : "拖动面板"}">
         <svg viewBox="0 0 12 18" aria-hidden="true">
           <circle cx="3" cy="3" r="1.2" fill="currentColor"/>
           <circle cx="9" cy="3" r="1.2" fill="currentColor"/>
@@ -823,7 +786,7 @@ function render(m: any) {
       </div>
       <button class="panel-pin-btn ${pinned ? "pinned" : ""}" id="panel-pin-btn" type="button"
         aria-pressed="${pinned}"
-        title="${pinned ? "已置顶（取消则恢复随选择关闭）" : "置顶面板（取消选中也保持显示）"}">
+        title="${pinned ? (en ? "Pinned (unpin to close on deselect again)" : "已置顶（取消则恢复随选择关闭）") : (en ? "Pin panel (stays open after deselect)" : "置顶面板（取消选中也保持显示）")}">
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .707c-.48.48-1.072.588-1.503.588-.177 0-.339-.016-.484-.041L7.176 13.04a.5.5 0 0 1-.708 0L3.633 10.207 1.4 12.439a.5.5 0 0 1-.707-.707L2.926 9.5.74 7.314a.5.5 0 0 1 0-.708l1.51-1.51c.41-.41.945-.625 1.482-.711.534-.085 1.139-.097 1.683-.024.546.073 1.169.114 1.643-.04.305-.099.62-.281.94-.602.193-.193.282-.467.348-.749.066-.281.117-.572.196-.793a1.51 1.51 0 0 1 .31-.508c.094-.092.215-.174.357-.232a.5.5 0 0 1 .19-.04Z" fill="currentColor"/>
         </svg>
@@ -832,6 +795,7 @@ function render(m: any) {
         ${renderNameButton(name, !!currentItemId)}
       </div>
       <div class="sub">${escapeHtml(sub)}</div>
+      ${contentNote ? `<div class="sub content-language">${escapeHtml(contentNote)}</div>` : ""}
     </div>
     ${stickyTop}
     ${contentBlock}
@@ -904,11 +868,12 @@ type RtTabId = "attr" | "res";
 let activeRtTab: RtTabId = "attr";
 
 function renderTabStrip(): string {
+  const en = _curLang === "en";
   return `
     <div class="rt-tabstrip">
       <div class="rt-tab-indicator" data-rt-indicator></div>
-      <button class="rt-tab ${activeRtTab === "attr" ? "on" : ""}" data-rt-tab="attr" type="button">属性</button>
-      <button class="rt-tab ${activeRtTab === "res" ? "on" : ""}" data-rt-tab="res" type="button">资源</button>
+      <button class="rt-tab ${activeRtTab === "attr" ? "on" : ""}" data-rt-tab="attr" type="button">${en ? "Stats" : "属性"}</button>
+      <button class="rt-tab ${activeRtTab === "res" ? "on" : ""}" data-rt-tab="res" type="button">${en ? "Resources" : "资源"}</button>
     </div>
   `;
 }
@@ -981,13 +946,17 @@ async function ensureResourceMount(): Promise<void> {
 // always render the button when the popover is open. Closed padlock
 // = locked (default — players see no bar in idle, silhouette in
 // combat); open padlock = unlocked (everyone sees full HP / AC).
+function lockTitle(locked: boolean): string {
+  const en = _curLang === "en";
+  return locked
+    ? (en ? "Locked: in combat prep / combat players see only the HP-bar ratio (no numbers / AC)" : "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）")
+    : (en ? "Unlocked: all players see full HP / AC values" : "已解锁：所有玩家可见完整 HP / AC 数值");
+}
 function renderLockButton(locked: boolean): string {
-  const titleZh = locked
-    ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
-    : "已解锁：所有玩家可见完整 HP / AC 数值";
+  const title = lockTitle(locked);
   const lockedAttr = locked ? "true" : "false";
   return `
-    <button class="stat-lock" data-locked="${lockedAttr}" title="${escapeHtml(titleZh)}" aria-label="${escapeHtml(titleZh)}" type="button">
+    <button class="stat-lock" data-locked="${lockedAttr}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" type="button">
       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor" stroke="none"/>
         <path class="lock-shackle" d="M5 7 V5 a3 3 0 0 1 6 0 V7"/>
@@ -1035,9 +1004,7 @@ function refreshStatInputs(live: BubblesData, skipFocused = true): void {
   if (lockBtn) {
     const locked = live.locked === undefined ? true : !!live.locked;
     lockBtn.dataset.locked = locked ? "true" : "false";
-    lockBtn.title = locked
-      ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
-      : "已解锁：所有玩家可见完整 HP / AC 数值";
+    lockBtn.title = lockTitle(locked);
   }
 }
 
@@ -1067,9 +1034,7 @@ function bindStatRowInputs(): void {
       const wasLocked = lockBtn.dataset.locked !== "false";
       const next = !wasLocked;
       lockBtn.dataset.locked = next ? "true" : "false";
-      lockBtn.title = next
-        ? "已上锁：玩家在战斗准备 / 战斗中只看到血条比例（无数值 / AC）"
-        : "已解锁：所有玩家可见完整 HP / AC 数值";
+      lockBtn.title = lockTitle(next);
       try {
         await patchBubbles(
           currentItemId!,
@@ -1150,31 +1115,81 @@ function bindStatRowInputs(): void {
 }
 
 async function showMonster(slug: string, itemId: string | null = currentItemId) {
+  const isCurrent = displayRequests.next();
+  resourceMountHandle?.unmount();
+  resourceMountHandle = null;
   currentSlug = slug;
   currentItemId = itemId;
+  // 2026-09-14 — drop the previous monster's DOM instead of painting the
+  // loading placeholder over it. The placeholder is written further down
+  // ONLY when the scene snapshot has no record to render, so a bound
+  // monster whose stat block is already in scene metadata paints on the
+  // first frame after its (local) snapshot read and never flashes
+  // 「正在读取怪物资料…」.
+  root.innerHTML = "";
+  // Resolve ownership of the bound token in parallel with everything
+  // else: a player who CREATED this token owns it and may edit its HP.
+  // Mirror bestiary/index.ts's check: item.createdUserId === myId.
+  const ownP: Promise<boolean> = itemId
+    ? OBR.scene.items
+        .getItems([itemId])
+        .then((arr) => {
+          const it = arr[0] as any;
+          return !!(it && myPlayerId && it.createdUserId === myPlayerId);
+        })
+        .catch(() => false)
+    : Promise.resolve(false);
   // Load the bound token's bubbles snapshot in parallel with monster
   // data — render() reads liveBubbles for the editable HP/AC rows.
   const liveP = itemId ? readBubbles(itemId) : Promise.resolve({} as BubblesData);
   try {
-    const [meta, live] = await Promise.all([
+    const [meta, live, owns] = await Promise.all([
       OBR.scene.getMetadata(),
       liveP,
+      ownP,
     ]);
-    liveBubbles = live;
+    if (!isCurrent()) return;
+    // Update ownership BEFORE render() → its trailing applyRoleGating()
+    // (called inside render) picks up the correct editable state.
+    isOwner = owns;
     const table = (meta[BESTIARY_DATA_KEY] as Record<string, any>) || {};
-    let m = table[slug];
-    if (!m) m = await fetchMonsterBySlug(slug);
-    if (currentSlug !== slug) return;
-    if (!m) {
-      root.innerHTML = `<div class="err">未找到怪物数据</div>`;
+    // 2026-09-14 — the scene snapshot IS the monster record for a bound
+    // token; it was written by the catalog loader and only carries
+    // display-safe extra annotations. Paint it now: no network await and no
+    // placeholder sit between the snapshot read and the first paint. The
+    // localized/authored upgrade below still runs and repaints when it
+    // resolves a genuinely different record.
+    const shared = table[slug];
+    if (shared) {
+      liveBubbles = live;
+      render(shared);
       await adjustHeight();
+    } else {
+      root.innerHTML = `<div class="loading">${_curLang === "en" ? "Loading monster…" : "正在读取怪物资料…"}</div>`;
+    }
+    const m = await fetchLocalizedMonster(slug, shared);
+    if (!isCurrent()) return;
+    liveBubbles = itemId ? await readBubbles(itemId).catch(() => live) : live;
+    if (!isCurrent()) return;
+    if (!m) {
+      root.innerHTML = `<div class="err">${_curLang === "en" ? "Monster data not found" : "未找到怪物数据"}</div>`;
+      await adjustHeight();
+      return;
+    }
+    if (m === shared) {
+      // Already painted. fetchLocalizedMonster hands back the very object it
+      // was given whenever the snapshot was already the record this client
+      // would resolve — repainting it would rebuild the whole stat block
+      // (and remount the resource pane) for nothing. Only the live bubbles
+      // read above may have moved since the first paint.
+      refreshStatInputs(liveBubbles);
       return;
     }
     render(m);
     await adjustHeight();
   } catch (e: any) {
-    if (currentSlug !== slug) return;
-    root.innerHTML = `<div class="err">加载失败：${escapeHtml(e?.message ?? e)}</div>`;
+    if (!isCurrent()) return;
+    root.innerHTML = `<div class="err">${_curLang === "en" ? "Load failed: " : "加载失败："}${escapeHtml(e?.message ?? e)}</div>`;
     await adjustHeight();
   }
 }
@@ -1248,6 +1263,29 @@ bindRollableClickPopup(
 OBR.onReady(async () => {
   installDebugOverlay();
   subscribeToSfx();
+  startSceneSync();
+  await refreshFromScene().catch(() => {});
+  _curLang = getLocalLang() === "en" ? "en" : "zh";
+  let contentSignature = contentConfigurationKey(getState().libraries ?? [], getLocalLang());
+  onStateChange(() => {
+    const next = contentConfigurationKey(getState().libraries ?? [], getLocalLang());
+    if (next === contentSignature) return;
+    contentSignature = next;
+    clearMonsterDetailCache();
+    if (currentSlug) void showMonster(currentSlug, currentItemId);
+  });
+  OBR.broadcast.onMessage(BC_LOCAL_CONTENT_CHANGED, () => {
+    displayRequests.invalidate();
+    clearMonsterDetailCache();
+    void forceReloadLocalContent().then(() => { if (currentSlug) return showMonster(currentSlug, currentItemId); }).catch(() => {});
+  });
+  OBR.scene.onReadyChange((ready) => {
+    displayRequests.invalidate(); clearMonsterDetailCache();
+    if (!ready) {
+      resourceMountHandle?.unmount(); resourceMountHandle = null;
+      currentSlug = null; currentItemId = null; root.innerHTML = "";
+    }
+  });
   // Capture the popover's opened height as the ceiling for future resizes.
   if (window.innerHeight > 0) INFO_MAX_HEIGHT = window.innerHeight;
   // 2026-05-16 — scale text + spacing with panel size. Baseline
@@ -1263,6 +1301,8 @@ OBR.onReady(async () => {
     const norm: "zh" | "en" = next === "en" ? "en" : "zh";
     if (norm === _curLang) return;
     _curLang = norm;
+    contentSignature = contentConfigurationKey(getState().libraries ?? [], getLocalLang());
+    clearMonsterDetailCache();
     if (currentSlug) {
       const slug = currentSlug;
       // Re-fire showMonster — looks the slug up again from cache /
@@ -1277,6 +1317,7 @@ OBR.onReady(async () => {
   // applyRoleGating() fires once at startup and again on player
   // change so a role flip during the session reflects immediately.
   try { isGMRole = (await OBR.player.getRole()) === "GM"; } catch {}
+  try { myPlayerId = await OBR.player.getId(); } catch {}
   applyRoleGating();
   OBR.player.onChange((p) => {
     const next = p.role === "GM";
@@ -1324,4 +1365,9 @@ OBR.onReady(async () => {
   // Local commits go through patchBubbles and call refreshStatInputs
   // synchronously already, so they're not double-painted by this.
   OBR.scene.items.onChange(() => { void syncFromExternal(); });
+});
+
+window.addEventListener("pagehide", () => {
+  displayRequests.invalidate(); clearMonsterDetailCache();
+  resourceMountHandle?.unmount(); resourceMountHandle = null;
 });

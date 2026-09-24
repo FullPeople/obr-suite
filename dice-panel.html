@@ -1149,18 +1149,18 @@ html,body{
              the most prominent thing. -->
         <div class="dice-row" id="diceRow">
           <button class="dice-btn" data-type="d4" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
-            <img src="/suite/d4.png" alt="d4" draggable="false">
+            <img src="/d4.png" alt="d4" draggable="false">
             <span class="lbl">d4</span>
             <span class="badge">0</span>
           </button>
           <button class="dice-btn" data-type="d6" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
-            <img src="/suite/d6.png" alt="d6" draggable="false">
+            <img src="/d6.png" alt="d6" draggable="false">
             <span class="lbl">d6</span>
             <span class="badge">0</span>
           </button>
           <div class="d20-box">
             <button class="dice-btn" data-type="d20" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
-              <img src="/suite/d20.png" alt="d20" draggable="false">
+              <img src="/d20.png" alt="d20" draggable="false">
               <span class="lbl">d20</span>
               <span class="badge">0</span>
             </button>
@@ -1171,22 +1171,22 @@ html,body{
             </div>
           </div>
           <button class="dice-btn" data-type="d8" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
-            <img src="/suite/d8.png" alt="d8" draggable="false">
+            <img src="/d8.png" alt="d8" draggable="false">
             <span class="lbl">d8</span>
             <span class="badge">0</span>
           </button>
           <button class="dice-btn" data-type="d10" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
-            <img src="/suite/d10.png" alt="d10" draggable="false">
+            <img src="/d10.png" alt="d10" draggable="false">
             <span class="lbl">d10</span>
             <span class="badge">0</span>
           </button>
           <button class="dice-btn" data-type="d12" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
-            <img src="/suite/d12.png" alt="d12" draggable="false">
+            <img src="/d12.png" alt="d12" draggable="false">
             <span class="lbl">d12</span>
             <span class="badge">0</span>
           </button>
           <button class="dice-btn" data-type="d100" type="button" data-i18n-title="diceTitleDicePm" title="左键 +1，右键 −1">
-            <img src="/suite/d100.png" alt="d100" draggable="false">
+            <img src="/d100.png" alt="d100" draggable="false">
             <span class="lbl">d100</span>
             <span class="badge">0</span>
           </button>
@@ -1224,6 +1224,17 @@ html,body{
                 data-i18n-title="diceBtnDarkRollGlobalTitle"
                 title="开启后，所有普通投掷都会自动变为暗骰。仅 DM 可见。"
                 style="display:none">全局暗骰：关</button>
+      </div>
+      <!-- §9 2026-08-21: DM-only 固定下次投掷. Hidden by JS for non-DM.
+           One-shot & per-client; reassigns REAL die faces to reach the
+           target total. Group saves / group initiative never consult it. -->
+      <div class="fixed-roll-row" id="fixedRollRow" style="display:none; gap:6px; align-items:center;">
+        <input id="fixedRollValue" type="number" step="1" placeholder="目标总数"
+               title="固定下一次投掷的最终总数（须在公式的合法范围内）"
+               style="width:88px; min-width:0;" />
+        <button class="btn dark-roll" id="btnFixedRoll" type="button"
+                title="固定你在本客户端的下一次投掷：骰盘/暗骰/组合/单值点击/单角色先攻。通过重新分配真实骰面达成目标总数；群体豁免与群体先攻不生效。一次性，仅 DM。"
+                style="flex:1;">固定下次：关</button>
       </div>
       <button class="btn force-clr" id="btnForceClr" type="button" data-i18n="diceBtnForceClr">⚠ 强制结束(若动画卡住)</button>
 

@@ -1,0 +1,190 @@
+/* The WebGL canvas owns the table and hand. DOM choices remain accessible. */
+/* The renderer draws on a transparent canvas, so the table shell keeps the
+   same wood-plank backdrop as every other view. */
+.table-shell[data-renderer=webgl]>.board-scroll{position:relative;padding:0;overflow:hidden;min-height:150px}
+.table-shell[data-renderer=webgl] #stage-host{position:absolute;inset:0}
+#table-stage{display:block;width:100%;height:100%;touch-action:none;outline-offset:-5px}
+#stage-summary{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:max-content;max-width:min(92vw,760px);max-height:18vh;overflow:auto;white-space:normal;text-align:center;line-height:1.35;font-size:.72rem;letter-spacing:.04em;color:#eddbc0;text-shadow:0 2px 5px #100906;pointer-events:none;background:#20130b88;padding:6px 12px;border-radius:20px}
+#stage-keyboard{position:absolute;left:50%;bottom:26%;transform:translateX(-50%);margin:0;padding:8px 12px;width:max-content;max-width:90%;background:#1c120eee;border:1px solid #b09060;border-radius:7px;font-size:.75rem;pointer-events:none;opacity:0}
+#table-stage:focus-visible~#stage-keyboard{opacity:1}
+.table-shell[data-renderer=webgl] #lobby:not(:empty){position:absolute;top:5%;left:50%;transform:translateX(-50%);z-index:2;margin:0;padding:12px;max-width:90%}
+.table-shell[data-renderer=webgl]>.player-dock{display:none}
+.table-shell[data-renderer=webgl] .turn{padding:12px;max-height:min(44vh,360px)}
+.table-shell[data-renderer=webgl] .turn:empty{display:none}
+.table-shell[data-renderer=webgl]>.board-scroll>.table-notes{position:absolute;bottom:0;left:12px;right:12px;z-index:4;margin:0;max-width:none;gap:5px 13px;pointer-events:none;align-items:flex-end}
+.table-shell[data-renderer=webgl] .table-notes>details{min-width:0;pointer-events:auto;background:#20140ddc;border-radius:5px;padding:0 6px;font-size:.7rem}
+.table-shell[data-renderer=webgl] .table-notes>details[open]{position:absolute;bottom:26px;left:0;right:0;max-height:46vh;overflow:auto;border:1px solid #967047;padding:12px}
+.table-shell[data-renderer=webgl] .table-notes>details[open]>summary{position:sticky;top:-12px;background:#24170f;padding:8px 0;z-index:1}
+#accessible-seats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px}
+#accessible-seats p{font-size:.75rem;margin:5px 0}#accessible-seats button{display:block;font-size:.75rem;margin:4px 0;padding:5px 8px}
+.table-shell[data-renderer=webgl]>.card-preview{top:92px;right:16px;left:auto;bottom:auto;transform:none;max-height:55%;width:260px;padding:20px}
+.table-shell[data-renderer=webgl] .preview-strength{font-size:30px;margin-bottom:6px}
+.table-shell[data-renderer=webgl] .preview-hint{font-size:.88rem;margin-top:12px}
+.dom-drop-slot{border:1px solid #ad906033;border-radius:8px;padding:12px;text-align:center;font-size:.75rem;min-height:45px;grid-column:1/-1}
+.table-shell[data-renderer=dom] .flight{border:1px solid #ad906033;min-height:62px}
+.table-shell[data-renderer=dom] .formation-badge{flex:0 0 100%;display:block;min-width:0;padding:3px 5px;border:1px solid #d9b77b88;border-radius:999px;background:#26180fc9;color:#f1d398;font:700 .56rem/1.2 "Segoe UI","Microsoft YaHei",sans-serif;letter-spacing:.04em;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.table-shell[data-renderer=dom] .formation-badge[data-formation="color"]{border-color:#e0bb6fcc;color:#ffe2a0}
+.table-shell[data-renderer=dom] .formation-badge[data-formation="strength"]{border-color:#9dc6dfcc;color:#cfeaff}
+.table-shell[data-renderer=dom] .formation-badge[data-formation="mortal"]{border-color:#c2a6e0cc;color:#e5d3ff}
+.hand .power-badge{display:inline-flex;align-items:center;gap:3px}
+.hand .power-badge i{width:4px;height:4px;border-radius:50%;background:var(--hand-power-accent,#ffe0a0);box-shadow:0 0 6px currentColor;animation:hand-power-spark 2200ms ease-in-out 2;animation-fill-mode:both}
+@keyframes hand-power-spark{0%,100%{opacity:.28;transform:scale(.72)}50%{opacity:1;transform:scale(1.25)}}
+@media(prefers-reduced-motion:reduce){.hand .power-badge i{animation:none}}
+.dom-drop-slot .card-wrap{width:76px;margin:6px auto}.dom-drop-slot .card{height:108px}
+.dom-drop-slot .card-back{width:76px;height:108px;margin:6px auto}
+.table-shell[data-renderer=dom] #hand [data-card]{touch-action:none}
+.dom-dragging{opacity:.35}
+.dom-drag-ghost{position:fixed!important;z-index:1000!important;pointer-events:none!important;width:130px!important;height:180px!important;transform:rotate(-8deg) scale(1.03)!important;box-shadow:0 30px 20px #0007!important}
+.table-shell[data-pending-action=true] #table-stage{cursor:progress}
+.tda-tutorial .table-shell[data-renderer=webgl]>.board-scroll{padding:0}
+@media(max-width:580px){
+ .table-shell[data-renderer=webgl]>.table-header{gap:8px;padding:8px 10px}
+ .table-shell[data-renderer=webgl] .window-controls{max-width:58%}
+ .table-shell[data-renderer=webgl]>.player-dock{padding-inline:10px}
+ .table-shell[data-renderer=webgl]>.card-preview{top:90px;right:10px;width:min(270px,calc(100% - 20px));max-height:45%}
+ .table-shell[data-renderer=webgl]>.board-scroll>.table-notes{left:5px;right:5px;gap:3px}
+ #stage-summary{top:7px;max-width:calc(100vw - 20px);max-height:14vh;font-size:.6rem;padding:5px 8px}
+ .table-bubbles>.resolution-stack{max-height:24vh;padding:9px}.table-bubbles>.resolution-stack .resolution-list{display:grid;grid-template-columns:1fr;max-height:17vh;overflow-y:auto;overflow-x:hidden}
+ .table-shell[data-renderer=webgl] .turn h2{font-size:.8rem}
+ .table-shell[data-renderer=webgl] #close-hint{display:none}
+}
+
+/* Mobile card inspection is a bottom sheet rather than a shrunken desktop
+ * drawer. The face stays recognizable while the copy remains the readable,
+ * scrollable source of the rule and private trigger explanation. */
+@media(max-width:580px){
+ .table-shell[data-renderer=webgl]>.card-preview{top:auto;right:10px;bottom:calc(48px + env(safe-area-inset-bottom));left:10px;width:auto;max-width:none;max-height:min(44dvh,340px);padding:0}
+ .table-shell[data-renderer=dom]>.card-preview{right:10px;bottom:calc(188px + env(safe-area-inset-bottom));left:10px;width:auto;max-width:none;max-height:min(38dvh,290px);padding:0;transform:none}
+ .table-shell>.card-preview #preview-content,.tda-tutorial .table-shell>.card-preview #preview-content{display:grid;grid-template-columns:minmax(76px,22vw) minmax(0,1fr);gap:8px;align-items:stretch}
+ .table-shell>.card-preview .printed-card-face,.tda-tutorial .table-shell>.card-preview .printed-card-face{width:100%;height:auto;max-height:none;object-fit:contain;object-position:top;border-radius:2px}
+ .table-shell>.card-preview .preview-copy,.tda-tutorial .table-shell>.card-preview .preview-copy{min-width:0;max-height:none;overflow:visible;align-self:start;padding:10px 11px 11px}
+ .table-shell>.card-preview .preview-copy .preview-strength,.tda-tutorial .table-shell>.card-preview .preview-copy .preview-strength{font-size:26px;margin-bottom:4px}
+ .table-shell>.card-preview .preview-copy h2,.tda-tutorial .table-shell>.card-preview .preview-copy h2{font-size:1rem;margin-bottom:5px}
+ .table-shell>.card-preview .preview-copy .preview-hint,.tda-tutorial .table-shell>.card-preview .preview-copy .preview-hint{font-size:.76rem;line-height:1.45}
+ .table-shell>.card-preview .preview-help,.tda-tutorial .table-shell>.card-preview .preview-help{font-size:.7rem;line-height:1.42;margin-top:9px;padding:7px 8px}
+ .table-shell>.card-preview #close-preview,.tda-tutorial .table-shell>.card-preview #close-preview{position:absolute;top:6px;right:6px;float:none;margin:0;min-width:32px;min-height:32px;padding:2px 8px;z-index:2}
+ .table-shell>.card-preview[data-pinned=true] #close-preview,.tda-tutorial .table-shell>.card-preview[data-pinned=true] #close-preview{opacity:1}
+}
+
+/* Notices overlay the table; changing text never changes the canvas or hand size. */
+.table-shell>.board-scroll{position:relative}
+.table-shell:not([data-phase=lobby])>#toolbar{position:absolute;right:14px;bottom:42px;z-index:7;max-width:200px;padding:0;background:transparent;justify-content:flex-end}
+/* The banner is the table's persistent answer to "what is happening now?".
+ * It carries the phase name at all times during a game, and the waiting line is
+ * the largest text on the felt so "waiting for whom" is never inferred. */
+.table-banner{position:absolute;top:42px;left:50%;transform:translateX(-50%);z-index:6;width:max-content;max-width:min(84%,820px);padding:10px 22px;border:1px solid #c9a86966;border-radius:12px;background:linear-gradient(180deg,#1d140ee8,#120b08f2);color:#f6e8cc;text-align:center;pointer-events:none;font-size:.86rem;line-height:1.5;box-shadow:0 6px 26px #00000059,inset 0 1px #ffffff0f;backdrop-filter:blur(3px)}
+.table-banner .banner-phase{display:inline-block;margin:0 0 3px;padding:2px 11px;border:1px solid #d9b26988;border-radius:999px;background:#3a2717cc;color:#ffdf9f;font:700 .68rem/1.5 "Segoe UI","Microsoft YaHei",sans-serif;letter-spacing:.10em}
+.table-banner .banner-waiting{font-size:1.02rem;font-weight:650;letter-spacing:.02em;color:#fff1d2;text-shadow:0 2px 10px #000000a6}
+.table-banner[data-waiting=true] .banner-waiting{animation:banner-wait-attention 2600ms ease-in-out 3}
+@keyframes banner-wait-attention{0%,100%{opacity:.82;transform:scale(.995)}45%{opacity:1;transform:scale(1.012)}}
+@media(prefers-reduced-motion:reduce){.table-banner[data-waiting=true] .banner-waiting{animation:none}}
+.table-banner p{margin:0}.table-banner #effect-banner{color:#e8ce8e;font-size:.8rem;margin-top:3px}
+.table-bubbles{position:absolute;left:14px;bottom:42px;z-index:7;width:min(300px,28%);display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.table-bubbles>.notice,.table-bubbles>.turn-indicator,.table-bubbles>#turn-overlay>.turn-indicator,.table-bubbles>.resolution-stack,.table-bubbles>.turn{margin:0;padding:12px;border:1px solid #b49b6855;border-radius:12px;background:#20170feb;box-shadow:0 5px 20px #0004;pointer-events:auto;overflow:auto;overflow-wrap:anywhere}
+.table-bubbles>.turn-indicator,.table-bubbles>#turn-overlay>.turn-indicator{overflow:hidden}
+.table-bubbles>.resolution-stack{max-height:min(28vh,220px);width:auto}.table-bubbles>.resolution-stack>p{margin:3px 0;font-size:.67rem}.table-bubbles>.resolution-stack .resolution-list{margin-top:6px}
+.table-bubbles>.notice.error{background:#542f31f2}
+.table-bubbles>.turn h2{font-size:.85rem;line-height:1.5}
+.table-bubbles>.turn:empty{display:none}
+.table-shell[data-has-choice=true]>.table-bubbles{bottom:25%;width:min(560px,56%)}
+.table-shell[data-has-choice=true] .table-bubbles>.turn{max-height:44vh}
+.table-bubbles .choices{flex-wrap:wrap;overflow:visible}
+.table-bubbles .action-row{position:sticky;bottom:0;background:#20170f;padding-block:7px}
+.table-shell[data-renderer=dom]>.table-bubbles{bottom:240px}
+
+@media(max-width:820px){
+ .table-bubbles{left:10px;bottom:26%;width:min(340px,calc(100% - 20px))}
+ .table-shell[data-has-choice=true]>.table-bubbles{width:calc(100% - 20px)}
+ .table-banner{top:37px;max-width:92%;padding:6px 12px;font-size:.78rem}
+ .table-banner #effect-banner{font-size:.72rem}
+}
+@media(max-height:560px){
+ .table-bubbles{bottom:35px;width:27%}
+ .table-shell[data-has-choice=true]>.table-bubbles{bottom:22%;width:55%}
+ .table-shell[data-has-choice=true] .table-bubbles>.turn{max-height:52vh}
+}
+
+#help-text{white-space:pre-line;line-height:1.7}
+
+/* Portrait WebGL uses the same readable DOM hand rail as the fallback table.
+ * The canvas remains the spatial table, while the private hand becomes an
+ * actual touch target instead of a second tiny 3D layer competing with the
+ * action bubble. Desktop keeps the immersive mesh hand. */
+@media(max-width:580px){
+ .table-shell[data-renderer=webgl]>.player-dock{
+  display:block;position:absolute;left:0;right:0;bottom:0;z-index:8;
+  max-height:var(--mobile-hand-dock-height,218px);overflow:hidden;
+  padding:6px 10px calc(4px + env(safe-area-inset-bottom));
+  border-top:1px solid #c4a86766;background:linear-gradient(180deg,#21150ee8,#120c0bf7 75%);
+  box-shadow:0 -10px 28px #09050499;backdrop-filter:blur(3px)
+ }
+ .table-shell[data-renderer=webgl]>.player-dock .hand-heading{min-height:22px}
+ .table-shell[data-renderer=webgl]>.player-dock .hand-heading .muted{max-width:64%;text-align:right}
+ .table-shell[data-renderer=webgl]>.player-dock .hand .cards{height:180px}
+ .table-shell[data-renderer=webgl]>.table-bubbles{bottom:calc(var(--mobile-hand-dock-height,218px) + 10px)}
+}
+@media(max-width:580px) and (max-height:620px){
+ .table-shell[data-renderer=webgl]{--mobile-hand-dock-height:184px}
+ .table-shell[data-renderer=webgl]>.player-dock .hand .cards{height:148px}
+}
+
+/* The slap control sits in the far corner of the felt: always reachable, never
+ * over a card or the hand fan. */
+.slap-table{position:absolute;right:14px;bottom:12px;z-index:9;padding:8px 16px;border:1px solid #d9b26999;border-radius:999px;background:linear-gradient(180deg,#2c1c12f2,#180f0af7);color:#ffe4ab;font-size:.76rem;font-weight:650;letter-spacing:.04em;box-shadow:0 6px 18px #0d070566,inset 0 1px #ffffff12;touch-action:manipulation}
+.slap-table:hover:not(:disabled){background:linear-gradient(180deg,#3d2718f2,#22150df7)}
+.slap-table:active:not(:disabled){transform:translateY(1px) scale(.985)}
+@media(max-width:580px){.slap-table{right:8px;bottom:calc(var(--mobile-hand-dock-height,218px) + 8px);padding:7px 13px;font-size:.7rem}}
+
+/* The host-side table editor. One overlay, a vertical seat list and a pickable
+   card pool; it never touches the table's own pointer surface. */
+.table-editor-host[hidden]{display:none}
+.table-editor{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;gap:.6rem;padding:1rem;overflow:auto;
+ background:linear-gradient(180deg,#1b1512f2,#0d0b0af7);backdrop-filter:blur(3px);color:#f6ead6;font-size:.86rem}
+.table-editor .editor-head{display:flex;flex-wrap:wrap;align-items:center;gap:.7rem;border-bottom:1px solid #6d56361f;padding-bottom:.5rem}
+.table-editor h2{font-size:1.05rem;margin:0}
+.table-editor h3{font-size:.92rem;margin:0 0 .3rem}
+.table-editor .editor-head p{margin:0;max-width:44ch;font-size:.78rem}
+.table-editor .editor-piles{display:flex;flex-wrap:wrap;gap:.45rem;margin-left:auto}
+.table-editor .editor-pile{display:flex;flex-direction:column;align-items:center;min-width:3.6rem;padding:.2rem .45rem;border:1px solid #f0c0643d;border-radius:.5rem;background:#00000047}
+.table-editor .editor-pile small{font-size:.62rem;opacity:.72}
+.table-editor .editor-pile strong{font-size:.95rem;color:#f0c064}
+.table-editor .editor-picked{display:flex;align-items:center;gap:.5rem;padding:.35rem .6rem;border:1px solid #f0c06466;border-radius:.5rem;background:#f0c0641a}
+.table-editor .editor-body{display:flex;flex-direction:column;gap:.55rem}
+.table-editor .editor-seat,.table-editor .editor-remove{border:1px solid #ffffff1f;border-radius:.6rem;padding:.5rem .6rem;background:#ffffff0a}
+.table-editor .editor-seat[data-seat]:hover{border-color:#f0c06457}
+.table-editor .editor-gold{display:flex;align-items:center;gap:.35rem;margin:.15rem 0 .4rem;flex-wrap:wrap}
+.table-editor .editor-gold button{min-width:2.4rem;padding:.15rem .3rem;font-size:.74rem}
+.table-editor .editor-gold input{width:5.4rem;padding:.15rem .3rem;border-radius:.35rem;border:1px solid #ffffff2e;background:#0000004d;color:inherit;font-size:.82rem}
+.table-editor .editor-ante{display:flex;align-items:center;gap:.4rem;margin:.15rem 0 .35rem;font-size:.76rem;opacity:.9}
+.table-editor .editor-hand{display:flex;flex-wrap:wrap;gap:.35rem;min-height:2.4rem;align-items:flex-start}
+.table-editor .editor-card{display:flex;flex-direction:column;align-items:center;gap:.15rem;width:3.4rem;padding:.15rem;border:1px solid transparent;border-radius:.4rem;background:none;color:inherit;cursor:pointer}
+.table-editor .editor-card:hover{border-color:#f0c0648c;background:#f0c0641a}
+.table-editor .editor-card[aria-pressed="true"]{border-color:#f0c064;background:#f0c0642e;box-shadow:0 0 0 1px #f0c06457}
+.table-editor .editor-card img{width:100%;border-radius:.25rem;display:block}
+.table-editor .editor-card span{font-size:.6rem;line-height:1.1;text-align:center;opacity:.85;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.table-editor .editor-remove{border-style:dashed;text-align:center;cursor:pointer}
+.table-editor .editor-search{border:1px solid #f0c0644d;border-radius:.6rem;padding:.5rem .6rem;background:#00000052}
+.table-editor .editor-search input{width:100%;max-width:26rem;padding:.3rem .45rem;border-radius:.4rem;border:1px solid #ffffff2e;background:#00000061;color:inherit}
+.table-editor .editor-candidates{display:flex;flex-wrap:wrap;gap:.3rem;max-height:14rem;overflow:auto;margin-top:.4rem}
+.table-editor .editor-candidates .editor-card{width:3rem}
+.seat-chips{display:flex;flex-wrap:wrap;gap:.35rem}
+.seat-chip{display:inline-flex;align-items:center;gap:.35rem;padding:.15rem .45rem;border:1px solid #ffffff24;border-radius:.45rem;background:#ffffff0d}
+.seat-chip .kick{padding:.05rem .35rem;font-size:.68rem;color:#f3b1a0;border-color:#f3b1a057}
+
+/* Right-click menu for a table-editor card: replace, remove, or hand it to
+   another player. Positioned at the pointer, above the panel. */
+.table-editor .editor-menu{position:fixed;z-index:70;display:flex;flex-direction:column;min-width:9rem;padding:.25rem;
+ border:1px solid #f0c06473;border-radius:.5rem;background:#1d1712f7;box-shadow:0 8px 22px #000a}
+.table-editor .editor-menu button{padding:.3rem .5rem;border:0;text-align:left;background:none;color:inherit;font-size:.78rem;cursor:pointer;border-radius:.3rem}
+.table-editor .editor-menu button:hover{background:#f0c06426}
+.table-editor .editor-submenu{display:flex;flex-direction:column;max-height:9rem;overflow:auto;margin:.15rem 0 .15rem .6rem;border-left:1px solid #f0c0643d;padding-left:.3rem}
+.table-editor .editor-add{justify-content:center;font-size:1.1rem;color:#f0c064;border:1px dashed #f0c0646b;width:3.4rem;aspect-ratio:.566}
+
+/* The waiting line shares the bottom-left corner with the clockwise hint, so the
+   far player's hand stays countable while someone else is deciding. */
+.turn-indicator #turn-waiting{margin-left:.5rem;padding-left:.5rem;border-left:1px solid #f0c0643d;color:#f0c064}
+.turn-indicator{max-width:min(46ch,42vw);flex-wrap:wrap}
+
+/* Everything the top banner used to show is in the bottom-left cluster. */
+.turn-indicator .turn-phase{padding:.05rem .4rem;border:1px solid #f0c0644d;border-radius:.4rem;background:#f0c0641a}
+.turn-indicator .turn-effect{color:#ffe6bd}

@@ -1,6 +1,9 @@
+import {WORKBENCH_DEV} from '../../workbench/channel';
 import OBR from "@owlbear-rodeo/sdk";
+import { setPanelOpen } from "../../utils/panelObstacles";
 import { assetUrl } from "../../asset-base";
 import { onViewportResize } from "../../utils/viewportAnchor";
+import { getState, onStateChange, refreshFromScene } from "../../state";
 import {
   PANEL_IDS,
   getPanelOffset,
@@ -16,6 +19,9 @@ import {
 // footprint (the user-visible "always there" strip). Returned even
 // when the popover hasn't opened so the editor can pre-arrange.
 registerPanelBbox(PANEL_IDS.search, async () => {
+  // §7: when the bar is GM-only, players get no layout-editor proxy
+  // box either (same contract as hpBar's provider — null hides it).
+  if (!searchAllowed()) return null;
   try {
     const vw = await OBR.viewport.getWidth();
     const userOff = getPanelOffset(PANEL_IDS.search);
@@ -70,6 +76,73 @@ function isMobileDevice(): boolean {
 let unsubs: Array<() => void> = [];
 let isOpen = false;
 let openInFlight = false;
+// §7: role cache — seeded in setupSearch, kept live by player.onChange.
+// null = not yet known / getRole failed → treated as PLAYER (deny by
+// default, matching settings.ts / metadata-inspector).
+let searchRole: "GM" | "PLAYER" | null = null;
+
+// §7: THE permission decision — every show/hide path consults this and
+// nothing else. Pure sync read of cached role + suite state.
+function searchAllowed(): boolean {
+  if (WORKBENCH_DEV) return false;
+  if (!getState().searchGmOnly) return true;
+  return searchRole === "GM";
+}
+
+// §7: single visibility applier. All entry points funnel through here,
+// and runs are chained so an open and a close can never interleave —
+// the LAST decision always wins (no "open resolves after the deny
+// already ran" leak). `reanchor` forces a close+reopen for fresh
+// geometry (viewport resize / layout-editor drag).
+let visChain: Promise<void> = Promise.resolve();
+function applySearchVisibility(entry: string, reanchor = false): Promise<void> {
+  visChain = visChain
+    .then(() => applySearchVisibilityImpl(entry, reanchor))
+    .catch((e) => {
+      console.warn("[obr-suite/search] visibility pass failed", {
+        entry, role: searchRole, error: e,
+      });
+    });
+  return visChain;
+}
+
+async function applySearchVisibilityImpl(entry: string, reanchor: boolean): Promise<void> {
+  let ready = false;
+  try {
+    ready = await OBR.scene.isReady();
+  } catch (e) {
+    console.warn("[obr-suite/search] scene.isReady failed — treating as not ready", {
+      entry, role: searchRole, error: e,
+    });
+  }
+  if (ready && searchAllowed()) {
+    if (!isOpen && searchRole !== "GM") {
+      // Player-side open: confirm against FRESH scene state first, so
+      // a not-yet-hydrated default (gmOnly=false) can never flash the
+      // bar open before the scene's real settings arrive (§7 forbids
+      // show-then-close leaks). GM opens skip the extra round-trip.
+      try {
+        await refreshFromScene();
+      } catch (e) {
+        console.warn("[obr-suite/search] pre-open state refresh failed", { entry, error: e });
+      }
+      if (!searchAllowed()) {
+        console.warn("[obr-suite/search] open denied by fresh state", {
+          entry, role: searchRole, sceneReady: ready, gmOnly: getState().searchGmOnly,
+        });
+        return;
+      }
+    }
+    if (!isOpen || reanchor) await openBar();
+  } else {
+    if ((isOpen || openInFlight) && ready && !searchAllowed()) {
+      console.warn("[obr-suite/search] deny — closing bar", {
+        entry, role: searchRole, sceneReady: ready, gmOnly: getState().searchGmOnly,
+      });
+    }
+    await closeBar(entry);
+  }
+}
 
 // Quadrant of the search bar's CENTER on the viewport. Determines
 // (a) which screen edge the popover anchors at — so when the iframe
@@ -119,7 +192,17 @@ async function openBar(): Promise<void> {
     const w = sizeOverride?.width ?? BAR_W_IDLE;
     const h = sizeOverride?.height ?? BAR_H_IDLE;
     const { hAnchor, vAnchor, anchorPos } = await computeOrigin();
-    try { await OBR.popover.close(POPOVER_ID); } catch {}
+    // §7 belt-and-braces: a role/state flip can land during the awaits
+    // above — re-check the cached decision right before touching the
+    // popover. The visChain serialization makes this near-impossible
+    // to hit, but the check is free.
+    if (!searchAllowed()) {
+      console.warn("[obr-suite/search] open refused mid-flight", {
+        role: searchRole, gmOnly: getState().searchGmOnly,
+      });
+      return;
+    }
+    try { await OBR.popover.close(POPOVER_ID); isOpen = false; setPanelOpen(PANEL_IDS.search, false); } catch {}
     // Pass quadrant info to the iframe so it can flip element order
     // (e.g. detail panel goes ABOVE the input row when vAnchor=BOTTOM).
     const h_q = hAnchor === "LEFT" ? "left" : "right";
@@ -140,7 +223,7 @@ async function openBar(): Promise<void> {
       // below it always pass through.
       disableClickAway: true,
     });
-    isOpen = true;
+    isOpen = true; setPanelOpen(PANEL_IDS.search, true);
   } catch (e) {
     console.error("[obr-suite/search] openPopover failed", e);
   } finally {
@@ -148,55 +231,90 @@ async function openBar(): Promise<void> {
   }
 }
 
-async function closeBar(): Promise<void> {
-  if (!isOpen) return;
-  try { await OBR.popover.close(POPOVER_ID); } catch {}
-  isOpen = false;
+async function closeBar(entry = "close"): Promise<void> {
+  // §7: NO `isOpen` early-return. A deny can arrive while an open is
+  // still in flight (isOpen flips true only after popover.open
+  // resolves), and the old guard let that popover survive the denial.
+  // popover.close on an already-closed id is a cheap no-op.
+  const wasVisible = isOpen || openInFlight;
+  try {
+    await OBR.popover.close(POPOVER_ID);
+    isOpen = false; setPanelOpen(PANEL_IDS.search, false);
+  } catch (e) {
+    if (wasVisible) {
+      console.warn("[obr-suite/search] popover.close failed", {
+        entry, role: searchRole, error: e,
+      });
+    }
+  }
 }
 
 export async function setupSearch(): Promise<void> {
+  if (WORKBENCH_DEV) return;
   if (isMobileDevice()) return;
 
-  const showIfReady = async () => {
-    try {
-      if (await OBR.scene.isReady()) await openBar();
-      else await closeBar();
-    } catch {}
-  };
-  await showIfReady();
+  // §7: seed the role BEFORE the first visibility decision. getRole
+  // failure counts as PLAYER (deny by default) — the pre-open fresh
+  // state confirm in applySearchVisibilityImpl covers the state side.
+  try {
+    searchRole = (await OBR.player.getRole()) as "GM" | "PLAYER";
+  } catch (e) {
+    searchRole = "PLAYER";
+    console.warn("[obr-suite/search] getRole failed — treating as PLAYER", e);
+  }
+
+  await applySearchVisibility("setup");
+
+  // Role promotions/demotions re-gate immediately (checklist §7).
   unsubs.push(
-    OBR.scene.onReadyChange(async (ready) => {
-      if (ready) await openBar();
-      else await closeBar();
+    OBR.player.onChange((p) => {
+      const nextRole: "GM" | "PLAYER" = p.role === "GM" ? "GM" : "PLAYER";
+      if (nextRole === searchRole) return;
+      searchRole = nextRole;
+      void applySearchVisibility("role-change");
     }),
   );
-  // Re-anchor on viewport resize. openBar reads `vw` fresh and re-issues
-  // OBR.popover.open() with the same id, so OBR updates the popover
-  // position in place.
+  // DM flips the toggle (or any suite-state refresh) → re-gate. The
+  // background iframe runs startSceneSync, so this fires on remote
+  // scene-metadata changes too.
   unsubs.push(
-    onViewportResize(async () => {
+    onStateChange(() => {
+      void applySearchVisibility("state-change");
+    }),
+  );
+  // Scene switch / reconnect (checklist §7).
+  unsubs.push(
+    OBR.scene.onReadyChange(() => {
+      void applySearchVisibility("scene-ready-change");
+    }),
+  );
+  // Re-anchor on viewport resize — same gate, forced reopen so openBar
+  // reads `vw` fresh and re-issues OBR.popover.open with new geometry.
+  unsubs.push(
+    onViewportResize(() => {
       if (!isOpen) return;
-      await openBar();
+      void applySearchVisibility("viewport-resize", true);
     }),
   );
   // Layout-editor drag-end / global reset → re-anchor with new
   // offset / size from localStorage. openBar reads both fresh.
   unsubs.push(
-    OBR.broadcast.onMessage(BC_PANEL_DRAG_END, async (event) => {
+    OBR.broadcast.onMessage(BC_PANEL_DRAG_END, (event) => {
       const payload = event.data as DragEndPayload | undefined;
       if (payload?.panelId !== PANEL_IDS.search) return;
       if (!isOpen) return;
-      await openBar();
+      void applySearchVisibility("panel-drag-end", true);
     }),
   );
   unsubs.push(
-    OBR.broadcast.onMessage(BC_PANEL_RESET, async () => {
-      if (isOpen) await openBar();
+    OBR.broadcast.onMessage(BC_PANEL_RESET, () => {
+      if (!isOpen) return;
+      void applySearchVisibility("panel-reset", true);
     }),
   );
 }
 
 export async function teardownSearch(): Promise<void> {
   for (const u of unsubs.splice(0)) u();
-  await closeBar();
+  await closeBar("teardown");
 }

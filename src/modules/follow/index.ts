@@ -20,6 +20,7 @@ import OBR, {
   type Item,
 } from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
+import { getLocalLang } from "../../state";
 import {
   FOLLOW_PLUGIN_ID,
   FOLLOW_KEY,
@@ -461,6 +462,7 @@ export async function setupFollow(): Promise<void> {
   if (registered) return;
   registered = true;
 
+  const en = getLocalLang() === "en";
   let role: "GM" | "PLAYER" = "PLAYER";
   try { role = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch {}
   myRoleForFollow = role;
@@ -481,7 +483,7 @@ export async function setupFollow(): Promise<void> {
         id: CTX_FOLLOW_ADD,
         icons: [{
           icon: ICON_URL,
-          label: "跟随",
+          label: en ? "Follow" : "跟随",
           filter: {
             every: [
               { key: "type", value: "IMAGE" },
@@ -513,7 +515,7 @@ export async function setupFollow(): Promise<void> {
         id: CTX_FOLLOW_REMOVE,
         icons: [{
           icon: ICON_URL,
-          label: "取消跟随",
+          label: en ? "Unfollow" : "取消跟随",
           filter: {
             every: [
               { key: "type", value: "IMAGE" },
@@ -542,14 +544,14 @@ export async function setupFollow(): Promise<void> {
         id: FOLLOW_TOOL_ID,
         icons: [{
           icon: ICON_URL,
-          label: "跟随绑定",
+          label: en ? "Follow binding" : "跟随绑定",
         }],
       });
       await OBR.tool.createMode({
         id: FOLLOW_MODE_ID,
         icons: [{
           icon: ICON_URL,
-          label: "绑定目标",
+          label: en ? "Bind target" : "绑定目标",
           filter: { activeTools: [FOLLOW_TOOL_ID] },
         }],
         cursors: [{ cursor: "crosshair" }],

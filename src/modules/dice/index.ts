@@ -1,5 +1,17 @@
+import {WORKBENCH_DEV} from '../../workbench/channel';
+import {setupWorkbenchDice,teardownWorkbenchDice} from '../../workbench/dice';
+import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR, { isImage } from "@owlbear-rodeo/sdk";
+import { getLocalLang } from "../../state";
 import { DiceType, DIE_SIDES, DieResult, rollDie, sidesOf } from "./types";
+import {
+  readFixedRoll,
+  consumeFixedRoll,
+  distributeFaces,
+  faceBounds,
+  randIntInclusive,
+  type DieSpec,
+} from "./fixed-roll";
 import { readSkinsForPlayer } from "./dice-skins";
 import { assetUrl } from "../../asset-base";
 import { onViewportResize } from "../../utils/viewportAnchor";
@@ -277,6 +289,7 @@ async function closeCrosshair(): Promise<void> {
 }
 
 let historyOpen = false;
+let historyRequest = 0, historyWanted = false;
 // User dismissed the popover via its X button without flipping any
 // toggle. Stays true until a new dice roll arrives, which auto-reopens.
 let historyManuallyDismissed = false;
@@ -337,7 +350,8 @@ function broadcastHistoryState(open: boolean): void {
   } catch {}
 }
 
-async function openHistory(mode: "transient" | "all" = "transient"): Promise<void> {
+export async function openHistory(mode: "transient" | "all" = "transient"): Promise<void> {
+  const request=++historyRequest;historyWanted=true;
   // Re-entrancy: re-anchor on viewport resize / drag-end / reset all
   // call this with `historyOpen=true` already, expecting the function
   // to update the popover in place. Don't bail on already-open.
@@ -365,6 +379,7 @@ async function openHistory(mode: "transient" | "all" = "transient"): Promise<voi
     const anchorRight = vw - HISTORY_RIGHT_OFFSET + userOff.dx;
     const anchorTop = vh - HISTORY_BOTTOM_OFFSET + userOff.dy;
     await emitSideHint(PANEL_IDS.diceHistory);
+    if(request!==historyRequest||!historyWanted)return;
     // OBR.popover (not modal) — only the bottom-right rectangle blocks
     // pointer events. Switching back from modal because we need the
     // panel to BE interactive (row click → jump to dice panel + replay)
@@ -381,20 +396,22 @@ async function openHistory(mode: "transient" | "all" = "transient"): Promise<voi
       hidePaper: true,
       disableClickAway: true,
     });
-    historyOpen = true;
+    if(!historyWanted){await OBR.popover.close(HISTORY_POPOVER_ID);return;}
+    historyOpen = true; setPanelOpen("dice-history", true);
     broadcastHistoryState(true);
   } catch (e) {
     console.error("[obr-suite/dice] open history failed", e);
   }
 }
-async function closeHistory(): Promise<void> {
+export async function closeHistory(): Promise<void> {
+  historyWanted=false;historyRequest++;
   try { await OBR.popover.close(HISTORY_POPOVER_ID); } catch {}
-  historyOpen = false;
+  historyOpen = false; setPanelOpen("dice-history", false);
   broadcastHistoryState(false);
 }
 // --- Replay overlay state ---
 let activeReplayCid: string | null = null;
-async function openReplay(cid: string): Promise<void> {
+export async function openReplay(cid: string): Promise<void> {
   if (activeReplayCid) await closeReplay();
   activeReplayCid = cid;
   const modalId = `${REPLAY_MODAL_PREFIX}${cid}`;
@@ -416,7 +433,7 @@ async function openReplay(cid: string): Promise<void> {
     activeReplayCid = null;
   }
 }
-async function closeReplay(): Promise<void> {
+export async function closeReplay(): Promise<void> {
   if (!activeReplayCid) return;
   const modalId = `${REPLAY_MODAL_PREFIX}${activeReplayCid}`;
   try { await OBR.modal.close(modalId); } catch {}
@@ -463,8 +480,11 @@ async function viewportCenterWorld(): Promise<{ x: number; y: number }> {
 
 // --- Effect modal: open on receive ---
 
-async function showDiceEffect(p: DiceRollPayload): Promise<void> {
+export async function showDiceEffect(p: DiceRollPayload): Promise<void> {
   const modalId = `${MODAL_PREFIX}${p.rollId}`;
+  // These reads are independent: skins must not start only after token and
+  // viewport RPCs have finished. No change to either source of truth.
+  const skinsRead = readSkinsForPlayer(p.rollerId).catch(()=>({}));
 
   // World anchor — token top for token rolls, viewport center for free.
   let world: { x: number; y: number } | null = null;
@@ -504,7 +524,7 @@ async function showDiceEffect(p: DiceRollPayload): Promise<void> {
   // no skins, keeping the common-case URL short.
   let skinsParam = "";
   try {
-    const skins = await readSkinsForPlayer(p.rollerId);
+    const skins = await skinsRead;
     if (Object.keys(skins).length > 0) {
       skinsParam = `&skins=${encodeURIComponent(JSON.stringify(skins))}`;
     }
@@ -534,7 +554,9 @@ async function showDiceEffect(p: DiceRollPayload): Promise<void> {
     skinsParam;
 
   try {
-    try { await OBR.modal.close(modalId); } catch {}
+    // Workbench de-duplicates rollId before rendering. There cannot be a prior
+    // modal to close here; an empty close added another SDK round trip per roll.
+    if(!WORKBENCH_DEV)try { await OBR.modal.close(modalId); } catch {}
     await OBR.modal.open({
       id: modalId,
       url,
@@ -573,11 +595,13 @@ async function openSkinPicker(payload: {
 // --- Setup / teardown ---
 
 export async function setupDice(): Promise<void> {
+  if (WORKBENCH_DEV) { await setupWorkbenchDice(); return; }
   // Re-entry guard: if some lifecycle path calls setupDice twice, the
   // already-registered listeners stay live; spinning up a second set
   // would make every dice roll fire showDiceEffect twice on this
   // client (the symptom users reported as "DM 端有概率多次播放").
   if (setupDiceRegistered) return;
+  const en = getLocalLang() === "en";
   setupDiceRegistered = true;
 
   // Clear any stale `LS_AUTO_DICE_HISTORY="0"` from the era when the
@@ -597,7 +621,7 @@ export async function setupDice(): Promise<void> {
       id: SKIN_CTX_ID,
       icons: [{
         icon: SKIN_CTX_ICON,
-        label: "设为我的骰子皮肤",
+        label: en ? "Set as my dice skin" : "设为我的骰子皮肤",
         filter: {
           every: [
             { key: "type", value: "IMAGE" },
@@ -1021,15 +1045,176 @@ function rollSimpleExpression(expr: string): { dice: DieResult[]; modifier: numb
   return { dice, modifier };
 }
 
-async function handleQuickRoll(req: QuickRollRequest): Promise<void> {
-  const parsed = rollSimpleExpression(req.expression);
+// §9 — fixed-total builder for the quick-roll grammar (simple NdM sums
+// + flat modifier). Mirrors the natural pipeline's structure and
+// bookkeeping exactly: negative dice terms are emitted as loser-marked
+// dice whose faces fold into the modifier; advMode pairs every kept
+// d20 with a real losing partner; critMode appends a kept twin per
+// non-loser die. Faces are REAL (assigned within each die's range) so
+// animation / history / broadcast / total agree by construction.
+function buildFixedSimple(
+  expression: string,
+  advMode: "adv" | "dis" | undefined,
+  critMode: boolean | undefined,
+  target: number,
+):
+  | { dice: DieResult[]; modifier: number }
+  | { err: "bounds"; min: number; max: number }
+  | { err: "unsupported" } {
+  interface Term { sign: 1 | -1; count: number; sides: number }
+  const terms: Term[] = [];
+  let flatMod = 0;
+  const cleaned = expression.replace(/\s+/g, "");
+  const re = /([+\-]?)(?:(\d*)d(\d+)|(\d+))/gi;
+  for (const m of cleaned.matchAll(re)) {
+    const sign = m[1] === "-" ? -1 : 1;
+    if (m[3] !== undefined) {
+      const count = m[2] ? parseInt(m[2], 10) : 1;
+      const sides = parseInt(m[3], 10);
+      if (!sides || sides < 2 || sides > 1000) continue;
+      terms.push({ sign, count, sides });
+    } else if (m[4]) {
+      flatMod += sign * parseInt(m[4], 10);
+    }
+  }
+  if (!terms.some((t) => t.count > 0)) return { err: "unsupported" };
+  // A negative d20 under advMode would pair a discarded die — the
+  // natural path's behaviour there is degenerate; refuse cleanly.
+  if (advMode && terms.some((t) => t.sign < 0 && t.sides === 20)) {
+    return { err: "unsupported" };
+  }
+
+  // Kept-face specs, in natural emit order. Slots remember where each
+  // assigned face must land.
+  const specs: DieSpec[] = [];
+  type Slot =
+    | { kind: "plain"; term: Term }
+    | { kind: "advKept"; term: Term }
+    | { kind: "critTwin"; term: Term };
+  const slots: Slot[] = [];
+  for (const t of terms) {
+    for (let i = 0; i < t.count; i++) {
+      if (t.sign < 0) {
+        // Subtracts via the modifier (natural bookkeeping); no crit twin
+        // (the natural crit loop skips loser-marked dice).
+        specs.push({ sides: t.sides, lo: 1, hi: t.sides, subtract: true });
+        slots.push({ kind: "plain", term: t });
+        continue;
+      }
+      const isAdvD20 = !!advMode && t.sides === 20;
+      specs.push({ sides: t.sides, lo: 1, hi: t.sides });
+      slots.push({ kind: isAdvD20 ? "advKept" : "plain", term: t });
+      if (critMode) {
+        specs.push({ sides: t.sides, lo: 1, hi: t.sides });
+        slots.push({ kind: "critTwin", term: t });
+      }
+    }
+  }
+
+  const need = target - flatMod;
+  const faces = distributeFaces(specs, need);
+  if (!faces) {
+    const { low, high } = faceBounds(specs);
+    return { err: "bounds", min: low + flatMod, max: high + flatMod };
+  }
+
+  const dice: DieResult[] = [];
+  let modifier = flatMod;
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i];
+    const face = faces[i];
+    const type = `d${slot.term.sides}`;
+    if (slot.kind === "plain" && slot.term.sign < 0) {
+      // face came back positive; contribution already negative via spec
+      dice.push({ type, value: face, loser: true });
+      modifier -= face;
+      continue;
+    }
+    dice.push({ type, value: face });
+    if (slot.kind === "advKept") {
+      // Real losing partner: adv keeps the higher (ties keep the first,
+      // so partner <= face), dis keeps the lower (partner >= face).
+      const partner =
+        advMode === "adv" ? randIntInclusive(1, face) : randIntInclusive(face, 20);
+      dice.push({ type: "d20", value: partner, loser: true });
+    }
+  }
+  return { dice, modifier };
+}
+
+/** Internal host context. It is constructed from SDK observations, never from
+ * a client's roll request. Legacy callers keep their existing SDK read path. */
+export type QuickRollIdentity = {id:string;name:string;color:string;role:'GM'|'PLAYER'};
+export async function handleQuickRoll(req: QuickRollRequest,identity?:QuickRollIdentity): Promise<void> {
+  // §9 — DM fixed result. Single-value rolls only: group saves (and
+  // any other batch flow) always carry a collectiveId and are excluded
+  // by contract. Fresh GM verification at THIS execution entry. When
+  // the fix applies we take the pre-assigned faces and skip the random
+  // pipeline; everything downstream (focus, broadcast, animation,
+  // history) is shared, so consistency is structural.
+  let fixedBuilt: { dice: DieResult[]; modifier: number } | null = null;
+  if (!req.collectiveId) {
+    const armed = readFixedRoll();
+    if (armed) {
+      let role = "PLAYER";
+      try {
+        role = identity?.role ?? await OBR.player.getRole();
+      } catch (e) {
+        console.warn("[obr-suite/dice] fixed-roll role verify failed — rolling for real", e);
+      }
+      if (role === "GM") {
+        const en = getLocalLang() === "en";
+        const built = buildFixedSimple(req.expression, req.advMode, req.critMode, armed.value);
+        if ("dice" in built) {
+          consumeFixedRoll();
+          fixedBuilt = built;
+          console.info("[obr-suite/dice] fixed roll applied", {
+            entry: "quick-roll",
+            expression: req.expression,
+            advMode: req.advMode ?? null,
+            critMode: !!req.critMode,
+            target: armed.value,
+          });
+        } else {
+          if (built.err === "bounds") {
+            OBR.notification
+              .show(
+                en
+                  ? `Fixed value ${armed.value} is outside this formula's range [${built.min}, ${built.max}] — rolled for real (still armed)`
+                  : `固定值 ${armed.value} 超出该公式范围 [${built.min}, ${built.max}]，本次真实投掷（保持已固定）`,
+                "WARNING",
+              )
+              .catch(() => {});
+          } else {
+            OBR.notification
+              .show(
+                en
+                  ? "This formula doesn't support fixed results — rolled for real (still armed)"
+                  : "该公式不支持固定结果，本次真实投掷（保持已固定）",
+                "WARNING",
+              )
+              .catch(() => {});
+          }
+          console.warn("[obr-suite/dice] fixed roll not applied", {
+            entry: "quick-roll",
+            expression: req.expression,
+            target: armed.value,
+            reason: built.err,
+          });
+        }
+      }
+    }
+  }
+
+  const parsed = fixedBuilt ?? rollSimpleExpression(req.expression);
   let { dice } = parsed;
   const { modifier } = parsed;
 
   // Advantage / disadvantage shortcut: every d20 in the dice array
   // gets a paired roll; keep the higher (adv) / lower (dis), mark the
-  // loser. Other dice are unaffected.
-  if (req.advMode === "adv" || req.advMode === "dis") {
+  // loser. Other dice are unaffected. (Skipped for a fixed build —
+  // buildFixedSimple already emitted the partners.)
+  if (!fixedBuilt && (req.advMode === "adv" || req.advMode === "dis")) {
     const expanded: DieResult[] = [];
     for (const d of dice) {
       if (d.type !== "d20") {
@@ -1056,7 +1241,8 @@ async function handleQuickRoll(req: QuickRollRequest): Promise<void> {
   // same flag on the twin so they continue to deduct from total.
   // Loser dice (adv/dis) aren't doubled — only the kept d20 stays as-
   // is; doubling a discarded roll has no effect on the result anyway.
-  if (req.critMode) {
+  // (Skipped for a fixed build — twins are already in the dice array.)
+  if (!fixedBuilt && req.critMode) {
     const doubled: DieResult[] = [];
     for (const d of dice) {
       doubled.push(d);
@@ -1090,8 +1276,8 @@ async function handleQuickRoll(req: QuickRollRequest): Promise<void> {
     } catch {}
   }
 
-  let rollerId = "";
-  try { rollerId = await OBR.player.getId(); } catch {}
+  let rollerId = identity?.id ?? "";
+  if(!identity)try { rollerId = await OBR.player.getId(); } catch {}
 
   await broadcastDiceRoll({
     itemId: req.itemId ?? null,
@@ -1100,6 +1286,7 @@ async function handleQuickRoll(req: QuickRollRequest): Promise<void> {
     modifier,
     label: req.label ?? "",
     rollerId,
+    ...(identity?{rollerName:identity.name,rollerColor:identity.color}:{}),
     hidden: !!req.hidden,
     collectiveId: req.collectiveId,
   });
@@ -1107,6 +1294,7 @@ async function handleQuickRoll(req: QuickRollRequest): Promise<void> {
 
 
 export async function teardownDice(): Promise<void> {
+  if (WORKBENCH_DEV) { teardownWorkbenchDice(); return; }
   // Close the action panel if open. (OBR.action.close is idempotent.)
   await closeActionPanel();
   await closeHistory();
@@ -1126,7 +1314,7 @@ export function rollD20(): number {
 /** Coerce any legacy / partial payload into the canonical schema, or
  *  return null if it's unrecoverable. Used by all receivers so nobody
  *  has to special-case the old shape. */
-function normalizePayload(raw: unknown): DiceRollPayload | null {
+export function normalizePayload(raw: unknown): DiceRollPayload | null {
   if (!raw || typeof raw !== "object") return null;
   const data = raw as Partial<DiceRollPayload> & LegacyDiceRollPayload;
   let dice: DieResult[];
@@ -1169,7 +1357,9 @@ function normalizePayload(raw: unknown): DiceRollPayload | null {
   const total =
     typeof data.total === "number"
       ? data.total
-      : dice.reduce((a, d) => a + d.value, 0) + modifier;
+      // §9 consistency fix: legacy fallback now matches the modern
+      // total semantics — losers skipped, subtraction dice negative.
+      : dice.reduce((a, d) => a + (d.loser ? 0 : d.subtract ? -d.value : d.value), 0) + modifier;
   return {
     itemId: data.itemId ?? null,
     dice,
@@ -1208,6 +1398,7 @@ export async function broadcastDiceRoll(opts: {
   label?: string;
   rollerId: string;
   rollerName?: string;
+  rollerColor?: string;
   hidden?: boolean;
   // If provided, this rollId is used instead of an auto-generated one.
   // Initiative passes a deterministic id so it can match BC_DICE_FADE_START.
@@ -1224,10 +1415,10 @@ export async function broadcastDiceRoll(opts: {
   if (!opts.dice.length) return "";
   const winnerIdx = Math.max(-1, Math.min(opts.dice.length - 1, opts.winnerIdx));
 
-  let rollerColor = "#5dade2";
+  let rollerColor = opts.rollerColor || "#5dade2";
   let rollerName = opts.rollerName ?? "";
   try {
-    const c = await OBR.player.getColor();
+    const c = opts.rollerColor ?? await OBR.player.getColor();
     if (typeof c === "string" && c) rollerColor = c;
     if (!rollerName) {
       const n = await OBR.player.getName();

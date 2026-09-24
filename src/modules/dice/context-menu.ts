@@ -1,3 +1,4 @@
+import {WORKBENCH_DEV} from '../../workbench/channel';
 import OBR from "@owlbear-rodeo/sdk";
 import { resolveClickRollTarget } from "./tags";
 import { assetUrl } from "../../asset-base";
@@ -54,6 +55,7 @@ async function openMenuPopoverAt(
   },
   viewportPos: { x: number; y: number },
 ): Promise<void> {
+  if (WORKBENCH_DEV) { await OBR.broadcast.sendMessage('com.obr-suite/workbench-compose',args,{destination:'LOCAL'}); return; }
   const params = new URLSearchParams();
   params.set("expr", args.expression);
   params.set("label", args.label);
@@ -101,6 +103,7 @@ async function openQuickPopupAt(
   },
   _viewportPos: { x: number; y: number },
 ): Promise<void> {
+  if (WORKBENCH_DEV) { await OBR.broadcast.sendMessage('com.obr-suite/workbench-compose',args,{destination:'LOCAL'}); return; }
   const params = new URLSearchParams();
   params.set("expr", args.expression);
   params.set("label", args.label);

@@ -1,0 +1,475 @@
+{
+  "schema_version": "0.3",
+  "meta": {
+    "template_name": "悲灵",
+    "template_version": "ver.",
+    "layout_version": "v1.0.12",
+    "ruleset": null,
+    "source_file": "tmp1hqmclhg.xlsx",
+    "parsed_at": "2026-05-26T02:54:55Z"
+  },
+  "identity": {
+    "character_name": "本杰明·弗拉明戈",
+    "display_name": "本杰明·弗拉明戈",
+    "player": "鸭嘴龙",
+    "race": {
+      "name": "人类",
+      "subrace": null
+    },
+    "alignment": null,
+    "faith": null,
+    "age": 33,
+    "gender": "男",
+    "height": "165",
+    "weight": "50",
+    "hometown": "深水城",
+    "languages": [
+      "通用语",
+      "龙语"
+    ],
+    "tool_proficiencies": [
+      "修补工具"
+    ]
+  },
+  "classes": [
+    {
+      "role": "主职",
+      "name": "术士",
+      "subclass": "狂野术法",
+      "level": 6
+    },
+    {
+      "role": "兼职1",
+      "name": null,
+      "subclass": null,
+      "level": null
+    },
+    {
+      "role": "兼职2",
+      "name": null,
+      "subclass": null,
+      "level": null
+    }
+  ],
+  "total_level": 6,
+  "abilities": {
+    "str": {
+      "total": 12,
+      "initial": 12,
+      "background": 0,
+      "growth": 0,
+      "misc": 0,
+      "modifier": 1,
+      "save": {
+        "proficient": false,
+        "bonus": 1,
+        "misc": 0
+      }
+    },
+    "dex": {
+      "total": 14,
+      "initial": 14,
+      "background": 0,
+      "growth": 0,
+      "misc": 0,
+      "modifier": 2,
+      "save": {
+        "proficient": false,
+        "bonus": 2,
+        "misc": 0
+      }
+    },
+    "con": {
+      "total": 8,
+      "initial": 8,
+      "background": 0,
+      "growth": 0,
+      "misc": 0,
+      "modifier": -1,
+      "save": {
+        "proficient": true,
+        "bonus": 2,
+        "misc": 0
+      }
+    },
+    "int": {
+      "total": 14,
+      "initial": 13,
+      "background": 1,
+      "growth": 0,
+      "misc": 0,
+      "modifier": 2,
+      "save": {
+        "proficient": false,
+        "bonus": 2,
+        "misc": 0
+      }
+    },
+    "wis": {
+      "total": 8,
+      "initial": 8,
+      "background": 0,
+      "growth": 0,
+      "misc": 0,
+      "modifier": -1,
+      "save": {
+        "proficient": false,
+        "bonus": -1,
+        "misc": 0
+      }
+    },
+    "cha": {
+      "total": 18,
+      "initial": 15,
+      "background": 2,
+      "growth": 1,
+      "misc": 0,
+      "modifier": 4,
+      "save": {
+        "proficient": true,
+        "bonus": 7,
+        "misc": 0
+      }
+    }
+  },
+  "core_stats": {
+    "proficiency_bonus": 3,
+    "initiative": 5,
+    "ac": 15,
+    "dc": 15,
+    "dc_ability": "魅力",
+    "passive_perception": 9,
+    "speed": 30,
+    "size": "中型",
+    "hp": {
+      "current": 20,
+      "max": 20,
+      "temp": 0
+    },
+    "hit_dice": {
+      "current": 6,
+      "max": 6,
+      "die_size": null
+    }
+  },
+  "defenses": {
+    "resistances": [],
+    "immunities": [],
+    "advantages": [],
+    "disadvantages": []
+  },
+  "skills": [
+    { "name": "运动", "ability": "str", "proficiency": "proficient", "total": 4, "misc_bonus": 0 },
+    { "name": "特技", "ability": "dex", "proficiency": "none", "total": 2, "misc_bonus": 0 },
+    { "name": "巧手", "ability": "dex", "proficiency": "proficient", "total": 5, "misc_bonus": 0 },
+    { "name": "隐匿", "ability": "dex", "proficiency": "proficient", "total": 5, "misc_bonus": 0 },
+    { "name": "调查", "ability": "int", "proficiency": "none", "total": 2, "misc_bonus": 0 },
+    { "name": "奥秘", "ability": "int", "proficiency": "proficient", "total": 5, "misc_bonus": 0 },
+    { "name": "历史", "ability": "int", "proficiency": "proficient", "total": 5, "misc_bonus": 0 },
+    { "name": "自然", "ability": "int", "proficiency": "none", "total": 2, "misc_bonus": 0 },
+    { "name": "宗教", "ability": "int", "proficiency": "proficient", "total": 5, "misc_bonus": 0 },
+    { "name": "察觉", "ability": "wis", "proficiency": "none", "total": -1, "misc_bonus": 0 },
+    { "name": "洞悉", "ability": "wis", "proficiency": "proficient", "total": 2, "misc_bonus": 0 },
+    { "name": "驯兽", "ability": "wis", "proficiency": "none", "total": -1, "misc_bonus": 0 },
+    { "name": "医药", "ability": "wis", "proficiency": "none", "total": -1, "misc_bonus": 0 },
+    { "name": "求生", "ability": "wis", "proficiency": "none", "total": -1, "misc_bonus": 0 },
+    { "name": "游说", "ability": "cha", "proficiency": "proficient", "total": 7, "misc_bonus": 0 },
+    { "name": "欺瞒", "ability": "cha", "proficiency": "proficient", "total": 7, "misc_bonus": 0 },
+    { "name": "威吓", "ability": "cha", "proficiency": "none", "total": 4, "misc_bonus": 0 },
+    { "name": "表演", "ability": "cha", "proficiency": "proficient", "total": 7, "misc_bonus": 0 }
+  ],
+  "combat": {
+    "armor": {
+      "name": null,
+      "ac_base": 13,
+      "dex_bonus_cap": 2,
+      "attuned": false,
+      "weight": null,
+      "equipped": true
+    },
+    "shield": {
+      "ac_bonus": 2,
+      "attuned": false,
+      "equipped": false
+    },
+    "weapons": [
+      {
+        "name": "长棍",
+        "proficient": true,
+        "attack_bonus": "+4",
+        "damage": "1d6+1",
+        "damage_type": "钝击",
+        "extra_damage": null,
+        "extra_damage_type": null,
+        "mastery": "失衡",
+        "mastery_effect": "当你用这把武器命中了一个生物时，你可以迫使该生物进行一次体质豁免（DC等于8+本次攻击所使用的调整值+你的熟练加值）。豁免检定失败时，该生物陷入倒地状态。",
+        "weight": null,
+        "ammo_type": null,
+        "properties": "多用（1d8）"
+      },
+      {
+        "name": "矛",
+        "proficient": true,
+        "attack_bonus": "+4",
+        "damage": "1d6+1",
+        "damage_type": "穿刺",
+        "extra_damage": null,
+        "extra_damage_type": null,
+        "mastery": "削弱",
+        "mastery_effect": "当你用这把武器命中一个生物时，直到你的下一回合开始前，该生物的下一次攻击检定将具有劣势。",
+        "weight": null,
+        "ammo_type": null,
+        "properties": "投掷（射程 20/60），多用（1d8）"
+      },
+      {
+        "name": "匕首",
+        "proficient": true,
+        "attack_bonus": "+5",
+        "damage": "1d4+2",
+        "damage_type": "穿刺",
+        "extra_damage": null,
+        "extra_damage_type": null,
+        "mastery": "迅击",
+        "mastery_effect": "当你发动由轻型词条所提供的额外的攻击时，你可以将本次攻击视作攻击动作的一部分，而非使用附赠动作。而你每一回合仍然只能进行一次由轻型词条所提供的额外的攻击。",
+        "weight": null,
+        "ammo_type": null,
+        "properties": "灵巧，轻型，投掷（射程 20/60）"
+      }
+    ],
+    "other_equipment": []
+  },
+  "spellcasting": {
+    "spellcasting_ability": "魅力",
+    "save_dc": 15,
+    "attack_bonus": "D20+7",
+    "max_prepared": null,
+    "spell_slots": {
+      "1": { "current": null, "max": 4 },
+      "2": { "current": null, "max": 3 },
+      "3": { "current": null, "max": 3 }
+    },
+    "sorcery_points": {
+      "current": 32,
+      "max": 32
+    },
+    "always_known": [],
+    "cantrips_known": [
+      {
+        "level": 0,
+        "name": "术法爆发",
+        "description": "你向施法距离内的一名生物或一个物件施展术法能量。对目标进行一次远程攻击检定，命中时，目标将受到1d8点伤害。由你选择法术造成何种类型的伤害：强酸，寒冷，火焰，闪电，毒素，心灵或雷鸣。\n如果你在此法术的任一d8骰上丢出了8，你便可以立刻再丢一枚d8，并将其加入此法术的伤害中。施展此法术时，你最多以此法造成的额外d8伤害骰数量等同于你的施法属性调整值。\n戏法强化：到达特定等级后，此戏法的初始伤害将增加1d8：5级（2d8）、11级（3d8）、17级（4d8）。",
+        "meta": { "school": "塑能", "casting_time": "动作", "range": "120尺", "components": "V/S", "duration": "立即", "concentration": false, "ritual": false, "english": "Sorcerous Burst", "source": "玩家手册" }
+      },
+      {
+        "level": 0,
+        "name": "剑刃防护",
+        "description": "在此法术结束前，每当有生物对你发动攻击检定，该生物的该次攻击检定都将承受1d4减值。",
+        "meta": { "school": "防护", "casting_time": "动作", "range": "自身", "components": "V/S", "duration": "专注，至多1分钟", "concentration": true, "ritual": false, "english": "Blade Ward", "source": "玩家手册" }
+      },
+      {
+        "level": 0,
+        "name": "魔法伎俩",
+        "description": "你在施法距离内创造一个魔法效应。从下述效应中选择一项。如果你多次施展该法术，则可以同时维持至多三个不同的非即时效应。\n　　• 感官效应Sensory Effect。 你创造一个立即生效的，无害的感官效应，比如一束火花，一阵风，微弱音乐或古怪的臭味。\n　　• 玩火Fire Play。 你立即点燃或熄灭一根蜡烛、一根火把或一处小篝火。\n　　• 清洁或弄脏Clean or Soil。 你立即清洁或弄脏一个体积不大于1立方尺的物件。\n　　• 次级感觉Minor Sensation。 你使一个不大于1立方尺的非活体物质变冷、变暖或对其调味，持续1小时。\n　　• 魔法印记Magic Mark。 你在一个物件或一个表面上创造一块色斑，一个小印记，或者一个徽记，持续1小时。\n　　• 次级造物Minor Creation。 你创造出一个非魔法小饰品或一张虚幻图像，其大小不能超过你的手掌大小，它会持续存在至下个你的回合结束为止。一个小饰品不能造成伤害，也不值任何钱。",
+        "meta": { "school": "变化", "casting_time": "动作", "range": "10尺", "components": "V/S", "duration": "至多1小时", "concentration": false, "ritual": false, "english": "Prestidigitation", "source": "玩家手册" }
+      },
+      {
+        "level": 0,
+        "name": "克敌先击",
+        "description": "你受到一瞬魔法洞见的指引，使用施展此法术时使用的那把武器发动一次攻击。此次攻击使用你的施法属性（而非力量属性或敏捷属性）进行攻击检定与伤害掷骰。此次攻击造成伤害时，你可以选择将其伤害类型改为光耀伤害，或是维持武器原本的伤害类型。\n戏法强化：到达特定等级后，无论你选择造成光耀伤害还是原本类型的伤害，本次攻击都会额外造成光耀伤害：5级（1d6点）、11级（2d6点）、17级（3d6点）。",
+        "meta": { "school": "预言", "casting_time": "动作", "range": "自身", "components": "S/M", "duration": "立即", "concentration": false, "ritual": false, "english": "True Strike", "source": "玩家手册" }
+      },
+      {
+        "level": 0,
+        "name": "传讯术",
+        "description": "你用指向施法距离内的一名生物并低声说出一段信息。该目标（且只有该目标）会听到这段信息，并且可以用只有你能听见的低语回复你。\n你可以隔着固态物件施展此法术，但你必须熟悉法术目标并知晓其就在阻挡物后方。魔法性的沉默效应，1尺厚的石头、金属或木料，或是一片薄铅都可以阻挡此法术。",
+        "meta": { "school": "变化", "casting_time": "动作", "range": "120尺", "components": "S/M", "duration": "立即", "concentration": false, "ritual": false, "english": "Message", "source": "玩家手册" }
+      }
+    ],
+    "prepared": [
+      {
+        "level": 1,
+        "name": "巫术箭",
+        "group": 1,
+        "description": "一支缠绕着碎裂魔力的蓝色能量长矛射向施法距离内的一个生物，并在你与目标之间生成一道持久的闪电弧。对目标进行一次远程法术攻击。若命中，则目标受到2d12点闪电伤害。\n无论首次攻击是否命中，在你接下来的每个回合中，你都可以用附赠动作直接对目标造成1d12点闪电伤害。\n此外，如果目标与你之间的距离超出了法术的施法距离，或者目标相对你而言处于全身掩护状态，法术将提前终止。\n升环施法：使用的法术位每比一环高一环，此法术的初始伤害就提高1d12。",
+        "meta": { "school": "塑能", "casting_time": "动作", "range": "60尺", "components": "V/S/M", "duration": "专注，至多1分钟", "concentration": true, "ritual": false, "english": "Witch Bolt", "source": "玩家手册" }
+      },
+      {
+        "level": 1,
+        "name": "燃烧之手",
+        "group": 1,
+        "description": "你向前喷射出一片火焰。处于15尺锥状区域内的生物必须进行一次敏捷豁免。豁免失败者受到3d6点火焰伤害，豁免成功者受到一半伤害。\n在此锥状区域内的未被着装或携带的易燃物件会开始燃烧。\n升环施法：你使用的法术位每比一环高一环，此法术的伤害就会提升1d6点。",
+        "meta": { "school": "塑能", "casting_time": "动作", "range": "自身", "components": "V/S", "duration": "立即", "concentration": false, "ritual": false, "english": "Burning Hands", "source": "玩家手册" }
+      },
+      {
+        "level": 1,
+        "name": "法师护甲",
+        "group": 1,
+        "description": "你触碰一个未着装护甲的自愿生物。直至法术终止前，目标的基础AC变为 13+它的敏捷调整值。当目标穿上护甲时，此法术将提前终止。",
+        "meta": { "school": "防护", "casting_time": "动作", "range": "触碰", "components": "V/S/M", "duration": "8小时", "concentration": false, "ritual": false, "english": "Mage Armor", "source": "玩家手册" }
+      },
+      {
+        "level": 1,
+        "name": "侦测魔法",
+        "group": 1,
+        "description": "在法术持续时间内，你感受到距你30尺内的魔法效应。若你感知到了此类效应，则你可以用一个魔法动作以看到任何带有此魔法的可见生物或物件周围环绕着微弱的灵光，且若此魔法属于被法术创造的效应，则你可分辨出其所属的魔法学派。\n此法术会被1尺厚的岩石、泥土或木头，1寸厚的金属，或薄薄一层铅阻隔。",
+        "meta": { "school": "预言", "casting_time": "动作或仪式", "range": "自身", "components": "V/S", "duration": "专注，至多10分钟", "concentration": true, "ritual": true, "english": "Detect Magic", "source": "玩家手册" }
+      },
+      {
+        "level": 2,
+        "name": "迷踪步",
+        "group": 1,
+        "description": "你短暂地被银白的雾气所笼罩，传送到至多30尺内一个你能看见且未被占据的空间。",
+        "meta": { "school": "咒法", "casting_time": "附赠动作", "range": "自身", "components": "V", "duration": "立即", "concentration": false, "ritual": false, "english": "Misty Step", "source": "玩家手册" }
+      },
+      {
+        "level": 2,
+        "name": "涡旋翘曲",
+        "group": 1,
+        "description": "• 你魔法地扭曲施法距离内一个你可见的其他生物周边的空间。目标需通过一次体质豁免（目标可主动选择失败），否则目标将被传送至施法距离内一处你可见，由你选择的未被占据的空间。选择的空间必须是地表之上或液体之中，并且能让目标在不被挤压的情况下支撑目标。\n• 升环施法效应：当你使用3环或更高的法术位施展该法术时，法术位每比2环高1环，施法距离便增加30尺。",
+        "meta": { "school": "咒法", "casting_time": "动作", "range": "90尺", "components": "V/S", "duration": "立即", "concentration": false, "ritual": false, "english": "Vortex Warp", "source": "斯翠海文：混乱之课" }
+      },
+      {
+        "level": 1,
+        "name": "护盾术",
+        "group": 1,
+        "description": "一道看不见的力场制护盾浮现在你身旁，保护着你。在你的下一回合开始前，你的 AC 具有+5 加值（在触发该法术的攻击之前生效），并且不会受到魔法飞弹Magic Missle 的伤害。",
+        "meta": { "school": "防护", "casting_time": "反应，当你被攻击命中或被作为魔法飞弹Magic Missile 法术的目标时执行", "range": "自身", "components": "V/S", "duration": "1轮", "concentration": false, "ritual": false, "english": "Shield", "source": "玩家手册" }
+      },
+      {
+        "level": 3,
+        "name": "气化形体",
+        "group": 1,
+        "description": "在法术持续时间内，你将触碰到的一名自愿生物连同其穿着携带物一起转化为一团云雾。如果目标的生命值降至0或其用一个魔法动作终止其身上的法术效应，则该目标身上的法术终止。\n在该形态下，目标唯一的移动方式即是10尺的飞行速度，且可以悬浮。该目标可以进入并占据一个已有生物占据的空间。其拥有钝击、穿刺和挥砍伤害的抗性，其对倒地状态免疫，且进行的力量、敏捷、体质豁免具有优势。该目标可以穿过狭隙，但会将液态物质视为固体表面。\n云雾形态的目标不能讲话或操作物件，其随身携带或持握的物件不会掉落，也不能被使用或与之互动。另外，目标也不能攻击或施法。\n升环施法：使用的法术位每比三环高一环，你就可以额外再指定一名生物作为法术目标。",
+        "meta": { "school": "变化", "casting_time": "动作", "range": "触碰", "components": "V/S/M", "duration": "专注，至多1小时", "concentration": true, "ritual": false, "english": "Gaseous Form", "source": "玩家手册" }
+      },
+      {
+        "level": 2,
+        "name": "镜影术",
+        "group": 2,
+        "description": "三个你自身的幻象分身出现在你所处的空间中。直到法术终止前，分身都会随你移动，并模仿你的动作和位置变换，使人无法追踪判断哪一个是你的真身。\n在法术持续时间内，每当一个生物攻击命中你时，为每个剩余分身投掷一个d6，只要有任一d6骰出3或以上，一个分身代你承受本次命中并随之被摧毁。分身无视所有其他的伤害和效应。三个分身都被摧毁时，法术随之结束。\n如果一名生物处于目盲状态，或拥有盲视，或拥有真实视觉，则该法术无法影响该生物。",
+        "meta": { "school": "幻术", "casting_time": "动作", "range": "自身", "components": "V/S", "duration": "1分钟", "concentration": false, "ritual": false, "english": "Mirror Image", "source": "玩家手册" }
+      },
+      {
+        "level": 1,
+        "name": "通晓语言",
+        "group": 2,
+        "description": "你在法术持续时间内知晓你所听到或看到手语的所有语言的字面意义。你也可以通过触碰书写的文字来读懂其字面意义。以这种方式阅读每页文字需要花费 1 分钟的时间。这个法术并不能解读符号和暗语。",
+        "meta": { "school": "预言", "casting_time": "动作或仪式", "range": "自身", "components": "V/S/M", "duration": "1小时", "concentration": false, "ritual": true, "english": "Comprehend Languages", "source": "玩家手册" }
+      }
+    ]
+  },
+  "features": {
+    "class_features": [
+      { "name": "施法", "description": "你从你的天生魔法汲取魔力用于施展法术。参见第7章有关施法的规则。下述信息将详述如何将这些规则应用于术士法术，术士法术详见本章后文职业描述中的术士法表。", "level": 1 },
+      { "name": "戏法", "description": "你已知4个你选择的术士戏法。推荐选择光亮术Light、魔法伎俩Prestidigitation、电爪Shocking Grasp和术法爆发Sorcerous Burst。每当你获得一个术士等级时，你都能将通过此特性已知的其中一个戏法替换为另一个你所选择的术士戏法。\n当你的术士等级达到4级和10级时，你都能另选一道术士戏法并习得，如术士特性表中戏法一列所示。", "level": null },
+      { "name": "法术位", "description": "术士特性表显示了你可用于施展一环及以上法术的法术位数量。当你完成长休时，你重获所有已消耗的法术位。", "level": null },
+      { "name": "准备法术", "description": "你准备可供你以此特性施展的一环及更高环阶的法术列表。最初，选择两道术士法术。推荐选择燃烧之手Burning Hands和侦测魔法Detect Magic 。\n已准备法术数量会随你术士等级的提升而增加，如术士特性表中的准备法术一列所示。每当这一列的数字增加时，从术士法术列表中选择额外法术准备，直至已准备法术的数量与表格中的数字一致。你所选择法术的环阶必须是你所拥有法术位对应的环阶。例如，如果你是一位3级术士，则你的准备法术列表能包括六道一环或二环的术士法术，随意组合。\n如果术士的其他特性给了你始终准备了的法术，这些法术不计入你以此法准备的法术数量，但这些法术对你而言都视为术士法术。", "level": null },
+      { "name": "改变你的准备法术", "description": "每当你获得一个术士等级时，你就可以将你准备列表上的一道法术替换为另一道术士法术，你必须拥有替换后法术对应环阶的法术位才可以替换。", "level": null },
+      { "name": "施法属性", "description": "你术士法术的施法属性是魅力。", "level": null },
+      { "name": "施法法器", "description": "你可以使用奥术法器作为你术士法术的施法法器。", "level": null },
+      { "name": "先天术法", "description": "你过去经历的某件事在你身上留下了不可磨灭的印记，为你注入了难以控制的涌动魔力。以一个附赠动作，你可以将魔力释放而出，持续1分钟。在这1分钟期间，你获得以下增益：\n你的术士法术豁免DC+1。\n你施展的术士法术的攻击检定具有优势。\n你可以使用此特性两次，你在完成一次长休时重获所有已消耗的使用次数。", "level": 1 },
+      { "name": "魔力泉涌", "description": "你汲取体内的魔力之源，从中涌现的魔力体现为你的可用术法点。你可以使用术法点创造各种魔法效应。\n你拥有2点术法点，你在到达更高等级时获得更多术法点，如同术士特性表中术法点一栏所示。你无法拥有比表格中对应数量更多的术法点。你在完成一次长休后重获所有已消耗的术法点。\n你可以消耗你的术法点来使用以下特性，例如超魔法。\n法术位转化为术法点Converting Spell Slots to Sorcery Points。你可以消耗一个法术位来获得等同于其环位的术法点（无需动作）。\n创造法术位Creating Spell Slots。以一个附赠动作，你可以将未消耗的术法点转化为一个法术位。创造法术位表格中展示了创造法术位所需的术法点以及创造它所需的最小术士等级。你无法创造高于五环的法术位。\n你以此特性创造的任何法术位都在完成一次长休时消失。\n\n创造法术位Creating Spell Slots \n法术位环阶 术法点消耗 最小术士等级\n　　1　　　　2　　　　2\n　　2　　　　3　　　　3\n　　3　　　　5　　　　5\n　　4　　　　6　　　　7\n　　5　　　　7　　　　9", "level": 2 },
+      { "name": "超魔法", "description": "由于你的魔法直接从你体内流向外界，你可以修改你的法术来适应自己的需要。你从超魔法选项中选择并获得2个你所选的超魔法选项。你使用你所选的超魔法来临时改变你施展的法术。要使用一个超魔法选项，你必须消耗等同于其描述中需求的术法点。\n当你施展一道法术时，你只能在其上应用一次超魔法选项，除非超魔法选项中另有说明。\n每当你获得一级术士等级时，你可以将一个超魔法选项更改为另一个超魔法选项。当你到达10级和17级术士等级时，你可以分别再获得2个超魔法选项。", "level": 2 },
+      { "name": "强效法术", "description": "消耗：1术法点\n当你为一个法术进行伤害掷骰时，你可以消耗1术法点来重掷最多等同于你魅力调整值数量的伤害骰（至少一个），你必须使用新的结果。\n即使你已经在一道法术上使用了其他超魔，你仍然可以使用强效法术。", "level": null },
+      { "name": "精妙法术", "description": "消耗：1术法点\n当你施展一道法术时，你可以消耗1术法点来忽视法术所需的言语、姿势和材料成分，但不能忽视那些会被消耗或在法术描述中写明了具体价值的材料成分。", "level": null },
+      { "name": "术法复苏", "description": "当你完成一次短休时，你可以恢复不大于你术士等级一半（向下取整）的已消耗术法点。\n此特性一经使用，直到你完成一次长休为止不能再次使用。", "level": 5 },
+      { "name": "狂野魔法浪涌", "description": "你施法时会释放出未经塑造的魔法浪涌。一回合一次，你每次施展一个不低于一环的术士法术后，可以立刻骰一次d20。如果你骰出20，则在狂野魔法浪涌表上掷骰以确定随机魔法效应。\n若该效果是一道法术，则其因过于狂野而无法受你的超魔法影响。", "level": 3 },
+      { "name": "混乱之潮", "description": "你可以驾驭机运的力量，以使一次D20检定具有优势。你必须在掷出d20之前决定是否使用此特性。此特性一经使用，直到你使用法术位施放一道术士法术、或完成一次长休后才能再次使用。\n如果你在完成一次长休前使用法术位施放了一道术士法术，则你自动于狂野魔法浪涌表上掷骰。", "level": 3 },
+      { "name": "扭曲幸运", "description": "你获得用你的狂野魔法扭曲命运的能力。当一个你能看见的生物投掷d20进行D20检定时，你可以在掷骰完成之后立即用一个反应并消耗1术法点来骰一次1d4，并将结果用作加值或减值（由你决定）加到该d20的骰值结果中。", "level": 6 }
+    ],
+    "race_features": [
+      { "name": "适应力", "description": "每当你完成长休时，你都会获得英雄激励。" },
+      { "name": "技能", "description": "你获得一项自选的技能的熟练。" },
+      { "name": "多才多艺", "description": "你获得一项自选的起源专长。" }
+    ],
+    "feats": [
+      { "name": "警戒", "description": "起源专长\n先攻熟练Initiative Proficiency。当你投掷先攻时，你可以将你的熟练加值加入结果。\n先攻互换Initiative Swap。当你掷完先攻，你可以立即与处于同一场战斗中的一名自愿的盟友交换先攻。如果你或那个盟友正处于失能状态，则不能进行交换。", "level": 1 },
+      { "name": "法术射手", "description": "通用专长（先决：等级4+，施法或契约魔法特性）\n属性值提升Ability Score Increase。你的智力、感知或魅力提升1，至多提升至20。\n绕过掩体Bypass Cover。你为法术进行的攻击检定无视半身掩护和四分之三掩护。\n抵近施法Casting in Melee。位于一个敌人5尺范围内的情况下，你用法术进行的攻击检定不会因此具有劣势。\n法术增距Increased Range。当你施展一道具有至少10尺施法距离，且需要你进行一次攻击检定的法术时，这道法术的施法距离增加60尺。", "level": 4 },
+      { "name": "熟习", "description": "起源专长\n你获得共计三项自选的技能和工具熟练。\n复选Repeatable。你可多次选择本专长。", "level": 1 }
+    ],
+    "fighting_style_feats": [],
+    "special_abilities": []
+  },
+  "special_resources": [],
+  "background": {
+    "background_name": "普普通通的冒险者",
+    "personality": "我嘴上讨厌一切，但刀子嘴豆腐心。",
+    "appearance": null,
+    "traits": "我不在乎不在乎的人的想法，他们怎么想和我无关。",
+    "ideals": "我希望世界变得美好，即使有些许牺牲。我愿意成为牺牲的一部分，前提是我的牺牲一定能让世界变得好。",
+    "bonds": "脖子上前男友的纹身\"道尔斯基\"",
+    "flaws": "如果有人对我好，我很容易信任甚至沉迷上对方，即使对方只是好意。我会为了讨好对方做许多极端的事。",
+    "story": "本杰明是一位白人男巫，性格比较懒散，是普通的在深水城过日子的小市民，家里人是魔法世家，但自己却没有太多魔法适应性，不适合学魔法。\n家里人很关怀说不学也行你可以好好过日子，但叛逆性说我偏要学——结果强行激活魔法能量暴走成为狂野术。\n狂野魔法给自己的生活添加了很多混乱。比如炸了一个叫巨魔头骨巷的虎眼侦探事务所，家里人帮忙赔了不少钱，自己也在那里打工还债过一小段时间；比如在重要场合一直打嗝打了一整天；或者比如只是大概18,9岁左右的时候被抢劫打晕，醒来的时候强盗们都被藤蔓挂在墙壁上之类的。\n然后本杰明怂了，在任何情况下除非迫不得已否则不会主动激发狂野能量。\n后来谈恋爱了，对象是个神职人员，是一位叫道尔斯基的矮人牧师。本杰明恋爱脑发作，撕心裂肺的爱着对方，并且经常在深夜过度思考，对方非常信仰龙，所以本杰明为了倒贴甚至做了不少研究，只为了有共同话题，还在脖子上纹了对方的名字。\n对方被本杰明的行为震撼到了，意识到red flag后，尝试和本杰明沟通，但发现本杰明的爱实在是太沉重了，于是在发现根本没办法交流后悄然离开深水城，去追随龙神，断崖式与本杰明分手。本杰明不接受这样的事情，有点疯狂，只留自己一个人又哭又崩溃，尽可能空虚度日。\n最后的最后，本杰明的家人和朋友劝他出去旅旅游，去冒险，去转换心情。但本杰明怎么可能是爱旅游的人呀。他的心永远应该属于某个值得他喜欢的人。抱着这样的想法，多见见世界上的不同的人，他出门了。\n\n噢，顺带一提，他的魔法烂透了。",
+    "description": "和其他花里胡哨的冒险者相比，你似乎过于普通了，没有奇怪的物种，没有复杂的过往，没有国仇家恨、伟大抱负之类的看上去就很大压力的目标。也许在这里，普通亦是一种不普通。"
+  },
+  "inventory": {
+    "currency": {
+      "wallet": { "gp": 0, "pp": 0, "ep": 0, "sp": 0, "cp": 0 },
+      "total_gp": 30,
+      "total_gp_raw": "30GP"
+    },
+    "encumbrance": {
+      "equipment_weight": 8,
+      "pack1_weight": 74,
+      "pack2_weight": 0,
+      "total_weight": 82,
+      "light_threshold": 0,
+      "heavy_threshold": 0,
+      "overloaded_threshold": 0,
+      "max_capacity": 180
+    },
+    "items": [],
+    "wondrous_items": [],
+    "consumables": [],
+    "containers": [
+      {
+        "label": "背包 1",
+        "rows": "5-25",
+        "schema": { "name": "B", "desc": "G", "weight": "S", "qty": "V" },
+        "items": [
+          { "row": 5,  "name": "法杖（也视作长棍）", "description": null, "weight": null, "quantity": 5 },
+          { "row": 6,  "name": "地城套组",         "description": null, "weight": null, "quantity": 12 },
+          { "row": 8,  "name": "书籍",             "description": null, "weight": null, "quantity": 25 },
+          { "row": 9,  "name": "长袍",             "description": null, "weight": null, "quantity": 1 },
+          { "row": 12, "name": "铁蒺藜",           "description": null, "weight": null, "quantity": 1 },
+          { "row": 13, "name": "撬棍",             "description": null, "weight": null, "quantity": 2 },
+          { "row": 14, "name": "滚珠",             "description": null, "weight": null, "quantity": 1 },
+          { "row": 15, "name": "工具",             "description": null, "weight": null, "quantity": null }
+        ]
+      },
+      {
+        "label": "背包 2",
+        "rows": "5-25",
+        "schema": { "name": "Y", "desc": "AD", "weight": "AP", "qty": "AS" },
+        "items": [
+          { "row": 5, "name": "地城套组",         "description": null, "weight": "55", "quantity": 1 },
+          { "row": 6, "name": "滚珠",             "description": null, "weight": "2",  "quantity": 3 },
+          { "row": 7, "name": "法杖（也视作长棍）", "description": null, "weight": "4",  "quantity": 1 },
+          { "row": 8, "name": "书籍",             "description": null, "weight": "5",  "quantity": 1 },
+          { "row": 9, "name": "长袍",             "description": null, "weight": "4",  "quantity": 1 }
+        ]
+      },
+      {
+        "label": "次元袋 1",
+        "rows": "29-49",
+        "schema": { "name": "B", "desc": "G", "weight": "S", "qty": "V" },
+        "items": []
+      },
+      {
+        "label": "次元袋 2",
+        "rows": "29-49",
+        "schema": { "name": "Y", "desc": "AD", "weight": "AP", "qty": "AS" },
+        "items": []
+      }
+    ]
+  },
+  "auto_resources": [
+    { "id": "auto-spell-slot-1", "name": "一环法术位", "type": "count", "current": 4, "max": 4, "icon": "spellbook" },
+    { "id": "auto-spell-slot-2", "name": "二环法术位", "type": "count", "current": 3, "max": 3, "icon": "spellbook" },
+    { "id": "auto-spell-slot-3", "name": "三环法术位", "type": "count", "current": 3, "max": 3, "icon": "spellbook" }
+  ],
+  "exports": {
+    "dice_bot": ".st 力量:12 敏捷:14 体质*:8 智力:14 感知:8 魅力*:18 hp:20 hpmax:20 先攻:5 ac:15 dc:15 pp:9 熟练:3 运动*:0 特技:0 巧手*:0 隐匿*:0 调查:0 奥秘*:0 历史*:0 自然:0 宗教*:0 察觉:0 洞悉*:0 驯兽:0 医疗:0 求生:0 游说*:0 欺瞒*:0 威吓:0 表演*:0",
+    "embedded_json": null
+  }
+}

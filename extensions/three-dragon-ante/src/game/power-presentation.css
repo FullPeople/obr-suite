@@ -1,0 +1,21 @@
+ .power-overlay{--power-accent:#ead8ff;--power-formation:#d8b5ff;--power-smoke:#c3b1ba;position:absolute;inset:0;z-index:90;display:grid;grid-template-columns:minmax(180px,35%) minmax(0,1fr);align-items:center;gap:clamp(20px,4vw,72px);padding:clamp(20px,5vw,72px);background:radial-gradient(ellipse at 24% 50%,color-mix(in srgb,var(--power-accent) 26%,#3b2818aa) 0%,#160f0bb8 46%,#090807d6);backdrop-filter:blur(2px);pointer-events:auto;overflow:hidden;color:#f6e7c9;text-shadow:0 2px 14px #000000e0,0 1px 3px #000}
+ .power-overlay::before{content:"";position:absolute;inset:6%;border:1px solid color-mix(in srgb,var(--power-formation) 32%,transparent);border-radius:22px 38px 28px 44px;opacity:.7;pointer-events:none;mix-blend-mode:screen}
+.power-overlay[hidden]{display:none}
+.power-card-space{display:flex;justify-content:center;perspective:1100px}
+ .power-card{position:relative;width:clamp(145px,20vw,270px);aspect-ratio:5/7;background:linear-gradient(135deg,color-mix(in srgb,var(--power-formation) 22%,#664420),#281b12);border:5px double var(--power-formation);border-radius:10px;box-shadow:0 0 0 3px color-mix(in srgb,var(--power-accent) 52%,#b18b47),0 0 45px color-mix(in srgb,var(--power-smoke) 46%,transparent),20px 22px 55px #0009;color:var(--card-color,#e9c681);display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:16px 9px;transform-style:preserve-3d}
+ .power-card::after{content:"";position:absolute;inset:11px;border:1px solid color-mix(in srgb,var(--power-accent) 45%,transparent);border-radius:8px;opacity:.75;pointer-events:none}
+ .power-overlay[data-power-shape=ember] .power-card::after{clip-path:polygon(50% 0,100% 20%,88% 82%,50% 100%,12% 82%,0 20%);border-radius:0}.power-overlay[data-power-shape=tide] .power-card::after{border-radius:48% 52% 44% 56%}.power-overlay[data-power-shape=grove] .power-card::after{border-radius:45% 8% 45% 8%}.power-overlay[data-power-shape=arcane] .power-card::after{transform:rotate(45deg) scale(.86);border-radius:2px}.power-overlay[data-power-shape=crown] .power-card::after{clip-path:polygon(0 15%,25% 30%,50% 0,75% 30%,100% 15%,90% 100%,10% 100%);border-radius:0}
+.power-card-strength{position:absolute;top:9px;left:13px;font:bold clamp(28px,4vw,46px) Georgia,serif}
+.power-card-art{width:86%;margin:auto}.power-card-art svg{display:block;width:100%;height:auto;fill:currentColor}
+.power-card-name{font:700 clamp(16px,1.8vw,25px)/1.3 Georgia,'Microsoft YaHei',serif;text-align:center}
+.power-copy{max-height:86%;overflow:auto;scrollbar-width:thin;pointer-events:auto}
+.power-player{font-size:clamp(13px,1.3vw,18px);color:#d8bd85;margin:0 0 15px}
+ .power-target{font-size:clamp(12px,1.1vw,16px);color:var(--power-accent);margin:-7px 0 15px;letter-spacing:.02em}
+.power-continue{position:absolute;bottom:14px;left:12px;right:12px;margin:0;text-align:center;font-size:13px;line-height:1.5;color:#d8bd85;pointer-events:none}
+ .power-copy h2{font-size:clamp(28px,3.5vw,48px);line-height:1.25;margin:0 0 20px;color:var(--power-formation)}
+.power-description{font-size:clamp(16px,1.6vw,24px);line-height:1.65;margin:0;white-space:pre-line;overflow-wrap:anywhere}
+.table-shell[data-power-active=true] .table-bubbles>.turn{visibility:hidden;pointer-events:none}
+.table-shell .card-wrap.power-active>.card{box-shadow:0 0 0 2px #f6d68b,0 0 20px #f1c66a88}.table-shell .card-wrap.power-active[data-resolution-source="active"]>.card{border-color:#d8b5ffdd;box-shadow:inset 0 0 0 4px #d8b5ff18,0 0 0 2px #d8b5ff66,0 0 18px #b986df66,0 5px 9px #07130f66}
+.preview-hint{white-space:pre-line;overflow-wrap:anywhere}.preview-help{display:block;margin-top:12px;line-height:1.5;color:#d0bc9d}
+@media(max-width:600px){.power-overlay{grid-template-columns:minmax(105px,28%) minmax(0,1fr);padding:16px 12px;gap:15px}.power-card{width:100%;padding:12px 5px;border-width:3px}.power-card-strength{font-size:24px;top:5px;left:6px}.power-card-name{font-size:12px}.power-player{font-size:12px;margin-bottom:10px}.power-copy h2{font-size:25px;margin-bottom:12px}.power-description{font-size:16px;line-height:1.6}.power-copy{max-height:92%}}
+@media(prefers-reduced-motion:reduce){.power-card{transform:none!important}}

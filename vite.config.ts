@@ -27,28 +27,31 @@ function normaliseBase(raw: string): string {
 const SUITE_BASE = normaliseBase(process.env.SUITE_BASE || "/suite/");
 const SUITE_CHANNEL = (process.env.SUITE_CHANNEL || "stable").toLowerCase();
 
-function devNamespaceIsolation() {
-  const isDevChannel = SUITE_CHANNEL === "dev" || SUITE_BASE.includes("suite-dev");
-  return {
-    name: "obr-suite-dev-namespace-isolation",
-    enforce: "pre" as const,
-    transform(code: string, id: string) {
-      if (!isDevChannel) return null;
-      if (!/\.(ts|tsx|js|jsx|html)$/.test(id)) return null;
-      if (!code.includes("com.obr-suite/")) return null;
-      return {
-        code: code.replaceAll("com.obr-suite/", "com.obr-suite-dev/"),
-        map: null,
-      };
-    },
-  };
-}
+// 2026-08-25 — REMOVED: devNamespaceIsolation.
+//
+// It used to rewrite every literal `com.obr-suite/` to
+// `com.obr-suite-dev/` in dev builds, so a dev install and a stable
+// install could sit in the same room without fighting over scene
+// metadata, tool ids and broadcast channels.
+//
+// It was dropped on request. The cost it was paying is that content
+// authored on dev — doors, windows, secret doors, lights, every suite
+// setting — was invisible to stable, so anything worked out while
+// testing had to be redrawn after release. Sharing the namespace makes
+// dev a true preview of the same room.
+//
+// The trade it buys back: THE TWO CHANNELS MUST NEVER BE INSTALLED IN
+// THE SAME ROOM. They now register identical tool / context-menu /
+// popover ids and derive walls and lights from the same fog shapes, so
+// together they would collide on ids, overwrite each other's settings
+// and build every wall and light twice. The dynamic-fog settings tab
+// carries this warning for GMs.
 
 export default defineConfig(({ command }) => ({
   plugins:
     command === "serve"
-      ? [devNamespaceIsolation(), preact(), basicSsl()]
-      : [devNamespaceIsolation(), preact()],
+      ? [preact(), basicSsl()]
+      : [preact()],
   base: SUITE_BASE,
   server: {
     cors: { origin: "*" },
@@ -71,6 +74,7 @@ export default defineConfig(({ command }) => ({
       },
       input: {
         background: resolve(__dirname, "background.html"),
+        "workbench-launcher": resolve(__dirname, "workbench-launcher.html"),
         cluster: resolve(__dirname, "cluster.html"),
         "cluster-row": resolve(__dirname, "cluster-row.html"),
         settings: resolve(__dirname, "settings.html"),
@@ -114,8 +118,11 @@ export default defineConfig(({ command }) => ({
         "portal-edit": resolve(__dirname, "portal-edit.html"),
         "portal-destination": resolve(__dirname, "portal-destination.html"),
         "portal-blink": resolve(__dirname, "portal-blink.html"),
+        "transition-control": resolve(__dirname, "transition-control.html"),
+        "transition-display": resolve(__dirname, "transition-display.html"),
         "trickster-edit": resolve(__dirname, "trickster-edit.html"),
         "circleimage": resolve(__dirname, "circleimage.html"),
+        "transform": resolve(__dirname, "transform.html"),
         "resource-edit": resolve(__dirname, "resource-edit.html"),
         "resource-toast": resolve(__dirname, "resource-toast.html"),
         "resource-tracker": resolve(__dirname, "resource-tracker.html"),
@@ -134,8 +141,8 @@ export default defineConfig(({ command }) => ({
         "fullfog-edit": resolve(__dirname, "fullfog-edit.html"),
         "fullfog-light-edit": resolve(__dirname, "fullfog-light-edit.html"),
         "hp-bar": resolve(__dirname, "hp-bar.html"),
-        // 2026-05-19 — music board (dev-only via STABLE_HIDES; module
-        // registration is gated in background.ts).
+        "boss-bar": resolve(__dirname, "boss-bar.html"),
+        // Shared music controls; playback lives in the background module.
         "music-board": resolve(__dirname, "music-board.html"),
       },
     },

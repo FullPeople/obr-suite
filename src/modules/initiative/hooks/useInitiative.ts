@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "preact/compat";
-import OBR from "@owlbear-rodeo/sdk";
-import { InitiativeItem, CombatState } from "../types";
+import OBR, { type Item } from "@owlbear-rodeo/sdk";
+import { InitiativeItem, CombatState, TurnChangePayload } from "../types";
 import {
   METADATA_KEY,
   COMBAT_STATE_KEY,
+  BROADCAST_TURN_CHANGE,
   BROADCAST_COMBAT_START,
   BROADCAST_COMBAT_END,
   BROADCAST_COMBAT_PREPARE,
@@ -20,7 +21,9 @@ import {
 } from "../utils/constants";
 import { itemToInitiativeItem, getCombatState, genTiebreak } from "../utils/metadata";
 import { getLocalLang } from "../../../state";
+import { t } from "../utils/i18n";
 import { broadcastDiceRoll, isGlobalDarkRollEnabled } from "../../dice";
+import { readFixedRoll, consumeFixedRoll, randIntInclusive } from "../../dice/fixed-roll";
 
 export type RollType = "disadvantage" | "normal" | "advantage";
 export type EffectType = "prepare" | "ambush" | "combat";
@@ -52,6 +55,79 @@ function localRoll(type: RollType): LocalRoll {
   // disadvantage
   const winnerIdx = r1 <= r2 ? 0 : 1;
   return { rolls: [r1, r2], winnerIdx, finalValue: Math.min(r1, r2) };
+}
+
+// §9 — fixed variant of localRoll: the KEPT d20 face is `face`, the
+// partner die (adv/dis) is a real random face on the losing side of
+// the comparison, so winner semantics stay true (adv keeps the higher,
+// dis the lower; ties keep the first — face first satisfies both).
+function fixedLocalRoll(type: RollType, face: number): LocalRoll {
+  if (type === "normal") {
+    return { rolls: [face], winnerIdx: 0, finalValue: face };
+  }
+  const partner =
+    type === "advantage" ? randIntInclusive(1, face) : randIntInclusive(face, 20);
+  return { rolls: [face, partner], winnerIdx: 0, finalValue: face };
+}
+
+// §8 (2026-08-21) — turn-change notifications. Computed on the
+// ADVANCING client (players can't see invisible items, so only the
+// writer holds the full rotation) and broadcast to every client, self
+// included (default destination = ALL). The next-player walk skips
+// invisible entries entirely — their count/position can shift neither
+// the hint's content nor its timing — and the active name is withheld
+// when the active entry is itself invisible, so the wire says no more
+// than the existing stealth-turn overlay already does. Receiver lives
+// in initiative/index.ts (background) and uses OBR.notification.
+async function notifyTurnChange(
+  rotation: InitiativeItem[],
+  activeIdx: number,
+  round: number,
+): Promise<void> {
+  const active = rotation[activeIdx];
+  if (!active) return;
+  const activeInvisible = !!active.invisible || active.visible === false;
+  let playerIds = new Set<string>();
+  try {
+    const party = await OBR.party.getPlayers();
+    playerIds = new Set(party.filter((p) => p.role === "PLAYER").map((p) => p.id));
+  } catch (e) {
+    console.warn(
+      "[obr-suite/initiative] turn-change party read failed — ready hint skipped",
+      e,
+    );
+  }
+  let nextOwnerId: string | null = null;
+  let nextName: string | null = null;
+  for (let k = 1; k < rotation.length; k++) {
+    const cand = rotation[(activeIdx + k) % rotation.length];
+    if (cand.invisible || cand.visible === false) continue;
+    if (!cand.ownerId || !playerIds.has(cand.ownerId)) continue;
+    // The first public player-owned entry decides the hint. When it
+    // belongs to the active owner they already got the your-turn
+    // prompt — send nothing.
+    if (cand.ownerId !== active.ownerId) {
+      nextOwnerId = cand.ownerId;
+      nextName = cand.name || null;
+    }
+    break;
+  }
+  const payload: TurnChangePayload = {
+    activeOwnerId: active.ownerId || null,
+    activeName: activeInvisible ? null : (active.name || null),
+    activeInvisible,
+    nextOwnerId,
+    nextName,
+    round,
+  };
+  try {
+    await OBR.broadcast.sendMessage(BROADCAST_TURN_CHANGE, payload);
+  } catch (e) {
+    console.warn("[obr-suite/initiative] turn-change broadcast failed", {
+      payload,
+      error: e,
+    });
+  }
 }
 
 // `genTiebreak` moved to utils/metadata.ts (2026-05-14 #5 sortfix) so
@@ -149,6 +225,14 @@ export function useInitiative() {
   const isGMRef = useRef(false);
   const allItemsRef = useRef<InitiativeItem[]>([]);
   const playerIdRef = useRef("");
+  const editScope = useRef({ alive: false, ready: false, generation: 0 });
+  useEffect(() => {
+    const scope = editScope.current;
+    scope.alive = true; const generation = ++scope.generation;
+    const off = OBR.scene.onReadyChange(ready => { scope.generation++; scope.ready = ready; });
+    OBR.scene.isReady().then(ready => { if (scope.alive && generation === scope.generation) scope.ready = ready; }).catch(() => {});
+    return () => { scope.alive = false; scope.ready = false; scope.generation++; off(); };
+  }, []);
   // Optimistic active-id: updated eagerly when the GM clicks next/prev so
   // rapid clicks chain correctly even before the scene refresh arrives.
   const optimisticActiveIdRef = useRef<string | null>(null);
@@ -655,7 +739,7 @@ export function useInitiative() {
             dice: [{ type: "d20" as const, value: visual }],
             winnerIdx: 0,
             modifier: 0,
-            label: "先攻 / Initiative",
+            label: t(getLocalLang(), "initiative"),
             rollerId,
             rollerName,
           });
@@ -683,11 +767,23 @@ export function useInitiative() {
       (event) => {
         if (!isGMRef.current) return;
         const reqActive = (event.data as any)?.activeId as string | undefined;
-        // Sanity check: only advance if the player thought they were active.
-        // Prevents a stale request from skipping a turn after the GM already
-        // moved on via their own controls.
+        // Sanity + de-dupe. The OLD guard `if (reqActive && curActive &&
+        // reqActive !== curActive) return` was INVERTED: it only blocked
+        // when both ids were present AND differed, so a missing /
+        // momentarily-stale id (curActive === undefined during a write
+        // round-trip, or an empty reqActive) slipped THROUGH and fired a
+        // SECOND advanceTurn(1). Combined with a racing auto-activate
+        // that picked an unrelated token, that produced the "切下一位
+        // 瞬间跳到无关角色 + 两行同时滑出" double-switch (bug 2026-05-21).
+        //
+        // New rule: advance ONLY when the requester's claimed active
+        // matches the REAL current active, AND we're not already
+        // mid-advance past it (optimistic pointer moves synchronously in
+        // advanceTurn, so a duplicate request arriving before the write
+        // lands is rejected here).
         const curActive = allItemsRef.current.find((i) => i.active)?.id;
-        if (reqActive && curActive && reqActive !== curActive) return;
+        if (!reqActive || !curActive || reqActive !== curActive) return;
+        if (optimisticActiveIdRef.current && optimisticActiveIdRef.current !== curActive) return;
         advanceTurnRef.current(1);
       }
     );
@@ -775,21 +871,32 @@ export function useInitiative() {
     return !!playerId && item.ownerId === playerId;
   }, [isGM, playerId]);
 
-  const updateCount = useCallback(async (itemId: string, count: number) => {
-    const item = allItemsRef.current.find((i) => i.id === itemId);
-    if (!item) return;
-    const pid = playerIdRef.current;
-    if (!isGMRef.current && (!pid || item.ownerId !== pid)) {
-      // Toast removed — UI already disables the inputs for non-owner players.
-      return;
-    }
+  // Both numeric editors follow the existing count rule: GM or current owner.
+  // The SDK obtains a second item snapshot before running the Immer callback;
+  // validate that snapshot as well, since ownership may change after preflight.
+  const updateEditableValue = useCallback(async (itemId: string, value: number, field: "count" | "modifier") => {
+    const scope = editScope.current, generation = scope.generation;
+    const valid = () => scope.alive && scope.ready && scope.generation === generation;
+    if (!valid() || !Number.isFinite(value)) return;
+    const [pid, role, targets, ready] = await Promise.all([OBR.player.getId(), OBR.player.getRole(), OBR.scene.items.getItems([itemId]), OBR.scene.isReady()]);
+    const allowed = (item: Item) => {
+      const data = item.metadata[METADATA_KEY] as { ownerId?: string } | undefined;
+      if (item.id !== itemId || !data || typeof data !== "object" || Array.isArray(data)) return false;
+      const owner = item.createdUserId || data.ownerId || "";
+      return (role === "GM" && isGMRef.current) || (!!pid && pid === owner);
+    };
+    if (!ready || !valid() || !targets.some(allowed)) return;
     await OBR.scene.items.updateItems([itemId], (drafts) => {
+      if (!valid()) return;
       for (const d of drafts) {
+        if (!allowed(d)) continue;
         const existing = d.metadata[METADATA_KEY] as any;
-        d.metadata[METADATA_KEY] = { ...existing, count };
+        if (field === "count") d.metadata[METADATA_KEY] = { ...existing, count: value };
+        else d.metadata["com.initiative-tracker/dexMod"] = value;
       }
     });
   }, []);
+  const updateCount = useCallback((itemId: string, count: number) => updateEditableValue(itemId, count, "count"), [updateEditableValue]);
 
   // 2026-05-14 (#5 fix) — write BOTH count and tiebreak in one scene
   // update. Reorder mode needs this: positioning a card precisely
@@ -810,16 +917,45 @@ export function useInitiative() {
     [],
   );
 
-  const updateModifier = useCallback(async (itemId: string, mod: number) => {
-    await OBR.scene.items.updateItems([itemId], (drafts) => {
-      for (const d of drafts) {
-        d.metadata["com.initiative-tracker/dexMod"] = mod;
-      }
-    });
-  }, []);
+  const updateModifier = useCallback((itemId: string, mod: number) => updateEditableValue(itemId, mod, "modifier"), [updateEditableValue]);
 
   const rollInitiativeLocal = useCallback(async (itemId: string, type: RollType) => {
-    const { rolls, winnerIdx, finalValue } = localRoll(type);
+    // §9 — DM fixed initiative d20 (checklist: 单角色先攻 劣势/普通/优势).
+    // Fresh GM verification at THIS execution entry — the armed flag is
+    // client-local state, not proof of role. The fixed value targets
+    // the raw d20 face (the stored count is the raw d20; the panel adds
+    // the DEX mod at display time), so legal bounds are [1, 20].
+    let fixedFace: number | null = null;
+    const armed = readFixedRoll();
+    if (armed) {
+      try {
+        if ((await OBR.player.getRole()) === "GM") {
+          if (armed.value >= 1 && armed.value <= 20) {
+            consumeFixedRoll();
+            fixedFace = armed.value;
+            console.info("[obr-suite/initiative] fixed initiative roll applied", {
+              itemId, type, face: fixedFace,
+            });
+          } else {
+            OBR.notification
+              .show(
+                getLocalLang() === "en"
+                  ? `Fixed value ${armed.value} is outside the d20 range 1-20 — rolled for real (still armed)`
+                  : `固定值 ${armed.value} 超出 d20 范围 1-20，本次真实投掷（保持已固定）`,
+                "WARNING",
+              )
+              .catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn(
+          "[obr-suite/initiative] fixed-roll role verify failed — rolling for real",
+          e,
+        );
+      }
+    }
+    const { rolls, winnerIdx, finalValue } =
+      fixedFace !== null ? fixedLocalRoll(type, fixedFace) : localRoll(type);
 
     // Read this token's stored DEX modifier AND invisibility flag so the
     // dice animation can SHOW the bonus alongside the d20 and route to
@@ -904,7 +1040,7 @@ export function useInitiative() {
         }),
         winnerIdx,
         modifier: dexMod,
-        label: "先攻 / Initiative",
+        label: t(getLocalLang(), "initiative"),
         rollerId,
         rollerName,
         rollId,
@@ -1125,7 +1261,11 @@ export function useInitiative() {
     await writeCombatState({ preparing: false, inCombat: true, round: 1 });
     fireBroadcast(BROADCAST_COMBAT_START, {});
     fireBroadcast(BROADCAST_OPEN_PANEL, {});
-    broadcastFocus(firstId).catch(() => {});
+    broadcastFocus(firstId).catch((e) => {
+      console.warn("[obr-suite/initiative] combat-start focus broadcast failed", { to: firstId, error: e });
+    });
+    // §8: round-1 first turn gets the same notification as any advance.
+    void notifyTurnChange(visible, 0, 1);
   }, [broadcastFocus, writeCombatState]);
 
   const cancelPreparation = useCallback(async () => {
@@ -1192,18 +1332,65 @@ export function useInitiative() {
 
     // Queue scene write onto chain — runs serially, never drops.
     turnWriteChainRef.current = turnWriteChainRef.current.then(async () => {
+      // Block the refreshItems auto-activate path for the duration of
+      // this deliberate write (+ a short settle window). setActiveItem-
+      // FromIds passes id-strings to updateItems, which makes the SDK do
+      // an internal getItems round-trip; an items.onChange firing in
+      // that window could otherwise see a transient "nobody active"
+      // state and auto-activate a DIFFERENT token at the prev index —
+      // the "瞬间跳到无关角色" half of the double-switch bug.
+      autoActivateLocked.current = true;
       try {
         const prev =
           lastWrittenActiveIdRef.current
           ?? allItemsRef.current.find((i) => i.active)?.id
           ?? null;
-        if (nextRound !== null) {
-          await writeCombatState({ round: nextRound });
-        }
+        // §8: pointer write FIRST, round second. The old order could
+        // commit a round tick (statusTracker decrements buff rounds on
+        // it) and then fail the pointer write — a phantom turn. A moved
+        // pointer with a stale round is the lesser fault, and it's
+        // loudly logged below instead of silently swallowed.
         await setActiveItemFromIds(nextId, prev);
         lastWrittenActiveIdRef.current = nextId;
-        broadcastFocus(nextId).catch(() => {});
-      } catch {}
+        if (nextRound !== null) {
+          try {
+            await writeCombatState({ round: nextRound });
+          } catch (e) {
+            console.error(
+              "[obr-suite/initiative] round write failed after pointer moved",
+              { from: currentId, to: nextId, dir, round, wantedRound: nextRound, error: e },
+            );
+          }
+        }
+        broadcastFocus(nextId).catch((e) => {
+          console.warn("[obr-suite/initiative] focus broadcast failed", { to: nextId, error: e });
+        });
+        void notifyTurnChange(visible, nextIndex, nextRound ?? round);
+      } catch (e) {
+        // §8: the pointer write failed — roll back the optimistic
+        // pointer (unless a later queued click already re-targeted it)
+        // so the local UI can't silently drift from the scene.
+        if (optimisticActiveIdRef.current === nextId) {
+          optimisticActiveIdRef.current = currentId;
+        }
+        console.error(
+          "[obr-suite/initiative] advanceTurn write failed — optimistic pointer rolled back",
+          { from: currentId, to: nextId, dir, round, wantedRound: nextRound, error: e },
+        );
+        OBR.notification
+          .show(
+            getLocalLang() === "en"
+              ? "Turn advance failed — local pointer restored"
+              : "切换回合失败，已回退本地指针",
+            "ERROR",
+          )
+          .catch(() => {});
+      }
+      finally {
+        // Release after the post-write onChange has settled, so a
+        // genuine "active token removed" can still auto-activate later.
+        setTimeout(() => { autoActivateLocked.current = false; }, 350);
+      }
     });
     return turnWriteChainRef.current;
   }, [broadcastFocus, setActiveItemFromIds, writeCombatState]);
@@ -1227,7 +1414,11 @@ export function useInitiative() {
     const activeId = allItemsRef.current.find((i) => i.active)?.id;
     OBR.broadcast
       .sendMessage(BROADCAST_END_TURN_REQUEST, { activeId })
-      .catch(() => {});
+      .catch((e) => {
+        // §8: a dropped end-turn request must leave evidence — the GM
+        // never sees it, so the player's console is the only trace.
+        console.warn("[obr-suite/initiative] end-turn request broadcast failed", { activeId, error: e });
+      });
   }, [advanceTurn]);
 
   const endCombat = useCallback(async () => {

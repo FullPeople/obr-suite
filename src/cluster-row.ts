@@ -1,9 +1,9 @@
+import {WORKBENCH_DEV} from './workbench/channel';
 import OBR from "@owlbear-rodeo/sdk";
 import {
   startSceneSync,
   getState,
   onStateChange,
-  refreshFromScene,
   readLS,
   writeLS,
   getLocalLang,
@@ -14,6 +14,7 @@ import { assetUrl } from "./asset-base";
 import { bindPanelDrag, applyDragSide, watchDragSide } from "./utils/panelDrag";
 import { PANEL_IDS } from "./utils/panelLayout";
 import { installDebugOverlay } from "./utils/debugOverlay";
+import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
 
 // Cluster ROW iframe — only rendered while the user has the trigger
 // toggled on. Holds the actual action buttons. The row popover is
@@ -45,6 +46,7 @@ const BC_CHARCARD_AUTOPOPUP = "com.character-cards/auto-info-toggled";
 const LS_AUTO_BESTIARY = "com.bestiary/auto-popup";
 const LS_AUTO_CHARCARD = "character-cards/auto-info";
 
+const inAction = document.body.dataset.surface === 'action';
 const rowEl = document.getElementById("row") as HTMLDivElement;
 
 const GEAR_SVG = `<svg class="gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
@@ -59,6 +61,14 @@ let cachedAnnounceVersion: string | null = null;
 let timeStopActive = false;
 let musicBoardOpen = false;
 let isGM = false;
+let rowAlive = true;
+let roleRevision = 0;
+let timeStopReadRevision = 0;
+const rowDisposers: Array<() => void> = [];
+window.addEventListener("pagehide", () => {
+  rowAlive = false; ++roleRevision; ++timeStopReadRevision;
+  for (const dispose of rowDisposers.splice(0)) dispose();
+}, { once: true });
 
 function isAutoPopupOn(key: string): boolean {
   return readLS(key, "1") !== "0";
@@ -95,13 +105,15 @@ function btnHTML(opts: {
 const BC_CLUSTER_ROW_WIDTH = "com.obr-suite/cluster-row-width";
 
 function reportNaturalWidth() {
+  if (!rowAlive || inAction) return;
   const wrap = document.getElementById("wrap");
   const row = document.getElementById("row");
   const grip = document.getElementById("row-drag-handle");
   if (!wrap || !row) return;
   // Sum: drag-grip (incl. its own margins) + row content. Add 16px
   // padding so the popover frame doesn't crowd the buttons.
-  let w = row.offsetWidth + 16;
+  let w = row.scrollWidth + 16;
+  row.classList.toggle("is-overflowing", row.scrollWidth > row.clientWidth + 1);
   if (grip) w += grip.offsetWidth + 12;
   // Clamp so absurd lang strings don't grow the popover wider than
   // the viewport (background also clamps).
@@ -121,8 +133,10 @@ function reportNaturalWidth() {
 }
 
 function renderRow() {
+  if (!rowAlive) return;
   const s = getState();
   const lang = getLocalLang();
+  rowEl.setAttribute("aria-label", inAction ? (lang === "zh" ? "常用工具" : "Quick tools") : lang === "zh" ? "常用工具，窄屏时可横向滚动" : "Quick tools; scroll horizontally in narrow windows");
 
   const parts: string[] = [];
 
@@ -145,7 +159,7 @@ function renderRow() {
       })
     );
   }
-  if (isGM && s.enabled.musicBoard) {
+  if (s.enabled.musicBoard) {
     parts.push(
       btnHTML({
         id: "btnMusic",
@@ -160,10 +174,17 @@ function renderRow() {
   // auto-info. Dice-history toggle moved out: it has its own dedicated
   // trigger button at the bottom-right.
   const popupBtns: string[] = [];
+  if (isGM && s.enabled.transitions) {
+    parts.push(btnHTML({
+      id: "btnTransitions",
+      labelHtml: lang === "zh" ? "转场" : "Transitions",
+      title: lang === "zh" ? "短休、长休与文字演出" : "Short rest, long rest and custom titles",
+    }));
+  }
   // Bestiary popup toggle — visible to ALL roles now (was GM-only).
   // Players can also see the monster info popover when they own a
   // bestiary-bound token, so they need their own auto-popup control.
-  if (s.enabled.bestiary) {
+  if (!WORKBENCH_DEV && s.enabled.bestiary) {
     popupBtns.push(
       btnHTML({
         id: "btnBestiaryPopup",
@@ -174,7 +195,7 @@ function renderRow() {
       })
     );
   }
-  if (s.enabled.characterCards) {
+  if (!WORKBENCH_DEV && s.enabled.characterCards) {
     popupBtns.push(
       btnHTML({
         id: "btnCharCardPopup",
@@ -205,7 +226,7 @@ function renderRow() {
   parts.push(
     btnHTML({
       id: "btnAnnounce",
-      labelHtml: MEGAPHONE_SVG,
+      labelHtml: inAction ? (lang === "zh" ? "公告" : "Announcement") : MEGAPHONE_SVG,
       title: lang === "zh" ? "公告" : "Announcement",
     })
   );
@@ -213,7 +234,7 @@ function renderRow() {
   parts.push(
     btnHTML({
       id: "btnGear",
-      labelHtml: GEAR_SVG,
+      labelHtml: inAction ? (lang === "zh" ? "设置" : "Settings") : GEAR_SVG,
       title: `${t(lang, "btnSettings")} / ${t(lang, "btnAbout")}`,
     })
   );
@@ -239,6 +260,10 @@ function renderRow() {
   document.getElementById("btnTimeStop")?.addEventListener("click", onTimeStop);
   document.getElementById("btnFocus")?.addEventListener("click", onFocus);
   document.getElementById("btnMusic")?.addEventListener("click", onMusic);
+  document.getElementById("btnTransitions")?.addEventListener("click", () => {
+    void OBR.broadcast.sendMessage(BC_TRANSITIONS_OPEN, {}, { destination: "LOCAL" })
+      .catch(error => console.warn("[obr-suite] open transitions failed", error));
+  });
   document
     .getElementById("btnBestiaryPopup")
     ?.addEventListener("click", onBestiaryPopup);
@@ -414,20 +439,57 @@ function installSupporterOverlayCloseListener(): void {
 }
 
 OBR.onReady(async () => {
+  if (!rowAlive) return;
+  window.addEventListener("resize", reportNaturalWidth);
+  rowEl.addEventListener("wheel", (event) => {
+    if (rowEl.scrollWidth <= rowEl.clientWidth + 1 || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rowEl.clientWidth : 1;
+    rowEl.scrollLeft += event.deltaY * unit;
+    event.preventDefault();
+  }, { passive: false });
   installDebugOverlay();
   installSupporterOverlayCloseListener();
-  OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {
+  rowDisposers.push(OBR.broadcast.onMessage("com.obr-suite/timestop-state", (event) => {
+    if (!rowAlive) return;
+    ++timeStopReadRevision;
     timeStopActive = !!(event.data as any)?.active;
     renderRow();
-  });
-  OBR.broadcast.onMessage("com.obr-suite/music-board:state-active", (event) => {
+  }));
+  // Drive the 时停 button's gold state from scene metadata (the source
+  // of truth), not just the BC_STATE broadcast. The broadcast can fire
+  // BEFORE this row iframe mounts — e.g. "显示为 CG" turns time-stop on
+  // and THEN auto-opens this row, so the row would otherwise miss the
+  // active state and the button wouldn't go gold. Reading metadata on
+  // mount + on change closes that gap. NOTE: "com.time-stop/" is NOT
+  // rewritten by the dev-namespace plugin (only "com.obr-suite/"), so
+  // this key matches the time-stop module on both channels.
+  const TIMESTOP_META_KEY = "com.time-stop/state";
+  const syncTimeStopFromMeta = (meta: any) => {
+    const ts = meta?.[TIMESTOP_META_KEY];
+    const active = !!(ts && ts.active);
+    if (active !== timeStopActive) { timeStopActive = active; renderRow(); }
+  };
+  const readTimeStop = async () => {
+    const revision = ++timeStopReadRevision;
+    try {
+      if (!await OBR.scene.isReady() || !rowAlive || revision !== timeStopReadRevision) return;
+      const meta = await OBR.scene.getMetadata();
+      if (rowAlive && revision === timeStopReadRevision) syncTimeStopFromMeta(meta);
+    } catch {}
+  };
+  try { rowDisposers.push(OBR.scene.onMetadataChange(meta => { ++timeStopReadRevision; if (rowAlive) syncTimeStopFromMeta(meta); })); } catch {}
+  try { rowDisposers.push(OBR.scene.onReadyChange(ready => { ++timeStopReadRevision; if (ready && rowAlive) void readTimeStop(); })); } catch {}
+  rowDisposers.push(OBR.broadcast.onMessage("com.obr-suite/music-board:state-active", (event) => {
+    if (!rowAlive) return;
     musicBoardOpen = !!(event.data as any)?.open;
     renderRow();
-  });
+  }));
 
   const recheckRole = async () => {
+    const revision = ++roleRevision;
     try {
       const role = await OBR.player.getRole();
+      if (!rowAlive || revision !== roleRevision) return;
       const next = role === "GM";
       if (next !== isGM) {
         isGM = next;
@@ -437,21 +499,23 @@ OBR.onReady(async () => {
       console.warn("[obr-suite/cluster-row] getRole failed", e);
     }
   };
-  await recheckRole();
-  OBR.player.onChange((p) => {
+  rowDisposers.push(OBR.player.onChange((p) => {
+    ++roleRevision;
+    if (!rowAlive) return;
     const next = p.role === "GM";
     if (next !== isGM) {
       isGM = next;
       renderRow();
     }
-  });
+  }));
 
+  rowDisposers.push(onStateChange(() => renderRow()), onLangChange(() => renderRow()));
   startSceneSync();
-  onStateChange(() => renderRow());
-  onLangChange(() => renderRow());
-
-  await refreshFromScene();
   renderRow();
+  // Install all subscriptions before independent initial reads. A slow role or
+  // time-stop read must not postpone settings updates in the already open row.
+  void recheckRole();
+  void readTimeStop();
 
   // Drag-handle for the row itself. Positioned at the start/end of
   // the row container so the user can grab it without overlapping any

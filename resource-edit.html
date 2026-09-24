@@ -234,58 +234,58 @@ label.field, .field{
 <body>
 <div class="card">
   <div class="hdr">
-    <span class="ttl" id="title">编辑资源</span>
-    <button class="x" id="btnX" type="button" title="关闭">×</button>
+    <span class="ttl" id="title" data-i18n="reEditTitle">编辑资源</span>
+    <button class="x" id="btnX" type="button" title="关闭" data-i18n-title="reClose">×</button>
   </div>
   <div class="body">
     <label class="field">
-      <span>名字</span>
-      <input type="text" id="name" maxlength="32" placeholder="如：一环法术槽 / 灵感" />
+      <span data-i18n="reLblName">名字</span>
+      <input type="text" id="name" maxlength="32" placeholder="如：一环法术槽 / 灵感" data-i18n-placeholder="reNamePh" />
     </label>
 
     <div class="field">
-      <span>类型</span>
+      <span data-i18n="reLblType">类型</span>
       <div class="type-toggle" id="typeToggle">
-        <button type="button" data-type="count"  class="on">个数</button>
-        <button type="button" data-type="bar">进度</button>
-        <button type="button" data-type="number">数字</button>
+        <button type="button" data-type="count"  class="on" data-i18n="reTypeCount">个数</button>
+        <button type="button" data-type="bar" data-i18n="reTypeBar">进度</button>
+        <button type="button" data-type="number" data-i18n="reTypeNumber">数字</button>
       </div>
     </div>
 
     <div class="row-2">
       <label class="field">
-        <span>当前</span>
+        <span data-i18n="reLblCurrent">当前</span>
         <input type="number" id="current" step="1" />
       </label>
       <label class="field">
-        <span>最大</span>
+        <span data-i18n="reLblMax">最大</span>
         <input type="number" id="max" step="1" min="0" />
       </label>
     </div>
 
     <div class="field">
-      <span>图标</span>
+      <span data-i18n="reLblIcon">图标</span>
       <div class="icon-grid" id="iconGrid"></div>
     </div>
 
     <div class="presets-wrap">
       <div class="lbl-row">
-        <span>预设（名字 · 类型 · 上限 · 图标 一起存）</span>
-        <button class="add" id="btnAddPreset" type="button">+ 保存当前为预设</button>
+        <span data-i18n="rePresetsLabel">预设（名字 · 类型 · 上限 · 图标 一起存）</span>
+        <button class="add" id="btnAddPreset" type="button" data-i18n="reAddPreset">+ 保存当前为预设</button>
       </div>
       <div class="chips" id="chipsPresets"></div>
     </div>
 
     <div class="preview-row" id="preview">
       <span class="preview-icon" id="previewIcon"></span>
-      <span class="preview-label" id="previewLabel">预览</span>
+      <span class="preview-label" id="previewLabel" data-i18n="rePreview">预览</span>
     </div>
   </div>
   <div class="btn-row">
-    <button class="btn danger" id="btnDelete" type="button" style="display:none">删除</button>
+    <button class="btn danger" id="btnDelete" type="button" style="display:none" data-i18n="reBtnDelete">删除</button>
     <span style="flex:1"></span>
-    <button class="btn" id="btnCancel" type="button">取消</button>
-    <button class="btn primary" id="btnSave" type="button">保存</button>
+    <button class="btn" id="btnCancel" type="button" data-i18n="reBtnCancel">取消</button>
+    <button class="btn primary" id="btnSave" type="button" data-i18n="reBtnSave">保存</button>
   </div>
 </div>
 <script type="module" src="/src/modules/resourceTracker/edit-page.ts"></script>

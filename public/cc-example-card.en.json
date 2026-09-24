@@ -1,0 +1,379 @@
+{
+  "schema_version": "0.3",
+  "meta": {
+    "template_name": "Belling",
+    "template_version": "ver.",
+    "layout_version": "v1.0.12",
+    "ruleset": null,
+    "source_file": "tmp1hqmclhg.xlsx",
+    "parsed_at": "2026-05-26T02:54:55Z"
+  },
+  "identity": {
+    "character_name": "Benjamin Flamingo",
+    "display_name": "Benjamin Flamingo",
+    "player": "Hadrosaur",
+    "race": {
+      "name": "Human",
+      "subrace": null
+    },
+    "alignment": null,
+    "faith": null,
+    "age": 33,
+    "gender": "Male",
+    "height": "165 cm",
+    "weight": "50 kg",
+    "hometown": "Waterdeep",
+    "languages": [
+      "Common",
+      "Draconic"
+    ],
+    "tool_proficiencies": [
+      "Tinker's Tools"
+    ]
+  },
+  "classes": [
+    {
+      "role": "Primary",
+      "name": "Sorcerer",
+      "subclass": "Wild Magic",
+      "level": 6
+    },
+    {
+      "role": "Multiclass 1",
+      "name": null,
+      "subclass": null,
+      "level": null
+    },
+    {
+      "role": "Multiclass 2",
+      "name": null,
+      "subclass": null,
+      "level": null
+    }
+  ],
+  "total_level": 6,
+  "abilities": {
+    "str": {
+      "total": 12, "initial": 12, "background": 0, "growth": 0, "misc": 0, "modifier": 1,
+      "save": { "proficient": false, "bonus": 1, "misc": 0 }
+    },
+    "dex": {
+      "total": 14, "initial": 14, "background": 0, "growth": 0, "misc": 0, "modifier": 2,
+      "save": { "proficient": false, "bonus": 2, "misc": 0 }
+    },
+    "con": {
+      "total": 8, "initial": 8, "background": 0, "growth": 0, "misc": 0, "modifier": -1,
+      "save": { "proficient": true, "bonus": 2, "misc": 0 }
+    },
+    "int": {
+      "total": 14, "initial": 13, "background": 1, "growth": 0, "misc": 0, "modifier": 2,
+      "save": { "proficient": false, "bonus": 2, "misc": 0 }
+    },
+    "wis": {
+      "total": 8, "initial": 8, "background": 0, "growth": 0, "misc": 0, "modifier": -1,
+      "save": { "proficient": false, "bonus": -1, "misc": 0 }
+    },
+    "cha": {
+      "total": 18, "initial": 15, "background": 2, "growth": 1, "misc": 0, "modifier": 4,
+      "save": { "proficient": true, "bonus": 7, "misc": 0 }
+    }
+  },
+  "core_stats": {
+    "proficiency_bonus": 3,
+    "initiative": 5,
+    "ac": 15,
+    "dc": 15,
+    "dc_ability": "Charisma",
+    "passive_perception": 9,
+    "speed": 30,
+    "size": "Medium",
+    "hp": { "current": 20, "max": 20, "temp": 0 },
+    "hit_dice": { "current": 6, "max": 6, "die_size": null }
+  },
+  "defenses": {
+    "resistances": [],
+    "immunities": [],
+    "advantages": [],
+    "disadvantages": []
+  },
+  "skills": [
+    { "name": "Athletics",       "ability": "str", "proficiency": "proficient", "total": 4,  "misc_bonus": 0 },
+    { "name": "Acrobatics",      "ability": "dex", "proficiency": "none",       "total": 2,  "misc_bonus": 0 },
+    { "name": "Sleight of Hand", "ability": "dex", "proficiency": "proficient", "total": 5,  "misc_bonus": 0 },
+    { "name": "Stealth",         "ability": "dex", "proficiency": "proficient", "total": 5,  "misc_bonus": 0 },
+    { "name": "Investigation",   "ability": "int", "proficiency": "none",       "total": 2,  "misc_bonus": 0 },
+    { "name": "Arcana",          "ability": "int", "proficiency": "proficient", "total": 5,  "misc_bonus": 0 },
+    { "name": "History",         "ability": "int", "proficiency": "proficient", "total": 5,  "misc_bonus": 0 },
+    { "name": "Nature",          "ability": "int", "proficiency": "none",       "total": 2,  "misc_bonus": 0 },
+    { "name": "Religion",        "ability": "int", "proficiency": "proficient", "total": 5,  "misc_bonus": 0 },
+    { "name": "Perception",      "ability": "wis", "proficiency": "none",       "total": -1, "misc_bonus": 0 },
+    { "name": "Insight",         "ability": "wis", "proficiency": "proficient", "total": 2,  "misc_bonus": 0 },
+    { "name": "Animal Handling", "ability": "wis", "proficiency": "none",       "total": -1, "misc_bonus": 0 },
+    { "name": "Medicine",        "ability": "wis", "proficiency": "none",       "total": -1, "misc_bonus": 0 },
+    { "name": "Survival",        "ability": "wis", "proficiency": "none",       "total": -1, "misc_bonus": 0 },
+    { "name": "Persuasion",      "ability": "cha", "proficiency": "proficient", "total": 7,  "misc_bonus": 0 },
+    { "name": "Deception",       "ability": "cha", "proficiency": "proficient", "total": 7,  "misc_bonus": 0 },
+    { "name": "Intimidation",    "ability": "cha", "proficiency": "none",       "total": 4,  "misc_bonus": 0 },
+    { "name": "Performance",     "ability": "cha", "proficiency": "proficient", "total": 7,  "misc_bonus": 0 }
+  ],
+  "combat": {
+    "armor": { "name": null, "ac_base": 13, "dex_bonus_cap": 2, "attuned": false, "weight": null, "equipped": true },
+    "shield": { "ac_bonus": 2, "attuned": false, "equipped": false },
+    "weapons": [
+      {
+        "name": "Quarterstaff",
+        "proficient": true,
+        "attack_bonus": "+4",
+        "damage": "1d6+1",
+        "damage_type": "Bludgeoning",
+        "extra_damage": null,
+        "extra_damage_type": null,
+        "mastery": "Topple",
+        "mastery_effect": "When you hit a creature with this weapon, you can force the target to make a Constitution saving throw (DC 8 + the modifier used for the attack + your proficiency bonus). On a failure, the target falls Prone.",
+        "weight": null,
+        "ammo_type": null,
+        "properties": "Versatile (1d8)"
+      },
+      {
+        "name": "Spear",
+        "proficient": true,
+        "attack_bonus": "+4",
+        "damage": "1d6+1",
+        "damage_type": "Piercing",
+        "extra_damage": null,
+        "extra_damage_type": null,
+        "mastery": "Sap",
+        "mastery_effect": "When you hit a creature with this weapon, that creature has Disadvantage on its next attack roll before the start of your next turn.",
+        "weight": null,
+        "ammo_type": null,
+        "properties": "Thrown (range 20/60), Versatile (1d8)"
+      },
+      {
+        "name": "Dagger",
+        "proficient": true,
+        "attack_bonus": "+5",
+        "damage": "1d4+2",
+        "damage_type": "Piercing",
+        "extra_damage": null,
+        "extra_damage_type": null,
+        "mastery": "Nick",
+        "mastery_effect": "When you make the extra attack granted by the Light property, you can make it as part of the Attack action instead of as a Bonus Action. You can still make this extra attack only once per turn.",
+        "weight": null,
+        "ammo_type": null,
+        "properties": "Finesse, Light, Thrown (range 20/60)"
+      }
+    ],
+    "other_equipment": []
+  },
+  "spellcasting": {
+    "spellcasting_ability": "Charisma",
+    "save_dc": 15,
+    "attack_bonus": "D20+7",
+    "max_prepared": null,
+    "spell_slots": {
+      "1": { "current": null, "max": 4 },
+      "2": { "current": null, "max": 3 },
+      "3": { "current": null, "max": 3 }
+    },
+    "sorcery_points": { "current": 32, "max": 32 },
+    "always_known": [],
+    "cantrips_known": [
+      {
+        "level": 0,
+        "name": "Sorcerous Burst",
+        "description": "You cast sorcerous energy at one creature or object within range. Make a ranged spell attack against the target. On a hit, the target takes 1d8 damage of an energy type you choose: Acid, Cold, Fire, Lightning, Poison, Psychic, or Thunder.\nIf you roll an 8 on a d8 for this spell, you can roll another d8, and add it to the damage. When you cast this spell, the maximum number of these extra d8s you can add to the damage equals your spellcasting ability modifier.\nCantrip Upgrade. The spell's initial damage increases by 1d8 when you reach levels 5 (2d8), 11 (3d8), and 17 (4d8).",
+        "meta": { "school": "Evocation", "casting_time": "Action", "range": "120 ft.", "components": "V, S", "duration": "Instantaneous", "concentration": false, "ritual": false, "english": "Sorcerous Burst", "source": "Player's Handbook" }
+      },
+      {
+        "level": 0,
+        "name": "Blade Ward",
+        "description": "Until the spell ends, whenever a creature makes an attack roll against you, that creature subtracts 1d4 from the attack roll.",
+        "meta": { "school": "Abjuration", "casting_time": "Action", "range": "Self", "components": "V, S", "duration": "Concentration, up to 1 minute", "concentration": true, "ritual": false, "english": "Blade Ward", "source": "Player's Handbook" }
+      },
+      {
+        "level": 0,
+        "name": "Prestidigitation",
+        "description": "You create one of the following magical effects within range. If you cast this spell multiple times, you can have up to three of its non-instantaneous effects active at a time.\n　　• Sensory Effect. You create an instantaneous, harmless sensory effect, such as a shower of sparks, a puff of wind, faint musical notes, or an odd odor.\n　　• Fire Play. You instantaneously light or snuff out a candle, a torch, or a small campfire.\n　　• Clean or Soil. You instantaneously clean or soil an object no larger than 1 cubic foot.\n　　• Minor Sensation. You chill, warm, or flavor up to 1 cubic foot of nonliving material for 1 hour.\n　　• Magic Mark. You make a color, a small mark, or a symbol appear on an object or a surface for 1 hour.\n　　• Minor Creation. You create a nonmagical trinket or an illusory image that can fit in your hand and that lasts until the end of your next turn. The trinket can't deal damage or be worth more than 1 CP.",
+        "meta": { "school": "Transmutation", "casting_time": "Action", "range": "10 ft.", "components": "V, S", "duration": "Up to 1 hour", "concentration": false, "ritual": false, "english": "Prestidigitation", "source": "Player's Handbook" }
+      },
+      {
+        "level": 0,
+        "name": "True Strike",
+        "description": "Guided by a flash of magical insight, you make one attack with the weapon used in the casting. The attack uses your spellcasting ability (rather than Strength or Dexterity) for the attack and damage rolls. If the attack deals damage, you can choose to make it Radiant damage or keep the weapon's normal damage type.\nCantrip Upgrade. Whether you cause Radiant damage or the weapon's normal type, the attack deals additional Radiant damage at levels 5 (1d6), 11 (2d6), and 17 (3d6).",
+        "meta": { "school": "Divination", "casting_time": "Action", "range": "Self", "components": "S, M", "duration": "Instantaneous", "concentration": false, "ritual": false, "english": "True Strike", "source": "Player's Handbook" }
+      },
+      {
+        "level": 0,
+        "name": "Message",
+        "description": "You point toward a creature within range and whisper a message. The target (and only the target) hears the message and can reply in a whisper that only you can hear.\nYou can cast this spell through solid objects if you are familiar with the target and know it is beyond the barrier. Magical silence, 1 foot of stone, 1 inch of common metal, or a thin sheet of lead blocks the spell.",
+        "meta": { "school": "Transmutation", "casting_time": "Action", "range": "120 ft.", "components": "S, M", "duration": "Instantaneous", "concentration": false, "ritual": false, "english": "Message", "source": "Player's Handbook" }
+      }
+    ],
+    "prepared": [
+      {
+        "level": 1, "name": "Witch Bolt", "group": 1,
+        "description": "A beam of crackling blue energy lances toward a creature within range, forming a sustained arc of lightning between you and the target. Make a ranged spell attack against the target. On a hit, the target takes 2d12 Lightning damage.\nOn each of your subsequent turns, you can use a Bonus Action to deal 1d12 Lightning damage to the target automatically.\nThe spell ends if the target is ever outside the spell's range or if it has Total Cover from you.\nUsing a Higher-Level Spell Slot. The initial damage increases by 1d12 for each spell slot level above 1.",
+        "meta": { "school": "Evocation", "casting_time": "Action", "range": "60 ft.", "components": "V, S, M", "duration": "Concentration, up to 1 minute", "concentration": true, "ritual": false, "english": "Witch Bolt", "source": "Player's Handbook" }
+      },
+      {
+        "level": 1, "name": "Burning Hands", "group": 1,
+        "description": "As you hold your hands with thumbs touching and fingers spread, a thin sheet of flames shoots forth from your outstretched fingertips. Each creature in a 15-foot Cone must make a Dexterity saving throw, taking 3d6 Fire damage on a failed save, or half as much damage on a successful one.\nThe fire ignites any flammable objects in the area that aren't being worn or carried.\nUsing a Higher-Level Spell Slot. The damage increases by 1d6 for each spell slot level above 1.",
+        "meta": { "school": "Evocation", "casting_time": "Action", "range": "Self", "components": "V, S", "duration": "Instantaneous", "concentration": false, "ritual": false, "english": "Burning Hands", "source": "Player's Handbook" }
+      },
+      {
+        "level": 1, "name": "Mage Armor", "group": 1,
+        "description": "You touch a willing creature who isn't wearing armor. Until the spell ends, the target's base AC becomes 13 + its Dexterity modifier. The spell ends early if the target dons armor.",
+        "meta": { "school": "Abjuration", "casting_time": "Action", "range": "Touch", "components": "V, S, M", "duration": "8 hours", "concentration": false, "ritual": false, "english": "Mage Armor", "source": "Player's Handbook" }
+      },
+      {
+        "level": 1, "name": "Detect Magic", "group": 1,
+        "description": "For the duration, you sense the presence of magical effects within 30 feet of yourself. If you sense such effects, you can take the Magic action to see a faint aura around any visible creature or object in the area that bears magic, and if a magical effect was created by a spell, you learn the spell's school of magic.\nThe spell is blocked by 1 foot of stone, dirt, or wood; 1 inch of metal; or a thin sheet of lead.",
+        "meta": { "school": "Divination", "casting_time": "Action or Ritual", "range": "Self", "components": "V, S", "duration": "Concentration, up to 10 minutes", "concentration": true, "ritual": true, "english": "Detect Magic", "source": "Player's Handbook" }
+      },
+      {
+        "level": 2, "name": "Misty Step", "group": 1,
+        "description": "Briefly surrounded by silvery mist, you teleport up to 30 feet to an unoccupied space you can see.",
+        "meta": { "school": "Conjuration", "casting_time": "Bonus Action", "range": "Self", "components": "V", "duration": "Instantaneous", "concentration": false, "ritual": false, "english": "Misty Step", "source": "Player's Handbook" }
+      },
+      {
+        "level": 2, "name": "Vortex Warp", "group": 1,
+        "description": "• You magically twist space around another creature you can see within range. The target must succeed on a Constitution saving throw (the target can choose to fail), or the target is teleported to an unoccupied space of your choice that you can see within range. The chosen space must be on a surface or in a liquid that can support the target without it having to squeeze.\n• Using a Higher-Level Spell Slot. The range increases by 30 feet for each spell slot level above 2.",
+        "meta": { "school": "Conjuration", "casting_time": "Action", "range": "90 ft.", "components": "V, S", "duration": "Instantaneous", "concentration": false, "ritual": false, "english": "Vortex Warp", "source": "Strixhaven: A Curriculum of Chaos" }
+      },
+      {
+        "level": 1, "name": "Shield", "group": 1,
+        "description": "An invisible barrier of magical force appears and protects you. Until the start of your next turn, you have a +5 bonus to AC, including against the triggering attack, and you take no damage from Magic Missile.",
+        "meta": { "school": "Abjuration", "casting_time": "Reaction, taken when you are hit by an attack or targeted by Magic Missile", "range": "Self", "components": "V, S", "duration": "1 round", "concentration": false, "ritual": false, "english": "Shield", "source": "Player's Handbook" }
+      },
+      {
+        "level": 3, "name": "Gaseous Form", "group": 1,
+        "description": "You transform a willing creature you touch, along with everything it's wearing and carrying, into a misty cloud for the duration. The spell ends if the creature drops to 0 Hit Points or ends the spell as a Magic action.\nWhile in this form, the target's only mode of movement is a Fly Speed of 10 feet and it can hover. The target can enter and occupy the space of another creature. The target has Resistance to Bludgeoning, Piercing, and Slashing damage, and it has Immunity to the Prone condition and has Advantage on Strength, Dexterity, and Constitution saving throws. The target can pass through small holes and narrow openings, but it treats liquids as though they were solid surfaces.\nThe target can't talk or manipulate objects, and any objects it was carrying or holding can't be dropped, used, or otherwise interacted with. The target can't attack or cast spells.\nUsing a Higher-Level Spell Slot. You can target one additional willing creature for each spell slot level above 3.",
+        "meta": { "school": "Transmutation", "casting_time": "Action", "range": "Touch", "components": "V, S, M", "duration": "Concentration, up to 1 hour", "concentration": true, "ritual": false, "english": "Gaseous Form", "source": "Player's Handbook" }
+      },
+      {
+        "level": 2, "name": "Mirror Image", "group": 2,
+        "description": "Three illusory duplicates of yourself appear in your space. Until the spell ends, the duplicates move with you and mimic your actions, shifting position so it's impossible to track which image is real.\nEach time a creature hits you with an attack roll during the spell's duration, roll a d6 for each remaining duplicate. If any of the d6s rolls a 3 or higher, one of the duplicates is destroyed in place of you. A duplicate can be destroyed only by an attack that hits it. It ignores all other damage and effects. The spell ends when all three duplicates are destroyed.\nA creature is unaffected by this spell if it has the Blinded condition, has Blindsight, or has Truesight.",
+        "meta": { "school": "Illusion", "casting_time": "Action", "range": "Self", "components": "V, S", "duration": "1 minute", "concentration": false, "ritual": false, "english": "Mirror Image", "source": "Player's Handbook" }
+      },
+      {
+        "level": 1, "name": "Comprehend Languages", "group": 2,
+        "description": "For the duration, you understand the literal meaning of any language that you hear or see signed. You also understand any written language that you see, but you must be touching the surface on which the words are written. It takes about 1 minute to read one page of text.\nThis spell doesn't decode secret messages in a text or a glyph, such as an arcane sigil, that isn't part of a written language.",
+        "meta": { "school": "Divination", "casting_time": "Action or Ritual", "range": "Self", "components": "V, S, M", "duration": "1 hour", "concentration": false, "ritual": true, "english": "Comprehend Languages", "source": "Player's Handbook" }
+      }
+    ]
+  },
+  "features": {
+    "class_features": [
+      { "name": "Spellcasting", "description": "You draw on your innate magic to cast spells. See chapter 7 for the rules on spellcasting. The information below details how you use those rules with Sorcerer spells, which appear in the Sorcerer spell list later in this class description.", "level": 1 },
+      { "name": "Cantrips", "description": "You know four cantrips of your choice from the Sorcerer spell list. Light, Prestidigitation, Shocking Grasp, and Sorcerous Burst are recommended. Whenever you gain a Sorcerer level, you can replace one of your cantrips from this feature with another cantrip of your choice from the Sorcerer spell list.\nWhen you reach Sorcerer levels 4 and 10, you learn another cantrip of your choice from the Sorcerer spell list, as shown in the Cantrips column of the Sorcerer Features table.", "level": null },
+      { "name": "Spell Slots", "description": "The Sorcerer Features table shows how many spell slots you have to cast your level 1+ spells. You regain all expended spell slots when you finish a Long Rest.", "level": null },
+      { "name": "Prepared Spells", "description": "You prepare the list of level 1+ spells that are available for you to cast with this feature. To start, choose two level 1 spells from the Sorcerer spell list. Burning Hands and Detect Magic are recommended.\nThe number of spells on your list increases as you gain Sorcerer levels, as shown in the Prepared Spells column of the Sorcerer Features table. Whenever that number increases, choose additional Sorcerer spells until the number of spells on your list matches the number in the table. The chosen spells must be of a level for which you have spell slots. For example, as a level 3 Sorcerer, your list of prepared spells can include six Sorcerer spells of levels 1 and 2 in any combination.\nIf another Sorcerer feature gives you spells that you always have prepared, those spells don't count against the number of spells you can prepare with this feature, but those spells otherwise count as Sorcerer spells for you.", "level": null },
+      { "name": "Changing Your Prepared Spells", "description": "Whenever you gain a Sorcerer level, you can replace one spell on your list with another Sorcerer spell for which you have spell slots.", "level": null },
+      { "name": "Spellcasting Ability", "description": "Charisma is your spellcasting ability for your Sorcerer spells.", "level": null },
+      { "name": "Spellcasting Focus", "description": "You can use an Arcane Focus as a Spellcasting Focus for your Sorcerer spells.", "level": null },
+      { "name": "Innate Sorcery", "description": "An event in your past left an indelible mark on you, infusing you with simmering magic. As a Bonus Action, you can unleash that magic for 1 minute, during which you gain the following benefits:\n• The spell save DC of your Sorcerer spells increases by 1.\n• You have Advantage on the attack rolls of Sorcerer spells you cast.\nYou can use this feature twice, and you regain all expended uses of it when you finish a Long Rest.", "level": 1 },
+      { "name": "Font of Magic", "description": "You can tap into the wellspring of magic within yourself. This wellspring is represented by Sorcery Points, which allow you to create a variety of magical effects.\nYou have 2 Sorcery Points, and you gain more as you reach higher levels, as shown in the Sorcery Points column of the Sorcerer Features table. You can't have more Sorcery Points than the number shown in the table for your level. You regain all expended Sorcery Points when you finish a Long Rest.\nYou can use your Sorcery Points to fuel the options below, along with other features, such as Metamagic, that use those points.\nConverting Spell Slots to Sorcery Points. You can expend a spell slot to gain a number of Sorcery Points equal to the slot's level (no action required).\nCreating Spell Slots. As a Bonus Action, you can transform unexpended Sorcery Points into one spell slot. The Creating Spell Slots table shows the cost of creating a spell slot of a given level, and it lists the minimum Sorcerer level you must be to create a slot. You can create a spell slot no higher than level 5.\nAny spell slot you create with this feature vanishes when you finish a Long Rest.\n\nCreating Spell Slots\nSpell Slot Level | Sorcery Point Cost | Min. Sorcerer Level\n      1                  2                    2\n      2                  3                    3\n      3                  5                    5\n      4                  6                    7\n      5                  7                    9", "level": 2 },
+      { "name": "Metamagic", "description": "Because your magic flows from within, you can alter your spells to suit your needs; you gain two Metamagic options of your choice. You use the chosen options to temporarily modify spells you cast. To use an option, you must spend the number of Sorcery Points it costs.\nYou can use only one Metamagic option on a spell when you cast it unless otherwise noted in one of those options.\nWhenever you gain a Sorcerer level, you can replace one of your Metamagic options with one you don't know. At Sorcerer levels 10 and 17, you gain two more Metamagic options of your choice.", "level": 2 },
+      { "name": "Empowered Spell", "description": "Cost: 1 Sorcery Point\nWhen you roll damage for a spell, you can spend 1 Sorcery Point to reroll a number of the damage dice up to your Charisma modifier (minimum of one). You must use the new rolls.\nYou can use Empowered Spell even if you've already used a different Metamagic option during the casting of the spell.", "level": null },
+      { "name": "Subtle Spell", "description": "Cost: 1 Sorcery Point\nWhen you cast a spell, you can spend 1 Sorcery Point to cast it without any Verbal, Somatic, or Material components, except Material components that are consumed by the spell or that have a cost specified in the spell.", "level": null },
+      { "name": "Sorcerous Restoration", "description": "When you finish a Short Rest, you can regain expended Sorcery Points, but no more than a number equal to half your Sorcerer level (round down).\nOnce you use this feature, you can't do so again until you finish a Long Rest.", "level": 5 },
+      { "name": "Wild Magic Surge", "description": "Your spellcasting can unleash surges of untamed magic. Once per turn, immediately after you cast a Sorcerer spell of level 1+, you can roll a d20. If you roll a 20, roll on the Wild Magic Surge table to determine the random magical effect that occurs.\nIf the result on that table is a spell, it's too wild to be affected by your Metamagic.", "level": 3 },
+      { "name": "Tides of Chaos", "description": "You can manipulate the forces of chance to give yourself Advantage on one D20 Test. You must decide to use this feature before rolling the d20. Once you use this feature, you can't do so again until you cast a Sorcerer spell of level 1+ using a spell slot or you finish a Long Rest.\nIf you use this feature before you finish a Long Rest, you automatically roll on the Wild Magic Surge table after you cast that Sorcerer spell.", "level": 3 },
+      { "name": "Bend Luck", "description": "You gain the ability to twist fate with your wild magic. When another creature you can see makes a D20 Test, you can take a Reaction and spend 1 Sorcery Point to roll 1d4 and apply the result as a bonus or penalty (your choice) to the creature's roll." , "level": 6 }
+    ],
+    "race_features": [
+      { "name": "Resourceful", "description": "You gain Heroic Inspiration whenever you finish a Long Rest." },
+      { "name": "Skillful", "description": "You gain proficiency in one skill of your choice." },
+      { "name": "Versatile", "description": "You gain an Origin feat of your choice." }
+    ],
+    "feats": [
+      { "name": "Alert", "description": "Origin Feat\nInitiative Proficiency. When you roll Initiative, you can add your Proficiency Bonus to the roll.\nInitiative Swap. Immediately after you roll Initiative, you can swap your Initiative with the Initiative of one willing ally in the same combat. You can't make this swap if you or the ally has the Incapacitated condition.", "level": 1 },
+      { "name": "Spell Sniper", "description": "General Feat (Prerequisite: Level 4+, Spellcasting or Pact Magic Feature)\nAbility Score Increase. Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\nBypass Cover. Your ranged spell attacks ignore Half Cover and Three-Quarters Cover.\nCasting in Melee. Being within 5 feet of an enemy doesn't impose Disadvantage on your ranged spell attack rolls.\nIncreased Range. When you cast a spell that has a range of at least 10 feet and that requires you to make an attack roll, the spell's range increases by 60 feet.", "level": 4 },
+      { "name": "Skilled", "description": "Origin Feat\nYou gain proficiency in any combination of three skills or tools of your choice.\nRepeatable. You can take this feat more than once.", "level": 1 }
+    ],
+    "fighting_style_feats": [],
+    "special_abilities": []
+  },
+  "special_resources": [],
+  "background": {
+    "background_name": "Ordinary Adventurer",
+    "personality": "I say I hate everything, but I have a soft heart under the sharp tongue.",
+    "appearance": null,
+    "traits": "I don't care what people I don't care about think — their opinions are none of my business.",
+    "ideals": "I want the world to be a better place, even if a few sacrifices are needed. I'm willing to be one of those sacrifices — as long as my sacrifice will truly make the world better.",
+    "bonds": "The tattoo on my neck of my ex-boyfriend's name: \"Dolski\".",
+    "flaws": "If someone is kind to me, I latch onto them too easily — even when the kindness was nothing more than politeness. I'll do many extreme things just to please them.",
+    "story": "Benjamin is a fair-skinned wizard, on the lazy side, an ordinary citizen who has spent his life in Waterdeep. His family is a long line of magic users, but he himself never had much aptitude for magic and was poorly suited to studying it.\nThe family was supportive — \"It's okay if you don't study, just live a good life\" — but his rebellious streak said \"No, I will\" — and the forced activation of magical energy went wild, turning him into a Wild Magic Sorcerer.\nWild magic has added a lot of chaos to his life. Like the time he blew up the Tiger Eye Detective Agency on Troll Skull Alley — his family paid a fair bit in damages, and he worked there a while to repay the debt. Or the time he had hiccups for an entire day at a critical occasion. Or when he was around 18 or 19 and got jumped by muggers — when he came to, all the muggers were strung up on the walls by vines.\nAfter all that, Benjamin got scared and stopped intentionally drawing on his wild magic unless absolutely forced to.\nLater, he fell in love. With a dwarven cleric named Dolski. Benjamin's lovesick brain took over and he loved hard, agonizingly hard, overthinking late into every night. Dolski was devoted to dragons, so Benjamin (in full simp mode) even did extensive research on draconic lore just to have something to talk about — and got Dolski's name tattooed on his neck.\nDolski was shaken by this behavior, recognized the red flags, and tried to talk it out with Benjamin — only to discover that Benjamin's love was simply too heavy. Realizing communication wasn't possible, Dolski quietly left Waterdeep to follow the dragon gods, ending things abruptly with Benjamin. Benjamin could not accept this. He went a bit mad, alone, crying and falling apart, and just drifted hollowly through his days.\nIn the end, his family and friends urged him to get out — go travel, go adventure, change his mood. But how could Benjamin possibly be the traveling type? His heart will always belong to someone worth loving. Holding onto that idea, telling himself he should at least meet more different kinds of people in the world, he stepped out the door.\n\nOh, and by the way — his magic is awful.",
+    "description": "Compared to other flashy adventurers, you seem oddly normal — no unusual species, no complicated past, no national grudges or grand ambitions or any of those stress-inducing goals. Maybe here, being ordinary is its own kind of extraordinary."
+  },
+  "inventory": {
+    "currency": {
+      "wallet": { "gp": 0, "pp": 0, "ep": 0, "sp": 0, "cp": 0 },
+      "total_gp": 30,
+      "total_gp_raw": "30GP"
+    },
+    "encumbrance": {
+      "equipment_weight": 8,
+      "pack1_weight": 74,
+      "pack2_weight": 0,
+      "total_weight": 82,
+      "light_threshold": 0,
+      "heavy_threshold": 0,
+      "overloaded_threshold": 0,
+      "max_capacity": 180
+    },
+    "items": [],
+    "wondrous_items": [],
+    "consumables": [],
+    "containers": [
+      {
+        "label": "Backpack 1",
+        "rows": "5-25",
+        "schema": { "name": "B", "desc": "G", "weight": "S", "qty": "V" },
+        "items": [
+          { "row": 5,  "name": "Staff (also Quarterstaff)", "description": null, "weight": null, "quantity": 5 },
+          { "row": 6,  "name": "Dungeoneer's Pack",         "description": null, "weight": null, "quantity": 12 },
+          { "row": 8,  "name": "Books",                      "description": null, "weight": null, "quantity": 25 },
+          { "row": 9,  "name": "Robes",                      "description": null, "weight": null, "quantity": 1 },
+          { "row": 12, "name": "Caltrops",                   "description": null, "weight": null, "quantity": 1 },
+          { "row": 13, "name": "Crowbar",                    "description": null, "weight": null, "quantity": 2 },
+          { "row": 14, "name": "Ball Bearings",              "description": null, "weight": null, "quantity": 1 },
+          { "row": 15, "name": "Tools",                      "description": null, "weight": null, "quantity": null }
+        ]
+      },
+      {
+        "label": "Backpack 2",
+        "rows": "5-25",
+        "schema": { "name": "Y", "desc": "AD", "weight": "AP", "qty": "AS" },
+        "items": [
+          { "row": 5, "name": "Dungeoneer's Pack",         "description": null, "weight": "55", "quantity": 1 },
+          { "row": 6, "name": "Ball Bearings",             "description": null, "weight": "2",  "quantity": 3 },
+          { "row": 7, "name": "Staff (also Quarterstaff)", "description": null, "weight": "4",  "quantity": 1 },
+          { "row": 8, "name": "Books",                     "description": null, "weight": "5",  "quantity": 1 },
+          { "row": 9, "name": "Robes",                     "description": null, "weight": "4",  "quantity": 1 }
+        ]
+      },
+      {
+        "label": "Bag of Holding 1",
+        "rows": "29-49",
+        "schema": { "name": "B", "desc": "G", "weight": "S", "qty": "V" },
+        "items": []
+      },
+      {
+        "label": "Bag of Holding 2",
+        "rows": "29-49",
+        "schema": { "name": "Y", "desc": "AD", "weight": "AP", "qty": "AS" },
+        "items": []
+      }
+    ]
+  },
+  "auto_resources": [
+    { "id": "auto-spell-slot-1", "name": "1st-Level Spell Slot", "type": "count", "current": 4, "max": 4, "icon": "spellbook" },
+    { "id": "auto-spell-slot-2", "name": "2nd-Level Spell Slot", "type": "count", "current": 3, "max": 3, "icon": "spellbook" },
+    { "id": "auto-spell-slot-3", "name": "3rd-Level Spell Slot", "type": "count", "current": 3, "max": 3, "icon": "spellbook" }
+  ],
+  "exports": {
+    "dice_bot": ".st 力量:12 敏捷:14 体质*:8 智力:14 感知:8 魅力*:18 hp:20 hpmax:20 先攻:5 ac:15 dc:15 pp:9 熟练:3 运动*:0 特技:0 巧手*:0 隐匿*:0 调查:0 奥秘*:0 历史*:0 自然:0 宗教*:0 察觉:0 洞悉*:0 驯兽:0 医疗:0 求生:0 游说*:0 欺瞒*:0 威吓:0 表演*:0",
+    "embedded_json": null
+  }
+}

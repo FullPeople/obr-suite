@@ -417,7 +417,7 @@ body.edit-mode .cat-btn.drop-target{
   border:none;border-radius:0;
   font-size:11px;font-weight:700;
   white-space:nowrap;
-  cursor:grab;
+  cursor:pointer;
   user-select:none;
   position:relative;
   overflow:hidden;
@@ -429,7 +429,12 @@ body.edit-mode .cat-btn.drop-target{
 /* Hover affordance: dim slightly via opacity (no brightness/saturate
    filters that mimic the old glossy roll-over). */
 .bubble:hover{opacity:0.86}
-.bubble:active{cursor:grabbing;opacity:0.74}
+.bubble:active{opacity:0.74}
+.bubble.selected{
+  outline:2px solid rgba(255,255,255,0.78);
+  outline-offset:-2px;
+  opacity:1;
+}
 
 /* Eraser pill — full-width row, flat red 80%. */
 .bubble.eraser{
@@ -730,54 +735,55 @@ body.edit-mode .bubble.drop-after{
         <circle cx="9" cy="15" r="1.2" fill="currentColor"/>
       </svg>
     </div>
-    <span class="ttl">状态调色板</span>
+    <span class="ttl" data-i18n="stPaletteTitle">状态调色板</span>
     <!-- 2026-05-16 — global render-mode toggle. 3 states: AUTO / 特效 /
          文字. Click cycles. Affects every buff this client renders
          on tokens regardless of per-buff settings. Per-client (stored
          in localStorage), so each player can pick their own preference. -->
-    <button class="x" id="btnRenderMode" type="button" title="渲染模式：循环 自动 → 特效 → 文字 → 自动 …"
+    <button class="x" id="btnRenderMode" type="button" data-i18n-title="stRenderModeTitle" title="渲染模式：循环 自动 → 特效 → 文字 → 自动 …"
             style="width:auto;padding:0 8px;font-size:11px;letter-spacing:0.5px">自动</button>
-    <button class="x" id="btnClose" type="button" title="关闭 (])">×</button>
+    <button class="x" id="btnClose" type="button" data-i18n-title="stCloseTitle" title="关闭 (])">×</button>
   </div>
   <div class="toolbar">
     <!-- Edit toggle. SVG = pencil icon, follows currentColor for the
          on/off state colours. -->
-    <button id="btnEdit" type="button" title="编辑 buff 库">
+    <button id="btnEdit" type="button" data-i18n-title="stEditTitle" title="编辑 buff 库">
       <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
         <path d="M11.5 2.5l2 2-8 8H3.5v-2l8-8z"/>
         <path d="M10.5 3.5l2 2"/>
       </svg>
-      <span>编辑</span>
+      <span data-i18n="stEditLabel">编辑</span>
     </button>
     <span class="tb-sp"></span>
     <!-- Export = download (arrow into tray) -->
-    <button id="btnExport" type="button" title="导出 buff 库为 JSON">
+    <button id="btnExport" type="button" data-i18n-title="stExportTitle" title="导出 buff 库为 JSON">
       <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
         <path d="M8 2v8"/>
         <path d="M4.5 7L8 10.5 11.5 7"/>
         <path d="M3 13h10"/>
       </svg>
-      <span>导出</span>
+      <span data-i18n="stExportLabel">导出</span>
     </button>
     <!-- Import = upload (arrow out of tray) -->
-    <button id="btnImport" type="button" title="导入 buff 库 JSON">
+    <button id="btnImport" type="button" data-i18n-title="stImportTitle" title="导入 buff 库 JSON">
       <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
         <path d="M8 11V3"/>
         <path d="M4.5 6.5L8 3l3.5 3.5"/>
         <path d="M3 13h10"/>
       </svg>
-      <span>导入</span>
+      <span data-i18n="stImportLabel">导入</span>
     </button>
     <span class="tb-sp"></span>
     <!-- Buff Studio — external web tool for making buff-effect WebMs.
          Status-tracker buffs render from WebM/image assets, so this is
          where users go to author new ones. Opens in a new tab. -->
     <a class="tb-link" href="https://obr.dnd.center/studio/buff-studio/" target="_blank" rel="noopener"
+       data-i18n-title="stStudioTitle"
        title="打开 Buff Studio：在线制作 buff 特效（多图层合成 / GIF·视频转 WebM），导出后放进 buff 库">
       <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
         <path d="M8 2.5l1.6 3.3 3.6.5-2.6 2.5.6 3.6L8 11.2 4.8 12.9l.6-3.6L2.8 6.8l3.6-.5z"/>
       </svg>
-      <span>特效工坊</span>
+      <span data-i18n="stStudioLabel">特效工坊</span>
     </a>
     <input id="fileImport" type="file" accept=".json,application/json"/>
   </div>
@@ -792,18 +798,14 @@ body.edit-mode .bubble.drop-after{
     <div class="bp-label" id="bp-label"></div>
   </div>
   <div class="foot" id="foot">
-    <div class="foot-line"><b>左键</b>拖到目标释放 = 应用 buff</div>
-    <div class="foot-line"><b>右键</b>拖过角色 = 路径切换 (有则去)</div>
-    <div class="foot-line"><b>左键</b>拖红色
+    <div class="foot-line"><b>左键</b>状态 = 选中；再点角色 = 应用 / 切换</div>
+    <div class="foot-line"><b>右键</b> = 取消当前选中</div>
+    <div class="foot-line"><b>左键</b>红色
       <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none"
            stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
            style="vertical-align:-2px;margin:0 3px"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-      = 单个清除</div>
-    <div class="foot-line"><b>右键</b>拖红色
-      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none"
-           stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-           style="vertical-align:-2px;margin:0 3px"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-      = 路径全清</div>
+      = 选中清除；再点角色 = 清空</div>
+    <div class="foot-line"><b>管理</b> = 选中后点角色，打开该角色 buff 管理</div>
     <div class="foot-line"><kbd>]</kbd> 关闭面板</div>
   </div>
   <div class="popup" id="popup"></div>

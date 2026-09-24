@@ -20,6 +20,11 @@
 // the popover is already open).
 
 import OBR from "@owlbear-rodeo/sdk";
+import { getLocalLang } from "../../state";
+
+// Per-client UI language (this debug popover is transient — opened fresh
+// each time — so a module-load read is sufficient; no live re-render).
+const en = getLocalLang() === "en";
 
 // Two distinct popover ids — see modules/metadata-inspector/index.ts.
 const POPOVER_ITEM_ID = "com.obr-suite/metadata-inspector/item";
@@ -33,6 +38,18 @@ const tabsEl = document.getElementById("tabs") as HTMLDivElement;
 const tabSceneBtn = document.getElementById("tab-scene") as HTMLButtonElement;
 const tabRoomBtn = document.getElementById("tab-room") as HTMLButtonElement;
 const tabPerformanceBtn = document.getElementById("tab-performance") as HTMLButtonElement;
+
+// Translate the static HTML chrome (title / close / tab labels + tips)
+// once at boot. The popover is transient, so no live re-render needed.
+if (en) {
+  document.title = "Metadata Inspector";
+  if (ttlEl) ttlEl.textContent = "Metadata Inspector";
+  if (xBtn) xBtn.title = "Close";
+  if (tabSceneBtn) { tabSceneBtn.textContent = "Scene"; tabSceneBtn.title = "OBR.scene.getMetadata() — current scene's metadata"; }
+  if (tabRoomBtn) { tabRoomBtn.textContent = "Room"; tabRoomBtn.title = "OBR.room.getMetadata() — room-level metadata (across scenes)"; }
+  if (tabPerformanceBtn) { tabPerformanceBtn.textContent = "Perf"; tabPerformanceBtn.title = "Performance — FPS + memory usage"; }
+  if (bodyEl) bodyEl.innerHTML = `<div class="empty">Loading…</div>`;
+}
 
 type Mode = "item" | "scene" | "room" | "performance";
 let currentMode: Mode = "item";
@@ -130,14 +147,14 @@ function classifyKey(key: string): { label: string; badgeClass: string; namespac
   }
   if (best) {
     return {
-      label: best.zh,
+      label: en ? best.en : best.zh,
       badgeClass: best.badgeClass,
       namespace: best.prefix.replace(/\/$/, ""),
     };
   }
   const slash = key.indexOf("/");
   const ns = slash >= 0 ? key.slice(0, slash) : key;
-  return { label: `未识别 — ${ns}`, badgeClass: "", namespace: ns || "(no-ns)" };
+  return { label: `${en ? "Unrecognized — " : "未识别 — "}${ns}`, badgeClass: "", namespace: ns || "(no-ns)" };
 }
 
 interface Group {
@@ -173,9 +190,9 @@ function groupByNamespace(metadata: Record<string, unknown>): Group[] {
 }
 
 function renderGroup(g: Group): string {
-  const badgeText = g.badgeClass === "suite" ? "枭熊"
-    : g.badgeClass === "external" ? "外部"
-    : g.badgeClass === "builtin" ? "原生"
+  const badgeText = g.badgeClass === "suite" ? (en ? "Suite" : "枭熊")
+    : g.badgeClass === "external" ? (en ? "Ext" : "外部")
+    : g.badgeClass === "builtin" ? (en ? "Native" : "原生")
     : "?";
   const rows = g.entries.map((e) => {
     const f = formatValue(e.value);
@@ -193,7 +210,7 @@ function renderGroup(g: Group): string {
           <span class="badge ${g.badgeClass}">${badgeText}</span>
           <span class="label">${escapeHtml(g.label)}</span>
         </div>
-        <div class="group-head-bottom">${g.entries.length} 条 · <code>${escapeHtml(g.namespace)}</code></div>
+        <div class="group-head-bottom">${g.entries.length} ${en ? "entries" : "条"} · <code>${escapeHtml(g.namespace)}</code></div>
       </div>
       <div class="kv-list">${rows}</div>
     </div>
@@ -205,8 +222,8 @@ function renderItem(item: any): void {
   const tags: string[] = [];
   tags.push(`<span class="tag layer">${escapeHtml(item.type)}</span>`);
   if (item.layer) tags.push(`<span class="tag layer">${escapeHtml(item.layer)}</span>`);
-  if (item.locked) tags.push(`<span class="tag locked">已锁定</span>`);
-  if (item.visible === false) tags.push(`<span class="tag invisible">隐藏</span>`);
+  if (item.locked) tags.push(`<span class="tag locked">${en ? "Locked" : "已锁定"}</span>`);
+  if (item.visible === false) tags.push(`<span class="tag invisible">${en ? "Hidden" : "隐藏"}</span>`);
   subEl.innerHTML = `${tags.join("")}<b style="font-family:ui-monospace,Consolas,monospace;font-size:10px;color:#9aa0b3">${escapeHtml(item.id)}</b>`;
 
   const meta = (item.metadata ?? {}) as Record<string, unknown>;
@@ -231,13 +248,13 @@ function renderItem(item: any): void {
   const sections: string[] = [];
   sections.push(renderGroup({
     namespace: "(builtin)",
-    label: "OBR 原生字段",
+    label: en ? "OBR native fields" : "OBR 原生字段",
     badgeClass: "builtin",
     entries: builtinEntries,
   }));
   for (const g of groups) sections.push(renderGroup(g));
   if (groups.length === 0) {
-    sections.push(`<div class="empty">该物体没有任何插件元数据 — 只有 OBR 原生字段。</div>`);
+    sections.push(`<div class="empty">${en ? "This item has no plugin metadata — only OBR native fields." : "该物体没有任何插件元数据 — 只有 OBR 原生字段。"}</div>`);
   }
   bodyEl.innerHTML = sections.join("");
 }
@@ -251,7 +268,7 @@ function renderRawMetadata(
   subEl.innerHTML = subline;
   const groups = groupByNamespace(metadata);
   if (groups.length === 0) {
-    bodyEl.innerHTML = `<div class="empty">${title} 没有任何元数据。</div>`;
+    bodyEl.innerHTML = `<div class="empty">${title}${en ? " has no metadata." : " 没有任何元数据。"}</div>`;
     return;
   }
   bodyEl.innerHTML = groups.map(renderGroup).join("");
@@ -261,20 +278,20 @@ function renderRawMetadata(
 
 async function loadItemMode(): Promise<void> {
   if (!currentItemId) {
-    ttlEl.textContent = "未选中物体";
-    subEl.innerHTML = `<span style="color:#888">激活望远镜工具后，在场景里选中任何物体即可查看</span>`;
-    bodyEl.innerHTML = `<div class="empty">在场景中点选任意物体后会在这里展示它的元数据。<br>切换上方「场景」/「房间」标签可查看场景级 / 房间级元数据。</div>`;
+    ttlEl.textContent = en ? "No item selected" : "未选中物体";
+    subEl.innerHTML = `<span style="color:#888">${en ? "Activate the telescope tool, then select any item in the scene to inspect it." : "激活望远镜工具后，在场景里选中任何物体即可查看"}</span>`;
+    bodyEl.innerHTML = `<div class="empty">${en ? "Select any item in the scene to show its metadata here.<br>Switch the “Scene” / “Room” tabs above for scene- / room-level metadata." : "在场景中点选任意物体后会在这里展示它的元数据。<br>切换上方「场景」/「房间」标签可查看场景级 / 房间级元数据。"}</div>`;
     return;
   }
   try {
     const items = await OBR.scene.items.getItems([currentItemId]);
     if (items.length === 0) {
-      bodyEl.innerHTML = `<div class="empty">物体不存在 — 可能已被删除。</div>`;
+      bodyEl.innerHTML = `<div class="empty">${en ? "Item not found — it may have been deleted." : "物体不存在 — 可能已被删除。"}</div>`;
       return;
     }
     renderItem(items[0] as any);
   } catch (e) {
-    bodyEl.innerHTML = `<div class="empty">加载失败：${escapeHtml(String((e as Error).message ?? e))}</div>`;
+    bodyEl.innerHTML = `<div class="empty">${en ? "Load failed: " : "加载失败："}${escapeHtml(String((e as Error).message ?? e))}</div>`;
   }
 }
 
@@ -282,10 +299,10 @@ async function loadSceneMode(): Promise<void> {
   try {
     const meta = (await OBR.scene.getMetadata()) ?? {};
     const keyCount = Object.keys(meta).length;
-    const subline = `<b style="color:#7ec8f0">OBR.scene.getMetadata()</b> · ${keyCount} 个 key`;
-    renderRawMetadata("场景元数据", subline, meta);
+    const subline = `<b style="color:#7ec8f0">OBR.scene.getMetadata()</b> · ${keyCount} ${en ? "keys" : "个 key"}`;
+    renderRawMetadata(en ? "Scene metadata" : "场景元数据", subline, meta);
   } catch (e) {
-    bodyEl.innerHTML = `<div class="empty">加载场景元数据失败：${escapeHtml(String((e as Error).message ?? e))}</div>`;
+    bodyEl.innerHTML = `<div class="empty">${en ? "Failed to load scene metadata: " : "加载场景元数据失败："}${escapeHtml(String((e as Error).message ?? e))}</div>`;
   }
 }
 
@@ -293,10 +310,10 @@ async function loadRoomMode(): Promise<void> {
   try {
     const meta = (await OBR.room.getMetadata()) ?? {};
     const keyCount = Object.keys(meta).length;
-    const subline = `<b style="color:#7ec8f0">OBR.room.getMetadata()</b> · ${keyCount} 个 key · <span style="color:#9aa0b3">跨 scene 的房间级数据</span>`;
-    renderRawMetadata("房间元数据", subline, meta);
+    const subline = `<b style="color:#7ec8f0">OBR.room.getMetadata()</b> · ${keyCount} ${en ? "keys" : "个 key"} · <span style="color:#9aa0b3">${en ? "room-level data, shared across scenes" : "跨 scene 的房间级数据"}</span>`;
+    renderRawMetadata(en ? "Room metadata" : "房间元数据", subline, meta);
   } catch (e) {
-    bodyEl.innerHTML = `<div class="empty">加载房间元数据失败：${escapeHtml(String((e as Error).message ?? e))}</div>`;
+    bodyEl.innerHTML = `<div class="empty">${en ? "Failed to load room metadata: " : "加载房间元数据失败："}${escapeHtml(String((e as Error).message ?? e))}</div>`;
   }
 }
 
@@ -311,10 +328,10 @@ async function loadPerformanceMode(): Promise<void> {
       timestamp: new Date().toISOString(),
       note: 'Drawcall count is not accessible from web APIs'
     };
-    const subline = `<b style="color:#7ec8f0">performance.memory</b> · <span style="color:#9aa0b3">浏览器性能指标 (Chrome only)</span>`;
-    renderRawMetadata("性能指标", subline, perfData);
+    const subline = `<b style="color:#7ec8f0">performance.memory</b> · <span style="color:#9aa0b3">${en ? "browser performance metrics (Chrome only)" : "浏览器性能指标 (Chrome only)"}</span>`;
+    renderRawMetadata(en ? "Performance" : "性能指标", subline, perfData);
   } catch (e) {
-    bodyEl.innerHTML = `<div class="empty">加载性能数据失败：${escapeHtml(String((e as Error).message ?? e))}</div>`;
+    bodyEl.innerHTML = `<div class="empty">${en ? "Failed to load performance data: " : "加载性能数据失败："}${escapeHtml(String((e as Error).message ?? e))}</div>`;
   }
 }
 

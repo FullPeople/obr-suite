@@ -43,7 +43,7 @@ import { assetUrl } from "./asset-base";
 
 const MODAL_ID = "com.obr-suite/dm-announcement";
 
-type SectionKind = "warn" | "info" | "issues" | "highlights" | "todo" | "changelog" | "footer" | "raw";
+type SectionKind = "warn" | "info" | "notice" | "release" | "history" | "issues" | "highlights" | "todo" | "changelog" | "footer" | "raw";
 type SectionLang = "zh" | "en" | undefined; // undefined = visible in both
 
 interface Section {
@@ -63,7 +63,7 @@ interface Section {
 }
 
 const KNOWN_KINDS: ReadonlySet<SectionKind> = new Set([
-  "warn", "info", "issues", "highlights", "todo", "changelog", "footer", "raw",
+  "warn", "info", "notice", "release", "history", "issues", "highlights", "todo", "changelog", "footer", "raw",
 ]);
 
 // Issues section: type → chip class. Anything not in this map renders
@@ -180,6 +180,13 @@ function renderInlineNoSpan(text: string): string {
 }
 
 function renderSection(s: Section): string {
+  if (s.kind === "release" || s.kind === "history") {
+    const list = `<ul class="release-items">${s.items.map(item => `<li>${renderInline(item)}</li>`).join("")}</ul>`;
+    const heading = escapeHtml(s.heading);
+    return s.kind === "history"
+      ? `<details class="release-history"><summary>${heading}</summary>${list}</details>`
+      : `<section class="release-current"><h2>${heading}</h2>${list}</section>`;
+  }
   if (s.kind === "warn" || s.kind === "info") {
     const cls = s.kind === "warn" ? "warn" : "info";
     return s.items
@@ -188,6 +195,16 @@ function renderSection(s: Section): string {
         return `<div class="alert-row ${cls}${primary}"><span class="dot"></span><span class="text">${renderInline(it)}</span></div>`;
       })
       .join("");
+  }
+  // 2026-05-23 — `notice` is `warn`'s prose-friendly sibling: instead
+  // of one alert-row per markdown line (which fragments long prose
+  // into a stack of red boxes), it renders the whole section body as
+  // ONE warn-styled box with paragraphs separated by blank lines. Use
+  // it for closure notes / standalone letters where the content is a
+  // multi-paragraph essay rather than a list of bullet alerts.
+  if (s.kind === "notice") {
+    const body = s.items.map(renderInline).join("<br><br>");
+    return `<div class="alert-row warn primary notice-block"><span class="dot"></span><span class="text">${body}</span></div>`;
   }
   if (s.kind === "issues") {
     // Per row: "type | level | desc"  OR  "type | desc" (level skipped).
@@ -387,14 +404,25 @@ async function loadAndRender(): Promise<void> {
 }
 
 // 2026-05-14 — stamp the running build version into the modal title.
-// The dev build serves `manifest-dev.json`, stable serves
-// `manifest.json`; we try dev first and fall back, so the same code
-// works on both channels (the 404 on the wrong-channel file just
-// falls through).
+//
+// 2026-08-25: this used to try `manifest-dev.json` first and fall back
+// to `manifest.json`, on the assumption that the wrong-channel file
+// would 404. It does not — `public/` ships BOTH manifests in BOTH
+// channels, so the dev one always answered first and the stable build
+// reported itself as some "-dev" version.
+//
+// Pick the channel's own file up front. `BASE_URL` is baked in at build
+// time (`/suite/` or `/suite-dev/`), so it is the one thing that
+// reliably says which build this is. The other name stays as a fallback
+// in case a deploy ever ships only one of the two.
 async function loadVersionIntoTitle(): Promise<void> {
   const titleEl = document.querySelector<HTMLElement>(".head .title");
   if (!titleEl) return;
-  for (const name of ["manifest-dev.json", "manifest.json"]) {
+  const dev = (import.meta.env.BASE_URL || "").includes("suite-dev");
+  const candidates = dev
+    ? ["manifest-dev.json", "manifest.json"]
+    : ["manifest.json", "manifest-dev.json"];
+  for (const name of candidates) {
     try {
       const res = await fetch(assetUrl(name), { cache: "no-cache" });
       if (!res.ok) continue;
@@ -409,15 +437,53 @@ async function loadVersionIntoTitle(): Promise<void> {
   }
 }
 
+/**
+ * How long the close button stays disabled, so the announcement is at
+ * least glanced at rather than dismissed reflexively.
+ *
+ * The bar in dm-announcement.html animates over the same duration —
+ * change both together.
+ */
+const READ_GATE_MS = 3000;
+
+/** Disable "我知道了" and run the progress bar down; then arm it. */
+function startReadGate(): void {
+  const btn = document.getElementById("btn-close") as HTMLButtonElement | null;
+  const bar = document.getElementById("auto-progress");
+  if (!btn) return;
+  const label = btn.textContent ?? "";
+  btn.disabled = true;
+  bar?.classList.add("on");
+
+  const started = Date.now();
+  const tick = () => {
+    const left = READ_GATE_MS - (Date.now() - started);
+    if (left <= 0) {
+      btn.disabled = false;
+      btn.textContent = label;
+      bar?.classList.remove("on");
+      return;
+    }
+    btn.textContent = `${label} (${Math.ceil(left / 1000)})`;
+    window.setTimeout(tick, 200);
+  };
+  tick();
+}
+
 OBR.onReady(() => {
   void loadAndRender();
   void loadVersionIntoTitle();
 
-  // 2026-05-14 — the announcement now ONLY closes via the "我知道了"
-  // button. The previous auto-close timer (?auto=1 → 5 s) and the
-  // Escape-to-close handler were both removed per user request: the
-  // DM should explicitly acknowledge the announcement. The `?auto=1`
-  // URL param + the .auto-progress bar are now inert.
+  // 2026-05-14 — the announcement only closes via the "我知道了" button;
+  // there is no auto-close and no Escape handler, because the DM should
+  // acknowledge it explicitly.
+  //
+  // 2026-08-25 — that button now arms after a 3 s progress bar. The
+  // announcement is shown unprompted once a day (see background.ts), so
+  // without a gate it would be dismissed by reflex before anyone read
+  // what changed.
+  startReadGate();
+
   document.getElementById("btn-close")?.addEventListener("click", async () => {
     try { await OBR.modal.close(MODAL_ID); } catch {}
   });

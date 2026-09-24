@@ -26,6 +26,16 @@ export const FOG_WALL_POLYLINES_KEY = `${PLUGIN_ID}/wallPolylines`;
 // edge. See EditorPrefs.wallExpandPx for full rationale.
 export const FOG_WALL_EXPAND_KEY = `${PLUGIN_ID}/wallExpandPx`;
 
+// Same offset, pre-converted to MAP-LOCAL units at save time.
+//
+// FOG_WALL_EXPAND_KEY is in IMAGE pixels, which the wall engine can
+// only convert by looking up the map image the Path is attached to for
+// its grid dpi. That lookup is impossible for an INDEPENDENT (unbound)
+// save, which has no `attachedTo`. Writing the converted value removes
+// the dependency entirely; the image-pixel key is kept for legacy
+// scenes and as the value the editor round-trips.
+export const FOG_WALL_EXPAND_LOCAL_KEY = `${PLUGIN_ID}/wallExpandLocal`;
+
 // Modal id (for OBR.modal.open / close).
 export const MODAL_ID = `${PLUGIN_ID}/edit`;
 
@@ -64,7 +74,15 @@ export type ToolId =
   | "line"
   | "magicWand"
   | "paintBucket"
-  | "picker";
+  | "picker"
+  // 2026-05-26 (Phase D) — door tool. Two-click placement of a
+  // straight line segment; the segment becomes a dynamic-fog door
+  // on save (a tiny FOG-layer Path with a Door[] metadata entry
+  // covering ~100% of its length, so when the door is OPEN
+  // WallActor subtracts the entire segment and no wall remains;
+  // when CLOSED the full segment renders as a wall). Doors are
+  // STORED SEPARATELY from the mask, never erased by brush/algo.
+  | "door";
 
 /** Tools that have a per-tool ADD / ERASE mode toggle (right-click
  *  the tool button to flip). Brush/eraser are separate tools so they

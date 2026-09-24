@@ -128,12 +128,32 @@ function stripEmoji(s: string): string {
 // Split text into grapheme clusters so emoji ZWJ sequences (👨‍👩‍👧
 // etc.) stay together as single "characters". Falls back to
 // codepoint iteration if Intl.Segmenter is unavailable.
+//
+// The segmenter is built ONCE. `segment()` carries no state between
+// calls, so one instance answers for every string — but constructing
+// one does real work, and this ran per call: three width estimates plus
+// two emoji strips for every text-rendered buff, on every sync pass.
+// Hoisting measured 0.112 ms -> 0.034 ms per seven labels, with
+// identical output.
+//
+// `undefined` distinguishes "not looked up yet" from "looked up, not
+// available" so an environment without Intl.Segmenter probes once and
+// then takes the fallback for free.
+let graphemeSegmenter: { segment(s: string): Iterable<{ segment: string }> } | null | undefined;
+
 function splitGraphemes(s: string): string[] {
   try {
-    const SegCtor = (Intl as any).Segmenter;
-    if (SegCtor) {
-      const seg = new SegCtor([], { granularity: "grapheme" });
-      return Array.from(seg.segment(s), (item: any) => item.segment as string);
+    if (graphemeSegmenter === undefined) {
+      const SegCtor = (Intl as any).Segmenter;
+      graphemeSegmenter = SegCtor
+        ? new SegCtor([], { granularity: "grapheme" })
+        : null;
+    }
+    if (graphemeSegmenter) {
+      return Array.from(
+        graphemeSegmenter.segment(s),
+        (item: any) => item.segment as string,
+      );
     }
   } catch { /* fallthrough */ }
   return Array.from(s);
@@ -168,6 +188,12 @@ function estimateNameWidth(name: string, fontSize: number): number {
 }
 
 import { getTokenCircleSpec } from "./circles";
+// WebM effect items sit above the curved-band label of the same token but below
+// any other token whose zIndex is higher; ground rings (`webmBelow`) go under the
+// token entirely. That choice and its slot offsets live in ./placement — a module
+// with no SDK imports, so which side of the token an effect renders on is
+// assertable on its own.
+import { webmPlacement } from "./placement";
 
 function meta(
   tokenId: string,
@@ -230,7 +256,7 @@ function sigWebm(d: WebmDescriptor): string {
   return JSON.stringify([
     "webm", d.buffId, d.url, num(d.centre.x), num(d.centre.y),
     num(d.scale), num(d.intrinsicW), num(d.intrinsicH),
-    d.mime, num(d.sceneDpi), d.zIndex, num(d.rotation ?? 0),
+    d.mime, num(d.sceneDpi), d.zIndex, num(d.rotation ?? 0), d.layer,
   ]);
 }
 
@@ -404,11 +430,6 @@ interface LabelDescriptor {
 const STACK_MULT = 1000;
 const SLOT_BG_MAIN = 0;
 const SLOT_LABEL = 100;
-// WebM effect items sit ABOVE the curved-band label of the same token
-// but BELOW any other token whose zIndex is higher. Slot 200 leaves
-// room for additional in-stack roles between label and webm if
-// needed later.
-const SLOT_WEBM = 200;
 function computeStackBase(token: Image): number {
   // token.zIndex CAN be negative on tokens the user manually sent to
   // back; Math.floor preserves sign while quantising. Falling back to
@@ -452,8 +473,10 @@ interface WebmDescriptor {
    *  image's intrinsic 192 as dpi made it render (192/sceneDpi)
    *  smaller than expected. */
   sceneDpi: number;
-  /** zIndex slot — token.zIndex * STACK_MULT + SLOT_WEBM. */
+  /** zIndex, already carrying the stack base and the webm slot offset. */
   zIndex: number;
+  /** Resolved by webmPlacement: under the token (DRAWING) or over it. */
+  layer: "ATTACHMENT" | "DRAWING";
   /** 2026-05-18 — degrees. From BuffDef.rotation; baked when the buff
    *  was created via "以此创建状态" from a pre-rotated source image
    *  so the buff retains that orientation when rendered on any token. */
@@ -570,9 +593,10 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
         intrinsicH,
         mime: "video/webm",
         sceneDpi,
-        // SLOT_WEBM (200) is above SLOT_LABEL (100) so WebMs draw over
-        // any sibling curved-band label on the same token.
-        zIndex: stackBase + SLOT_WEBM,
+        // SLOT_WEBM (200) is above SLOT_LABEL (100) so WebMs draw over any
+        // sibling curved-band label on the same token. A `webmBelow` buff goes
+        // to the DRAWING layer under the token instead, in its own slot.
+        ...webmPlacement(b.webmBelow === true, stackBase),
         rotation: buffRotation,
       });
       continue;
@@ -602,7 +626,7 @@ function describe(token: Image, buffs: BuffDef[], sceneDpi: number): TokenDescri
         intrinsicH: ih,
         mime: typeof b.iconMime === "string" && b.iconMime ? b.iconMime : "image/png",
         sceneDpi,
-        zIndex: stackBase + SLOT_WEBM,
+        ...webmPlacement(false, stackBase),
         rotation: buffRotation,
       });
       continue;
@@ -783,7 +807,7 @@ function buildWebmItem(token: Image, d: WebmDescriptor, stableId: string, sig: s
     .id(stableId)
     .position(d.centre)
     .scale({ x: d.scale, y: d.scale })
-    .layer("ATTACHMENT")
+    .layer(d.layer)
     .attachedTo(token.id)
     .locked(true)
     .disableHit(true)
@@ -933,11 +957,17 @@ async function hydrateLocalCache(tokenId: string): Promise<Map<string, string>> 
       const sig = (it.metadata?.[SIG_KEY] as string) ?? `__legacy_${Math.random()}`;
       map.set(it.id, sig);
     }
-  } catch {}
+  } catch (e) {
+    logErr(`scene.local.getItems(token=${tokenId}) failed [stage=hydrate-local]`, e);
+  }
   return map;
 }
 
-export async function syncTokenBuffs(token: Image, buffs: BuffDef[]): Promise<void> {
+/** Returns false when the scene write failed (delete or add rejected):
+ *  the caller must NOT record the token as synced, or the key-compare
+ *  skip would block the retry forever and the invalidated cache never
+ *  gets its self-heal pass. */
+export async function syncTokenBuffs(token: Image, buffs: BuffDef[]): Promise<boolean> {
   let sceneDpi = 150;
   try { sceneDpi = await OBR.scene.grid.getDpi(); } catch {}
   const desc = describe(token, buffs, sceneDpi);
@@ -1003,42 +1033,48 @@ export async function syncTokenBuffs(token: Image, buffs: BuffDef[]): Promise<vo
   // so anything sitting there is leftover from before this refactor.
   const localToDelete = Array.from(existingLocal.keys());
 
-  // 4) Parallel execute. Delete is collapsed into a single OBR call;
-  //    add is a single call; both fire concurrently. Wall-clock time
-  //    drops to one round trip vs the previous 2-3 sequential awaits.
-  //
-  //    Safety: items in toAdd carry stable ids that match toDelete
-  //    entries (for sig-changed buffs). OBR processes both deltas in
-  //    parallel — if delete somehow lands AFTER add, the new item
-  //    would be removed. Empirically this hasn't happened (OBR seems
-  //    to enqueue ops in receive order), but we keep an error-recovery
-  //    path: any failure invalidates the cache so the next sync
-  //    re-hydrates from scene and self-heals.
-  const ops: Promise<unknown>[] = [];
+  // 4) Two-phase execute (checklist §1): DELETE first, AWAIT it, then
+  //    add. toAdd reuses the stable ids of sig-changed toDelete
+  //    entries — if OBR ever processed the add before the delete, the
+  //    delete would erase the freshly-added bubble. The old code fired
+  //    both in one Promise.all and relied on "empirically hasn't
+  //    happened"; now the add only runs after the delete round-trip
+  //    confirms, and is skipped entirely when the delete FAILED (the
+  //    invalidated cache makes the next sync re-hydrate + self-heal).
+  //    Pure additions (toDelete empty) still cost one round-trip.
+  let sceneDeleteFailed = false;
+  let sceneAddFailed = false;
+  const deleteOps: Promise<unknown>[] = [];
   if (toDelete.length > 0) {
-    ops.push(
+    deleteOps.push(
       OBR.scene.items.deleteItems(toDelete).catch((e) => {
-        logErr(`scene.items.deleteItems(token=${token.id}) failed`, e);
+        sceneDeleteFailed = true;
+        logErr(`deleteItems(token=${token.id}) failed [stage=delete, ids=${toDelete.join(",")}]`, e);
         invalidateTokenBuffCache(token.id);
       }),
     );
   }
   if (localToDelete.length > 0) {
-    ops.push(
-      OBR.scene.local.deleteItems(localToDelete).catch(() => {
+    deleteOps.push(
+      OBR.scene.local.deleteItems(localToDelete).catch((e) => {
+        logErr(`local.deleteItems(token=${token.id}) failed [stage=delete-local, ids=${localToDelete.join(",")}]`, e);
         invalidateTokenBuffCache(token.id);
       }),
     );
   }
-  if (toAdd.length > 0) {
-    ops.push(
-      OBR.scene.items.addItems(toAdd).catch((e) => {
-        logErr(`addItems(token=${token.id}) failed`, e);
-        invalidateTokenBuffCache(token.id);
-      }),
+  await Promise.all(deleteOps);
+  if (toAdd.length > 0 && !sceneDeleteFailed) {
+    await OBR.scene.items.addItems(toAdd).catch((e) => {
+      sceneAddFailed = true;
+      logErr(`addItems(token=${token.id}) failed [stage=add, ids=${toAddIds.join(",")}]`, e);
+      invalidateTokenBuffCache(token.id);
+    });
+  } else if (toAdd.length > 0) {
+    logErr(
+      `addItems(token=${token.id}) skipped [stage=add, ids=${toAddIds.join(",")}]: prior delete failed — caller must not record this token as synced`,
+      null,
     );
   }
-  await Promise.all(ops);
 
   // 5) Update cache to match the post-sync state. If we just
   //    invalidated (above catch path), don't repopulate — the next
@@ -1052,11 +1088,26 @@ export async function syncTokenBuffs(token: Image, buffs: BuffDef[]): Promise<vo
     tokenLocalCache.set(token.id, new Map());
   }
 
-  await particles.syncForToken(token.id, desc.effectBuffs, {
-    cx: desc.cx, cy: desc.cy,
-    tokenW: desc.tokenW, tokenH: desc.tokenH,
-    ringRadius: desc.ringRadius,
-  });
+  // Guarded on the same const that decides whether `effectBuffs` can
+  // ever be non-empty (see the classify step above). With the flag off
+  // this call was reached on every token sync and provably did nothing:
+  // `particles` drives everything off a module-level map that only
+  // `syncForToken` fills, and it only fills from a non-empty
+  // `effectBuffs`.
+  //
+  // Making that explicit is not just tidier — it lets the bundler drop
+  // particles.ts (17.7 kB of source: shader strings, a rAF ticker, item
+  // pooling) out of the BACKGROUND chunk, which every client loads at
+  // boot. Flipping STATUS_EFFECTS_ENABLED back to true restores both
+  // the call and the module, so this is a kill-switch, not a deletion.
+  if (STATUS_EFFECTS_ENABLED) {
+    await particles.syncForToken(token.id, desc.effectBuffs, {
+      cx: desc.cx, cy: desc.cy,
+      tokenW: desc.tokenW, tokenH: desc.tokenH,
+      ringRadius: desc.ringRadius,
+    });
+  }
+  return !sceneDeleteFailed && !sceneAddFailed;
 }
 
 // === Token hit-test (used by capture overlay for manage-transfer) ====
@@ -1123,6 +1174,12 @@ function hasPluginMetadata(item: Item): boolean {
  * alongside the new curved band; that's exactly what the legacy
  * `buildShape().shapeType("RECTANGLE")` items rendered as. */
 export async function sweepAllOurItems(): Promise<void> {
+  // The sweep deletes every bubble item — the sig caches now describe
+  // items that no longer exist. Leaving them populated made the next
+  // sync diff to zero ops, so bubbles never re-appeared after a scene
+  // switch / GM handoff (checklist §1). Invalidate FIRST so even a
+  // partially-failed sweep re-hydrates from the real scene state.
+  invalidateAllBuffCaches();
   try {
     const ours = await OBR.scene.items.getItems(hasPluginMetadata);
     if (ours.length > 0) {
@@ -1139,8 +1196,17 @@ export async function sweepAllOurItems(): Promise<void> {
   } catch (e) {
     logErr("sweepAllOurItems(scene.local) failed", e);
   }
+  // Invalidate AGAIN after the deletes: a sync pass whose hydrate read
+  // raced this sweep may have repopulated the caches with pre-sweep
+  // state in the meantime (belt to the exclusive-gate braces in
+  // index.ts — callers there serialize, but keep the sweep self-safe).
+  invalidateAllBuffCaches();
   // Reset particles module's internal Map + stop its rAF tick.
-  await particles.clearAll();
+  // Same kill-switch as in syncBubblesForToken: with effects off the
+  // map is always empty and there is no tick, so this was a no-op.
+  if (STATUS_EFFECTS_ENABLED) {
+    await particles.clearAll();
+  }
 }
 
 /** Read buff-id list from token metadata. */

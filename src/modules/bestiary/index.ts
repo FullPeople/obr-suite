@@ -1,3 +1,5 @@
+import {WORKBENCH_DEV} from '../../workbench/channel';
+import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
 import { setupGroupSaves, teardownGroupSaves } from "./group-saves";
 import { assetUrl } from "../../asset-base";
@@ -11,10 +13,15 @@ import {
   BC_PANEL_RESET,
   type DragEndPayload,
 } from "../../utils/panelLayout";
-import { BC_LOCAL_CONTENT_CHANGED } from "../../utils/localContent";
+import { BC_LOCAL_CONTENT_CHANGED, forceReloadLocalContent } from "../../utils/localContent";
+import { contentConfigurationKey } from "../../utils/contentLocale";
 import { clearMonsterCache, loadAllMonsters, getRawMonster } from "./data";
-import { onStateChange, getState } from "../../state";
+import { onStateChange, onLangChange, getState, getLocalLang } from "../../state";
 import { createCanvasDragMode } from "../../utils/canvasDragMode";
+
+// Per-client language for context-menu / tool labels, read once at
+// module load (matches when context menus are registered).
+const en = getLocalLang() === "en";
 
 // Bestiary list panel bbox — RIGHT/TOP anchor. Always returns the
 // expected bbox even when the panel isn't open (layout editor uses
@@ -42,6 +49,7 @@ registerPanelBbox(PANEL_IDS.bestiaryPanel, async () => {
 // matter that it overlaps the bestiary list panel because deselecting
 // a token clears it, which the user can do at any time.
 registerPanelBbox(PANEL_IDS.bestiaryInfo, async () => {
+  if (WORKBENCH_DEV) return null;
   try {
     const vw = await OBR.viewport.getWidth();
     const userOff = getPanelOffset(PANEL_IDS.bestiaryInfo);
@@ -184,6 +192,12 @@ const INFO_TOP_OFFSET = 60;
 const INFO_RIGHT_OFFSET = 60;
 
 const unsubs: Array<() => void> = [];
+// 2026-05-21 (audit) — module-scope handles so teardownBestiary can
+// fully reverse setup: clear the selection-debounce timer and close
+// the in-flight drag modal (otherwise its 35s safety timer could fire
+// post-teardown and close a freshly-reopened module's drag modal).
+let selectionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let closeDragModalFn: (() => void) | null = null;
 let isOpen = false;
 let infoPopoverOpen = false;
 let currentInfoSlug: string | null = null;
@@ -219,7 +233,7 @@ async function openPanel() {
       transformOrigin: { horizontal: "RIGHT", vertical: "TOP" },
       disableClickAway: true,
     });
-    isOpen = true;
+    isOpen = true; setPanelOpen("bestiary-panel", true);
   } catch (e) {
     console.error("[obr-suite/bestiary] openPanel failed", e);
   }
@@ -227,7 +241,7 @@ async function openPanel() {
 
 async function closePanel() {
   try { await OBR.popover.close(POPOVER_ID); } catch {}
-  isOpen = false;
+  isOpen = false; setPanelOpen("bestiary-panel", false);
 }
 
 async function openInfoPopoverFor(slug: string, itemId: string | null) {
@@ -255,7 +269,7 @@ async function openInfoPopoverFor(slug: string, itemId: string | null) {
       hidePaper: true,
       disableClickAway: true,
     });
-    infoPopoverOpen = true;
+    infoPopoverOpen = true; setPanelOpen("bestiary-info", true);
   } catch (e) {
     console.error("[obr-suite/bestiary] openInfoPopoverFor failed", e);
   }
@@ -263,7 +277,7 @@ async function openInfoPopoverFor(slug: string, itemId: string | null) {
 
 async function closeInfoPopover() {
   try { await OBR.popover.close(INFO_POPOVER_ID); } catch {}
-  infoPopoverOpen = false;
+  infoPopoverOpen = false; setPanelOpen("bestiary-info", false);
   currentInfoSlug = null;
   currentInfoItemId = null;
 }
@@ -297,6 +311,7 @@ function isMonsterInfoPinned(): boolean {
 }
 
 async function handleSelection(selection: string[] | undefined) {
+  if (WORKBENCH_DEV) return;
   if (!isAutoPopupOn()) {
     if (currentInfoSlug) await hideInfo();
     return;
@@ -363,22 +378,7 @@ async function handleSelection(selection: string[] | undefined) {
 }
 
 export async function setupBestiary(): Promise<void> {
-  // One-time migration: the legacy standalone "bestiary" / "character-
-  // cards" plugins both wrote `com.bestiary/auto-popup = "0"` from
-  // a UI that was visible to ALL roles. The suite hides the toggle
-  // from non-GM, leaving players permanently stuck with auto-popup
-  // off and no way to flip it back on. Clear the stale "0" once so
-  // the new player-facing popover (owner-token) actually shows up.
-  // Players + GM can now toggle it via the cluster row.
-  try {
-    const MIG_KEY = "obr-suite/bestiary-popup-migration-v2";
-    if (localStorage.getItem(MIG_KEY) !== "done") {
-      if (localStorage.getItem(AUTO_POPUP_KEY) === "0") {
-        localStorage.removeItem(AUTO_POPUP_KEY);
-      }
-      localStorage.setItem(MIG_KEY, "done");
-    }
-  } catch {}
+  // Unset means enabled; preserve an explicit local choice to disable previews.
   // Local-content invalidation: when the user imports / removes a
   // homebrew JSON or MD file, drop our merged-monster cache so the
   // bestiary panel re-renders with the new entries. Also refresh
@@ -389,8 +389,15 @@ export async function setupBestiary(): Promise<void> {
   // "删除重新上传也没用 / re-upload doesn't update" 2026-05-10).
   unsubs.push(
     OBR.broadcast.onMessage(BC_LOCAL_CONTENT_CHANGED, () => {
-      clearMonsterCache();
-      void refreshSharedMonsterTableFromLocal();
+      // 2026-05-27 — also reload the localContent in-memory mirror
+      // from IDB, otherwise this iframe never sees content written by
+      // the settings iframe (manual imports OR URL-subscription
+      // refreshes); the subsequent clearMonsterCache then re-derives
+      // from fresh memFiles.
+      void forceReloadLocalContent().then(() => {
+        clearMonsterCache();
+        void refreshSharedMonsterTableFromLocal();
+      });
     }),
   );
 
@@ -399,12 +406,9 @@ export async function setupBestiary(): Promise<void> {
   // added/removed OR a per-source blacklist toggled in settings.
   // Signature includes baseUrl + disabledSources so both kinds of
   // mutation invalidate.
-  const libSig = () => JSON.stringify(
-    (getState().libraries || [])
-      .filter((l) => l.enabled)
-      .map((l) => `${l.baseUrl}|${(l.disabledSources ?? []).slice().sort().join(",")}`),
-  );
+  const libSig = () => contentConfigurationKey(getState().libraries ?? [], getLocalLang());
   let lastLibSig = libSig();
+  unsubs.push(onLangChange(() => { lastLibSig = libSig(); clearMonsterCache(); }));
   unsubs.push(
     onStateChange(() => {
       const sig = libSig();
@@ -422,7 +426,7 @@ export async function setupBestiary(): Promise<void> {
     icons: [
       {
         icon: ICON_URL,
-        label: "怪物图鉴",
+        label: en ? "Bestiary" : "怪物图鉴",
         filter: { roles: ["GM"] },
       },
     ],
@@ -451,7 +455,7 @@ export async function setupBestiary(): Promise<void> {
     modeId: `${TOOL_ID}/mode`,
     toolId: TOOL_ID,
     icon: ICON_URL,
-    label: "浏览",
+    label: en ? "Browse" : "浏览",
   });
 
   // Track previous tool + open/close panel based on which tool is active.
@@ -501,7 +505,7 @@ export async function setupBestiary(): Promise<void> {
         icons: [
           {
             icon: ICON_URL,
-            label: "切换怪物图鉴",
+            label: en ? "Toggle bestiary" : "切换怪物图鉴",
             filter: { activeTools: [SELECT_TOOL, TOOL_ID] },
           },
         ],
@@ -610,12 +614,11 @@ export async function setupBestiary(): Promise<void> {
   // empty-read guards inside handleSelection are kept as defence-in-
   // depth (the resource panel's own items.onChange listener is left
   // un-debounced because its refresh() does incremental DOM diff).
-  let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   unsubs.push(
     OBR.scene.items.onChange(() => {
-      if (pendingTimer) clearTimeout(pendingTimer);
-      pendingTimer = setTimeout(async () => {
-        pendingTimer = null;
+      if (selectionDebounceTimer) clearTimeout(selectionDebounceTimer);
+      selectionDebounceTimer = setTimeout(async () => {
+        selectionDebounceTimer = null;
         try {
           const sel = await OBR.player.getSelection();
           await handleSelection(sel);
@@ -632,7 +635,7 @@ export async function setupBestiary(): Promise<void> {
     onViewportResize(async () => {
       if (isOpen) await openPanel();
       if (infoPopoverOpen && currentInfoSlug) {
-        infoPopoverOpen = false;
+        infoPopoverOpen = false; setPanelOpen("bestiary-info", false);
         await openInfoPopoverFor(currentInfoSlug, currentInfoItemId);
       }
     }),
@@ -647,7 +650,7 @@ export async function setupBestiary(): Promise<void> {
         if (isOpen) await openPanel();
       } else if (payload?.panelId === PANEL_IDS.bestiaryInfo) {
         if (infoPopoverOpen && currentInfoSlug) {
-          infoPopoverOpen = false;
+          infoPopoverOpen = false; setPanelOpen("bestiary-info", false);
           await openInfoPopoverFor(currentInfoSlug, currentInfoItemId);
         }
       }
@@ -692,7 +695,7 @@ export async function setupBestiary(): Promise<void> {
       icons: [
         {
           icon: ICON_URL,
-          label: "绑定怪物图鉴",
+          label: en ? "Bind to bestiary" : "绑定怪物图鉴",
           filter: {
             roles: ["GM"],
             every: [
@@ -714,7 +717,7 @@ export async function setupBestiary(): Promise<void> {
       icons: [
         {
           icon: ICON_URL,
-          label: "更换怪物图鉴",
+          label: en ? "Change bestiary entry" : "更换怪物图鉴",
           filter: {
             roles: ["GM"],
             every: [
@@ -736,7 +739,7 @@ export async function setupBestiary(): Promise<void> {
       icons: [
         {
           icon: ICON_URL,
-          label: "移除怪物图鉴绑定",
+          label: en ? "Remove bestiary binding" : "移除怪物图鉴绑定",
           filter: {
             roles: ["GM"],
             every: [
@@ -774,7 +777,7 @@ export async function setupBestiary(): Promise<void> {
       icons: [
         {
           icon: ICON_URL,
-          label: "群体绑定怪物图鉴",
+          label: en ? "Bulk bind to bestiary" : "群体绑定怪物图鉴",
           filter: {
             roles: ["GM"],
             // ALL selected tokens must be IMAGE; metadata state can
@@ -799,7 +802,7 @@ export async function setupBestiary(): Promise<void> {
       icons: [
         {
           icon: ICON_URL,
-          label: "群体移除怪物图鉴",
+          label: en ? "Bulk remove bestiary binding" : "群体移除怪物图鉴",
           filter: {
             roles: ["GM"],
             // Show only when at least one CHARACTER-layer token in the
@@ -861,7 +864,7 @@ export async function setupBestiary(): Promise<void> {
     OBR.broadcast.onMessage(BC_PANEL_RESET, async () => {
       if (isOpen) await openPanel();
       if (infoPopoverOpen && currentInfoSlug) {
-        infoPopoverOpen = false;
+        infoPopoverOpen = false; setPanelOpen("bestiary-info", false);
         await openInfoPopoverFor(currentInfoSlug, currentInfoItemId);
       }
     }),
@@ -886,6 +889,9 @@ export async function setupBestiary(): Promise<void> {
     dragModalOpen = false;
     try { await OBR.modal.close(MONSTER_DRAG_MODAL_ID); } catch {}
   };
+  // Expose for teardown so an in-flight drag modal + its 35s safety
+  // timer are torn down with the module.
+  closeDragModalFn = () => { void closeDragModal(); };
   unsubs.push(
     OBR.broadcast.onMessage(BC_MONSTER_DRAG_START, async (event) => {
       const payload = event.data as Record<string, unknown> | undefined;
@@ -922,6 +928,11 @@ export async function setupBestiary(): Promise<void> {
 }
 
 export async function teardownBestiary(): Promise<void> {
+  // Cancel the selection debounce + close any in-flight drag modal
+  // (and its 35s safety timer) before detaching listeners, so neither
+  // can fire after teardown.
+  if (selectionDebounceTimer) { clearTimeout(selectionDebounceTimer); selectionDebounceTimer = null; }
+  if (closeDragModalFn) { try { closeDragModalFn(); } catch {} closeDragModalFn = null; }
   await teardownGroupSaves();
   await closePanel();
   await closeInfoPopover();
