@@ -49,7 +49,8 @@ export function writeRuntime(doc:any,runtime:Runtime,definitions:any[]=[]){
  result.web_resources=cloneJson(runtime.resources);
  const native=result.dnd_card_web;if(native){native.runtime||={};native.runtime.hp=hp.current;native.runtime.tempHp=hp.temp;native.runtime.resources=cloneJson(runtime.resources);native.selections=runtimeConditions(native.selections||[],native.selections||[],runtime.conditions,definitions);native.revision=(native.revision||0)+1;
  if(runtime.stats['max health']!==before.stats['max health']){native.baseHp=runtime.stats['max health'];native.sheetBonuses={...native.sheetBonuses,hp:0};native.adjustments=[...(native.adjustments||[]).filter((a:any)=>a.target!=='hp'),{id:'suite-hp',target:'hp',value:runtime.stats['max health'],reason:'枭熊场景'}];}
- if(runtime.stats['armor class']!==before.stats['armor class'])native.adjustments=[...(native.adjustments||[]).filter((a:any)=>a.target!=='ac'),{id:'suite-ac',target:'ac',value:runtime.stats['armor class'],reason:'枭熊场景'}];
+ // Scene AC is a final total; retain the card offset without applying it twice.
+ if(runtime.stats['armor class']!==before.stats['armor class'])native.adjustments=[...(native.adjustments||[]).filter((a:any)=>a.target!=='ac'),{id:'suite-ac',target:'ac',value:runtime.stats['armor class']-(native.sheetBonuses?.ac||0),reason:'枭熊场景'}];
  for(const [id,r] of Object.entries(runtime.resources) as [string,any][])if(id.startsWith('spell-slot:')&&native.spellSettings)native.spellSettings.slots[id.split(':')[1]]={max:r.max,used:r.max-r.current};
  result.web_conditions=native.selections.filter((r:any)=>r.entry?.kind==='condition').map((r:any)=>r.entry);
  }else result.web_conditions=runtimeConditions((result.web_conditions||[]).map((entry:any)=>({entry})),[],runtime.conditions,definitions).map((r:any)=>r.entry);
