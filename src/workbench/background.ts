@@ -1,3 +1,4 @@
+import {sharedEntry,OPEN_WIKI_CHANNEL} from './shared-entry';
 import {RUNTIME_BASELINE,DOCUMENT_REVISION,documentRevision,documentRuntime,tokenRuntime,mergeTokenRuntime,writeRuntime,mergeMonsterMetadata,type RuntimeBaseline} from './runtime-authority';
 import {workbenchObservation} from './observation';
 import {documentChanges,expandChanges} from './document-delta';
@@ -50,6 +51,7 @@ async function start(){
  const inventories=inventoryDocuments(relay,OBR.room.id||'default');
  const hostStarted=Date.now();
  const send=(type:string,extra:Record<string,unknown>={},route?:'relay'|'direct')=>{const data={protocol,session,hostStarted,type,...extra};if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch{}if(route==='relay'||route!=='direct'&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).catch(()=>{});};
+ OBR.broadcast.onMessage(OPEN_WIKI_CHANNEL,event=>{if(event.connectionId!==playerConnection)return;try{const entry=sharedEntry((event.data as any)?.entry);send('showWiki',{entry,id:crypto.randomUUID()});}catch{}});
  const panels=panelBridge(send,relay);
  const bubble=(item:Item|undefined)=>((item?.metadata[HP]??item?.metadata[LEGACY]??{}) as Record<string,any>);
  const documentLocation=(id:string)=>cardLocations.get(id)||cardLocation(origin,OBR.room.id||'default',id);
@@ -303,10 +305,10 @@ async function start(){
   const actor=(await observation.read()).player.name;
   for(const id of changed){const previous=before[id],next=after[id];
    const resource={...(next||previous),id,current:next?.current||0,name:next?.name||previous?.name||id,type:next?.type||previous?.type||'count',icon:'gem'},delta=resource.current-(previous?.current||0);
-   await publishWorkbenchNotice({noticeId:crypto.randomUUID(),privateFor,privateSummary:`${actor}${delta>0?'恢复':'消耗'}了什么`,tokenId:a.item?.id||`card:${a.cardId}`,tokenName:a.card?.name||a.item?.name||'',resource,delta,prevValue:previous?.current||0});
+   await publishWorkbenchNotice({noticeId:crypto.randomUUID(),privateFor,privateSummary:`${actor}${delta>0?'恢复':'消耗'}了什么`,tokenId:a.item?.id||`card:${a.cardId}`,tokenName:a.card?.name||a.item?.name||'',entry:next?.entry||previous?.entry,resource,delta,prevValue:previous?.current||0});
   }
  }
- function nativeStockNotices(c:any){const values:Record<string,any>={};for(const row of c?.selections||[]){if(row.entry?.kind!=='item')continue;const id='item:'+row.entry.id;const r=values[id]||={id,name:row.entry.name,current:0,max:0,type:'number'};r.current+=row.quantity||0;r.max=r.current;}for(const [coin,current] of Object.entries(c?.inventory?.coins||{}))values['coin:'+coin]={name:({cp:'铜币',sp:'银币',ep:'琥珀金币',gp:'金币',pp:'铂金币'} as Record<string,string>)[coin]||coin,current,max:current,type:'number'};return values;}
+ function nativeStockNotices(c:any){const values:Record<string,any>={};for(const row of c?.selections||[]){if(row.entry?.kind!=='item')continue;const id='item:'+row.entry.id;const r=values[id]||={id,name:row.entry.name,entry:row.entry,current:0,max:0,type:'number'};r.current+=row.quantity||0;r.max=r.current;}for(const [coin,current] of Object.entries(c?.inventory?.coins||{}))values['coin:'+coin]={name:({cp:'铜币',sp:'银币',ep:'琥珀金币',gp:'金币',pp:'铂金币'} as Record<string,string>)[coin]||coin,current,max:current,type:'number'};return values;}
  async function spellPreparationNotices(a:Awaited<ReturnType<typeof access>>,before:any,after:any){
   const prepared=(card:any):Set<string>=>new Set(card?.spellSettings?.mode==='prepared'?card.spellSettings.prepared||[]:[]);
   const old=prepared(before),next=prepared(after);if([...old].every(id=>next.has(id))&&old.size===next.size)return;
@@ -316,7 +318,7 @@ async function start(){
    if(old.has(id)===next.has(id))continue;
    const row=(after.selections||[]).find((s:any)=>s.id===id)||(before.selections||[]).find((s:any)=>s.id===id);if(row?.entry?.kind!=='spell')continue;
    const added=next.has(id),name=row.entry.name,summary=`${actor}${added?'预备了':'取消预备了'}${name}`;
-   await publishWorkbenchNotice({noticeId:crypto.randomUUID(),tokenId:a.item?.id||`card:${a.cardId}`,tokenName:actor,summary,privateFor,privateSummary:`${requester}${added?'预备':'取消预备'}了法术`,resource:{id,name,current:added?1:0,max:1,type:'count',icon:'spellbook'},delta:added?1:-1,prevValue:added?0:1});
+   await publishWorkbenchNotice({noticeId:crypto.randomUUID(),tokenId:a.item?.id||`card:${a.cardId}`,tokenName:actor,entry:row.entry,summary,privateFor,privateSummary:`${requester}${added?'预备':'取消预备'}了法术`,resource:{id,name,current:added?1:0,max:1,type:'count',icon:'spellbook'},delta:added?1:-1,prevValue:added?0:1});
   }
  }
  async function statNotices(a:Awaited<ReturnType<typeof access>>,before:Record<string,any>,after:Record<string,any>){
@@ -325,11 +327,11 @@ async function start(){
   await resourceNotices(a,values(before),values(after));
  }
  async function conditionNotices(a:Awaited<ReturnType<typeof access>>,before:any,after:any){
-  const values=(card:any)=>Object.fromEntries((card?.selections||[]).filter((row:any)=>row.entry?.kind==='condition').map((row:any)=>[conditionIdentity(row.entry,definitionsFor(a.scene)),{id:row.entry.id,name:row.entry.name,current:row.level||1,max:6,type:'number'}]));
+  const values=(card:any)=>Object.fromEntries((card?.selections||[]).filter((row:any)=>row.entry?.kind==='condition').map((row:any)=>[conditionIdentity(row.entry,definitionsFor(a.scene)),{id:row.entry.id,name:row.entry.name,entry:row.entry,current:row.level||1,max:6,type:'number'}]));
   const old=values(before),next=values(after);if(sameValue(old,next))return;
   if(a.role==='GM'&&(await inventories.read()).data.silent)return;
   const actor=a.card?.name||a.item?.name||after.name||'',requester=(await observation.read()).player.name,privateFor=a.card?.locked?(a.card.owner_ids||[]):a.item?.metadata['com.obr-suite/workbench/locked']?[a.item.createdUserId]:undefined;
-  for(const id of new Set([...Object.keys(old),...Object.keys(next)])){if(sameValue(old[id],next[id]))continue;const row=next[id]||old[id],added=!!next[id],summary=`${actor}${added?'获得了':'移除了'}${row.name}${added&&row.current>1?` ${row.current}`:''}`;await publishWorkbenchNotice({noticeId:crypto.randomUUID(),tokenId:a.item?.id||`card:${a.cardId}`,tokenName:actor,summary,privateFor,privateSummary:`${requester}调整了状态`,resource:row,delta:added?1:-1,prevValue:old[id]?.current||0});}
+  for(const id of new Set([...Object.keys(old),...Object.keys(next)])){if(sameValue(old[id],next[id]))continue;const row=next[id]||old[id],added=!!next[id],summary=`${actor}${added?'获得了':'移除了'}${row.name}${added&&row.current>1?` ${row.current}`:''}`;await publishWorkbenchNotice({noticeId:crypto.randomUUID(),tokenId:a.item?.id||`card:${a.cardId}`,tokenName:actor,entry:row.entry,summary,privateFor,privateSummary:`${requester}调整了状态`,resource:row,delta:added?1:-1,prevValue:old[id]?.current||0});}
  }
  function conditionRows(a:{scene:Record<string,any>;item?:Item;cardId?:string},doc:any):ConditionRow[]{
   const defs=definitionsFor(a.scene),saved=a.cardId?(doc?.dnd_card_web?.selections?.filter((s:any)=>s.entry?.kind==='condition')||(doc?.web_conditions||[]).map((entry:any)=>({entry}))):Object.values(a.item?.metadata['com.obr-suite/workbench/condition-details'] as any||{});
@@ -361,6 +363,8 @@ async function start(){
   notice:async changes=>{for(const change of changes){const a=await access(change.itemId),native=(row:ConditionRow|null)=>({selections:row?[{entry:row.entry,level:row.level||1}]:[]});await conditionNotices(a,native(change.before),native(change.after));}}
  });
  async function command(m:any){
+  if(m.type==='showEntry'){const entry=sharedEntry(m.entry),actor=(await observation.read()).player.name;await publishWorkbenchNotice({noticeId:m.requestId,tokenId:'',tokenName:actor,entry,shared:true,summary:`${actor}展示了 ${entry.name}`,resource:{id:entry.id,name:entry.name,current:0,max:0,type:'number',icon:'gem'},delta:0,prevValue:0});return;}
+
   if(m.type==='condition'){
    if(m.condition?.entry){const a=await access(m.itemId);m.condition={...m.condition,id:conditionIdentity(m.condition.entry,definitionsFor(a.scene)),level:Math.max(1,Math.min(6,Number(m.condition.level)||1))};}
    return changeCondition(m);
@@ -391,7 +395,7 @@ async function start(){
       const source=result.ledger.containers[operation.from],target=result.ledger.containers[operation.to];const message=source&&target?(source.kind==='public'?`${target.name}拿走了${row.name}`:`${actor}给予了${row.name}给${target.name}`):`${container.name}${delta>0?'获得':'消耗'}了${row.name}`;
       // One public message per transfer; the source delta is the same operation.
       if(operation.action==='transfer'&&id===operation.from)continue;
-      await publishWorkbenchNotice({noticeId:crypto.randomUUID(),privateFor,privateSummary:`${actor}${delta>0?'恢复':'消耗'}了什么`,tokenId:id,tokenName:message,resource,delta,prevValue:before});
+      await publishWorkbenchNotice({noticeId:crypto.randomUUID(),privateFor,privateSummary:`${actor}${delta>0?'恢复':'消耗'}了什么`,tokenId:id,tokenName:message,entry:row.entry,resource,delta,prevValue:before});
      }
     }
    }
@@ -528,13 +532,13 @@ async function start(){
   if(m.type==='cancel'){if(!activeRequests.has(m.requestId)&&!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}
   if(m.type==='pin'){follow=!m.pinned;if(follow)lastSelection='';void refreshSelection();return;}
   if(m.type==='select'){const generation=++selectionGeneration;try{const a=await access(m.itemId);if(generation!==selectionGeneration)return;chosen=a.cardId?`card:${a.cardId}`:m.itemId;lastSelection=JSON.stringify((await observation.read()).selection);last='';void refreshSelection();}catch(e){send('error',{message:String(e)});}return;}
-  if(!['stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
+  if(!['showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
   if(requestRuns.has(m.requestId))return;
   delete m._committed;delete m._inventoryCommitted;
   const receivedAt=performance.now();
   const run=async()=>{let answer=seen.get(m.requestId);if(!answer){const began=performance.now(),steps:{phase:string;ms:number}[]=[];let phase='authorize',phaseStart=began;
    Object.defineProperty(m,'_phase',{configurable:true,get:()=>phase,set:(next:string)=>{const now=performance.now();steps.push({phase,ms:Math.round((now-phaseStart)*10)/10});phase=next;phaseStart=now;}});
-   const writes=!['diceRpc','roll','panelRpc'].includes(m.type);if(writes){mutation++;epoch++;}try{
+   const writes=!['diceRpc','roll','panelRpc','showEntry'].includes(m.type);if(writes){mutation++;epoch++;}try{
    if(cancelledRequests.delete(m.requestId)||typeof m.expiresAt==='number'&&Date.now()>m.expiresAt)throw Error('操作在执行前已取消或过期；未修改数据');
    activeRequests.add(m.requestId);send('requestPending',{requestId:m.requestId,active:true},route);m._phase='authorize';answer={ok:true,result:await command(m)};
   }catch(error){const e=error as any;answer={ok:false,uncertain:!!e?.uncertain,message:e?.message||String(error),diagnostic:{version:devManifest.version,at:new Date().toISOString(),requestId:m.requestId,requestType:m.type,phase:m._phase,httpStatus:e?.status,...e?.diagnostic,stack:typeof e?.stack==='string'?e.stack.split('\n').slice(0,6).join('\n'):undefined}};
@@ -546,8 +550,8 @@ async function start(){
     try{if(m._committed.kind==='document')result.snapshot=await snapshot(m._committed.id);else{const context=await inventoryContext();result.historyId=m._committed.historyId;result.inventory=await inventories.view(context.definitions,context.gm,context.publicId);result.sequence=++sequence;}}catch{}
     answer={ok:true,result};void hydrate();scheduleInventoryRepair();
    }else if(m._inventoryCommitted){answer.uncertain=true;answer.diagnostic={...answer.diagnostic,code:'PARTIAL_INVENTORY_COMMIT',inventoryCommitted:true};}
-  }finally{activeRequests.delete(m.requestId);if(writes){mutation--;epoch++;}}steps.push({phase,ms:Math.round((performance.now()-phaseStart)*10)/10});answer.timing={transport:route,version:devManifest.version,queueMs:Math.round(began-receivedAt),hostMs:Math.round(performance.now()-began),steps};seen.set(m.requestId,answer);if(seen.size>256)seen.delete(seen.keys().next().value!);}send('ack',{requestId:m.requestId,...answer},route);if(!['diceRpc','roll','panelRpc'].includes(m.type)){void refreshSelection();void refresh();}};
-  const task=['diceRpc','roll','panelRpc','console'].includes(m.type)||m.type==='inventory'&&['silent','containerLock'].includes(m.operation?.action)?run():(queue=queue.then(run).catch(()=>{}));requestRuns.set(m.requestId,task);void task.finally(()=>{requestRuns.delete(m.requestId);});
+  }finally{activeRequests.delete(m.requestId);if(writes){mutation--;epoch++;}}steps.push({phase,ms:Math.round((performance.now()-phaseStart)*10)/10});answer.timing={transport:route,version:devManifest.version,queueMs:Math.round(began-receivedAt),hostMs:Math.round(performance.now()-began),steps};seen.set(m.requestId,answer);if(seen.size>256)seen.delete(seen.keys().next().value!);}send('ack',{requestId:m.requestId,...answer},route);if(!['diceRpc','roll','panelRpc','showEntry'].includes(m.type)){void refreshSelection();void refresh();}};
+  const task=['diceRpc','roll','panelRpc','console','showEntry'].includes(m.type)||m.type==='inventory'&&['silent','containerLock'].includes(m.operation?.action)?run():(queue=queue.then(run).catch(()=>{}));requestRuns.set(m.requestId,task);void task.finally(()=>{requestRuns.delete(m.requestId);});
  }
  window.addEventListener('message',e=>{if(e.origin!==origin||e.data?.protocol!==protocol||!e.source)return;
   if(e.data.type==='discover'){try{const source=e.source as Window;if(source!==window&&source.parent===parent)source.postMessage({protocol,type:'background',nonce:e.data.nonce,session,clientKey:credentials.clientKey},origin);}catch{}return;}

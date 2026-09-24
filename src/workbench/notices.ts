@@ -1,5 +1,6 @@
+import {setupActivityPanel,ensureActivityPanel,onActivityPanelChange} from './activity-panel';
+import {sharedEntry,type SharedEntry} from './shared-entry';
 import OBR from '@owlbear-rodeo/sdk';
-import { assetUrl } from '../asset-base';
 import type { Resource } from '../modules/resourceTracker/types';
 
 export const NOTICE_CHANNEL = 'com.obr-suite/resources/changed';
@@ -11,6 +12,8 @@ const PROBE = 'com.obr-suite/resources/toast-probe';
 const RETRY_MS = 500;
 export interface WorkbenchNotice {
   noticeId: string;
+  entry?: SharedEntry;
+  shared?: boolean;
   tokenId: string;
   tokenName?: string;
   resource: Resource;
@@ -31,6 +34,7 @@ let instance = '', modalWork: Promise<void> = Promise.resolve();
 let timer: ReturnType<typeof setTimeout> | undefined, attempts = 0;
 const queue = new Map<string, WorkbenchNotice>();
 const accepted = new Set<string>();
+const recent = new Map<string,{at:number;data:WorkbenchNotice}>();
 
 function remember(id: string) {
   accepted.add(id);
@@ -51,6 +55,8 @@ function accept(data: WorkbenchNotice | undefined) {
   const id = data.noticeId || crypto.randomUUID();
   if (accepted.has(id)) return;
   remember(id); queue.set(id, { ...data, noticeId: id });
+  recent.set(id,{at:performance.timeOrigin+performance.now(),data:{...data,noticeId:id}});
+  while(recent.size>50)recent.delete(recent.keys().next().value!);
   while (queue.size > 50) queue.delete(queue.keys().next().value!);
   deliver();
 }
@@ -66,10 +72,7 @@ function openOverlay(replace = false) {
   const current = () => ready && own === revision && instance === ownInstance;
   const work = modalWork.then(async () => {
     if (!current()) return;
-    if (replace) await OBR.modal.close(TOAST).catch(() => {});
-    if (!current()) return;
-    await OBR.modal.open({ id: TOAST, url: assetUrl(`resource-toast.html?noticeInstance=${encodeURIComponent(ownInstance)}`), fullScreen: true,
-      hidePaper: true, hideBackdrop: true, disablePointerEvents: true });
+    await ensureActivityPanel(replace);
     if (!current()) return;
     overlayOpen = true;
     // READY can precede the SDK open response, or be lost. The renderer answers
@@ -126,6 +129,14 @@ function sceneChanged(value: boolean) {
 export function setupWorkbenchNotices() {
   if (started) return;
   started = true;
+  setupActivityPanel();
+  onActivityPanelChange(({dismissedAt})=>{
+    overlayOpen=false;rendererReady=false;
+    // Closing dismisses what existed at the gesture, not messages received
+    // afterwards while the close broadcast/SDK call was still in flight.
+    if(Number.isFinite(dismissedAt))for(const [id,row] of recent)if(row.at>dismissedAt!&&row.at>performance.timeOrigin+performance.now()-20000)queue.set(id,row.data);
+    if(queue.size)queueMicrotask(deliver);
+  });
   // Subscribe synchronously, before reading SDK state or starting any module.
   OBR.broadcast.onMessage(NOTICE_CHANNEL, event => accept(event.data as WorkbenchNotice));
   OBR.broadcast.onMessage(ACK, event => {
@@ -134,6 +145,7 @@ export function setupWorkbenchNotices() {
     queue.delete(ack.id || '');
     if (!queue.size) { clearTimeout(timer); timer = undefined; attempts = 0; }
   });
+  OBR.broadcast.onMessage('com.obr-suite/resources/toast-mounted',event=>{if(event.connectionId===connection)probeRenderer();});
   OBR.broadcast.onMessage(READY, event => {
     if (!connection || event.connectionId !== connection || !instance || (event.data as any)?.instance !== instance) return;
     rendererReady = true; deliver();
@@ -151,6 +163,10 @@ export function setupWorkbenchNotices() {
 }
 
 export async function publishWorkbenchNotice(data: WorkbenchNotice) {
+  // Keep entry snapshots bounded; bad imported rule text must never fail a committed edit.
+  let entry:SharedEntry|undefined;try{if(data.entry)entry=sharedEntry(data.entry);}catch{}
+  const {entry:unused,...resource}=data.resource as Resource & {entry?:unknown};
+  data={...data,entry,resource};
   // Never depend on a sender receiving its own SDK broadcast. A single notice
   // ID covers local enqueue, remote delivery, retries and iframe replacement.
   accept(data);

@@ -1,3 +1,5 @@
+import {WORKBENCH_DEV} from '../../workbench/channel';
+import {setupActivityPage} from '../../workbench/activity-page';
 import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
 import { DieResult, sidesOf } from "./types";
@@ -767,10 +769,11 @@ function myRoleIsDM(entry: HistoryEntry): boolean {
 // of bouncing to the dice panel's history tab.)
 
 OBR.onReady(async () => {
+  if(WORKBENCH_DEV)setupActivityPage();
   installDebugOverlay();
   // 2026-05-16 — scale text + spacing with panel size. Baseline =
   // HISTORY_W × HISTORY_H from dice/index.ts.
-  installPanelZoom({ baseWidth: 320, baseHeight: 218 });
+  installPanelZoom({ baseWidth: 320, baseHeight: 218, min:0.7 });
   // Rebuild the LS key with the actual room id and reload history
   // from THIS room's slice. Skipping this step (or running it after
   // the first render) leaks yesterday's "default"-suffixed entries
@@ -797,11 +800,11 @@ OBR.onReady(async () => {
   // X button — dismiss the popover for this session, BUT keep the
   // cluster's "投骰记录" toggle on so the next dice roll auto-reopens
   // it. Background module owns this via BC_DICE_HISTORY_DISMISS.
-  document.getElementById("btnDismiss")?.addEventListener("click", () => {
+  document.getElementById("btnDismiss")?.addEventListener("click", event => {
     try {
       OBR.broadcast.sendMessage(
         "com.obr-suite/dice-history-dismiss",
-        {},
+        {issuedAt:performance.timeOrigin+event.timeStamp},
         { destination: "LOCAL" },
       );
     } catch {}

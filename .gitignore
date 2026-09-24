@@ -6,3 +6,6 @@ tools/buff-fx-gen/.emoji-cache/
 
 # Local fog rollback backup (kept out-of-tree, not for git)
 _fog-backup-*/
+
+dist-workbench-dev/
+workbench-test-output/
