@@ -99,7 +99,7 @@ export function openingColor(opening: Opening): string {
 /** Secret doors get a dashed indicator so the GM can tell one from a
  *  door the party can actually see, at a glance and colour-blind-safe. */
 function openingDash(opening: Opening): number[] {
-  return opening.kind === "secret" ? SECRET_DASH : [];
+  return opening.kind === "secret" || opening.kind === "locked" ? SECRET_DASH : [];
 }
 
 interface OverlayEntry {

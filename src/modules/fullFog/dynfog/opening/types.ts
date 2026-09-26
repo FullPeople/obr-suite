@@ -28,7 +28,7 @@
 // gates the overlay, and the GM-side toggle listener re-checks it so a
 // hand-rolled broadcast can't flip one either.
 
-export type OpeningKind = "door" | "window" | "secret";
+export type OpeningKind = "door" | "window" | "secret" | "locked";
 
 export interface Opening {
   /** Stable id. Player toggle requests reference this rather than an
@@ -87,7 +87,7 @@ export function playerVisible(opening: Opening): boolean {
  * broadcast cannot work a window or a secret door either.
  */
 export function playerOperable(opening: Opening): boolean {
-  return playerVisible(opening) && opening.kind !== "window";
+  return opening.kind === "door";
 }
 
 /** Default `open` for a freshly created opening of each kind.

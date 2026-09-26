@@ -1,4 +1,5 @@
 import OBR, {type Item, type Player} from '@owlbear-rodeo/sdk';
+import {workbenchItemsSignature} from './item-observation';
 
 type Observation = {
  ready:boolean; scene:Record<string,unknown>; room:Record<string,unknown>;
@@ -14,7 +15,10 @@ function createObservation(){
  const subscribers=new Set<()=>void>();
  const set=<K extends keyof Observation>(key:K,value:Observation[K])=>{values[key]=value;versions.set(key,(versions.get(key)||0)+1);};
  const notify=()=>{serial++;for(const listener of subscribers)listener();};
- const event=<K extends keyof Observation>(key:K,value:Observation[K])=>{set(key,value);notify();};
+ const event=<K extends keyof Observation>(key:K,value:Observation[K])=>{
+  const relevant=key!=='items'||workbenchItemsSignature((values.items||[]))!==workbenchItemsSignature(value as Item[]);
+  set(key,value);if(relevant)notify();
+ };
  OBR.scene.items.onChange(items=>event('items',items));
  OBR.scene.onMetadataChange(scene=>event('scene',scene));
  OBR.room.onMetadataChange(room=>event('room',room));

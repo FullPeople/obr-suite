@@ -57,14 +57,11 @@ export function readVisionCards(raw: unknown): Map<string, VisionCard> {
   return result;
 }
 
-/** Explicit ownership wins over every inference. `all` is the GM's explicit
- * "全部玩家" grant and is what makes a light visible to the whole party even
- * when no player owns it. Without an explicit choice, a bound card and then a
- * narrowly inferred player-created token decide. A card with no explicit owner
- * list takes the bound token's creator for the personal view and counts as
- * shareable; Creator id alone is NOT a general ownership boundary: GM-created
- * player tokens work via their card/override; maps and NPCs never become party
- * eyes. */
+/** Explicit restrictions win over automatic ownership. The room's sharing
+ * setting can share any visible automatic source, including GM-created NPCs
+ * and lights without a bound token. Personal vision still resolves card
+ * owners or the token creator. Hidden attachments and DM-only cards never
+ * participate; the consumer applies the room sharing switch to `team`. */
 export function resolveVisionSource(
   item: Item,
   context: VisionContext,
@@ -86,7 +83,7 @@ export function resolveVisionSource(
   const fromOwners = (ownerIds: string[], shareable: boolean): VisionSource => ({
     visible,
     personal: context.playerIds.has(context.playerId) && ownerIds.includes(context.playerId),
-    team: shareable && ownerIds.some(id => context.playerIds.has(id)),
+    team: shareable && ownerIds.length > 0,
     publicAmbient: false,
   });
   if (ownership) {
@@ -125,7 +122,7 @@ export function resolveVisionSource(
     }
     return { ...fromOwners(card.ownerIds, true), publicAmbient: card.visibility === "public" };
   }
-  if (chain.some(node => MONSTER_BIND_KEY in node.metadata)) return { ...deny, publicAmbient: true };
+  if (chain.some(node => MONSTER_BIND_KEY in node.metadata)) return { ...deny, team: true, publicAmbient: true };
   const token = chain.find(node => node.layer === "CHARACTER" || node.layer === "MOUNT");
-  return { ...(token ? fromOwners([token.createdUserId], true) : deny), publicAmbient: true };
+  return { ...(token ? fromOwners([token.createdUserId], true) : deny), team: true, publicAmbient: true };
 }

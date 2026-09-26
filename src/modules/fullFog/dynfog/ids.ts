@@ -48,6 +48,7 @@ export {
 export const OBR_FOG_TOOL = "rodeo.owlbear.tool/fog";
 
 export const LINE_MODE_ID = dynfogId("line-mode");
+export const LOCKED_DOOR_MODE_ID = dynfogId("locked-door-mode");
 export const DOOR_MODE_ID = dynfogId("door-mode");
 export const WINDOW_MODE_ID = dynfogId("window-mode");
 export const SECRET_MODE_ID = dynfogId("secret-mode");

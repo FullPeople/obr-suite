@@ -563,7 +563,7 @@ function releaseCues(){
   // plus ownership or the room GM role. Depending on a capability flag made the
   // control vanish whenever that flag failed to arrive.
   const omniscientToggle=el<HTMLButtonElement>("omniscient-toggle");omniscientToggle.hidden=!(!!game&&(!!view?.isHost||view?.role==="GM"));omniscientToggle.textContent=t(omniscient?"omniscientOn":"omniscientOff");omniscientToggle.title=`${t("omniscientHint")}${lang==="zh"?"（本机角色：":" (local role: "}${view?.role??"unknown"}${lang==="zh"?"）":")"}`;omniscientToggle.setAttribute("aria-label",`${omniscientToggle.textContent} · ${t("omniscientHint")}`);omniscientToggle.setAttribute("aria-pressed",String(!!omniscient));
-  if(!view?.canEdit&&omniscientGame())void deps.send({type:"omniscient",enabled:false});
+  if(!view?.isHost&&view?.role!=="GM"&&omniscientGame())void deps.send({type:"omniscient",enabled:false});
   el("close").setAttribute("aria-label",t("close"));el("close").title=t("close");el("close").textContent=t("backToMap");el("display-mode").textContent=t(deps.mode==="compact"?"expand":"minimize");const closePreview=root.querySelector<HTMLButtonElement>("#close-preview");if(closePreview)closePreview.setAttribute("aria-label",t("closePreview"));
   const message=view&&!receiptCompatible()?(lang==="zh"?"牌桌后台仍是旧版。请完整刷新枭熊页面后再出牌；现在仍可观看或返回地图。":"The table background is an older version. Fully refresh the Owlbear page before playing. You can still watch or return to the map."):pendingAction?.retryable?(lang==="zh"?"尚未确认这次操作，请重试原操作。":"This action is not confirmed. Retry the same action."):localMessage?(rulePrompt(localMessage,lang)!==localMessage?rulePrompt(localMessage,lang):t(localMessage)):view?.message?tableText(view.message,lang):busy()?t("sending"):!view||!view.connected?t("connecting"):"";
   el("status").textContent=message;el("status").hidden=!message;el("status").classList.toggle("error",!!view?.message&&!['connecting','privateSync'].includes(view.message));
@@ -573,6 +573,7 @@ function releaseCues(){
    hasView:!!view,
    selfPlayerId:view?.selfPlayerId,
    isHost:!!view?.isHost,
+   canHandover:!!view?.canHandover,
    connected:!!view?.connected,
    message:view?.message,
    localMessage,
@@ -583,10 +584,11 @@ function releaseCues(){
    leaveDisabled:locked(),
    startDisabled:locked()||!table||table.seats.length<2||setupDeckId==="selected-specials-v1"&&selectedSpecialIds().length!==10,
    retryDisabled:sending||!!view&&!receiptCompatible(),
-   labels:{create:t("create"),join:t("join"),leave:t("leave"),start:t("start"),retry:t("retry"),retryAction:lang==="zh"?"重试这次操作":"Retry this action"},
+   labels:{create:t("create"),join:t("join"),leave:t("leave"),handover:lang==="zh"?"移交主持后离开":"Transfer hosting before leaving",start:t("start"),retry:t("retry"),retryAction:lang==="zh"?"重试这次操作":"Retry this action"},
    onCreate:()=>send({type:"create"}),
    onJoin:()=>send({type:"join"}),
    onLeave:()=>send({type:"leave"}),
+   onHandover:()=>send({type:"handover"}),
    onStart:()=>{if(!table)return;send({type:"start",options:{...(startingGold===undefined?{}:{startingGold}),startingHand,variant:setupVariant()}});},
    onRetry:()=>send({type:"retry"}),
   });

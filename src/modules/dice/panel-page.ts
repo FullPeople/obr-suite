@@ -78,6 +78,7 @@ interface DiceRollPayload {
   winnerIdx: number;
   modifier: number;
   label: string;
+  expression?: string;
   total: number;
   rollerId: string;
   rollerName: string;
@@ -1565,6 +1566,7 @@ function renderEntrySolo(h: DiceRollPayload): string {
           <span class="player">${darkTag}${titleText}</span>
           <span class="ago">${ago}</span>
         </div>
+        ${h.expression ? `<div class="roll-expression" style="font:11px monospace;opacity:.8;overflow-wrap:anywhere">${escapeHtml(h.expression)}</div>` : ""}
         ${body}
       </div>
     </div>
@@ -1596,6 +1598,7 @@ function renderEntryCollective(cid: string, members: DiceRollPayload[]): string 
           <span class="player">${darkTag}${collTag}${labelOrName}</span>
           <span class="ago">${ago}</span>
         </div>
+        ${head.expression ? `<div class="roll-expression" style="font:11px monospace;opacity:.8;overflow-wrap:anywhere">${escapeHtml(head.expression)}</div>` : ""}
         ${buildMemberStripHtml(members)}
       </div>
     </div>
@@ -2301,6 +2304,7 @@ async function emitOneRoll(opts: {
   winnerIdx: number;
   modifier: number;
   label: string;
+  expression?: string;
   itemId: string | null;
   hidden: boolean;
   rowStarts?: number[];
@@ -2342,6 +2346,7 @@ async function emitOneRoll(opts: {
     winnerIdx: opts.winnerIdx,
     modifier: opts.modifier,
     label: opts.label,
+    expression: opts.expression,
     total,
     rollerId,
     rollerName,
@@ -2846,6 +2851,7 @@ async function performRoll(opts: { hidden: boolean }): Promise<void> {
       dice: built.dice,
       winnerIdx: built.winnerIdx,
       modifier: totalModifier(parsed),
+      expression: formatExpr(parsed),
       label,
       itemId: tokenId || null,
       hidden: opts.hidden,
@@ -2941,6 +2947,7 @@ async function rollFromCombo(
       dice: built.dice,
       winnerIdx: built.winnerIdx,
       modifier: totalModifier(parsed),
+      expression: formatExpr(parsed),
       label,
       itemId: tokenId || null,
       hidden,

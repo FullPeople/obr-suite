@@ -44,6 +44,8 @@ interface Session { link: PrivateLink; sessionId: string; requestId: string; at:
 interface PendingHostSession { requestId: string; sessionId: string; at: number; offer?: Offer; link?: PrivateLink }
 interface GestureEnvelope { kind: "gesture"; version: 1; tableId: string; tableRevision: number; playerId: string; seatId: string; gesture: HandGesture }
 interface ReceivedGesture { envelope: GestureEnvelope; sequence: number; at: number; pending: boolean; timer?: ReturnType<typeof setTimeout> }
+interface HandoverOut {id:string;request:Request;connection:string;target:TableMember;baseRevision:number;next:ControllerRecord;parts:string[];sentAt:number;deadline:number}
+interface HandoverIn {id:string;sender:string;baseRevision:number;total:number;parts:Map<number,string>;ready:boolean;at:number}
 const clone = <T>(value: T): T => structuredClone(value);
 const errorCode = (error: unknown, fallback = "requestFailed") => error instanceof Error &&
   ["storageFailed", "staleTable", "roomFull", "recoveryMissing", "protocolMismatch"].includes(error.message) ? error.message : fallback;
@@ -149,6 +151,8 @@ export class TableController {
   private gestureFlush?: Promise<void>;
   private gestureResolve?: () => void;
   private creation?: { id: string; contenders: Map<string, string> };
+  private handoverOut?:HandoverOut;
+  private handoverIn?:HandoverIn;
   private readonly retryMs: number;
   private readonly heartbeatMs: number;
   private readonly timeoutMs: number;
@@ -180,9 +184,10 @@ export class TableController {
       // creator as PLAYER in some rooms, so a strict GM-only gate would lock
       // the table owner out of their own table.
       canEdit: !!this.game && !!host && this.serving(),
+      canHandover: !!host && this.serving() && !!this.handoverCandidate(),
       connected,
       syncing,
-      pending: !!this.creation || this.recovering || !!this.pending?.busy,
+      pending: !!this.creation || this.recovering || !!this.pending?.busy || !!this.handoverOut,
       game: this.game, ...(this.historyPage ? { historyPage: clone(this.historyPage) } : {}), ...(this.actionReceipt ? { actionReceipt: this.actionReceipt } : {}), ...(this.message ? { message: this.message } : {}) });
   }
   private connected(): boolean {
@@ -279,6 +284,8 @@ export class TableController {
   }
   private resetLinks(): void {
     this.tableEpoch++;
+    this.handoverOut=undefined;this.handoverIn=undefined;
+    this.inspectLinks.clear();this.inspection=undefined;
     for (const session of this.active.values()) session.link.dispose();
     for (const sessions of this.hostPending.values()) for (const session of sessions) session.link?.dispose();
     this.hello?.candidate?.link.dispose();
@@ -340,6 +347,8 @@ export class TableController {
     if (next && this.summary?.id === next.id && next.revision < this.summary.revision) return;
     const changed = next?.id !== this.summary?.id || next?.hostConnectionId !== this.summary?.hostConnectionId;
     if (changed) {
+      const handover=this.handoverOut;
+      if(handover&&next?.id===handover.next.table.id&&next.hostConnectionId===handover.target.connectionId&&next.revision===handover.next.table.revision&&handover.connection===this.self.connectionId)this.acceptReceipt({requestId:handover.request.requestId,ok:true},false);
       this.omniscient = false;
       const sameTable = next?.id === this.summary?.id;
       this.resetLinks(); this.saved = null; this.resetSerial = undefined; this.historyPage = undefined;
@@ -352,6 +361,7 @@ export class TableController {
   }
   private membersChanged(): void {
     if (!this.running) return;
+    for(const connection of [...this.inspectLinks]){const member=this.member(connection);if(!member||member.id!==this.summary?.hostPlayerId&&member.role!=='GM'){this.inspectLinks.delete(connection);void this.enqueue(()=>this.shareInspection(connection));}}
     for (const [connection, session] of this.active) if (!this.member(connection)) { session.link.dispose(); this.active.delete(connection); }
     for (const [connection, sessions] of this.hostPending) if (!this.member(connection)) { sessions.forEach(session => session.link?.dispose()); this.hostPending.delete(connection); this.seenHello.delete(connection); }
     if (this.summary && !this.present(this.summary.hostConnectionId, this.summary.hostPlayerId)) {
@@ -473,7 +483,7 @@ export class TableController {
   private updateHostView(): void {
     if (!this.saved) return;
     const seat = this.saved.table.seats.find(seat => seat.playerId === this.self.id);
-    this.adoptGame(!this.saved.game ? null : seat ? this.omniscient ? projectOmniscient(this.saved.game, seat.seatId) : projectSeat(this.saved.game, seat.seatId) : projectPublic(this.saved.game), this.saved.table.revision);
+    this.adoptGame(!this.saved.game ? null : this.omniscient ? projectOmniscient(this.saved.game, seat?.seatId ?? "") : seat ? projectSeat(this.saved.game, seat.seatId) : projectPublic(this.saved.game), this.saved.table.revision);
     this.emit();
   }
   private makeHistoryPayload(requestId: string, before: number): HistoryPayload | null {
@@ -539,12 +549,15 @@ export class TableController {
   /** Send the current inspection payload to one connection, if it asked for it
    *  and this client is the one holding the archive. */
   private async shareInspection(connection: string): Promise<void> {
-    const session = this.active.get(connection), saved = this.saved;
-    if (!session || !saved || !this.inspectLinks.has(connection)) return;
-    const game = saved.game ? projectOmniscient(saved.game, saved.table.seats.find(seat => seat.playerId === this.self.id)?.seatId ?? "") : null;
+    const session = this.active.get(connection), saved = this.saved,member=this.member(connection);
+    if (!session || !saved || !member) return;
+    const allowed=this.inspectLinks.has(connection)&&(member.id===saved.table.hostPlayerId||member.role==='GM');
+    const game = allowed&&saved.game ? projectOmniscient(saved.game, saved.table.seats.find(seat => seat.playerId === member.id)?.seatId ?? "") : null;
     await this.send(session, { kind: "inspect", version: 1, tableId: saved.table.id, gameId: saved.game?.id ?? null, game } as InspectionPayload);
+    if(!allowed)await this.snapshot(connection);
   }
   private acceptInspection(payload: InspectionPayload): void {
+    if(!this.summary||payload.version!==1||payload.tableId!==this.summary.id||payload.gameId!==(this.game?.id??null)||!this.gm()&&this.summary.hostPlayerId!==this.self.id){this.inspection=undefined;return;}
     const wire = payload.game as Record<string, unknown> | null;
     this.inspection = wire && wire.omniscient === true && record(wire.privateHands) ? wire as unknown as OmniscientView : undefined;
     this.updateClientView();
@@ -557,8 +570,77 @@ export class TableController {
   }
   private async send(session: Session, value: unknown): Promise<void> {
     const epoch = this.epoch, tableEpoch = this.tableEpoch;
-    const packets = await session.link.seal(value);
+    let packets:Awaited<ReturnType<PrivateLink['seal']>>;
+    try{packets=await session.link.seal(value);}catch(error){if(!this.alive(epoch,tableEpoch))return;throw error;}
     for (const packet of packets) { if (!this.alive(epoch, tableEpoch)) return; await this.platform.send(packet); }
+  }
+  private handoverCandidate():TableMember|undefined{
+    const seats=this.summary?.seats||[];
+    return [...this.players].filter(player=>player.id!==this.self.id&&this.active.has(player.connectionId)&&(player.role==='GM'||seats.some(seat=>seat.playerId===player.id)))
+      .sort((a,b)=>(a.role==='GM'?0:1)-(b.role==='GM'?0:1)||(seats.findIndex(s=>s.playerId===a.id)-seats.findIndex(s=>s.playerId===b.id))||a.connectionId.localeCompare(b.connectionId))[0];
+  }
+  private async beginHandover(request:Request,connection:string,fingerprint:string):Promise<void>{
+    if(this.handoverOut){if(this.handoverOut.request.requestId===request.requestId)await this.sendHandover();return;}
+    const target=this.handoverCandidate(),saved=this.saved;
+    if(!target||!saved)throw Error('requestFailed');
+    const table={...clone(saved.table),hostPlayerId:target.id,hostConnectionId:target.connectionId,hostName:target.name.slice(0,200),revision:saved.table.revision+1};
+    // Removing an active seat would destroy its hands/accounting. A running
+    // game keeps every seat; only hosting moves. Lobby leave can remove a seat.
+    if(!saved.game&&request.command.type==='leave')table.seats=table.seats.filter(seat=>seat.playerId!==this.self.id);
+    const next:ControllerRecord={...clone(saved),table,controller:{receipts:[...(saved.controller?.receipts||[]),{playerId:this.self.id,requestId:request.requestId,fingerprint}].slice(-128)}};
+    const serialized=JSON.stringify(next);if(serialized.length>4_000_000)throw Error('requestFailed');
+    const parts=Array.from({length:Math.ceil(serialized.length/8000)},(_,i)=>serialized.slice(i*8000,(i+1)*8000));
+    this.handoverOut={id:crypto.randomUUID(),request,connection,target,baseRevision:saved.table.revision,next,parts,sentAt:0,deadline:Date.now()+Math.max(this.timeoutMs*3,parts.length*2500)};
+    this.emit();await this.sendHandover();
+  }
+  private async sendHandover():Promise<void>{
+    const transfer=this.handoverOut;if(!transfer)return;const session=this.active.get(transfer.target.connectionId);if(!session)return;
+    transfer.sentAt=Date.now();
+    for(let part=0;part<transfer.parts.length;part++){
+      if(this.handoverOut!==transfer)return;
+      await this.send(session,{kind:'handover-part',version:1,id:transfer.id,baseRevision:transfer.baseRevision,part,total:transfer.parts.length,text:transfer.parts[part],leave:transfer.request.command.type==='leave'});
+    }
+  }
+  private async acceptHandover(payload:Record<string,unknown>,sender:string):Promise<void>{
+    const summary=this.summary,session=this.active.get(sender),epoch=this.epoch,tableEpoch=this.tableEpoch;
+    if(!summary||!session||sender!==summary.hostConnectionId||payload.version!==1||!validText(payload.id,64)||payload.baseRevision!==summary.revision||!Number.isInteger(payload.total)||(payload.total as number)<1||(payload.total as number)>500||!Number.isInteger(payload.part)||(payload.part as number)<0||(payload.part as number)>=(payload.total as number)||typeof payload.text!=='string'||payload.text.length>8000||typeof payload.leave!=='boolean')return;
+    let incoming=this.handoverIn;
+    if(!incoming||incoming.id!==payload.id)incoming=this.handoverIn={id:payload.id,sender,baseRevision:summary.revision,total:payload.total as number,parts:new Map(),ready:false,at:Date.now()};
+    if(incoming.sender!==sender||incoming.total!==payload.total||incoming.baseRevision!==summary.revision)return;
+    if(incoming.ready){await this.send(session,{kind:'handover-ready',version:1,id:incoming.id,baseRevision:incoming.baseRevision});return;}
+    incoming.parts.set(payload.part as number,payload.text);if(incoming.parts.size!==incoming.total)return;
+    try{
+      const archive=JSON.parse(Array.from({length:incoming.total},(_,i)=>incoming!.parts.get(i)).join('')) as ControllerRecord;
+      const expected:TableSummary={...summary,hostPlayerId:this.self.id,hostConnectionId:this.self.connectionId,hostName:this.self.name.slice(0,200),revision:summary.revision+1,...(payload.leave&&!archive.game?{seats:summary.seats.filter(seat=>seat.playerId!==summary.hostPlayerId)}:{})};
+      if(!validRecovery(archive,this.platform.roomId,expected)||JSON.stringify(tableSummary(archive.table))!==JSON.stringify(tableSummary(expected)))throw Error('protocolMismatch');
+      const previous=await this.storage.load(this.platform.roomId,summary.id);
+      if(!this.alive(epoch,tableEpoch)||this.summary?.revision!==summary.revision||this.summary.hostConnectionId!==sender)return;
+      await this.storage.save({...archive,serial:previous?.serial??0},previous?.serial??null);
+      if(!this.alive(epoch,tableEpoch)||this.handoverIn!==incoming)return;
+      incoming.ready=true;incoming.parts.clear();
+      await this.send(session,{kind:'handover-ready',version:1,id:incoming.id,baseRevision:incoming.baseRevision});
+    }catch(error){if(this.alive(epoch,tableEpoch)){this.handoverIn=undefined;await this.send(session,{kind:'handover-rejected',version:1,id:incoming.id,error:errorCode(error,'storageFailed')});}}
+  }
+  private async finishHandover(payload:Record<string,unknown>,sender:string):Promise<void>{
+    const transfer=this.handoverOut;if(!transfer||payload.version!==1||payload.id!==transfer.id||sender!==transfer.target.connectionId||!this.present(sender,transfer.target.id))return;
+    if(payload.kind==='handover-rejected'){await this.abortHandover(typeof payload.error==='string'?payload.error:'storageFailed');return;}
+    if(payload.baseRevision!==transfer.baseRevision||this.saved?.table.revision!==transfer.baseRevision||!this.serving())return;
+    const before=tableSummary(await this.platform.readTable());
+    if(this.handoverOut!==transfer||!before||before.id!==transfer.next.table.id||before.hostConnectionId!==this.self.connectionId||before.revision!==transfer.baseRevision){await this.abortHandover('staleTable');return;}
+    try{
+      // The full archive has already passed validation and durable storage on
+      // the authenticated successor. This write contains public identity only.
+      await this.platform.writeTable(clone(transfer.next.table));
+      const after=tableSummary(await this.platform.readTable());
+      if(!after||after.id!==transfer.next.table.id||after.hostConnectionId!==transfer.target.connectionId||after.revision!==transfer.next.table.revision)throw Error('staleTable');
+      this.observe(after);
+    }catch(error){if(this.handoverOut===transfer){this.message=errorCode(error);this.emit();}}
+  }
+  private async abortHandover(code:string):Promise<void>{
+    const transfer=this.handoverOut;if(!transfer)return;this.handoverOut=undefined;
+    const receipt={kind:'receipt',requestId:transfer.request.requestId,ok:false,error:code};
+    if(transfer.connection===this.self.connectionId)this.acceptReceipt(receipt);else {const session=this.active.get(transfer.connection);if(session)await this.send(session,receipt);}
+    this.emit();
   }
   private async handshake(): Promise<void> {
     if (!this.summary || this.canClaim() || !this.present(this.summary.hostConnectionId, this.summary.hostPlayerId)) return;
@@ -738,6 +820,7 @@ export class TableController {
       session.at = Date.now();
       if (payload.kind === "sync") { await this.enqueue(() => this.snapshot(sender)); return; }
       if (payload.kind === "pulse") return;
+      if (payload.kind === "handover-ready" || payload.kind === "handover-rejected") { await this.enqueue(() => this.finishHandover(payload,sender)); return; }
       if (payload.kind === "command") await this.enqueue(() => this.hostCommand(payload as unknown as Request, sender));
     } else if (sender === this.summary.hostConnectionId) {
       if (candidate) {
@@ -745,7 +828,8 @@ export class TableController {
         active?.link.dispose(); this.active.set(sender, candidate); this.hello = undefined; this.hostSilentAt = 0;
       } else if (this.active.get(sender)?.link !== session.link) return;
       session.at = Date.now(); this.hostSilentAt = 0;
-      if (payload.kind === "snapshot") this.acceptSnapshot(payload);
+      if (payload.kind === "handover-part") await this.enqueue(() => this.acceptHandover(payload,sender));
+      else if (payload.kind === "snapshot") this.acceptSnapshot(payload);
       else if (payload.kind === "history") this.acceptHistoryPage(payload);
       else if (payload.kind === "receipt") this.acceptReceipt(payload as unknown as Receipt);
       else if (payload.kind === "inspect") this.acceptInspection(payload as unknown as InspectionPayload);
@@ -881,7 +965,7 @@ export class TableController {
     if (command.type === "history" && (!Number.isSafeInteger(command.before) || command.before < 1)) { this.fail("invalidCommand"); return; }
     if (command.type === "action") this.actionReceipt = undefined;
     if (command.type === "create") { await this.enqueue(() => this.create()); return; }
-    if (!["join", "leave", "kick", "edit", "inspect", "start", "newGame", "action", "history"].includes(command.type) || !this.summary) { this.fail("invalidCommand"); return; }
+    if (!["join", "leave", "handover", "kick", "edit", "inspect", "start", "newGame", "action", "history"].includes(command.type) || !this.summary) { this.fail("invalidCommand"); return; }
     if (command.type === "action") {
       const seat = this.summary.seats.find(seat => seat.playerId === this.self.id);
       if (!seat || !command.action || command.action.seatId !== seat.seatId || !this.game || command.action.revision !== this.game.revision) { this.fail("notSeated"); return; }
@@ -943,7 +1027,7 @@ export class TableController {
     };
     const reject = (error: string) => respond({ requestId: request.requestId, ok: false, error });
     const command = request.command;
-    if (!["join", "leave", "kick", "edit", "inspect", "start", "newGame", "action", "history"].includes(command.type)) { await reject("invalidCommand"); return; }
+    if (!["join", "leave", "handover", "kick", "edit", "inspect", "start", "newGame", "action", "history"].includes(command.type)) { await reject("invalidCommand"); return; }
     const fingerprint = JSON.stringify([member.id, request.tableId, request.tableRevision, request.gameId, command]);
     const receipts = this.saved.controller?.receipts ?? [];
     const receipt = receipts.find(receipt => receipt.playerId === member.id && receipt.requestId === request.requestId);
@@ -967,6 +1051,12 @@ export class TableController {
         return;
       }
       if (receipt) { await respond({ requestId: request.requestId, ok: true }); return; }
+      if(command.type==='handover'||command.type==='leave'&&member.id===this.saved.table.hostPlayerId&&this.handoverCandidate()){
+        if(member.id!==this.saved.table.hostPlayerId){await reject('notHost');return;}
+        if(request.tableRevision!==this.saved.table.revision||request.gameId!==(this.saved.game?.id??null)){await reject('staleTable');return;}
+        await this.beginHandover(request,connection,fingerprint);return;
+      }
+      if(this.handoverOut){await reject('privateSync');return;}
       const saved = this.saved!; let game = saved.game; const table = clone(saved.table);
       const seat = table.seats.find(seat => seat.playerId === member.id);
       if (command.type === "action") {
@@ -1071,6 +1161,8 @@ export class TableController {
   private async tick(): Promise<void> {
     if (!this.running || !this.summary) return;
     const now = Date.now();
+    if(this.handoverIn&&now-this.handoverIn.at>Math.max(120000,this.timeoutMs*4))this.handoverIn=undefined;
+    if(this.handoverOut){const transfer=this.handoverOut;if(now>transfer.deadline||!this.present(transfer.target.connectionId,transfer.target.id))await this.enqueue(()=>this.abortHandover('hostOffline'));else if(now-transfer.sentAt>=Math.max(this.retryMs,1000))await this.enqueue(()=>this.sendHandover());}
     for (const [connection, sessions] of this.hostPending) {
       const alive = sessions.filter(session => now - session.at < this.timeoutMs);
       sessions.filter(session => !alive.includes(session)).forEach(session => session.link?.dispose());

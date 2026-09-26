@@ -3,7 +3,6 @@ import { ICONS } from "../../icons";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
 import { assetUrl } from "../../asset-base";
-import { reconcileUploadedCardShieldState } from "./xlsx-shield-state";
 
 let lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -548,11 +547,13 @@ async function uploadJsonAsCard(parsed: unknown, op: PanelWrite): Promise<void> 
   showError("");
   op.uploading = true;
   render();
+  const normalized = await normalizeUpload(parsed);
+  assertWriteCurrent(op);
   const u = encodeURIComponent(playerName);
   const response = await fetch(`${API_BASE}/create-from-json?room=${op.room}&uploader=${u}`, {
     method: "POST", signal: op.controller.signal,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ data: parsed }),
+    body: JSON.stringify({ data: normalized }),
   });
   assertWriteCurrent(op);
   if (!response.ok) throw await serviceError(response);
@@ -560,46 +561,19 @@ async function uploadJsonAsCard(parsed: unknown, op: PanelWrite): Promise<void> 
   await acceptUploadedCard(op, entry);
 }
 
-async function reconcileCardShield(op: PanelWrite, entry: CardEntry, file: File): Promise<void> {
-  assertWriteCurrent(op);
-  try {
-    await reconcileUploadedCardShieldState({ apiBase: API_BASE, roomId: op.room,
-      cardId: entry.id, xlsx: file, signal: op.controller.signal,
-      isCurrent: () => writeIsCurrent(op) });
-  } catch (error) {
-    assertWriteCurrent(op);
-    console.warn("[cc-panel] shield equipped reconciliation failed", error);
-  }
-  assertWriteCurrent(op);
+// The standalone website owns character creation. The plugin accepts validated JSON only.
+function isSupportedSheet(name: string): boolean { return name.toLowerCase().endsWith(".json"); }
+async function normalizeUpload(value: unknown): Promise<unknown> {
+  const moduleUrl = assetUrl("card-viewer/bridge.js");
+  const bridge = await import(/* @vite-ignore */ moduleUrl);
+  return bridge.normalizeLegacyUpload(value);
 }
-
-// Accepts both formats the service /upload endpoint handles: the xlsx
-// sheet and the .json the suite's own export produces. The exported JSON
-// is what a user naturally drags back in, and it used to be rejected
-// here with a misleading "只支持 .xlsx 文件".
-function isSupportedSheet(name: string): boolean {
-  const lower = name.toLowerCase();
-  return lower.endsWith(".xlsx") || lower.endsWith(".json");
-}
-
 async function uploadFile(file: File, op: PanelWrite): Promise<void> {
   assertWriteCurrent(op);
-  showError("");
-  op.uploading = true;
-  render();
-  const fd = new FormData();
-  fd.append("file", file);
-  const u = encodeURIComponent(playerName);
-  const response = await fetch(`${API_BASE}/upload?room=${op.room}&uploader=${u}`, {
-    method: "POST", body: fd, signal: op.controller.signal,
-  });
+  if (!isSupportedSheet(file.name)) throw new Error("仅支持 JSON 角色卡；请在车卡网站编辑后导出。");
+  const value = JSON.parse(await file.text());
   assertWriteCurrent(op);
-  if (!response.ok) throw await serviceError(response);
-  const entry = await response.json() as CardEntry;
-  // Shield reconciliation needs the workbook itself; a JSON upload has
-  // no gear sheets to reconcile against.
-  if (file.name.toLowerCase().endsWith(".xlsx")) await reconcileCardShield(op, entry, file);
-  await acceptUploadedCard(op, entry);
+  await uploadJsonAsCard(value, op);
 }
 
 // Open a native file picker dialog. Returns the chosen File or null
@@ -607,11 +581,11 @@ async function uploadFile(file: File, op: PanelWrite): Promise<void> {
 // the File System Access API is blocked in cross-origin iframes
 // (which is exactly what OBR plugin frames are), so an attempt
 // throws SecurityError. Plain `<input type=file>` works everywhere.
-function pickXlsxFile(): Promise<File | null> {
+function pickJsonFile(): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".xlsx,.json";
+    input.accept = ".json";
     input.onchange = () => resolve(input.files?.[0] ?? null);
     // 'cancel' fires on modern Chromium when the user closes the
     // picker without choosing. On older browsers we fall back to
@@ -625,11 +599,11 @@ function pickXlsxFile(): Promise<File | null> {
 // 2026-05-10: multi-file picker for bulk upload. Same SecurityError
 // caveat as above (no FSA in iframes), so it's just a plain
 // `<input type=file multiple>`.
-function pickXlsxFiles(): Promise<File[]> {
+function pickJsonFiles(): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".xlsx,.json";
+    input.accept = ".json";
     input.multiple = true;
     input.onchange = () => {
       const out = input.files ? Array.from(input.files) : [];
@@ -640,11 +614,11 @@ function pickXlsxFiles(): Promise<File[]> {
   });
 }
 
-// "Link a local xlsx" entry point. With FSA blocked, this just opens
+// "Link a local JSON" entry point. With FSA blocked, this just opens
 // a regular file picker; the resulting card behaves identically to a
 // drag-drop upload. The refresh button on each row uses the same
 // picker on subsequent clicks so the user can re-pick the freshly
-// edited xlsx without deleting + re-uploading the card.
+// edited JSON without deleting + re-uploading the card.
 //
 // 2026-05-10: now multi-select capable — picking N files uploads each
 // one sequentially, creating N new cards. UI stays responsive because
@@ -654,7 +628,7 @@ async function linkLocalFile(): Promise<void> {
   const op = beginPanelWrite("upload");
   if (!op) return;
   try {
-    const files = await pickXlsxFiles();
+    const files = await pickJsonFiles();
     assertWriteCurrent(op);
     await uploadFilesBatch(files, op);
   } catch (error) { showSheetError(op, error, "ccPanelUploadFailed"); }
@@ -690,29 +664,28 @@ async function refreshCardFromPicker(card: CardEntry): Promise<void> {
   const op = beginPanelWrite("refresh", card.id);
   if (!op) return;
   try {
-    const file = await pickXlsxFile();
+    const file = await pickJsonFile();
     assertWriteCurrent(op);
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".xlsx")) throw new Error(tt("ccPanelRefreshOnlyXlsx"));
+    if (!isSupportedSheet(file.name)) throw new Error(tt("ccPanelOnlySheet"));
+    const normalized = await normalizeUpload(JSON.parse(await file.text()));
+    assertWriteCurrent(op);
     // Refresh overwrites server content. Re-read the target after the native
     // picker, before sending that request, even if its metadata event is late.
     await readWriteCards(op);
     assertWriteCurrent(op);
-    const fd = new FormData();
-    fd.append("file", file);
     const response = await fetch(
-      `${API_BASE}/refresh?room=${op.room}&card=${encodeURIComponent(card.id)}`,
-      { method: "POST", body: fd, signal: op.controller.signal },
+      `${API_BASE}/${encodeURIComponent(op.room)}/${encodeURIComponent(card.id)}/data`,
+      { method: "PUT", body: JSON.stringify(normalized), headers: {"Content-Type":"application/json"}, signal: op.controller.signal },
     );
     assertWriteCurrent(op);
     if (!response.ok) throw await serviceError(response);
     const updated = await response.json() as CardEntry;
     assertWriteCurrent(op);
     if (updated.id !== card.id) throw new Error(tt("ccPanelWriteFailed"));
-    await reconcileCardShield(op, updated, file);
     await mutateCardsInScene(op, list => list.map(c => c.id === card.id ? {
-      ...c, name: updated.name, url: updated.url,
-      uploader: updated.uploader, uploaded_at: updated.uploaded_at,
+      ...c, name: updated.name || (normalized as any)?.identity?.character_name || c.name, url: updated.url || c.url,
+      uploader: updated.uploader || c.uploader, uploaded_at: updated.uploaded_at || c.uploaded_at,
       // Visibility, owners and the folder belong to current scene
       // metadata, not to the service response.
     } : c));
@@ -757,19 +730,15 @@ function selectResource(slug: string) {
   render();
 }
 
-/** Build the iframe src for a card. v2 (2026-05-03+) loads our own
- *  data-driven Preact renderer (cc-fullscreen.html) which fetches
- *  /characters/<room>/<card>/data.json directly. The legacy Jinja2-
- *  rendered index.html on the server is still served for backward
- *  compat (e.g. raw link sharing) but no longer embedded in the
- *  panel — that lets us iterate on layout / edit / export / import
- *  features without redeploying the server. */
+/** Reuse the website's five-page reader without starting its Wiki or editor.
+ * Existing service links remain valid; only their data.json is fetched. */
 function buildCardIframeSrc(card: CardEntry, cacheBust = false): string {
-  const params = new URLSearchParams();
-  params.set("room", roomId);
-  params.set("card", card.id);
+  const params = new URLSearchParams({legacyViewer:"1",lang});
+  const dataUrl = new URL(card.url || `/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(card.id)}/index.html`, "https://obr.dnd.center");
+  dataUrl.pathname = dataUrl.pathname.replace(/\/(?:index\.html|data\.json)$/, "/data.json");
+  params.set("data_url",dataUrl.href);
   if (cacheBust) params.set("t", String(Date.now()));
-  return `${assetUrl("cc-fullscreen.html")}?${params.toString()}`;
+  return `${assetUrl("card-viewer/index.html")}?${params.toString()}`;
 }
 
 function ensureCardIframe(card: CardEntry): HTMLIFrameElement {
@@ -1015,7 +984,7 @@ function render() {
 
       // ↻ refresh — every card row has one. Clicking opens a file
       // picker so the user can re-pick the (possibly newly-saved)
-      // xlsx; the server overwrites the existing card's data.
+      // JSON; the server overwrites the existing card's data.
       const refresh = document.createElement("button");
       refresh.className = "card-refresh";
       refresh.disabled = !canWrite || changing;
@@ -1142,18 +1111,10 @@ function timeAgo(isoZ: string): string {
 // The example opens a read-only preview. Pasted JSON uses the separate
 // creation dialog below and persists only after its explicit Create action.
 const PREVIEW_MODAL_ID = "com.obr-suite/cc-preview";
-const PREVIEW_LS_KEY = "obr-suite/cc-preview-payload";
-
-function setPreviewPayload(kind: "sample" | "paste", json: unknown): void {
-  try {
-    localStorage.setItem(PREVIEW_LS_KEY, JSON.stringify({ kind, json, ts: Date.now() }));
-  } catch (e) {
-    console.warn("[cc-panel/preview] localStorage write failed", e);
-  }
-}
-
-async function openPreviewModal(kind: "sample" | "paste"): Promise<void> {
-  const url = `${assetUrl("cc-fullscreen.html")}?preview=${kind}`;
+async function openSamplePreview(): Promise<void> {
+  const file = lang === "en" ? "cc-example-card.en.json" : "cc-example-card.json";
+  const params=new URLSearchParams({legacyViewer:"1",lang,data_url:assetUrl(file)});
+  const url = `${assetUrl("card-viewer/index.html")}?${params}`;
   try {
     await OBR.modal.open({
       id: PREVIEW_MODAL_ID,
@@ -1163,26 +1124,6 @@ async function openPreviewModal(kind: "sample" | "paste"): Promise<void> {
     });
   } catch (e) {
     console.warn("[cc-panel/preview] modal open failed", e);
-  }
-}
-
-async function openSamplePreview(): Promise<void> {
-  // 2026-05-26 — fetch the language-matched example. There's a
-  // dedicated EN translation (cc-example-card.en.json) since the
-  // schema-0.3 card body is heavy with Chinese D&D terminology
-  // (skill / weapon / class-feature / spell-description names) that
-  // wouldn't be useful to non-Chinese DMs as a reference. ZH UI gets
-  // 本杰明 (Sorcerer / Wild Magic); EN UI gets Benjamin Flamingo
-  // with all the canonical 5E translations applied.
-  const file = lang === "en" ? "cc-example-card.en.json" : "cc-example-card.json";
-  try {
-    const res = await fetch(assetUrl(file), { cache: "no-cache" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    setPreviewPayload("sample", json);
-    await openPreviewModal("sample");
-  } catch (e: any) {
-    showError(`${tt("ccPasteJsonInvalid")}: ${e?.message ?? e}`);
   }
 }
 
@@ -1214,7 +1155,7 @@ function openPasteJsonPreview(): void {
     "flex:1 1 auto;min-height:280px;padding:9px 11px;border-radius:7px;" +
     "background:#0d1018;border:1px solid rgba(255,255,255,0.12);color:#e6e8ee;" +
     "font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;resize:vertical";
-  ta.placeholder = "{ \"schema_version\": \"0.3\", \"identity\": { ... }, \"abilities\": { ... }, ... }";
+  ta.placeholder = '{ "format": "dnd-card-web", "version": 1, "character": { ... } }';
   const errBox = document.createElement("div");
   errBox.style.cssText = "font-size:12px;color:#e74c3c;min-height:18px;white-space:pre-line";
   const btnRow = document.createElement("div");
@@ -1264,12 +1205,12 @@ function openPasteJsonPreview(): void {
       return;
     }
     if (!parsed || typeof parsed !== "object" ||
-        !("abilities" in parsed || "identity" in parsed)) {
+        !("abilities" in parsed || "identity" in parsed || "character" in parsed || "schemaVersion" in parsed || "dnd_card_web" in parsed)) {
       errBox.textContent = tt("ccPasteJsonInvalid");
       return;
     }
     // 2026-05-26 — POST to /create-from-json (server endpoint added
-    // the same day). Mirrors the xlsx upload flow: server allocates a
+    // the same day). Mirrors the JSON upload flow: server allocates a
     // cardId, writes data.json, broadcasts card-list refresh via
     // scene-metadata write. The new card appears in the panel like
     // any other card. Errors stay in errBox so the user can fix the
@@ -1395,7 +1336,7 @@ OBR.onReady(() => {
     linkBtn.addEventListener("click", () => { void linkLocalFile(); });
   }
   // 2026-05-26 — preview entry points (see openSamplePreview /
-  // openPasteJsonPreview above). Both open cc-fullscreen.html in an
+  // openPasteJsonPreview above). The sample opens the bundled read-only viewer in an
   // OBR modal with ?preview=…; nothing persists to the server.
   const sampleBtn = document.getElementById("btnViewSample") as HTMLButtonElement | null;
   sampleBtn?.addEventListener("click", () => { void openSamplePreview(); });

@@ -190,6 +190,12 @@ const ownerSave=crypto.randomUUID();await writer.evaluate(m=>window.liveProbe.re
 const writesBeforeRecheck=writesSeen.length;docs.hero.dnd_card_web.player='fresh-read-marker';docs.hero._suiteRevision++;
 const recheckId=crypto.randomUUID();await writer.evaluate(m=>window.liveProbe.request(m),{type:'refreshCard',requestId:recheckId,itemId:'card:hero'});const recheck=await acknowledgement(recheckId);assert.equal(recheck.result.snapshot.document.dnd_card_web.player,'fresh-read-marker');assert.equal(writesSeen.length,writesBeforeRecheck,'recheck must not replay a save');
 reports.push({name:'sync-recheck-fetches-authority-without-replaying-mutation',writes:0});
+const beforeReadChoice=await writer.evaluate(()=>window.liveProbe.cache().chosen),beforeReadWrites=writesSeen.length;
+const readId=crypto.randomUUID();await writer.evaluate(m=>window.liveProbe.request(m),{type:'readCard',requestId:readId,itemId:'card:hero'});const readOnly=await acknowledgement(readId);
+assert.equal(readOnly.result.document.dnd_card_web.player,'fresh-read-marker');assert.equal(readOnly.result.snapshot,undefined);assert.equal(await writer.evaluate(()=>window.liveProbe.cache().chosen),beforeReadChoice);assert.equal(writesSeen.length,beforeReadWrites);
+await assert.rejects(()=>frame.evaluate(()=>window.liveProbe.command({type:'readCard',itemId:'card:hero'})));
+reports.push({name:'readCard-exports-visible-document-without-selection-mutation-and-refuses-private-card',writes:0});
+
 await page.evaluate(()=>{state.items[0].createdUserId='next-player';for(const f of document.querySelectorAll('iframe'))f.contentWindow.postMessage({id:'OBR_SCENE_ITEMS_EVENT_CHANGE',data:{items:state.items}},location.origin);});await sleep(40);
 const revoked=await writer.evaluate(()=>window.liveProbe.catalog());assert(!revoked.cards.some(c=>c.id==='hero'),'old token owner must lose access after reassignment');
 await assert.rejects(()=>writer.evaluate(()=>window.liveProbe.command({type:'stats',itemId:'card:hero',patch:{health:1},expected:{health:14}})));

@@ -36,6 +36,7 @@ import { ICON_DOOR, ICON_SECRET, ICON_WINDOW } from "../overlayAssets";
 import {
   COLOR_CONTROL,
   DOOR_MODE_ID,
+  LOCKED_DOOR_MODE_ID,
   LIGHT_OVERLAY_KEY,
   OBR_FOG_TOOL,
   OVERLAY_OPENING_KEY,
@@ -159,6 +160,12 @@ const MODE_SPEC: Record<
     label: en ? "Door" : "门",
     icon: ICON_DOOR,
     shortcut: "O",
+  }),
+  locked: (en) => ({
+    id: LOCKED_DOOR_MODE_ID,
+    label: en ? "GM-controlled door" : "门（仅 DM 开关）",
+    icon: ICON_DOOR,
+    shortcut: "Shift+O",
   }),
   window: (en) => ({
     id: WINDOW_MODE_ID,
@@ -403,7 +410,7 @@ export function createOpeningMode(
 }
 
 export async function removeOpeningModes(): Promise<void> {
-  for (const id of [DOOR_MODE_ID, WINDOW_MODE_ID, SECRET_MODE_ID]) {
+  for (const id of [DOOR_MODE_ID, LOCKED_DOOR_MODE_ID, WINDOW_MODE_ID, SECRET_MODE_ID]) {
     try {
       await OBR.tool.removeMode(id);
     } catch {}

@@ -1,0 +1,64 @@
+// Resource regression: actual installed SDK + actual iframe boundary; synthetic HTTP room.
+// Only the SDK host RPC/HTTP boundary is simulated. Production queues and notices run unchanged.
+import {build} from 'rolldown';
+import {readFileSync,writeFileSync,mkdirSync,unlinkSync} from 'node:fs';
+import {resolve,join} from 'node:path';
+import {createServer} from 'node:http';
+import {createHash} from 'node:crypto';
+import {createRequire} from 'node:module';
+import assert from 'node:assert/strict';
+const out=process.env.WORKBENCH_PERF196_OUT||'F:/CodexWork/2026-09-27/feedback/suite-results/perf196';mkdirSync(out,{recursive:true});
+const source=readFileSync(process.env.PROFILE_SOURCE||'src/workbench/background.ts','utf8');
+writeFileSync(join(out,'background-baseline.ts'),source);
+const expose=`Object.assign(window,{liveProbe:{invalidateCard,catalog,snapshot,hydrate,refreshSelection,command,age(ms){for(const [key,value] of documentTimes)documentTimes.set(key,value-ms);},builds(){return (window as any).__catalogBuilds||0;},request(m){void receive({...m,protocol,session});},activate(){child=window.parent;chosen='card:hero';lastSelection='["one"]';},expire(){documentTimes.clear();},cache(){return {revision:documents.get('profile-room:card:hero')?._suiteRevision,time:documentTimes.get('profile-room:card:hero'),flight:cardReads.has('profile-room:card:hero'),chosen};}}});`;
+const profiled=source.replace('  const sceneList=', '  (window as any).__catalogBuilds=((window as any).__catalogBuilds||0)+1; const sceneList=').replace("setInterval(()=>send('pong',{at:Date.now()}),10000);",'').replace('setInterval(()=>{changed();scheduleInventoryRepair();},4000);',expose);
+if(!profiled.includes(expose))throw Error('Probe hook no longer matches background');
+const entry=resolve('tools/workbench-resource-194-entry.ts');
+writeFileSync(entry,`import OBR from '@owlbear-rodeo/sdk';import {setupWorkbench} from '../src/workbench/background';(window as any).wbMock={metadata:{},settings:{},emit(){}};OBR.onReady(()=>setupWorkbench());(window as any).profileModuleReady=true;`);
+try{await build({input:entry,plugins:[{name:'probe-boundary',transform(code,id){if(id.replaceAll('\\','/').endsWith('/src/workbench/background.ts'))code=profiled;if(process.env.PROFILE_SOURCE&&id.replaceAll('\\','/').endsWith('/src/workbench/observation.ts'))code=readFileSync(process.env.PROFILE_SOURCE.replace(/background\.ts$/,'observation.ts'),'utf8');return code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/suite-dev/')).replaceAll('import.meta.env.DEV','false');},resolveId(id){if(id==='./state'||id==='../state'||id==='../../state'||id==='../modules/bestiary/data')return resolve('tools/fixtures/workbench-modules.ts');}}],output:{file:join(out,'probe.js'),format:'esm',codeSplitting:false}});}finally{unlinkSync(entry);}
+const list=Array.from({length:3},(_,i)=>({id:i?'hero'+i:'hero',name:'卡'+i,owner_ids:['other'],visibility:'public',locked:false,...(i?{}:{url:'http://127.0.0.1:5604/characters/upload-room/hero/data.json'})}));
+const runtime={stats:{health:20,'max health':30,'temporary health':0,'armor class':15},conditions:[],resources:{}};
+const items=list.map((c,i)=>({id:i?'token'+i:'one',name:c.name,type:'IMAGE',layer:'CHARACTER',createdUserId:'other',position:{x:i,y:i},metadata:{'com.character-cards/boundCardId':c.id,'com.obr-suite/bubbles/data':runtime.stats,'com.obr-suite/workbench/runtime-baseline':{version:1,cardId:c.id,revision:1,value:runtime}}}));
+const scene={'com.character-cards/list':list,'com.obr-suite/workbench/shared':{id:'profile',revision:0}},room={'com.obr-suite/workbench/cards':list,'com.obr-suite/workbench/owner-roles':{me:'PLAYER',other:'PLAYER'}};
+const docs=Object.fromEntries(list.map(c=>[c.id,{schema_version:'0.3',_suiteRevision:1,identity:{character_name:c.name},core_stats:{hp:{current:20,max:30,temp:0},ac:15},inventory:{},features:{},background:{},classes:[],web_conditions:[]}]));
+const parentScript=`window.state=${JSON.stringify({items,scene,room})};window.results=[];window.rpc=[];window.blockProjection=false;window.projectionBlocked=[];window.projectionEvents=[];window.broadcasts=[];window.blockNoticeResponse=false;window.noticeBlocked=[];
+window.addEventListener('message',event=>{const m=event.data,writer=event.source===document.querySelector('#writer')?.contentWindow;if(m.protocol==='full-suite-workbench/v1'){results.push({...m,at:performance.now(),writer,type:m.type,key:m.state?.key,revision:m.document?._suiteRevision,conditions:m.document?.web_conditions,health:m.document?.core_stats?.hp?.current,document:m.document});return;}if(!m.id||!m.nonce)return;rpc.push(m.id);const s=state,d=m.data;let value={};switch(m.id){
+case 'OBR_PLAYER_GET_ID':value={id:writer?'writer':'me'};break;case 'OBR_PLAYER_GET_CONNECTION_ID':value={connectionId:writer?'writer-connection':'local-connection'};break;case 'OBR_PLAYER_GET_ROLE':value={role:'GM'};break;case 'OBR_PLAYER_GET_NAME':value={name:writer?'写入者':'只读玩家'};break;case 'OBR_PLAYER_GET_COLOR':value={color:'#50525B'};break;case 'OBR_PLAYER_GET_SELECTION':value={selection:['one']};break;case 'OBR_PLAYER_GET_METADATA':value={metadata:{}};break;case 'OBR_PARTY_GET_PLAYERS':value={players:[]};break;
+case 'OBR_SCENE_IS_READY':value={ready:true};break;case 'OBR_SCENE_GET_METADATA':value={metadata:s.scene};break;case 'OBR_ROOM_GET_METADATA':value={metadata:s.room};break;case 'OBR_SCENE_ITEMS_GET_ALL_ITEMS':value={items:s.items};break;case 'OBR_SCENE_ITEMS_GET_ITEMS':value={items:s.items.filter(i=>d.ids.includes(i.id))};break;
+case 'OBR_SCENE_SET_METADATA':Object.assign(s.scene,d.update);event.source.postMessage({id:'OBR_SCENE_METADATA_EVENT_CHANGE',data:{metadata:s.scene}},event.origin);break;case 'OBR_ROOM_SET_METADATA':Object.assign(s.room,d.update);event.source.postMessage({id:'OBR_ROOM_METADATA_EVENT_CHANGE',data:{metadata:s.room}},event.origin);break;
+case 'OBR_SCENE_ITEMS_UPDATE_ITEMS':{const apply=(respond=true)=>{for(const u of d.updates)Object.assign(s.items.find(i=>i.id===u.id),u);for(const f of document.querySelectorAll('iframe'))f.contentWindow.postMessage({id:'OBR_SCENE_ITEMS_EVENT_CHANGE',data:{items:s.items}},location.origin);if(respond)event.source.postMessage({id:m.id+'_RESPONSE'+m.nonce,data:{}},event.origin);};if(blockProjection&&writer){const responseOnly=blockProjection==='response';blockProjection=false;if(responseOnly)apply(false);const update=d.updates.find(u=>u.id==='one'),entry={at:performance.now(),revision:update?.metadata?.['com.obr-suite/workbench/runtime-baseline']?.revision,resource:update?.metadata?.['com.obr-suite/resources/data']?.find(r=>r.id==='points')?.current,released:false};projectionEvents.push(entry);projectionBlocked.push(()=>{entry.released=true;entry.releasedAt=performance.now();if(responseOnly)event.source.postMessage({id:m.id+'_RESPONSE'+m.nonce,data:{}},event.origin);else apply();});return;}apply();return;}
+case 'OBR_BROADCAST_SEND_MESSAGE':broadcasts.push({at:performance.now(),writer,...d});for(const f of document.querySelectorAll('iframe'))f.contentWindow.postMessage({id:'OBR_BROADCAST_MESSAGE_'+d.channel,data:{connectionId:writer?'writer-connection':'local-connection',data:d.data}},location.origin);if(blockNoticeResponse&&d.channel==='com.obr-suite/resources/changed'){blockNoticeResponse=false;noticeBlocked.push(()=>event.source.postMessage({id:m.id+'_RESPONSE'+m.nonce,data:{}},event.origin));return;}break;
+}event.source.postMessage({id:m.id+'_RESPONSE'+m.nonce,data:value},event.origin);});`;
+const currentRoomCopies=structuredClone(docs);const writesSeen=[],sharedDocs=new Map();let blockedId='',release,waiting=false;const reads=[];let readDelay=0;const cardRequests=[];
+const server=createServer(async(req,res)=>{const u=new URL(req.url,'http://localhost');res.setHeader('Content-Type','application/json');if(u.pathname==='/'){res.setHeader('Content-Type','text/html');res.end('<script>'+parentScript+'</script><iframe src="/child?obrref='+Buffer.from('http://127.0.0.1:5604 profile-room').toString('base64')+'"></iframe>');return;}if(u.pathname==='/child'){res.setHeader('Content-Type','text/html');res.end('<script type="module" src="/probe.js"></script>');return;}if(u.pathname==='/probe.js'){res.setHeader('Content-Type','text/javascript');res.end(readFileSync(join(out,'probe.js')));return;}
+if(u.pathname.startsWith('/characters/')){cardRequests.push(u.pathname);if(readDelay)await new Promise(resolve=>setTimeout(resolve,readDelay));const room=u.pathname.split('/')[2],id=u.pathname.split('/')[3],stored=room==='upload-room'?docs:currentRoomCopies,body=JSON.stringify(stored[id]);res.setHeader('ETag','same-second-same-length');if(req.headers['if-none-match']==='same-second-same-length'){res.writeHead(304);res.end();return;}reads.push({id,revision:docs[id]?._suiteRevision,at:Date.now()});if(id===blockedId){blockedId='';waiting=true;await new Promise(r=>release=r);waiting=false;}res.end(body);return;}
+if(u.pathname==='/suite-dev/relay'){if(req.method==='GET'){setTimeout(()=>{if(!res.destroyed)res.end('[]');},20000).unref();return;}let parts=[];for await(const p of req)parts.push(p);let bytes=Buffer.concat(parts);if(req.headers['content-encoding']==='gzip')bytes=(await import('node:zlib')).gunzipSync(bytes);const body=JSON.parse(bytes);if(body.saveCard){const s=body.saveCard;writesSeen.push({room:s.room,card:s.card,inventoryRoom:s.inventoryRoom,paths:s.changes.map(c=>c.path)});const doc=(s.room==='upload-room'?docs:currentRoomCopies)[s.card];if(createHash('sha256').update(JSON.stringify(doc)).digest('hex')!==s.expected){res.writeHead(409);res.end('{"error":"conflict"}');return;}for(const c of s.changes){let target=doc;for(const part of c.path.slice(0,-1))target=target[part]??=(typeof part==='number'?[]:{});const key=c.path.at(-1);if(c.remove)delete target[key];else target[key]=c.after;}}
+if(body.sharedDocument){const request=body.sharedDocument,previous=sharedDocs.get(request.key)||{revision:0,data:null};if(request.operation==='write'){if(request.expected!==previous.revision){res.writeHead(409);res.end('{"error":"conflict"}');return;}sharedDocs.set(request.key,{revision:previous.revision+1,data:request.data});}res.end(JSON.stringify(sharedDocs.get(request.key)||previous));}else res.end('{}');return;}res.writeHead(404);res.end('{}');});await new Promise(r=>server.listen(5604,'127.0.0.1',r));
+const {chromium}=createRequire('D:/Desktop/DND-card-web/package.json')('@playwright/test'),browser=await chromium.launch({channel:'msedge',headless:true});
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const reports=[];
+try{
+const page=await browser.newPage();await page.goto('http://127.0.0.1:5604/');const frame=page.frames().find(f=>f.url().includes('/child'));await frame.waitForFunction(()=>window.profileModuleReady);await page.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({id:'OBR_READY',data:{ref:'test',userId:'me'}},location.origin));await frame.waitForFunction(()=>window.liveProbe);
+
+await frame.evaluate(async()=>{window.liveProbe.activate();await window.liveProbe.hydrate();await window.liveProbe.refreshSelection();});
+await sleep(200);
+const initialBuilds=await frame.evaluate(()=>window.liveProbe.builds()),initialRpc=await page.evaluate(()=>rpc.length),initialReads=reads.length;
+for(let step=0;step<30;step++){
+ await page.evaluate(step=>{state.items[0].position={x:step*10,y:step};document.querySelector('iframe').contentWindow.postMessage({id:'OBR_SCENE_ITEMS_EVENT_CHANGE',data:{items:state.items}},location.origin);},step);
+ await sleep(5);
+}
+await sleep(150);
+const drag={catalogBuilds:await frame.evaluate(()=>window.liveProbe.builds())-initialBuilds,sdkRequests:await page.evaluate(()=>rpc.length)-initialRpc,cardDownloads:reads.length-initialReads};
+const beforeTTL=cardRequests.length;await frame.evaluate(()=>{window.liveProbe.age(5000);return window.liveProbe.hydrate();});
+const periodicRequests=cardRequests.length-beforeTTL;
+const beforeSelect=reads.length,start=Date.now();
+for(let i=0;i<12;i++){
+ const card=i%2?'hero':'hero1';
+ await frame.evaluate(async card=>{window.liveProbe.request({type:'select',itemId:'card:'+card});},card);
+ await page.waitForFunction(card=>results.at(-1)?.key==='profile-room:card:'+card,card);
+}
+const selection={switches:12,totalMs:Date.now()-start,cardDownloads:reads.length-beforeSelect};
+if(!process.env.PROFILE_SOURCE){assert.equal(drag.catalogBuilds,0);assert.equal(drag.cardDownloads,0);assert.equal(periodicRequests,0);assert.equal(selection.cardDownloads,0);}
+const result={sourceSHA256:createHash('sha256').update(source).digest('hex'),actualSdk:true,actualCrossWindow:true,simulatedBackend:true,realRoomVerified:false,drag,periodicRequests,selection};
+writeFileSync(join(out,'perf.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+}finally{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}

@@ -104,6 +104,7 @@ async function syncGmTools(): Promise<void> {
         await createLineMode();
         if (reconciler) {
           await createOpeningMode(reconciler, "door");
+          await createOpeningMode(reconciler, "locked");
           await createOpeningMode(reconciler, "window");
           await createOpeningMode(reconciler, "secret");
         }

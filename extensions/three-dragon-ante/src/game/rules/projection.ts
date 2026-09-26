@@ -79,7 +79,7 @@ export function projectSeat(s:GameState,seatId:string):SeatView {
 /** Deliberately local-only host projection. The returned fields are private
  * inspection data; the controller must keep them out of every wire pack. */
 export function projectOmniscient(s:GameState,seatId:string):OmniscientView {
-  const base=projectSeat(s,seatId);
+  const base=seatId && s.seats.some(seat=>seat.id===seatId) ? projectSeat(s,seatId) : {...projectPublic(s),selfSeatId:"",hand:[],committedAnte:null,actions:[],handPowerHints:[]};
   return {...base,omniscient:true,privateHands:Object.fromEntries(s.seats.map(seat=>[seat.id,seat.hand.map(id=>copy(card(id)))])),privateCommittedAntes:Object.fromEntries(s.seats.map(seat=>[seat.id,Object.prototype.hasOwnProperty.call(s.committed,seat.id)?copy(card(s.committed[seat.id])):null])),privateHandPowerHints:Object.fromEntries(s.seats.map(seat=>[seat.id,handPowerHints(s,seat.id)])),
     privateDeck:s.deck.map(id=>copy(card(id))),privateExcluded:s.excluded.map(id=>copy(card(id)))};
 }

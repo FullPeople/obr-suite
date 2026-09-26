@@ -14,6 +14,7 @@ export interface TableToolbarLabels {
   start: string;
   retry: string;
   retryAction: string;
+  handover?:string;
 }
 
 export interface TableToolbarViewProps {
@@ -21,6 +22,7 @@ export interface TableToolbarViewProps {
   hasView: boolean;
   selfPlayerId: string | undefined;
   isHost: boolean;
+  canHandover?:boolean;
   connected: boolean;
   message: string | undefined;
   localMessage: string;
@@ -35,6 +37,7 @@ export interface TableToolbarViewProps {
   onCreate(): void;
   onJoin(): void;
   onLeave(): void;
+  onHandover?():void;
   onStart(): void;
   onRetry(): void;
 }
@@ -50,6 +53,7 @@ export function TableToolbarView(props: TableToolbarViewProps) {
   return <>
     {!seated && props.table.stage !== "playing" && <button type="button" onClick={props.onJoin} disabled={props.joinDisabled} className="primary">{props.labels.join}</button>}
     {seated && props.table.stage !== "playing" && <button type="button" onClick={props.onLeave} disabled={props.leaveDisabled}>{props.labels.leave}</button>}
+    {props.isHost&&props.canHandover&&props.onHandover&&<button type="button" onClick={props.onHandover} disabled={props.leaveDisabled}>{props.labels.handover}</button>}
     {props.isHost && props.table.stage === "lobby" && <button type="button" onClick={props.onStart} disabled={props.startDisabled} className="primary">{props.labels.start}</button>}
     {canRetry && <button type="button" onClick={props.onRetry} disabled={props.retryDisabled}>{props.retryable ? props.labels.retryAction : props.labels.retry}</button>}
   </>;

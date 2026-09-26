@@ -715,8 +715,10 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   }
   const motionKey = (object: THREE.Object3D) => { const hit = object.userData.hit as StageHit | undefined; return `${hit?.zone ?? "?"}:${hit && "cardId" in hit ? hit.cardId : hit?.seatId ?? "?"}`; };
   function finishMotions() { for (const motion of [...motions.values()]) { setPose(motion.object, motion.to); motion.done?.(); } motions.clear(); }
+  let shadowsDirty = true;
   function tick(now: number) {
     raf = 0; if (destroyed || hidden()) return;
+    const movingShadows = motions.size > 0 || !!revealCue || slapCues.size > 0;
     tickReveal(now);
     tickPowerPulses(now);
     tickPowerBursts(now);
@@ -737,7 +739,7 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     // portrait devices do not pay a full-rate scene render for a tiny glyph.
     const handPowerOnly = handPowerActive && !spotActive && !slapActive && !motions.size && !revealCue && !powerPulses.size && !powerBursts.size;
     if (handPowerOnly && now - handPowerLastRender < 1000 / 30) { requestFrame(); return; }
-    renderer.shadowMap.needsUpdate = true; renderer.render(scene, camera); frames++;
+    renderer.shadowMap.needsUpdate = shadowsDirty || movingShadows; renderer.render(scene, camera); shadowsDirty = false; frames++;
     if (handPowerOnly) handPowerLastRender = now;
     if (motions.size || revealCue || powerPulses.size || powerBursts.size || handPowerActive || spotActive || slapActive) requestFrame();
   }
@@ -1140,7 +1142,7 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     }
     return value;
   }
-  function reconcile(animate: boolean) {
+  function reconcile(animate: boolean) { shadowsDirty = true;
     const desired = new Map((model.view ? placements(model.view) : []).map(p => [p.key, p]));
     const sourcePoses = new Map<string, Pose>();
     if (animate) for (const [id, placement] of desired) {

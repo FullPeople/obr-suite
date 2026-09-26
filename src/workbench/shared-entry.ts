@@ -7,7 +7,7 @@ export function sharedEntry(value:any):SharedEntry{
  const text=(key:string)=>typeof value[key]==='string'?value[key].slice(0,300):'';
  const entry:SharedEntry={id:value.id,kind:value.kind,name:value.name,english:text('english'),source:text('source'),edition:['2014','2024'].includes(value.edition)?value.edition:'both',packId:text('packId'),revision:text('revision'),entries:value.entries,raw:{}};
  if(Number.isFinite(value.page))entry.page=value.page;
- for(const key of ['level','school','time','range','components','duration','value','weight','rarity','_category','_custom'])if(value.raw&&key in value.raw)entry.raw[key]=value.raw[key];
+ for(const key of ['level','school','time','range','components','duration','value','weight','rarity','type','weaponCategory','property','dmg1','dmg2','dmgType','ac','strength','stealth','attunement','reqAttune','cost','entriesHigherLevel','ability','skillProficiencies','weaponProficiencies','armorProficiencies','savingThrowProficiencies','startingProficiencies','startingEquipment','_category','_custom'])if(value.raw&&key in value.raw)entry.raw[key]=value.raw[key];
  if(JSON.stringify(entry).length>100_000)throw Error('该词条内容过长，无法一次展示');
  return JSON.parse(JSON.stringify(entry));
 }

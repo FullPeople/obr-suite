@@ -1,6 +1,7 @@
 import OBR, { buildImage } from "@owlbear-rodeo/sdk";
 import { ParsedMonster } from "./types";
-import { getRawMonster, makeSlug } from "./data";
+import { getRawMonster, loadMonsterBySlug, makeSlug } from "./data";
+import { resolveTokenImage } from "./token-image";
 
 // The bestiary panel iframe doesn't run startSceneSync(), so calling
 // getState() from src/state.ts here would return only DEFAULT_STATE.
@@ -56,65 +57,19 @@ let writeChain: Promise<void> = Promise.resolve();
 
 async function ensureSharedMonsterData(slug: string, raw: any) {
   if (!raw) return;
-  writeChain = writeChain.then(async () => {
-    try {
+  const write = writeChain.catch(()=>{}).then(async () => {
       const meta = await OBR.scene.getMetadata();
       const table = (meta[BESTIARY_DATA_KEY] as Record<string, any>) || {};
       if (table[slug]) return;
       table[slug] = raw;
       await OBR.scene.setMetadata({ [BESTIARY_DATA_KEY]: table });
-    } catch (e) {
-      console.error("[bestiary] ensureSharedMonsterData failed", e);
-    }
   });
-  await writeChain;
+  writeChain = write.catch(()=>{});
+  await write;
 }
 
 function roll1d20(): number {
   return Math.floor(Math.random() * 20) + 1;
-}
-
-// Probe actual image dimensions
-function getImageSize(url: string): Promise<{ w: number; h: number }> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = () => resolve({ w: 280, h: 280 }); // fallback
-    img.src = url;
-  });
-}
-
-/** Same as getImageSize but also reports whether the image actually
- *  loaded. Lets spawnMonster fall back to a placeholder when a
- *  homebrew monster has no token (the auto-built kiwee URL 404s). */
-function probeImage(url: string): Promise<{ ok: boolean; w: number; h: number }> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ ok: true, w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = () => resolve({ ok: false, w: 280, h: 280 });
-    img.src = url;
-  });
-}
-
-const FALLBACK_TOKEN_URL = `https://5e.kiwee.top/img/bestiary/tokens/MM/Commoner.webp`;
-
-/** Detect the right MIME type from a token URL extension. OBR's
- *  image-fetcher validates the ImageContent.mime field against the
- *  actual fetched response; if we hardcode "image/webp" but the URL
- *  is a .png from a homebrew bestiary, the validation rejects the
- *  image AFTER it lands in the scene — that's the "panel + drag
- *  preview look fine but the spawned token shows the broken-image
- *  icon" bug. Defaults to webp because the official 5etools
- *  bestiary URLs all end in .webp. */
-function mimeFromUrl(url: string): string {
-  const u = url.toLowerCase();
-  if (/\.svg(\?|#|$)/.test(u)) return "image/svg+xml";
-  if (/\.png(\?|#|$)/.test(u)) return "image/png";
-  if (/\.(jpe?g)(\?|#|$)/.test(u)) return "image/jpeg";
-  if (/\.gif(\?|#|$)/.test(u)) return "image/gif";
-  if (/\.bmp(\?|#|$)/.test(u)) return "image/bmp";
-  if (/\.avif(\?|#|$)/.test(u)) return "image/avif";
-  return "image/webp";
 }
 
 export async function spawnMonster(
@@ -125,32 +80,12 @@ export async function spawnMonster(
    *  jitter" behaviour for the click-to-spawn path. */
   position?: { x: number; y: number },
 ) {
-  // Probe the chosen tokenUrl up-front. If it 404s (typical for
-  // homebrew monsters whose auto-built kiwee URL doesn't exist),
-  // fall back to the Commoner placeholder so the token still spawns
-  // — DM can swap in a real image later via OBR's image picker.
-  //
-  // 2026-09-14 — the probe's own decode is reused as the token size.
-  // `getImageSize(tokenUrl)` used to start a SECOND `new Image()` for
-  // the same URL, so every click-spawn decoded the same remote webp
-  // twice. Only the fallback commoner still needs a fresh measurement.
-  let tokenUrl = monster.tokenUrl || FALLBACK_TOKEN_URL;
-  let probed: { w: number; h: number } | null = null;
-  if (tokenUrl !== FALLBACK_TOKEN_URL) {
-    const probe = await probeImage(tokenUrl);
-    if (!probe.ok) {
-      console.warn(
-        "[obr-suite/bestiary] tokenUrl 404, using Commoner fallback:",
-        tokenUrl,
-      );
-      tokenUrl = FALLBACK_TOKEN_URL;
-    } else {
-      probed = { w: probe.w, h: probe.h };
-    }
-  }
-
+  const tokenImage = await resolveTokenImage(monster.tokenUrl || "");
+  const tokenUrl = tokenImage.url;
   const slug = makeSlug(monster.source, monster.engName);
-  await ensureSharedMonsterData(slug, getRawMonster(slug));
+  const raw = getRawMonster(slug) || await loadMonsterBySlug(slug);
+  if (!raw) throw new Error("怪物资料尚未载入，请重试放置。");
+  await ensureSharedMonsterData(slug, raw);
 
   let ownerId = "";
   try { ownerId = await OBR.player.getId(); } catch {}
@@ -160,7 +95,7 @@ export async function spawnMonster(
     OBR.viewport.getHeight(),
     OBR.viewport.getPosition(),
     OBR.viewport.getScale(),
-    probed ? Promise.resolve(probed) : getImageSize(tokenUrl),
+    Promise.resolve(tokenImage),
   ]);
 
   let worldX: number;
@@ -256,7 +191,7 @@ export async function spawnMonster(
       width: imgSize.w,
       height: imgSize.h,
       url: tokenUrl,
-      mime: mimeFromUrl(tokenUrl),
+      mime: tokenImage.mime,
     },
     { dpi: imgSize.w, offset: { x: halfW, y: halfH } }
   )
@@ -282,6 +217,9 @@ export async function spawnMonster(
   }
 
   await OBR.scene.items.addItems([item]);
+  if (tokenImage.fallback) {
+    void OBR.notification.show("怪物图片暂不可用，已使用占位图；再次放置会重新尝试。", "WARNING").catch(()=>{});
+  }
 
   // ② Focus the DM's viewport on the newly spawned token so they can see
   // where it landed without manual panning. Skipped for drag-spawn —

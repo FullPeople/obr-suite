@@ -67,6 +67,8 @@ export interface TableView {
   /** LOCAL: this viewer may use the host-side table editor. Only the creator
    *  holds the private hands, so this is never granted on an unseated client. */
   canEdit?: boolean;
+  /** A live authenticated GM or seated player can receive the private archive. */
+  canHandover?: boolean;
   connected: boolean;
   /** LOCAL: authenticated connection is alive, but publication/projection is
    * catching up. Input remains blocked; this is not a transport disconnect. */
@@ -84,6 +86,8 @@ export type TableCommand =
   | { type: "create" }
   | { type: "join" }
   | { type: "leave" }
+  /** Transfer authority only after the successor confirms private persistence. */
+  | { type: "handover" }
   | { type: "start"; options?: { startingGold?: number; startingHand?: number; variant?: TableVariant } }
   | { type: "newGame" }
   | { type: "history"; before: number }

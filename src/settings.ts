@@ -270,66 +270,8 @@ const SUPPORT: BilingualHtml = {
 };
 
 const IMPORTANT_NOTES: BilingualHtml = {
-  zh: `
-    <h3>${ICONS.user} 如何为玩家设置 Owner</h3>
-    <p>在 OBR 中把角色卡的 Owner 指派给玩家后，<b>玩家端就能在先攻插件里：</b></p>
-    <ul class="benefit-list">
-      <li><span class="benefit-tag">投骰</span>在准备阶段为<b>自己拥有的角色</b>投先攻骰</li>
-      <li><span class="benefit-tag">改值</span>编辑自己角色的<b>先攻值</b>和<b>加值</b></li>
-      <li><span class="benefit-tag">回合</span>轮到自己时，点角色卡下方<b>绿色「结束回合」</b>按钮</li>
-    </ul>
-    <p style="font-size:11.5px;color:#9aa0b3">不设置也能玩，由 DM 一手操作即可。但开放后玩家可以更自主地推进自己的回合。</p>
-
-    <div class="step">
-      <div class="step-title">第 1 步：开启 Character「Owner Only」权限</div>
-      <p>左侧 Players 面板中，点 <b>盾牌图标</b>（Player Permissions）。</p>
-      <img src="${assetUrl("owner-step1.png")}" alt="Players 面板的盾牌按钮">
-      <p>展开 Map → <b>Character</b> 行，在下拉里勾上 <b>Owner Only</b>，然后 SAVE。</p>
-      <img src="${assetUrl("owner-step2.png")}" alt="勾选 Owner Only">
-      <p class="tip-line">含义：被指派为某角色 Owner 的玩家，才能修改/操作那个角色（DM 仍可操作所有角色）。</p>
-    </div>
-
-    <div class="step">
-      <div class="step-title">第 2 步：把角色 Owner 指派给玩家</div>
-      <p>在地图上<b>左键点选</b>一个角色 Token，悬浮工具栏里点 <b>人形图标</b>（Set Owner），从列表里选玩家即可。</p>
-      <img src="${assetUrl("owner-step3.png")}" alt="角色工具栏的 Set Owner 按钮">
-      <p class="tip-line">每个 Token 单独指派；一个玩家可以拥有多个角色（PC + 召唤物等）。</p>
-    </div>
-
-    <div class="note">
-      <b>提示：</b>设置完成后，在先攻面板里那位玩家的角色卡<b>加值/先攻值</b>会变成可点编辑（蓝色描边），战斗中轮到他时会出现<b>绿色「结束回合」</b>按钮。其他人的卡对他来说是只读的。
-    </div>
-  `,
-  en: `
-    <h3>${ICONS.user} Setting up Owner permissions for players</h3>
-    <p>Once you assign a token's Owner to a player in OBR, <b>they gain extra abilities in the Initiative module:</b></p>
-    <ul class="benefit-list">
-      <li><span class="benefit-tag">Roll</span>Roll initiative for <b>their own characters</b> during prep phase</li>
-      <li><span class="benefit-tag">Edit</span>Edit their character's <b>initiative</b> and <b>modifier</b></li>
-      <li><span class="benefit-tag">End Turn</span>Click the <b>green "End Turn"</b> button under their card when it's their turn</li>
-    </ul>
-    <p style="font-size:11.5px;color:#9aa0b3">Optional — you can also run everything DM-side. But owner-delegation lets players drive their own turns.</p>
-
-    <div class="step">
-      <div class="step-title">Step 1: Enable Character "Owner Only" permission</div>
-      <p>In the left Players panel, click the <b>shield icon</b> (Player Permissions).</p>
-      <img src="${assetUrl("owner-step1.png")}" alt="Shield button in Players panel">
-      <p>Expand Map → <b>Character</b> row, select <b>Owner Only</b> in the dropdown, then SAVE.</p>
-      <img src="${assetUrl("owner-step2.png")}" alt="Select Owner Only">
-      <p class="tip-line">This means: only the player assigned as a token's Owner can edit/move it (DM still has full control).</p>
-    </div>
-
-    <div class="step">
-      <div class="step-title">Step 2: Assign Owner to a player</div>
-      <p>On the map, <b>left-click</b> a token, then click the <b>person icon</b> (Set Owner) in the floating toolbar and pick a player.</p>
-      <img src="${assetUrl("owner-step3.png")}" alt="Set Owner button on token toolbar">
-      <p class="tip-line">Per-token assignment; one player can own multiple tokens (PC + summons, etc.).</p>
-    </div>
-
-    <div class="note">
-      <b>After setup:</b> in the initiative panel, that player's card will have <b>editable initiative/modifier</b> (blue outline), and a <b>green "End Turn"</b> button appears when it's their turn. Other players' cards are read-only to them.
-    </div>
-  `,
+  zh: `<p>Owner 权限的图文设置步骤已移至新版工作台的「版本公告」。在工作台顶部打开公告即可查看。</p>`,
+  en: `<p>The Owner permission guide is now in the workbench release announcement. Open the announcement from the workbench toolbar.</p>`,
 };
 
 const TIMESTOP_DESC: BilingualHtml = {
@@ -381,28 +323,8 @@ const BESTIARY_DESC: BilingualHtml = {
 </ul>`,
 };
 const CHARCARD_DESC: BilingualHtml = {
-  zh: `<p>导入 <b>xlsx 角色卡</b>（D&amp;D 中文社区悲灵 v1.0.12 模板），自动渲染成可查阅的卡片。</p>
-<ul>
-  <li>cluster「<b>角色卡界面</b>」/ <kbd>CapsLock</kbd> 打开全屏面板</li>
-  <li><b>拖入 xlsx</b>到侧栏 / 点 📁 选择文件上传</li>
-  <li>卡旁 <b>↻</b> = 用新 xlsx 覆盖更新（Excel 改完保存→点刷新）</li>
-  <li>选中绑定 token 时浮出<b>小信息框</b>（受悬浮窗开关控制）</li>
-  <li>右键 token <b>绑定 / 解绑</b>角色卡</li>
-  <li><b>可点击元素</b>：六维字母 = 豁免（含熟练）/ 修正 = 检定；武器命中 + 伤害骰；底部 <em>特性 / 专长 / 法术</em> chip → 填入全局搜索</li>
-  <li><b>武器属性</b>（轻型 / 灵巧 / 精通词条）也可点击 → 直接查搜索定义</li>
-</ul>
-<p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>📱 手机端</b>：全屏面板按钮被隐藏（小屏不可用 + 内存吃紧）。手机玩家仍可通过绑定 token 的小信息框查看。</p>`,
-  en: `<p>Use the suite's <b>2014 or 2024 XLSX template</b> below. These downloads currently contain Chinese content; full English sheets are being prepared.</p>
-<ul>
-  <li>cluster's <b>Character Card Panel</b> / <kbd>CapsLock</kbd> opens the fullscreen view</li>
-  <li><b>Drag</b> an xlsx onto the side panel / click 📁 to upload</li>
-  <li>Each card's <b>↻</b> button = re-pick xlsx to overwrite in place</li>
-  <li>Selecting a bound token shows a <b>small info popup</b> (auto-popup toggle)</li>
-  <li>Right-click a token to <b>bind / unbind</b> a card</li>
-  <li><b>Clickable</b>: ability letters = saves (with proficiency) / modifiers = checks; weapon attack + damage; bottom <em>Traits / Feats / Spells</em> chips fill the global search</li>
-  <li><b>Weapon properties</b> (light / finesse / mastery tags) are also clickable → opens the rule definition in search</li>
-</ul>
-<p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>📱 Mobile</b>: fullscreen panel button hidden (not usable on small screens + memory cost). Mobile players still see card info via the bound-token popup.</p>`,
+  zh: `<p>在车卡网站编辑角色，导出<b>完整 JSON 备份</b>，再上传到插件。网站与枭熊共用一种 JSON，旧枭熊 JSON 仍可导入。</p><ul><li>通过「角色卡界面」或 CapsLock 打开五页阅读器。</li><li>拖入 JSON 或点击上传；卡旁 ↻ 可用新 JSON 更新。</li><li>旧插件提供角色阅读与棋子绑定；编辑角色请前往车卡网站。</li><li>不再支持上传 XLS/XLSX 文件。</li></ul>`,
+  en: `<p>Create and edit a character on the website, then upload its <b>complete JSON backup</b>. The website and Owlbear share one format; legacy Owlbear JSON is still accepted.</p><ul><li>Open the five-page reader from Character Cards or CapsLock.</li><li>Drop or upload JSON; use ↻ to update it from a new JSON file.</li><li>Edit characters on the website. XLS/XLSX upload is no longer supported.</li></ul>`,
 };
 const INITIATIVE_DESC: BilingualHtml = {
   zh: `<p>顶部居中的横向先攻条，覆盖完整 D&amp;D 战斗流程。</p>
@@ -2407,35 +2329,7 @@ const TABS: TabDef[] = [
     moduleId: "characterCards",
     dynamicBody: (lang) => {
       const desc = lang === "zh" ? CHARCARD_DESC.zh : CHARCARD_DESC.en;
-      // Two templates side-by-side — both share the same xlsx layout
-      // (parsed by the same rules), only the D&D edition differs.
-      // 2014 = traditional 5e; 2024 = the revised "One D&D" rules.
-      // 2026-05-15 — refreshed both files to the new "悲灵 / 弗人 / 枭熊
-      // 适配版" cut. URLs kept stable (no version-numbered file rename)
-      // so external links / cached docs keep resolving.
-      const tpl2014 = assetUrl("DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx");
-      const tpl2024 = assetUrl("DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx");
-      const btns = lang === "zh"
-        ? `<div class="dl-row">
-             <a class="dl-btn" href="${tpl2014}"
-                download="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx" target="_blank" rel="noopener">
-               ⬇ 5E2014 模板（悲灵 · 弗人 · 枭熊适配版）
-             </a>
-             <a class="dl-btn" href="${tpl2024}"
-                download="DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx" target="_blank" rel="noopener">
-               ⬇ 5E2024 模板（悲灵 · 弗人 · 枭熊适配版）
-             </a>
-           </div>`
-        : `<div class="dl-row">
-             <a class="dl-btn" href="${tpl2014}"
-                download="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx" target="_blank" rel="noopener">
-               ⬇ 2014 sheet (Chinese)
-             </a>
-             <a class="dl-btn" href="${tpl2024}"
-                download="DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx" target="_blank" rel="noopener">
-               ⬇ 2024 sheet (Chinese)
-             </a>
-           </div>`;
+      const btns = `<div class="dl-row"><a class="dl-btn" href="https://obr.dnd.center/card/" target="_blank" rel="noopener">${lang === "zh" ? "进入车卡网站" : "Open character website"}</a></div>`;
       return `${desc}${btns}`;
     },
   },

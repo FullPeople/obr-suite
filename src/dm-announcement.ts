@@ -187,7 +187,7 @@ function renderSection(s: Section): string {
   // multi-paragraph essay rather than a list of bullet alerts.
   if (s.kind === "notice") {
     const body = s.items.map(renderInline).join("<br><br>");
-    return `<div class="alert-row warn primary notice-block"><span class="dot"></span><span class="text">${body}</span></div>`;
+    return `<section class="notice-block"><h2>${escapeHtml(s.heading)}</h2><div class="text">${body}</div></section>`;
   }
   if (s.kind === "issues") {
     // Per row: "type | level | desc"  OR  "type | desc" (level skipped).

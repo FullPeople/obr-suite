@@ -34,8 +34,8 @@ export function setupActivityPage(){
  .activity-line{display:flex;align-items:baseline;gap:5px;line-height:1.35;flex-wrap:wrap}
  .activity-line strong{font-size:12.5px}.activity-who{font-size:11px;color:#d0d0d4}
  .activity-value{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}.activity-delta{font-weight:700;color:#e6c995}
- .activity-entry{margin:4px 0 0;white-space:pre-wrap;font-size:12px;line-height:1.4;max-height:126px;overflow:auto;scrollbar-width:thin}
- .activity-facts{float:right;font-size:10px;color:#ccc;max-width:50%;text-align:right}
+ .activity-entry{margin:4px 0 0;white-space:pre-wrap;font-size:12px;line-height:1.4;max-height:min(45vh,320px);overflow:auto;scrollbar-width:thin}
+ .activity-facts{display:block;margin-top:3px;font-size:11px;line-height:1.4;color:#c9cbd2;overflow-wrap:anywhere}
  .unified-activity .dismiss-btn{background:#50525b;border-color:#97999f;color:#fff}
  .activity-countdown{position:absolute;bottom:0;left:0;height:2px;width:100%;background:#e0cd90;transform-origin:left;pointer-events:none}
  `;document.head.append(style);

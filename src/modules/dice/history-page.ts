@@ -59,6 +59,7 @@ interface HistoryEntry {
   winnerIdx: number;
   modifier: number;
   label: string;
+  expression?: string;
   total: number;
   rollerId: string;
   rollerName: string;
@@ -409,6 +410,7 @@ function render(): void {
             <span class="player">${dmTag}${darkTag}${collTag}${repeatTag}${escapeHtml(h.rollerName)}</span>
             <span class="ago">${formatAgo(Date.now() - h.ts)}</span>
           </div>
+          ${h.expression ? `<div class="roll-expression" style="font:11px monospace;opacity:.8;overflow-wrap:anywhere">${escapeHtml(h.expression)}</div>` : ""}
           ${bodyTail}
         </div>
       </div>
@@ -689,6 +691,7 @@ function renderEntryRow(h: HistoryEntry, cid: string, tight: boolean): string {
           <span class="player">${h.hidden && !tight ? `<span class="dark-tag">${tt("diceHistDarkTag")}</span>` : ""}${escapeHtml(h.label || h.rollerName)}</span>
           <span class="ago">${ago}</span>
         </div>
+        ${h.expression ? `<div class="roll-expression" style="font:11px monospace;opacity:.8;overflow-wrap:anywhere">${escapeHtml(h.expression)}</div>` : ""}
         ${body}
       </div>
     </div>

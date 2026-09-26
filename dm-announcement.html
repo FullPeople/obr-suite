@@ -8,7 +8,7 @@
   --bg-soft: rgba(31, 34, 48, 0.97);
   --bg-card: rgba(15, 17, 28, 0.85);
   --border: rgba(255, 255, 255, 0.14);
-  --border-strong: rgba(245, 166, 35, 0.55);
+  --border-strong: #626672;
   --accent: #5dade2;
   --accent-dim: #7ec8f0;
   --warn: #f5a623;
@@ -28,17 +28,15 @@ html, body {
 }
 body {
   display: flex; align-items: center; justify-content: center;
-  padding: 8px;
+  padding: 0;
 }
 .card {
   width: 100%;
   height: 100%;
   background: var(--bg-soft);
   border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6),
-              0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-              0 0 32px rgba(245, 166, 35, 0.10);
+  border-radius: 0;
+  box-shadow: none;
   display: flex; flex-direction: column;
   overflow: hidden;
 }
@@ -46,7 +44,7 @@ body {
   display: flex; align-items: center; gap: 10px;
   padding: 14px 18px 12px;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(245, 166, 35, 0.10), transparent);
+  background: #363942;
 }
 .auto-progress{
   height:4px;
@@ -59,7 +57,7 @@ body {
 .auto-progress .bar{
   width:100%;
   height:100%;
-  background:linear-gradient(90deg,#f5a623,#5dade2);
+  background:#8b94a7;
   transform-origin:left center;
   /* Counts the 3 s the close button stays disabled. Kept in sync with
      READ_GATE_MS in src/dm-announcement.ts — change both together. */
@@ -383,6 +381,7 @@ body {
 }
 .btn:disabled:hover { background: #2a3242; }
 .btn:disabled:active { transform: none; }
+.notice-block{padding:0;border:0;background:none;line-height:1.7;font-size:13px}.notice-block h2{font-size:19px;margin-bottom:12px;color:#f4f4f6}.notice-block .text{color:#dce0e8}.notice-block a{color:#a9ccef}.hl-card{flex-direction:column;background:none;border:0;padding:0}.hl-card .hl-img{width:100%;height:auto;max-height:none;object-fit:contain;border-radius:0}.hl-card .hl-title{color:#e0e5ed}.head .icon{color:#dfe4ef;background:#555b69;border-color:#70798b}.body{gap:16px}.head .title{font-size:16px}
 </style>
 </head>
 <body>

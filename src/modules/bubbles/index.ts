@@ -176,6 +176,7 @@ const DISABLE_INHERIT: Array<"SCALE" | "ROTATION" | "POSITION" | "VISIBLE" | "LO
 
 // --- Data shape ---------------------------------------------------------
 interface BubbleData {
+  pendingHp: boolean;
   hp: number;
   maxHp: number;
   tempHp: number;
@@ -192,20 +193,23 @@ interface BubbleData {
 
 function readBubbleData(item: Item): BubbleData | null {
   const meta = (item.metadata as any) ?? {};
-  const m = meta[BUBBLES_META] ?? meta[EXTERNAL_BUBBLES_META];
-  if (!m || typeof m !== "object") return null;
+  const raw = meta[BUBBLES_META] ?? meta[EXTERNAL_BUBBLES_META];
+  const m = raw && typeof raw === "object" ? raw : {};
+  if (!raw && !meta[HP_BAR_FLAG_KEY]) return null;
   const hpRaw = Number(m["health"]);
   const maxRaw = Number(m["max health"]);
   const tempRaw = Number(m["temporary health"]);
   const acRaw = m["armor class"];
   const hasHp = Number.isFinite(maxRaw) && maxRaw > 0;
   const hasAc = acRaw != null && Number.isFinite(Number(acRaw));
-  if (!hasHp && !hasAc) return null;
+  const pendingHp = !!meta[HP_BAR_FLAG_KEY] && !hasHp;
+  if (!hasHp && !hasAc && !pendingHp) return null;
   // `locked` defaults to TRUE when the field is absent — matches the
   // user's spec ("默认上锁"). DM unlock writes an explicit `false`.
   const lockedRaw = m["locked"];
   const locked = lockedRaw === undefined ? true : !!lockedRaw;
   return {
+    pendingHp,
     hp: Number.isFinite(hpRaw) ? Math.max(0, Math.min(hpRaw, hasHp ? maxRaw : hpRaw)) : (hasHp ? maxRaw : 0),
     maxHp: hasHp ? maxRaw : 0,
     tempHp: Number.isFinite(tempRaw) && tempRaw > 0 ? Math.floor(tempRaw) : 0,
@@ -229,7 +233,7 @@ function dataHash(d: BubbleData): string {
 // at construction time goes into structureHash. Anything that's just a
 // number patched live via patchGeometry → valueHash.
 function structureHash(d: BubbleData): string {
-  const hpBar = d.maxHp > 0 ? "1" : "0";
+  const hpBar = d.maxHp > 0 || d.pendingHp ? "1" : "0";
   const ac = d.ac != null ? "1" : "0";
   const hidden = d.hide ? "1" : "0";
   return `${hpBar}${ac}${hidden}`;
@@ -997,7 +1001,7 @@ function computeLayoutFromMetrics(
   // than being appended). Centring keeps the bar's geometric centre
   // on the token's centre. Text bbox = full bar width (also matching
   // 1.0.105 — user said "文字同样也是").
-  const showHp = data.maxHp > 0;
+  const showHp = data.maxHp > 0 || data.pendingHp;
   const inlineGap = 2 * s;
   const acSlotW = overheadMode && data.ac != null ? diameter : 0;
   // 2026-05-15 — overhead mode: temp HP no longer reserves an inline
@@ -1721,7 +1725,7 @@ async function syncBubbles(): Promise<void> {
       // flip drives a structure-rebuild instead of slipping
       // through patchGeometry.
       const has = {
-        hp: effectiveData.maxHp > 0 && !bossReplacesHealthBar(it.id),
+        hp: (effectiveData.maxHp > 0 || effectiveData.pendingHp) && !bossReplacesHealthBar(it.id),
         ac: viewMode === "silhouette" ? false : (d.ac != null),
         temp: effectiveData.tempHp > 0 && effectiveData.maxHp > 0,
       };
@@ -1807,8 +1811,8 @@ async function syncBubbles(): Promise<void> {
       const shimmerIds: string[] = [];
       const isSilhouette = w.viewMode === "silhouette";
 
-      if (w.data.maxHp > 0 && !bossReplacesHealthBar(tokId)) {
-        const ratio = Math.max(0, Math.min(1, w.data.hp / w.data.maxHp));
+      if ((w.data.maxHp > 0 || w.data.pendingHp) && !bossReplacesHealthBar(tokId)) {
+        const ratio = Math.max(0, Math.min(1, w.data.hp / Math.max(1, w.data.maxHp)));
         const bg = buildBarBg(ctx, w.layout, w.statsVisible);
         const fill = buildBarFill(ctx, w.layout, ratio);
         toAdd.push(bg, fill);

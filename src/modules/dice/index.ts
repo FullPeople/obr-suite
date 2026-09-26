@@ -194,6 +194,7 @@ export interface DiceRollPayload {
   winnerIdx: number;        // -1 = no specific winner (panel rolls)
   modifier: number;
   label: string;
+  expression?: string;
   total: number;            // sum of dice values + modifier (cached)
   rollerId: string;
   rollerName: string;
@@ -1285,6 +1286,7 @@ export async function handleQuickRoll(req: QuickRollRequest,identity?:QuickRollI
     winnerIdx: -1,
     modifier,
     label: req.label ?? "",
+    expression: req.expression,
     rollerId,
     ...(identity?{rollerName:identity.name,rollerColor:identity.color}:{}),
     hidden: !!req.hidden,
@@ -1366,6 +1368,7 @@ export function normalizePayload(raw: unknown): DiceRollPayload | null {
     winnerIdx,
     modifier,
     label: data.label ?? "",
+    expression: typeof (data as any).expression === "string" ? (data as any).expression.slice(0, 4096) : undefined,
     total,
     rollerId: data.rollerId ?? "",
     rollerName: data.rollerName ?? "",
@@ -1396,6 +1399,7 @@ export async function broadcastDiceRoll(opts: {
   winnerIdx: number;
   modifier?: number;
   label?: string;
+  expression?: string;
   rollerId: string;
   rollerName?: string;
   rollerColor?: string;
@@ -1450,6 +1454,7 @@ export async function broadcastDiceRoll(opts: {
     winnerIdx,
     modifier,
     label: opts.label ?? "",
+    expression: opts.expression,
     total,
     rollerId: opts.rollerId,
     rollerName,

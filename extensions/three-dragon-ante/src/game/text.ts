@@ -30,7 +30,7 @@ const TEXT:Record<string,readonly [string,string]>={
  connecting:["正在连接牌桌…","Connecting to the table…"],hostOffline:["牌桌创建者的原窗口已离线，等待其恢复牌桌后继续。","The table creator's original window is offline. Play resumes when they restore the table."],
  privateSync:["正在同步你的私有手牌。","Syncing your private hand."],storageFailed:["本机无法保存恢复记录，请检查浏览器存储后重试。","Recovery storage is unavailable. Check browser storage and retry."],
  roomFull:["房间暂时无法保存牌桌设置，请重试。","The room cannot save the table right now. Retry."],tableExists:["房间已有牌桌，可直接加入。","A table already exists. Join it."],tableFull:["六个座位都已坐满，可以旁观。","All six seats are taken. You can watch."],
- notHost:["只有牌桌创建者可以开局或准备新局。","Only the table creator can start or reset the game."],cannotLeave:["游戏进行中无法离开座位；可以直接关窗。","You cannot leave a running game. You can close the window."],
+ notHost:["只有牌桌主持可以开局、准备新局或移交主持。","Only the table host can start, reset or transfer hosting."],cannotLeave:["游戏进行中保留原座位。主持离开房间前请先移交主持，并等待移交完成。","Seats are preserved during a game. Transfer hosting and wait for completion before leaving the room."],
  tooFewPlayers:["至少需要两名玩家。","At least two players are needed."],notSeated:["请先加入牌桌。","Join the table first."],staleTable:["牌桌已变化，请重新连接。","The table changed. Reconnect."],
  invalidCommand:["当前无法执行这个操作。","That action is unavailable."],requestFailed:["未收到处理结果，请重新连接后重试。","No result arrived. Reconnect and retry."],
  recoveryMissing:["当前浏览器没有本局存档，无法还原手牌。请牌桌创建者回到原浏览器恢复，或与同桌玩家确认后重新开局。","This browser has no saved game to restore the hands. The table creator must return to the original browser, or agree with the table to start a new game."],

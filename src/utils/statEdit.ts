@@ -16,6 +16,7 @@
 // Anything else returns null and the caller should leave the value
 // unchanged (input box reverts).
 
+import { evaluateStatExpression } from "./statExpression";
 import OBR, { type Item } from "@owlbear-rodeo/sdk";
 
 export const BUBBLES_META_KEY = "com.obr-suite/bubbles/data";
@@ -43,22 +44,7 @@ function readDataFromMetadata(meta: Record<string, unknown> | undefined): Bubble
 }
 
 export function parseStatInput(input: string, current: number): number | null {
-  const t = String(input ?? "").trim();
-  if (!t) return null;
-  // Relative: "+5" / "-3"
-  let m = t.match(/^([+-])\s*(\d+)$/);
-  if (m) return current + (m[1] === "+" ? 1 : -1) * parseInt(m[2], 10);
-  // Absolute: "20"
-  if (/^\d+$/.test(t)) return parseInt(t, 10);
-  // Calc-style: "15+5" / "15-3"
-  m = t.match(/^(\d+)\s*([+-])\s*(\d+)$/);
-  if (m) {
-    const a = parseInt(m[1], 10);
-    const sign = m[2] === "+" ? 1 : -1;
-    const b = parseInt(m[3], 10);
-    return a + sign * b;
-  }
-  return null;
+  return evaluateStatExpression(input, current);
 }
 
 export async function readBubbles(itemId: string): Promise<BubblesData> {
