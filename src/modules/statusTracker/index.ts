@@ -32,6 +32,7 @@ import {
   BuffDef,
 } from "./types";
 import {
+  OWNER_KEY,
   syncTokenBuffs,
   readTokenBuffIds,
   readTokenBuffRounds,
@@ -831,13 +832,14 @@ async function syncOneToken(token: any, buffs: BuffDef[]): Promise<boolean> {
   }
 }
 
-async function syncAllVisibleTokensImpl(itemsSnapshot?: Item[]): Promise<void> {
+async function syncAllVisibleTokensImpl(itemsSnapshot?: Item[], force = false): Promise<void> {
   if (!isGM) return;
   try {
     // onChange delivers the complete scene — reuse it instead of
     // re-fetching the whole scene per pass (checklist §1).
     const items = itemsSnapshot ?? await OBR.scene.items.getItems();
     const next = new Map<string, string>();
+    const visualOwners = new Set(items.map(item => item.metadata?.[OWNER_KEY]).filter((id):id is string=>typeof id==='string'));
     // First pass: cheap key compare, collect what actually changed.
     const cleanups: any[] = [];
     const changed: Array<{ token: any; ids: string[] }> = [];
@@ -845,19 +847,20 @@ async function syncAllVisibleTokensImpl(itemsSnapshot?: Item[]): Promise<void> {
       if (!(it as any).image || (it as any).type !== "IMAGE") continue;
       const ids = readTokenBuffIds(it);
       if (ids.length === 0) {
-        if (lastBuffSnapshot.has(it.id)) cleanups.push(it);
+        if (lastBuffSnapshot.has(it.id) || visualOwners.has(it.id)) cleanups.push(it);
         continue;
       }
       const key = tokenSyncKey(it, ids);
       next.set(it.id, key);
-      if (lastBuffSnapshot.get(it.id) === key) continue;
+      if (!force && lastBuffSnapshot.get(it.id) === key) continue;
       changed.push({ token: it, ids });
     }
     // Catalog parse once per pass, not once per changed token.
     const cat = changed.length > 0 ? await getCatalog() : [];
     const byId = new Map(cat.map((b) => [b.id, b]));
     for (const it of cleanups) {
-      await syncOneToken(it, []);
+      const ok=await syncOneToken(it, []);
+      if(!ok)next.set(it.id,lastBuffSnapshot.get(it.id)||'cleanup-pending');
     }
     for (const { token, ids } of changed) {
       const buffs = ids
@@ -927,11 +930,11 @@ async function syncAllVisibleTokens(itemsSnapshot?: Item[]): Promise<void> {
   syncRunning = true;
   try {
     await runExclusive(() => {
-      if (forceFullResync) {
-        forceFullResync = false;
-        lastBuffSnapshot.clear();
-      }
-      return syncAllVisibleTokensImpl(itemsSnapshot);
+      const force=forceFullResync;
+      forceFullResync = false;
+      // Clearing token membership here loses final-status removal when a
+      // catalog broadcast races the empty metadata snapshot.
+      return syncAllVisibleTokensImpl(itemsSnapshot,force);
     });
   } finally {
     syncRunning = false;

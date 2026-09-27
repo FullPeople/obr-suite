@@ -943,6 +943,7 @@ async function hydrateSceneCache(tokenId: string): Promise<Map<string, string>> 
     }
   } catch (e) {
     logErr(`scene.items.getItems(token=${tokenId}) failed`, e);
+    throw e;
   }
   return map;
 }
@@ -959,6 +960,7 @@ async function hydrateLocalCache(tokenId: string): Promise<Map<string, string>> 
     }
   } catch (e) {
     logErr(`scene.local.getItems(token=${tokenId}) failed [stage=hydrate-local]`, e);
+    throw e;
   }
   return map;
 }
@@ -997,10 +999,11 @@ export async function syncTokenBuffs(token: Image, buffs: BuffDef[]): Promise<bo
   let existing = tokenItemCache.get(token.id);
   let existingLocal = tokenLocalCache.get(token.id);
   if (existing === undefined || existingLocal === undefined) {
-    const [s, l] = await Promise.all([
+    let s:Map<string,string>,l:Map<string,string>;
+    try { [s, l] = await Promise.all([
       existing === undefined ? hydrateSceneCache(token.id) : Promise.resolve(existing),
       existingLocal === undefined ? hydrateLocalCache(token.id) : Promise.resolve(existingLocal),
-    ]);
+    ]); } catch { invalidateTokenBuffCache(token.id); return false; }
     existing = s;
     existingLocal = l;
     tokenItemCache.set(token.id, existing);
@@ -1043,6 +1046,7 @@ export async function syncTokenBuffs(token: Image, buffs: BuffDef[]): Promise<bo
   //    invalidated cache makes the next sync re-hydrate + self-heal).
   //    Pure additions (toDelete empty) still cost one round-trip.
   let sceneDeleteFailed = false;
+  let localDeleteFailed = false;
   let sceneAddFailed = false;
   const deleteOps: Promise<unknown>[] = [];
   if (toDelete.length > 0) {
@@ -1057,6 +1061,7 @@ export async function syncTokenBuffs(token: Image, buffs: BuffDef[]): Promise<bo
   if (localToDelete.length > 0) {
     deleteOps.push(
       OBR.scene.local.deleteItems(localToDelete).catch((e) => {
+        localDeleteFailed = true;
         logErr(`local.deleteItems(token=${token.id}) failed [stage=delete-local, ids=${localToDelete.join(",")}]`, e);
         invalidateTokenBuffCache(token.id);
       }),
@@ -1107,7 +1112,7 @@ export async function syncTokenBuffs(token: Image, buffs: BuffDef[]): Promise<bo
       ringRadius: desc.ringRadius,
     });
   }
-  return !sceneDeleteFailed && !sceneAddFailed;
+  return !sceneDeleteFailed && !localDeleteFailed && !sceneAddFailed;
 }
 
 // === Token hit-test (used by capture overlay for manage-transfer) ====

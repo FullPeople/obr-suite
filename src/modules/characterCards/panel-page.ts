@@ -1441,3 +1441,7 @@ function stopPanelReads(): void {
 }
 window.addEventListener("pagehide", stopPanelReads);
 window.addEventListener("beforeunload", stopPanelReads);
+
+// Readable migration guidance, without opening a file chooser or changing a card.
+document.getElementById('jsonMigrationHelp')?.addEventListener('click',()=>{(document.getElementById('jsonMigrationDialog') as HTMLDialogElement)?.showModal();});
+document.getElementById('closeMigrationHelp')?.addEventListener('click',()=>{(document.getElementById('jsonMigrationDialog') as HTMLDialogElement)?.close();});

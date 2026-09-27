@@ -1,4 +1,5 @@
 export interface Monster {
+  _copy?: {name?:string;ENG_name?:string;source?:string;_mod?:Record<string,unknown>};
   name: string;          // Chinese name
   ENG_name: string;      // English name
   source: string;        // Source book (MM, VGM, etc.)

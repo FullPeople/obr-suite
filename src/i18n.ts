@@ -332,7 +332,7 @@ const TR: Dict = {
   ccPanelWriteFailed: { zh: "角色卡更新失败", en: "Could not update the character card" },
   ccPanelCloseFailed: { zh: "窗口关闭失败，请再试一次。", en: "Could not close the window. Please try again." },
   ccPanelClose: { zh: "关闭 (Esc)", en: "Close (Esc)" },
-  ccPanelDragHint: { zh: "拖拽 JSON 到此处上传，或", en: "Drag JSON here to upload, or" },
+  ccPanelDragHint: { zh: "拖拽 JSON 到此处上传", en: "Drag JSON here to upload" },
   ccPanelChooseFile: { zh: "📁 选择文件", en: "📁 Choose File" },
   ccPanelChooseFileTitle: {
     zh: "打开本地文件选择器上传 JSON 角色卡",

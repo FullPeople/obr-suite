@@ -210,6 +210,8 @@ html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
 .err{padding:8px 12px;font-size:11px;color:#e74c3c;background:rgba(231,76,60,0.1);border-top:1px solid rgba(231,76,60,0.2)}
 .status{padding:6px 12px;font-size:10px;color:#5dade2;text-align:center}
 
+
+.side-head{flex-wrap:wrap;gap:8px}.head-actions{flex-wrap:wrap}.side-hint{display:block;text-align:left;padding:14px}.upload-heading{display:block;font-size:13px;color:#e3e9f2;margin-bottom:6px}.side-hint>span{display:block;line-height:1.5}.upload-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:12px 0}.upload-actions .link-local-btn{width:100%;margin:0;min-height:32px;white-space:nowrap}.upload-actions #btnViewSample{grid-column:1 / -1;grid-row:2;background:transparent;border-color:#627183;color:#bac9dc}.side-hint-sub{line-height:1.5;margin-top:9px}.migration-help{display:block;max-width:100%;text-align:left;color:#b8d1ec;background:none;border:0;text-decoration:underline;text-underline-offset:3px;font-size:11px;line-height:1.6;cursor:pointer}.migration-dialog{margin:auto;width:min(680px,calc(100vw - 24px));max-height:85vh;overflow:auto;padding:20px;background:#202638;color:#e1e5ee;border:1px solid #65758a;border-radius:6px;font-size:13px;line-height:1.8}.migration-dialog::backdrop{background:#0008}.migration-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.migration-dialog h2{font-size:18px;line-height:1.4}.migration-dialog h3{font-size:14px;margin-top:18px}.migration-dialog p{margin:10px 0}.migration-dialog header button{color:inherit;background:transparent;border:0;padding:2px 6px;font-size:22px;cursor:pointer}.migration-site{display:inline-block;padding:7px 14px;margin-top:10px;background:#304967;color:#fff;border:1px solid #7698bc;border-radius:4px}
 </style>
 </head>
 <body>
@@ -231,9 +233,9 @@ html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
         <button class="close" id="closeBtn" data-i18n-title="ccPanelClose" title="关闭 (Esc)">✕</button>
       </div>
     </div>
-    <div class="side-hint">
-      <span data-i18n="ccPanelDragHint">拖拽 JSON 到此处上传，或</span>
-      <button id="btnLinkLocal" class="link-local-btn" type="button"
+    <div class="side-hint"><strong class="upload-heading">上传角色 JSON</strong>
+      <span data-i18n="ccPanelDragHint">拖拽 JSON 到此处上传</span>
+      <div class="upload-actions"><button id="btnLinkLocal" class="link-local-btn" type="button"
               data-i18n="ccPanelChooseFile"
               data-i18n-title="ccPanelChooseFileTitle"
               title="打开本地文件选择器上传 JSON 角色卡">
@@ -252,6 +254,7 @@ html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
               title="粘贴角色卡 JSON，确认后上传并添加到当前场景">
         📋 粘贴 JSON
       </button>
+      </div><button id="jsonMigrationHelp" class="migration-help" type="button">关于舍弃excel导入的重要说明</button>
       <div class="side-hint-sub" data-i18n="ccPanelRefreshHint">每张卡片旁的 ↻ 可重新选择 JSON 覆盖更新</div>
     </div>
     <div id="status" class="status" style="display:none"></div>
@@ -259,6 +262,13 @@ html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
     <div class="card-list" id="list"></div>
   </aside>
 </div>
+<dialog id="jsonMigrationDialog" class="migration-dialog" aria-labelledby="migration-title"><header><h2 id="migration-title">关于舍弃excel导入的重要说明</h2><button id="closeMigrationHelp" type="button" aria-label="关闭格式说明">×</button></header>
+<p>Excel 适合把表格摆在纸面上，但角色卡同时包含职业、特性、法术、装备和运行中的数值。依赖固定单元格与公式导入，每次调整表格布局、合并单元格或更新模板，都可能让插件读错位置，也让版本维护越来越困难。</p>
+<h3>今后为什么统一使用 JSON？</h3><p>JSON 把每一项角色资料按名称与结构保存，不依赖它显示在哪一格。网站与插件可以使用同一份完整备份，更容易保留条目来源、版本和子内容，也方便及时跟进新的规则与功能。</p>
+<p>JSON 是之后优先适配的角色数据格式。长期来看，结构化资料也为不同桌游规则、更多显示方式和平台之间的互通提供了基础；这些是后续发展方向，并不表示目前已经支持所有规则。</p>
+<h3>你不需要手写 JSON</h3><p>建议直接到车卡网站创建和编辑角色，完成后导出完整 JSON，再拖入这里、选择文件或粘贴上传。修改后重新导出，用角色旁的 ↻ 更新同一张卡。</p>
+<p>旧插件不再导入 XLS/XLSX。已有上传记录保留；旧表格请自行保管，并核对后把角色迁移到网站。格式变化不能自动修复旧文件里已经缺失的资料。</p>
+<a class="migration-site" href="https://obr.dnd.center/card/" target="_blank" rel="noopener">前往车卡网站</a></dialog>
 <script type="module" src="/src/modules/characterCards/panel-page.ts"></script>
 </body>
 </html>

@@ -581,3 +581,6 @@ body {
   padding: 40px;
   text-align: center;
 }
+
+/* Fixed-size controls wrap as units instead of shrinking Chinese labels vertically. */
+.header-row{flex-wrap:wrap;justify-content:flex-start;gap:6px}.header-row .count{flex:1 0 100%;white-space:nowrap;line-height:1.5}.header-row .source-filter-wrap{flex:1 1 110px;min-width:90px;max-width:none}.header-row .auto-init-toggle,.header-row .sort-btn{flex:0 0 auto;white-space:nowrap;min-height:27px;margin:0}.header-row .source-filter{width:100%}.bestiary-load-errors{padding:8px 10px;flex:none;max-height:30vh;overflow:auto;font-size:12px;line-height:1.5;border-bottom:1px solid var(--border)}.bestiary-load-errors button{margin-left:8px;padding:3px 8px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:4px}.bestiary-load-errors details{margin-top:5px}.bestiary-load-errors li{margin:6px 0 6px 16px;overflow-wrap:anywhere}.bestiary-load-errors small{display:block;color:var(--text2)}

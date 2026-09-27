@@ -5,7 +5,7 @@ import { installDebugOverlay } from "../../utils/debugOverlay";
 import { installPanelZoom } from "../../utils/panelZoom";
 import { ParsedMonster, MonsterEdition } from "./types";
 import { contentConfigurationKey } from "../../utils/contentLocale";
-import { loadAllMonsters, clearMonsterCache, refreshRemoteContent, searchMonsters, getRawMonster, makeSlug } from "./data";
+import { type MonsterLoadFailure, loadAllMonsters, clearMonsterCache, refreshRemoteContent, searchMonsters, getRawMonster, makeSlug } from "./data";
 import { BC_LOCAL_CONTENT_CHANGED, forceReloadLocalContent } from "../../utils/localContent";
 import { spawnMonster } from "./spawn";
 import { t } from "../../i18n";
@@ -291,6 +291,7 @@ function App() {
   const loadingRef = useRef(true);
   const [loadedFiles, setLoadedFiles] = useState(0);
   const [failedFiles, setFailedFiles] = useState(0);
+  const [loadFailures,setLoadFailures]=useState<MonsterLoadFailure[]>([]);
   const [loadError, setLoadError] = useState(false);
   // Rendered-row window. The library holds thousands of monsters, so the list is
   // paged instead of truncated: this is the ONLY cap now, it grows on scroll, and
@@ -437,14 +438,14 @@ function App() {
       loadingRef.current = true;
       setLoading(true);
       setLoadError(false);
-      setFailedFiles(0);
+      setFailedFiles(0);setLoadFailures([]);
       setLoadedFiles(0);
       if (reset) setMonsters([]);
       void loadAllMonsters((progress) => {
         if (!alive || id !== requestId) return;
         setMonsters(progress.preview);
         setLoadedFiles(progress.loadedFiles);
-        setFailedFiles(progress.failedFiles);
+        setFailedFiles(progress.failedFiles);setLoadFailures(progress.failures);
       }).then((all) => {
         if (!alive || id !== requestId) return;
         setMonsters(all);
@@ -458,7 +459,7 @@ function App() {
         // Preview rows have not passed the final inheritance merge.
         loadingRef.current = true;
         setLoading(false);
-        setLoadError(true);
+        setLoadError(true);setLoadFailures([{kind:"download",path:"资料目录",message:error instanceof Error?error.message:String(error)}]);
       });
     };
     retryLoadRef.current = () => load(true);
@@ -1101,13 +1102,14 @@ function App() {
         </div>
       </div>
       {(failedFiles > 0 || loadError) && (
-        <div role="status" style={{ padding: "6px 12px", fontSize: "12px" }}>
+        <div role="status" class="bestiary-load-errors">
           {lang === "zh"
-            ? `部分资料未能加载${failedFiles > 0 ? `（${failedFiles} 份）` : ""}。`
+            ? `部分资料未能加载${failedFiles > 0 ? `（${failedFiles} 项）` : ""}。`
             : `Some content could not be loaded${failedFiles > 0 ? ` (${failedFiles})` : ""}. `}
           <button type="button" disabled={loading} onClick={() => retryLoadRef.current()}>
             {lang === "zh" ? "重试" : "Retry"}
           </button>
+          {loadFailures.length>0&&<details><summary>{lang==='zh'?'查看未加载原因':'View failure details'}</summary><ul>{loadFailures.map(failure=><li key={`${failure.kind}:${failure.path}`}><strong>{failure.path}</strong><small>{failure.message}</small></li>)}</ul></details>}
         </div>
       )}
       {loading && monsters.length > 0 && (

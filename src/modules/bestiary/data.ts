@@ -164,12 +164,14 @@ let loadGeneration = 0;
 let activeLoadController: AbortController | null = null;
 const selectedFlights=new Map<string,Promise<any|null>>();
 let selectedDetailGeneration=-1;
+export interface MonsterLoadFailure { kind: "download" | "dependency"; path: string; message: string; }
 export interface MonsterLoadProgress {
+  failures: MonsterLoadFailure[];
   loadedFiles: number;
   failedFiles: number;
   preview: ParsedMonster[];
 }
-let lastLoadProgress: MonsterLoadProgress = { loadedFiles: 0, failedFiles: 0, preview: [] };
+let lastLoadProgress: MonsterLoadProgress = { loadedFiles: 0, failedFiles: 0, preview: [], failures: [] };
 const progressListeners = new Set<(progress: MonsterLoadProgress) => void>();
 function reportProgress(progress: MonsterLoadProgress) {
   lastLoadProgress = progress;
@@ -190,7 +192,7 @@ export function clearMonsterCache(): void {
   cachedMonsters = null;
   loadingPromise = null;
   rawBySlug.clear();
-  lastLoadProgress = { loadedFiles: 0, failedFiles: 0, preview: [] };
+  lastLoadProgress = { loadedFiles: 0, failedFiles: 0, preview: [], failures: [] };
 }
 
 /** Force the NEXT load to re-download the remote library instead of reusing the
@@ -404,7 +406,8 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
       .filter((monster) => monster && typeof monster === "object" && !source.disabledSources.has(String(monster.source ?? "").trim().toLowerCase()))
       .map((monster) => tag(monster, source)) }));
     const perLibraryMonsters: Monster[][][] = bases.map(() => []);
-    const failed = new Set<string>();
+    const failed = new Map<string, MonsterLoadFailure>();
+    const dependencyMonsters: Monster[][] = bases.map(() => []);
     let loadedFiles = 0;
     let lastPreviewAt = 0;
     let previewRows: ParsedMonster[] = [];
@@ -433,7 +436,7 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
           return true;
         });
       }
-      reportProgress({ loadedFiles, failedFiles: failed.size, preview: previewRows });
+      reportProgress({ loadedFiles, failedFiles: failed.size, failures: [...failed.values()], preview: previewRows });
     }
     publish(true);
     const cacheKey = (value: string) => `bestiary:${value}`;
@@ -443,11 +446,13 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
       // libraries must finish even when their total load takes over 30 seconds.
       const sourceDeadline = createContentIdleDeadline(30_000, signal);
       const request = (path: string) => fetchContentJson(`${base}/${path}`, { cache: "no-cache", signal: sourceDeadline.signal });
+      const indexFiles = new Map<string,string>();
+      const visitedFiles = new Set<string>();
       const recordFailure = (path: string, error: unknown) => {
         if (signal.aborted) return;
         const key = sourceDeadline.signal.aborted ? `${base}/timeout` : `${base}/${path}`;
         if (failed.has(key)) return;
-        failed.add(key);
+        failed.set(key,{kind:"download",path:`${base}/${path}`,message:error instanceof Error?error.message:String(error)});
         console.warn("[obr-suite/bestiary] content unavailable", { base, path, error });
       };
       try {
@@ -459,6 +464,7 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
           if (response.ok) {
             const index = await response.json();
             if (!index || typeof index !== "object" || Array.isArray(index)) throw new Error("Invalid bestiary index");
+            for (const [code, name] of Object.entries(index)) if(typeof name === "string")indexFiles.set(code.trim().toLowerCase(),name);
             files = [...new Set(Object.entries(index).filter(([code, name]) => typeof name === "string" &&
               sources.some((source) => source.base === base && !source.disabledSources.has(code.trim().toLowerCase())))
               .map(([, name]) => name as string))];
@@ -475,6 +481,7 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
           } else if (response.status !== 404) recordFailure("data/bestiary/index.json", `HTTP ${response.status}`);
         } catch (error) { recordFailure("data/bestiary/index.json", error); }
         if (files !== null) {
+          files.forEach(file => visitedFiles.add(file));
           const key = cacheKey(base);
           const raw = await cachedPayload(key, files, indexMeta);
           if (raw) {
@@ -560,6 +567,36 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
             publish();
           });
         }
+        // A disabled book stays hidden, but an enabled variant may inherit its
+        // base creature. Fetch only referenced dependency files; never expose
+        // those parents as selectable monsters or alter the user's settings.
+        if (indexFiles.size) {
+          while (!signal.aborted && !sourceDeadline.signal.aborted) {
+            const needed = new Set<string>();
+            const loaded = [...perLibraryMonsters[libraryIndex].flat(), ...dependencyMonsters[libraryIndex], ...localMonsters];
+            for (const monster of loaded) {
+              const code = monster?._copy?.source;
+              const file = typeof code === "string" ? indexFiles.get(code.trim().toLowerCase()) : undefined;
+              if (file && !visitedFiles.has(file)) needed.add(file);
+            }
+            if (!needed.size) break;
+            await mapWithConcurrency([...needed], CONTENT_REQUEST_LIMIT, async filename => {
+              visitedFiles.add(filename);
+              for (let attempt=0;attempt<2;attempt++) {
+                try {
+                  const response=await request(`data/bestiary/${filename}`);
+                  if(!response.ok)throw Error(`HTTP ${response.status}`);
+                  const data=await response.json();
+                  if(!Array.isArray(data.monster))throw Error("Invalid monster dependency list");
+                  dependencyMonsters[libraryIndex].push(...data.monster);
+                  loadedFiles++; sourceDeadline.progress(); publish(); return;
+                }catch(error){
+                  if(attempt===1||sourceDeadline.signal.aborted){recordFailure(`data/bestiary/${filename}`,error);return;}
+                }
+              }
+            });
+          }
+        }
       } catch (error) { recordFailure("index", error); }
       finally {
         sourceDeadline.dispose();
@@ -577,13 +614,17 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
     // Resolve inheritance before choosing translations. Same-library parents
     // come first; compatible libraries can supply missing core dependencies.
     const candidateGroups = candidates();
+    const parentGroups = sources.map(source => ({source, monsters:[
+      ...(perLibraryMonsters[bases.indexOf(source.base)]??[]).flat(),
+      ...dependencyMonsters[bases.indexOf(source.base)],
+    ].filter(monster=>monster&&typeof monster==='object').map(monster=>tag(monster,source))}));
     const remoteMonsters: any[] = [];
     const allGroups = candidateGroups.map((group) => ({ monsters: group.monsters, parents: [
-      ...group.monsters,
+      ...(parentGroups.find(parent=>parent.source===group.source)?.monsters??group.monsters),
       // Homebrew libraries may depend on a separately configured core library.
       // Keep known translations apart; unknown-language sources retain that
       // cross-library dependency behavior without claiming translated prose.
-      ...candidateGroups.filter((other) => other !== group && (group.source.language === "auto" || other.source.language === "auto" || other.source.language === group.source.language))
+      ...parentGroups.filter((other) => other.source !== group.source && (group.source.language === "auto" || other.source.language === "auto" || other.source.language === group.source.language))
         .flatMap((other) => other.monsters),
     ] }));
     for (const group of allGroups) {
@@ -618,7 +659,7 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
         if (!m?.name) continue;
         const complete = resolveCandidate(m);
         if (!complete) {
-          failed.add(`copy:${m._suiteContent?.libraryId ?? "local"}:${makeSlug(m.source, m.ENG_name || m.name)}`);
+          failed.set(`copy:${m._suiteContent?.libraryId ?? "local"}:${makeSlug(m.source, m.ENG_name || m.name)}`,{kind:"dependency",path:`${m.name} (${m.source})`,message:`无法解析继承资料 ${m._copy?.name||m._copy?.ENG_name||"?"} (${m._copy?.source||"?"})；可能缺少来源、存在循环或修改目标不匹配`});
           continue;
         }
         remoteMonsters.push(complete ?? m);
@@ -643,7 +684,7 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
     for (const monster of localMonsters) {
       const resolved = resolveLocal(monster);
       if (resolved) readyMonsters.push(resolved);
-      else failed.add(`copy:local:${makeSlug(monster.source, monster.ENG_name || monster.name)}`);
+      else failed.set(`copy:local:${makeSlug(monster.source, monster.ENG_name || monster.name)}`,{kind:"dependency",path:`${monster.name} (${monster.source})`,message:`无法解析继承资料 ${monster._copy?.name||"?"} (${monster._copy?.source||"?"})`});
     }
     readyMonsters.push(...remoteMonsters);
     const chosen = new Map<string, any>();
@@ -679,7 +720,7 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
     rawBySlug.clear();
     for (const [slug, monster] of resolvedBySlug) rawBySlug.set(slug, monster);
     cachedMonsters = all;
-    reportProgress({ loadedFiles, failedFiles: failed.size, preview: all });
+    reportProgress({ loadedFiles, failedFiles: failed.size, failures: [...failed.values()], preview: all });
     return all;
 }
 
