@@ -163,7 +163,10 @@ async function start(){
    // A DM import retains its importer owner; assigning a bound token also grants
    // access. Recompute token grants, so transferring it revokes the old grant.
    // These transient grants must not be saved to the room directory.
-   const owner_ids=[...new Set([...(Array.isArray((room['com.obr-suite/workbench/card-editors'] as any)?.[c.id])?(room['com.obr-suite/workbench/card-editors'] as any)[c.id]:Array.isArray(c.owner_ids)?c.owner_ids:[]),...tokens.map(i=>i.createdUserId)].filter(Boolean))];
+   const assigned=(room['com.obr-suite/workbench/card-editors'] as any)?.[c.id];
+   // Explicit room-wide assignment survives scene changes. A stale owner on an
+   // inactive scene's token must not restore a permission the DM revoked.
+   const owner_ids=[...new Set((Array.isArray(assigned)?assigned:[...(Array.isArray(c.owner_ids)?c.owner_ids:[]),...tokens.map(i=>i.createdUserId)]).filter(Boolean))];
    const own=owner_ids.includes(playerId),locked=c.locked??!!(c.visibility&&c.visibility!=='public');
    const projectedRevision=Math.max(0,...tokens.map(token=>{const baseline=token.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined;return baseline&&baseline.cardId===c.id?baseline.revision:0;}));if(projectedRevision>documentRevision(documents.get(`${OBR.room.id}:card:${c.id}`)))invalidateCard(c.id,projectedRevision);
    return {...c,owner_ids,name:c.name||c.title||tokens[0]?.name||c.id,own,write:role==='GM'||own,locked,inScene:tokens.length>0,itemId:tokens[0]?.id||`card:${c.id}`,documentRevision:0,passive:undefined as number|undefined,coins:{} as Record<string,number>,player:party.filter(p=>c.owner_ids?.includes(p.id)).map(p=>p.name).join('、'),conditions:conditionRows({item:tokens[0],scene},undefined),resources:tokens[0]?.metadata[RES]||[],stats:bubble(tokens[0])};

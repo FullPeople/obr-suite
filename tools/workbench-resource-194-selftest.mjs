@@ -215,6 +215,10 @@ await assert.rejects(()=>writer.evaluate(()=>window.liveProbe.command({type:'ass
 await frame.evaluate(()=>window.liveProbe.command({type:'assignOwners',itemId:'card:hero1',ownerIds:[]}));await sleep(30);
 assert.equal((await writer.evaluate(()=>window.liveProbe.snapshot('card:hero1'))).state.write,false);
 reports.push({name:'DM-explicit-assignment-grants-and-revokes-player-editor-without-reimport',playerSelfGrantRejected:true});
+await page.evaluate(()=>{state.items.find(item=>item.id==='token1').createdUserId='writer';for(const f of document.querySelectorAll('iframe'))f.contentWindow.postMessage({id:'OBR_SCENE_ITEMS_EVENT_CHANGE',data:{items:state.items}},location.origin);});await sleep(30);
+assert.equal((await writer.evaluate(()=>window.liveProbe.snapshot('card:hero1'))).state.write,false);
+reports.push({name:'old-scene-token-owner-cannot-restore-explicitly-revoked-card-permission'});
+
 
 // A delayed Owlbear status catalog and slow foreign card reads must not stall
 // a committed cached character operation or selecting another cached card.
