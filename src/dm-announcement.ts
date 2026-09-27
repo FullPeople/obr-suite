@@ -22,6 +22,7 @@
 //     If no `[kind]` suffix is present the section renders as a plain
 //     paragraph block.
 //
+//   ### Heading / ---      → subheading / divider inside release sections
 //   - text                 → list item inside the current section
 //   - desc | tag | size    → todo-section format. `size`=`large` → big tag.
 //   - 1.0.57 · changes     → changelog-section format.
@@ -162,9 +163,26 @@ function renderInline(text: string): string {
 }
 
 
+function renderReleaseItems(items: string[]): string {
+  const output: string[] = [];
+  let list: string[] = [];
+  const flush = () => {
+    if (list.length) output.push(`<ul class="release-items">${list.join("")}</ul>`);
+    list = [];
+  };
+  for (const item of items) {
+    if (item === "---" || item.startsWith("### ")) {
+      flush();
+      output.push(item === "---" ? '<hr class="release-divider">' : `<h3>${escapeHtml(item.slice(4))}</h3>`);
+    } else list.push(`<li>${renderInline(item)}</li>`);
+  }
+  flush();
+  return output.join("");
+}
+
 function renderSection(s: Section): string {
   if (s.kind === "release" || s.kind === "history") {
-    const list = `<ul class="release-items">${s.items.map(item => `<li>${renderInline(item)}</li>`).join("")}</ul>`;
+    const list = renderReleaseItems(s.items);
     const heading = escapeHtml(s.heading);
     return s.kind === "history"
       ? `<details class="release-history"><summary>${heading}</summary>${list}</details>`
