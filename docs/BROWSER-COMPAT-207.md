@@ -1,4 +1,4 @@
-# 2026-09-27 · 浏览器加载兼容修复候选
+# 2026-09-27 · 浏览器加载兼容修复已验证并上线
 
 用户反馈为 Edge 等浏览器提示“加载失败”，未提供版本、报错原文或具体入口。没有把所有 Edge 故障归为同一原因。
 
@@ -20,4 +20,4 @@
 
 Edge 自身采用 Chromium，不应笼统称为性能不足。参考 [Microsoft Edge 说明](https://support.microsoft.com/en-us/edge/microsoft-edge-chromium)、[MDN AbortSignal.any 兼容性](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/any_static)、[Vite 构建仅默认转换语法](https://vite.dev/guide/build)。未通过不安全 JSON 克隆替换 structuredClone；更老的浏览器、IE 模式、玩家的具体设备、扩展拦截、真实网络和受限存储仍待验证。
 
-发布目标：新版 1.0.207-dev、单机 0.1.12 / standalone-1.0.207、独立三龙牌 0.7.19-dev；最终以 RELEASE-207-RESULT.md 为准。旧插件 1.3.11 的 XLSX 不变。
+已发布：新版 1.0.207-dev、单机 0.1.12 / standalone-1.0.207、独立三龙牌 0.7.19-dev；部署证据见 [RELEASE-207-RESULT.md](RELEASE-207-RESULT.md)。旧插件 1.3.11 的 XLSX 不变。
