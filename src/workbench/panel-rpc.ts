@@ -2,12 +2,15 @@ import OBR from '@owlbear-rodeo/sdk';
 import {getState} from '../state';
 import {assetUrl} from '../asset-base';
 import {tableWorkbench} from './table';
+import {SERVER_GRANT,SERVER_ROOM_KEY,SERVER_WINDOW,serverRoom} from '../../extensions/three-dragon-ante/src/game/server-protocol';
+import {setupServerAdmission} from '../../extensions/three-dragon-ante/src/game/server-session';
 import {privateNotesCapability,roomNotes} from './notes';
 import type {Relay} from './relay';
 const personalKeys=new Set(['obr-suite/lang','obr-suite/sfx-dice','obr-suite/sfx-initiative','obr-suite/sfx-on','com.obr-suite/bubbles/scale','obr-suite/boss-bar/preferences']);
 const musicPrefix='com.obr-suite/music-board:';
 const safeLocal=new Set(['com.obr-suite/state-changed','com.obr-suite/local-content-changed','com.obr-suite/lang-changed','com.obr-suite/module-status/query','com.obr-suite/panel-side-hint','com.obr-suite/boss-bar/preferences-changed','com.obr-suite/settings-closed']);
 export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void,relay?:Pick<Relay,'send'>){
+ setupServerAdmission();
  const notes=relay?roomNotes(relay,async()=>privateNotesCapability(OBR.room.id||'default',await OBR.player.getId()),()=>OBR.player.getRole()):undefined;
  const subscriptions=new Map<string,()=>void>();
  const table=tableWorkbench((instance,event,name,data)=>send('panelEvent',{panel:'table',instance,event,name,data}));
@@ -40,7 +43,11 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
   if(method==='broadcast.sendMessage'){
    const [name,data,options]=args;
    if(typeof name!=='string'||!name.startsWith('com.')||!['LOCAL','REMOTE','ALL'].includes(options?.destination))throw Error('无效功能消息');
-   if(panel==='table'){if(options.destination!=='LOCAL')throw Error('牌桌消息必须经游戏控制器处理');return table(instance,method,args);}
+   if(panel==='table'){
+    if(name===SERVER_GRANT&&options.destination==='ALL'&&typeof data?.roomId==='string'&&typeof data?.memberId==='string'&&typeof data?.challenge==='string'&&JSON.stringify(data).length<500)return OBR.broadcast.sendMessage(name,data,options);
+    if(name===SERVER_WINDOW&&options.destination==='LOCAL'&&['close','display'].includes(data?.command?.type))return true;
+    if(options.destination!=='LOCAL')throw Error('牌桌消息必须经游戏控制器处理');return table(instance,method,args);
+   }
    if(['music','studio'].includes(panel)){
     if(![musicPrefix+'command',musicPrefix+'local',musicPrefix+'ready'].includes(name))throw Error('无效音乐操作');
     // Shared music commands still go through RoomMusic's writer and fresh role/allowPlayers check.
@@ -55,6 +62,10 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
   if(Object.prototype.hasOwnProperty.call(reads,method))return reads[method]();
   if(method==='notification.show')return OBR.notification.show(String(args[0]).slice(0,400));
   if(method==='player.setMetadata')return OBR.player.setMetadata(args[0]);
+  if(panel==='table'&&method==='room.setMetadata'){
+   const keys=Object.keys(args[0]||{});if(keys.length!==1||keys[0]!==SERVER_ROOM_KEY||!serverRoom(args[0][SERVER_ROOM_KEY]))throw Error('无效牌桌邀请');
+   return OBR.room.setMetadata({[SERVER_ROOM_KEY]:serverRoom(args[0][SERVER_ROOM_KEY])});
+  }
   if(panel!=='settings'||!gm)throw Error('此设置仅 DM 可以调整');
   if(method==='scene.items.getItems'||method==='scene.local.getItems'){const api=method.includes('.local.')?OBR.scene.local:OBR.scene.items;return api.getItems(Array.isArray(args[0])?args[0]:undefined);}
   if(method==='scene.items.applyChanges'||method==='scene.local.applyChanges'){

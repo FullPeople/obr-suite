@@ -1,0 +1,29 @@
+[Unit]
+Description=Three-Dragon Ante authoritative game service
+After=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=obr-three-dragon
+StateDirectoryMode=0700
+WorkingDirectory=/opt/obr-three-dragon
+ExecStart=/usr/local/bin/node /opt/obr-three-dragon/server.mjs
+Environment=NODE_ENV=production
+Environment=PORT=5013
+Environment=TDA_DATABASE=/var/lib/obr-three-dragon/game.sqlite
+Environment=TDA_ORIGIN=https://obr.dnd.center
+Environment=TDA_MAX_ROOMS=20
+Environment=TDA_MAX_SOCKETS=180
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+MemoryMax=256M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

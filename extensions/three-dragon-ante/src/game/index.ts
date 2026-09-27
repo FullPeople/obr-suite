@@ -10,6 +10,8 @@ import { createIdentity, type Identity } from "./identity";
 import { sendQueued, queueState } from "./broadcast";
 import { describeError, diag, throttle } from "./diagnostics";
 import { TABLE_UI_RESTORE, readUIDraft, type TableDisplayMode, type TableUICommand, type TableUIDraft } from "./ui-command";
+import {SERVER_WINDOW} from './server-protocol';
+import {setupServerAdmission} from './server-session';
 
 const PANEL = "com.fullpeople/three-dragon-ante/popover";
 let active = false, epoch = 0, selfId = "";
@@ -198,7 +200,8 @@ export async function openTable(): Promise<void> {
   // An explicit reopen replaces a possibly stale shell, keeping the controller.
   if (panelOpen) replacePanel = true;
   desiredOpen = true;
-  void ensureController();
+  const metadata=await OBR.room.getMetadata();
+  if(metadata[TABLE_ROOM_KEY])void ensureController();
   await syncPanel();
 }
 async function localCommand(value: unknown, sender: string): Promise<void> {
@@ -260,6 +263,13 @@ export async function setupThreeDragonAnte(): Promise<void> {
   diag("boot", "background ready", { selfId, connection, panel: panelInstance || "(none)" });
   if (!active || generation !== epoch) return;
   errorMessage = undefined;
+  unsubs.push(setupServerAdmission(),OBR.broadcast.onMessage(SERVER_WINDOW,event=>{void(async()=>{
+    if(!active||!identity||!(await identity.matches(event.connectionId)))return;
+    const data=event.data as {instance?:string;command?:{type?:string;mode?:string}};
+    if(data?.instance!==panelInstance)return;
+    if(data.command?.type==='close'){desiredOpen=false;await syncPanel();}
+    else if(data.command?.type==='display'&&['full','compact'].includes(data.command.mode||'')){displayMode=data.command.mode as TableDisplayMode;await syncPanel();}
+  })().catch(()=>{});}));
   unsubs.push(OBR.broadcast.onMessage(TABLE_OPEN, event => { void (async () => { if (await identity!.matches(event.connectionId)) void openTable(); })(); }));
   unsubs.push(OBR.broadcast.onMessage(TABLE_READY, event => {
     const data = event.data as { clientId?: unknown; instance?: unknown };

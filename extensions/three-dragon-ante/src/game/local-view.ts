@@ -7,14 +7,14 @@ import { card } from "./rules";
 /** The LOCAL channel only reaches this player's own page, which is where the
  *  host inspects the table. packSeat is the encrypted REMOTE whitelist and must
  *  never carry inspection data, so it travels here. */
-function packOmniscient(view: OmniscientView, budget?: number) {
+export function packOmniscient(view: OmniscientView, budget?: number) {
   return { ...packSeat(view, budget), omniscient: true as const,
     privateHands: Object.fromEntries(Object.entries(view.privateHands).map(([seatId, cards]) => [seatId, cards.map(value => value.id)])),
     privateCommittedAntes: Object.fromEntries(Object.entries(view.privateCommittedAntes).map(([seatId, value]) => [seatId, value?.id ?? null])),
     privateHandPowerHints: view.privateHandPowerHints,
     privateDeck: view.privateDeck?.map(value => value.id) ?? [], privateExcluded: view.privateExcluded?.map(value => value.id) ?? [] };
 }
-function unpackOmniscient(wire: Record<string, unknown>): OmniscientView {
+export function unpackOmniscient(wire: Record<string, unknown>): OmniscientView {
   const hands = (wire.privateHands ?? {}) as Record<string, string[]>;
   const antes = (wire.privateCommittedAntes ?? {}) as Record<string, string | null>;
   const deck = (wire.privateDeck ?? []) as string[], excluded = (wire.privateExcluded ?? []) as string[];
