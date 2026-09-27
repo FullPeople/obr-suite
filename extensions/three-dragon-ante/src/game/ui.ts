@@ -550,6 +550,7 @@ function releaseCues(){
   turnIndicatorView.render({...shown,reducedMotion:reduced.matches});
  }
  function render(){if(destroyed)return;
+  root.dataset.lobby=String(!view?.game);
   reactShell.begin();
   try{
   refreshKeyboard();
@@ -578,7 +579,7 @@ function releaseCues(){
    hasView:!!view,
    selfPlayerId:view?.selfPlayerId,
    isHost:!!view?.isHost,
-   canHandover:!!view?.canHandover,
+   canHandover:!!view?.canHandover&&view?.table?.hostConnectionId!=="server",
    connected:!!view?.connected,
    message:view?.message,
    localMessage,

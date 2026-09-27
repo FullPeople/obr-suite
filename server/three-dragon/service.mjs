@@ -17,7 +17,7 @@ const fail=code=>{throw Error(code);};
 const stage=g=>!g?'lobby':g.stage==='ended'?'ended':'playing';
 const trimGame=game=>game?{...game,history:(game.history||[]).slice(-24),historyComplete:false,accepted:{}}:null;
 const cleanName=v=>String(v||'玩家').replace(/[\u0000-\u001f]/g,'').slice(0,60)||'玩家';
-export function createTableService({database,origin='https://obr.dnd.center',maxRooms=20,maxSockets=180,injectFailure}={}){
+export function createTableService({database,origin='https://obr.dnd.center',maxRooms=20,maxSockets=180,injectFailure,hostGraceMs=8000}={}){
  if(database!==':memory:')mkdirSync(dirname(database),{recursive:true,mode:0o700});
  const db=new DatabaseSync(database);db.exec(`PRAGMA journal_mode=WAL;PRAGMA synchronous=FULL;PRAGMA foreign_keys=ON;
  CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY,join_hash TEXT NOT NULL,state TEXT NOT NULL,updated INTEGER NOT NULL);
@@ -26,7 +26,7 @@ export function createTableService({database,origin='https://obr.dnd.center',max
  CREATE TABLE IF NOT EXISTS receipts(room TEXT NOT NULL,member TEXT NOT NULL,id TEXT NOT NULL,fingerprint TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(room,member,id));
  CREATE TABLE IF NOT EXISTS history(room TEXT NOT NULL,game TEXT NOT NULL,sequence INTEGER NOT NULL,entry TEXT NOT NULL,PRIMARY KEY(room,game,sequence));`);
  if(!db.prepare('PRAGMA table_info(members)').all().some(c=>c.name==='gm_until'))db.exec('ALTER TABLE members ADD COLUMN gm_until INTEGER NOT NULL DEFAULT 0');
- const sockets=new Map(),rooms=new Map(),rates=new Map();let closing=false;
+ const sockets=new Map(),rooms=new Map(),rates=new Map(),hostTimers=new Map();let closing=false;
  const stmt={room:db.prepare('SELECT * FROM rooms WHERE id=?'),member:db.prepare('SELECT m.* FROM members m JOIN credentials c ON c.member=m.id WHERE c.room=? AND c.token_hash=?'),members:db.prepare('SELECT * FROM members WHERE room=?'),save:db.prepare('UPDATE rooms SET state=?,updated=? WHERE id=?'),receipt:db.prepare('SELECT * FROM receipts WHERE room=? AND member=? AND id=?'),saveReceipt:db.prepare('INSERT INTO receipts VALUES(?,?,?,?,?)'),history:db.prepare('INSERT OR REPLACE INTO history VALUES(?,?,?,?)')};
  function rate(key,max,interval=60000){const now=Date.now();let r=rates.get(key);if(!r||now-r.at>interval){r={at:now,n:0};rates.set(key,r);}if(++r.n>max)fail('rateLimited');}
  function load(id){const row=stmt.room.get(id);if(!row)fail('roomMissing');return rooms.get(id)||JSON.parse(row.state);}
@@ -54,6 +54,29 @@ export function createTableService({database,origin='https://obr.dnd.center',max
   ctx.seq=seq;ctx.last=next;
  }
  function publishRoom(id){for(const ctx of sockets.values())if(ctx.room===id)try{publish(ctx);}catch{ctx.ws.close(1011,'publicationFailed');}}
+ function successor(id,state,previous){
+  const online=new Set([...sockets.values()].filter(c=>c.room===id&&c.ws.readyState===WebSocket.OPEN).map(c=>c.member));
+  const members=stmt.members.all(id).filter(m=>m.id!==previous&&m.role!=='PENDING'&&online.has(m.id));
+  return members.find(m=>roleOf(m)==='GM')||state.table.seats.map(s=>members.find(m=>m.id===s.playerId)).find(Boolean);
+ }
+ function checkHost(id){
+  if(closing)return;
+  const state=load(id),online=[...sockets.values()].some(c=>c.room===id&&c.member===state.table.hostPlayerId&&c.ws.readyState===WebSocket.OPEN);
+  if(online){clearTimeout(hostTimers.get(id));hostTimers.delete(id);return;}
+  if(hostTimers.has(id)||!successor(id,state,state.table.hostPlayerId))return;
+  // A refresh or a second window must not hand away ownership. Once the
+  // grace expires, persist only ownership; cards, seats and receipts stay intact.
+  hostTimers.set(id,setTimeout(()=>{
+   hostTimers.delete(id);if(closing)return;
+   try{
+    const current=load(id);
+    if([...sockets.values()].some(c=>c.room===id&&c.member===current.table.hostPlayerId&&c.ws.readyState===WebSocket.OPEN))return;
+    const nextHost=successor(id,current,current.table.hostPlayerId);if(!nextHost)return;
+    const next={...current,table:{...current.table,hostPlayerId:nextHost.id,hostName:nextHost.name,revision:current.table.revision+1}};
+    transaction(()=>stmt.save.run(JSON.stringify(next),Date.now(),id));rooms.set(id,next);publishRoom(id);
+   }catch(error){console.warn('[three-dragon] automatic host transfer pending',error);checkHost(id);}
+  },hostGraceMs));
+ }
  function command(ctx,message){
   const {id,command:cmd}=message;if(!text(id,128)||!cmd||typeof cmd.type!=='string')fail('invalidCommand');
   const m=member(ctx.room,ctx.token),s=load(ctx.room),fingerprint=JSON.stringify(cmd),duplicate=stmt.receipt.get(ctx.room,m.id,id);
@@ -73,10 +96,10 @@ export function createTableService({database,origin='https://obr.dnd.center',max
    if(m.role==='PENDING')fail('privateSync');
    if(stage(s.game)==='playing')fail('gameStarted');if(!seat){if(s.table.seats.length>=6)fail('tableFull');next.table.seats.push({playerId:m.id,seatId:m.id,name:m.name});}
   }else if(cmd.type==='leave'||cmd.type==='kick'){
-   if(stage(s.game)==='playing')fail('cannotLeave');const target=cmd.type==='leave'?m.id:cmd.playerId;
+   const playing=stage(s.game)==='playing';if(playing&&(cmd.type!=='leave'||!owner))fail('cannotLeave');const target=cmd.type==='leave'?m.id:cmd.playerId;
    if(cmd.type==='kick'&&!admin(s,m)||target===s.table.hostPlayerId&&cmd.type==='kick')fail('notAllowed');
-   next.table.seats=next.table.seats.filter(p=>p.playerId!==target);
-   if(target===next.table.hostPlayerId){const successor=next.table.seats[0];if(successor){next.table.hostPlayerId=successor.playerId;next.table.hostName=successor.name;}}
+   if(!playing)next.table.seats=next.table.seats.filter(p=>p.playerId!==target);
+   if(target===next.table.hostPlayerId){const peer=successor(ctx.room,s,m.id);if(playing&&!peer)fail('noSuccessor');if(peer){next.table.hostPlayerId=peer.id;next.table.hostName=peer.name;}}
   }else if(cmd.type==='handover'){
    if(!owner)fail('notHost');const peers=[...sockets.values()].filter(c=>c.room===ctx.room&&c.member!==m.id).map(c=>member(c.room,c.token));
    const successor=peers.find(p=>roleOf(p)==='GM')||peers.find(p=>s.table.seats.some(seat=>seat.playerId===p.id));if(!successor)fail('noSuccessor');next.table.hostPlayerId=successor.id;next.table.hostName=successor.name;
@@ -156,7 +179,7 @@ export function createTableService({database,origin='https://obr.dnd.center',max
      if(message.type!=='auth'||!text(message.room,32))fail('notAllowed');const m=member(message.room,message.token);
      if(!rooms.has(m.room)&&rooms.size>=maxRooms)fail('roomFull');rooms.set(m.room,load(m.room));
      if([...sockets.values()].filter(c=>c.member===m.id).length>=3)fail('tooManyWindows');
-     ctx={ws,room:m.room,member:m.id,token:message.token,inspect:false,seq:0,last:null,receipt:null,gesture:null};sockets.set(ws,ctx);clearTimeout(authTimer);publish(ctx,true);return;
+     ctx={ws,room:m.room,member:m.id,token:message.token,inspect:false,seq:0,last:null,receipt:null,gesture:null};sockets.set(ws,ctx);clearTimeout(authTimer);publish(ctx,true);checkHost(m.room);return;
     }
     rate('ws:'+ctx.member,90,10000);
     if(message.type==='sync'){publish(ctx,true);return;}
@@ -173,12 +196,12 @@ export function createTableService({database,origin='https://obr.dnd.center',max
     send(ws,{type:'ack',id,ok:false,code:error.message,...(actionReceipt?{actionReceipt}:{})});
    }
   });
-  ws.on('close',()=>{clearTimeout(authTimer);sockets.delete(ws);if(ctx){const peers=[...sockets.values()].filter(c=>c.room===ctx.room);if(!peers.length)rooms.delete(ctx.room);else if(ctx.gesture)for(const c of peers)send(c.ws,{type:'gestures',values:[{...ctx.gesture,gesture:{...ctx.gesture.gesture,hover:null,selected:[],slap:false}}]},false);}});
+  ws.on('close',()=>{clearTimeout(authTimer);sockets.delete(ws);if(ctx){const peers=[...sockets.values()].filter(c=>c.room===ctx.room);if(!peers.length)rooms.delete(ctx.room);else if(ctx.gesture)for(const c of peers)send(c.ws,{type:'gestures',values:[{...ctx.gesture,gesture:{...ctx.gesture.gesture,hover:null,selected:[],slap:false}}]},false);checkHost(ctx.room);}});
  });
  const gestures=setInterval(()=>{
   const groups=new Map();for(const ctx of sockets.values())if(ctx.gesture){const values=groups.get(ctx.room)||[];values.push(ctx.gesture);groups.set(ctx.room,values);ctx.gesture=null;}
   for(const [id,values] of groups)for(const ctx of sockets.values())if(ctx.room===id&&ctx.ws.bufferedAmount<32000)send(ctx.ws,{type:'gestures',values},false);
  },250);
  const pulse=setInterval(()=>{for(const ws of wss.clients){if(!ws.isAlive){ws.terminate();continue;}ws.isAlive=false;ws.ping();const ctx=sockets.get(ws);if(ctx&&ctx.last?.role==='GM'&&roleOf(member(ctx.room,ctx.token))!=='GM')publish(ctx,true);}for(const [key,r] of rates)if(Date.now()-r.at>3600000)rates.delete(key);},15000);
- return {server,db,stats:()=>({rooms:rooms.size,sockets:sockets.size}),async close(){closing=true;clearInterval(gestures);clearInterval(pulse);for(const ws of wss.clients)ws.terminate();await new Promise(done=>server.close(done));wss.close();db.close();}};
+ return {server,db,stats:()=>({rooms:rooms.size,sockets:sockets.size}),async close(){closing=true;clearInterval(gestures);clearInterval(pulse);for(const timer of hostTimers.values())clearTimeout(timer);hostTimers.clear();for(const ws of wss.clients)ws.terminate();await new Promise(done=>server.close(done));wss.close();db.close();}};
 }

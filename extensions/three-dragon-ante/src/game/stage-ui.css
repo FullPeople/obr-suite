@@ -2,6 +2,7 @@
 /* The renderer draws on a transparent canvas, so the table shell keeps the
    same wood-plank backdrop as every other view. */
 .table-shell[data-renderer=webgl]>.board-scroll{position:relative;padding:0;overflow:hidden;min-height:150px}
+.table-shell[data-lobby=true]>.board-scroll{overflow-y:auto;overflow-x:hidden;min-height:0;touch-action:pan-y;overscroll-behavior-y:contain;scrollbar-gutter:stable}
 .table-shell[data-renderer=webgl] #stage-host{position:absolute;inset:0}
 #table-stage{display:block;width:100%;height:100%;touch-action:none;outline-offset:-5px}
 #stage-summary{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:max-content;max-width:min(92vw,760px);max-height:18vh;overflow:auto;white-space:normal;text-align:center;line-height:1.35;font-size:.72rem;letter-spacing:.04em;color:#eddbc0;text-shadow:0 2px 5px #100906;pointer-events:none;background:#20130b88;padding:6px 12px;border-radius:20px}
