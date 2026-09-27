@@ -323,8 +323,8 @@ const BESTIARY_DESC: BilingualHtml = {
 </ul>`,
 };
 const CHARCARD_DESC: BilingualHtml = {
-  zh: `<p>在车卡网站编辑角色，导出<b>完整 JSON 备份</b>，再上传到插件。网站与枭熊共用一种 JSON，旧枭熊 JSON 仍可导入。</p><ul><li>通过「角色卡界面」或 CapsLock 打开五页阅读器。</li><li>拖入 JSON 或点击上传；卡旁 ↻ 可用新 JSON 更新。</li><li>旧插件提供角色阅读与棋子绑定；编辑角色请前往车卡网站。</li><li>不再支持上传 XLS/XLSX 文件。</li></ul>`,
-  en: `<p>Create and edit a character on the website, then upload its <b>complete JSON backup</b>. The website and Owlbear share one format; legacy Owlbear JSON is still accepted.</p><ul><li>Open the five-page reader from Character Cards or CapsLock.</li><li>Drop or upload JSON; use ↻ to update it from a new JSON file.</li><li>Edit characters on the website. XLS/XLSX upload is no longer supported.</li></ul>`,
+  zh: `<p>在车卡网站编辑角色，导出<b>完整 JSON 备份</b>，再上传到插件。网站与枭熊共用一种 JSON，旧枭熊 JSON 仍可导入。</p><ul><li>通过「角色卡界面」或 CapsLock 打开五页阅读器。</li><li>拖入 JSON / XLSX 或点击上传；卡旁 ↻ 可用新文件更新。</li><li>旧插件提供角色阅读与棋子绑定；编辑角色请前往车卡网站。</li><li>暂时恢复原 2014 / 2024 悲灵角色卡 XLSX 导入；不支持 .xls。</li></ul>`,
+  en: `<p>Create and edit a character on the website, then upload its <b>complete JSON backup</b>. The website and Owlbear share one format; legacy Owlbear JSON is still accepted.</p><ul><li>Open the five-page reader from Character Cards or CapsLock.</li><li>Drop or upload JSON / XLSX; use ↻ to update it from a new file.</li><li>Edit characters on the website. XLSX import is temporarily restored for the supported 2014 / 2024 Chinese sheet templates; .xls is not supported.</li></ul>`,
 };
 const INITIATIVE_DESC: BilingualHtml = {
   zh: `<p>顶部居中的横向先攻条，覆盖完整 D&amp;D 战斗流程。</p>

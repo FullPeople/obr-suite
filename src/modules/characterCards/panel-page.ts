@@ -3,6 +3,7 @@ import { ICONS } from "../../icons";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
 import { assetUrl } from "../../asset-base";
+import { reconcileUploadedCardShieldState } from "./xlsx-shield-state";
 
 let lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -561,8 +562,21 @@ async function uploadJsonAsCard(parsed: unknown, op: PanelWrite): Promise<void> 
   await acceptUploadedCard(op, entry);
 }
 
-// The standalone website owns character creation. The plugin accepts validated JSON only.
-function isSupportedSheet(name: string): boolean { return name.toLowerCase().endsWith(".json"); }
+async function reconcileCardShield(op: PanelWrite, entry: CardEntry, file: File): Promise<void> {
+  assertWriteCurrent(op);
+  try {
+    await reconcileUploadedCardShieldState({ apiBase: API_BASE, roomId: op.room,
+      cardId: entry.id, xlsx: file, signal: op.controller.signal,
+      isCurrent: () => writeIsCurrent(op) });
+  } catch (error) {
+    assertWriteCurrent(op);
+    console.warn("[cc-panel] shield equipped reconciliation failed", error);
+  }
+  assertWriteCurrent(op);
+}
+
+// Temporary legacy compatibility: retain validated JSON and restore XLSX uploads.
+function isSupportedSheet(name: string): boolean { return /\.(json|xlsx)$/i.test(name); }
 async function normalizeUpload(value: unknown): Promise<unknown> {
   const moduleUrl = assetUrl("card-viewer/bridge.js");
   const bridge = await import(/* @vite-ignore */ moduleUrl);
@@ -570,7 +584,20 @@ async function normalizeUpload(value: unknown): Promise<unknown> {
 }
 async function uploadFile(file: File, op: PanelWrite): Promise<void> {
   assertWriteCurrent(op);
-  if (!isSupportedSheet(file.name)) throw new Error("仅支持 JSON 角色卡；请在车卡网站编辑后导出。");
+  if (!isSupportedSheet(file.name)) throw new Error(tt("ccPanelOnlySheet"));
+  if (/\.xlsx$/i.test(file.name)) {
+    showError(""); op.uploading = true; render();
+    const body = new FormData(); body.append("file", file);
+    const response = await fetch(`${API_BASE}/upload?room=${encodeURIComponent(op.room)}&uploader=${encodeURIComponent(playerName)}`, {
+      method: "POST", body, signal: op.controller.signal,
+    });
+    assertWriteCurrent(op);
+    if (!response.ok) throw await serviceError(response);
+    const entry = await response.json() as CardEntry;
+    await reconcileCardShield(op, entry, file);
+    await acceptUploadedCard(op, entry);
+    return;
+  }
   const value = JSON.parse(await file.text());
   assertWriteCurrent(op);
   await uploadJsonAsCard(value, op);
@@ -581,11 +608,11 @@ async function uploadFile(file: File, op: PanelWrite): Promise<void> {
 // the File System Access API is blocked in cross-origin iframes
 // (which is exactly what OBR plugin frames are), so an attempt
 // throws SecurityError. Plain `<input type=file>` works everywhere.
-function pickJsonFile(): Promise<File | null> {
+function pickSheetFile(): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".json";
+    input.accept = ".json,.xlsx";
     input.onchange = () => resolve(input.files?.[0] ?? null);
     // 'cancel' fires on modern Chromium when the user closes the
     // picker without choosing. On older browsers we fall back to
@@ -599,11 +626,11 @@ function pickJsonFile(): Promise<File | null> {
 // 2026-05-10: multi-file picker for bulk upload. Same SecurityError
 // caveat as above (no FSA in iframes), so it's just a plain
 // `<input type=file multiple>`.
-function pickJsonFiles(): Promise<File[]> {
+function pickSheetFiles(): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".json";
+    input.accept = ".json,.xlsx";
     input.multiple = true;
     input.onchange = () => {
       const out = input.files ? Array.from(input.files) : [];
@@ -614,11 +641,11 @@ function pickJsonFiles(): Promise<File[]> {
   });
 }
 
-// "Link a local JSON" entry point. With FSA blocked, this just opens
+// "Link a local character file" entry point. With FSA blocked, this just opens
 // a regular file picker; the resulting card behaves identically to a
 // drag-drop upload. The refresh button on each row uses the same
 // picker on subsequent clicks so the user can re-pick the freshly
-// edited JSON without deleting + re-uploading the card.
+// edited JSON/XLSX without deleting + re-uploading the card.
 //
 // 2026-05-10: now multi-select capable — picking N files uploads each
 // one sequentially, creating N new cards. UI stays responsive because
@@ -628,7 +655,7 @@ async function linkLocalFile(): Promise<void> {
   const op = beginPanelWrite("upload");
   if (!op) return;
   try {
-    const files = await pickJsonFiles();
+    const files = await pickSheetFiles();
     assertWriteCurrent(op);
     await uploadFilesBatch(files, op);
   } catch (error) { showSheetError(op, error, "ccPanelUploadFailed"); }
@@ -664,17 +691,22 @@ async function refreshCardFromPicker(card: CardEntry): Promise<void> {
   const op = beginPanelWrite("refresh", card.id);
   if (!op) return;
   try {
-    const file = await pickJsonFile();
+    const file = await pickSheetFile();
     assertWriteCurrent(op);
     if (!file) return;
     if (!isSupportedSheet(file.name)) throw new Error(tt("ccPanelOnlySheet"));
-    const normalized = await normalizeUpload(JSON.parse(await file.text()));
+    const xlsx = /\.xlsx$/i.test(file.name);
+    const normalized = xlsx ? undefined : await normalizeUpload(JSON.parse(await file.text()));
     assertWriteCurrent(op);
     // Refresh overwrites server content. Re-read the target after the native
     // picker, before sending that request, even if its metadata event is late.
     await readWriteCards(op);
     assertWriteCurrent(op);
-    const response = await fetch(
+    const form = new FormData(); if (xlsx) form.append("file", file);
+    const response = xlsx ? await fetch(
+      `${API_BASE}/refresh?room=${encodeURIComponent(op.room)}&card=${encodeURIComponent(card.id)}`,
+      { method: "POST", body: form, signal: op.controller.signal },
+    ) : await fetch(
       `${API_BASE}/${encodeURIComponent(op.room)}/${encodeURIComponent(card.id)}/data`,
       { method: "PUT", body: JSON.stringify(normalized), headers: {"Content-Type":"application/json"}, signal: op.controller.signal },
     );
@@ -683,6 +715,7 @@ async function refreshCardFromPicker(card: CardEntry): Promise<void> {
     const updated = await response.json() as CardEntry;
     assertWriteCurrent(op);
     if (updated.id !== card.id) throw new Error(tt("ccPanelWriteFailed"));
+    if (xlsx) await reconcileCardShield(op, updated, file);
     await mutateCardsInScene(op, list => list.map(c => c.id === card.id ? {
       ...c, name: updated.name || (normalized as any)?.identity?.character_name || c.name, url: updated.url || c.url,
       uploader: updated.uploader || c.uploader, uploaded_at: updated.uploaded_at || c.uploaded_at,

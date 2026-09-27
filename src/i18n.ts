@@ -297,7 +297,7 @@ const TR: Dict = {
     en: "Drop a JSON backup into the right rail of the",
   },
   ccBindUploadHint2: {
-    zh: "面板的右侧栏拖入 JSON 备份",
+    zh: "面板的右侧栏拖入 JSON / XLSX 角色卡",
     en: "panel.",
   },
 
@@ -332,11 +332,11 @@ const TR: Dict = {
   ccPanelWriteFailed: { zh: "角色卡更新失败", en: "Could not update the character card" },
   ccPanelCloseFailed: { zh: "窗口关闭失败，请再试一次。", en: "Could not close the window. Please try again." },
   ccPanelClose: { zh: "关闭 (Esc)", en: "Close (Esc)" },
-  ccPanelDragHint: { zh: "拖拽 JSON 到此处上传", en: "Drag JSON here to upload" },
+  ccPanelDragHint: { zh: "拖拽 JSON / XLSX 到此处上传", en: "Drag JSON / XLSX here to upload" },
   ccPanelChooseFile: { zh: "📁 选择文件", en: "📁 Choose File" },
   ccPanelChooseFileTitle: {
-    zh: "打开本地文件选择器上传 JSON 角色卡",
-    en: "Open local file picker to upload an JSON character card",
+    zh: "打开本地文件选择器上传 JSON / XLSX 角色卡",
+    en: "Open local file picker to upload a JSON / XLSX character card",
   },
   // 2026-05-26 — preview entry points right below 选择文件.
   ccPanelViewSample: { zh: "👁 查看示例", en: "👁 View Example" },
@@ -373,11 +373,11 @@ const TR: Dict = {
     en: "No preview payload found — go back to the character card panel and click 'View Example' or 'Paste JSON' again.",
   },
   ccPanelRefreshHint: {
-    zh: "每张卡片旁的 ↻ 可重新选择 JSON 覆盖更新",
-    en: "Click ↻ next to a card to re-pick JSON and overwrite",
+    zh: "每张卡片旁的 ↻ 可重新选择 JSON / XLSX 覆盖更新",
+    en: "Click ↻ next to a card to re-pick JSON / XLSX and overwrite",
   },
   ccPanelEmpty: { zh: "从右侧选择一张角色卡", en: "Select a character card from the right" },
-  ccPanelEmpty2: { zh: "拖拽 JSON 到右侧栏上传", en: "Drag JSON onto the right rail to upload" },
+  ccPanelEmpty2: { zh: "拖拽 JSON / XLSX 到右侧栏上传", en: "Drag JSON / XLSX onto the right rail to upload" },
   ccPanelMiniTitle: { zh: "角色卡面板", en: "Character Card Panel" },
   ccPanelUploading: { zh: "⏳ 上传中…", en: "⏳ Uploading…" },
   ccPanelUploaded: { zh: "已上传", en: "Uploaded" },
@@ -388,7 +388,7 @@ const TR: Dict = {
   },
   // 2026-09-14 — the panel accepts the suite's own exported .json as well
   // as .xlsx, so the old "只支持 .xlsx 文件" rejection text was a lie.
-  ccPanelOnlySheet: { zh: "只支持 .json 文件", en: "Only .json files are supported" },
+  ccPanelOnlySheet: { zh: "只支持 .json / .xlsx 文件", en: "Only .json / .xlsx files are supported" },
   // The per-row ↻ refresh posts to /refresh, which re-parses an xlsx and
   // has no JSON branch (PUT /data is the JSON replacement path).
   ccPanelRefreshOnlyXlsx: {
@@ -413,7 +413,7 @@ const TR: Dict = {
   ccPanelRefreshed: { zh: "已刷新", en: "Refreshed" },
   ccPanelRefreshFailed: { zh: "刷新失败", en: "Refresh failed" },
   ccPanelEmpty3: {
-    zh: "还没有角色卡\n拖拽 JSON 到左侧上传",
+    zh: "还没有角色卡\n拖拽 JSON / XLSX 到左侧上传",
     en: "No character cards yet.\nDrag JSON to the panel to upload.",
   },
   ccPanelNoCards: { zh: "暂无角色卡", en: "No character cards" },
