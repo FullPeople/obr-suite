@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 const root=resolve('.'),web=process.env.DND_CARD_WEB_ROOT||resolve(root,'../web');
 const {chromium}=createRequire(join(web,'package.json'))('@playwright/test');
 const live=process.argv.includes('--live'),origin=live?'https://obr.dnd.center':'http://127.0.0.1:5642';
+const workbenchOnly=process.argv.includes('--workbench-only');
 const out=process.env.TDA_RELEASE_EVIDENCE||resolve(root,'../release201');mkdirSync(out,{recursive:true});
 const roots={'/three-dragon-ante-dev/':process.env.TDA_RELEASE_DIST||'D:/Temp/DND-card-release201-storage/three-dragon-dist','/suite-dev/':resolve(root,'dist-workbench-dev')};
 const mime={'.js':'text/javascript','.css':'text/css','.html':'text/html','.json':'application/json','.png':'image/png','.webp':'image/webp','.svg':'image/svg+xml'};
@@ -14,7 +15,7 @@ if(server)await new Promise(done=>server.listen(5642,'127.0.0.1',done));
 const direct=process.argv.includes('--direct');
 const browser=await chromium.launch({channel:'msedge',headless:true,args:['--enable-webgl','--use-angle=swiftshader','--enable-unsafe-swiftshader',...(direct?['--no-proxy-server']:[])]}),errors=[],checks=[];
 try{
- for(const mode of ['independent','workbench'])for(const width of [1440,390]){
+ for(const mode of workbenchOnly?['workbench']:['independent','workbench'])for(const width of [1440,390]){
   console.log(`Checking ${live?'live':'local'} ${mode} at ${width}px`);
   const context=await browser.newContext({locale:'zh-CN',viewport:{width,height:960},reducedMotion:'reduce'}),page=await context.newPage();context.setDefaultTimeout(45000);page.on('pageerror',e=>errors.push(e.message));
   await context.addInitScript(()=>{localStorage.setItem('three-dragon-ante.introduction.v1','seen');localStorage.setItem('three-dragon-ante/language','zh');});
@@ -35,13 +36,20 @@ try{
   const names=await frame.locator('#deck-choice option').allTextContents();assert.match(names[1],/命运之轮的轮转使用/);
   await frame.locator('#deck-choice').selectOption('wheel-of-fate-v1');assert.match(await frame.locator('.setup-extra-card').innerText(),/传说巨龙 · 善良 · 力量 12/);
   const img=frame.locator('.setup-extra-card img');await img.evaluate(image=>Promise.race([image.decode(),new Promise((_,reject)=>setTimeout(()=>reject(Error('card image decode timed out')),120000))]));const src=await img.getAttribute('src');assert.match(src,/time-dragon/);
+  // Check the current live node after network activity settles. A decode promise
+  // from an earlier node alone does not prove that the visible image has painted.
+  await page.waitForLoadState('networkidle',{timeout:120000});
+  await frame.waitForFunction(()=>{const img=document.querySelector('.setup-extra-card img');return img?.complete&&img.naturalWidth>0;},undefined,{timeout:120000});
+  await frame.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))));
+  const imageState=await img.evaluate(image=>({complete:image.complete,naturalWidth:image.naturalWidth,width:image.clientWidth,opacity:getComputedStyle(image).opacity,visibility:getComputedStyle(image).visibility}));
+  assert.equal(imageState.complete,true);assert.ok(imageState.naturalWidth>0&&imageState.width>0);assert.equal(imageState.opacity,'1');assert.equal(imageState.visibility,'visible');
   assert.equal(await frame.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.screenshot({path:join(out,`${live?'live':'local'}-${mode}-${width}.png`),animations:'disabled'});
   if(width===390){await frame.locator('.setup-extra-card').scrollIntoViewIfNeeded();await page.screenshot({path:join(out,`${live?'live':'local'}-${mode}-${width}-card.png`),animations:'disabled'});}
   await frame.getByRole('button',{name:'开始游戏',exact:true}).click();await page.waitForFunction(()=>commands.some(c=>c.type==='start'));
   const command=await page.evaluate(()=>commands.find(c=>c.type==='start'));assert.equal(command.options.variant.deckId,'wheel-of-fate-v1');
-  checks.push({mode,width,deck:names[1],image:src,startCommand:command,overflow:false});console.log(`PASS ${mode} ${width}px`);await context.close();
+  checks.push({mode,width,deck:names[1],image:src,imageState,startCommand:command,overflow:false});console.log(`PASS ${mode} ${width}px ${JSON.stringify(imageState)}`);await context.close();
  }
- assert.deepEqual(errors,[]);const record={passed:true,checks,errors,sdkAndRoomSimulated:true,realRoomVerified:false,directConnection:direct};writeFileSync(join(out,(live?'live':'local')+'-three-dragon-browser.json'),JSON.stringify(record,null,2));console.log(JSON.stringify(record));
+ assert.deepEqual(errors,[]);const record={passed:true,checks,errors,sdkAndRoomSimulated:true,realRoomVerified:false,directConnection:direct};writeFileSync(join(out,(live?'live':'local')+(workbenchOnly?'-workbench-image-check':'-three-dragon-browser')+'.json'),JSON.stringify(record,null,2));console.log(JSON.stringify(record));
 }catch(error){writeFileSync(join(out,(live?'live':'local')+'-three-dragon-browser-failure.json'),JSON.stringify({checks,errors,error:String(error)},null,2));throw error;}
 finally{await browser.close();if(server)await new Promise(done=>server.close(done));}
