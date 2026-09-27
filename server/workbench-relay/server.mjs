@@ -11,6 +11,7 @@ const sessions=new Map(),origin=process.env.RELAY_ORIGIN||'https://obr.dnd.cente
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 const hash=s=>createHash('sha256').update(s).digest('hex');
 function reply(res,status,data){if(res.writableEnded||res.destroyed)return;const text=JSON.stringify(data),headers={'Content-Type':'application/json','Cache-Control':'no-store'};if(text.length>4096&&res.compress){gzip(text,{level:4},(error,bytes)=>{if(res.writableEnded||res.destroyed)return;if(!error){headers['Content-Encoding']='gzip';headers.Vary='Accept-Encoding';}res.writeHead(status,headers);res.end(error?text:bytes);});}else{res.writeHead(status,headers);res.end(text);}}
+function notifyCard(room,card,revision){for(const [id,s] of sessions){if(s.room!==room)continue;const box=s.host;box.queue=box.queue.filter(m=>m.type!=='cardChanged'||m.cardId!==card);if(box.queue.length>=96)continue;box.queue.push({protocol:'full-suite-workbench/v1',session:id,type:'cardChanged',cardId:card,revision});flush(box);}}
 function flush(box){if(box.wait&&box.queue.length){clearTimeout(box.wait.timer);reply(box.wait.res,200,box.queue.splice(0));box.wait=null;}}
 const server=http.createServer(async(req,res)=>{
  res.compress=/\bgzip\b/.test(req.headers['accept-encoding']||'');
@@ -50,13 +51,13 @@ const server=http.createServer(async(req,res)=>{
    const {room,card,expected,changes,inventoryGuard}=body.saveCard;let {data}=body.saveCard;const inventoryRoom=body.saveCard.inventoryRoom||room;if(!/^[a-zA-Z0-9_-]+$/.test(room||'')||!/^[a-zA-Z0-9_-]+$/.test(card||'')||!/^[a-zA-Z0-9_-]+$/.test(inventoryRoom)||!(data?.schema_version==='0.3'||Array.isArray(changes))||!/^[a-f0-9]{64}$/.test(expected||''))return reply(res,400,{});
    // Document location can be the original upload room. Its projection still
    // shares a lock with the current host's inventory, bound at registration.
-   if(inventoryGuard&&inventoryRoom!==(session.room||room))return reply(res,403,{error:'库存房间与宿主不一致'});
+   if(inventoryRoom!==(session.room||room))return reply(res,403,{error:'库存房间与宿主不一致'});
    const key='card:'+room+':'+card,task=(writes.get(key)||Promise.resolve()).catch(()=>{}).then(async()=>{const commit=async()=>{
     if(inventoryGuard){if(inventoryGuard.key!=='inventory_'+inventoryRoom||!Number.isSafeInteger(inventoryGuard.revision))return reply(res,400,{error:'无效库存投影凭证'});const ledger=await sharedDocuments({key:inventoryGuard.key,operation:'read'});if(ledger.revision!==inventoryGuard.revision)return reply(res,409,{error:'库存投影已过期，请使用最新库存重试'});}
     const current=await fetch(`${process.env.CARD_READ_BASE||'https://obr.dnd.center'}/characters/${room}/${card}/data.json`,{signal:AbortSignal.timeout(15000)});if(!current.ok)return reply(res,502,{error:'read failed'});
     const currentData=await current.json();if(hash(JSON.stringify(currentData))!==expected)return reply(res,409,{error:'角色已被其他客户端修改，请刷新后重试'});
     if(changes){try{data=applyDocumentChanges(currentData,changes);}catch{return reply(res,400,{error:'角色增量无效'});}if(data?.schema_version!=='0.3')return reply(res,400,{error:'角色格式无效'});}
-    const result=await fetch(`${process.env.CARD_WRITE_BASE||'http://127.0.0.1:5001'}/api/character/${room}/${card}/data`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(60000)});reply(res,result.status,await result.json());};if(inventoryGuard)await serialized('room:'+inventoryRoom,commit);else await commit();
+    const result=await fetch(`${process.env.CARD_WRITE_BASE||'http://127.0.0.1:5001'}/api/character/${room}/${card}/data`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(60000)});const receipt=await result.json();if(result.ok)notifyCard(inventoryRoom,typeof body.saveCard.logicalCard==='string'&&/^[a-zA-Z0-9_-]{1,160}$/.test(body.saveCard.logicalCard)?body.saveCard.logicalCard:card,data?._suiteRevision);reply(res,result.status,receipt);};if(inventoryGuard)await serialized('room:'+inventoryRoom,commit);else await commit();
    });writes.set(key,task);try{await task;}finally{if(writes.get(key)===task)writes.delete(key);}return;
   }
   if(req.method==='GET'){

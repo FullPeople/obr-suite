@@ -370,7 +370,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
   // A turn only moves on a play phase, and only for the seat that now holds it.
   if(after.activeSeatId&&after.activeSeatId!==before.activeSeatId&&(after.phase==="play"||after.phase==="choice"))sound?.play('turn',`${key}:turn:${after.activeSeatId}`);
  }
-  function clearPresentation(){presentationView=null;presentationBase=null;stageGoldFlows=[];deferredSounds.clear();anteSoundKey="";cinema?.clear();power?.clear();}
+  function clearPresentation(){pendingRounds=[];roundReadyAt=0;presentationView=null;presentationBase=null;stageGoldFlows=[];deferredSounds.clear();anteSoundKey="";cinema?.clear();power?.clear();}
  function notifyPresentation(){if(updating||destroyed)return;const busy=!!power?.busy||!!cinema?.busy||!!revealPhase;if(busy!==notifiedPresentationBusy){notifiedPresentationBusy=busy;deps.onPresentationChange?.(busy);}}
  /** One pass of the resolution show, strictly sequential: the card lands, the
   *  table rests for 0.3s, the full-screen ability plays, and only once the
@@ -432,9 +432,10 @@ function releaseCues(){
  }
  /** Round/turn announcements opened by a projection that arrived mid-settlement
   *  wait here, so the banner never appears over a running payout. */
- let pendingRounds:ReturnType<typeof roundCues>=[];
+ let pendingRounds:ReturnType<typeof roundCues>=[],roundReadyAt=0;
  function holdRounds(cues:ReturnType<typeof roundCues>){
-  if(!settling()&&!pendingRounds.length){cinema?.enqueue(cues);return;}
+  roundReadyAt=performance.now()+32;
+  statusReady=false;
   for(const cue of cues)pendingRounds.push(cue);
   pumpPresentation();
  }
@@ -442,10 +443,14 @@ function releaseCues(){
  function pumpPresentation(){
   if(destroyed)return;
   const now=performance.now();
+  if(pendingRounds.length&&!showBusy&&!pendingCues.length&&!power?.busy&&!cinema?.busy&&!revealPhase){
+   syncStage();
+   const domMoving=!stageAvailable&&root.getAnimations({subtree:true}).some(a=>a.playState==='running'&&a.effect?.getComputedTiming().iterations!==Infinity);
+   if(now<roundReadyAt||!landingDone()||domMoving){schedulePresentation();return;}
+   cinema?.enqueue(pendingRounds.splice(0));return;
+  }
   if(pendingCues.length&&!power?.busy&&!revealPhase){
-    // A cinema cue (round/scoring) owns the table first; the played card then
-    // lands on a still table. Waiting for it keeps the show serial instead of
-    // forcing a projection the stage is not allowed to adopt yet.
+    // Apply the card's projection before its ability and next-turn announcements.
     if(!landingDone()&&cueTicks<PRESENTATION_TICK_LIMIT){
       cueTicks++;
       // The acting seat's own card sits in the stage's pending slot until its
@@ -472,7 +477,7 @@ function releaseCues(){
     const wait=PRESENTATION_BEAT_MS-(now-showQuietSince);
     if(wait>0){schedulePresentation(wait);return;}
     showBusy=false;showQuietSince=0;statusReady=true;
-    if(pendingRounds.length){const cues=pendingRounds.splice(0);cinema?.enqueue(cues);beginShow();}
+    if(pendingRounds.length){statusReady=false;schedulePresentation();}
     // The chip, the turn line and the waiting line land together, and only now.
     const key=view?.game?`${view.game.id}:${view.game.gambit}:${view.game.round}:${view.game.phase}`:"";
     if(key)sound?.play('phase',key);

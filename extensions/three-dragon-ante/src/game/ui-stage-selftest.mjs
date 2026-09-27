@@ -15,7 +15,9 @@ const runtime=process.env.CODEX_NODE_MODULES||'C:/Users/admin/.cache/codex-runti
 const {chromium}=await import(pathToFileURL(join(runtime,'playwright/index.mjs')));
 const mutant=process.argv.find(v=>v.startsWith('--mutant='))?.split('=')[1];
 const handshakeOnly=process.argv.includes('--handshake-only');
+const orderOnly=process.argv.includes('--order-only');
 const mutants={
+ landing:['if(now<roundReadyAt||!landingDone()||domMoving)','if(false)','webgl: banner never precedes or overlaps landing'],
  identity:['receipt.actionId!==p.actionId||','', 'unrelated receipt does not acknowledge this card'],
  revision:['view.game.revision<receipt.revision','false','receipt ahead of applied projection keeps card pending'],
  retry:['action:structuredClone(pendingAction.action)','action:{...pendingAction.action,id:crypto.randomUUID()}','retry preserves exact original action ID and revision'],
@@ -60,6 +62,27 @@ const waitStage=()=>page.waitForFunction(()=>Array.isArray(window.stages)&&windo
 async function drag(){await settled();const points=await page.evaluate(()=>({from:h.surface.getAnchor('hand'),to:h.surface.getAnchor('ownAnte')}));assert.ok(points.from&&points.to);await page.mouse.move(points.from.x+10,points.from.y+10);writeFileSync(join(out,'drag-before-down.json'),JSON.stringify(await page.evaluate(p=>({points:p,hit:stages.at(-1).hitTest(p.from.x+10,p.from.y+10),anchor:h.surface.getAnchor('hand'),element:document.elementFromPoint(p.from.x+10,p.from.y+10)?.outerHTML.slice(0,160)}),points),null,2));await page.mouse.down();await page.mouse.move(points.to.x+10,points.to.y+10,{steps:12});await page.mouse.up();writeFileSync(join(out,'drag-after-up.json'),JSON.stringify(await page.evaluate(p=>({sent:h.sent,pending:h.surface.waitingForReceipt(),diag:stages.at(-1).diagnostics(),toHit:stages.at(-1).hitTest(p.to.x+10,p.to.y+10)}),points),null,2));}
 const pending=()=>page.evaluate(()=>h.surface.waitingForReceipt());
 try{
+ if(orderOnly){
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  for(const fallback of [false,true]){
+   if(fallback)await page.addInitScript(()=>{const get=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type==='webgl'||type==='webgl2'?null:get.call(this,type,...args);};});
+   await page.goto(url);await page.waitForFunction(()=>window.h&&document.querySelector('#table-app')?.dataset.renderer);
+   await page.evaluate(()=>{const v=structuredClone(h.view);v.game.phase='play';v.game.round=1;v.game.activeSeatId='s1';v.game.revision=1;h.set({...v,connected:false});h.set(v);});
+   if(!fallback)await settled();
+   const result=await page.evaluate(async()=>{
+    const next=structuredClone(h.view),card=next.game.hand.shift();next.game.revision++;next.game.activeSeatId='s2';const seat=next.game.seats.find(s=>s.id==='s1');seat.handCount--;seat.flight.push({cardId:card.id,card});
+    const samples=[];let finish;const done=new Promise(r=>finish=r),start=performance.now();
+    function sample(){const stage=stages.at(-1),overlay=document.querySelector('.round-overlay'),visible=!!overlay&&!overlay.hidden&&overlay.dataset.kind==='turn';const moving=document.querySelector('#table-app').dataset.renderer==='webgl'?stage.diagnostics().motions>0:document.querySelector('#table-app').getAnimations({subtree:true}).some(a=>a.playState==='running'&&!a.effect?.target?.closest('.round-overlay')&&a.effect?.getComputedTiming().iterations!==Infinity);samples.push({at:performance.now()-start,visible,moving,revision:stage?.diagnostics().viewRevision});if(visible||performance.now()-start>12000)finish();else requestAnimationFrame(sample);}
+    h.set(next);sample();await done;return {samples,revision:next.game.revision,renderer:document.querySelector('#table-app').dataset.renderer};
+   });
+   writeFileSync(join(out,'order-'+result.renderer+'.json'),JSON.stringify(result,null,2));
+   check(result.renderer+': card motion actually ran',result.samples.some(s=>s.moving));
+   check(result.renderer+': next-turn banner eventually appears',result.samples.at(-1).visible);
+   check(result.renderer+': banner never precedes or overlaps landing',!result.samples.some(s=>s.visible&&s.moving)&&result.samples.at(-1).at>result.samples.find(s=>s.moving).at);
+   if(!fallback)check('WebGL adopted the played-card revision before banner',result.samples.at(-1).revision===result.revision);
+   await page.screenshot({path:join(out,'order-'+result.renderer+'.png')});
+  }
+ }else{
  if(!handshakeOnly){
  await page.goto(url);await page.waitForFunction(()=>window.h);await settled();
   check('waiting and turn status are separate React portals in one shell',await page.evaluate(()=>{const banner=document.querySelector('#table-banner'),turn=document.querySelector('#turn-indicator'),shell=document.querySelector('#table-app [data-react-shell="true"]');return !!shell&&document.querySelector('#status-banner-overlay')?.dataset.uiRenderer==='react'&&document.querySelector('#turn-overlay')?.dataset.uiRenderer==='react'&&banner?.parentElement?.id==='status-banner-overlay'&&turn?.parentElement?.id==='turn-overlay'&&document.querySelectorAll('#table-banner').length===1&&document.querySelectorAll('#turn-indicator').length===1}));
@@ -192,6 +215,7 @@ try{
   const retryPage=await browser.newPage();retryPage.on('pageerror',e=>errors.push(String(e)));await retryPage.addInitScript(()=>{localStorage.setItem('three-dragon-ante.introduction.v1','seen');localStorage.setItem('three-dragon-ante/language','en')});await retryPage.goto(url+'/page?'+failure+'=1');await retryPage.waitForTimeout(250);await retryPage.screenshot({path:join(out,failure+'.png')});writeFileSync(join(out,failure+'.json'),JSON.stringify(await retryPage.evaluate(()=>({status:document.querySelector('#status')?.textContent,sent:window.sdk?.sent,html:document.querySelector('#toolbar')?.innerHTML})),null,2));await retryPage.waitForFunction(()=>document.querySelector('#status')?.textContent.includes('No result arrived'));
   const retry=retryPage.locator('#toolbar button').filter({hasText:'Reconnect'});check(`${failure}: no-view initialization failure permits Reconnect`,await retry.isEnabled());await retry.click();await retryPage.waitForFunction(()=>sdk.ready);await retryPage.evaluate(()=>p.push());
   check(`${failure}: Retry re-establishes READY and receives an actionable projection`,await retryPage.evaluate(()=>document.querySelector('#table-app').dataset.phase==='ante'&&document.querySelector('#status').hidden));await retryPage.close();
+ }
  }
  check('browser has no uncaught application errors',errors.length===0);
  if(mutant)throw Error('mutant survived '+mutant);

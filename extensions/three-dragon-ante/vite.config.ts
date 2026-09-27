@@ -7,7 +7,7 @@ const dev = process.env.THREE_DRAGON_CHANNEL !== "stable";
 const base = `/three-dragon-ante${dev ? "-dev" : ""}/`;
 // Injected so the running build identifies itself on screen: a stale cached
 // bundle is otherwise indistinguishable from a code defect.
-const version = "0.7.17" + (dev ? "-dev" : "");
+const version = "0.7.18" + (dev ? "-dev" : "");
 export default defineConfig({
   root, base,
   define: { __TDA_BUILD__: JSON.stringify(`v${version}`) },

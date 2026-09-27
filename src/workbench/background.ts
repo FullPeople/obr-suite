@@ -154,13 +154,16 @@ async function start(){
   for(const c of all){c.name=c.name||c.title||items.find(i=>i.metadata[BIND]===c.id)?.name||c.id;if(!Array.isArray(c.owner_ids)||!c.owner_ids.length){const owners=[...new Set(items.filter(i=>i.metadata[BIND]===c.id).map(i=>i.createdUserId))];if(owners.length)c.owner_ids=owners;}}
   // Legacy uploads retain their original room URL when moved between scenes.
   for(const c of all)if(typeof c.url==='string'){const next=cardLocation(origin,OBR.room.id||'default',c.id,c.url),previous=cardLocations.get(c.id);cardLocations.set(c.id,next);if(previous&&previous.url!==next.url)invalidateCard(c.id);}
-  const compact=all.map(({id,name,owner_ids,locked,visibility,url})=>({id,name,owner_ids,locked,visibility,url}));
-  if(role==='GM'&&!directoryWrite&&JSON.stringify(directory)!==JSON.stringify(compact)){directoryWrite=true;void OBR.room.setMetadata({[DIRECTORY]:compact}).finally(()=>{directoryWrite=false;});}
+  // Recovery may fill missing directory entries, but an old scene snapshot
+  // must not overwrite an existing room entry on every room-change event.
+  // Rename/lock/import commands update the directory explicitly.
+  const compact=all.map(c=>({...c,...directory.find(row=>row.id===c.id)})).map(({id,name,owner_ids,locked,visibility,url})=>({id,name,owner_ids,locked,visibility,url}));
+  if(role==='GM'&&!directoryWrite&&!sameValue(directory,compact)){directoryWrite=true;void OBR.room.setMetadata({[DIRECTORY]:compact}).catch(error=>console.warn('[workbench] directory recovery pending',error)).finally(()=>{directoryWrite=false;});}
   const cards=all.map(c=>{const tokens=items.filter(i=>i.metadata[BIND]===c.id);
    // A DM import retains its importer owner; assigning a bound token also grants
    // access. Recompute token grants, so transferring it revokes the old grant.
    // These transient grants must not be saved to the room directory.
-   const owner_ids=[...new Set([...(Array.isArray(c.owner_ids)?c.owner_ids:[]),...tokens.map(i=>i.createdUserId)].filter(Boolean))];
+   const owner_ids=[...new Set([...(Array.isArray((room['com.obr-suite/workbench/card-editors'] as any)?.[c.id])?(room['com.obr-suite/workbench/card-editors'] as any)[c.id]:Array.isArray(c.owner_ids)?c.owner_ids:[]),...tokens.map(i=>i.createdUserId)].filter(Boolean))];
    const own=owner_ids.includes(playerId),locked=c.locked??!!(c.visibility&&c.visibility!=='public');
    const projectedRevision=Math.max(0,...tokens.map(token=>{const baseline=token.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined;return baseline&&baseline.cardId===c.id?baseline.revision:0;}));if(projectedRevision>documentRevision(documents.get(`${OBR.room.id}:card:${c.id}`)))invalidateCard(c.id,projectedRevision);
    return {...c,owner_ids,name:c.name||c.title||tokens[0]?.name||c.id,own,write:role==='GM'||own,locked,inScene:tokens.length>0,itemId:tokens[0]?.id||`card:${c.id}`,documentRevision:0,passive:undefined as number|undefined,coins:{} as Record<string,number>,player:party.filter(p=>c.owner_ids?.includes(p.id)).map(p=>p.name).join('、'),conditions:conditionRows({item:tokens[0],scene},undefined),resources:tokens[0]?.metadata[RES]||[],stats:bubble(tokens[0])};
@@ -199,7 +202,7 @@ async function start(){
   data[DOCUMENT_REVISION]=documentRevision(existing)+1;
   const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(existing))),expected=[...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('');
   const location=documentLocation(a.cardId);
-  try{await relay.send({saveCard:{room:location.room,card:location.card,inventoryRoom:(OBR.room.id||'default').replace(/[^a-zA-Z0-9_-]/g,'_'),expected,changes:documentChanges(existing,data).map(({path,after,remove})=>({path,after,remove})),inventoryGuard}});}
+  try{await relay.send({saveCard:{room:location.room,card:location.card,logicalCard:a.cardId,inventoryRoom:(OBR.room.id||'default').replace(/[^a-zA-Z0-9_-]/g,'_'),expected,changes:documentChanges(existing,data).map(({path,after,remove})=>({path,after,remove})),inventoryGuard}});}
   catch(error){documentTimes.delete(a.key);const e=error as any;if(e.status&&e.status<500)throw error;
    // A lost HTTP response is not evidence of a failed write. Read back once;
    // never replay the mutation, and never report a rollback while it is unknown.
@@ -251,6 +254,8 @@ async function start(){
    for(const [id,record] of Object.entries(ledger.projections||{})){if(!context.authority.write.has(id))continue;try{await inventoryMirror(id,ledger.containers[id],record.conditions,record.entries);await inventories.projected(id,record.revision);}catch{/* Durable record remains until a later successful projection. */}}
   }finally{repairQueued=false;}})().catch(()=>{});
  }
+ let statusCatalogQueue=Promise.resolve();
+ function publishStatusDefinitions(additions:any[]){if(!additions.length)return;statusCatalogQueue=statusCatalogQueue.catch(()=>{}).then(async()=>{const scene=await OBR.scene.getMetadata(),custom=Array.isArray(scene[SHARED_BUFFS])?scene[SHARED_BUFFS] as any[]:[];const next=[...custom.filter(d=>!additions.some(v=>v.id===d.id)),...additions];if(!sameValue(custom,next))await OBR.scene.setMetadata({[SHARED_BUFFS]:next});}).catch(error=>console.warn('[workbench] status catalog projection pending',error));}
  const canOpen=(a:Awaited<ReturnType<typeof access>>)=>a.cardId?getState().enabled.characterCards!==false:a.slug?getState().enabled.bestiary!==false:getState().enabled.hpBar!==false;
  let selectionGeneration=0,selecting=false,selectAgain=false;
  async function refreshSelection(){
@@ -294,7 +299,7 @@ async function start(){
  async function refresh(){if(!relayActive&&(!child||child.closed))return;if(refreshing){again=true;return;}refreshing=true;
   try{
    const observedVersion=observation.version(),startedEpoch=epoch;
-   const list=await catalog(),[rules,observed,inventoryContextNow]=await Promise.all([shared.read(),observation.read(),inventoryContext(list)]),inventory=await inventories.view(inventoryContextNow.definitions,inventoryContextNow.gm,inventoryContextNow.publicId);for(const card of list.cards){const container=inventory.containers[`card:${card.id}`];if(container)card.coins=Object.fromEntries(container.items.filter(row=>row.kind==='currency').map(row=>[row.coin!,row.quantity]));}const data={cards:list.cards.map(({id,name,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player})=>({id,name,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player})),monsters:list.monsters,role:list.role,shared:rules,inventory,settings:getState(),enabled:getState().enabled,visibility:{wiki:getState().enabled.search!==false&&(list.role==='GM'||!getState().searchGmOnly),monsters:getState().enabled.bestiary!==false&&(list.role==='GM'||getState().allowPlayerMonsters)},console:{timeStop:readTimeStop(list.scene[TIME_STOP_META]).active,portalEffects:getState().portalEffects!==false,players:observed.party}};
+   const list=await catalog(),[rules,observed,inventoryContextNow]=await Promise.all([shared.read(),observation.read(),inventoryContext(list)]),inventory=await inventories.view(inventoryContextNow.definitions,inventoryContextNow.gm,inventoryContextNow.publicId);for(const card of list.cards){const container=inventory.containers[`card:${card.id}`];if(container)card.coins=Object.fromEntries(container.items.filter(row=>row.kind==='currency').map(row=>[row.coin!,row.quantity]));}const data={cards:list.cards.map(({id,name,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player})=>({id,name,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player})),monsters:list.monsters,role:list.role,shared:rules,inventory,settings:getState(),enabled:getState().enabled,visibility:{wiki:getState().enabled.search!==false&&(list.role==='GM'||!getState().searchGmOnly),monsters:getState().enabled.bestiary!==false&&(list.role==='GM'||getState().allowPlayerMonsters)},console:{timeStop:readTimeStop(list.scene[TIME_STOP_META]).active,portalEffects:getState().portalEffects!==false,players:[observed.player,...observed.party.filter(p=>p.id!==observed.player.id)]}};
    if(observation.version()!==observedVersion||epoch!==startedEpoch){again=true;return;}
    const signature=JSON.stringify(data);if(signature!==lastCatalog){lastCatalog=signature;send('catalog',{sequence:++sequence,...data});}
   }catch(error){console.warn('[workbench] catalog refresh',error);}finally{refreshing=false;if(again){again=false;void refresh();}}
@@ -356,7 +361,7 @@ async function start(){
   return ids.map(id=>{const original=saved.find((s:any)=>s.entry&&conditionIdentity(s.entry,defs)===id),definition=defs.find(v=>v.id===id),entry=original?.entry||definition?.entry||{id:'suite-condition:'+id,kind:'condition',name:definition?.name||id,english:id,source:'IMPORTED',edition:'both',packId:'imported',revision:'1',entries:[],raw:{_suiteStatusId:id}};return {id,name:entry.name,entry,level:original?.level||1};});
  }
  const changeCondition=conditionCommands({
-  read:async id=>{const a=await access(id);return {rows:conditionRows(a,a.cardId?await read(a,true):undefined),write:a.write,receive:!!(a.card?!a.card.locked:a.item?.createdUserId&&a.item.metadata['com.obr-suite/workbench/locked']!==true)};},
+  read:async id=>{const a=await access(id);return {rows:conditionRows(a,a.cardId?await read(a):undefined),write:a.write,receive:!!(a.card?!a.card.locked:a.item?.createdUserId&&a.item.metadata['com.obr-suite/workbench/locked']!==true)};},
   write:async change=>{
    const a=await access(change.itemId);if(!a.write&&!(change.grant&&(a.card?!a.card.locked:a.item?.createdUserId&&a.item.metadata['com.obr-suite/workbench/locked']!==true)))throw Error('角色状态修改权限已改变');
    const doc=a.cardId?await read(a):undefined,rows=conditionRows(a,doc),current=rows.find(row=>row.id===change.conditionId)||null;
@@ -364,16 +369,18 @@ async function start(){
    const next=[...rows.filter(row=>row.id!==change.conditionId),...(change.after?[change.after]:[])],defs=definitionsFor(a.scene);
    const nativeRows=(values:ConditionRow[])=>({selections:values.map(row=>({id:'suite-status:'+row.id,entry:row.entry,level:row.level||1,quantity:1}))});
    const sync=await inventories.syncNative(a.cardId?`card:${a.cardId}`:`monster:${a.item!.id}`,nativeRows(rows),nativeRows(next),entry=>conditionIdentity(entry,defs));
-   if(change.after&&!defs.some(def=>def.id===change.after!.id)){const custom=Array.isArray(a.scene[SHARED_BUFFS])?a.scene[SHARED_BUFFS] as any[]:[];await OBR.scene.setMetadata({[SHARED_BUFFS]:[...custom,{id:change.after.id,name:change.after.name,entry:change.after.entry,color:'#777777'}]});}
+   if(change.after&&!defs.some(def=>def.id===change.after!.id))defs.push({id:change.after.id,name:change.after.name,entry:change.after.entry,color:'#777777'});
    if(a.cardId){
     const updated=writeRuntime(doc,{...documentRuntime(doc,defs),conditions:next.map(row=>row.id)},defs);
     if(updated.dnd_card_web)updated.dnd_card_web.selections=updated.dnd_card_web.selections.map((selection:any)=>{if(selection.entry?.kind!=='condition')return selection;const row=next.find(row=>conditionIdentity(selection.entry,defs)===row.id);return row?{...selection,entry:row.entry,level:row.level||1}:selection;});
     updated.web_conditions=next.map(row=>row.entry);
     try{await persistDocument(a,doc,updated,sync.ledgerRevision===undefined?undefined:{key:inventories.key,revision:sync.ledgerRevision},change.grant);}
     catch(error){if(sync.ledgerCommitted)throw Object.assign(Error('库存中的状态授予变更已保存；角色状态写入结果需要核对。'),{uncertain:true,diagnostic:{code:'CONDITION_GRANT_PARTIAL',phase:'save-condition-document',ledgerRevision:sync.ledgerRevision,itemId:change.itemId,conditionId:change.conditionId,committed:['inventory-grant'],cause:String(error)}});throw error;}
+    if(change.after)publishStatusDefinitions(defs.filter(def=>def.id===change.after!.id));
     try{await setTokens(a,{conditions:next.map(row=>row.id)});}catch(error){console.warn('[workbench] condition projection pending',error);}
    }else{
     await OBR.scene.items.updateItems([a.item!.id],items=>{for(const item of items){if(!a.write&&item.metadata['com.obr-suite/workbench/locked']===true)throw Error('目标怪物已上锁');if(item.metadata[BIND]||item.metadata[SLUG]!==a.item!.metadata[SLUG])throw Error('怪物关联已改变');const oldIds=a.item!.metadata[STATUS_BUFFS_KEY] as string[]||[],liveIds=item.metadata[STATUS_BUFFS_KEY] as string[]||[];if(oldIds.includes(change.conditionId)!==liveIds.includes(change.conditionId))throw Error('怪物状态已改变');item.metadata[STATUS_BUFFS_KEY]=[...liveIds.filter(id=>id!==change.conditionId),...(change.after?[change.conditionId]:[])];const details={...item.metadata['com.obr-suite/workbench/condition-details'] as any};if(change.after)details[change.conditionId]={entry:change.after.entry,level:change.after.level||1};else delete details[change.conditionId];item.metadata['com.obr-suite/workbench/condition-details']=details;}});
+    if(change.after)publishStatusDefinitions(defs.filter(def=>def.id===change.after!.id));
    }
   },
   snapshot:async id=>snapshot(id),catalog:async()=>{const list=await catalog();return {cards:list.cards,monsters:list.monsters,sequence:++sequence};},
@@ -381,6 +388,13 @@ async function start(){
  });
  async function command(m:any){
   if(m.type==='readCard'){const a=await access(m.itemId);return {document:await read(a)};}
+  if(m.type==='assignOwners'){
+   const a=await access(m.itemId);if(a.role!=='GM'||!a.cardId)throw Error('仅 DM 可分配角色卡编辑权限');
+   const observed=await observation.read(),ids=m.ownerIds;if(!Array.isArray(ids)||ids.length>32||ids.some(id=>typeof id!=='string'||id!==observed.player.id&&!observed.party.some(p=>p.id===id)&&!a.card.owner_ids.includes(id)))throw Error('请选择房间内的玩家');
+   const key='com.obr-suite/workbench/card-editors',room=await OBR.room.getMetadata();await OBR.room.setMetadata({[key]:{...room[key] as object,[a.cardId]:[...new Set(ids)]}});
+   const tokens=observed.items.filter(item=>item.metadata[BIND]===a.cardId);if(tokens.length)await OBR.scene.items.updateItems(tokens.map(item=>item.id),drafts=>{for(const item of drafts)if(item.metadata[BIND]===a.cardId)item.createdUserId=ids[0]||playerId;});
+   return {snapshot:await snapshot(m.itemId)};
+  }
   if(m.type==='refreshCard'){const a=await access(m.itemId);if(a.cardId){invalidateCard(a.cardId);await read(a,true);}return {snapshot:await snapshot(m.itemId)};}
   if(m.type==='showEntry'){const entry=sharedEntry(m.entry),actor=(await observation.read()).player.name;await publishWorkbenchNotice({noticeId:m.requestId,tokenId:'',tokenName:actor,entry,shared:true,summary:`${actor}展示了 ${entry.name}`,resource:{id:entry.id,name:entry.name,current:0,max:0,type:'number',icon:'gem'},delta:0,prevValue:0});return;}
 
@@ -526,13 +540,14 @@ async function start(){
   const custom=Array.isArray(a.scene[SHARED_BUFFS])?a.scene[SHARED_BUFFS] as any[]:[],defs=[...DEFAULT_BUFFS,...custom].filter(d=>d&&typeof d.id==='string'&&typeof d.name==='string');
   const identify=(entry:any)=>conditionIdentity(entry,defs);
   const additions:any[]=[];const conditions=selections.map((s:any)=>{const id=identify(s.entry),found=defs.find(d=>d.id===id);if(found){if(!custom.some(d=>d.id===id))additions.push(found);}else additions.push({id,name:s.entry.name,color:'#777777'});return id;});
-  if(conditionsChanged&&additions.length)await OBR.scene.setMetadata({[SHARED_BUFFS]:[...custom.filter(d=>!additions.some(v=>v.id===d.id)),...additions]});
+  // Status definitions are projected only after the character commit below.
   const resources=Object.entries(native.runtime.resources||{}).filter(([,r])=>r&&typeof r==='object').map(([id,value]:[string,any])=>({id,name:value.name||id,type:value.type||'count',icon:value.icon||'circle',...value}));
   merged.web_resources=structuredClone(native.runtime.resources);
   m._phase='sync-inventory';
   if(nativeInventoryChanged(m.previous||base,native,identify))await inventories.ensure([{id:`card:${a.cardId}`,name:a.card!.name,kind:'card',write:a.write,document:existing}]);
   const inventorySync=await inventories.syncNative(`card:${a.cardId}`,m.previous||base,native,identify);m._inventoryCommitted=inventorySync.ledgerCommitted===true;
   m._phase='save-document';await persistDocument(a,existing,merged,inventorySync.ledgerRevision===undefined?undefined:{key:inventories.key,revision:inventorySync.ledgerRevision});m._committed={kind:'document',id:`card:${a.cardId}`};
+  if(conditionsChanged)publishStatusDefinitions(additions);
   if(resourcesChanged)await resourceNotices(a,base.runtime?.resources||{},native.runtime.resources||{});
   await resourceNotices(a,nativeStockNotices(base),nativeStockNotices(native));
   await spellPreparationNotices(a,base,native);
@@ -545,13 +560,14 @@ async function start(){
   return {snapshot:await snapshot(`card:${a.cardId}`)};
  }
  async function receive(m:any,viaRelay=false){if(m.protocol!==protocol||m.session!==session)return;const route=viaRelay?'relay':'direct';
+  if(m.type==='cardChanged'){if(typeof m.cardId==='string'&&invalidateCard(m.cardId,m.revision)){void hydrate(m.cardId);void refreshSelection();void refresh();}return;}
   if(m.type==='hello'){last='';lastCatalog='';send('ready',{rolls},route);if(viaRelay&&child&&!child.closed)send('ready',{rolls},'direct');if(!viaRelay)void OBR.action.close().catch(()=>{});void refreshSelection();void refresh();void hydrate();return;}
   if(m.type==='ping'){send('pong',{at:Date.now()},route);return;}
   if(m.type==='requestStatus'){const answer=seen.get(m.requestId);if(answer)send('ack',{requestId:m.requestId,...answer},route);else send('requestPending',{requestId:m.requestId,active:activeRequests.has(m.requestId),known:requestRuns.has(m.requestId)},route);return;}
   if(m.type==='cancel'){if(!activeRequests.has(m.requestId)&&!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}
   if(m.type==='pin'){follow=!m.pinned;if(follow)lastSelection='';void refreshSelection();return;}
   if(m.type==='select'){const generation=++selectionGeneration;try{const a=await access(m.itemId);if(generation!==selectionGeneration)return;chosen=a.cardId?`card:${a.cardId}`:m.itemId;lastSelection=JSON.stringify((await observation.read()).selection);last='';void refreshSelection();}catch(e){send('error',{message:String(e)});}return;}
-  if(!['readCard','refreshCard','showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
+  if(!['assignOwners','readCard','refreshCard','showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
   if(requestRuns.has(m.requestId))return;
   delete m._committed;delete m._inventoryCommitted;
   const receivedAt=performance.now();
