@@ -1,3 +1,4 @@
+import {withRequestTimeout} from '../request-timeout';
 import {sharedEntry,OPEN_WIKI_CHANNEL} from './shared-entry';
 import {RUNTIME_BASELINE,DOCUMENT_REVISION,documentRevision,documentRuntime,tokenRuntime,mergeTokenRuntime,writeRuntime,mergeMonsterMetadata,type RuntimeBaseline} from './runtime-authority';
 import {workbenchObservation} from './observation';
@@ -209,7 +210,7 @@ async function start(){
   catch(error){documentTimes.delete(a.key);const e=error as any;if(e.status&&e.status<500)throw error;
    // A lost HTTP response is not evidence of a failed write. Read back once;
    // never replay the mutation, and never report a rollback while it is unknown.
-   try{const response=await fetch(location.url,{cache:'no-store',signal:AbortSignal.timeout(20000)});if(response.ok){const committed=await response.json();if(sameValue(committed,data)){cardCommitted(a,committed);return;}}}catch{}
+   try{const committed=await withRequestTimeout(20000,undefined,async signal=>{const response=await fetch(location.url,{cache:'no-store',signal});return response.ok?response.json():undefined;});if(committed&&sameValue(committed,data)){cardCommitted(a,committed);return;}}catch{}
    throw Object.assign(Error('角色保存结果暂时无法确认；本地改动已保留，请恢复连接后核对。'),{uncertain:true,diagnostic:{code:'WRITE_RESULT_UNKNOWN',documentRevision:data[DOCUMENT_REVISION]}});
   }
   cardCommitted(a,data);

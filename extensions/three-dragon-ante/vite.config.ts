@@ -7,7 +7,7 @@ const dev = process.env.THREE_DRAGON_CHANNEL !== "stable";
 const base = `/three-dragon-ante${dev ? "-dev" : ""}/`;
 // Injected so the running build identifies itself on screen: a stale cached
 // bundle is otherwise indistinguishable from a code defect.
-const version = "0.7.18" + (dev ? "-dev" : "");
+const version = "0.7.19" + (dev ? "-dev" : "");
 export default defineConfig({
   root, base,
   define: { __TDA_BUILD__: JSON.stringify(`v${version}`) },
@@ -19,7 +19,7 @@ export default defineConfig({
       action: { title: "三龙牌 / Three-Dragon Ante", icon: `${base}icon.svg`, popover: `${base}launcher.html`, width: 300, height: 180 },
     }, null, 2) });
   } }],
-  build: { outDir: "dist", emptyOutDir: true, rollupOptions: {
+  build: {target:['chrome109','edge109','firefox102','safari15.4'], outDir: "dist", emptyOutDir: true, rollupOptions: {
     input: { background: resolve(root, "background.html"), table: resolve(root, "index.html"), launcher: resolve(root, "launcher.html"), practice: resolve(root, "practice.html") },
     output: { manualChunks: id => /node_modules[/\\]three[/\\]/.test(id) ? "table-engine" : id.includes("node_modules") ? "vendor" : undefined },
   } },

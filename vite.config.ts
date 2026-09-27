@@ -57,7 +57,7 @@ export default defineConfig(({ command }) => ({
     cors: { origin: "*" },
     headers: { "Access-Control-Allow-Origin": "*" },
   },
-  build: {
+  build: {target:['chrome109','edge109','firefox102','safari15.4'],
     rollupOptions: {
       // Put ALL node_modules into a single vendor chunk. Without this
       // hint, vite's auto-chunker sometimes co-locates the CommonJS
