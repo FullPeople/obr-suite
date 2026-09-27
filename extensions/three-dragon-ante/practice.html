@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <meta name="robots" content="noindex">
+    <meta name="description" content="三龙牌重构测试版：无需枭熊房间，直接体验完整练习局、卡牌能力和三维牌桌。">
+    <title>三龙牌 · 网页体验</title>
+  </head>
+  <body>
+    <main id="practice-home" class="practice-home">
+      <p class="practice-eyebrow">THREE-DRAGON ANTE / 网页练习</p>
+      <h1>三龙牌<span>网页体验</span></h1>
+      <p>直接入座，与两位自动对手打一局。无需登录，也不需要打开枭熊房间。</p>
+      <div class="practice-actions">
+        <button type="button" data-lesson="game">开始完整练习</button>
+        <button type="button" data-lesson="powers">查看手牌能力特效</button>
+      </div>
+      <p id="practice-status" role="status" aria-live="polite"></p>
+      <section aria-labelledby="practice-notes">
+        <h2 id="practice-notes">这是可操作的测试版</h2>
+        <p>可体验三维牌桌、回合提示、手牌能力高亮和 41 项练习。支持拖牌或方向键选牌、空格拿起、Enter 放下；能力说明需要手动关闭。</p>
+        <p>此页为本机练习：固定发牌，可退回一步；刷新会重新开始，不会加入或修改任何线上牌局。手机端可滚动查看教程与牌桌。视觉和手机布局仍在打磨。</p>
+        <p>多人牌局、全能查看、完整历史和牌组设置请在枭熊内体验：将<a href="./manifest.json">三龙牌测试版安装地址</a>添加到枭熊扩展，再在房间中启用。更新后请所有玩家刷新枭熊。</p>
+      </section>
+      <noscript>此游戏需要启用 JavaScript。</noscript>
+    </main>
+    <div id="practice-table"></div>
+    <script type="module" src="./src/game/practice-page.ts"></script>
+  </body>
+</html>

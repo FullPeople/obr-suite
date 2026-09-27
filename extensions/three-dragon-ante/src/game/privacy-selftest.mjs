@@ -98,14 +98,19 @@ async function verify(mod) {
   const tableView = {
     actionReceiptVersion: 1,
     table: { version: 1, id: 'privacy-table', hostPlayerId: 'player-a', hostConnectionId: 'connection-a', hostName: 'A', stage: 'playing', seats: [{ playerId: 'player-a', seatId: 'a', name: 'A' }, { playerId: 'player-b', seatId: 'b', name: 'B' }], revision: state.revision },
-    selfPlayerId: 'player-a', isHost: true, connected: true, pending: false, game: omniscient,
+    selfPlayerId: 'player-a', isHost: true, connected: true, pending: false, game: seatView,
     historyPage: { gameId: 'privacy-game', before: 4, entries: [{ sequence: 1, revision: 1, phase: 'play', gambit: 1, round: 1, activeSeatId: 'a', event: { code: 'CARD_PLAYED', privateHands: { b: [{ id: opponentCardId }] } }, privateHands: { b: [{ id: opponentCardId }] } }], historyComplete: false, historyStartSequence: 1 },
   };
+  // LOCAL deliberately supports approved host inspection; REMOTE remains seat-only.
+  const hostParts=mod.localViewParts({...tableView,game:omniscient},'host-inspection',1);
+  const hostReceiver=new mod.LocalViewReceiver('host-inspection');let hostView;
+  for(const part of hostParts)hostView=hostReceiver.receive(part)??hostView;
+  check('LOCAL preserves the approved host inspection view',hostView?.game?.privateHands.b.some(card=>card.id===opponentCardId));
   const contaminatedTableView = { ...tableView, table: { ...tableView.table, privateHands: { b: [{ id: opponentCardId }] } }, privateHands: { b: [{ id: opponentCardId }] }, privateCommittedAntes: { b: { id: 'secret-ante' } }, privateHandPowerHints: { b: [{ cardId: opponentCardId }] }, omniscient: true, injectedSecret: 'do-not-retain' };
   const parts = mod.localViewParts(contaminatedTableView, 'client-a', 1);
   const localText = Buffer.from(parts.map(part => part.payload).join(''), 'base64').toString('utf8');
   assertNoPrivate(JSON.parse(localText), 'LOCAL encoded payload', opponentCardId);
-  check('LOCAL payload strips omniscient fields before chunking', parts.length >= 1 && !localText.includes('privateHands'));
+  check('LOCAL seat payload strips stray omniscient envelope fields before chunking', parts.length >= 1 && !localText.includes('privateHands'));
   const receiver = new mod.LocalViewReceiver('client-a');
   let roundTrip;
   for (const part of parts) roundTrip = receiver.receive(part) ?? roundTrip;

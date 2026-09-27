@@ -305,7 +305,7 @@ export function mountTableUI(root:HTMLElement,deps:TableUIDeps){
     hand:(omniscient.privateHands[seat.id]??[]).map(editorCard),
     ante:omniscient.privateCommittedAntes[seat.id]?editorCard(omniscient.privateCommittedAntes[seat.id]!):null}));
   // Any card outside a hand may be brought in. The excluded twenty count too:
-  // a replacement swaps two locations, so the 80/20 split still holds exactly.
+  // a replacement swaps two locations, so the variant card pool still stays conserved.
   const taken=new Set(Object.values(omniscient.privateHands).flat().map(value=>value.id));
   const pool=[...(omniscient.privateDeck??[]),...omniscient.discard,...(omniscient.privateExcluded??[])].filter(value=>!taken.has(value.id)).map(editorCard);
   tableEditorView.render({visible:true,language:lang,seats,pool,

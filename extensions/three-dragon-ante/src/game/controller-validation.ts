@@ -1,4 +1,4 @@
-import { CARDS, STANDARD_CARDS, checkInvariants, parseVariant, sameVariant } from "./rules";
+import { CARDS, STANDARD_CARDS, checkInvariants, parseVariant, sameVariant, variantCards, variantExtraCardIds } from "./rules";
 import type { GameState, PublicReplayFrame } from "./rules";
 import type { SavedTable } from "./store";
 import type { TableSummary } from "./protocol";
@@ -105,8 +105,9 @@ export function validRecovery(value: SavedTable, roomId: string, summary: TableS
     const pending = game.pending && ["seer-keep", "sorcerer"].includes(game.pending.task.kind) ? game.pending.task.ids ?? [] : [];
     const reserved = game.queue.filter(task => task.kind === "sorcerer-ante").flatMap(task => task.ids ?? []);
     const cards = [...game.deck, ...game.discard, ...game.ante, ...Object.values(game.committed), ...held, ...pending, ...reserved];
-    if (cards.length !== 80 || game.excluded.length !== 20 || new Set([...cards, ...game.excluded]).size !== 100 ||
-        [...cards, ...game.excluded].some(id => !CARDS.some(card => card.id === id)) || STANDARD_CARDS.some(card => !cards.includes(card.id))) return false;
+    const extras=variantExtraCardIds(game.variant),pool=variantCards(game.variant);
+    if (cards.length !== 80+extras.length || game.excluded.length !== 20 || new Set([...cards, ...game.excluded]).size !== pool.length ||
+        [...cards, ...game.excluded].some(id => !pool.some(card => card.id === id)) || STANDARD_CARDS.some(card => !cards.includes(card.id))) return false;
     const count=game.seats.length,budget=game.initialGold??count*count*10;
     // The budget must stay a sane total. Its divisibility by the seat count
     // only holds for an untouched starting configuration, and a host-side table

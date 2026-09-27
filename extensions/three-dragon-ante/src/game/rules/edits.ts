@@ -3,8 +3,8 @@ import { CARDS } from "./cards";
 import type { GameState } from "./types";
 
 /** A host-only table edit. Every kind keeps the save's conservation law intact
- *  by construction, so an edited game still recovers: the 100-card pool stays
- *  80 in play and 20 excluded, and `sum(seat.gold) + stakes + hole` still equals
+ *  by construction, so an edited game still recovers: each variant's card pool
+ *  stays conserved (80 or 81 in play and 20 excluded), and currency still equals
  *  `initialGold`. Returns the next state, or null when the edit cannot be
  *  applied without breaking an engine invariant. */
 export type TableEdit =

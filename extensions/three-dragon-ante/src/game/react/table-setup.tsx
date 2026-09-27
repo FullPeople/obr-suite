@@ -2,6 +2,8 @@
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { cardFaceURL } from "../card-images";
+import { card } from "../rules/cards";
+import { cardName, cardHint, cardExplanation } from "../rules/prompts";
 
 export interface TableSetupChoice {
   id: string;
@@ -11,6 +13,7 @@ export interface TableSetupChoice {
   nameEn: string;
   summary?: string;
   summaryEn?: string;
+  extraCardIds?: readonly string[];
 }
 
 export interface TableSetupSpecial {
@@ -98,6 +101,13 @@ export function TableSetupView(props: TableSetupViewProps) {
         {deck.summary && <span>{language === "zh" ? deck.summary : deck.summaryEn ?? deck.summary}</span>}
       </article>}
     </div>
+    {deck?.extraCardIds?.map(id=><figure className="setup-extra-card" key={id}>
+      <img src={cardFaceURL(id)} alt={cardName(id,language)} decoding="async" width="768" height="1357"/>
+      <figcaption><strong>{language==="zh"?"额外加入：":"Additional card: "}{cardName(id,language)}</strong>
+        <span>{language==="zh"?"传说巨龙 · 善良 · 力量 ":"Legendary dragon · Good · Strength "}{card(id).strength}</span>
+        <p>{cardHint(id,language)}</p><small>{cardExplanation(id,language)}</small>
+      </figcaption>
+    </figure>)}
     <p className="setup-summary">{labels.variantSummary}: {props.variantSummary}</p>
     {props.deckId === "selected-specials-v1" && <fieldset className="special-picker">
       <legend>{labels.chooseSpecials} · {labels.selectedCount} {selected.size}/10</legend>

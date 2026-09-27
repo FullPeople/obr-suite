@@ -13,9 +13,10 @@ export type AbilityClass =
   | "steal-stakes" | "forced-payment" | "neighbour-demand" | "comparison-payment"
   | "steal-hand" | "draw" | "discard-draw" | "hand-replace" | "deck-replace"
   | "take-ante" | "remove-dragon" | "swap-flight" | "copy-power" | "score-modifier"
-  | "field-rule" | "scry-deck" | "static-ban" | "extra-round";
+  | "field-rule" | "scry-deck" | "static-ban" | "extra-round" | "take-discard";
 
 const ABILITY_CLASS: Readonly<Record<string, AbilityClass>> = {
+  "time-dragon": "take-discard",
   // take gold straight out of the stakes
   black: "steal-stakes", thief: "steal-stakes", "black-raider": "steal-stakes",
   // make opponents pay you or the stakes
@@ -77,6 +78,7 @@ export interface ClassEffect {
 }
 
 const EFFECTS: Readonly<Record<AbilityClass, ClassEffect>> = {
+  "take-discard": { glyph: "card-fan", flight: "card", from: "discard", ring: 1, field: false },
   "steal-stakes": { glyph: "chevron", flight: "coin", from: "stakes", ring: 1, field: false },
   "forced-payment": { glyph: "chain", flight: "coin", from: "self", ring: 1.15, field: false },
   "neighbour-demand": { glyph: "chain", flight: "card", from: "self", ring: 1.05, field: false },

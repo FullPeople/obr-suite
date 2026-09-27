@@ -1,7 +1,7 @@
 import type {Card} from "./cards";
 export interface SeatConfig { id:string; name:string }
 export type RuleSetId="provided-pack-20260910";
-export type DeckId="random-specials-v1"|"selected-specials-v1";
+export type DeckId="random-specials-v1"|"wheel-of-fate-v1"|"selected-specials-v1";
 /** Versioned public setup. `specialIds` is present only for the selected deck. */
 export interface TableVariant { ruleSetId:RuleSetId; deckId:DeckId; specialIds?:string[] }
 export interface GameConfig { id:string; seats:SeatConfig[]; specialIds?:string[]; variant?:TableVariant; seed?:number; startingGold?:number; startingHand?:number }

@@ -1,5 +1,6 @@
 import {card} from "./cards";
 import {PRINTED_PACK} from "./printed-pack";
+import {CUSTOM_PACK} from "./custom-pack";
 /** Independently written interface explanations of LE pp. 6–11 and 16–24.
  * Describe the actual action and its limits; do not substitute abbreviated hints
  * or reproduce the publisher's printed card text. */
@@ -45,6 +46,7 @@ export function rulePrompt(code:string,language:"zh"|"en"):string {return RULE_P
  * Silver Seer's full-hand handling is explicitly labelled as this table's ruling:
  * the publisher gives the ten-card limit but does not specify that return-to-top case. */
 export const CARD_HINTS: Readonly<Record<string,readonly [string,string]>> = {
+  "time-dragon":["这张牌发动能力时，从弃牌堆顶逐张拿取牌加入手牌，直到弃牌堆为空或手牌达到 10 张。拿不下的牌留在弃牌堆，不从牌库补牌。","When this power triggers, take cards from the top of the discard pile into your hand until it is empty or you hold 10 cards. Leave any remaining discards in place; do not draw from the deck."],
   black:["这张牌发动能力时，你从中央奖池取走 3 金币，加入自己的金币。奖池不足 3 金币就全部取走；奖池一旦被取空，本轮局立即结束并结算。","When this power triggers, move 3 gold from the central stakes to your own hoard. If fewer than 3 gold remain, take the amount available. Emptying the stakes immediately ends and scores this gambit."],
   blue:["这张牌发动能力时，由你选择一种方式，所有对手都按同一种方式付款：每位对手向你支付 1 金币；或者，你的牌阵每有 1 张牌，每位对手就向中央奖池支付 1 金币。数牌阵张数时，包括刚打出的这张牌和凡人牌。","When this power triggers, choose one payment method for all opponents: each opponent pays 1 gold to you, or each opponent pays the central stakes 1 gold for every card in your flight. Count the card you just played and any mortals when counting your flight's cards."],
   brass:["这张牌发动能力时，你逆时针方向的相邻对手作出选择：从其手牌中交给你 1 张点数高于发动能力的牌的善龙，或者向你支付 5 金币。交牌时先向所有人展示，再加入你的手牌；没有符合条件的龙牌就必须付款。你的手牌已满 10 张时，对手仍可选择交牌，但只展示并保留那张牌，你拿不到它。","When this power triggers, your counterclockwise neighboring opponent chooses either to give you 1 good dragon from their hand whose strength exceeds the card using this power, or to pay you 5 gold. Reveal a given dragon to everyone before adding it to your hand. If no eligible dragon is available, that opponent must pay. If you already hold 10 cards, the opponent may still choose a dragon, but reveals and keeps it instead of transferring it."],
@@ -86,7 +88,7 @@ export const CARD_HINTS: Readonly<Record<string,readonly [string,string]>> = {
   thief:["这张牌发动能力时，你从中央奖池取走 7 金币，加入自己的金币。奖池不足 7 金币就全部取走；奖池一旦被取空，本轮局立即结束并结算，不再继续等其他玩家出牌。","When this power triggers, move 7 gold from the central stakes to your own hoard. If fewer than 7 remain, take the amount available. Emptying the stakes immediately ends and scores this gambit without waiting for more players to play."],
   wyrmpriest:["这张牌的能力发动后，直到本轮局结束，组成同色牌阵时它可以算任意一种龙的颜色，无须预先指定一种颜色，也可以在不同同色组合中分别使用。它仍然是一张凡人牌，也能参与三张凡人的组合；不会因为配色而变成善龙或邪龙，点数也不改变。","After this power triggers, this card can match any dragon color for color flights until this gambit ends. You do not lock it to one color, and it can contribute to different color flights. It remains a mortal and can still form a three-mortal flight; matching a color does not make it a good or evil dragon or change its strength."],
 };
-export function cardHint(family:string,language:"zh"|"en"):string{return language==="zh"?PRINTED_PACK[family]?.[1]??family:CARD_HINTS[family]?.[1]??family;}
+export function cardHint(family:string,language:"zh"|"en"):string{return language==="zh"?CUSTOM_PACK[family]?.[1]??PRINTED_PACK[family]?.[1]??family:CARD_HINTS[family]?.[1]??family;}
 export function cardExplanation(family:string,language:"zh"|"en"):string{return CARD_HINTS[family]?.[language==="zh"?0:1]??family;}
 const CARD_NAMES_ZH:Readonly<Record<string,string>>={
   black:"黑龙",blue:"蓝龙",brass:"黄铜龙",bronze:"青铜龙",copper:"赤铜龙",gold:"金龙",green:"绿龙",red:"红龙",silver:"银龙",white:"白龙",
@@ -96,4 +98,4 @@ const CARD_NAMES_ZH:Readonly<Record<string,string>>={
   archmage:"大法师",dragonrider:"龙骑士",dragonslayer:"屠龙者",druid:"德鲁伊",fool:"愚者",illusionist:"幻术师",kobold:"狗头人",
   "merchant-prince":"商人王子",priest:"祭司",princess:"公主",prophet:"预言家",queen:"女王",sorcerer:"术士",thief:"盗贼",wyrmpriest:"龙祭司",
 };
-export function cardName(id:string,language:"zh"|"en"):string {const value=card(id);return language==="zh"?PRINTED_PACK[value.family]?.[0]??CARD_NAMES_ZH[value.family]??value.name:value.name;}
+export function cardName(id:string,language:"zh"|"en"):string {const value=card(id);return language==="zh"?CUSTOM_PACK[value.family]?.[0]??PRINTED_PACK[value.family]?.[0]??CARD_NAMES_ZH[value.family]??value.name:value.name;}

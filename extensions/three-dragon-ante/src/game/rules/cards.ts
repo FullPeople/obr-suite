@@ -13,7 +13,8 @@ export interface Card {
   alignment: Alignment;
   color?: Color;
   category: "standard" | "legendary" | "mortal";
-  rulesPage: number;
+  /** Printed base-rule page; custom cards have no publisher rulebook page. */
+  rulesPage?: number;
 }
 const STANDARD: Record<Color, number[]> = {
   black: [1,2,3,5,6,7,9], blue: [1,2,4,6,7,9,11], brass: [1,2,3,4,5,7,9], bronze: [1,3,6,7,8,9,11],
@@ -38,6 +39,8 @@ export const SPECIAL_CARDS: readonly Card[] = [
   ...legendary.map(([id,strength,alignment,color,rulesPage])=>({id,family:id,name:title(id),strength,alignment,color,category:"legendary",rulesPage} as Card)),
   ...mortals.map(([id,strength,rulesPage])=>({id,family:id,name:`The ${title(id)}`,strength,alignment:"mortal",category:"mortal",rulesPage} as Card)),
 ];
-export const CARDS: readonly Card[] = [...STANDARD_CARDS,...SPECIAL_CARDS];
+export const BASE_CARDS: readonly Card[] = [...STANDARD_CARDS,...SPECIAL_CARDS];
+export const TIME_DRAGON:Card=Object.freeze({id:"time-dragon",family:"time-dragon",name:"Time Dragon",strength:12,alignment:"good",category:"legendary"});
+export const CARDS: readonly Card[] = [...BASE_CARDS,TIME_DRAGON];
 export const CARD_BY_ID: Readonly<Record<string,Card>> = Object.freeze(Object.fromEntries(CARDS.map(card=>[card.id,Object.freeze(card)])));
 export function card(id:string):Card { const value=CARD_BY_ID[id]; if(!value)throw Error(`Unknown card: ${id}`); return value; }

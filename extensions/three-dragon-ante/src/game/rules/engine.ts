@@ -1,6 +1,6 @@
 import {card, CARDS, COLORS, EVIL_COLORS, SPECIAL_CARDS, STANDARD_CARDS} from "./cards";
 import type {ActionResult, Choice, ChoiceOption, EffectKind, FlightCard, GameAction, GameConfig, GameState, HandPowerHint, HandPowerReason, PublicHistoryEntry, PublicHistoryPhase, PublicReplayFrame, RandomSource, ResolutionStep, Task, ScoreReport, PublicEvent} from "./types";
-import {parseVariant, resolveVariant, variantSpecialIds} from "./variants";
+import {parseVariant, resolveVariant, variantSpecialIds, variantExtraCardIds, variantCards} from "./variants";
 
 const copy=<T>(value:T):T=>JSON.parse(JSON.stringify(value));
 const around=(s:GameState,seat:number,includeSelf=false)=>Array.from({length:s.seats.length-(includeSelf?0:1)},(_,i)=>(seat+i+(includeSelf?0:1))%s.seats.length);
@@ -264,6 +264,13 @@ function executePower(s:GameState,t:Task,rng?:RandomSource){
   if(family!==card(source).family)s.events[s.events.length-1].effectFamily=family;
   const opponents=around(s,seat);
   switch(family){
+    case "time-dragon":{
+      const taken:string[]=[];
+      while(s.discard.length&&self.hand.length<10){const id=s.discard.pop()!;self.hand.push(id);taken.push(id);}
+      // Discarded cards were public already. Never include existing private hand cards.
+      event(s,"DISCARD_RECLAIMED",seat,taken,taken.length);
+      break;
+    }
     case "black":steal(s,seat,3);break;
     case "thief":steal(s,seat,7);break;
     case "black-raider":
@@ -418,7 +425,7 @@ export function createGame(config:GameConfig,rng?:RandomSource):GameState {
   const s:GameState={version:1,id:config.id,revision:0,seats:config.seats.map(seat=>({...seat,gold:config.startingGold??config.seats.length*10,debt:0,hand:[],flight:[],rewards:[],archmage:false})),stage:"ante",deck:[],discard:[],excluded:[],committed:{},ante:[],stakes:0,hole:0,gambit:1,round:0,leader:0,active:0,turnIndex:0,roundCards:config.seats.map(()=>null),effects:[],queue:[],pending:null,choiceSerial:0,events:[],history:[],historyComplete:true,variant,revealed:[],accepted:{},...(config.seed===undefined?{}:{randomState:config.seed}),lastGambit:null,winners:[],issue:null,scoring:false};
   s.initialGold=(config.startingGold??config.seats.length*10)*config.seats.length;
   const specials=variantSpecialIds(variant)??shuffle(s,SPECIAL_CARDS.map(c=>c.id),rng).slice(0,10);s.excluded=SPECIAL_CARDS.map(c=>c.id).filter(id=>!specials.includes(id));
-  s.deck=shuffle(s,[...STANDARD_CARDS.map(c=>c.id),...specials],rng);for(let round=0;round<(config.startingHand??6);round++)for(let seat=0;seat<s.seats.length;seat++)draw(s,seat,1,rng);
+  s.deck=shuffle(s,[...STANDARD_CARDS.map(c=>c.id),...specials,...variantExtraCardIds(variant)],rng);for(let round=0;round<(config.startingHand??6);round++)for(let seat=0;seat<s.seats.length;seat++)draw(s,seat,1,rng);
   return s;
 }
 function fingerprint(action:GameAction):string{return JSON.stringify([action.seatId,action.revision,action.kind,action.cardId??null,action.choiceId??null,action.optionIds??null]);}
@@ -474,6 +481,7 @@ export function checkInvariants(s:GameState):string[]{
   const ids=[...s.deck,...s.discard,...s.ante,...Object.values(s.committed),...held,...pending,...reserved];
   if(new Set(ids).size!==ids.length)errors.push("DUPLICATE_CARD");
   if(ids.some(id=>!CARDS.some(c=>c.id===id)))errors.push("UNKNOWN_CARD");
+  if([...ids,...s.excluded].some(id=>!variantCards(s.variant).some(c=>c.id===id)))errors.push("CARD_NOT_IN_VARIANT");
   if(s.seats.some(p=>p.hand.length>10||p.gold<0||p.debt<0||!Number.isInteger(p.gold)||!Number.isInteger(p.debt)))errors.push("INVALID_SEAT_VALUES");
   if(s.stakes<0||s.hole<0)errors.push("INVALID_POTS");
   return errors;
