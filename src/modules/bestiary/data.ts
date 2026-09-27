@@ -76,6 +76,18 @@ function parseType(type: any): string {
   return String(type);
 }
 
+function formatChallengeRating(value: unknown): string {
+  const text = (part: unknown): string | undefined => {
+    if (typeof part === "string") return part.trim() || undefined;
+    if (typeof part === "number" && Number.isFinite(part)) return String(part);
+  };
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const rating = value as Record<string, unknown>;
+    return text(rating.cr) ?? text(rating.special) ?? "?";
+  }
+  return text(value) ?? "?";
+}
+
 // Replicates 5etools Parser.nameToTokenName: toAscii + strip quotes
 // We can't call toAscii (it's a String prototype extension), so we approximate
 // with just removing quotes — most English monster names are already ASCII.
@@ -142,7 +154,10 @@ function parseMon(m: any): ParsedMonster | null {
       hp: parseHpNumber(m.hp),
       dexMod: abilityModifier(m.dex),
       initiative: monsterInitiativeBonus(m),
-      cr: m.cr ?? "?",
+      // Preview rows must contain display values, not references to raw JSON.
+      // Preact treats an object child as a VNode and writes parent pointers to
+      // it, making later inheritance/caching/scene serialization circular.
+      cr: formatChallengeRating(m.cr),
       size: (getLocalLang() === "en" ? { T: "Tiny", S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan" } as Record<string, string> : SIZE_MAP)[m.size?.[0]] || m.size?.[0] || "?",
       sizeCode: m.size?.[0],
       contentLanguage: m._suiteContent?.language ?? "auto",

@@ -14,7 +14,7 @@ export interface Monster {
   int: number;
   wis: number;
   cha: number;
-  cr: string;
+  cr: string | number | { cr?: string | number; lair?: string | number; coven?: string | number; special?: string };
   hasToken?: boolean;
   hasFluffImages?: boolean;
 }
