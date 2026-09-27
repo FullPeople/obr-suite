@@ -1,0 +1,44 @@
+// Real production panel, installed SDK and public XLSX parser. Only Owlbear
+// identity/scene metadata is a fixture. Creates and deletes only its own cards.
+import {createRequire} from 'node:module';
+import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
+import {resolve,join,extname} from 'node:path';
+import assert from 'node:assert/strict';
+const {chromium}=createRequire('F:/CodexWork/2026-09-27/feedback/web/package.json')('@playwright/test');
+const live=process.argv.includes('--live'),origin='https://obr.dnd.center',dist=resolve('../dist'),out=resolve('../release204');mkdirSync(out,{recursive:true});
+const room='xlsx204-'+crypto.randomUUID().slice(0,8),ids=new Set(),errors=[],checks=[],writes=[];const pass=message=>{checks.push(message);console.log('PASS '+message);};
+const old=readFileSync('tools/feedback196-browser-selftest.mjs','utf8').replaceAll('\r\n','\n'),host=old.slice(old.indexOf('const host=`')+12,old.indexOf('`;\nconst images='));
+assert.ok(host.startsWith('window.state=')&&!host.includes('createServer('));
+const browser=await chromium.launch({channel:'msedge',headless:true,args:['--no-proxy-server']}),context=await browser.newContext({viewport:{width:1280,height:960},serviceWorkers:'block'}),page=await context.newPage();context.setDefaultTimeout(60000);
+const wait=async(check,label)=>{const end=Date.now()+90000;while(!await check()){if(Date.now()>end)throw Error('Timed out '+label);await new Promise(r=>setTimeout(r,60));}};
+page.on('pageerror',e=>errors.push(e.message));
+page.on('request',r=>{if(r.url().includes('/api/character/')&&['POST','PUT'].includes(r.method()))writes.push(r.url());});
+page.on('response',async response=>{try{if(response.url().includes('/api/character/')&&response.ok()&&response.request().method()==='POST'){const value=await response.json();if(value.id){ids.add(value.id);writeFileSync(join(out,(live?'live':'candidate')+'-created.json'),JSON.stringify({room,cardIds:[...ids]},null,2));}}}catch{}});
+if(!live)await context.route(origin+'/suite/**',route=>{const path=decodeURIComponent(new URL(route.request().url()).pathname).slice('/suite/'.length),file=resolve(dist,path);if(!file.startsWith(dist+'\\')||!existsSync(file))return route.fulfill({status:404});return route.fulfill({body:readFileSync(file),contentType:({'.js':'text/javascript','.html':'text/html','.css':'text/css','.json':'application/json','.png':'image/png','.svg':'image/svg+xml','.webp':'image/webp'})[extname(file)]||'application/octet-stream'});});
+const shell='<!doctype html><meta charset="utf-8"><style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%}</style><script>'+host+'</script><iframe src="/suite/cc-panel.html?obrref='+Buffer.from(origin+' '+room).toString('base64')+'" onload="this.contentWindow.postMessage({id:\'OBR_READY\',data:{ref:\'test\',userId:\'me\'}},location.origin)"></iframe>';
+await page.route(origin+'/xlsx204-fixture',r=>r.fulfill({contentType:'text/html',body:shell}));
+let panel;
+const cards=()=>page.evaluate(()=>window.state.scene['com.character-cards/list']||[]);
+const data=async id=>{const r=await context.request.get(origin+'/characters/'+room+'/'+id+'/data.json');assert.ok(r.ok());return r.json();};
+async function pick(files,selector='#btnLinkLocal'){const [chooser]=await Promise.all([page.waitForEvent('filechooser'),panel.locator(selector).click()]);assert.equal(await chooser.element().getAttribute('accept'),'.json,.xlsx');await chooser.setFiles(files);}
+try{
+ await page.goto(origin+'/xlsx204-fixture');panel=page.frames().find(f=>f.parentFrame());await panel.locator('#btnLinkLocal').waitFor();await panel.waitForFunction(()=>!document.getElementById('btnLinkLocal').disabled);
+ const template2014=resolve('public/DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx'),template2024=resolve('public/DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx');
+ await pick([template2014,template2024]);await wait(async()=>(await cards()).length===2,'batch XLSX imports');const imported=await cards(),parsed=await Promise.all(imported.map(c=>data(c.id)));assert.deepEqual(parsed.map(d=>d.meta.ruleset).sort(),['5E2014','5E2024']);
+ const first=imported[parsed.findIndex(d=>d.meta.ruleset==='5E2014')];ids.add(first.id);pass('Real 2014 and 2024 XLSX templates batch-import through public parser with correct editions');
+ // Refresh is scoped to the row's data-id; old and new file paths preserve its ID.
+ if(await panel.locator('.group-head-older[data-collapsed="1"]').count())await panel.locator('.group-head-older[data-collapsed="1"]').click();
+ const button=panel.locator(`.card[data-id="${first.id}"] .card-refresh`);
+ const [choose]=await Promise.all([page.waitForEvent('filechooser'),button.click()]);await choose.setFiles(template2024);
+ await wait(async()=>(await data(first.id)).meta.ruleset==='5E2024','XLSX refresh updates same ID');await panel.waitForFunction(()=>!document.getElementById('side').classList.contains('busy'));assert.equal((await cards()).length,2);pass('XLSX refresh replaces an existing card without duplicating its ID');
+ const reader=page.frames().find(f=>f.url().includes('legacyViewer=1'));assert.ok(reader);await reader.locator('.paper').waitFor();assert.equal(await reader.getByRole('tablist',{name:'角色卡页面'}).getByRole('tab').count(),5);pass('Imported XLSX opens in the five-page character reader');
+ const drag=await panel.evaluateHandle(({name,base64})=>{const d=new DataTransfer();d.items.add(new File([Uint8Array.from(atob(base64),c=>c.charCodeAt(0))],name,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));return d;},{name:'drag.XLSX',base64:readFileSync(template2014).toString('base64')});await panel.locator('#side').dispatchEvent('drop',{dataTransfer:drag});await wait(async()=>(await cards()).length===3,'drag XLSX');await drag.dispose();pass('Drag/drop accepts XLSX including uppercase extension');
+ const sample=JSON.parse(readFileSync('public/cc-example-card.json','utf8'));sample.identity.character_name='204 JSON regression';sample.identity.display_name='204 JSON regression';
+ await pick({name:'retained.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(sample))});await wait(async()=>(await cards()).length===4,'JSON compatibility');const jsonCard=(await cards()).find(c=>c.name==='204 JSON regression');assert.ok(jsonCard);assert.ok((await data(jsonCard.id)).dnd_card_web);pass('JSON import still validates and creates a native-backed character');
+ await panel.waitForFunction(()=>!document.getElementById('side').classList.contains('busy'));const before=writes.length;await pick({name:'unsupported.xls',mimeType:'application/vnd.ms-excel',buffer:Buffer.from('unsupported')});await panel.locator('#error').waitFor();assert.equal(writes.length,before);assert.equal((await cards()).length,4);pass('Unsupported XLS is rejected before upload and leaves existing cards intact');
+ const corrupt=page.waitForResponse(r=>r.url().includes('/api/character/upload')&&r.status()===400);await pick({name:'broken.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from('not a zip')});await corrupt;await panel.waitForFunction(()=>!document.getElementById('side').classList.contains('busy'));assert.match(await panel.locator('#error').innerText(),/失败/);assert.equal((await cards()).length,4);pass('Corrupt XLSX reports parser failure without adding a card');
+ await panel.locator('#jsonMigrationHelp').click();await panel.locator('#jsonMigrationDialog').waitFor();assert.match(await panel.locator('#jsonMigrationDialog').innerText(),/暂时恢复 XLSX/);await panel.locator('#closeMigrationHelp').click();
+ await page.screenshot({path:join(out,(live?'live':'candidate')+'-upload.png')});await page.setViewportSize({width:760,height:900});assert.equal(await panel.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:join(out,(live?'live':'candidate')+'-narrow.png')});
+ assert.deepEqual(errors,[]);writeFileSync(join(out,(live?'live':'candidate')+'-browser.json'),JSON.stringify({checks,errors,room,cardIds:[...ids],scope:'Production panel + actual public XLSX/JSON service and reader. Owlbear identity/scene SDK host is simulated.'},null,2));console.log(checks.join('\n'));
+}catch(error){await page.screenshot({path:join(out,(live?'live':'candidate')+'-failure.png')}).catch(()=>{});writeFileSync(join(out,(live?'live':'candidate')+'-failure.json'),JSON.stringify({error:String(error),errors,room,cardIds:[...ids],panelError:await panel?.locator('#error').innerText({timeout:2000}).catch(()=>null)},null,2));throw error;}
+finally{const cleanup=[];for(const id of ids){const response=await context.request.delete(origin+'/api/character/'+room+'/'+id);cleanup.push({id,status:response.status()});}writeFileSync(join(out,(live?'live':'candidate')+'-cleanup.json'),JSON.stringify({room,cleanup},null,2));await browser.close();}
