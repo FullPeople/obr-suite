@@ -6,10 +6,8 @@ export const STYLE_CHOICES:{id:ThemeID;name:string;style:MaterialStyle}[]=[
   {id:'godot_blue_cat_eye',name:'猫眼石',style:'cat-eye'},
   {id:'royal_ember_resin',name:'半透明树脂',style:'resin'},
   {id:'ink_sketch',name:'卡通涂鸦',style:'sketch'},
-  {id:'comic_print',name:'漫画印刷',style:'comic'},
-  {id:'flowing_ink',name:'流动水墨',style:'ink-flow'},
-  {id:'neon_runes',name:'霓虹符文',style:'runic'},
 ];
+export const RETIRED_STYLES=['comic_print','flowing_ink','neon_runes'] as const;
 export const STYLE_SETTINGS={
   ceramic:{code:0,roughness:.43,metalness:0,clearcoat:.25,clearcoatRoughness:.4,envMapIntensity:.32,specularIntensity:.38,opacity:1},
   metal:{code:1,roughness:.34,metalness:.92,clearcoat:0,clearcoatRoughness:.4,envMapIntensity:.72,specularIntensity:.8,opacity:1},

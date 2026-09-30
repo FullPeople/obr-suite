@@ -7,11 +7,12 @@ import {readFixedRoll} from '../modules/dice/fixed-roll';
 export const rolls:DiceRollPayload[]=[];
 export const rollListeners=new Set<()=>void>();
 let unsubs:(()=>void)[]=[];
-export async function setupWorkbenchDice(){
+let startup:Promise<void>|undefined;
+export function setupWorkbenchDice(){return startup??=startWorkbenchDice();}
+async function startWorkbenchDice(){
  if(unsubs.length)return;
  const initial=await workbenchObservation().read(),connection=initial.player.connectionId;let replay='';
  setupActivityPanel();
- await setupDice3d();
  const historyKey=`obr-suite/dice/history:${String(OBR.room.id||'default').replace(/[^a-zA-Z0-9_-]/g,'_')}`;
  try{const history=JSON.parse(localStorage.getItem(historyKey)||'[]');const {role,player:{id}}=initial;if(Array.isArray(history))rolls.push(...history.map(normalizePayload).filter(r=>r&&(!r.hidden||role==='GM'||r.rollerId===id)).slice(0,100) as DiceRollPayload[]);}catch{}
  unsubs.push(OBR.broadcast.onMessage(BROADCAST_DICE_ROLL,async event=>{
@@ -29,8 +30,10 @@ export async function setupWorkbenchDice(){
   if(event.connectionId!==connection)return;
   void executeRoll(event.data as QuickRollRequest).catch(error=>{void OBR.notification.show(String(error),'ERROR');});
  }),OBR.broadcast.onMessage('com.obr-suite/dice3d-reveal',event=>{if(event.connectionId!==connection)return;void dice3dRpc('reveal',[(event.data as any)?.rollId]).catch(error=>OBR.notification.show(String(error),'ERROR'));}),OBR.broadcast.onMessage('com.obr-suite/dice-replay',event=>{const data=event.data as any;if(!data?.cid)return;void dice3dRpc(data.action==='close'?'clear':'replay',[data.cid]).catch(error=>OBR.notification.show(String(error),'ERROR'));}),OBR.broadcast.onMessage('com.obr-suite/dice-panel-toggle',()=>{void OBR.action.open();}));
+ // Install all room subscriptions before opening the renderer, independent of any UI.
+ await setupDice3d();
 }
-export function teardownWorkbenchDice(){teardownDice3d();unsubs.splice(0).forEach(fn=>fn());rolls.length=0;rollListeners.forEach(fn=>fn());}
+export function teardownWorkbenchDice(){teardownDice3d();startup=undefined;unsubs.splice(0).forEach(fn=>fn());rolls.length=0;rollListeners.forEach(fn=>fn());}
 export async function executeRoll(req:QuickRollRequest){
  const expression=String(req.expression||'').replace(/\s/g,'');
  const {role,player}=await workbenchObservation().read();

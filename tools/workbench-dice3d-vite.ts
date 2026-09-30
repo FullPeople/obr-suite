@@ -4,6 +4,8 @@ import {adapt3dHistory} from './workbench-dice3d-history.mjs';
 export function workbenchDice3dPlugin(enabled:boolean):Plugin{
  return{name:'workbench-dice3d-only',enforce:'pre',transform(code,id){if(!enabled)return;
   const path=id.replaceAll('\\','/');if(path.endsWith('/src/modules/dice/index.ts')){
+   // Renderer/history persist even if the old dice-tool module is disabled.
+   code=code.replace('if (WORKBENCH_DEV) { teardownWorkbenchDice(); return; }','if (WORKBENCH_DEV) { return; }');
    code="import {submitDice3d,submitCompat3d} from '../../workbench/dice3d';\n"+code;
    code=code.replace('export async function handleQuickRoll(req: QuickRollRequest,identity?:QuickRollIdentity): Promise<void> {','export async function handleQuickRoll(req: QuickRollRequest,identity?:QuickRollIdentity): Promise<void> { if (!readFixedRoll()) { await submitDice3d(req); return; }');
    code=code.replace(/(\}\): Promise<string> \{)(\r?\n  if \(!opts\.dice\.length\))/, '$1\n  return submitCompat3d(opts);$2');
@@ -19,7 +21,7 @@ export function workbenchDice3dPlugin(enabled:boolean):Plugin{
    code=code.replaceAll('JSON.stringify(history)', 'JSON.stringify(history.filter(h=>!h.hidden))');
    code=code.replace('history=loadHistory();for(const [id,pending]', 'history=[...history.filter(h=>h.hidden&&h._3dConnection===__3dConnection),...loadHistory()];for(const [id,pending]');
    code=code.replace('pending.entry.hidden&&myRole!==\'GM\'&&pending.entry.rollerId!==myPlayerId','pending.entry.hidden&&pending.entry._3dConnection!==__3dConnection&&myRole!==\'GM\'&&pending.entry.rollerId!==myPlayerId');
-   code=code.replace('pendingEntries.set(data.rollId, { entry: data, timer });','clearTimeout(pendingEntries.get(data.rollId)?.timer);pendingEntries.set(data.rollId, { entry: data, timer });');
+   code=code.replace('pendingEntries.set(data.rollId, { entry: data, timer });','clearTimeout(pendingEntries.get(data.rollId)?.timer);pendingEntries.set(data.rollId, { entry: data, timer });commitPending(data.rollId);');
    code=code.replaceAll('history = loadHistory();','history = [...history.filter(h=>h.hidden&&h._3dConnection===__3dConnection),...loadHistory()];');
    code=code.replace(/(applyI18nDom\(lang\);\r?\n  render\(\);\r?\n)(\}\);)/,'$1  void OBR.broadcast.sendMessage(\'com.obr-suite/dice3d-history-request\',{}, {destination:\'LOCAL\'});\n$2');
    code=adapt3dHistory(code);

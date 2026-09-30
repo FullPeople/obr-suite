@@ -41,7 +41,7 @@ export class CueRenderer{
   private targetSlot:[number,number]=[0,0];
   private currentSlot:[number,number]=[0,0];
   private previousFrame=0;
-  constructor(private container:HTMLElement,rollId:string,private playerName:string){
+  constructor(private container:HTMLElement,rollId:string,private playerName:string,private playerColor?:string){
     this.canvas=document.createElement('canvas');
     this.canvas.className='cue-canvas';
     container.appendChild(this.canvas);
@@ -221,7 +221,7 @@ export class CueRenderer{
         if(age<=TOTAL_PULSE)pulse=Math.max(pulse,scale-1);
       }
       const centerScale=1+pulse*1.35+maximumHit*0.42;
-      const color=latestColorAt(cue,elapsed)||[0.92,0.84,0.62];
+      const color:[number,number,number]=this.playerColor?[1,3,5].map(i=>parseInt(this.playerColor!.slice(i,i+2),16)/255) as [number,number,number]:[0.92,0.84,0.62];
       ctx.save();
       ctx.translate(centerX,centerY);ctx.scale(centerScale,centerScale);ctx.translate(-centerX,-centerY);
       ctx.font='600 92px CinzelVariable,Georgia,serif';
@@ -229,7 +229,7 @@ export class CueRenderer{
       ctx.fillStyle=rgba([0,0,0],centerOpacity*0.58);
       ctx.fillText(String(shown),centerX+4,centerY+4);
       const graphic=cue.inkStyle==='sketch'||cue.inkStyle==='comic';
-      ctx.lineWidth=graphic?4:2;ctx.strokeStyle=rgba(keyline(color),centerOpacity*(graphic?.96:.72));
+      ctx.lineWidth=graphic?4:3;ctx.strokeStyle=rgba(keyline(color),centerOpacity*.96);
       ctx.strokeText(String(shown),centerX,centerY);
       ctx.fillStyle=rgba(color,centerOpacity);
       ctx.fillText(String(shown),centerX,centerY);
