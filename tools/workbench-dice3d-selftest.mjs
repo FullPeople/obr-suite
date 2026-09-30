@@ -1,0 +1,2 @@
+import {build} from 'rolldown';import {mkdirSync} from 'node:fs';import {execFileSync} from 'node:child_process';
+mkdirSync('.cache/dice3d-evidence',{recursive:true});await build({input:'tools/workbench-dice3d-selftest.entry.ts',platform:'node',external:[/^node:/],output:{file:'.cache/dice3d-evidence/selftest.mjs',format:'esm'}});execFileSync(process.execPath,['.cache/dice3d-evidence/selftest.mjs'],{stdio:'inherit'});

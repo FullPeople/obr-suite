@@ -1,0 +1,10 @@
+{
+  "package": "jolt-physics",
+  "version": "1.1.0",
+  "source": "https://www.npmjs.com/package/jolt-physics/v/1.1.0",
+  "files": {
+    "jolt-physics.wasm.js": "bcebc61c2a5db94f1b155b2ce1902667f952d9d63baa003b654e9e5d1ff20eb4",
+    "jolt-physics.wasm.wasm": "65f044b2ec57be2bbf0f84828f3948d6f3f9e17942ad80aa98923b94dd292f90",
+    "Jolt-LICENSE": "9907e3cd4976e88e7b4d8aee1a035ffa7d3ebe84993d00b6b273f716c74b794c"
+  }
+}

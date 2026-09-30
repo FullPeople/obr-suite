@@ -1,0 +1,10 @@
+import {Controller} from './controller';
+import {mountOverlay} from './overlay';
+import {CHANNEL,now} from './types';
+import {materialCatalog} from './material-styles';
+const query=new URLSearchParams(location.search),id=query.get('id')||'a',roles:Record<string,'GM'|'PLAYER'>={a:'GM',b:'PLAYER',c:'PLAYER'};
+const room=new BroadcastChannel(CHANNEL+':suite-probe'),events:any[]=[],records:any[]=[],bus=new BroadcastChannel(`${CHANNEL}:local:${id}`);
+bus.onmessage=e=>{const m=e.data;if(m.type==='log'||m.type==='state'||m.type==='prepare'||m.type==='history')events.push(m);if(m.type==='history'){records.splice(0,records.length,...m.records);}};
+const core=new Controller({id,name:'测试-'+id,color:id==='a'?'#76bceb':id==='b'?'#fa9168':'#bac687',role:roles[id],resolveRole:async id=>roles[id],mode:'本地 3D 新版接线夹具（非真实枭熊房间）',send:async data=>room.postMessage(data),listen:fn=>{room.onmessage=e=>fn(e.data,e.data.from);return()=>room.close();}});
+await core.init();const renderer=await mountOverlay(document.body,id);
+(window as any).suiteProbe={core,renderer,events,records,submit:async(formula:string,visibility='all',theme='ink_sketch')=>core.submit({id:crypto.randomUUID(),recipe:true,kind:'mixed',count:100,theme,modifier:0,visibility,formula,context:{rollerId:id,itemId:null,label:'测试公式'}}),reveal:(id:string)=>bus.postMessage({type:'command',action:'reveal',id}),now};

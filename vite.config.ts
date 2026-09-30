@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import preact from "@preact/preset-vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import { resolve } from "path";
+import {workbenchDice3dPlugin} from './tools/workbench-dice3d-vite';
 
 // Dual deploy targets:
 //   stable → /suite/      (default)
@@ -51,7 +52,8 @@ export default defineConfig(({ command }) => ({
   plugins:
     command === "serve"
       ? [preact(), basicSsl()]
-      : [preact()],
+      : [preact(),workbenchDice3dPlugin(SUITE_BASE==='/suite-dev/')],
+  worker:{format:'es'},
   base: SUITE_BASE,
   server: {
     cors: { origin: "*" },
