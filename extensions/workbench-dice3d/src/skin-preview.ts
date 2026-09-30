@@ -18,20 +18,20 @@ const key=new T.DirectionalLight(0xfffaf2,2.2);key.position.set(-2.4,9,4.2);scen
 const rim=new T.DirectionalLight(0xe2edff,.65);rim.position.set(3,4.4,-5);scene.add(rim);
 const pmrem=new T.PMREMGenerator(gl),room=new RoomEnvironment(),environment=pmrem.fromScene(room,.04).texture;scene.environment=environment;room.dispose();pmrem.dispose();
 const report=(error:unknown)=>{status.textContent='3D 展示加载失败：'+String(error);document.body.dataset.previewError=String(error);parent.postMessage({channel,error:String(error)},location.origin);};
-function resize(){const w=Math.max(1,innerWidth),h=Math.max(1,innerHeight);gl.setSize(w,h,false);camera.aspect=w/h;camera.position.set(0,5.4,7.6).multiplyScalar(Math.max(1,1.55/camera.aspect));camera.lookAt(0,0,0);camera.updateProjectionMatrix();}
+function resize(){const w=Math.max(1,innerWidth),h=Math.max(1,innerHeight);gl.setSize(w,h,false);camera.aspect=w/h;camera.position.set(0,5.2,3.8).multiplyScalar(Math.max(1,1.55/camera.aspect));camera.lookAt(0,0,0);camera.updateProjectionMatrix();}
 function rebuild(){
  for(const mesh of meshes){disposeDiceDecorations(mesh);(mesh.material as T.Material).dispose();group.remove(mesh);}meshes.length=0;
  const theme=catalog.themes[style];
  for(const [i,kind] of KINDS.entries()){
   const geo=geometry.get(kind)!,mat=instanceDiceMaterial(bases.get(`${style}:${kind}`)!,theme,color),mesh=new T.Mesh(geo,mat),row=i<4?0:1,col=row?i-4:i,count=row?3:4;
-  mesh.position.set((col-(count-1)/2)*1.34,0,(row-.5)*1.5);mesh.rotation.set(.12+i*.17,.4+i*.55,.10);if(theme.style==='sketch')addSketchOutline(mesh,geo);
+  mesh.position.set((col-(count-1)/2)*1.34,0,(row-.5)*1.8);mesh.rotation.set(.12+i*.17,.4+i*.55,.10);if(theme.style==='sketch')addSketchOutline(mesh,geo);
   group.add(mesh);meshes.push(mesh);
  }
  document.body.dataset.previewTheme=style;document.body.dataset.previewColor=color;
 }
 function draw(time:number){frame=0;if(!active||!loaded)return;const age=time/1000;group.rotation.y=Math.sin(age*.16)*.22;
  for(const [i,mesh] of meshes.entries()){const mat=mesh.material as T.MeshPhysicalMaterial;mat.userData.time.value=age;mesh.rotation.y=.4+i*.55+age*.12;}
- gl.render(scene,camera);frame=requestAnimationFrame(draw);
+ gl.render(scene,camera);document.body.dataset.previewPainted=style;frame=requestAnimationFrame(draw);
 }
 function wake(){if(active&&loaded&&!frame)frame=requestAnimationFrame(draw);}
 addEventListener('message',event=>{if(event.source!==parent||event.origin!==location.origin||event.data?.channel!==channel)return;try{

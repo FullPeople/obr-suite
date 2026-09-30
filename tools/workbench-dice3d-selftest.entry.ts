@@ -6,12 +6,16 @@ import {percentileValue,validateRecipe} from '../extensions/workbench-dice3d/src
 import {packReveal,unpackReveal} from '../extensions/workbench-dice3d/src/suite-reveal';
 import {SecretKeys} from '../extensions/workbench-dice3d/src/secret-keys';
 import {shapeSymmetries,maskRoll} from '../extensions/workbench-dice3d/src/hidden-roll';
-import {materialCatalog} from '../extensions/workbench-dice3d/src/material-styles';
+import {materialCatalog,STYLE_CHOICES} from '../extensions/workbench-dice3d/src/material-styles';
 import {workbenchDice3dPlugin} from './workbench-dice3d-vite';
 import {adapt3dHistory} from './workbench-dice3d-history.mjs';
 Object.defineProperty(globalThis,'crypto',{value:webcrypto});let checks=0;
 const ok=(label:string,test:()=>void)=>{test();checks++;console.log('PASS '+label);};
 const base='extensions/workbench-dice3d/public/',catalog=materialCatalog(JSON.parse(readFileSync(base+'assets/catalog.json','utf8')));
+ok('exactly five active styles',()=>{assert.equal(STYLE_CHOICES.length,5);assert(!['comic_print','flowing_ink','neon_runes'].some(id=>Object.hasOwn(catalog.themes,id)));});
+ok('persistent startup independent of UI',()=>assert(readFileSync('src/workbench/background.ts','utf8').includes('void setupWorkbenchDice()')));
+const activePlugin=workbenchDice3dPlugin(true),adaptedIndex=(activePlugin.transform as Function)(readFileSync('src/modules/dice/index.ts','utf8'),'/src/modules/dice/index.ts');
+ok('old feature toggle cannot tear down persistent 3D',()=>assert(adaptedIndex.includes('if (WORKBENCH_DEV) { return; }')));
 const lock=JSON.parse(readFileSync(base+'vendor/lock.json','utf8'));for(const [file,digest] of Object.entries(lock.files))ok('locked '+file,()=>assert.equal(createHash('sha256').update(readFileSync(base+'vendor/'+file)).digest('hex'),digest));
 for(const [kind,asset] of Object.entries(catalog.dice))ok('proper hull symmetries '+kind,()=>assert(shapeSymmetries(asset).length>=asset.outcomes.length));
 for(const [formula,count] of [['1d100',2],['adv(1d20)',2],['adv(1d20,2)',3],['repeat(3,2d6+5)',6],['2d4*3',2],['resetmin(1d6,6)',1]] as const)ok('frontier '+formula,()=>assert.equal(initialPhysicalCount(parseFormula(formula)),count));
