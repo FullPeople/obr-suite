@@ -38,7 +38,7 @@ export class FormulaShow extends CueRenderer{
   private fx:HTMLCanvasElement;private context:CanvasRenderingContext2D;private chips=new Map<string,HTMLElement>();private total:HTMLElement;
   private latest=-1;private finished=false;
   constructor(private stage:HTMLElement,roll:Roll,private ids:string[],private row:FormulaRow,private card:HTMLElement,private projection:()=>Projection,private timeline?:RuleTimeline){
-    super(stage,roll.request.id,roll.request.name);
+    super(stage,roll.request.id,roll.request.name,roll.request.bodyColor);
     this.fx=document.createElement('canvas');this.fx.className='research-effects';stage.append(this.fx);this.context=this.fx.getContext('2d')!;
     const caption=document.createElement('div');caption.className='formula-caption';caption.textContent=row.formula.replaceAll('*','×');card.append(caption);
     const inline=document.createElement('div');inline.className='formula-inline';

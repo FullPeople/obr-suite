@@ -145,7 +145,7 @@ export class DiceRenderer {
     if(this.active.reduce((n,r)=>n+r.meshes.length,0)+roll.kinds.length>300)throw Error('当前同时显示上限 300 枚，请等待或清屏');
     const theme=this.catalog.themes[roll.request.theme];
     const cue=presentation?.cue??buildCue(roll,this.projection,presentationTheme(theme,roll.request.bodyColor));
-    const show=presentation?.show??new CueRenderer(this.container,roll.request.id,roll.request.name);
+    const show=presentation?.show??new CueRenderer(this.container,roll.request.id,roll.request.name,roll.request.bodyColor);
     const meshes=roll.kinds.map((kind,index)=>{
       const base=this.materials.get(`${roll.request.theme}:${kind}${roll.masked?':hidden':''}`),geometry=this.geometry.get(kind);
       if(!base||!geometry)throw Error('来源皮肤/几何不可用');

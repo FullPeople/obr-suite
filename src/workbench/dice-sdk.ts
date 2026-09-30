@@ -2,6 +2,8 @@ import './tone';
 import {installExpressionHistory,rememberExpression} from './expression-history';
 import {readFixedRoll,disarmFixedRoll} from '../modules/dice/fixed-roll';
 import {diceLoadingUi} from './dice-loading-ui';
+import {STYLE_CHOICES} from '../../extensions/workbench-dice3d/src/material-styles';
+import {BUILD} from '../../extensions/workbench-dice3d/src/types';
 // SDK facade for the original dice pages embedded in the external workbench.
 // Only the dedicated dice allowlist is forwarded by the authenticated host.
 import type OBRType from '@owlbear-rodeo/sdk';
@@ -20,10 +22,19 @@ let watching=false;
 async function watchLoading(){if(watching)return;watching=true;while(document.body.isConnected){await new Promise(resolve=>setTimeout(resolve,500));try{loading.update(await rpc('dice3d.status'));}catch(error){loading.update({ready:false,error:String(error)});}}}
 function install3dChoices(){
  const skinPane=document.querySelector<HTMLElement>('.tabPane[data-tab="skins"]');if(!skinPane)return;
- const material=document.createElement('select');material.id='dice3d-material';material.setAttribute('aria-label','3D 骰子材质');
- for(const [id,name] of [['ink_sketch','卡通涂鸦'],['stage6_calibration','瓷质'],['brushed_metal','拉丝金属'],['godot_blue_cat_eye','猫眼石'],['royal_ember_resin','半透明树脂'],['comic_print','漫画印刷'],['flowing_ink','流动水墨'],['neon_runes','霓虹符文']]){const o=document.createElement('option');o.value=id;o.textContent=name;material.append(o);}
- material.value=reads['player.getMetadata']?.['com.obr-suite/dice/3d-theme']||'ink_sketch';material.onchange=()=>{void rpc('dice3d.material',material.value).catch(e=>rpc('notification.show',String(e)));};
- const title=document.createElement('p');title.textContent='3D 骰子材质 · 使用你的枭熊玩家颜色';const volume=document.createElement('input');volume.type='range';volume.min='0';volume.max='100';volume.value=localStorage.getItem('obr-suite/dice3d/volume')||'100';volume.setAttribute('aria-label','3D 骰子音量');volume.oninput=()=>{localStorage.setItem('obr-suite/dice3d/volume',volume.value);void rpc('dice3d.audio',Number(volume.value)/100);};const label=document.createElement('label');label.textContent='骰子音量 ';label.append(volume);skinPane.replaceChildren(title,material,label);
+ const material=document.createElement('div');material.id='dice3d-material';material.setAttribute('role','group');material.setAttribute('aria-label','3D 骰子材质');
+ const preview=document.createElement('iframe');preview.title='当前七骰样式的 3D 展示';preview.className='dice3d-skin-preview';
+ let selected=String(reads['player.getMetadata']?.['com.obr-suite/dice/3d-theme']||'ink_sketch'),started=false;
+ const active=()=>skinPane.classList.contains('on')||skinPane.classList.contains('active');
+ const update=()=>{for(const button of material.querySelectorAll('button'))button.setAttribute('aria-pressed',String(button.dataset.material===selected));
+  if(active()&&!started){started=true;preview.src='/suite-dev/dice3d/skin-preview.html?v='+BUILD;}
+  if(started)preview.contentWindow?.postMessage({channel:'workbench-dice-preview/v1',theme:selected,color:reads['player.getColor']||'#50525b',active:active()},location.origin);
+ };
+ for(const choice of STYLE_CHOICES){const button=document.createElement('button');button.type='button';button.dataset.material=choice.id;button.textContent=choice.name;button.onclick=async()=>{if(button.disabled)return;for(const b of material.querySelectorAll('button'))b.disabled=true;try{await rpc('dice3d.material',choice.id);selected=choice.id;reads['player.getMetadata']={...reads['player.getMetadata'],'com.obr-suite/dice/3d-theme':selected};update();}catch(error){await rpc('notification.show',String(error),'ERROR');}finally{for(const b of material.querySelectorAll('button'))b.disabled=false;}};material.append(button);}
+ preview.onload=update;new MutationObserver(update).observe(skinPane,{attributes:true,attributeFilter:['class']});
+ window.addEventListener('message',event=>{if(event.source===preview.contentWindow&&event.origin===location.origin&&event.data?.channel==='workbench-dice-preview/v1'&&event.data.ready)update();});
+ on('player',()=>{selected=String(reads['player.getMetadata']?.['com.obr-suite/dice/3d-theme']||'ink_sketch');update();});
+ const title=document.createElement('p');title.textContent='骰子材质 · 使用你的枭熊玩家颜色';const volume=document.createElement('input');volume.type='range';volume.min='0';volume.max='100';volume.value=localStorage.getItem('obr-suite/dice3d/volume')||'100';volume.setAttribute('aria-label','3D 骰子音量');volume.oninput=()=>{localStorage.setItem('obr-suite/dice3d/volume',volume.value);void rpc('dice3d.audio',Number(volume.value)/100);};const label=document.createElement('label');label.className='dice3d-volume';label.textContent='骰子音量 ';label.append(volume);skinPane.replaceChildren(title,material,label,preview);update();
 }
 const api:any={isAvailable:true,isReady:true,onReady:(fn:()=>void)=>{void ready.then(async()=>{void watchLoading();await fn();install3dChoices();await rpc('dice3d.history');document.body.dataset.bridgeReady='true';parent.postMessage({channel,ready:true},location.origin);}).catch(error=>{loading.update({ready:false,error:String(error)});document.body.dataset.bridgeError=String(error);});},room:{get id(){return roomId;}},
  dice3d:{submit:async(req:any)=>{const result=await rpc('dice3d.submit',{...req,visibility:'all',globalDark:localStorage.getItem('obr-suite/dice/global-dark-roll')==='1'});rememberExpression(req.expression);return result;}},

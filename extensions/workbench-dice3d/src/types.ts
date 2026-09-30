@@ -1,4 +1,4 @@
-export const BUILD='suite-3d-1';
+export const BUILD='suite-3d-2';
 export const CHANNEL='com.obr-suite/workbench-dice3d.v1';
 export type Kind='d4'|'d6'|'d8'|'d10'|'d12'|'d20'|'d_percentile';
 export const KINDS:Kind[]=['d4','d6','d8','d10','d12','d20','d_percentile'];

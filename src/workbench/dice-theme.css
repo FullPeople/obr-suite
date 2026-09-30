@@ -24,3 +24,9 @@ button:disabled{opacity:.42}button:not(:disabled):hover{filter:brightness(.95)}
 :root[data-suite-night=true] body{background:var(--bg)}:root[data-suite-night=true] :is(input,select,textarea){background:var(--bg-card)!important;color:var(--text)!important}
 :root[data-suite-night=true] :is(button,.dice-btn,.combo-card,.history-card,.expr-wrap,.example-btn,.ad-btn){background:var(--bg-card);color:var(--text);border-color:var(--border)}
 :root[data-suite-night=true] :is(.rules-hint code,.examples code,.label-input,.hint,.expr-help){color:var(--text-dim)}:root[data-suite-night=true] :is(button.active,button.selected,button[aria-pressed=true]){background:#51596b;color:#fff}
+
+#dice3d-material{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin:12px 0}
+#dice3d-material button{min-height:38px;padding:8px 10px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);cursor:pointer;font:inherit}
+#dice3d-material button[aria-pressed=true]{background:var(--suite-tone);border-color:var(--suite-tone);color:white;box-shadow:inset 0 -3px 0 #ffffff30}
+.dice3d-volume{display:flex;align-items:center;gap:12px;margin:14px 0}.dice3d-volume input{flex:1;accent-color:var(--suite-tone)}
+.dice3d-skin-preview{display:block;width:100%;height:clamp(220px,38vh,340px);border:1px solid var(--border);background:var(--bg-soft);border-radius:8px}

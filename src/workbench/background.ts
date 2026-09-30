@@ -18,7 +18,7 @@ import {applyPatch,applyProjectionPatch,resourceSnapshot,sameValue} from './merg
 import OBR,{type Item} from '@owlbear-rodeo/sdk';
 import {WORKBENCH_DEV,WORKBENCH_PROTOCOL as protocol} from './channel';
 import {Relay} from './relay';
-import {rolls,rollListeners,executeRoll} from './dice';
+import {rolls,rollListeners,executeRoll,setupWorkbenchDice} from './dice';
 import {BUBBLES_META_KEY as HP,EXTERNAL_BUBBLES_META_KEY as LEGACY} from '../utils/statEdit';
 import {getState,onStateChange,setState} from '../state';
 import {sharedDocuments} from './shared';
@@ -32,7 +32,7 @@ const MONSTER='com.obr-suite/workbench/monster';
 const monsterOverrides=new Map<string,{revision:number;data:any}>();
 const DELETED='com.obr-suite/workbench/deleted-cards';
 const fields=['health','max health','temporary health','armor class'];
-export function setupWorkbench(){if(WORKBENCH_DEV){setupWorkbenchNotices();void start();}}
+export function setupWorkbench(){if(WORKBENCH_DEV){setupWorkbenchNotices();void setupWorkbenchDice().catch(error=>{console.error('[workbench] dice startup failed',error);void OBR.notification.show(String(error),'ERROR');});void start();}}
 async function start(){
  const observation=workbenchObservation();
  const [playerId,playerConnection]=await Promise.all([OBR.player.getId(),OBR.player.getConnectionId()]),origin=location.origin,storageKey=`workbench:v2:${OBR.room.id}:${playerId}`;
