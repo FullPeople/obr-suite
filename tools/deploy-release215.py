@@ -1,7 +1,7 @@
 """Version-guarded 215 static overlays. No server code, service restart or player-data writes."""
 from pathlib import Path
 import hashlib,json,os,shutil,subprocess,tarfile,tempfile
-root=Path('/var/www/obr-plugins').resolve();archives=Path('/tmp/dnd-release215').resolve()
+root=Path('/var/www/obr-plugins').resolve();archives=Path(__file__).resolve().parent
 receipt=json.loads((archives/'package-receipt.json').read_text())
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 def tree(folder):return {p.relative_to(folder).as_posix():sha(p) for p in folder.rglob('*') if p.is_file()}
