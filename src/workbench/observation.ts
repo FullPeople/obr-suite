@@ -1,6 +1,7 @@
 import OBR, {type Item, type Player} from '@owlbear-rodeo/sdk';
 import {workbenchItemsSignature} from './item-observation';
 
+type ObservationChange = 'data'|'selection';
 type Observation = {
  ready:boolean; scene:Record<string,unknown>; room:Record<string,unknown>;
  items:Item[]; role:'GM'|'PLAYER'; party:Player[]; selection:string[]; player:Player;
@@ -12,9 +13,9 @@ type Observation = {
 function createObservation(){
  const values:Partial<Observation>={},versions=new Map<keyof Observation,number>();
  let flight:Promise<Observation>|undefined,sceneEpoch=0,serial=0;
- const subscribers=new Set<()=>void>();
+ const subscribers=new Set<(change:ObservationChange)=>void>();
  const set=<K extends keyof Observation>(key:K,value:Observation[K])=>{values[key]=value;versions.set(key,(versions.get(key)||0)+1);};
- const notify=()=>{serial++;for(const listener of subscribers)listener();};
+ const notify=(change:ObservationChange='data')=>{if(change==='data')serial++;for(const listener of subscribers)listener(change);};
  const event=<K extends keyof Observation>(key:K,value:Observation[K])=>{
   const relevant=key!=='items'||workbenchItemsSignature((values.items||[]))!==workbenchItemsSignature(value as Item[]);
   set(key,value);if(relevant)notify();
@@ -24,7 +25,14 @@ function createObservation(){
  OBR.room.onMetadataChange(room=>event('room',room));
  OBR.party.onChange(party=>event('party',party));
  OBR.player.onChange(player=>{
-  set('player',player);set('role',player.role);set('selection',player.selection||[]);notify();
+  // Selection arrives in the same SDK event as profile/permission changes. It
+  // does not invalidate the card catalog or require reconciling every card.
+  const {selection:previousSelection,...previousProfile}=values.player||{};
+  const {selection,...profile}=player;
+  const profileChanged=JSON.stringify(previousProfile)!==JSON.stringify(profile);
+  const selectionChanged=JSON.stringify(values.selection||[])!==JSON.stringify(selection||[]);
+  set('player',player);set('role',player.role);set('selection',selection||[]);
+  if(profileChanged)notify();else if(selectionChanged)notify('selection');
  });
  OBR.scene.onReadyChange(ready=>{
   sceneEpoch++;set('ready',ready);set('items',[]);set('scene',{});
@@ -54,7 +62,7 @@ function createObservation(){
   try{await task;}finally{if(flight===task)flight=undefined;}
   return read();
  }
- return {read,peek:()=>values,version:()=>serial,onChange:(listener:()=>void)=>{subscribers.add(listener);return()=>subscribers.delete(listener);}};
+ return {read,peek:()=>values,version:()=>serial,onChange:(listener:(change:ObservationChange)=>void)=>{subscribers.add(listener);return()=>subscribers.delete(listener);}};
 }
 let instance:ReturnType<typeof createObservation>|undefined;
 export const workbenchObservation=()=>instance??=createObservation();

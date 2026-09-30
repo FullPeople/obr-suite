@@ -13,7 +13,7 @@ export async function diceRpc(method:string,args:any[],target:any,access:(id:str
  const checkItem=async(id:string)=>{if(target?.item?.id===id||target?.cardId&&id===`card:${target.cardId}`)return;await access(id);};
  if(method.startsWith('dice3d.')){if(method==='dice3d.submit'){const req=args[0];if(!req||typeof req.expression!=='string')throw Error('无效公式');if(req.itemId)await checkItem(req.itemId);return dice3dRpc('submit',[{...req,itemId:req.itemId??target?.item?.id??null,hidden:playerRole==='GM'&&(!!req.hidden||!!req.globalDark)}]);}return dice3dRpc(method.slice(7),args);}
  if(method==='init'){
-  return {roomId:OBR.room.id,reads:{'player.getId':player.id,'player.getConnectionId':player.connectionId,'player.getName':player.name,'player.getColor':player.color,'player.getMetadata':player.metadata,'party.getPlayers':observed.party,'scene.grid.getDpi':await OBR.scene.grid.getDpi(),'player.getRole':playerRole,'player.getSelection':target?.item?[target.item.id]:[],'scene.items.getItems':target?.item?[target.item]:[]}};
+  return {roomId:OBR.room.id,diceLoading:await dice3dRpc('status',[]),reads:{'player.getId':player.id,'player.getConnectionId':player.connectionId,'player.getName':player.name,'player.getColor':player.color,'player.getMetadata':player.metadata,'party.getPlayers':observed.party,'scene.grid.getDpi':await OBR.scene.grid.getDpi(),'player.getRole':playerRole,'player.getSelection':target?.item?[target.item.id]:[],'scene.items.getItems':target?.item?[target.item]:[]}};
  }
  if(method==='player.getSelection')return target?.item?[target.item.id]:[];
  if(method==='scene.items.getItems'){

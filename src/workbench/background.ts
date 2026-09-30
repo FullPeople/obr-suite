@@ -47,6 +47,7 @@ async function start(){
  let queue=Promise.resolve();const seen=new Map<string,any>(),documents=new Map<string,any>(),documentTimes=new Map<string,number>();
  function cacheDocument(key:string,value:any){if(documents.get(key)!==value)documentCacheVersion++;documents.set(key,value);return documents;}
  const cardReads=new Map<string,Promise<any>>(),cardEtags=new Map<string,string>(),cardLocations=new Map<string,CardLocation>();
+ const monsterSceneDocuments=new Map<string,any>();
  const cardInvalidations=new Map<string,number>();
  const cardReadControllers=new Map<string,AbortController>(),cardNotifiedRevisions=new Map<string,number>();
  const activeRequests=new Set<string>(),cancelledRequests=new Set<string>(),requestRuns=new Map<string,Promise<void>>();
@@ -191,10 +192,14 @@ async function start(){
   return {...data,item:token,cardId,card,slug,write:card?.write??(data.role==='GM'||token?.createdUserId===playerId),key:cardId?`${OBR.room.id}:card:${cardId}`:`${OBR.room.id}:token:${id}:${slug}`};
  }
  async function read(a:Awaited<ReturnType<typeof access>>,fresh=false){
-  const key=a.key;const override=a.item?.metadata[MONSTER] as {key:string;revision:number}|undefined;if(override?.key){let cached=monsterOverrides.get(override.key);if(fresh||!cached||cached.revision<override.revision){cached=await relay.send({sharedDocument:{key:override.key,operation:'read'}});monsterOverrides.set(override.key,cached!);}if(cached?.data){cacheDocument(key,cached.data);return cached.data;}}if(!a.cardId&&!fresh&&documents.has(key))return documents.get(key);let doc:any=null;
+  const key=a.key;const override=a.item?.metadata[MONSTER] as {key:string;revision:number}|undefined;if(override?.key){let cached=monsterOverrides.get(override.key);if(fresh||!cached||cached.revision<override.revision){cached=await relay.send({sharedDocument:{key:override.key,operation:'read'}});monsterOverrides.set(override.key,cached!);}if(cached?.data){monsterSceneDocuments.delete(key);cacheDocument(key,cached.data);return cached.data;}}
+  // A scene-owned definition can arrive or be replaced after the library read.
+  // Cache against its observed identity; a removed override must not stay alive.
+  const sceneDocument=a.slug?(a.scene['com.bestiary/monsters'] as any)?.[a.slug]:undefined;
+  if(!a.cardId&&!fresh&&documents.get(key)&&monsterSceneDocuments.has(key)&&monsterSceneDocuments.get(key)===sceneDocument)return documents.get(key);let doc:any=null;
   if(a.cardId)return loadCard(a.cardId,key,fresh);
-  else if(a.slug){doc=(a.scene['com.bestiary/monsters'] as any)?.[a.slug];if(!doc){const data=await import('../modules/bestiary/data');doc=data.getRawMonster(a.slug);if(!doc){doc=await data.loadMonsterBySlug(a.slug);}}}
-  cacheDocument(key,doc);return doc;
+  else if(a.slug){doc=sceneDocument;if(!doc){const data=await import('../modules/bestiary/data');doc=data.getRawMonster(a.slug);if(!doc){doc=await data.loadMonsterBySlug(a.slug);}}}
+  monsterSceneDocuments.set(key,sceneDocument);cacheDocument(key,doc);return doc;
  }
  function live(a:Awaited<ReturnType<typeof access>>){const ids=a.item?.metadata[STATUS_BUFFS_KEY];const custom=a.scene[SHARED_BUFFS];const defs=[...DEFAULT_BUFFS,...(Array.isArray(custom)?custom:[])].filter(d=>d&&typeof d.id==='string');return {conditions:Array.isArray(ids)?ids.map(id=>defs.find(v=>v.id===id)||{id,name:id}):undefined,resources:a.item?.metadata[RES]};}
  async function snapshot(id:string,existing?:Awaited<ReturnType<typeof catalog>>){
@@ -262,13 +267,16 @@ async function start(){
  let statusCatalogQueue=Promise.resolve();
  function publishStatusDefinitions(additions:any[]){if(!additions.length)return;statusCatalogQueue=statusCatalogQueue.catch(()=>{}).then(async()=>{const scene=await OBR.scene.getMetadata(),custom=Array.isArray(scene[SHARED_BUFFS])?scene[SHARED_BUFFS] as any[]:[];const next=[...custom.filter(d=>!additions.some(v=>v.id===d.id)),...additions];if(!sameValue(custom,next))await OBR.scene.setMetadata({[SHARED_BUFFS]:next});}).catch(error=>console.warn('[workbench] status catalog projection pending',error));}
  const canOpen=(a:Awaited<ReturnType<typeof access>>)=>a.cardId?getState().enabled.characterCards!==false:a.slug?getState().enabled.bestiary!==false:getState().enabled.hpBar!==false;
+ // A token can acquire or change its binding after the selection event. Keep
+ // the binding in the identity so that this same selected token is retried.
+ const selectionIdentity=(selection:string[],items:Item[])=>JSON.stringify(selection.map(id=>{const item=items.find(item=>item.id===id);return [id,item?.metadata[BIND],item?.metadata[SLUG]];}));
  let selectionGeneration=0,selecting=false,selectAgain=false;
  async function refreshSelection(){
   if(!relayActive&&(!child||child.closed))return;
   if(selecting){selectAgain=true;return;}selecting=true;
-  try{const list=await catalog(),selection=(await observation.read()).selection,signature=JSON.stringify(selection);
-   if(follow&&signature!==lastSelection){lastSelection=signature;selectionGeneration++;if(selection.length===1)try{const a=await access(selection[0],list);if(canOpen(a)){chosen=a.cardId?`card:${a.cardId}`:selection[0];send('navigate',{itemId:chosen,id:crypto.randomUUID()});}}catch{}}
-   if(chosen)try{if(!canOpen(await access(chosen,list)))chosen='';}catch{chosen='';}
+  try{const list=await catalog(),selection=(await observation.read()).selection,signature=selectionIdentity(selection,list.items);
+   if(follow&&signature!==lastSelection){selectionGeneration++;if(selection.length===1)try{const a=await access(selection[0],list);if(canOpen(a)){lastSelection=signature;chosen=a.cardId?`card:${a.cardId}`:selection[0];send('navigate',{itemId:chosen,id:crypto.randomUUID()});}}catch{}else lastSelection=signature;}
+   if(chosen)try{if(!canOpen(await access(chosen,list))){chosen='';lastSelection='';}}catch{chosen='';lastSelection='';}
    if(!chosen)chosen=getState().enabled.characterCards!==false&&list.cards[0]?`card:${list.cards[0].id}`:'';
    if(!chosen){send('selection',{sequence:++sequence,message:'暂无可查看的角色卡'});return;}
    const id=chosen,generation=selectionGeneration;
@@ -571,7 +579,7 @@ async function start(){
   if(m.type==='requestStatus'){const answer=seen.get(m.requestId);if(answer)send('ack',{requestId:m.requestId,...answer},route);else send('requestPending',{requestId:m.requestId,active:activeRequests.has(m.requestId),known:requestRuns.has(m.requestId)},route);return;}
   if(m.type==='cancel'){if(!activeRequests.has(m.requestId)&&!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}
   if(m.type==='pin'){follow=!m.pinned;if(follow)lastSelection='';void refreshSelection();return;}
-  if(m.type==='select'){const generation=++selectionGeneration;try{const a=await access(m.itemId);if(generation!==selectionGeneration)return;chosen=a.cardId?`card:${a.cardId}`:m.itemId;lastSelection=JSON.stringify((await observation.read()).selection);last='';void refreshSelection();}catch(e){send('error',{message:String(e)});}return;}
+  if(m.type==='select'){const generation=++selectionGeneration;try{const a=await access(m.itemId);if(generation!==selectionGeneration)return;chosen=a.cardId?`card:${a.cardId}`:m.itemId;const observed=await observation.read();lastSelection=selectionIdentity(observed.selection,observed.items);last='';void refreshSelection();}catch(e){send('error',{message:String(e)});}return;}
   if(!['assignOwners','readCard','refreshCard','showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
   if(requestRuns.has(m.requestId))return;
   delete m._committed;delete m._inventoryCommitted;
@@ -606,7 +614,7 @@ async function start(){
  OBR.player.onChange(player=>send('diceEvent',{event:'player',data:player}));
  let changeScheduled=false;
  const changed=()=>{if(changeScheduled)return;changeScheduled=true;queueMicrotask(()=>{changeScheduled=false;void refreshSelection();void refresh();void hydrate();});};
- observation.onChange(changed);OBR.scene.onReadyChange(()=>{chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
+ observation.onChange(change=>{if(change==='selection')void refreshSelection();else changed();});OBR.scene.onReadyChange(()=>{chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
  OBR.broadcast.onMessage('com.obr-suite/cc-card-updated',event=>{const data=event.data as any,id=data?.cardId;if(id){if(!invalidateCard(id,data?.revision))return;void hydrate(id);}else{invalidateCards();void hydrate();}changed();});OBR.broadcast.onMessage('com.obr-suite/workbench/inventory-changed',event=>{if(event.connectionId!==playerConnection)inventories.invalidate();changed();});onStateChange(changed);rollListeners.add(()=>send('rolls',{rolls}));
  const connection=await OBR.player.getConnectionId();OBR.broadcast.onMessage('com.obr-suite/workbench-compose',event=>{if(event.connectionId===connection&&typeof(event.data as any)?.expression==='string')send('compose',{compose:{...(event.data as object),id:crypto.randomUUID()}});});
  setInterval(()=>send('pong',{at:Date.now()}),10000);

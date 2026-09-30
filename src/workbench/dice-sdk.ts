@@ -14,10 +14,10 @@ document.body.inert=true;
 function rpc(method:string,...args:any[]):Promise<any>{const id=crypto.randomUUID();return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{waiting.delete(id);reject(Error('枭熊连接超时'));},method==='dice3d.submit'||method==='broadcast.sendMessage'?245000:20000);waiting.set(id,{resolve,reject,timer});parent.postMessage({channel,id,method,args},location.origin);});}
 function on(key:string,fn:(v:any)=>void){if(!subscriptions.has(key))subscriptions.set(key,new Set());subscriptions.get(key)!.add(fn);return()=>subscriptions.get(key)?.delete(fn);}
 window.addEventListener('message',event=>{if(event.source!==parent||event.origin!==location.origin||event.data?.channel!==channel)return;const m=event.data;if(m.event==='snapshot'){reads=m.data.reads;return;}if(m.event==='player'){for(const [key,field] of [['getRole','role'],['getName','name'],['getColor','color'],['getMetadata','metadata']])if(m.data[field]!==undefined)reads['player.'+key]=m.data[field];}if(m.event){subscriptions.get(m.event)?.forEach(fn=>fn(m.data));return;}const pending=waiting.get(m.id);if(pending){clearTimeout(pending.timer);waiting.delete(m.id);m.error?pending.reject(Error(m.error)):pending.resolve(m.result);}});
-const ready=rpc('init').then(data=>{roomId=data.roomId;reads=data.reads;installExpressionHistory();});
-const loading=diceLoadingUi(()=>rpc('dice3d.retry'));
+const loading=diceLoadingUi(async()=>{const state=await rpc('dice3d.retry');loading.update(state);return state;});
+const ready=rpc('init').then(async data=>{roomId=data.roomId;reads=data.reads;loading.update(data.diceLoading??await rpc('dice3d.status'));installExpressionHistory();});
 let watching=false;
-async function watchLoading(){if(watching)return;watching=true;while(document.body.isConnected){try{loading.update(await rpc('dice3d.status'));}catch(error){loading.update({ready:false,error:String(error)});}await new Promise(resolve=>setTimeout(resolve,500));}}
+async function watchLoading(){if(watching)return;watching=true;while(document.body.isConnected){await new Promise(resolve=>setTimeout(resolve,500));try{loading.update(await rpc('dice3d.status'));}catch(error){loading.update({ready:false,error:String(error)});}}}
 function install3dChoices(){
  const skinPane=document.querySelector<HTMLElement>('.tabPane[data-tab="skins"]');if(!skinPane)return;
  const material=document.createElement('select');material.id='dice3d-material';material.setAttribute('aria-label','3D 骰子材质');
