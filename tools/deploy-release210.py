@@ -2,6 +2,7 @@
 from pathlib import Path
 import hashlib,json,os,shutil,subprocess,tarfile,tempfile
 root=Path('/var/www/obr-plugins').resolve()
+archives=Path(os.environ.get('DND_RELEASE_ARCHIVES','/tmp')).resolve()
 targets={'card':('release.json','standalone-1.0.209','standalone-1.0.210'),'suite-dev':('manifest-dev.json','1.0.209-dev','1.0.210-dev'),'suite':('manifest.json','1.3.13','1.3.14')}
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 def validate(folder,files):
@@ -23,7 +24,7 @@ for name,(manifest,_,version) in targets.items():
  stage=Path(tempfile.mkdtemp(prefix='.release210-'+name+'-',dir=root)).resolve()
  # Both Suite targets are overlays: unchanged dice, map and host assets survive byte for byte.
  if name in original:shutil.copytree(root/name,stage,dirs_exist_ok=True)
- with tarfile.open('/tmp/'+name+'-210.tar.gz') as tar:
+ with tarfile.open(archives/(name+'-210.tar.gz')) as tar:
   for member in tar.getmembers():
    p=(stage/member.name).resolve();assert p.is_relative_to(stage) and (member.isfile() or member.isdir()),member.name
    if name in original:
