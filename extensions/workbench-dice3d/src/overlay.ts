@@ -11,19 +11,24 @@ import {presentationTheme} from './material-styles';
 import {buildCue} from './cue';
 import './research/research.css';
 import './suite-overlay.css';
+import {DiceAssets} from './asset-loading';
 export async function mountOverlay(container:HTMLElement,client:string){
-  const audio=mountAudioHost(client);(window as any).__diceLabAudio=audio;
+  const bus=new BroadcastChannel(`${CHANNEL}:local:${client}`),assets=new DiceAssets(progress=>bus.postMessage({type:'load-progress',progress}));
+  assets.locks=await assets.json<Record<string,string>>('asset-hashes.json');
+  const catalog=materialCatalog(await assets.json<import('./types').Catalog>('assets/catalog.json')),parents=new Map<string,{id:string;pending:Set<string>}>();
+  const audioPaths=Object.values(catalog.themes).flatMap(t=>[...Object.values(t.audio.impacts).flatMap(Object.values),t.audio.rolling,t.audio.tension,t.audio.natural_1,t.audio.natural_20]);
+  assets.plan(['assets/fonts/Cinzel-Variable.ttf',...Object.values(catalog.dice).map(d=>d.model),...Object.values(catalog.themes).flatMap(t=>Object.values(t.masks)),...audioPaths]);
+  const audio=mountAudioHost(client,assets,catalog);(window as any).__diceLabAudio=audio;
   // The result numbers use the same Cinzel variable font the native ships; canvas needs it loaded.
-  const face=new FontFace('CinzelVariable',`url(${url('assets/fonts/Cinzel-Variable.ttf')})`,{weight:'400 900'});
+  const face=new FontFace('CinzelVariable',await assets.bytes('assets/fonts/Cinzel-Variable.ttf'),{weight:'400 900'});
   await face.load();document.fonts.add(face);
-  const bus=new BroadcastChannel(`${CHANNEL}:local:${client}`);
-  const response=await fetch(url('assets/catalog.json'));if(!response.ok)throw Error('加载骰子清单失败');
-  const catalog=materialCatalog(await response.json()),parents=new Map<string,{id:string;pending:Set<string>}>();
+  let rendererDetail:any;
   const renderer=new DiceRenderer(container,catalog,(event,detail)=>{
+    if(event==='renderer-ready'){rendererDetail=detail;return;}
     const parent=parents.get(detail?.roll);
     if(parent&&(event==='render-complete'||event==='render-cancelled')){parent.pending.delete(detail.roll);bus.postMessage({type:'renderer-event',event:'audio-finished-child',detail});if(!parent.pending.size){bus.postMessage({type:'renderer-event',event,detail:{...detail,roll:parent.id}});for(const [id,value] of parents)if(value===parent)parents.delete(id);}return;}
     bus.postMessage(event==='renderer-ready'?{type:'overlay-ready',detail}:{type:'renderer-event',event,detail});
-  });
+  },assets);
   const prepared=new Map<string,Roll>(),archive=new Map<string,Roll>();
   // Full Suite owns the unified activity/history surface. Do not add a second Lab history.
   bus.onmessage=e=>{const p=e.data;try{
@@ -51,7 +56,9 @@ export async function mountOverlay(container:HTMLElement,client:string){
     else if(p.type==='reset-metrics')renderer.resetMetrics();
     else if(p.type==='result-bubble'&&p.highlight)bus.postMessage({type:'suite-reveal-highlight',id:p.record.id});
   }catch(error){bus.postMessage({type:'renderer-event',event:'error',detail:{message:errorText(error)}})}};
-  await audio.warmup();await renderer.init();return renderer;
+  assets.stage('加载模型、数字贴图和音效');
+  await Promise.all([audio.warmup(),renderer.init()]);assets.stage('首次渲染完成');
+  bus.postMessage({type:'overlay-ready',detail:rendererDetail});return renderer;
 }
 if(location.pathname.endsWith('/overlay.html')){
   document.body.classList.add('overlay');

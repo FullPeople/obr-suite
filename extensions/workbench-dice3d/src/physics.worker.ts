@@ -18,6 +18,7 @@ import {hiddenRequest,privateLaunchRotation} from './hidden-roll';
 import type {PhysicalHop} from './physical-hop';
 import {physicalRuleFace,ruleFlipLaunch,FLIP_DAMPING} from './rule-flip-launch';
 import {predictRecipe} from './suite-formula';
+import {DiceAssets} from './asset-loading';
 
 /** User data round-trips through a 32-bit int in this binding, so the tags stay small. */
 const FLOOR_TAG=1000000,WALL_TAG=1000001,INCUMBENT_TAG=1000002,ENTRY_TAG=1000003;
@@ -49,7 +50,14 @@ const isWall=(tag:number)=>tag===WALL_TAG||(tag>=ENTRY_TAG&&tag<ENTRY_TAG+4);
 function engine():Promise<any>{
   if(!loading){
     const moduleURL=new URL(url('vendor/jolt-physics.wasm.js'),self.location.origin).href;
-    loading=import(/* @vite-ignore */ moduleURL).then(m=>m.default({locateFile:(file:string)=>new URL(file,moduleURL).href})).then(m=>{J=m;return m});
+    loading=(async()=>{
+      const assets=new DiceAssets(progress=>self.postMessage({type:'load-progress',progress}));
+      const lock=await assets.json<{version:string;files:Record<string,string>}>('vendor/lock.json');if(lock.version!=='1.1.0')throw Error('Jolt 版本不符合锁定合同: '+lock.version);
+      assets.locks=Object.fromEntries(Object.entries(lock.files).map(([name,digest])=>['vendor/'+name,digest]));assets.plan(['vendor/jolt-physics.wasm.js','vendor/jolt-physics.wasm.wasm']);
+      const [,binary]=await Promise.all([assets.bytes('vendor/jolt-physics.wasm.js'),assets.bytes('vendor/jolt-physics.wasm.wasm')]);
+      const module=await import(/* @vite-ignore */ moduleURL).catch(error=>{throw Error(`Jolt 模块 ${moduleURL}: ${String(error)}`);});
+      assets.stage('初始化物理引擎');J=await module.default({wasmBinary:new Uint8Array(binary),locateFile:(file:string)=>new URL(file,moduleURL).href});return J;
+    })();
   }
   return loading;
 }

@@ -9,6 +9,7 @@
 import {now,type Theme} from './types';
 import * as N from './native';
 import {ruleSound} from './rule-sound';
+import {DiceAssets} from './asset-loading';
 import {AUDIO_MAPPING,IMPACT_VOICES,RESULT_HIT_VOICES,resultHitGain,resultHitRate,UI_EMPHASIS_GAIN,
   type AudioImpact,type ImpactStrength} from './audio-map';
 
@@ -18,7 +19,8 @@ export interface LoadedThemeAudio{impacts:Record<'die_on_ground'|'die_on_die',Re
 export interface RollingState{activity:number;pan:number}
 
 export class DiceAudio{
-  constructor(context:AudioContext|null=null,cache?:Map<string,LoadedThemeAudio>){this.ctx=context;if(cache)this.buffers=cache}
+  constructor(context:AudioContext|null=null,cache?:Map<string,LoadedThemeAudio>,private assets=new DiceAssets()){this.ctx=context;if(cache)this.buffers=cache}
+  private decoded=new Map<string,Promise<AudioBuffer>>();
   private ctx:AudioContext|null=null;
   private master:GainNode|null=null;
   private impactVoices:Voice[]=[];
@@ -67,7 +69,7 @@ export class DiceAudio{
     return{left,right,merger,source:null,endsAt:0};
   }
   async resume(){const ctx=this.ensure();if(!ctx)throw Error('Web Audio 不可用');if(ctx.state==='suspended')await ctx.resume()}
-  fork(){const ctx=this.ensure();if(!ctx)throw Error('Web Audio 不可用');const child=new DiceAudio(ctx,this.buffers);child.ruleBuffers=this.ruleBuffers;child.setVolume(this.volume);child.ensure();return child}
+  fork(){const ctx=this.ensure();if(!ctx)throw Error('Web Audio 不可用');const child=new DiceAudio(ctx,this.buffers,this.assets);child.decoded=this.decoded;child.ruleBuffers=this.ruleBuffers;child.setVolume(this.volume);child.ensure();return child}
   dispose(){this.stop('dispose');for(const voice of [...this.impactVoices,...this.hitVoices,this.rolling!,this.stingerVoice!]){
     if(voice){voice.left.disconnect();voice.right.disconnect();voice.merger.disconnect()}}
     this.master?.disconnect();}
@@ -81,11 +83,7 @@ export class DiceAudio{
     if(!ctx)throw Error('Web Audio 不可用');
     const cached=this.buffers.get(theme.id);
     if(cached)return cached;
-    const decode=async(path:string)=>{
-      const response=await fetch(base+path);
-      if(!response.ok)throw Error(`主题音频缺失: ${path}`);
-      return ctx.decodeAudioData(await response.arrayBuffer());
-    };
+    const decode=(path:string)=>{let pending=this.decoded.get(path);if(!pending){pending=this.assets.bytes(path).then(data=>ctx.decodeAudioData(data.slice(0))).catch(error=>{throw Error(`音频解码 ${base+path}: ${String(error)}`);});this.decoded.set(path,pending);}return pending;};
     const impacts={die_on_ground:{} as Record<ImpactStrength,AudioBuffer>,die_on_die:{} as Record<ImpactStrength,AudioBuffer>};
     await Promise.all((['die_on_ground','die_on_die'] as const).flatMap(surface=>
       (['light','medium','heavy'] as const).map(async strength=>{impacts[surface][strength]=await decode(theme.audio.impacts[surface][strength])})));
