@@ -51,6 +51,14 @@ export function setupActivityPage(){
  }
  const newest=()=>{flow.scrollTop=flow.scrollHeight;requestAnimationFrame(()=>{flow.scrollTop=flow.scrollHeight;});};
  document.addEventListener('suite-dice-content',newest);
+ // Reveal is a LOCAL command; the background verifies source ownership and completed secret.
+ rows.addEventListener('contextmenu',event=>{
+  const row=(event.target as HTMLElement).closest<HTMLElement>('.row.hidden-roll');if(!row)return;
+  if(row.dataset.rollerid!==player||!row.dataset.cid)return;event.preventDefault();
+  document.querySelector('.dice3d-context')?.remove();const menu=document.createElement('button');menu.className='dice3d-context';menu.textContent='公开暗骰并醒目';menu.style.cssText=`position:fixed;z-index:1000;left:${Math.min(event.clientX,innerWidth-140)}px;top:${Math.min(event.clientY,innerHeight-36)}px;border-radius:8px;padding:8px;background:#43464e;color:#fff;border:1px solid #8d9099;box-shadow:0 4px 14px #0007`;
+  menu.onclick=()=>{menu.remove();void OBR.broadcast.sendMessage('com.obr-suite/dice3d-reveal',{rollId:row.dataset.cid},{destination:'LOCAL'});};document.body.append(menu);setTimeout(()=>document.addEventListener('pointerdown',e=>{if(!menu.contains(e.target as Node))menu.remove();},{once:true}),0);
+ });
+ OBR.broadcast.onMessage('com.obr-suite/dice3d-highlight',event=>{if(event.connectionId!==connection)return;const cid=(event.data as any)?.cid;if(typeof cid!=='string')return;setTimeout(()=>{for(const row of rows.querySelectorAll<HTMLElement>('.row'))if(row.dataset.cid===cid)row.animate([{transform:'scale(1)',filter:'brightness(1)'},{transform:'scale(1.035)',filter:'brightness(1.6)'},{transform:'scale(1)',filter:'brightness(1)'}],{duration:700,easing:'ease-out'});},100);});
  function render(followNew=false){
   const atBottom=flow.scrollHeight-flow.clientHeight-flow.scrollTop<12;
   clearTimeout(timer);const now=Date.now();for(const [id,row] of active)if(row.expires<=now)active.delete(id);
