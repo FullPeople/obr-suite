@@ -1,0 +1,7 @@
+// Only class declarations travel with the permitted card list. No biographies,
+// portraits, inventory, runtime resources or additional reads are needed.
+const ruleKeys=['hd','proficiency','savingThrows','startingProficiencies','multiclassing','classFeatures','casterProgression','spellcastingAbility','preparedSpells','preparedSpellsProgression','preparedSpellsChange','spellsKnownProgression','spellsKnownProgressionFixed','cantripProgression','cantripChange','optionalfeatureProgression','_custom','_classEdition'];
+export function classSummary(document:any){
+ if(document.dnd_card_web)return (document.dnd_card_web.selections||[]).filter((s:any)=>s.entry?.kind==='class').map((s:any)=>({id:s.id,level:s.level,quantity:1,equipped:false,entry:{id:s.entry.id,kind:'class',name:s.entry.name,english:s.entry.english,source:s.entry.source,edition:s.entry.edition,packId:s.entry.packId,revision:s.entry.revision,entries:[],effects:s.entry.effects,choices:s.entry.choices,raw:Object.fromEntries(ruleKeys.filter(k=>s.entry.raw?.[k]!==undefined).map(k=>[k,s.entry.raw[k]]))}}));
+ return (document.classes||[]).filter((c:any)=>typeof c.name==='string').map((c:any,i:number)=>({id:`legacy-class-${i}`,level:c.level||1,quantity:1,equipped:false,entry:{id:`imported:class:${c.name}`,kind:'class',name:c.name,english:c.name,source:'IMPORTED',edition:'both',packId:'imported',revision:'0.3',entries:[],raw:{}}}));
+}
