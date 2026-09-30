@@ -10,7 +10,7 @@ out.mkdir(parents=True)
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 def head(repo):return subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo,text=True).strip()
 for repo in [w,s]:assert not subprocess.check_output(['git','status','--porcelain'],cwd=repo,text=True).strip(),str(repo)+' dirty'
-assert json.loads((build/'standalone/standalone-audit.json').read_text())['multiplayerModules']==[]
+assert json.loads((build/'standalone/standalone-audit.json').read_text(encoding='utf-8'))['multiplayerModules']==[]
 for repo,name in [(w,'source.zip'),(s,'suite-source.zip')]:
  subprocess.run(['git','archive','--format=zip','--output='+str(out/name),'HEAD'],cwd=repo,check=True)
  with zipfile.ZipFile(out/name) as z:
@@ -35,7 +35,7 @@ for folder in [patch,patch/'workbench']:
 (patch/'card-viewer').mkdir();shutil.copy2(out/'suite-source.zip',patch/'card-viewer/suite-source.zip')
 record={'webCommit':head(w),'suiteCommit':head(s),'announcementVersion':'0.1.16','targets':{}}
 for name,folder,manifest,version in [('card',site,'release.json','standalone-1.0.212'),('suite-dev',patch,'manifest-dev.json','1.0.212-dev')]:
- assert json.loads((folder/manifest).read_text())['version']==version
+ assert json.loads((folder/manifest).read_text(encoding='utf-8'))['version']==version
  files={p.relative_to(folder).as_posix():sha(p) for p in folder.rglob('*') if p.is_file()}
  if name=='suite-dev':assert all(p.startswith(('assets/','workbench/')) or p=='card-viewer/suite-source.zip' or '/' not in p and (p.endswith('.html') or p in ['manifest-dev.json','source.zip','suite-source.zip']) for p in files)
  (folder/'release212-hashes.json').write_text(json.dumps(files,indent=2));(out/(name+'-hashes.json')).write_text(json.dumps(files,indent=2))
