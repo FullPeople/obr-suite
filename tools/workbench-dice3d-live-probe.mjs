@@ -1,7 +1,8 @@
 import {createRequire} from 'node:module';import {readdirSync,writeFileSync} from 'node:fs';import {createHash} from 'node:crypto';import assert from 'node:assert/strict';
 const origin=process.env.DICE3D_PROBE_ORIGIN||'https://obr.dnd.center',prefix='/suite-dev/',worker=readdirSync('.cache/suite3d-root/assets').find(n=>n.startsWith('physics.worker-')&&n.endsWith('.js')),{chromium}=createRequire('F:/CodexWork/2026-09-27/feedback/web/package.json')('@playwright/test');
-const manifest=await (await fetch(origin+prefix+'manifest-dev.json?dice3d=211')).json();assert.equal(manifest.version,'1.0.211-dev');
-const hashes=process.env.DICE3D_PROBE_ORIGIN?{}:await (await fetch(origin+prefix+'dice3d211-hashes.json?dice3d=211')).json(),queue=Object.entries(hashes).filter(([name])=>!name.endsWith('source.zip'));let verified=0;
+const manifest=await (await fetch(origin+prefix+'manifest-dev.json?dice3d=check')).json();assert.equal(manifest.version,process.env.DICE3D_PROBE_VERSION||'1.0.211-dev');
+const release=manifest.version.split('.')[2].replace('-dev','');
+const hashes=process.env.DICE3D_PROBE_ORIGIN?{}:await (await fetch(origin+prefix+'dice3d'+release+'-hashes.json?dice3d='+release)).json(),queue=Object.entries(hashes).filter(([name])=>!name.endsWith('source.zip'));let verified=0;
 await Promise.all(Array.from({length:6},async()=>{for(;;){const task=queue.shift();if(!task)break;const [name,digest]=task,response=await fetch(origin+prefix+name+'?dice3d=211');assert.equal(response.status,200,name);assert.equal(createHash('sha256').update(new Uint8Array(await response.arrayBuffer())).digest('hex'),digest,name);verified++;}}));
 console.log('STATIC_HASHES_VERIFIED',verified);
 const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--enable-webgl','--disable-background-timer-throttling'],...(process.env.DICE3D_BROWSER_PROXY?{proxy:{server:process.env.DICE3D_BROWSER_PROXY}}:{})}),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[];

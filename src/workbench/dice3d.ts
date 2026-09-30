@@ -5,8 +5,12 @@ import {parseFormula,initialPhysicalCount} from '../../extensions/workbench-dice
 import {STYLE_CHOICES} from '../../extensions/workbench-dice3d/src/material-styles';
 import type {QuickRollRequest,DiceRollPayload} from '../modules/dice';
 import {workbenchObservation} from './observation';
+import type {DiceLoadingState} from './dice-loading-ui';
+import type {LoadProgress} from '../../extensions/workbench-dice3d/src/asset-loading';
 const MODAL=CHANNEL+'/overlay',RESULT='com.obr-suite/dice-roll',THEME='com.obr-suite/dice/3d-theme';
 let core:Controller|undefined,bus:BroadcastChannel|undefined,start:Promise<void>|undefined,ready=false,lastError='',connection='',profileStop:(()=>void)|undefined,historyStop:(()=>void)|undefined;
+let loadState:DiceLoadingState={ready:false,phase:'连接骰子渲染层'},renderProgress:LoadProgress|undefined,engineProgress:LoadProgress|undefined;
+function updateLoadProgress(){const parts=[renderProgress,engineProgress].filter(Boolean) as LoadProgress[];loadState={...loadState,done:parts.reduce((n,p)=>n+p.done,0),total:parts.reduce((n,p)=>n+p.total,0),bytes:parts.reduce((n,p)=>n+p.bytes,0),phase:renderProgress?.phase||engineProgress?.phase||'连接骰子渲染层'};}
 const waiters=new Map<string,{resolve:(p:DiceRollPayload)=>void;reject:(e:Error)=>void;timer:ReturnType<typeof setTimeout>}>(),records=new Map<string,ResultRecord>();
 export const resultListeners=new Set<(payload:DiceRollPayload,revealed:boolean)=>void>();
 const payload=(record:ResultRecord):DiceRollPayload=>{
@@ -21,7 +25,8 @@ export async function setupDice3d(){
  start=(async()=>{
   const observed=await workbenchObservation().read(),p=observed.player;connection=p.connectionId;
   bus=new BroadcastChannel(`${CHANNEL}:local:${connection}`);
-  bus.onmessage=e=>{const m=e.data;if(m.type==='state'){ready=m.state.ready;const error=m.state.error||'';if(error&&error!==lastError){void OBR.notification.show('3D 骰子：'+error,'ERROR');for(const [id,w] of waiters){clearTimeout(w.timer);waiters.delete(id);w.reject(Error(error));}}lastError=error;}
+  bus.onmessage=e=>{const m=e.data;if(m.type==='load-progress'){if(m.engine)engineProgress=m.progress;else renderProgress=m.progress;updateLoadProgress();}
+   else if(m.type==='state'){ready=m.state.ready;const error=m.state.error||'';loadState={...loadState,ready,physics:m.state.physics,overlay:m.state.overlay,error:ready?'':error};if(error&&error!==lastError){void OBR.notification.show('3D 骰子：'+error,'ERROR');for(const [id,w] of waiters){clearTimeout(w.timer);waiters.delete(id);w.reject(Error(error));}}lastError=error;}
    else if(m.type==='history')for(const r of m.records as ResultRecord[]){const previous=records.get(r.id);records.set(r.id,r);if(!r.formulaData)continue;const data=payload(r);
     if(!previous||previous.revealed!==r.revealed){resultListeners.forEach(fn=>fn(data,r.revealed));void OBR.broadcast.sendMessage(RESULT,data,{destination:'LOCAL'}).then(()=>{if(r.revealed)return Promise.all(['com.obr-suite/dice-history-reveal','com.obr-suite/dice3d-highlight'].map(channel=>OBR.broadcast.sendMessage(channel,{rollId:r.id,cid:r.formulaData?.context?.collectiveId??r.id},{destination:'LOCAL'})));});}
     const waiting=waiters.get(r.id);if(waiting){clearTimeout(waiting.timer);waiters.delete(r.id);waiting.resolve(data);}
@@ -32,10 +37,10 @@ export async function setupDice3d(){
   historyStop=OBR.broadcast.onMessage('com.obr-suite/dice3d-history-request',event=>{if(event.connectionId===connection)void dice3dRpc('history',[]).catch(error=>core?.fail('history-snapshot',error));});
   profileStop=workbenchObservation().onChange(()=>{const p=workbenchObservation().peek().player;if(p)void core?.setProfile(p.name,p.color,p.role).catch(e=>core?.fail('profile',e));});
   await core.init();await OBR.modal.open({id:MODAL,url:`/suite-dev/dice3d/overlay.html?client=${encodeURIComponent(connection)}&v=${BUILD}`,fullScreen:true,hideBackdrop:true,hidePaper:true,disablePointerEvents:true});
- })().catch(error=>{teardownDice3d();throw error});return start;
+ })().catch(error=>{teardownDice3d();loadState={...loadState,error:String(error)};throw error});return start;
 }
-export function teardownDice3d(){core?.dispose();core=undefined;profileStop?.();profileStop=undefined;historyStop?.();historyStop=undefined;bus?.close();bus=undefined;start=undefined;ready=false;lastError='';records.clear();for(const w of waiters.values()){clearTimeout(w.timer);w.reject(Error('3D 投骰模块已关闭'));}waiters.clear();void OBR.modal.close(MODAL);}
-async function whenReady(){await setupDice3d();const began=performance.now();while(!ready){if(lastError)throw Error(lastError);if(performance.now()-began>30000)throw Error('3D 模型/物理层准备超时');await new Promise(r=>setTimeout(r,40));}}
+export function teardownDice3d(close=true){core?.dispose();core=undefined;profileStop?.();profileStop=undefined;historyStop?.();historyStop=undefined;bus?.close();bus=undefined;start=undefined;ready=false;lastError='';renderProgress=undefined;engineProgress=undefined;loadState={ready:false,phase:'连接骰子渲染层'};records.clear();for(const w of waiters.values()){clearTimeout(w.timer);w.reject(Error('3D 投骰模块已关闭'));}waiters.clear();if(close)void OBR.modal.close(MODAL);}
+async function whenReady(){await setupDice3d();if(!ready)throw Error(lastError||'正在加载骰子，首次渲染会花费一点时间，请等待....');}
 function theme(metadata:Record<string,unknown>):ThemeID{const id=metadata[THEME]??'ink_sketch';if(!STYLE_CHOICES.some(s=>s.id===id))throw Error('未知 3D 材质：'+String(id));return id as ThemeID;}
 export async function submitDice3d(req:QuickRollRequest,compat?:Partial<DiceRollPayload>):Promise<DiceRollPayload>{
  await whenReady();const observed=await workbenchObservation().read(),id=compat?.rollId||crypto.randomUUID();let formula=String(req.expression||'');
@@ -49,6 +54,8 @@ export async function submitDice3d(req:QuickRollRequest,compat?:Partial<DiceRoll
 }
 export async function submitCompat3d(opts:any){const result=await submitDice3d({expression:opts.expression||'',itemId:opts.itemId,label:opts.label,hidden:opts.hidden,collectiveId:opts.collectiveId},{...opts,total:opts.total??opts.dice.filter((d:any)=>!d.loser).reduce((n:number,d:any)=>n+(d.subtract?-d.value:d.value),opts.modifier??0)});return result.rollId;}
 export async function dice3dRpc(method:string,args:any[]){
+ if(method==='status'){if(!start&&!loadState.error)void setupDice3d().catch(()=>{});return {...loadState};}
+ if(method==='retry'){if(ready||records.size||waiters.size)throw Error('已有投骰记录时不能重置物理层，请刷新房间重试');teardownDice3d(false);await OBR.modal.close(MODAL);await setupDice3d();return {...loadState};}
  if(method==='submit')return submitDice3d(args[0]);
  if(method==='history'){for(const r of records.values()){if(!r.formulaData)continue;await OBR.broadcast.sendMessage(RESULT,payload(r),{destination:'LOCAL'});if(r.complete)await OBR.broadcast.sendMessage('com.obr-suite/dice-history-reveal',{rollId:r.id},{destination:'LOCAL'});}return;}
  if(method==='material'){const id=args[0];if(!STYLE_CHOICES.some(s=>s.id===id))throw Error('未知材质');return OBR.player.setMetadata({[THEME]:id});}

@@ -1,10 +1,11 @@
 import {RollAudioMixer} from './audio-mixer';
-import {CHANNEL} from './types';
+import {CHANNEL,type Catalog} from './types';
+import {DiceAssets} from './asset-loading';
 /** Persistent overlay owns sound, not the transient Owlbear popover. The user's gesture in the
  * same-origin panel explicitly requests resume; actual browser state is reported, never assumed. */
-export function mountAudioHost(client:string){
+export function mountAudioHost(client:string,assets?:DiceAssets,catalog?:Catalog){
   const bus=new BroadcastChannel(`${CHANNEL}:local:${client}`);
-  const mixer=new RollAudioMixer((event,detail)=>bus.postMessage({type:'renderer-event',event,detail}));
+  const mixer=new RollAudioMixer((event,detail)=>bus.postMessage({type:'renderer-event',event,detail}),assets,catalog);
   const stored=Number(localStorage.getItem('obr-suite/dice3d/volume')??100);mixer.setVolume(Number.isFinite(stored)?stored/100:1);
   const state=()=>bus.postMessage({type:'audio-state',...mixer.snapshot()});
   bus.onmessage=e=>{const p=e.data;void (async()=>{

@@ -13,6 +13,7 @@ import {createDiceMaterial,instanceDiceMaterial,addSketchOutline,disposeDiceDeco
 import {addDynamicOutline} from './dynamic-decorations';
 import {questionMask} from './question-mask';
 import {diePresence} from './die-presence';
+import {DiceAssets} from './asset-loading';
 export interface RollPresentation{cue:Cue;show?:CueRenderer;births?:number[];ruleSounds?:AudioPlan['rules'];onPrepare?:(meshes:T.Mesh[])=>void;onFrame?:(age:number,meshes:T.Mesh[])=>void;onDispose?:()=>void}
 type Active={roll:Roll;meshes:T.Mesh[];start:number;released:boolean;settled:boolean;cue:Cue;show:CueRenderer;slot:number;births?:number[];onFrame?:RollPresentation['onFrame'];onDispose?:()=>void};
 /** Everything the panel's audio engine needs, derived once from the authoritative trace. */
@@ -52,7 +53,7 @@ export class DiceRenderer {
   private observer?:PerformanceObserver;
   private metricsSince=performance.now();
   private q0=new T.Quaternion();private q1=new T.Quaternion();
-  constructor(private container:HTMLElement,private catalog:Catalog,private emit:(event:string,detail:any)=>void){
+  constructor(private container:HTMLElement,private catalog:Catalog,private emit:(event:string,detail:any)=>void,private assets=new DiceAssets()){
     this.gl=new T.WebGLRenderer({alpha:true,antialias:true,powerPreference:'high-performance'});
     this.gl.setClearColor(0,0);this.gl.setPixelRatio(Math.min(devicePixelRatio,1.5));
     this.gl.outputColorSpace=T.SRGBColorSpace;this.gl.toneMapping=T.ACESFilmicToneMapping;this.gl.toneMappingExposure=1;
@@ -76,17 +77,19 @@ export class DiceRenderer {
     if(PerformanceObserver.supportedEntryTypes.includes('longtask')){this.observer=new PerformanceObserver(list=>{for(const e of list.getEntries())if(e.startTime>=this.metricsSince)this.longTasks.push(e.duration);if(this.longTasks.length>5000)this.longTasks.splice(0,1000)});this.observer.observe({entryTypes:['longtask']})}
   }
   async init(){
-    const loader=new GLTFLoader(),textures=new T.TextureLoader();
+    const loader=new GLTFLoader();
     const kinds=Object.keys(this.catalog.dice) as Kind[];
     // 31 assets; a sequential walk made the ready wait several round trips longer than needed.
     await Promise.all(kinds.map(async kind=>{
-      const gltf=await loader.loadAsync(url(this.catalog.dice[kind].model));
+      const path=this.catalog.dice[kind].model;
+      const gltf=await loader.parseAsync(await this.assets.bytes(path),url('')).catch(error=>{throw Error(`模型解析 ${url(path)}: ${String(error)}`);});
       const mesh=gltf.scene.getObjectByName('RenderMesh') as T.Mesh;
       if(!mesh?.isMesh||!mesh.geometry.getAttribute('uv1'))throw Error(`模型缺少 RenderMesh/数字 UV: ${kind}`);
       const geo=mesh.geometry.clone();geo.scale(40,40,40);geo.computeBoundingSphere();geo.setAttribute('diceGlyph',geo.getAttribute('uv1'));this.geometry.set(kind,geo);
     }));
     const masks=new Map<string,Promise<T.Texture>>();
-    const loadMask=(path:string)=>{let promise=masks.get(path);if(!promise){promise=textures.loadAsync(url(path)).then(mask=>{
+    const loadMask=(path:string)=>{let promise=masks.get(path);if(!promise){promise=this.assets.bytes(path).then(async data=>new T.Texture(await createImageBitmap(new Blob([data])))).catch(error=>{throw Error(`贴图解码 ${url(path)}: ${String(error)}`);}).then(mask=>{
+      mask.needsUpdate=true;
       mask.flipY=false;mask.anisotropy=Math.min(8,this.gl.capabilities.getMaxAnisotropy());return mask;});masks.set(path,promise)}return promise;};
     await Promise.all(Object.values(this.catalog.themes).flatMap(theme=>kinds.map(async kind=>{
       this.materials.set(`${theme.id}:${kind}`,createDiceMaterial(theme,await loadMask(theme.masks[kind])));
@@ -94,6 +97,7 @@ export class DiceRenderer {
     for(const kind of kinds){const mask=questionMask(kind);mask.anisotropy=Math.min(8,this.gl.capabilities.getMaxAnisotropy());
       for(const theme of Object.values(this.catalog.themes))this.materials.set(`${theme.id}:${kind}:hidden`,createDiceMaterial(theme,mask));}
     // Compile every shader variant while the layer is transparent, before ready ACK.
+    this.assets.stage('正在首次编译渲染');
     const warm:T.Mesh[]=[];for(const [key,material] of this.materials){const [id,kind]=key.split(':') as [ThemeID,Kind];const geometry=this.geometry.get(kind)!;const m=new T.Mesh(geometry,material);m.castShadow=true;m.receiveShadow=true;if(this.catalog.themes[id].style==='sketch')addSketchOutline(m,geometry);else addDynamicOutline(m,geometry,this.catalog.themes[id].style!);warm.push(m);this.diceSpace.add(m)}
     await this.gl.compileAsync(this.scene,this.camera);this.gl.render(this.scene,this.camera);this.gl.getContext().finish();for(const m of warm){disposeDiceDecorations(m);this.diceSpace.remove(m)}
     this.ready=true;this.gl.render(this.scene,this.camera);this.gl.getContext().finish();this.gl.domElement.style.opacity='1';
