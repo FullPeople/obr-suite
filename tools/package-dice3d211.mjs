@@ -1,5 +1,5 @@
 import {readFileSync,writeFileSync,mkdirSync,readdirSync,copyFileSync,existsSync} from 'node:fs';import {resolve,join,relative} from 'node:path';import {execFileSync} from 'node:child_process';import {createHash} from 'node:crypto';
-const root=resolve(import.meta.dirname,'..'),out=join(root,'.cache/dice3d211'),candidate=join(out,'delta');if(existsSync(candidate))throw Error('Delta already exists; use a new candidate directory');mkdirSync(candidate,{recursive:true});
+const root=resolve(import.meta.dirname,'..'),out=join(root,'.cache',process.env.DICE3D_CANDIDATE||'dice3d211'),candidate=join(out,'delta');if(existsSync(candidate))throw Error('Delta already exists; use a new candidate directory');mkdirSync(candidate,{recursive:true});
 function copy(from,to){mkdirSync(to,{recursive:true});for(const item of readdirSync(from,{withFileTypes:true})){const a=join(from,item.name),b=join(to,item.name);if(item.isDirectory())copy(a,b);else if(item.isFile())copyFileSync(a,b);}}
 // Do not ship old public assets/announcements/manifests or rebuild Web. The remote candidate
 // starts as a byte-exact copy of live 210; this delta contains only freshly built Suite entries.

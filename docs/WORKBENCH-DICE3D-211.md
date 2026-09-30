@@ -34,6 +34,13 @@
 - 33 项定向检查：Jolt 1.1.0 文件锁散列、七骰精确对称群、首波实体数量、d100 的 00/0、暗骰信息脱敏、压缩/加密大记录、未授权无明文、原插件适配关闭、每行重复总数/加值等。
 - 三客户端真实 Jolt/WebGL：普通、优势、重复、d100、真实保底翻面、低点重投、乘法；三个页面轨迹/结果一致，GM 私密权限、公开不重演、三人不同材质独立提交通过，浏览器错误 0。证据 `.cache/dice3d-evidence/report.json`。
 - 真实 Owlbear SDK + 模拟宿主：百分骰 +5、129 的固定既有结果、来源身份/颜色、私密范围、分组公开、仅 LOCAL 结果和穿透地图按钮通过。未连接真人枭熊房间。证据 `.cache/dice3d-evidence/sdk.json`。
+- 正式静态产物的真实浏览器检查：加载编译后的 worker、Jolt/WASM、模型、字体与覆盖层，`2d6+1d20+5` 实际结算为 32，完成物理播放，浏览器错误 0。此检查不替换模拟器、不向房间发送任何消息。证据 `.cache/dice3d-evidence/production-local.json`。
+
+## 首次正式候选发现的问题与恢复
+
+第一次 211 候选的逐文件散列检查通过，但公网真实物理播放暴露了开发服务器未能发现的资源路径错误：根入口编译的 worker 使用根 `BASE_URL`，请求了 `/suite-dev/vendor/jolt-physics.wasm.js`；引擎实际属于 `/suite-dev/dice3d/vendor/`。立即原子恢复 210，错误候选保留于服务器 `suite-dev-dice3d211-first-candidate`，没有以散列 PASS 冒充可用，也没有影响旧插件。
+
+修复为使用 3D 模块统一的 `url()`，不再依赖外层编译入口的 base；补齐覆盖层图标，消除浏览器额外的 favicon 404。修复后重新构建正式产物，并以 `workbench-dice3d-static-probe.mjs` 先验证实际正式包，再以 `workbench-dice3d-live-probe.mjs` 验证实际公网产物。两者都使用生产 worker/Jolt/覆盖层，不能将开发测试结果替代它们。
 
 ```powershell
 node node_modules/typescript/bin/tsc --noEmit

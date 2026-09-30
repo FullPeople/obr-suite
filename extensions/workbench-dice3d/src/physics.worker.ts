@@ -9,7 +9,7 @@
  * Public units are metres, kilograms and seconds. All engine lengths are conditioned by the same
  * factor of 40; the emitted trajectory uses visual units (1 unit = 0.025 m).
  */
-import {KINDS,type Catalog,type Contact,type Kind,type Request,type Roll,type Viewport} from './types';
+import {KINDS,url,type Catalog,type Contact,type Kind,type Request,type Roll,type Viewport} from './types';
 import * as N from './native';
 import {spreadTargets,distributedThrow} from './launch-layout';
 import {incomingBounds} from './physics-capacity';
@@ -48,7 +48,7 @@ const isWall=(tag:number)=>tag===WALL_TAG||(tag>=ENTRY_TAG&&tag<ENTRY_TAG+4);
 
 function engine():Promise<any>{
   if(!loading){
-    const moduleURL=new URL(import.meta.env.BASE_URL+'vendor/jolt-physics.wasm.js',self.location.origin).href;
+    const moduleURL=new URL(url('vendor/jolt-physics.wasm.js'),self.location.origin).href;
     loading=import(/* @vite-ignore */ moduleURL).then(m=>m.default({locateFile:(file:string)=>new URL(file,moduleURL).href})).then(m=>{J=m;return m});
   }
   return loading;
