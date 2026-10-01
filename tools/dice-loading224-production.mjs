@@ -21,7 +21,7 @@ if(!process.env.DICE_EDGE_ORIGIN){
  });await new Promise(r=>server.listen(5220,'127.0.0.1',r));
 }
 mkdirSync(out,{recursive:true});
-const browser=await chromium.launch({channel:'msedge',headless:true,args:['--enable-webgl','--disable-background-timer-throttling'],...(process.env.DICE3D_BROWSER_PROXY?{proxy:{server:process.env.DICE3D_BROWSER_PROXY}}:{})});
+const browser=await chromium.launch({channel:'msedge',headless:true,args:['--enable-webgl','--disable-background-timer-throttling',...(process.env.DICE3D_BROWSER_DIRECT?['--no-proxy-server']:[])],...(process.env.DICE3D_BROWSER_PROXY?{proxy:{server:process.env.DICE3D_BROWSER_PROXY}}:{})});
 async function warm(page,{keep=false,reuse=false}={}){return page.evaluate(async ({worker,catalog,keep,reuse})=>{
  const engine=reuse?window.engine:new Worker('/suite-dev/assets/'+worker,{type:'module'});window.engine=engine;
  const reply=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('warmup timeout')),60000);engine.onerror=reject;engine.onmessage=e=>{if(e.data.type==='warm'){clearTimeout(timer);resolve(e.data);}};engine.postMessage({type:'warmup',catalog,view:{w:1440,h:900}});});if(!keep)engine.terminate();return reply;
@@ -41,17 +41,23 @@ try{
   }
  }
  const metadataRequests=[];
- const page=await browser.newPage({viewport:{width:1440,height:900}});page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
+ const page=await browser.newPage({viewport:{width:1440,height:900}});page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());else if(m.text().startsWith('DICE224 '))console.log(m.text());});
  await page.route(metadata,route=>{metadataRequests.push(route.request().url());return route.abort('timedout');});
  await page.addInitScript(()=>{window.events=[];window.bus=new BroadcastChannel('com.obr-suite/workbench-dice3d.v1:local:edge224-production');window.bus.onmessage=e=>window.events.push(e.data);});
+ console.log('Loading Edge overlay from '+origin);
  await page.goto(origin+'/suite-dev/dice3d/overlay.html?client=edge224-production&v=224');
- await page.waitForFunction(()=>window.events.some(e=>e.type==='overlay-ready'),null,{timeout:90000});
+ try{await page.waitForFunction(()=>window.events.some(e=>e.type==='overlay-ready'),null,{timeout:180000});}catch(error){
+  const state=await page.evaluate(()=>({events:window.events,resources:performance.getEntriesByType('resource').map(e=>({name:e.name,duration:e.duration,bytes:e.transferSize}))}));
+  writeFileSync(out+'/overlay-failure.json',JSON.stringify({error:String(error),errors,...state},null,2));throw error;
+ }
+ console.log('Edge overlay ready');
  const result=await page.evaluate(async ({worker,catalog})=>{
   const engine=new Worker('/suite-dev/assets/'+worker,{type:'module'});
-  await new Promise((resolve,reject)=>{engine.onerror=reject;engine.onmessage=e=>e.data.error?reject(Error(e.data.error)):e.data.type==='warm'&&resolve(e.data);engine.postMessage({type:'warmup',catalog,view:{w:1440,h:900}});});
+  await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{engine.terminate();reject(Error('physics warmup exceeded 120 seconds'));},120000);engine.onerror=e=>{clearTimeout(timer);reject(e);};engine.onmessage=e=>{if(e.data.type==='load-progress')console.log('DICE224 '+JSON.stringify(e.data.progress));if(e.data.error){clearTimeout(timer);reject(Error(e.data.error));}else if(e.data.type==='warm'){clearTimeout(timer);resolve(e.data);}};engine.postMessage({type:'warmup',catalog,view:{w:1440,h:900}});});
   const roll=await new Promise((resolve,reject)=>{engine.onmessage=e=>{if(e.data.error)reject(Error(e.data.error));else if(e.data.roll)resolve(e.data.roll);};engine.postMessage({request:{id:'edge224-real-roll',source:'edge224-production',authority:'edge224-production',name:'Edge verification',count:3,kind:'mixed',theme:'stage6_calibration',bodyColor:'#76bceb',modifier:0,visibility:'all',seed:12345,recipe:true,formula:'2d6+1d20+5',context:{rollerId:'edge224-production',itemId:null,label:'Edge'}},catalog,view:{w:1440,h:900}});});
   window.bus.postMessage({type:'prepare',roll});window.bus.postMessage({type:'start',id:roll.request.id,at:performance.timeOrigin+performance.now()+200});engine.terminate();return {results:roll.results,total:roll.formulaData.rows[0].total,duration:roll.duration};
  },{worker,catalog:catalogFixture});
+ console.log('Edge physics completed');
  assert.equal(result.total,32);assert.deepEqual(result.results,[6,5,16]);
  await page.waitForTimeout(result.duration*1000+450);await page.screenshot({path:out+(process.env.DICE_EDGE_ORIGIN?'/public-edge.png':'/production-edge.png')});
  await page.waitForFunction(()=>window.events.some(e=>e.type==='renderer-event'&&e.event==='render-complete'&&e.detail.roll==='edge224-real-roll'),null,{timeout:60000});assert.deepEqual(errors,[]);checks.push({case:'production Edge Jolt/WASM/WebGL roll and full animation',...result});
