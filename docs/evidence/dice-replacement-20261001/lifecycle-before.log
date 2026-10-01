@@ -1,0 +1,44 @@
+PASS pending workbench startup cannot revive subscriptions or renderer after teardown
+PASS pending token result startup cannot revive its channel after teardown
+PASS remote history clicks cannot change local token labels
+PASS same history click removes the label completely
+PASS history replacement is exclusive and stale close cannot reset its toggle
+PASS group history cancels both duplicates and late group results stay dismissed
+PASS group explicit show and hide still work after history cancellation
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+2 !== 0
+
+    at file:///workspace/suite-host-repair/.local-evidence/history-replacement-before/dice-lifecycle.mjs:1256:8 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 2,
+  expected: 0,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.19.0
+node:internal/errors:985
+  const err = new Error(message);
+              ^
+
+Error: Command failed: /opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node .local-evidence/history-replacement-before/dice-lifecycle.mjs
+    at genericNodeError (node:internal/errors:985:15)
+    at wrappedFn (node:internal/errors:539:14)
+    at checkExecSyncError (node:child_process:942:11)
+    at execFileSync (node:child_process:978:15)
+    at file:///workspace/suite-host-repair/tools/workbench-dice-lifecycle-217.mjs:3:1485 {
+  status: 1,
+  signal: null,
+  output: [ null, null, null ],
+  pid: 10371,
+  stdout: null,
+  stderr: null
+}
+
+Node.js v24.19.0

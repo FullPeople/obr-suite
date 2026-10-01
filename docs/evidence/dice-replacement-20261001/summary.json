@@ -1,0 +1,42 @@
+{
+  "runtimeSuiteCommit": "3fc7c710019bd7ac705915d5b91e633aeeb4215f",
+  "baselineSuiteCommit": "259672c6e7f504c43deca6ee340f2bbf62a865d8",
+  "pairedWebCommit": "4da0b4cd6f37d1c2ad6181baeee2864d25df50ac",
+  "webSourceUnmodified": true,
+  "originalWebScriptUnmodified": true,
+  "pairedBefore": {
+    "passed": 13,
+    "failed": 2,
+    "exitCode": 1
+  },
+  "pairedAfter": {
+    "passed": 15,
+    "failed": 0,
+    "exitCode": 0
+  },
+  "pairedWidths": [
+    390,
+    1280
+  ],
+  "hostBrowser": {
+    "passed": 59,
+    "failed": 0,
+    "widths": [
+      360,
+      1280
+    ]
+  },
+  "lifecycle": {
+    "passed": 18,
+    "includesReadyFalse": true,
+    "includesNewRollAfterCancel": true,
+    "includesLateOldMember": true,
+    "historyRetained": true
+  },
+  "typecheckPassed": true,
+  "devBuildPassed": true,
+  "stableBuildPassed": true,
+  "runtimeSourceFilesMatched": 616,
+  "realRoomVerified": false,
+  "deployed": false
+}

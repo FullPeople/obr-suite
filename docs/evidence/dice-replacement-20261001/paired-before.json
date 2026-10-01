@@ -1,0 +1,198 @@
+{
+  "suiteSource": "/workspace/suite-host-repair",
+  "suiteSha": "259672c6e7f504c43deca6ee340f2bbf62a865d8",
+  "webSha": "4da0b4cd6f37d1c2ad6181baeee2864d25df50ac",
+  "browser": "151.0.7922.173",
+  "installedSdk": true,
+  "productionWebBridge": true,
+  "productionSuiteDiceRpc": true,
+  "productionSuiteHistory": true,
+  "productionOverlayLabels": true,
+  "physicalRendererReplaced": true,
+  "controllerReplaced": true,
+  "realOwlbearRoom": false,
+  "checks": [
+    {
+      "name": "390 Web panel single shows real Suite DOM",
+      "passed": true
+    },
+    {
+      "name": "390 Web panel second click removes Suite DOM",
+      "passed": false,
+      "replayIntents": [
+        {
+          "channel": "com.obr-suite/dice-replay",
+          "data": {
+            "cid": "single",
+            "action": "open"
+          },
+          "options": {
+            "destination": "LOCAL"
+          }
+        },
+        {
+          "channel": "com.obr-suite/dice-replay",
+          "data": {
+            "cid": "single",
+            "action": "open"
+          },
+          "options": {
+            "destination": "REMOTE"
+          }
+        },
+        {
+          "channel": "com.obr-suite/dice-replay",
+          "data": {
+            "cid": "single",
+            "action": "close"
+          },
+          "options": {
+            "destination": "LOCAL"
+          }
+        },
+        {
+          "channel": "com.obr-suite/dice-replay",
+          "data": {
+            "cid": "single",
+            "action": "close"
+          },
+          "options": {
+            "destination": "REMOTE"
+          }
+        }
+      ],
+      "remaining": [
+        {
+          "group": "group-synthetic",
+          "text": "14member",
+          "opacity": "1"
+        }
+      ]
+    },
+    {
+      "name": "390 Web panel group is exclusive",
+      "passed": true
+    },
+    {
+      "name": "390 Web panel group second click removes DOM",
+      "passed": true
+    },
+    {
+      "name": "390 Action history same row removes DOM",
+      "passed": true
+    },
+    {
+      "name": "390 Action switches history exclusively",
+      "passed": true
+    },
+    {
+      "name": "390 Action rapid double click cancels after delayed SDK delivery",
+      "passed": true,
+      "intent": [
+        {
+          "cid": "single",
+          "action": "open"
+        },
+        {
+          "cid": "single",
+          "action": "close"
+        }
+      ],
+      "remaining": 0
+    },
+    {
+      "name": "1280 Web panel single shows real Suite DOM",
+      "passed": true
+    },
+    {
+      "name": "1280 Web panel second click removes Suite DOM",
+      "passed": false,
+      "replayIntents": [
+        {
+          "channel": "com.obr-suite/dice-replay",
+          "data": {
+            "cid": "single",
+            "action": "open"
+          },
+          "options": {
+            "destination": "LOCAL"
+          }
+        },
+        {
+          "channel": "com.obr-suite/dice-replay",
+          "data": {
+            "cid": "single",
+            "action": "open"
+          },
+          "options": {
+            "destination": "REMOTE"
+          }
+        },
+        {
+          "channel": "com.obr-suite/dice-replay",
+          "data": {
+            "cid": "single",
+            "action": "close"
+          },
+          "options": {
+            "destination": "LOCAL"
+          }
+        },
+        {
+          "channel": "com.obr-suite/dice-replay",
+          "data": {
+            "cid": "single",
+            "action": "close"
+          },
+          "options": {
+            "destination": "REMOTE"
+          }
+        }
+      ],
+      "remaining": [
+        {
+          "group": "group-synthetic",
+          "text": "14member",
+          "opacity": "1"
+        }
+      ]
+    },
+    {
+      "name": "1280 Web panel group is exclusive",
+      "passed": true
+    },
+    {
+      "name": "1280 Web panel group second click removes DOM",
+      "passed": true
+    },
+    {
+      "name": "1280 Action history same row removes DOM",
+      "passed": true
+    },
+    {
+      "name": "1280 Action switches history exclusively",
+      "passed": true
+    },
+    {
+      "name": "1280 Action rapid double click cancels after delayed SDK delivery",
+      "passed": true,
+      "intent": [
+        {
+          "cid": "single",
+          "action": "open"
+        },
+        {
+          "cid": "single",
+          "action": "close"
+        }
+      ],
+      "remaining": 0
+    },
+    {
+      "name": "no browser script errors",
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "errors": []
+}

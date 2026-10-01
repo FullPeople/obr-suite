@@ -1,0 +1,63 @@
+{
+  "allPassed": true,
+  "checked": 1061,
+  "pinnedAssets": 56,
+  "retainedPublicAssets": [
+    {
+      "path": "icon.svg",
+      "bytes": 3162,
+      "sha256": "5cd729b4d98931e45151f2e3cc70de749320dbbc49ab01249897d465bd34ee30"
+    },
+    {
+      "path": "DND5E\u4eba\u7269\u5361_\u60b2\u7075_\u5f17\u4eba_\u67ad\u718a\u9002\u914d\u7248.xlsx",
+      "bytes": 966478,
+      "sha256": "94444fda4206d579125418b0007b89c414b86c27d6b98655f81f3f1ce65e8fe6"
+    },
+    {
+      "path": "DND5R\u4eba\u7269\u5361_\u60b2\u7075_\u5f17\u4eba_\u67ad\u718a\u9002\u914d\u7248.xlsx",
+      "bytes": 1733242,
+      "sha256": "264fc65569e3e80932544af548830ca70f10ee308493c8b0234608fcd01c9b04"
+    },
+    {
+      "path": "exe_icon.png",
+      "bytes": 151715,
+      "sha256": "08c433a8a8a06c01c80d7897ec834d7b7215cd0e6b9d27ed806be97c68989546"
+    },
+    {
+      "path": "d4.png",
+      "bytes": 16179,
+      "sha256": "b1d14932213007af1bccf32445cb1a8366c11f72d234d15c6c96ade9123770fc"
+    },
+    {
+      "path": "d6.png",
+      "bytes": 4542,
+      "sha256": "9e63305eb7d6a7b5a73ec92343104f80bc4da505b740566aed215e0008bfa2fc"
+    },
+    {
+      "path": "d20.png",
+      "bytes": 16375,
+      "sha256": "a4b932d681d1f3c0f455774ef0c9f2b68ae18799a3758dc879620dadfd9d15fd"
+    },
+    {
+      "path": "d8.png",
+      "bytes": 16742,
+      "sha256": "c89f4586afae071dd29d207657ab3eaa88a533d3524ee62a1da73fcf0ccf6146"
+    },
+    {
+      "path": "d10.png",
+      "bytes": 17530,
+      "sha256": "283de4f3767d0f68680ebb0b2baec83c01539b4c3ca7e5244240b9a4ec56a71a"
+    },
+    {
+      "path": "d12.png",
+      "bytes": 14326,
+      "sha256": "7766e3e0f9052ef7b4474956ff7b49fdd8060185cf080a7b108211ad1c4cbe5a"
+    },
+    {
+      "path": "d100.png",
+      "bytes": 11720,
+      "sha256": "6f7b0de50f5f3be442a1963e03d8453893a959611905c0a337d100cabf2afc65"
+    }
+  ],
+  "missing": []
+}

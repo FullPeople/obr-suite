@@ -1,0 +1,30 @@
+PASS different target formulas share one physical frontier
+PASS long rAF gap preserves unplayed animation and future barriers
+PASS DM multiselection creates group
+PASS DC state survives selection clear
+PASS visibility changes do not close the group
+PASS settlement keeps results and cannot repeat successful deltas
+PASS close removes group
+PASS uncertain receipt cannot reapply damage
+PASS scene change discards locked result
+PASS late close cannot dismiss a different group
+PASS old roll completion cannot unlock a new in-flight group
+PASS 100 normal targets accepted in one 100-die physical frontier (not a GPU performance claim)
+PASS 50 adv targets accepted in one 100-die physical frontier (not a GPU performance claim)
+PASS 50 dis targets accepted in one 100-die physical frontier (not a GPU performance claim)
+PASS 101 normal targets rejected before state mutation or engine submission
+PASS 51 adv targets rejected before state mutation or engine submission
+PASS 51 dis targets rejected before state mutation or engine submission
+PASS 100 mixed-visibility parts retain one shared start barrier within message size budget
+PASS protocol rejects over-budget group parts before adding any child reservation
+PASS public mixed sibling contains no master seed or hidden face; both keep the same batch
+PASS one aborted child releases the complete unstarted group barrier
+PASS receive timeout immediately releases the whole group barrier
+PASS authorized late abort cleans leases after inbound disappeared; foreign abort is ignored
+PASS group initiative uses the same batch and stores raw d20 once
+PASS rebinding before initiative write cannot mutate a replacement character
+PASS combat preparation selects group initiative and returns to save before rolling
+PASS pre-roll HP/Max HP/AC edits preserve repeated explicit adjustments without DC
+PASS DC half-on-success applies to the selected field and retry cannot change fields
+PASS partial pre-roll edit locks selection and only retries unfinished targets
+{"checks":29,"success":true}
