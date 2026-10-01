@@ -1,0 +1,84 @@
+{
+  "web": {
+    "remote": "https://github.com/FullPeople/DND-card-web.git",
+    "branches": [
+      {
+        "branch": "codex/selection-follow223",
+        "sha": "84d50cc5e183b982a40fb695d591bbde9213aeeb",
+        "included": true
+      },
+      {
+        "branch": "codex/a4-wiki-recovery-229",
+        "sha": "8c58542bc02692041bfb4289f09e851994f5ba05",
+        "included": true
+      },
+      {
+        "branch": "codex/startup-226",
+        "sha": "6dee5fb413fdfe261fb0ff033b7e6e7de181eb1e",
+        "included": true
+      },
+      {
+        "branch": "main",
+        "sha": "f9f4ba39ae7c1cc272830841049a386489a608d4",
+        "included": true
+      },
+      {
+        "branch": "codex/resource-dashboard222",
+        "sha": "f6f9068cbae4db6ef225f9e857dda317c1c5ad00",
+        "included": true
+      }
+    ],
+    "integrationMerge": "c8432105b39b2dd43b354b9755d54db47ee82581"
+  },
+  "suite": {
+    "remote": "https://github.com/FullPeople/obr-suite.git",
+    "branches": [
+      {
+        "branch": "codex/selection-follow223-suite",
+        "sha": "a8dc0c6a941429a4f318057f1c393f6a8c6fb788",
+        "included": true
+      },
+      {
+        "branch": "codex/startup-226",
+        "sha": "1da2715def0aee1f6e710de7622e4adb7d2a6a01",
+        "included": true
+      },
+      {
+        "branch": "codex/dice-loading-225",
+        "sha": "5d8b0e440f140d15e6b1612c6444f7d9dae3f688",
+        "included": true
+      },
+      {
+        "branch": "codex/dice-edge-220",
+        "sha": "ecb1d50cf18e4cd95c29366ed6bb3bda6db7f901",
+        "included": true
+      },
+      {
+        "branch": "codex/automation-223",
+        "sha": "2d9769dbedbe3e26a55d276b4b7113b7c5e91e9c",
+        "included": true
+      },
+      {
+        "branch": "codex/layout-nona4-225",
+        "sha": "c588fa82592e88c4e60f7f63fa9a9c29b282b8f4",
+        "included": true
+      },
+      {
+        "branch": "codex/dice-loading-224",
+        "sha": "a43554155c9af4c6898e0dcc54c95fb8d170e9d2",
+        "included": true
+      },
+      {
+        "branch": "codex/resource-dashboard222",
+        "sha": "7a8e382660615d23542c72392e908e7b3da1ac6d",
+        "included": true
+      },
+      {
+        "branch": "dev",
+        "sha": "bd06d5a81b81eae4d18e29e0d67e5fceb0213aa5",
+        "included": true
+      }
+    ],
+    "integrationMerge": "ac03f733443013baeb45fa545c1410013ec198c5"
+  }
+}
