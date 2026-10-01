@@ -26,7 +26,7 @@ export interface Roll {version:2;request:Request;kinds:Kind[];results:number[];f
 export interface RollMeta extends Omit<Roll,'poses'> {}
 export interface EventRecord {at:number;event:string;detail:unknown}
 export interface Peer {id:string;session?:string;name:string;color?:string;role?:import('./hidden-roll').Role;lastSeen:number;ready:boolean;rtt:number;offset:number;version:string;born:number}
-export const ASSET_VERSION='dice-assets-224';
+export const ASSET_VERSION='dice-assets-225';
 export const url=(p:string)=>'/suite-dev/dice3d/'+p+'?v='+ASSET_VERSION;
 export const now=()=>performance.timeOrigin+performance.now();
 export function errorText(error:unknown):string{
