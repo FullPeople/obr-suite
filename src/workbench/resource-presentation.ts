@@ -1,24 +1,80 @@
-/** Presentation metadata only, restricted to resource IDs already authorized for this recipient. */
-export function resourceWidgetPresentation(document:any,resources:readonly {id?:string}[]):Record<string,{style:'bar'|'ring'|'square'|'icon';x:number;y:number;w:number;h:number;page:number}>{
- const saved=document?.dnd_card_web!==undefined?document?.dnd_card_web?.quickbarLayout?.widgets:document?.web_resource_widgets,result:ReturnType<typeof resourceWidgetPresentation>=Object.create(null);
- if(!saved||typeof saved!=='object'||Array.isArray(saved))return result;
- for(const resource of resources){const id=resource.id;if(typeof id!=='string'||!Object.hasOwn(saved,id))continue;const value=saved[id];if(!value||typeof value!=='object'||!['bar','ring','square','icon'].includes(value.style))continue;
-  const {x,y,w,h,page}=value;if(![x,y,w,h,page].every(Number.isSafeInteger)||x<0||y<0||w<3||h<2||x+w>12||y+h>6||page<0||page>2999)continue;
-  Object.defineProperty(result,id,{value:{style:value.style,x,y,w,h,page},enumerable:true,writable:true,configurable:true});
+/** Presentation never owns resource values or grants access to additional resources. */
+export const RESOURCE_WIDGET_STYLES = ['ring','pips','pool','half','orbit','square','segments','reservoir','matrix','fraction','counter','poolchips','poolbars','poolpips','ready','diamond','bar','icon'] as const;
+export const RESOURCE_WIDGET_ICONS = ['spark','diamond','shield','flame','leaf','bottle'] as const;
+export type ResourceAppearance = {style:typeof RESOURCE_WIDGET_STYLES[number];color?:string;icon?:typeof RESOURCE_WIDGET_ICONS[number]};
+export type ResourceWidgetPresentation = ResourceAppearance & {x:number;y:number;w:number;h:number;page:number;members?:string[];label?:string};
+const object = (value:unknown):value is Record<string,any> => !!value && typeof value==='object' && !Array.isArray(value);
+const style = (value:unknown):value is ResourceAppearance['style'] => RESOURCE_WIDGET_STYLES.includes(value as ResourceAppearance['style']);
+const color = (value:unknown):value is string => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value);
+const icon = (value:unknown):value is ResourceAppearance['icon'] => RESOURCE_WIDGET_ICONS.includes(value as typeof RESOURCE_WIDGET_ICONS[number]);
+
+/** Public inventory has appearance only; grid placement belongs to the character dashboard. */
+export function validResourceAppearance(value:unknown):value is ResourceAppearance {
+ return object(value) && Object.keys(value).every(key=>['style','color','icon'].includes(key)) && style(value.style)
+  && (value.color===undefined || color(value.color)) && (value.icon===undefined || icon(value.icon));
+}
+
+function widget(value:unknown):ResourceWidgetPresentation|undefined {
+ if(!object(value)||!style(value.style))return;
+ const {x,y,w,h,page}=value;
+ if(![x,y,w,h,page].every(Number.isSafeInteger)||x<0||y<0||w<2||h<2||x+w>12||y+h>6||page<0||page>2999)return;
+ return {style:value.style,x,y,w,h,page,...(color(value.color)?{color:value.color}:{}),...(icon(value.icon)?{icon:value.icon}:{})};
+}
+
+/** Restricted to resource IDs already authorized for this recipient, including group members. */
+export function resourceWidgetPresentation(document:any,resources:readonly {id?:string}[]):Record<string,ResourceWidgetPresentation> {
+ const saved=document?.dnd_card_web!==undefined?document?.dnd_card_web?.quickbarLayout?.widgets:document?.web_resource_widgets;
+ const result:Record<string,ResourceWidgetPresentation>=Object.create(null);
+ if(!object(saved))return result;
+ const allowed=new Set(resources.map(resource=>resource.id));
+ for(const resource of resources){
+  const id=resource.id;if(typeof id!=='string'||!Object.hasOwn(saved,id))continue;
+  const value=saved[id],picked=widget(value);if(!picked)continue;
+  const members=Array.isArray(value.members)?value.members.filter((key:unknown)=>typeof key==='string'&&allowed.has(key)):[];
+  if(members.length>=2&&members.length<=12&&new Set(members).size===members.length&&members.includes(id)){
+   picked.members=members;
+   if(typeof value.label==='string'&&value.label.length<=100)picked.label=value.label;
+  }
+  Object.defineProperty(result,id,{value:picked,enumerable:true,writable:true,configurable:true});
  }
  return result;
 }
 
+/** Independent weapon-panel geometry, never represented as a synthetic resource. */
+export function quickbarAttackPresentation(document:any):ResourceWidgetPresentation|undefined {
+ const value=document?.dnd_card_web!==undefined?document?.dnd_card_web?.quickbarLayout?.attacks:document?.web_quickbar_attacks;
+ return value?.members===undefined?widget(value):undefined;
+}
+
 /** Called inside the existing resource document transaction, never as a second write. */
-export function updateResourceWidgetPresentation(document:any,id:string,presentation:unknown){
+export function updateResourceWidgetPresentation(document:any,id:string,presentation:unknown) {
  if(!id||['__proto__','prototype','constructor'].includes(id))throw Error('无效资源展示ID');
  const native=document.dnd_card_web;
+ if(native!==undefined&&!object(native))throw Error('角色资料格式无效');
+ const resources=native?.runtime?.resources||document.web_resources||{};
  if(presentation!==null){
-  if(!presentation||typeof presentation!=='object'||Array.isArray(presentation)||Object.keys(presentation).some(k=>!['style','x','y','w','h','page'].includes(k))||!['bar','ring','square','icon'].includes((presentation as any).style))throw Error('无效资源展示样式');
-  const value=presentation as any,geometry=['x','y','w','h','page'];
-  if(geometry.some(k=>k in value)&&!resourceWidgetPresentation({web_resource_widgets:{[id]:value}},[{id}])[id])throw Error('无效资源展示布局');
+  if(!object(presentation)||Object.keys(presentation).some(key=>!['style','color','icon','x','y','w','h','page','members','label'].includes(key))||!style(presentation.style)
+   ||presentation.color!==undefined&&!color(presentation.color)||presentation.icon!==undefined&&!icon(presentation.icon))throw Error('无效资源展示样式');
+  if(['x','y','w','h','page'].some(key=>key in presentation)&&!widget(presentation))throw Error('无效资源展示布局');
+  if(presentation.members!==undefined&&(!Array.isArray(presentation.members)||presentation.members.length<2||presentation.members.length>12||new Set(presentation.members).size!==presentation.members.length||!presentation.members.includes(id)||presentation.members.some((key:unknown)=>typeof key!=='string'||key!==id&&!Object.hasOwn(resources,key))))throw Error('无效资源分组');
+  if(presentation.label!==undefined&&(typeof presentation.label!=='string'||presentation.label.length>100))throw Error('无效资源分组名称');
  }
- const previous=resourceWidgetPresentation(document,[{id}])[id];
- if(native!==undefined){if(!native||typeof native!=='object'||Array.isArray(native))throw Error('角色资料格式无效');const layout=native.quickbarLayout||={order:[],hidden:[]};layout.widgets||={};if(presentation===null)delete layout.widgets[id];else Object.defineProperty(layout.widgets,id,{value:{...(previous||{x:0,y:0,w:4,h:2,page:0}),...(presentation as any)},writable:true,enumerable:true,configurable:true});delete document.web_resource_widgets;}
- else {const widgets=document.web_resource_widgets||={};if(presentation===null)delete widgets[id];else Object.defineProperty(widgets,id,{value:{...(previous||{x:0,y:0,w:4,h:2,page:0}),...(presentation as any)},writable:true,enumerable:true,configurable:true});}
+ const previous=resourceWidgetPresentation(document,[...new Set([id,...Object.keys(resources)])].map(id=>({id})))[id];
+ const existingLayout=native?.quickbarLayout;
+ if(existingLayout!==undefined&&!object(existingLayout)||existingLayout?.widgets!==undefined&&!object(existingLayout.widgets)||!native&&document.web_resource_widgets!==undefined&&!object(document.web_resource_widgets))throw Error('角色展示布局格式无效');
+ const layout=native?(native.quickbarLayout||={order:[],hidden:[]}):undefined;
+ const widgets=layout?(layout.widgets||={}):(document.web_resource_widgets||={});
+ if(presentation===null){
+  const old=widgets[id];delete widgets[id];
+  for(const value of Object.values(widgets) as any[])if(Array.isArray(value?.members)){
+   value.members=value.members.filter((key:string)=>key!==id);
+   if(value.members.length<2){delete value.members;delete value.label;}
+  }
+  // Deleting a pool anchor keeps the remaining pool at the same place and appearance.
+  if(Array.isArray(old?.members)){
+   const members=old.members.filter((key:string)=>key!==id&&Object.hasOwn(resources,key));
+   if(members.length){const replacement={...old,members};if(members.length<2){delete replacement.members;delete replacement.label;}Object.defineProperty(widgets,members[0],{value:replacement,writable:true,enumerable:true,configurable:true});}
+  }
+ }else Object.defineProperty(widgets,id,{value:{...(previous||{x:0,y:0,w:4,h:2,page:0}),...(presentation as object)},writable:true,enumerable:true,configurable:true});
+ if(native)delete document.web_resource_widgets;
 }

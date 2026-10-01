@@ -1,3 +1,4 @@
+import {DICE_HISTORY_LIMIT,canSeeDiceHistory,diceHistory,storedDiceHistory,type DiceHistoryVisibility} from './history-policy';
 import {WORKBENCH_DEV} from '../../workbench/channel';
 import {setupActivityPage} from '../../workbench/activity-page';
 import OBR from "@owlbear-rodeo/sdk";
@@ -47,7 +48,7 @@ function safeRoomKey(rid: string): string {
   return rid.replace(/[^a-zA-Z0-9_-]/g, "_") || "default";
 }
 let LS_HISTORY = `${LS_HISTORY_BASE}:default`;
-const HISTORY_CAP = 200;
+const HISTORY_CAP = DICE_HISTORY_LIMIT;
 // Hard ceiling on how long a pending entry waits for its reveal
 // signal. If something goes wrong with the effect modal the entry
 // still lands in history after this delay.
@@ -67,6 +68,7 @@ interface HistoryEntry {
   rollId: string;
   ts: number;
   hidden?: boolean;
+  visibility?: DiceHistoryVisibility;
   collectiveId?: string;
   // Mirrors `DiceRollPayload.rowStarts` from panel-page — present when
   // the roll was wrapped in `repeat(N, …)`. Each entry in `rowStarts`
@@ -102,19 +104,8 @@ function commitPending(rollId: string): void {
   if (!p) return;
   pendingEntries.delete(rollId);
   clearTimeout(p.timer);
-  // Dedupe — the dice panel iframe ALSO writes to localStorage on
-  // BROADCAST_DICE_ROLL (eager save for its own history tab) and the
-  // resulting `storage` event re-loads our `history` array. By the
-  // time we commit-pending here, the entry may already be present.
-  // Without this guard we'd unshift a second copy → "集体 2" of the
-  // same roll, which is the duplication the user hit.
-  if (history.some((h) => h.rollId === rollId)) {
-    render();
-    if (detailRollerKey) renderDetail();
-    return;
-  }
-  history.unshift(p.entry);
-  if (history.length > HISTORY_CAP) history.length = HISTORY_CAP;
+  if(!canSeeDiceHistory(p.entry,historyViewer()))return;
+  history=storedDiceHistory([p.entry,...loadHistory(),...history]);
   saveHistory();
   render();
   if (detailRollerKey) {
@@ -126,6 +117,8 @@ function commitPending(rollId: string): void {
 let myRole: "GM" | "PLAYER" | "" = "";
 let myPlayerId = "";
 let history: HistoryEntry[] = loadHistory();
+const historyViewer=()=>({playerId:myPlayerId,role:myRole});
+const visibleHistory=()=>diceHistory(history,historyViewer());
 
 const rowsEl = document.getElementById("rows") as HTMLDivElement;
 // headHint was removed when the title bar was dropped from
@@ -149,14 +142,14 @@ function loadHistory(): HistoryEntry[] {
     const v = localStorage.getItem(LS_HISTORY);
     if (!v) return [];
     const p = JSON.parse(v);
-    if (Array.isArray(p)) return p.filter(row=>row&&(!row.hidden||myRole==='GM'||row.rollerId===myPlayerId));
+    if (Array.isArray(p)) {const rows=storedDiceHistory(p) as HistoryEntry[];if(p.length>HISTORY_CAP)localStorage.setItem(LS_HISTORY,JSON.stringify(rows));return rows;}
   } catch {}
   return [];
 }
 
 function saveHistory(): void {
   try {
-    localStorage.setItem(LS_HISTORY, JSON.stringify(history));
+    localStorage.setItem(LS_HISTORY, JSON.stringify(storedDiceHistory(history)));
   } catch {}
 }
 
@@ -341,7 +334,7 @@ interface GroupedRow {
 // until it scrolls off the top.
 function chronologicalFlow(): GroupedRow[] {
   const byCid = new Map<string, HistoryEntry[]>();
-  for (const h of history) {
+  for (const h of visibleHistory()) {
     const cid = h.collectiveId ?? h.rollId;
     const arr = byCid.get(cid) ?? [];
     arr.push(h);
@@ -352,7 +345,7 @@ function chronologicalFlow(): GroupedRow[] {
   // history is newest-first; emit each cid the first time we see it.
   // This places the newest occurrence of each cid (typically the
   // collective-head) at the front, with all members attached.
-  for (const h of history) {
+  for (const h of visibleHistory()) {
     const cid = h.collectiveId ?? h.rollId;
     if (seenCids.has(cid)) continue;
     seenCids.add(cid);
@@ -423,9 +416,9 @@ function render(): void {
     row.addEventListener("click", () => {
       const playerName = row.dataset.roller ?? "";
       const cid = row.dataset.cid ?? "";
-      if (document.body.dataset.actionHistory) {
-        // The embedded Action tab remains open while token results are toggled.
-        if (cid) void toggleReplayForCid(cid).catch(() => {});
+      if(document.body.dataset.actionHistory){
+        // This is the Action history tab, not the legacy dismissing popover.
+        if(cid)void toggleReplayForCid(cid).catch(() => {});
         return;
       }
       // New behaviour (per user spec): click a row → open the dice
@@ -552,7 +545,7 @@ function closeDetail(): void {
 
 function renderDetail(): void {
   if (!detailRollerKey) return;
-  const entries = history.filter((h) => {
+  const entries = visibleHistory().filter((h) => {
     const k = h.rollerId || h.rollerName || "?";
     return k === detailRollerKey;
   });
@@ -704,14 +697,12 @@ function renderEntryRow(h: HistoryEntry, cid: string, tight: boolean): string {
 }
 
 async function toggleReplayForCid(cid: string): Promise<void> {
-  if (document.body.dataset.actionHistory) {
-    if (!history.some((h) => (h.collectiveId ?? h.rollId) === cid)) return;
-    const action = activeReplayCid === cid ? "close" : "open";
-    await OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action }, { destination: "LOCAL" });
-    activeReplayCid = action === "close" ? null : cid;
-    render();
-    if (detailRollerKey) renderDetail();
-    return;
+  if(document.body.dataset.actionHistory){
+    if(!visibleHistory().some(h=>(h.collectiveId??h.rollId)===cid))return;
+    const action=activeReplayCid===cid?'close':'open';
+    await OBR.broadcast.sendMessage(BC_DICE_REPLAY,{cid,action},{destination:'LOCAL'});
+    activeReplayCid=action==='close'?null:cid;
+    render();if(detailRollerKey)renderDetail();return;
   }
   if (activeReplayCid === cid) {
     try {
@@ -727,7 +718,7 @@ async function toggleReplayForCid(cid: string): Promise<void> {
   }
   // Camera focus locally on the involved tokens (don't move other
   // players' cameras). Build a synthetic group for the focus helper.
-  const members = history.filter((h) => (h.collectiveId ?? h.rollId) === cid);
+  const members = visibleHistory().filter((h) => (h.collectiveId ?? h.rollId) === cid);
   if (members.length) {
     const head = members[0];
     await focusCameraOnGroup({ cid, head, members });
@@ -813,7 +804,7 @@ OBR.onReady(async () => {
     myPlayerId = await OBR.player.getId();
     history = loadHistory();
   } catch {}
-  OBR.player.onChange(player=>{myRole=player.role==='GM'?'GM':'PLAYER';myPlayerId=player.id;history=loadHistory();for(const [id,pending] of pendingEntries)if(pending.entry.hidden&&myRole!=='GM'&&pending.entry.rollerId!==myPlayerId){clearTimeout(pending.timer);pendingEntries.delete(id);}render();});
+  OBR.player.onChange(player=>{const changed=myRole!==player.role||myPlayerId!==player.id;myRole=player.role==='GM'?'GM':'PLAYER';myPlayerId=player.id;history=loadHistory();for(const [id,pending] of pendingEntries)if(!canSeeDiceHistory(pending.entry,historyViewer())){clearTimeout(pending.timer);pendingEntries.delete(id);}if(changed&&activeReplayCid)void clearActiveReplay();render();if(detailRollerKey)renderDetail();});
 
   // Drag grip in the title bar — releases broadcast to dice/index.ts
   // which re-issues OBR.popover.open() with the new offset.
@@ -853,13 +844,16 @@ OBR.onReady(async () => {
   OBR.broadcast.onMessage(BROADCAST_DICE_ROLL, (event) => {
     const data = event.data as HistoryEntry | undefined;
     if (!data || !Array.isArray(data.dice) || !data.rollId) return;
-    if (data.hidden && myRole !== "GM" && data.rollerId !== myPlayerId) {
+    if (!canSeeDiceHistory(data,historyViewer())) {
       return;
     }
     // Stash. Fallback timer: if the reveal never arrives (effect
     // modal crashed / cancelled), commit anyway after PENDING_TIMEOUT_MS.
+    const prior=pendingEntries.get(data.rollId);
+    if(prior){if(!prior.entry.hidden&&data.hidden)return;clearTimeout(prior.timer);}
     const timer = window.setTimeout(() => commitPending(data.rollId), PENDING_TIMEOUT_MS);
     pendingEntries.set(data.rollId, { entry: data, timer });
+    while(pendingEntries.size>HISTORY_CAP){const oldest=[...pendingEntries].sort((a,b)=>a[1].entry.ts-b[1].entry.ts)[0];clearTimeout(oldest[1].timer);pendingEntries.delete(oldest[0]);}
   });
 
   // Reveal — commit the matching pending entry so it appears in the
@@ -936,5 +930,5 @@ setInterval(() => {
 window.addEventListener("storage", (e) => {
   if (e.key !== LS_HISTORY) return;
   history = loadHistory();
-  render();
+  render();if(detailRollerKey)renderDetail();
 });

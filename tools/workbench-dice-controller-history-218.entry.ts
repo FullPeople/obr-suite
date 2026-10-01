@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {Controller} from '../extensions/workbench-dice3d/src/controller';
+const host:any=Object.create(Controller.prototype),messages:any[]=[];host.transport={id:'connection-owner',role:'GM',name:'Owner'};host.records=new Map();host.bus={postMessage:(m:any)=>messages.push(m)};host.state=()=>{};host.send=async()=>{};
+const record=(id:string,source:string,visibility:string)=>({id,source,visibility,secret:visibility!=='all',revealed:false,at:Number(id)||0});
+for(let i=0;i<103;i++)host.records.set(String(i),record(String(i),'connection-other','all'));
+host.records.set('secret',record('secret','connection-owner','self'));host.sendRecords();assert.equal(messages.at(-1).records.length,100);
+assert.equal(host.visibleRecord(record('1','connection-owner','self')),true);assert.equal(host.visibleRecord(record('1','player-owner','self')),false);assert.equal(host.visibleRecord(record('1','connection-other','gm')),true);
+await host.setProfile('Owner',undefined,'PLAYER');assert.equal(host.visibleRecord(record('1','connection-other','gm')),false);assert.equal(host.visibleRecord(record('1','connection-owner','self')),true);assert.equal(host.records.size,104);assert.equal(messages.at(-1).type,'history');
+assert.equal(host.visibleRecord({...record('1','connection-other','gm'),revealed:true}),true);
+await host.setProfile('Owner',undefined,'GM');assert.equal(host.visibleRecord(record('1','connection-other','gm')),true);
+console.log(JSON.stringify({checks:5,success:true,scope:'actual Controller prototype; connection identity, bounded snapshots, demotion projection, archive preservation, reveal'}));

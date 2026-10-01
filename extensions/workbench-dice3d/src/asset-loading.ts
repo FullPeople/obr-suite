@@ -18,13 +18,13 @@ export class DiceAssets {
       if(this.active>=4)await new Promise<void>(resolve=>this.queue.push(resolve));else this.active++;
       const abort=new AbortController();let timer=setTimeout(()=>abort.abort(),30000),retryable=true;
       try{
-        this.emit(path,attempt,true);const response=await fetch(url(path),{signal:abort.signal});
+        this.emit(path,attempt,true);const response=await fetch(url(path)+(attempt>1?'&retry='+attempt:''),{signal:abort.signal,cache:attempt>1?'reload':'default'});
         if(!response.ok){retryable=[408,429].includes(response.status)||response.status>=500;throw Error(`HTTP ${response.status} ${response.statusText}`);}
         const reader=response.body?.getReader(),parts:Uint8Array[]=[];let count=0;
         if(reader){for(;;){const {done,value}=await reader.read();if(done)break;clearTimeout(timer);timer=setTimeout(()=>abort.abort(),30000);parts.push(value);count+=value.byteLength;this.sizes.set(path,count);this.emit(path,attempt);}}
         else{const value=new Uint8Array(await response.arrayBuffer());parts.push(value);count=value.length;this.sizes.set(path,count);}
         const data=new Uint8Array(count);let offset=0;for(const part of parts){data.set(part,offset);offset+=part.length;}
-        retryable=false;const expected=this.locks[path];if(expected){const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',data))].map(n=>n.toString(16).padStart(2,'0')).join('');if(digest!==expected)throw Error(`SHA-256 mismatch expected=${expected} actual=${digest}`);}
+        const expected=this.locks[path];if(expected){const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',data))].map(n=>n.toString(16).padStart(2,'0')).join('');if(digest!==expected)throw Error(`SHA-256 mismatch expected=${expected} actual=${digest}`);}
         this.completed.add(path);this.emit(path,attempt,true);return data.buffer;
       }catch(error){if(!retryable||attempt===3)throw Error(`E_DICE_ASSET ${url(path)} attempt=${attempt}/3: ${String(error)}`);}
       finally{clearTimeout(timer);const next=this.queue.shift();if(next)next();else this.active--;}

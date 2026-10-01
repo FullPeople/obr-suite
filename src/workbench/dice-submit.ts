@@ -1,3 +1,4 @@
+import {sendDiceMessage} from './dice-broadcast';
 import OBR from '@owlbear-rodeo/sdk';
 import type {DiceRollPayload,QuickRollRequest} from '../modules/dice';
 import {errorText} from '../../extensions/workbench-dice3d/src/types';
@@ -13,7 +14,7 @@ const pending=new Map<string,{connection:string;ack:()=>void;finish:(error:unkno
 export function serveDiceSubmissions(connection:string,execute:Owner){
  owner=execute;let disposed=false;
  const requests=new Map<string,{task:Promise<any>;timer:ReturnType<typeof setTimeout>}>();
- const send=(data:any)=>OBR.broadcast.sendMessage(RESPONSE,data,{destination:'LOCAL'});
+ const send=(data:any)=>sendDiceMessage(RESPONSE,data,{destination:'LOCAL'});
  const stop=OBR.broadcast.onMessage(REQUEST,event=>{
   const data=event.data as any;
   if(disposed||event.connectionId!==connection||!data||typeof data.id!=='string'||data.id.length>80||!['formula','compat'].includes(data.method))return;
@@ -34,7 +35,7 @@ async function submit(method:Method,data:any):Promise<any>{
  return new Promise((resolve,reject)=>{
   let completed=false;
   const finish=(error:unknown,result?:any)=>{if(completed)return;completed=true;clearInterval(retry);clearTimeout(ackTimer);clearTimeout(resultTimer);pending.delete(id);error?reject(error instanceof Error?error:Error(errorText(error))):resolve(result);};
-  const send=()=>{void OBR.broadcast.sendMessage(REQUEST,{id,method,data},{destination:'LOCAL'}).catch(error=>finish(error));};
+  let sending=false;const send=()=>{if(sending||completed)return;sending=true;void sendDiceMessage(REQUEST,{id,method,data},{destination:'LOCAL'},()=>!completed).catch(error=>finish(error)).finally(()=>{sending=false;});};
   const retry=setInterval(send,500),ackTimer=setTimeout(()=>finish(Error('未收到骰子后台确认，结果暂不确定；请先查看历史记录，避免重复投掷')),5000),resultTimer=setTimeout(()=>finish(Error('3D 投骰超过 240 秒未返回，请查看网络/物理错误')),245000);
   pending.set(id,{connection,ack:()=>{clearInterval(retry);clearTimeout(ackTimer);},finish});send();
  });

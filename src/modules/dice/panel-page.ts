@@ -1,3 +1,4 @@
+import {DICE_HISTORY_LIMIT,canSeeDiceHistory,diceHistory,storedDiceHistory,type DiceHistoryVisibility} from './history-policy';
 import OBR from "@owlbear-rodeo/sdk";
 import { DiceType, DieResult, sidesOf } from "./types";
 import { subscribeToSfx } from "./sfx-broadcast";
@@ -56,7 +57,7 @@ function safeRoomKey(rid: string): string {
 }
 let LS_HISTORY = `${LS_HISTORY_BASE}:default`;
 const LS_LAST_EXPR = "obr-suite/dice/last-expr";
-const HISTORY_CAP = 80;
+const HISTORY_CAP = DICE_HISTORY_LIMIT;
 
 // 2026-05-14 — DM "全局暗骰" toggle. When ON, every regular roll
 // (main 投掷 button + each combo's 投掷 button) is treated as if the
@@ -86,6 +87,7 @@ interface DiceRollPayload {
   rollId: string;
   ts: number;
   hidden?: boolean;
+  visibility?: DiceHistoryVisibility;
   // Layout/animation hints introduced by the new wrappers:
   // - rowStarts: explicit row boundaries for `repeat(N, ...)`. Row i
   //   spans [rowStarts[i], rowStarts[i+1]) (last row goes to end of
@@ -174,6 +176,8 @@ let isDM = false;
 // who happens to be the roller still gets their own entry stored on
 // their own client.
 let myPlayerId = "";
+const historyViewer=()=>({playerId:myPlayerId,role:myPlayerId?(isDM?'GM':'PLAYER'):''});
+const visibleHistory=()=>diceHistory(history,historyViewer());
 
 // --- DOM refs ---
 const diceRow      = document.getElementById("diceRow")      as HTMLDivElement;
@@ -236,11 +240,11 @@ function loadHistory(): DiceRollPayload[] {
     const v = localStorage.getItem(LS_HISTORY);
     if (!v) return [];
     const p = JSON.parse(v);
-    if (Array.isArray(p)) return p;
+    if (Array.isArray(p)) {const rows=storedDiceHistory(p) as DiceRollPayload[];if(p.length>HISTORY_CAP)localStorage.setItem(LS_HISTORY,JSON.stringify(rows));return rows;}
   } catch {}
   return [];
 }
-function saveHistory() { try { localStorage.setItem(LS_HISTORY, JSON.stringify(history)); } catch {} }
+function saveHistory() { try { localStorage.setItem(LS_HISTORY, JSON.stringify(storedDiceHistory(history))); } catch {} }
 function loadLastExpr(): string {
   try { return localStorage.getItem(LS_LAST_EXPR) ?? ""; } catch { return ""; }
 }
@@ -1407,7 +1411,7 @@ function wireDragAndDrop() {
 function renderHistorySeg() {
   const seen = new Set<string>();
   const names: string[] = [];
-  for (const h of history) {
+  for (const h of visibleHistory()) {
     if (!seen.has(h.rollerName)) {
       seen.add(h.rollerName);
       names.push(h.rollerName);
@@ -1607,8 +1611,8 @@ function renderEntryCollective(cid: string, members: DiceRollPayload[]): string 
 
 function renderHistoryList() {
   const filtered = historyFilter
-    ? history.filter((h) => h.rollerName === historyFilter)
-    : history;
+    ? visibleHistory().filter((h) => h.rollerName === historyFilter)
+    : visibleHistory();
   if (!filtered.length) {
     historyList.innerHTML = `<div class="empty-state">${tt("diceHistoryEmpty")}</div>`;
     return;
@@ -3295,6 +3299,7 @@ OBR.onReady(async () => {
   try {
     myPlayerId = await OBR.player.getId();
   } catch {}
+  renderHistorySeg();renderHistoryList();
   const btnDark = document.getElementById("btnDarkRoll") as HTMLButtonElement | null;
   if (btnDark) btnDark.style.display = isDM ? "" : "none";
   // 2026-05-14 — 全局暗骰 toggle visibility mirrors btnDarkRoll. Both
@@ -3333,6 +3338,8 @@ OBR.onReady(async () => {
     // arm is cleared (consume sites re-verify with a fresh getRole
     // anyway; this is the UI layer catching up).
     const nowDM = p.role === "GM";
+    const viewerChanged=nowDM!==isDM||myPlayerId!==p.id;
+    myPlayerId=p.id;
     if (nowDM !== isDM) {
       isDM = nowDM;
       if (!isDM) disarmFixedRoll();
@@ -3342,6 +3349,7 @@ OBR.onReady(async () => {
       refreshFixedRollUi();
       renderCombos();
     }
+    if(viewerChanged){history=loadHistory();if(activeReplayCid){void OBR.broadcast.sendMessage(BC_DICE_REPLAY,{cid:activeReplayCid,action:'close'},{destination:'LOCAL'});setActiveReplayCid(null);}renderHistorySeg();renderHistoryList();}
   });
 
   OBR.broadcast.onMessage(BROADCAST_DICE_ROLL, (event) => {
@@ -3357,11 +3365,10 @@ OBR.onReady(async () => {
     // gate, the action panel's history tab on a player client would
     // store and render the dark roll values. We rely on `myPlayerId`
     // / `isDM` (resolved earlier in this onReady block) to scope.
-    if (data.hidden && !isDM && data.rollerId !== myPlayerId) {
+    if (!canSeeDiceHistory(data,historyViewer())) {
       return;
     }
-    history.unshift(data);
-    if (history.length > HISTORY_CAP) history.length = HISTORY_CAP;
+    history=storedDiceHistory([data,...loadHistory(),...history]);
     saveHistory();
     if (activeTab === "history") {
       renderHistorySeg();

@@ -1,0 +1,13 @@
+import {verifyDiceAssets} from './dice-pinned-assets.mjs';
+import {mkdirSync,readFileSync,writeFileSync,copyFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const out='.cache/edge220/pinned-fixture';mkdirSync(out+'/vendor',{recursive:true});writeFileSync(out+'/asset-hashes.json','{}');
+for(const name of ['lock.json','jolt-physics.wasm.js','jolt-physics.wasm.wasm','Jolt-LICENSE'])copyFileSync('extensions/workbench-dice3d/public/vendor/'+name,out+'/vendor/'+name);
+assert.equal(verifyDiceAssets(out).verified,3);
+const script=out+'/vendor/jolt-physics.wasm.js',original=readFileSync(script);
+writeFileSync(script,original.toString('utf8').replaceAll('\n','\r\n'));
+assert.throws(()=>verifyDiceAssets(out),/mismatch/);
+assert.equal(verifyDiceAssets(out,{normalize:true}).changes[0].path,'vendor/jolt-physics.wasm.js');assert.deepEqual(readFileSync(script),original);
+writeFileSync(script,'invalid vendor script');assert.throws(()=>verifyDiceAssets(out,{normalize:true}),/mismatch/);assert.equal(readFileSync(script,'utf8'),'invalid vendor script');writeFileSync(script,original);
+const wasm=out+'/vendor/jolt-physics.wasm.wasm',bytes=readFileSync(wasm);bytes[0]^=1;writeFileSync(wasm,bytes);assert.throws(()=>verifyDiceAssets(out,{normalize:true}),/mismatch/);assert.deepEqual(readFileSync(wasm),bytes);
+console.log(JSON.stringify({checks:6,success:true,windowsVendorCorruptionReproduced:true,arbitraryCorruptionRejected:true}));

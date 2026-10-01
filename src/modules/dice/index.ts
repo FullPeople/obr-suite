@@ -1,3 +1,4 @@
+import type {DiceHistoryVisibility} from './history-policy';
 import {WORKBENCH_DEV} from '../../workbench/channel';
 import {setupWorkbenchDice,teardownWorkbenchDice} from '../../workbench/dice';
 import { setPanelOpen } from "../../utils/panelObstacles";
@@ -189,6 +190,7 @@ export interface QuickRollRequest {
 // era) are coerced into the new dice-array shape on receive, treating
 // every entry as a d20 face.
 export interface DiceRollPayload {
+  visibility?: DiceHistoryVisibility;
   itemId: string | null;
   dice: DieResult[];        // every die rolled, with type + face value
   winnerIdx: number;        // -1 = no specific winner (panel rolls)
@@ -1376,6 +1378,7 @@ export function normalizePayload(raw: unknown): DiceRollPayload | null {
     rollId: data.rollId,
     ts: data.ts ?? Date.now(),
     hidden: !!(data as any).hidden,
+    visibility: (data as any).visibility,
     ...(((data as any).autoDismiss) ? { autoDismiss: true } : {}),
     ...(Array.isArray((data as any).rowStarts) ? { rowStarts: ((data as any).rowStarts as number[]).filter((n) => Number.isFinite(n)) } : {}),
     ...(((data as any).sameHighlight) ? { sameHighlight: true } : {}),

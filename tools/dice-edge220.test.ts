@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {DiceSendQueue} from '../src/workbench/dice-send-queue';
+let checks=0;
+const check=(label:string,fn:()=>void)=>{fn();checks++;console.log('PASS '+label);};
+let time=0;const sleep=async(ms:number)=>{time+=ms;},queue=new DiceSendQueue(100,()=>time,sleep);
+const calls:any[]=[];let limited=true;
+await Promise.all([queue.send(async()=>{calls.push({id:'same-roll',time});if(limited){limited=false;throw {error:{name:'RateLimitHit',message:'Too many requests'}};}return 'accepted';}),queue.send(async()=>{calls.push({id:'second',time});})]);
+check('explicit rejection retries the same message before the next message',()=>assert.deepEqual(calls.map(c=>c.id),['same-roll','same-roll','second']));
+check('retries back off and subsequent messages remain paced',()=>{assert(calls[1].time-calls[0].time>=800);assert(calls[2].time-calls[1].time>=100);});
+let attempts=0;await assert.rejects(queue.send(async()=>{attempts++;throw Error('timeout: unknown outcome');}),/unknown outcome/);
+check('unknown outcomes are never replayed',()=>assert.equal(attempts,1));
+let recovered=false;await queue.send(async()=>{recovered=true;});check('a failed request cannot stall the lane',()=>assert(recovered));
+let retries=0;await assert.rejects(queue.send(async()=>{retries++;throw Error('RateLimitHit: Too many requests');}),/RateLimitHit/);
+check('persistent rate limit has a bounded retry budget',()=>assert.equal(retries,4));
+let alive=true,ghost=0;const closing=new DiceSendQueue(100,()=>time,async ms=>{time+=ms;alive=false;});
+await closing.send(async()=>{});await assert.rejects(closing.send(async()=>{ghost++;},()=>alive),/disposed/);
+check('teardown during a queued wait cannot send a message',()=>assert.equal(ghost,0));
+console.log(JSON.stringify({checks,success:true}));

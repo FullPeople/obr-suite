@@ -17,12 +17,8 @@ export function workbenchDice3dPlugin(enabled:boolean):Plugin{
   if(path.endsWith('/src/modules/dice/history-page.ts')){
    code="let __3dConnection='';\n"+code;
    code=code.replace('OBR.onReady(async () => {','OBR.onReady(async () => { __3dConnection=await OBR.player.getConnectionId();');
-   code=code.replace('if (data.hidden && myRole !== "GM" && data.rollerId !== myPlayerId)', 'if ((data as any)._3dConnection!==__3dConnection)');
-   code=code.replaceAll('JSON.stringify(history)', 'JSON.stringify(history.filter(h=>!h.hidden))');
-   code=code.replace('history=loadHistory();for(const [id,pending]', 'history=[...history.filter(h=>h.hidden&&h._3dConnection===__3dConnection),...loadHistory()];for(const [id,pending]');
-   code=code.replace('pending.entry.hidden&&myRole!==\'GM\'&&pending.entry.rollerId!==myPlayerId','pending.entry.hidden&&pending.entry._3dConnection!==__3dConnection&&myRole!==\'GM\'&&pending.entry.rollerId!==myPlayerId');
+   code=code.replace('if (!canSeeDiceHistory(data,historyViewer()))', 'if ((data as any)._3dConnection!==__3dConnection || !canSeeDiceHistory(data,historyViewer()))');
    code=code.replace('pendingEntries.set(data.rollId, { entry: data, timer });','clearTimeout(pendingEntries.get(data.rollId)?.timer);pendingEntries.set(data.rollId, { entry: data, timer });commitPending(data.rollId);');
-   code=code.replaceAll('history = loadHistory();','history = [...history.filter(h=>h.hidden&&h._3dConnection===__3dConnection),...loadHistory()];');
    code=code.replace(/(applyI18nDom\(lang\);\r?\n  render\(\);\r?\n)(\}\);)/,'$1  void OBR.broadcast.sendMessage(\'com.obr-suite/dice3d-history-request\',{}, {destination:\'LOCAL\'});\n$2');
    code=adapt3dHistory(code);
   }return code;
