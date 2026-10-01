@@ -20,9 +20,14 @@ export function setTokenResults(id:string,rows:DiceRollPayload[],visible?:boolea
  if(epoch!==-1&&epoch!==currentEpoch){epoch=currentEpoch;groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;}
  if(closed.has(id))return;
  if(id.startsWith('history:')){
-  for(const key of groups.keys())if(key.startsWith('history:'))groups.delete(key);
-  // A group's automatic result and its history view represent the same roll.
-  // Keep the live group available for an explicit show, but dismiss its label.
+  for(const [key,group] of groups){
+   if(key.startsWith('history:'))groups.delete(key);
+   // Opening history replaces every existing automatic label. Remember that
+   // dismissal so closing history or a late member cannot resurrect old rolls.
+   else{group.visible=false;visibility.set(key,false);}
+  }
+  // Also dismiss the original roll if its automatic result has not arrived.
+  // New roll IDs remain independent; explicit show can restore an old group.
   const original=id.slice('history:'.length);visibility.set(original,false);const group=groups.get(original);if(group)group.visible=false;
  }
  // The latest display control outranks the visibility captured when a roll
