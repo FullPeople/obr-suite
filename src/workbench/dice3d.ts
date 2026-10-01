@@ -1,3 +1,4 @@
+import {sendDiceMessage} from './dice-broadcast';
 import OBR from '@owlbear-rodeo/sdk';
 import {serveDiceSubmissions} from './dice-submit';
 import {Controller,type ResultRecord} from '../../extensions/workbench-dice3d/src/controller';
@@ -36,12 +37,12 @@ export async function setupDice3d(){
    else if(m.type==='state'){ready=m.state.ready;const error=m.state.error||'';loadState={...loadState,ready,physics:m.state.physics,overlay:m.state.overlay,error:ready?'':error};if(error&&error!==lastError){void OBR.notification.show('3D 骰子：'+error,'ERROR');for(const [id,w] of waiters){clearTimeout(w.timer);waiters.delete(id);w.reject(Error(error));}}lastError=error;}
    else if(m.type==='history')for(const r of m.records as ResultRecord[]){const previous=records.get(r.id);records.set(r.id,r);if(!r.formulaData)continue;const data=payload(r);
     // Early prediction resolves only the submit RPC, never visible/stored history.
-    if(r.complete&&(!previous?.complete||previous.revealed!==r.revealed)){resultListeners.forEach(fn=>fn(data,r.revealed));void OBR.broadcast.sendMessage(RESULT,data,{destination:'LOCAL'}).then(()=>Promise.all(['com.obr-suite/dice-history-reveal',...(r.revealed?['com.obr-suite/dice3d-highlight']:[])].map(channel=>OBR.broadcast.sendMessage(channel,{rollId:r.id,cid:r.formulaData?.context?.collectiveId??r.id},{destination:'LOCAL'})))).catch(error=>core?.fail('history-publish',error));}
+    if(r.complete&&(!previous?.complete||previous.revealed!==r.revealed)){resultListeners.forEach(fn=>fn(data,r.revealed));void sendDiceMessage(RESULT,data,{destination:'LOCAL'}).then(()=>Promise.all(['com.obr-suite/dice-history-reveal',...(r.revealed?['com.obr-suite/dice3d-highlight']:[])].map(channel=>sendDiceMessage(channel,{rollId:r.id,cid:r.formulaData?.context?.collectiveId??r.id},{destination:'LOCAL'})))).catch(error=>core?.fail('history-publish',error));}
     const waiting=waiters.get(r.id);if(waiting){clearTimeout(waiting.timer);waiters.delete(r.id);waiting.resolve(data);}
    }
-   else if(m.type==='log'&&m.event==='render-complete'){const rollId=m.detail.roll;if(records.has(rollId))void Promise.all(['com.obr-suite/dice-fade-start','com.obr-suite/dice-history-reveal'].map(channel=>OBR.broadcast.sendMessage(channel,{rollId,rollerId:records.get(rollId)!.formulaData?.context?.rollerId},{destination:'LOCAL'})));}
+   else if(m.type==='log'&&m.event==='render-complete'){const rollId=m.detail.roll;if(records.has(rollId))void Promise.all(['com.obr-suite/dice-fade-start','com.obr-suite/dice-history-reveal'].map(channel=>sendDiceMessage(channel,{rollId,rollerId:records.get(rollId)!.formulaData?.context?.rollerId},{destination:'LOCAL'})));}
   };
-  core=new Controller({id:p.connectionId,name:p.name,color:p.color,role:observed.role,resolveRole:async id=>(await workbenchObservation().read()).party.find(p=>p.connectionId===id)?.role,mode:'Full Suite 新版 3D',send:data=>OBR.broadcast.sendMessage(CHANNEL,data,{destination:'REMOTE'}),listen:fn=>OBR.broadcast.onMessage(CHANNEL,event=>fn(event.data,event.connectionId))});
+  core=new Controller({id:p.connectionId,name:p.name,color:p.color,role:observed.role,resolveRole:async id=>(await workbenchObservation().read()).party.find(p=>p.connectionId===id)?.role,mode:'Full Suite 新版 3D',send:data=>sendDiceMessage(CHANNEL,data,{destination:'REMOTE'},()=>own===generation),listen:fn=>OBR.broadcast.onMessage(CHANNEL,event=>fn(event.data,event.connectionId))});
   historyStop=OBR.broadcast.onMessage('com.obr-suite/dice3d-history-request',event=>{if(event.connectionId===connection)void dice3dRpc('history',[]).catch(error=>core?.fail('history-snapshot',error));});
   profileStop=workbenchObservation().onChange(()=>{const p=workbenchObservation().peek().player;if(p)void core?.setProfile(p.name,p.color,p.role).catch(e=>core?.fail('profile',e));});
   await core.init();if(own!==generation)return;const url=`/suite-dev/dice3d/overlay.html?client=${encodeURIComponent(connection)}&v=${BUILD}`;
@@ -80,7 +81,7 @@ export async function dice3dRpc(method:string,args:any[]){
  if(method==='status'){if(!start&&!loadState.error)void setupDice3d().catch(()=>{});return {...loadState};}
  if(method==='retry'){if(ready||records.size||waiters.size)throw Error('已有投骰记录时不能重置物理层，请刷新房间重试');teardownDice3d(false);await OBR.modal.close(MODAL);await setupDice3d();return {...loadState};}
  if(method==='submit')return submitDice3d(args[0]);
- if(method==='history'){for(const r of records.values()){if(!r.formulaData||!r.complete)continue;await OBR.broadcast.sendMessage(RESULT,payload(r),{destination:'LOCAL'});await OBR.broadcast.sendMessage('com.obr-suite/dice-history-reveal',{rollId:r.id},{destination:'LOCAL'});}return;}
+ if(method==='history'){for(const r of records.values()){if(!r.formulaData||!r.complete)continue;await sendDiceMessage(RESULT,payload(r),{destination:'LOCAL'});await sendDiceMessage('com.obr-suite/dice-history-reveal',{rollId:r.id},{destination:'LOCAL'});}return;}
  if(method==='material'){const id=args[0];if(!STYLE_CHOICES.some(s=>s.id===id))throw Error('未知材质');return OBR.player.setMetadata({[THEME]:id});}
  if(method==='audio'){const value=args[0];if(!Number.isFinite(value)||value<0||value>1)throw Error('无效音量');localStorage.setItem('obr-suite/dice3d/volume',String(value*100));bus?.postMessage({type:'audio-command',action:'volume',value});return;}
  const matched=[...records.values()].filter(r=>r.id===args[0]||r.formulaData?.context?.collectiveId===args[0]);

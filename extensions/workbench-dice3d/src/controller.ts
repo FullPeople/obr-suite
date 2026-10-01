@@ -19,7 +19,7 @@ export interface ResultRecord{id:string;source:string;name:string;color?:string;
 interface Reservation{request:Request;broker:string;at:number;members:string[]}
 interface SecretArchive{request:Request;kinds:Roll['kinds'];commitment:string;details?:SecretDetails;complete:boolean;revealed:boolean}
 interface Received {source:string;assembly:Assembly;at:number;retry:number;processing:boolean;prepared:boolean}
-interface Outgoing {roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>}
+interface Outgoing {uploading:boolean;roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>}
 export class Controller {
   readonly bus:BroadcastChannel;
   private worker=new Worker(new URL('./physics.worker.ts',import.meta.url),{type:'module'});
@@ -42,7 +42,7 @@ export class Controller {
   private started=new Map<string,{source:string;hash:string;at:number}>();
   private bytesSent=0;private bytesReceived=0;private packetsSent=0;private packetsReceived=0;
   private metrics:any={};private error='';private failures=0;private completed=0;private stress=0;
-  private lastPresence=0;private lastState=0;
+  private lastPresence=0;private lastState=0;private ticking=false;
   // Logical join order, not a cross-machine wall clock. A loading newcomer follows known members.
   private born=0;
   private requests=new Map<string,{request:Request;at:number;authority:string;status?:string}>();
@@ -79,7 +79,7 @@ export class Controller {
     this.worker.onerror=e=>{const pending=this.pending;this.disabled=true;this.pending=undefined;clearTimeout(this.pendingTimer);this.refreshReady();
       this.fail('physics-worker',e.message);if(pending&&hiddenRequest(pending)){this.cancelSecret(pending.id);void this.send({type:'secret-failed',id:pending.id,reason:'暗骰来源的物理计算器发生错误'}).catch(error=>this.fail('hidden-failure-notice',error))}this.next()};
     this.worker.onmessage=e=>{void this.onWorker(e.data).catch(e=>this.fail('physics-result',e))};
-    this.interval=setInterval(()=>{void this.tick().catch(e=>this.fail('maintenance',e))},500);
+    this.interval=setInterval(()=>{if(this.ticking)return;this.ticking=true;void this.tick().catch(e=>this.fail('maintenance',e)).finally(()=>{this.ticking=false;})},500);
   }
   dispose(){clearInterval(this.interval);clearInterval(this.stress);clearTimeout(this.pendingTimer);this.stopTransport();this.worker.terminate();this.bus.close();this.disabled=true;}
   async init(){
@@ -104,7 +104,7 @@ export class Controller {
   private async send(data:any){const p={v:1,build:BUILD,from:this.transport.id,...data};if(p.type==='hello'){await this.keys.ready;p.born=this.born;p.color=this.transport.color;p.role=this.transport.role;p.publicKey=this.keys.publicKey;p.session=this.session}const bytes=sizeOf(p);if(bytes>MAX_MESSAGE_BYTES)throw Error(`消息超限 ${bytes}`);await this.transport.send(p);this.bytesSent+=bytes;this.packetsSent++}
   private authority(){return [{id:this.transport.id,born:this.born,ready:this.ready},...[...this.peers.values()].filter(p=>now()-p.lastSeen<12000)]
     .filter(p=>p.ready).sort((a,b)=>a.born-b.born||a.id.localeCompare(b.id))[0]?.id||this.transport.id}
-  private async ping(id:string){const nonce=crypto.randomUUID(),t=now();this.probes.set(nonce,{to:id,t});await this.send({type:'ping',to:id,nonce,t})}
+  private async ping(id:string){if([...this.probes.values()].some(p=>p.to===id&&now()-p.t<2500))return;const nonce=crypto.randomUUID(),t=now();this.probes.set(nonce,{to:id,t});await this.send({type:'ping',to:id,nonce,t})}
   private async onLocal(p:any){
     if(p?.type==='panel-ready'){this.state();this.sendRecords();return}
     if(p?.type==='overlay-ready'){
@@ -249,7 +249,7 @@ export class Controller {
       const members=[...this.peers.values()].filter(p=>p.ready&&now()-p.lastSeen<12000&&p.version===BUILD&&(!roll.masked||this.reservations.get(roll.request.id)?.members.includes(p.id))).map(p=>p.id);
       // A 100-dice stress roll takes ~25 s to predict per peer; the product tier needs only seconds.
       const window=Math.max(roll.kinds.length>20?90000:20000,roll.request.batch?15000+roll.request.batch.size*2000:0);
-      const out:Outgoing={roll,chunks,hash:sha,bytes:bytes.length,wait:new Set([this.transport.id,...members]),members,at:now(),started:false,retry:0,acks:new Set(members),lastStartRetry:0,window,viewers:new Set([this.transport.id,...members])};
+      const out:Outgoing={uploading:true,roll,chunks,hash:sha,bytes:bytes.length,wait:new Set([this.transport.id,...members]),members,at:now(),started:false,retry:0,acks:new Set(members),lastStartRetry:0,window,viewers:new Set([this.transport.id,...members])};
       this.outgoing.set(roll.request.id,out);this.rolls.set(roll.request.id,actual);this.addRecord(actual);
       this.requests.delete(roll.request.id);
       this.log('trajectory-ready',{id:roll.request.id,source:roll.request.source,theme:roll.request.theme,physicsMs:roll.physicsMs,steps:roll.steps,collisions:roll.collisions,diagnostics:roll.diagnostics,bytes:bytes.length,rawBytes:poses.byteLength,chunks:chunks.length,hash:sha,results:roll.results,members});
@@ -257,6 +257,7 @@ export class Controller {
       if(members.length){await this.send({type:'offer',id:roll.request.id,total:chunks.length,bytes:bytes.length,hash:sha,members});
         for(let i=0;i<chunks.length;i++){await this.send({type:'chunk',id:roll.request.id,index:i,data:chunks[i]});if(i%8===7)await new Promise(r=>setTimeout(r,8))}
         await this.send({type:'chunks-done',id:roll.request.id});}
+      out.uploading=false;out.at=now();await this.maybeStart(out);
       }
       this.requests.delete(predicted.request.id);this.privateAudiences.delete(predicted.request.id);
     }catch(e){this.worker.postMessage({type:'release',id:pending.id});this.fail('physics/trajectory',e);
@@ -281,11 +282,11 @@ export class Controller {
     }
   }
   private async maybeStart(out:Outgoing){
-    if(out.started||out.wait.size)return;
+    if(out.uploading||out.started||out.wait.size)return;
     const batch=out.roll.request.batch;
     if(batch){
       const peers=[...this.outgoing.values()].filter(r=>r.roll.request.batch?.id===batch.id);
-      if(peers.length!==batch.size||peers.some(r=>r.wait.size||r.started))return;
+      if(peers.length!==batch.size||peers.some(r=>r.uploading||r.wait.size||r.started))return;
       const maxRtt=Math.max(0,...[...this.peers.values()].filter(p=>p.ready).map(p=>p.rtt));
       const lead=out.members.length?Math.min(1500,Math.max(100,maxRtt*1.5+50)):24,start=Math.max(now()+lead,...this.settledAt.values());
       for(const row of peers){row.started=true;row.start=start;row.lastStartRetry=now();this.retainUntilExit(row.roll,start);}
@@ -388,7 +389,7 @@ export class Controller {
         if(!Number.isSafeInteger(p.born)||p.born<0)throw Error('Invalid authority join order');
         if(!this.ready)this.born=Math.max(this.born,p.born+1);
         const isNew=!existing;this.peers.set(source,{id:source,session:p.session,name:p.name,color:p.color,role,lastSeen:now(),ready:p.ready===true,rtt:existing?.rtt??-1,offset:existing?.offset??0,version:p.build,born:p.born});
-        if(isNew||restarted){await this.send({type:'hello',ready:this.ready,name:this.transport.name,to:source});this.log('peer-joined',{source,name:p.name})}await this.ping(source);this.state();break;
+        if(isNew||restarted){await this.send({type:'hello',ready:this.ready,name:this.transport.name,to:source});this.log('peer-joined',{source,name:p.name})}if(isNew||restarted||!this.clocks.get(source)?.some(s=>now()-s.at<4000))await this.ping(source);this.state();break;
       }
       case 'secret-request':{
         const r=p.request as Request;
@@ -434,7 +435,7 @@ export class Controller {
       }
       case 'chunk':{
         const inbound=this.inbound.get(p.id);if(!inbound||inbound.source!==source)break;
-        inbound.assembly.add(p.index,p.data);
+        inbound.assembly.add(p.index,p.data);inbound.at=now();
         // The tail is a prompt NACK opportunity, not a mandatory 2.5 second stall for a lost chunk.
         if(p.index===inbound.assembly.total-1&&inbound.assembly.missing().length&&inbound.retry===0){inbound.retry++;
           await this.send({type:'missing',to:source,id:p.id,indices:inbound.assembly.missing()})}
@@ -495,6 +496,7 @@ export class Controller {
       if(!inbound.processing&&t-inbound.at>(inbound.retry+1)*2500&&inbound.retry<40){inbound.retry++;await this.send({type:'missing',to:inbound.source,id,indices:inbound.assembly.missing()})}
     }
     for(const [id,out] of this.outgoing){
+      if(out.uploading)continue;
       if(!out.started&&t-out.at>(out.retry+1)*2500&&out.retry<out.window/2500){out.retry++;for(const member of out.wait)if(member!==this.transport.id)await this.send({type:'offer',to:member,id,total:out.chunks.length,bytes:out.bytes,hash:out.hash,members:out.members})}
       if(out.started&&out.acks.size&&t-out.lastStartRetry>500){out.lastStartRetry=t;if(t-out.start!>10000){this.fail('start-ack-timeout',`${id} 未确认 ${[...out.acks].join(',')}`);out.acks.clear()}else for(const member of out.acks)await this.send({type:'start',to:member,id,start:out.start,hash:out.hash})}
       if(!out.started&&t-out.at>out.window){await this.send({type:'abort',id,reason:`等待播放器准备超时（${out.window/1000} 秒）`});this.bus.postMessage({type:'discard',id});this.outgoing.delete(id);this.rolls.delete(id);this.releasePhysics(id);this.cancelSecret(id);this.fail('prepare-timeout',`${id} 等待 ${[...out.wait].join(',')}`)}
