@@ -1,4 +1,5 @@
 import OBR from '@owlbear-rodeo/sdk';
+import {serveDiceSubmissions} from './dice-submit';
 import {Controller,type ResultRecord} from '../../extensions/workbench-dice3d/src/controller';
 import {BUILD,CHANNEL,type Roll,type Request,type ThemeID} from '../../extensions/workbench-dice3d/src/types';
 import {parseFormula,initialPhysicalCount} from '../../extensions/workbench-dice3d/src/research/formula';
@@ -11,7 +12,7 @@ const MODAL=CHANNEL+'/overlay',RESULT='com.obr-suite/dice-roll',THEME='com.obr-s
 let core:Controller|undefined,bus:BroadcastChannel|undefined,start:Promise<void>|undefined,ready=false,lastError='',connection='',profileStop:(()=>void)|undefined,historyStop:(()=>void)|undefined;
 let loadState:DiceLoadingState={ready:false,phase:'连接骰子渲染层'},renderProgress:LoadProgress|undefined,engineProgress:LoadProgress|undefined;
 function updateLoadProgress(){const parts=[renderProgress,engineProgress].filter(Boolean) as LoadProgress[];loadState={...loadState,done:parts.reduce((n,p)=>n+p.done,0),total:parts.reduce((n,p)=>n+p.total,0),bytes:parts.reduce((n,p)=>n+p.bytes,0),phase:renderProgress?.phase||engineProgress?.phase||'连接骰子渲染层'};}
-let generation=0,modalLane:Promise<void>=Promise.resolve();
+let generation=0,modalLane:Promise<void>=Promise.resolve(),submissionStop:(()=>void)|undefined;
 const waiters=new Map<string,{resolve:(p:DiceRollPayload)=>void;reject:(e:Error)=>void;timer:ReturnType<typeof setTimeout>}>(),records=new Map<string,ResultRecord>();
 export const resultListeners=new Set<(payload:DiceRollPayload,revealed:boolean)=>void>();
 const payload=(record:ResultRecord):DiceRollPayload=>{
@@ -25,6 +26,7 @@ export async function setupDice3d(){
  if(start)return start;const own=generation;
  start=(async()=>{
   const observed=await workbenchObservation().read();if(own!==generation)return;const p=observed.player;connection=p.connectionId;
+  submissionStop=serveDiceSubmissions(connection,(method,data)=>method==='compat'?submitCompat3d(data):submitDice3d(data));
   if(RETIRED_STYLES.includes(p.metadata[THEME] as any)){
    const removed=p.metadata[THEME];await OBR.player.setMetadata({[THEME]:'ink_sketch'});if(own!==generation)return;p.metadata={...p.metadata,[THEME]:'ink_sketch'};
    await OBR.notification.show(`已移除材质 ${removed}，后续骰子已改为卡通涂鸦，可在皮肤页重新选择。`,'INFO');
@@ -46,7 +48,7 @@ export async function setupDice3d(){
   const work=modalLane.then(async()=>{if(own===generation)await OBR.modal.open({id:MODAL,url,fullScreen:true,hideBackdrop:true,hidePaper:true,disablePointerEvents:true});});modalLane=work.catch(()=>{});await work;
  })().catch(error=>{if(own!==generation)return;teardownDice3d();loadState={...loadState,error:String(error)};throw error});return start;
 }
-export function teardownDice3d(close=true){generation++;core?.dispose();core=undefined;profileStop?.();profileStop=undefined;historyStop?.();historyStop=undefined;bus?.close();bus=undefined;start=undefined;ready=false;lastError='';renderProgress=undefined;engineProgress=undefined;loadState={ready:false,phase:'连接骰子渲染层'};records.clear();for(const w of waiters.values()){clearTimeout(w.timer);w.reject(Error('3D 投骰模块已关闭'));}waiters.clear();if(close)modalLane=modalLane.then(()=>OBR.modal.close(MODAL)).catch(error=>console.warn('[dice] overlay close failed',error));}
+export function teardownDice3d(close=true){generation++;submissionStop?.();submissionStop=undefined;core?.dispose();core=undefined;profileStop?.();profileStop=undefined;historyStop?.();historyStop=undefined;bus?.close();bus=undefined;start=undefined;ready=false;lastError='';renderProgress=undefined;engineProgress=undefined;loadState={ready:false,phase:'连接骰子渲染层'};records.clear();for(const w of waiters.values()){clearTimeout(w.timer);w.reject(Error('3D 投骰模块已关闭'));}waiters.clear();if(close)modalLane=modalLane.then(()=>OBR.modal.close(MODAL)).catch(error=>console.warn('[dice] overlay close failed',error));}
 async function whenReady(){await setupDice3d();if(!ready)throw Error(lastError||'正在加载骰子，首次渲染会花费一点时间，请等待....');}
 function theme(metadata:Record<string,unknown>):ThemeID{const id=metadata[THEME]??'ink_sketch';if(!STYLE_CHOICES.some(s=>s.id===id))throw Error('未知 3D 材质：'+String(id));return id as ThemeID;}
 export async function submitDice3d(req:QuickRollRequest,compat?:Partial<DiceRollPayload>):Promise<DiceRollPayload>{

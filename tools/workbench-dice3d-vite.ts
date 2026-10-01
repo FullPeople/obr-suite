@@ -6,7 +6,7 @@ export function workbenchDice3dPlugin(enabled:boolean):Plugin{
   const path=id.replaceAll('\\','/');if(path.endsWith('/src/modules/dice/index.ts')){
    // Renderer/history persist even if the old dice-tool module is disabled.
    code=code.replace('if (WORKBENCH_DEV) { teardownWorkbenchDice(); return; }','if (WORKBENCH_DEV) { return; }');
-   code="import {submitDice3d,submitCompat3d} from '../../workbench/dice3d';\n"+code;
+   code="import {submitDice3d,submitCompat3d} from '../../workbench/dice-submit';\n"+code;
    code=code.replace('export async function handleQuickRoll(req: QuickRollRequest,identity?:QuickRollIdentity): Promise<void> {','export async function handleQuickRoll(req: QuickRollRequest,identity?:QuickRollIdentity): Promise<void> { if (!readFixedRoll()) { await submitDice3d(req); return; }');
    code=code.replace(/(\}\): Promise<string> \{)(\r?\n  if \(!opts\.dice\.length\))/, '$1\n  return submitCompat3d(opts);$2');
    if(!code.includes('return submitCompat3d(opts);')||!code.includes('await submitDice3d(req); return;'))throw Error('3D adapter no longer matches the shared dice entry contract');

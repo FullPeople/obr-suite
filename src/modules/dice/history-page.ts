@@ -423,6 +423,11 @@ function render(): void {
     row.addEventListener("click", () => {
       const playerName = row.dataset.roller ?? "";
       const cid = row.dataset.cid ?? "";
+      if (document.body.dataset.actionHistory) {
+        // The embedded Action tab remains open while token results are toggled.
+        if (cid) void toggleReplayForCid(cid).catch(() => {});
+        return;
+      }
       // New behaviour (per user spec): click a row → open the dice
       // action panel jumped to History tab (filter by this player) +
       // activate the replay overlay for this roll's collective. The
@@ -699,6 +704,15 @@ function renderEntryRow(h: HistoryEntry, cid: string, tight: boolean): string {
 }
 
 async function toggleReplayForCid(cid: string): Promise<void> {
+  if (document.body.dataset.actionHistory) {
+    if (!history.some((h) => (h.collectiveId ?? h.rollId) === cid)) return;
+    const action = activeReplayCid === cid ? "close" : "open";
+    await OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action }, { destination: "LOCAL" });
+    activeReplayCid = action === "close" ? null : cid;
+    render();
+    if (detailRollerKey) renderDetail();
+    return;
+  }
   if (activeReplayCid === cid) {
     try {
       await Promise.all([

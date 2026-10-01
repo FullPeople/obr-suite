@@ -28,4 +28,14 @@ export interface EventRecord {at:number;event:string;detail:unknown}
 export interface Peer {id:string;session?:string;name:string;color?:string;role?:import('./hidden-roll').Role;lastSeen:number;ready:boolean;rtt:number;offset:number;version:string;born:number}
 export const url=(p:string)=>'/suite-dev/dice3d/'+p;
 export const now=()=>performance.timeOrigin+performance.now();
-export const errorText=(e:unknown)=>e instanceof Error?`${e.name}: ${e.message}`:String(e);
+export function errorText(error:unknown):string{
+ if(error instanceof Error)return `${error.name}: ${error.message}`;
+ if(error&&typeof error==='object'){
+  // SDK RPCs reject with plain objects, not necessarily Error instances.
+  const data=error as Record<string,unknown>,message=typeof data.message==='string'?data.message:typeof data.error==='string'?data.error:'';
+  const code=typeof data.code==='string'||typeof data.code==='number'?String(data.code):'';
+  if(message)return `${message}${code?` (${code})`:''}`;
+  try{return JSON.stringify(error).slice(0,1000);}catch{return '无法读取错误详情';}
+ }
+ return String(error);
+}
