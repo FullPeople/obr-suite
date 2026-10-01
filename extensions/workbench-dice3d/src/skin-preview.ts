@@ -3,7 +3,8 @@ import * as T from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import {DiceAssets} from './asset-loading';
-import {materialCatalog,STYLE_CHOICES} from './material-styles';
+import {diceCatalog} from './asset-catalog';
+import {STYLE_CHOICES} from './material-styles';
 import {createDiceMaterial,instanceDiceMaterial,addSketchOutline,disposeDiceDecorations} from './dice-materials';
 import {normalizePlayerColor} from './player-color.mjs';
 import {KINDS,url,type Catalog,type ThemeID,type Kind} from './types';
@@ -43,7 +44,7 @@ new ResizeObserver(resize).observe(document.body);resize();
 gl.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();active=false;report('WebGL 上下文丢失，请重新打开皮肤页');});
 addEventListener('pagehide',()=>{cancelAnimationFrame(frame);for(const mesh of meshes){disposeDiceDecorations(mesh);(mesh.material as T.Material).dispose();}for(const geo of geometry.values())geo.dispose();for(const mat of bases.values())mat.dispose();environment.dispose();gl.dispose();},{once:true});
 async function init(){
- const assets=new DiceAssets(p=>{status.textContent=`正在准备 3D 展示… ${p.done}/${p.total}`;});assets.locks=await assets.json<Record<string,string>>('asset-hashes.json');catalog=materialCatalog(await assets.json<Catalog>('assets/catalog.json'));
+ const assets=new DiceAssets(p=>{status.textContent=`正在准备 3D 展示… ${p.done}/${p.total}`;});catalog=diceCatalog();
  assets.plan([...KINDS.map(k=>catalog.dice[k].model),...Object.values(catalog.themes).flatMap(t=>Object.values(t.masks))]);
  const loader=new GLTFLoader(),textures=new Map<string,Promise<T.Texture>>();
  await Promise.all(KINDS.map(async kind=>{const model=await loader.parseAsync(await assets.bytes(catalog.dice[kind].model),url(''));const mesh=model.scene.getObjectByName('RenderMesh') as T.Mesh;

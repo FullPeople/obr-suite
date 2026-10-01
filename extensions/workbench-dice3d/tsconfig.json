@@ -1,1 +1,1 @@
-{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"Bundler","strict":true,"skipLibCheck":true,"lib":["ES2023","DOM","WebWorker"],"allowJs":true,"noEmit":true,"types":["vite/client"]},"include":["src"]}
+{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"Bundler","strict":true,"skipLibCheck":true,"lib":["ES2023","DOM","WebWorker"],"allowJs":true,"noEmit":true,"types":["vite/client"],"resolveJsonModule":true},"include":["src"]}

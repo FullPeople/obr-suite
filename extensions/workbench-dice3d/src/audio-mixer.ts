@@ -1,8 +1,8 @@
 import {DiceAudio,type LoadedThemeAudio} from './audio';
 import {now,url,type Catalog,type ThemeID} from './types';
 import type {AudioPlan} from './renderer';
-import {materialCatalog} from './material-styles';
 import {DiceAssets} from './asset-loading';
+import {diceCatalog} from './asset-catalog';
 
 interface Track{engine:DiceAudio;plan:AudioPlan;loaded:Promise<LoadedThemeAudio>;at:number;started:boolean;hit:number;rule:number;stinger:boolean}
 /** One shared browser context, independent voices/theme/cursor/lifetime per authoritative roll. */
@@ -12,7 +12,7 @@ export class RollAudioMixer{
   private loading=new Map<ThemeID,Promise<LoadedThemeAudio>>();
   private catalog:Promise<Catalog>;
   private timer=0;private finishedPlayed=0;private finishedDropped=0;private volume=1;
-  constructor(private report:(event:string,detail:unknown)=>void,assets=new DiceAssets(),catalog?:Catalog){this.root=new DiceAudio(null,undefined,assets);this.catalog=catalog?Promise.resolve(catalog):assets.json<Catalog>('assets/catalog.json').then(materialCatalog);}
+  constructor(private report:(event:string,detail:unknown)=>void,assets=new DiceAssets(),catalog?:Catalog){this.root=new DiceAudio(null,undefined,assets);this.catalog=Promise.resolve(catalog||diceCatalog());}
   get played(){return this.finishedPlayed+[...this.tracks.values()].reduce((n,t)=>n+t.engine.played,0)}
   get dropped(){return this.finishedDropped+[...this.tracks.values()].reduce((n,t)=>n+t.engine.dropped,0)}
   state(){return this.root.state()}

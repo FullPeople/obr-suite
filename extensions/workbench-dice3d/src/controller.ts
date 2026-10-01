@@ -5,7 +5,6 @@ import {buildCue} from './cue';
 import {makeProjection} from './native';
 import {floorBudget} from './physics-capacity';
 import {normalizePlayerColor,validBodyColor} from './player-color.mjs';
-import {materialCatalog} from './material-styles';
 import {validModifier} from './modifier.mjs';
 import {audienceFor,hiddenRequest,maskRoll,unmaskRoll,validVisibility,validateDetails,type SecretDetails,type Role} from './hidden-roll';
 import {SecretKeys,secretCommitment} from './secret-keys';
@@ -13,7 +12,7 @@ import {dieTotalValue} from './cue';
 import {validateRecipe} from './suite-formula';
 import {formulaCue} from './research/presentation';
 import {packReveal,unpackReveal} from './suite-reveal';
-import {DiceAssets} from './asset-loading';
+import {diceCatalog} from './asset-catalog';
 import {splitGroupRoll} from './group-batch';
 export interface Transport {id:string;name:string;color?:string;role?:Role;resolveRole?:(id:string)=>Promise<Role|undefined>;mode:string;send:(data:any)=>Promise<void>;listen:(fn:(data:any,source:string)=>void)=>()=>void}
 export interface ResultRecord{visibility?:DiceHistoryVisibility;id:string;source:string;name:string;color?:string;kinds:Roll['kinds'];results:number[];modifier:number;total:number;secret:boolean;revealed:boolean;complete:boolean;at:number;canReveal:boolean;formulaData?:Roll['formulaData']}
@@ -85,7 +84,7 @@ export class Controller {
   dispose(){clearInterval(this.interval);clearInterval(this.stress);clearTimeout(this.pendingTimer);this.stopTransport();this.worker.terminate();this.bus.close();this.disabled=true;}
   async init(){
     await this.keys.ready;
-    this.catalog=materialCatalog(await new DiceAssets().json<Catalog>('assets/catalog.json'));this.log('controller-ready',{mode:this.transport.mode,build:BUILD});
+    this.catalog=diceCatalog();this.log('controller-ready',{mode:this.transport.mode,build:BUILD});
     // Pay the engine load here, behind the panel's "preparing" state, instead of on the first roll.
     this.worker.postMessage({type:'warmup',catalog:this.catalog,view:this.viewport});
     await this.send({type:'hello',ready:false,name:this.transport.name,born:this.born});this.state();
