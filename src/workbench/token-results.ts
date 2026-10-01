@@ -21,7 +21,9 @@ export function setTokenResults(id:string,rows:DiceRollPayload[],visible?:boolea
   // Keep the live group available for an explicit show, but dismiss its label.
   const original=id.slice('history:'.length);visibility.set(original,false);const group=groups.get(original);if(group)group.visible=false;
  }
- groups.set(id,{visible:visible??visibility.get(id)??groups.get(id)?.visible??true,rows:rows.filter(r=>r.itemId).map(r=>({itemId:r.itemId!,text:r.label||r.expression||'',total:r.total,color:r.rollerColor||'#fff',hidden:!!r.hidden}))});serial++;void setupTokenResults().then(refresh);
+ // The latest display control outranks the visibility captured when a roll
+ // started; a late completion must not undo a subsequent cancellation.
+ groups.set(id,{visible:visibility.get(id)??visible??groups.get(id)?.visible??true,rows:rows.filter(r=>r.itemId).map(r=>({itemId:r.itemId!,text:r.label||r.expression||'',total:r.total,color:r.rollerColor||'#fff',hidden:!!r.hidden}))});serial++;void setupTokenResults().then(refresh);
 }
 export function toggleTokenResults(id:string,visible:boolean){visibility.set(id,visible);const group=groups.get(id);if(group){group.visible=visible;serial++;void refresh();}}
 export function clearTokenResults(id:string){if(id.startsWith('group-'))closed.add(id);if(closed.size>100)closed.delete(closed.values().next().value!);groups.delete(id);serial++;void refresh();}

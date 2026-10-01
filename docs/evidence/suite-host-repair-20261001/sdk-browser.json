@@ -1,0 +1,144 @@
+{
+  "sourceSHA256": "59caf7465aa6bd4154b800ec537049d5582fe777460e88f69cc9a66277bda278",
+  "actualSdk": true,
+  "actualCrossWindow": true,
+  "syntheticData": true,
+  "baseline": false,
+  "realRoomVerified": false,
+  "httpDocumentReads": 7,
+  "documentWrites": 2,
+  "reports": [
+    {
+      "name": "other-player-selection-does-not-hydrate-or-refresh",
+      "passed": true,
+      "counts": {
+        "catalog": 0,
+        "hydrate": 0,
+        "refresh": 0,
+        "refreshSelection": 0,
+        "reconcileRuntime": 0
+      }
+    },
+    {
+      "name": "repeated-same-client-hello-does-not-resend-warm-portraits",
+      "passed": true,
+      "cacheSnapshots": 0
+    },
+    {
+      "name": "healthy-direct-window-does-not-duplicate-view-payloads-through-relay",
+      "passed": true,
+      "relayViewMessages": []
+    },
+    {
+      "name": "new-relay-viewer-receives-catalog-despite-old-direct-window",
+      "passed": true
+    },
+    {
+      "name": "cold-multiselection-publishes-overview-before-document-arrives",
+      "passed": true,
+      "group": {
+        "id": "group-4f67c575-da5e-4de0-956a-998ca2b68423",
+        "phase": "select",
+        "targets": [],
+        "selectedCount": 2,
+        "loading": true,
+        "visible": true,
+        "kind": "save",
+        "ability": "dex",
+        "variant": "normal"
+      }
+    },
+    {
+      "name": "cached-single-selection-bypasses-pending-group-read",
+      "passed": true
+    },
+    {
+      "name": "clear-selection-restores-original-card-and-emits-view-restore",
+      "passed": true
+    },
+    {
+      "name": "late-group-download-cannot-reopen-cleared-overview",
+      "passed": true
+    },
+    {
+      "name": "same-selection-late-character-binding",
+      "passed": true,
+      "elapsedMs": 13,
+      "chosen": "card:hero1"
+    },
+    {
+      "name": "same-selection-character-binding-replaced",
+      "passed": true,
+      "elapsedMs": 13,
+      "chosen": "card:hero3"
+    },
+    {
+      "name": "same-selection-late-monster-component",
+      "passed": true,
+      "elapsedMs": 13,
+      "chosen": "token23"
+    },
+    {
+      "name": "selected-monster-late-scene-definition-replaces-library-cache",
+      "passed": true,
+      "elapsedMs": 12
+    },
+    {
+      "name": "selected-monster-removed-scene-definition-restores-library-source",
+      "passed": true
+    },
+    {
+      "name": "twelve-cached-selection-events-five-cards",
+      "elapsedMs": 42,
+      "counts": {
+        "catalog": 24,
+        "hydrate": 0,
+        "refresh": 0,
+        "refreshSelection": 12,
+        "reconcileRuntime": 0
+      },
+      "httpReads": 0
+    },
+    {
+      "name": "cached-B-bypasses-pending-A",
+      "passed": true,
+      "elapsedMs": 2,
+      "chosen": "card:hero0"
+    },
+    {
+      "name": "late-A-never-replaces-new-selection",
+      "passed": true,
+      "cachedBMs": 4
+    },
+    {
+      "name": "player-profile-event-still-refreshes-catalog",
+      "passed": true
+    },
+    {
+      "name": "pinned-selection-retained",
+      "passed": true
+    },
+    {
+      "name": "unpin-follows-current-selection",
+      "passed": true,
+      "elapsedMs": 1,
+      "chosen": "card:hero0"
+    },
+    {
+      "name": "durable-stats-ack-and-stale-write-guard-preserved",
+      "passed": true,
+      "durableWrites": 2
+    },
+    {
+      "name": "permission-revocation-preserved",
+      "passed": true
+    },
+    {
+      "name": "same-selection-restored-permission-recovers",
+      "passed": true,
+      "elapsedMs": 15,
+      "chosen": "card:hero4"
+    }
+  ],
+  "errors": []
+}

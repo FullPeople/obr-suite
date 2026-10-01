@@ -1,0 +1,2 @@
+PASS ordered startup reports slow module and continues when it settles
+PASS failed popover does not block modules after authoritative settings arrive

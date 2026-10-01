@@ -52,7 +52,7 @@ const SUITE_CHANNEL = (process.env.SUITE_CHANNEL || "stable").toLowerCase();
 export default defineConfig(({ command }) => ({
   plugins:
     command === "serve"
-      ? [preact(), basicSsl()]
+      ? [preact(), basicSsl(),workbenchAnnouncementPlugin(SUITE_BASE==='/suite-dev/')]
       : [preact(),workbenchDice3dPlugin(SUITE_BASE==='/suite-dev/'),workbenchAnnouncementPlugin(SUITE_BASE==='/suite-dev/')],
   worker:{format:'es'},
   base: SUITE_BASE,

@@ -315,7 +315,8 @@ function renderSection(s: Section): string {
       .map((it) => {
         // "version · description" — version is anything before the
         // first `·` or `-` separator. Fall back to whole string.
-        const sepMatch = it.match(/^([^·\-—]+?)\s*[·\-—]\s*(.+)$/);
+        const sepMatch = it.match(/^(\d+\.\d+\.\d+(?:[-.][\w]+)*)\s*[·\-—]\s*(.+)$/)
+          ?? it.match(/^([^·\-—]+?)\s*[·\-—]\s*(.+)$/);
         const version = sepMatch ? sepMatch[1].trim() : it.trim();
         const desc = sepMatch ? sepMatch[2].trim() : "";
         const versionHtml = `<span class="cl-version">${escapeHtml(version)}</span>`;
@@ -415,8 +416,8 @@ async function loadAndRender(): Promise<void> {
 //
 // Pick the channel's own file up front. `BASE_URL` is baked in at build
 // time (`/suite/` or `/suite-dev/`), so it is the one thing that
-// reliably says which build this is. The other name stays as a fallback
-// in case a deploy ever ships only one of the two.
+// reliably says which build this is. Missing channel metadata must not report
+// another channel's version.
 async function loadVersionIntoTitle(): Promise<void> {
   const titleEl = document.querySelector<HTMLElement>(".head .title");
   if (!titleEl) return;
@@ -432,7 +433,7 @@ async function loadVersionIntoTitle(): Promise<void> {
         return;
       }
     } catch {
-      /* try the next candidate */
+      /* Keep the existing title if this channel is unavailable. */
     }
   }
 }

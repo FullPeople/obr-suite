@@ -1,0 +1,66 @@
+{
+  "room": {
+    "cards": 5,
+    "monsters": 20
+  },
+  "virtualIdle": false,
+  "reports": [
+    {
+      "name": "idle-small-room-single-card-arrives-within-one-second",
+      "passed": true,
+      "elapsedMs": 15,
+      "hostBeforeSelection": {
+        "relayAge": 5913,
+        "chosen": "card:hero0",
+        "cards": 5
+      },
+      "client": {
+        "online": true,
+        "key": "profile-room:card:hero1"
+      },
+      "idleClientMessages": [
+        {
+          "type": "ping",
+          "afterMs": 589
+        },
+        {
+          "type": "ping",
+          "afterMs": 10590
+        },
+        {
+          "type": "ping",
+          "afterMs": 20590
+        },
+        {
+          "type": "ping",
+          "afterMs": 30590
+        },
+        {
+          "type": "ping",
+          "afterMs": 40590
+        }
+      ]
+    },
+    {
+      "name": "single-monster-arrives",
+      "passed": true,
+      "elapsedMs": 27
+    },
+    {
+      "name": "two-target-group-arrives",
+      "passed": true
+    },
+    {
+      "name": "clear-restores-original-card",
+      "passed": true,
+      "actual": "profile-room:card:hero0"
+    },
+    {
+      "name": "no-page-errors",
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "reads": 5,
+  "errors": []
+}

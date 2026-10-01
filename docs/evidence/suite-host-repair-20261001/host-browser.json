@@ -1,0 +1,189 @@
+{
+  "browser": "151.0.7922.173",
+  "realRoomVerified": false,
+  "physicsVerified": false,
+  "checks": [
+    {
+      "name": "360 single label visible",
+      "passed": true
+    },
+    {
+      "name": "360 second click removes DOM",
+      "passed": true
+    },
+    {
+      "name": "360 replace and late close",
+      "passed": true
+    },
+    {
+      "name": "360 group history no duplicate",
+      "passed": true
+    },
+    {
+      "name": "360 group cancellation and late result removes DOM",
+      "passed": true
+    },
+    {
+      "name": "360 permission change clears DOM",
+      "passed": true
+    },
+    {
+      "name": "360 pending coordinates cancel",
+      "passed": true
+    },
+    {
+      "name": "360 remote clicks rejected",
+      "passed": true
+    },
+    {
+      "name": "360 suite-dev feedback Gmail retained",
+      "passed": true
+    },
+    {
+      "name": "360 suite-dev body routed",
+      "passed": true
+    },
+    {
+      "name": "360 new notice uses paired Web history",
+      "passed": true
+    },
+    {
+      "name": "360 suite-dev Gmail is clickable",
+      "passed": true
+    },
+    {
+      "name": "360 dev suffix preserved",
+      "passed": true
+    },
+    {
+      "name": "360 suite-dev notice fits width",
+      "passed": true
+    },
+    {
+      "name": "360 suite-dev version stays on own channel",
+      "passed": true
+    },
+    {
+      "name": "360 suite-dev close targets own modal",
+      "passed": true
+    },
+    {
+      "name": "360 suite feedback Gmail retained",
+      "passed": true
+    },
+    {
+      "name": "360 suite body routed",
+      "passed": true
+    },
+    {
+      "name": "360 suite Gmail is clickable",
+      "passed": true
+    },
+    {
+      "name": "360 suite notice fits width",
+      "passed": true
+    },
+    {
+      "name": "360 suite version stays on own channel",
+      "passed": true
+    },
+    {
+      "name": "360 suite close targets own modal",
+      "passed": true
+    },
+    {
+      "name": "1280 single label visible",
+      "passed": true
+    },
+    {
+      "name": "1280 second click removes DOM",
+      "passed": true
+    },
+    {
+      "name": "1280 replace and late close",
+      "passed": true
+    },
+    {
+      "name": "1280 group history no duplicate",
+      "passed": true
+    },
+    {
+      "name": "1280 group cancellation and late result removes DOM",
+      "passed": true
+    },
+    {
+      "name": "1280 permission change clears DOM",
+      "passed": true
+    },
+    {
+      "name": "1280 pending coordinates cancel",
+      "passed": true
+    },
+    {
+      "name": "1280 remote clicks rejected",
+      "passed": true
+    },
+    {
+      "name": "1280 suite-dev feedback Gmail retained",
+      "passed": true
+    },
+    {
+      "name": "1280 suite-dev body routed",
+      "passed": true
+    },
+    {
+      "name": "1280 new notice uses paired Web history",
+      "passed": true
+    },
+    {
+      "name": "1280 suite-dev Gmail is clickable",
+      "passed": true
+    },
+    {
+      "name": "1280 dev suffix preserved",
+      "passed": true
+    },
+    {
+      "name": "1280 suite-dev notice fits width",
+      "passed": true
+    },
+    {
+      "name": "1280 suite-dev version stays on own channel",
+      "passed": true
+    },
+    {
+      "name": "1280 suite-dev close targets own modal",
+      "passed": true
+    },
+    {
+      "name": "1280 suite feedback Gmail retained",
+      "passed": true
+    },
+    {
+      "name": "1280 suite body routed",
+      "passed": true
+    },
+    {
+      "name": "1280 suite Gmail is clickable",
+      "passed": true
+    },
+    {
+      "name": "1280 suite notice fits width",
+      "passed": true
+    },
+    {
+      "name": "1280 suite version stays on own channel",
+      "passed": true
+    },
+    {
+      "name": "1280 suite close targets own modal",
+      "passed": true
+    },
+    {
+      "name": "no browser script errors",
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "errors": []
+}

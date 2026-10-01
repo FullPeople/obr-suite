@@ -21,7 +21,7 @@ if(!process.env.DICE_EDGE_ORIGIN){
  });await new Promise(r=>server.listen(5220,'127.0.0.1',r));
 }
 mkdirSync(out,{recursive:true});
-const browser=await chromium.launch({channel:'msedge',headless:true,args:['--enable-webgl','--disable-background-timer-throttling',...(process.env.DICE3D_BROWSER_DIRECT?['--no-proxy-server']:[])],...(process.env.DICE3D_BROWSER_PROXY?{proxy:{server:process.env.DICE3D_BROWSER_PROXY}}:{})});
+const browser=await chromium.launch({...(process.env.PLAYWRIGHT_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH}:{channel:'msedge'}),headless:true,args:['--enable-webgl','--disable-background-timer-throttling',...(process.env.DICE3D_BROWSER_SWIFTSHADER?['--use-angle=swiftshader','--enable-unsafe-swiftshader']:[]),...(process.env.DICE3D_BROWSER_DIRECT?['--no-proxy-server']:[])],...(process.env.DICE3D_BROWSER_PROXY?{proxy:{server:process.env.DICE3D_BROWSER_PROXY}}:{})});
 async function warm(page,{keep=false,reuse=false}={}){return page.evaluate(async ({worker,catalog,keep,reuse})=>{
  const engine=reuse?window.engine:new Worker('/suite-dev/assets/'+worker,{type:'module'});window.engine=engine;
  const reply=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('warmup timeout')),60000);engine.onerror=reject;engine.onmessage=e=>{if(e.data.type==='warm'){clearTimeout(timer);resolve(e.data);}};engine.postMessage({type:'warmup',catalog,view:{w:1440,h:900}});});if(!keep)engine.terminate();return reply;
@@ -64,5 +64,5 @@ try{
  await page.waitForFunction(()=>window.events.some(e=>e.type==='renderer-event'&&e.event==='render-complete'&&e.detail.roll==='edge225-real-roll'),null,{timeout:60000});assert.deepEqual(errors,[]);checks.push({case:'production Edge Jolt/WASM/WebGL roll and full animation',...result});
  assert.equal(wasmRequests.length,1);checks.push({case:'one verified WASM download; unversioned refetch blocked',wasmRequests});
  assert.deepEqual(metadataRequests,[]);checks.push({case:'blocked startup JSON endpoints are never requested; physics and renderer still complete'});
- const report={browser:'Microsoft Edge',origin,checks,errors,success:true,realOwlbearRoom:false,roomMessagesSent:0};writeFileSync(out+(process.env.DICE_EDGE_ORIGIN?'/public-edge.json':'/production-edge.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
+ const report={browser:process.env.PLAYWRIGHT_EXECUTABLE_PATH?'Chromium':'Microsoft Edge',browserVersion:await browser.version(),browserExecutable:process.env.PLAYWRIGHT_EXECUTABLE_PATH||'msedge',softwareWebGL:!!process.env.DICE3D_BROWSER_SWIFTSHADER,origin,checks,errors,success:true,realOwlbearRoom:false,roomMessagesSent:0};writeFileSync(out+(process.env.DICE_EDGE_ORIGIN?'/public-edge.json':'/production-edge.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 }finally{await browser.close();if(server)await new Promise(r=>server.close(r));}

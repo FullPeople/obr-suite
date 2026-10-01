@@ -1,0 +1,12 @@
+PASS pending workbench startup cannot revive subscriptions or renderer after teardown
+PASS pending token result startup cannot revive its channel after teardown
+PASS remote history clicks cannot change local token labels
+PASS same history click removes the label completely
+PASS history replacement is exclusive and stale close cannot reset its toggle
+PASS group history cancels both duplicates and late group results stay dismissed
+PASS group explicit show and hide still work after history cancellation
+PASS viewer permission changes clear every existing token label
+PASS cancel during an in-flight coordinate read still publishes the empty result
+PASS awaiting group control does not revive token service after teardown
+PASS old initialization failure cannot tear down the new controller or reopen an old overlay
+{"checks":11,"success":true}

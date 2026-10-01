@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {setupWorkbenchDice,teardownWorkbenchDice,rolls} from '../src/workbench/dice';
 import {setupDice3d,teardownDice3d} from '../src/workbench/dice3d';
-import {setupTokenResults,setTokenResults,clearTokenResults,teardownTokenResults} from '../src/workbench/token-results';
+import {setupTokenResults,setTokenResults,toggleTokenResults,clearTokenResults,teardownTokenResults} from '../src/workbench/token-results';
 const g=globalThis as any,handlers=new Map<string,Function>(),channels:any[]=[],controllers:any[]=[],opens:any[]=[],closed:any[]=[],observers=new Set<Function>();let pendingRead:((v:any)=>void)|undefined,readPending=false,initPending=false,rejectInit:((v:any)=>void)|undefined;
 const observed={ready:true,role:'GM',player:{id:'owner',connectionId:'local',role:'GM',name:'Synthetic',color:'#ffffff',metadata:{}},party:[],items:[{id:'unit',visible:true,position:{x:0,y:0},metadata:{}}]};
 g.localStorage={getItem:()=>null,setItem:()=>{}};g.sessionStorage=g.localStorage;
@@ -23,7 +23,8 @@ click('public');click('second');await flush();assert.deepEqual(visible().map((v:
 click('public','close');click('second');await flush();assert.equal(visible().length,0);pass('history replacement is exclusive and stale close cannot reset its toggle');
 const grouped={rollId:'member',ts:3,collectiveId:'group-roll',itemId:'unit',total:14,label:'Group',dice:[],expression:'1d20',rollerColor:'#ffffff'} as any;rolls.push(grouped);setTokenResults('group-roll',[grouped]);await flush();
 click('group-roll');await flush();assert.deepEqual(visible().map((v:any)=>v.id),['history:group-roll']);
-click('group-roll');await flush();assert.equal(visible().length,0);setTokenResults('group-roll',[grouped]);await flush();assert.equal(visible().length,0);pass('group history cancels both duplicates and late group results stay dismissed');
+click('group-roll');await flush();assert.equal(visible().length,0);setTokenResults('group-roll',[grouped],true);await flush();assert.equal(visible().length,0);pass('group history cancels both duplicates and late group results stay dismissed');
+toggleTokenResults('group-roll',true);await flush();assert.equal(visible().length,1);toggleTokenResults('group-roll',false);await flush();assert.equal(visible().length,0);pass('group explicit show and hide still work after history cancellation');
 click('public');await flush();observed.role='PLAYER';for(const fn of observers)fn();await flush();assert.equal(visible().length,0);observed.role='GM';for(const fn of observers)fn();pass('viewer permission changes clear every existing token label');
 const originalPosition=g.diceTestSDK.viewport.getPosition;let resolvePosition:Function=()=>{};g.diceTestSDK.viewport.getPosition=()=>new Promise(resolve=>resolvePosition=resolve);
 setTokenResults('pending',[grouped]);await flush();clearTokenResults('pending');resolvePosition({x:0,y:0});await flush();assert.deepEqual(labels().groups,[]);g.diceTestSDK.viewport.getPosition=originalPosition;pass('cancel during an in-flight coordinate read still publishes the empty result');

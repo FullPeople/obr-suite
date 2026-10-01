@@ -1,0 +1,34 @@
+PASS exactly five active styles
+PASS persistent startup independent of UI
+PASS old feature toggle cannot tear down persistent 3D
+PASS locked jolt-physics.wasm.js
+PASS locked jolt-physics.wasm.wasm
+PASS locked Jolt-LICENSE
+PASS proper hull symmetries d4
+PASS proper hull symmetries d6
+PASS proper hull symmetries d8
+PASS proper hull symmetries d10
+PASS proper hull symmetries d12
+PASS proper hull symmetries d20
+PASS proper hull symmetries d_percentile
+PASS frontier 1d100
+PASS frontier adv(1d20)
+PASS frontier adv(1d20,2)
+PASS frontier repeat(3,2d6+5)
+PASS frontier 2d4*3
+PASS frontier resetmin(1d6,6)
+PASS percentile 0/0
+PASS percentile 0/9
+PASS percentile 90/0
+PASS percentile 90/9
+PASS mask all secrets
+PASS missing model explicit error
+PASS large reveal below transport budget
+PASS unauthorized reader has no plaintext
+PASS stable adapter disabled
+PASS row total history-page
+PASS row modifier history-page
+PASS row total panel-page
+PASS row modifier panel-page
+PASS independent repeat multiplication
+{"checks":36,"success":true}

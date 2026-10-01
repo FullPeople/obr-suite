@@ -70,7 +70,14 @@ try{
  const started=Date.now(),initialTraffic=traffic.length;console.log(JSON.stringify({phase:'idle-start',cards:5,monsters:20,transport:await viewer.evaluate(()=>window.workbenchDiagnostics().transport)}));
  // Playwright's clock belongs to the context. Advance both pages exactly once in
  // one-second steps while real SDK/HTTP requests continue between steps.
- if(virtual){const anchor=Date.now()+5000;await page.clock.pauseAt(anchor);
+ const freezeMs=Number(process.env.HOST_FREEZE_MS)||0;
+ if(freezeMs>0){
+  const cdp=await context.newCDPSession(page);await cdp.send('Page.setWebLifecycleState',{state:'frozen'});
+  console.log(JSON.stringify({phase:'host-frozen',freezeMs}));await new Promise(r=>setTimeout(r,freezeMs));
+  await cdp.send('Page.setWebLifecycleState',{state:'active'});await cdp.detach();
+  await viewer.waitForFunction(()=>window.getWorkbench().online,null,{timeout:20000});
+  reports.push({name:'actual-frozen-host-recovers',passed:true,freezeMs});
+ }else if(virtual){const anchor=Date.now()+5000;await page.clock.pauseAt(anchor);
   let steps=0;for(;steps<90;steps++){await page.clock.runFor(1000);await new Promise(r=>setTimeout(r,60));if(process.env.WEB_BASELINE?(await frame.evaluate(()=>window.probe.health().relayAge))>=46000:steps>=59){steps++;break;}}
   console.log(JSON.stringify({phase:'virtual-idle',simulatedMs:steps*1000,health:await frame.evaluate(()=>window.probe.health())}));
  }else while(Date.now()-started<46500){await page.waitForTimeout(Math.min(10000,46500-(Date.now()-started)));console.log(JSON.stringify({phase:'idle',elapsedMs:Date.now()-started,health:await frame.evaluate(()=>window.probe.health())}));}

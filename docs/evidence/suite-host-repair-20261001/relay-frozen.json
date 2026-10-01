@@ -1,0 +1,79 @@
+{
+  "room": {
+    "cards": 5,
+    "monsters": 20
+  },
+  "virtualIdle": false,
+  "reports": [
+    {
+      "name": "actual-frozen-host-recovers",
+      "passed": true,
+      "freezeMs": 61000
+    },
+    {
+      "name": "idle-small-room-single-card-arrives-within-one-second",
+      "passed": true,
+      "elapsedMs": 14,
+      "hostBeforeSelection": {
+        "relayAge": 419,
+        "chosen": "card:hero0",
+        "cards": 5
+      },
+      "client": {
+        "online": true,
+        "key": "profile-room:card:hero1"
+      },
+      "idleClientMessages": [
+        {
+          "type": "ping",
+          "afterMs": 590
+        },
+        {
+          "type": "ping",
+          "afterMs": 10590
+        },
+        {
+          "type": "ping",
+          "afterMs": 20590
+        },
+        {
+          "type": "ping",
+          "afterMs": 30590
+        },
+        {
+          "type": "ping",
+          "afterMs": 40590
+        },
+        {
+          "type": "ping",
+          "afterMs": 50590
+        },
+        {
+          "type": "ping",
+          "afterMs": 60590
+        }
+      ]
+    },
+    {
+      "name": "single-monster-arrives",
+      "passed": true,
+      "elapsedMs": 14
+    },
+    {
+      "name": "two-target-group-arrives",
+      "passed": true
+    },
+    {
+      "name": "clear-restores-original-card",
+      "passed": true,
+      "actual": "profile-room:card:hero0"
+    },
+    {
+      "name": "no-page-errors",
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "reads": 5,
+  "errors": []
+}

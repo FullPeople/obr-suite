@@ -1,0 +1,8 @@
+PASS other players selecting or changing their viewport do not rebuild the card catalog
+PASS party permission changes still invalidate immediately
+PASS own map selection retains its independent event
+PASS multiselection opens its group immediately while target documents are still loading
+PASS cold multiselection bounds concurrent document reads
+PASS pending group cannot mutate targets before its data is ready
+PASS clearing selection closes a pending group without waiting for slow documents
+PASS old reads cannot recreate the cleared group or start further old downloads

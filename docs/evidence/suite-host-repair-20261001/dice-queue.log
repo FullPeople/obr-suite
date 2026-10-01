@@ -1,0 +1,7 @@
+PASS explicit rejection retries the same message before the next message
+PASS retries back off and subsequent messages remain paced
+PASS unknown outcomes are never replayed
+PASS a failed request cannot stall the lane
+PASS persistent rate limit has a bounded retry budget
+PASS teardown during a queued wait cannot send a message
+{"checks":6,"success":true}

@@ -1,0 +1,46 @@
+{
+  "browser": "Chromium",
+  "browserVersion": "151.0.7922.173",
+  "browserExecutable": "/usr/bin/chromium",
+  "softwareWebGL": true,
+  "origin": "http://127.0.0.1:5220",
+  "checks": [
+    {
+      "case": "Edge recovers from screenshot-matching stale CRLF vendor bytes",
+      "requests": [
+        "http://127.0.0.1:5220/suite-dev/dice3d/vendor/jolt-physics.wasm.js?v=dice-assets-225",
+        "http://127.0.0.1:5220/suite-dev/dice3d/vendor/jolt-physics.wasm.js?v=dice-assets-225&retry=2",
+        "http://127.0.0.1:5220/suite-dev/dice3d/vendor/jolt-physics.wasm.js?v=dice-assets-225"
+      ]
+    },
+    {
+      "case": "persistent corrupted engine fails closed after three attempts"
+    },
+    {
+      "case": "same worker retries successfully after a failed engine load"
+    },
+    {
+      "case": "production Edge Jolt/WASM/WebGL roll and full animation",
+      "results": [
+        6,
+        5,
+        16
+      ],
+      "total": 32,
+      "duration": 0.6416666666666667
+    },
+    {
+      "case": "one verified WASM download; unversioned refetch blocked",
+      "wasmRequests": [
+        "http://127.0.0.1:5220/suite-dev/dice3d/vendor/jolt-physics.wasm.wasm?v=dice-assets-225"
+      ]
+    },
+    {
+      "case": "blocked startup JSON endpoints are never requested; physics and renderer still complete"
+    }
+  ],
+  "errors": [],
+  "success": true,
+  "realOwlbearRoom": false,
+  "roomMessagesSent": 0
+}

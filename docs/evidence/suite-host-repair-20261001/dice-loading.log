@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "checks": [
+    "concurrent and successful requests share one download",
+    "failed downloads are evicted and can recover in the same loader",
+    "permanent HTTP failures do not consume three retries",
+    "stalled headers time out with a clear reason and remain retryable",
+    "a stalled response body retains the bounded inactivity timeout",
+    "bundled locks still reject corrupted engine bytes"
+  ]
+}
+
