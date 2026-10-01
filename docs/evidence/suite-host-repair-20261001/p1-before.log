@@ -1,0 +1,48 @@
+PASS pending workbench startup cannot revive subscriptions or renderer after teardown
+PASS pending token result startup cannot revive its channel after teardown
+PASS remote history clicks cannot change local token labels
+PASS same history click removes the label completely
+PASS history replacement is exclusive and stale close cannot reset its toggle
+PASS group history cancels both duplicates and late group results stay dismissed
+PASS group explicit show and hide still work after history cancellation
+PASS viewer permission changes clear every existing token label
+PASS cancel during an in-flight coordinate read still publishes the empty result
+PASS awaiting group control does not revive token service after teardown
+PASS old initialization failure cannot tear down the new controller or reopen an old overlay
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: unready scene exceeded bounded microtask budget: 13/12
+
+true !== false
+
+    at file:///workspace/suite-host-repair/.local-evidence/p1-before/dice-lifecycle.mjs:1298:8 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: true,
+  expected: false,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.19.0
+node:internal/errors:985
+  const err = new Error(message);
+              ^
+
+Error: Command failed: /opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node .local-evidence/p1-before/dice-lifecycle.mjs
+    at genericNodeError (node:internal/errors:985:15)
+    at wrappedFn (node:internal/errors:539:14)
+    at checkExecSyncError (node:child_process:942:11)
+    at execFileSync (node:child_process:978:15)
+    at file:///workspace/suite-host-repair/tools/workbench-dice-lifecycle-217.mjs:3:1485 {
+  status: 1,
+  signal: null,
+  output: [ null, null, null ],
+  pid: 8716,
+  stdout: null,
+  stderr: null
+}
+
+Node.js v24.19.0

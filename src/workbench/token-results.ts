@@ -14,6 +14,10 @@ export async function setupTokenResults(){
  starting=task;try{await task;}finally{if(starting===task)starting=undefined;}
 }
 export function setTokenResults(id:string,rows:DiceRollPayload[],visible?:boolean){
+ const currentEpoch=workbenchObservation().sceneEpoch();
+ // Retire the previous scene before storing a result from the new one. With
+ // an idle empty renderer, refresh may not have observed the ready transition.
+ if(epoch!==-1&&epoch!==currentEpoch){epoch=currentEpoch;groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;}
  if(closed.has(id))return;
  if(id.startsWith('history:')){
   for(const key of groups.keys())if(key.startsWith('history:'))groups.delete(key);
@@ -30,9 +34,15 @@ export function clearTokenResults(id:string){if(id.startsWith('group-'))closed.a
 export function resetTokenResults(){groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;void refresh();}
 export function teardownTokenResults(){generation++;starting=undefined;clearTimeout(timer);timer=undefined;bus?.close();bus=undefined;groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;}
 async function refresh(){
- if(!bus||flight===generation)return;const current=bus,ownGeneration=generation,own=serial;clearTimeout(timer);flight=ownGeneration;
+ if(!bus||flight===generation)return;const current=bus,ownGeneration=generation;let own=serial;clearTimeout(timer);flight=ownGeneration;
  try{
-  const observation=workbenchObservation(),data=observation.peek();if(epoch!==observation.sceneEpoch()||!data.ready){epoch=observation.sceneEpoch();groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;}
+  const observation=workbenchObservation(),data=observation.peek();if(epoch!==observation.sceneEpoch()||!data.ready){
+   const changed=epoch!==observation.sceneEpoch()||groups.size||closed.size||visibility.size||tracked.size;
+   epoch=observation.sceneEpoch();groups.clear();closed.clear();visibility.clear();tracked.clear();if(changed)serial++;
+   // This cleanup belongs to this refresh. Only a later external mutation
+   // should request another pass; an unready scene is not a pending update.
+   own=serial;
+  }
   const ids=new Set([...tracked,...[...groups.values()].flatMap(g=>g.rows.map(r=>r.itemId))]);
   if(!ids.size){bus.postMessage({type:'token-results',groups:[],anchors:{}});return;}
   const [position,scale,dpi]=await Promise.all([OBR.viewport.getPosition(),OBR.viewport.getScale(),OBR.scene.grid.getDpi()]);if(bus!==current||generation!==ownGeneration||own!==serial||epoch!==observation.sceneEpoch())return;

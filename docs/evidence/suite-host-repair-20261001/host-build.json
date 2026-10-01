@@ -4,7 +4,7 @@
   "base": "/suite-dev/",
   "sourceRoot": "/workspace/suite-host-repair",
   "dependencyRoot": "/workspace/suite-host-repair",
-  "output": "/workspace/suite-host-repair/.local-evidence/host-overlay-final3",
+  "output": "/workspace/suite-host-repair/.local-evidence/host-overlay-p1-final",
   "copyPublicDir": false,
   "completeStaticSite": false,
   "rebuiltSubtrees": [

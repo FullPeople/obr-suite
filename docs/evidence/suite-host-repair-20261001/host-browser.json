@@ -4,6 +4,50 @@
   "physicsVerified": false,
   "checks": [
     {
+      "name": "360 unready scene stays bounded",
+      "passed": true
+    },
+    {
+      "name": "360 scene unload and ready recovery",
+      "passed": true
+    },
+    {
+      "name": "360 actual Action rapid double click sends open/close",
+      "passed": true,
+      "intents": [
+        {
+          "cid": "single",
+          "action": "open"
+        },
+        {
+          "cid": "single",
+          "action": "close"
+        }
+      ]
+    },
+    {
+      "name": "360 actual Action double click removes label before delayed ACK",
+      "passed": true
+    },
+    {
+      "name": "360 actual Action group double click sends open/close",
+      "passed": true,
+      "intents": [
+        {
+          "cid": "group-synthetic",
+          "action": "open"
+        },
+        {
+          "cid": "group-synthetic",
+          "action": "close"
+        }
+      ]
+    },
+    {
+      "name": "360 actual Action history replacement remains exclusive",
+      "passed": true
+    },
+    {
       "name": "360 single label visible",
       "passed": true
     },
@@ -89,6 +133,50 @@
     },
     {
       "name": "360 suite close targets own modal",
+      "passed": true
+    },
+    {
+      "name": "1280 unready scene stays bounded",
+      "passed": true
+    },
+    {
+      "name": "1280 scene unload and ready recovery",
+      "passed": true
+    },
+    {
+      "name": "1280 actual Action rapid double click sends open/close",
+      "passed": true,
+      "intents": [
+        {
+          "cid": "single",
+          "action": "open"
+        },
+        {
+          "cid": "single",
+          "action": "close"
+        }
+      ]
+    },
+    {
+      "name": "1280 actual Action double click removes label before delayed ACK",
+      "passed": true
+    },
+    {
+      "name": "1280 actual Action group double click sends open/close",
+      "passed": true,
+      "intents": [
+        {
+          "cid": "group-synthetic",
+          "action": "open"
+        },
+        {
+          "cid": "group-synthetic",
+          "action": "close"
+        }
+      ]
+    },
+    {
+      "name": "1280 actual Action history replacement remains exclusive",
       "passed": true
     },
     {

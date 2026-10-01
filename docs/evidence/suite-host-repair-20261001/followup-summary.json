@@ -1,0 +1,32 @@
+{
+  "baselineSuite": "5b733dbf9c35aa066ac16fe2eafec0befe199a5b",
+  "supersededIntermediate": "f78c78b14cb6569645e5343f3efcb1806358c6e4",
+  "pairedWeb": "4ad925fc86a409dbb987f267836ad88bdd75c38c",
+  "realRoomVerified": false,
+  "deployed": false,
+  "typecheckPassed": true,
+  "stableBuildPassed": true,
+  "devBuildPassed": true,
+  "lifecycleChecks": 14,
+  "browserChecks": 57,
+  "browserErrors": 0,
+  "sdkBehaviorChecks": 21,
+  "sdkTimingSamples": 1,
+  "frozenRelayChecks": 6,
+  "actualHostFreezeMs": 61000,
+  "frozenRecoverySelectionMs": 15,
+  "realPhysicsChecks": 6,
+  "p1BeforeExpectedFailure": "bounded microtask budget exceeded: 13/12",
+  "actionBeforeExpectedFailure": [
+    "open",
+    "open"
+  ],
+  "afterClickIntents": [
+    "open",
+    "close"
+  ],
+  "runtimeSourceFilesMatched": 616,
+  "staticReferencesChecked": 1061,
+  "overlayFileCount": 261,
+  "tests": "quality logs, browser and JSON reports are co-located; before logs intentionally exit 1"
+}

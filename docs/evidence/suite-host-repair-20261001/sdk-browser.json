@@ -37,7 +37,7 @@
       "name": "cold-multiselection-publishes-overview-before-document-arrives",
       "passed": true,
       "group": {
-        "id": "group-4f67c575-da5e-4de0-956a-998ca2b68423",
+        "id": "group-0f5ab017-4adb-477c-9cd6-27e7becfbf41",
         "phase": "select",
         "targets": [],
         "selectedCount": 2,
@@ -63,7 +63,7 @@
     {
       "name": "same-selection-late-character-binding",
       "passed": true,
-      "elapsedMs": 13,
+      "elapsedMs": 12,
       "chosen": "card:hero1"
     },
     {
@@ -75,7 +75,7 @@
     {
       "name": "same-selection-late-monster-component",
       "passed": true,
-      "elapsedMs": 13,
+      "elapsedMs": 14,
       "chosen": "token23"
     },
     {
@@ -89,7 +89,7 @@
     },
     {
       "name": "twelve-cached-selection-events-five-cards",
-      "elapsedMs": 42,
+      "elapsedMs": 37,
       "counts": {
         "catalog": 24,
         "hydrate": 0,
@@ -121,7 +121,7 @@
     {
       "name": "unpin-follows-current-selection",
       "passed": true,
-      "elapsedMs": 1,
+      "elapsedMs": 2,
       "chosen": "card:hero0"
     },
     {
@@ -136,7 +136,7 @@
     {
       "name": "same-selection-restored-permission-recovers",
       "passed": true,
-      "elapsedMs": 15,
+      "elapsedMs": 14,
       "chosen": "card:hero4"
     }
   ],

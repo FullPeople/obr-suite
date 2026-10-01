@@ -700,9 +700,11 @@ async function toggleReplayForCid(cid: string): Promise<void> {
   if(document.body.dataset.actionHistory){
     if(!visibleHistory().some(h=>(h.collectiveId??h.rollId)===cid))return;
     const action=activeReplayCid===cid?'close':'open';
-    await OBR.broadcast.sendMessage(BC_DICE_REPLAY,{cid,action},{destination:'LOCAL'});
+    // Commit the click intent before waiting for the SDK response. A second
+    // click while that response is delayed must send close, not another open.
     activeReplayCid=action==='close'?null:cid;
-    render();if(detailRollerKey)renderDetail();return;
+    render();if(detailRollerKey)renderDetail();
+    await OBR.broadcast.sendMessage(BC_DICE_REPLAY,{cid,action},{destination:'LOCAL'});return;
   }
   if (activeReplayCid === cid) {
     try {

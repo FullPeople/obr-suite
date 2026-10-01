@@ -13,9 +13,9 @@
     {
       "name": "idle-small-room-single-card-arrives-within-one-second",
       "passed": true,
-      "elapsedMs": 14,
+      "elapsedMs": 15,
       "hostBeforeSelection": {
-        "relayAge": 419,
+        "relayAge": 411,
         "chosen": "card:hero0",
         "cards": 5
       },
@@ -26,38 +26,38 @@
       "idleClientMessages": [
         {
           "type": "ping",
-          "afterMs": 590
+          "afterMs": 598
         },
         {
           "type": "ping",
-          "afterMs": 10590
+          "afterMs": 10598
         },
         {
           "type": "ping",
-          "afterMs": 20590
+          "afterMs": 20598
         },
         {
           "type": "ping",
-          "afterMs": 30590
+          "afterMs": 30598
         },
         {
           "type": "ping",
-          "afterMs": 40590
+          "afterMs": 40598
         },
         {
           "type": "ping",
-          "afterMs": 50590
+          "afterMs": 50598
         },
         {
           "type": "ping",
-          "afterMs": 60590
+          "afterMs": 60598
         }
       ]
     },
     {
       "name": "single-monster-arrives",
       "passed": true,
-      "elapsedMs": 14
+      "elapsedMs": 13
     },
     {
       "name": "two-target-group-arrives",

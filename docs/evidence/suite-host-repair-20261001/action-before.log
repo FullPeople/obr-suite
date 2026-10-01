@@ -1,0 +1,16 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: 360 actual Action rapid double click sends open/close
+    at check (file:///workspace/suite-host-repair/tools/suite-host-repair-browser.mjs:78:76)
+    at file:///workspace/suite-host-repair/tools/suite-host-repair-browser.mjs:82:84 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+
+Node.js v24.19.0

@@ -7,6 +7,8 @@ import {createServer} from 'node:http';
 import {createRequire} from 'node:module';
 import {build} from 'rolldown';
 const root=resolve(import.meta.dirname,'..'),out=resolve(process.env.SUITE_REPAIR_OUT||join(root,'.local-evidence/host-browser'));mkdirSync(out,{recursive:true});
+const devDist=resolve(process.env.SUITE_ACTION_DEV_DIST||join(root,'.local-evidence/dist-dev'));
+const stableDist=resolve(process.env.SUITE_STABLE_DIST||join(root,'.local-evidence/dist-stable'));
 const requireBrowser=createRequire(process.env.PLAYWRIGHT_PACKAGE||'/tmp/suite-browser-deps/package.json'),{chromium}=requireBrowser('@playwright/test');
 const entry=join(out,'entry.ts'),styles=[];
 writeFileSync(entry,`
@@ -14,12 +16,12 @@ import {setupWorkbenchDice,teardownWorkbenchDice,rolls} from '${root}/src/workbe
 import {setTokenResults,clearTokenResults} from '${root}/src/workbench/token-results';
 import {mountOverlay} from '${root}/extensions/workbench-dice3d/src/overlay';
 const g=window as any,handlers=new Map(),observers=new Set<Function>();let pending:Function|undefined;
-const observed={ready:true,role:'GM',player:{id:'owner',connectionId:'local',role:'GM',name:'Synthetic',color:'#ffffff',metadata:{}},party:[],items:[{id:'unit',visible:true,position:{x:innerWidth/2,y:280},metadata:{}}]};
+let sceneEpoch=1;const observed={ready:new URLSearchParams(location.search).get('ready')!=='0',role:'GM',player:{id:'owner',connectionId:'local',role:'GM',name:'Synthetic',color:'#ffffff',metadata:{}},party:[],items:[{id:'unit',visible:true,position:{x:innerWidth/2,y:280},metadata:{}}]};
 g.hostSDK={room:{id:'synthetic'},broadcast:{onMessage:(name,fn)=>{handlers.set(name,fn);return()=>handlers.delete(name)},sendMessage:async()=>{}},modal:{open:async()=>{},close:async()=>{}},notification:{show:async()=>{}},action:{open:async()=>{}},player:{setMetadata:async()=>{}},viewport:{getPosition:()=>g.slowPosition?new Promise(resolve=>pending=resolve):Promise.resolve({x:0,y:0}),getScale:async()=>1},scene:{grid:{getDpi:async()=>150}}};
-g.hostObservation={read:async()=>observed,peek:()=>observed,sceneEpoch:()=>1,onChange:fn=>{observers.add(fn);return()=>observers.delete(fn)}};
+g.hostObservation={read:async()=>observed,peek:()=>observed,sceneEpoch:()=>sceneEpoch,onChange:fn=>{observers.add(fn);return()=>observers.delete(fn)}};
 const single={rollId:'single',ts:1,itemId:'unit',total:16,label:'单次结果',dice:[],expression:'1d20',rollerColor:'#ffffff'},second={...single,rollId:'second',ts:2,total:20,label:'另一个结果'},group={...single,rollId:'member',ts:3,collectiveId:'group-synthetic',total:14,label:'群体结果'};
 rolls.push(single as any,second as any,group as any);
-g.hostProbe={click(cid,action='toggle',remote=false){handlers.get('com.obr-suite/dice-replay')({connectionId:remote?'foreign':'local',data:{cid,action}})},group(){setTokenResults('group-synthetic',[group] as any,true)},role(role){observed.role=role;observed.player.role=role;for(const fn of observers)fn()},pending(){g.slowPosition=true;setTokenResults('pending',[single] as any)},cancel(){clearTokenResults('pending');g.slowPosition=false;pending?.({x:0,y:0})},dispose:teardownWorkbenchDice};
+g.hostProbe={click(cid,action='toggle',remote=false){handlers.get('com.obr-suite/dice-replay')({connectionId:remote?'foreign':'local',data:{cid,action}})},group(){setTokenResults('group-synthetic',[group] as any,true)},scene(ready){observed.ready=ready;sceneEpoch++;},role(role){observed.role=role;observed.player.role=role;for(const fn of observers)fn()},pending(){g.slowPosition=true;setTokenResults('pending',[single] as any)},cancel(){clearTokenResults('pending');g.slowPosition=false;pending?.({x:0,y:0})},dispose:teardownWorkbenchDice};
 await setupWorkbenchDice();await mountOverlay(document.body,'local');g.hostReady=true;
 `);
 await build({input:entry,plugins:[{name:'only-sdk-renderer-boundaries',transform(code){return code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/suite-dev/'));},resolveId(id,importer){
@@ -49,18 +51,38 @@ const mime={'.js':'text/javascript','.css':'text/css','.md':'text/plain; charset
 const parent=`<meta charset="utf-8"><style>html,body,iframe{margin:0;width:100%;height:100%;border:0}</style><iframe src="TARGET"></iframe><script>window.addEventListener('message',e=>{const m=e.data;if(!m?.id)return;if(m.id==='OBR_CONNECT'){e.source.postMessage({id:'OBR_READY',data:{ref:'synthetic',userId:'owner'}},e.origin);return;}let data={};if(m.id==='OBR_PLAYER_GET_ROLE')data={role:'GM'};if(m.id==='OBR_MODAL_CLOSE')window.closedModal=m.data.id;e.source.postMessage({id:m.id+'_RESPONSE'+m.nonce,data},e.origin);});</script>`;
 const server=createServer((req,res)=>{
  const url=new URL(req.url,'http://localhost'),p=url.pathname;let file;
+ if(p==='/action'){
+  res.setHeader('Content-Type','text/html');res.end(`<meta charset="utf-8"><script type="module" src="/host.js"></script><link rel="stylesheet" href="/style.css"><script>
+  window.intents=[];window.heldAck=[];window.releaseAck=()=>{for(const fn of heldAck.splice(0).reverse())fn()};
+  window.addEventListener('message',e=>{const m=e.data;if(!m?.id)return;let data={};
+   const values={OBR_PLAYER_GET_CONNECTION_ID:{connectionId:'local'},OBR_PLAYER_GET_ROLE:{role:'GM'},OBR_PLAYER_GET_NAME:{name:'Synthetic'},OBR_PLAYER_GET_COLOR:{color:'#ffffff'},OBR_PLAYER_GET_METADATA:{metadata:{}},OBR_PLAYER_GET_SELECTION:{selection:[]},OBR_PARTY_GET_PLAYERS:{players:[]}};data=values[m.id]||data;
+   const ack=()=>e.source.postMessage({id:m.id+'_RESPONSE'+m.nonce,data},e.origin);
+   if(m.id==='OBR_BROADCAST_SEND_MESSAGE'&&m.data.channel==='com.obr-suite/dice-replay'){intents.push(m.data.data);hostProbe.click(m.data.data.cid,m.data.data.action);heldAck.push(ack);return;}ack();
+  });
+  window.addEventListener('load',async()=>{while(!window.hostReady)await new Promise(r=>setTimeout(r,10));
+   const rows=[['single',null,16,'单次结果'],['second',null,20,'另一个结果'],['member','group-synthetic',14,'群体结果']].map(([rollId,collectiveId,total,label],i)=>({rollId,collectiveId,ts:Date.now()+i,itemId:'unit',total,label,dice:[{type:'d20',value:total}],winnerIdx:0,modifier:0,rollerId:'roller-'+i,rollerName:'Synthetic '+i,rollerColor:'#ffffff',expression:'1d20',_3dConnection:'local'}));
+   localStorage.setItem('obr-suite/dice/history:synthetic',JSON.stringify(rows));
+   const child=document.createElement('iframe');child.style.cssText='position:fixed;left:0;top:330px;width:100%;height:460px;border:0;pointer-events:auto';
+   child.src='/suite-dev/workbench-launcher.html?obrref='+btoa(location.origin+' synthetic');child.onload=()=>child.contentWindow.postMessage({id:'OBR_READY',data:{ref:'synthetic',userId:'owner'}},location.origin);document.body.append(child);
+  });</script>`);return;
+ }
  if(p==='/host'){res.setHeader('Content-Type','text/html');res.end('<meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#393b40}</style><script type="module" src="/host.js"></script><link rel="stylesheet" href="/style.css">');return;}
  if(p==='/notice'){const channel=url.searchParams.get('channel');const target='/'+channel+'/dm-announcement.html?obrref='+Buffer.from(origin+' synthetic').toString('base64');res.setHeader('Content-Type','text/html');res.end(parent.replace('TARGET',target));return;}
  if(p==='/host.js'||p==='/style.css')file=join(out,p.slice(1));
  else if(p==='/font.ttf')file=join(root,'extensions/workbench-dice3d/public/assets/fonts/Cinzel-Variable.ttf');
- else if(p.startsWith('/suite-dev/'))file=join(root,'.local-evidence/dist-dev',p.slice('/suite-dev/'.length));
- else if(p.startsWith('/suite/'))file=join(root,'.local-evidence/dist-stable',p.slice('/suite/'.length));
+ else if(p.startsWith('/suite-dev/'))file=join(devDist,p.slice('/suite-dev/'.length));
+ else if(p.startsWith('/suite/'))file=join(stableDist,p.slice('/suite/'.length));
  if(!file||!existsSync(file)){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');res.end(readFileSync(file));
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH||'/usr/bin/chromium',headless:true}),checks=[],errors=[],requests=[];
 const check=(name,passed,detail={})=>{checks.push({name,passed,...detail});assert(passed,name);};
 try{for(const width of [360,1280]){
+ const unready=await browser.newPage({viewport:{width,height:800}});unready.on('pageerror',e=>errors.push(String(e)));await unready.addInitScript(()=>{const native=queueMicrotask;window.microtaskCount=0;window.microtaskOverflow=false;window.queueMicrotask=fn=>{if(++window.microtaskCount>12){window.microtaskOverflow=true;return;}native(fn);};});await unready.goto(origin+'/host?ready=0');await unready.waitForFunction(()=>window.hostReady);await unready.evaluate(()=>window.hostProbe.group());await unready.waitForTimeout(150);check(width+' unready scene stays bounded',await unready.evaluate(()=>!window.microtaskOverflow&&window.microtaskCount===0)&&await unready.locator('.token-result').count()===0);await unready.evaluate(()=>{window.hostProbe.scene(true);window.hostProbe.group()});await unready.locator('.token-result').waitFor();await unready.evaluate(()=>{window.hostProbe.scene(false);window.hostProbe.group()});await unready.locator('.token-result').waitFor({state:'detached'});await unready.evaluate(()=>{window.hostProbe.scene(true);window.hostProbe.group()});await unready.locator('.token-result').waitFor();check(width+' scene unload and ready recovery',await unready.evaluate(()=>!window.microtaskOverflow));await unready.evaluate(()=>window.hostProbe.dispose());await unready.close();
+ const action=await browser.newPage({viewport:{width,height:800}});action.on('pageerror',e=>errors.push(String(e)));await action.goto(origin+'/action');const actionFrame=action.frameLocator('iframe');await actionFrame.getByRole('tab',{name:'历史',exact:true}).click();const solo=actionFrame.locator('.row[data-cid="single"]');await solo.waitFor();
+ await solo.dblclick();await action.waitForFunction(()=>window.intents.length===2);check(width+' actual Action rapid double click sends open/close',await action.evaluate(()=>JSON.stringify(window.intents.map(v=>v.action)))===JSON.stringify(['open','close']),{intents:await action.evaluate(()=>window.intents.slice(-2))});await action.waitForFunction(()=>document.querySelectorAll('.token-result').length===0);check(width+' actual Action double click removes label before delayed ACK',await action.locator('.token-result').count()===0);await action.evaluate(()=>window.releaseAck());
+ await actionFrame.locator('.row[data-cid="group-synthetic"]').dblclick();await action.waitForFunction(()=>window.intents.length===4);check(width+' actual Action group double click sends open/close',await action.evaluate(()=>JSON.stringify(window.intents.slice(-2).map(v=>v.action)))===JSON.stringify(['open','close']),{intents:await action.evaluate(()=>window.intents.slice(-2))});await action.waitForFunction(()=>document.querySelectorAll('.token-result').length===0);await action.evaluate(()=>window.releaseAck());
+ await actionFrame.locator('.row[data-cid="single"]').click();await actionFrame.locator('.row[data-cid="group-synthetic"]').click();await action.waitForFunction(()=>document.querySelector('.token-result strong')?.textContent==='14');check(width+' actual Action history replacement remains exclusive',await action.locator('.token-result').count()===1);await action.screenshot({path:join(out,width+'-action-history.png')});await action.evaluate(()=>{window.releaseAck();window.hostProbe.dispose()});await action.close();
  const page=await browser.newPage({viewport:{width,height:800}});page.on('pageerror',e=>errors.push(String(e)));await page.goto(origin+'/host');await page.waitForFunction(()=>window.hostReady);const labels=page.locator('.token-result');
  await page.evaluate(()=>window.hostProbe.click('single'));await labels.waitFor();check(width+' single label visible',await labels.count()===1);
  await page.screenshot({path:join(out,width+'-single.png')});await page.evaluate(()=>window.hostProbe.click('single'));await labels.waitFor({state:'detached'});check(width+' second click removes DOM',await labels.count()===0);
@@ -74,7 +96,7 @@ try{for(const width of [360,1280]){
  for(const channel of ['suite-dev','suite']){
   const notice=await browser.newPage({viewport:{width,height:800}});notice.on('pageerror',e=>errors.push(String(e)));notice.on('request',r=>requests.push({channel,width,url:r.url()}));await notice.goto(origin+'/notice?channel='+channel);const frame=notice.frames().find(f=>f.url().includes('dm-announcement.html'));await notice.evaluate(()=>document.querySelector('iframe').contentWindow.postMessage({id:'OBR_READY',data:{ref:'synthetic',userId:'owner'}},location.origin));await frame.waitForFunction(()=>document.querySelector('#body')?.textContent.includes('gmail.com'));const text=await frame.locator('#body').innerText();check(width+' '+channel+' feedback Gmail retained',text.includes('1763086701psw@gmail.com'));
   check(width+' '+channel+' body routed',requests.some(r=>r.channel===channel&&r.width===width&&r.url.endsWith(channel==='suite-dev'?'/announcement-dev.md':'/announcement.md')));
-  if(channel==='suite-dev')check(width+' new notice uses paired Web history',text.includes('减少首次打开时需要下载的程序内容')&&await frame.locator('.release-history').count()>1);
+  if(channel==='suite-dev'){const expected=readFileSync(join(devDist,'assets/announcement-dev.md'),'utf8').match(/^## (.+) \[release\]$/m)?.[1];check(width+' new notice uses paired Web history',await frame.locator('.release-current h2').innerText()===expected&&await frame.locator('.release-history').count()>1);}
   check(width+' '+channel+' Gmail is clickable',await frame.locator('a[href="mailto:1763086701psw@gmail.com"]').count()>=1);
   if(channel==='suite-dev')check(width+' dev suffix preserved',/\d+\.\d+\.\d+-dev/.test(await frame.locator('.cl-version').innerText()));
   check(width+' '+channel+' notice fits width',await frame.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));

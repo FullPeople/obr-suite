@@ -1,0 +1,30 @@
+{
+  "browser": "151.0.7922.173",
+  "realRoomVerified": false,
+  "physicsVerified": false,
+  "checks": [
+    {
+      "name": "360 unready scene stays bounded",
+      "passed": true
+    },
+    {
+      "name": "360 scene unload and ready recovery",
+      "passed": true
+    },
+    {
+      "name": "360 actual Action rapid double click sends open/close",
+      "passed": false,
+      "intents": [
+        {
+          "cid": "single",
+          "action": "open"
+        },
+        {
+          "cid": "single",
+          "action": "open"
+        }
+      ]
+    }
+  ],
+  "errors": []
+}
