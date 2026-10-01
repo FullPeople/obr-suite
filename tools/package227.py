@@ -1,0 +1,193 @@
+"""Build release-227 static packages only; no network or publication side effects."""
+from pathlib import Path, PurePosixPath
+import argparse, hashlib, json, os, re, shutil, subprocess, sys, tarfile, zipfile
+sys.dont_write_bytecode = True
+
+RELEASE = 227
+WEB_VERSION = '0.1.23'
+SUITE_VERSION = '1.0.227-dev'
+BASE_WEB = '07b742f571cc28736cda0f358736acbc1364050f'
+BASE_SUITE = '928527b7350b2e9e45239c82f5a54fd19e8fccf9'
+SUITE = Path(__file__).resolve().parents[1]
+EVIDENCE = SUITE.parent / 'release227'
+
+
+def require(ok, message):
+    if not ok:
+        raise ValueError(message)
+
+
+def stream_sha256(stream):
+    # hashlib.file_digest is unavailable on the production server's older Python.
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def sha(path):
+    with Path(path).open('rb') as stream:
+        return stream_sha256(stream)
+
+
+def read_json(path):
+    return json.loads(Path(path).read_text(encoding='utf-8'))
+
+
+def write_json(path, value):
+    Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+
+def git(repo, *args):
+    return subprocess.check_output(['git', *args], cwd=repo, text=True, encoding='utf-8').strip()
+
+
+def inventory(folder):
+    require(folder.is_dir() and not folder.is_symlink(), 'Missing or linked input: ' + str(folder))
+    result = {}
+    for path in sorted(folder.rglob('*')):
+        require(not path.is_symlink(), 'Symlinks are not release inputs: ' + str(path))
+        if path.is_file():
+            result[path.relative_to(folder).as_posix()] = sha(path)
+    return result
+
+
+def web_sources(web):
+    result = {}
+    for name in ['src', 'public', 'tools']:
+        result.update({name + '/' + p: h for p, h in inventory(web / name).items()})
+    for path in sorted(web.iterdir()):
+        if path.is_file() and (path.name in ['index.html', 'package.json', 'package-lock.json'] or path.name.startswith('vite.') and path.suffix in ['.ts', '.js', '.mjs'] or path.name.startswith('tsconfig') and path.suffix == '.json'):
+            result[path.name] = sha(path)
+    return result
+
+
+
+def validate_files(root, files):
+    for name, digest in files.items():
+        relative = PurePosixPath(name)
+        require(not relative.is_absolute() and '..' not in relative.parts and '\\' not in name and ':' not in name, 'Unsafe path: ' + name)
+        file = (root / name).resolve()
+        require(file.is_relative_to(root.resolve()) and file.is_file() and sha(file) == digest, 'Changed or absent file: ' + str(file))
+
+
+def suite_allowed(name):
+    return name.startswith('workbench/') or name in ['manifest-dev.json','source.zip','suite-source.zip','card-viewer/suite-source.zip']
+
+
+def source_archive(repo, output, commit):
+    subprocess.run(['git', 'archive', '--format=zip', '--output=' + str(output), commit], cwd=repo, check=True)
+    expected = set(git(repo, '-c', 'core.quotepath=false', 'ls-tree', '-r', '--name-only', commit).splitlines())
+    with zipfile.ZipFile(output) as archive:
+        names = {name for name in archive.namelist() if not name.endswith('/')}
+        require(names == expected, 'Source archive does not contain exactly the tracked source files')
+        require(archive.comment.decode('ascii') == commit and archive.testzip() is None, 'Source ZIP integrity or commit differs')
+        require('LICENSE' in names, 'Missing source license')
+        for name in names:
+            parts = PurePosixPath(name).parts
+            require(not any(part in ['node_modules', '.local-evidence', 'real-equipment-sources', 'class-audit', 'local-rules', 'work', '.cache'] for part in parts), 'Private/generated source path: ' + name)
+            require(not any(part.startswith('.env') and part != '.env.example' for part in parts), 'Environment file in source: ' + name)
+    return {'commit': commit, 'files': len(expected), 'bytes': output.stat().st_size, 'sha256': sha(output)}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--web-root', type=Path, default=SUITE.parent / 'web')
+    parser.add_argument('--web-commit')
+    parser.add_argument('--suite-commit')
+    parser.add_argument('--snapshot-web', type=Path, help='Capture Web source hashes BEFORE the two final builds, then exit; refuses overwrite')
+    parser.add_argument('--web-source-snapshot', type=Path)
+    parser.add_argument('--standalone', type=Path)
+    parser.add_argument('--integrated', type=Path)
+    parser.add_argument('--out', type=Path, default=EVIDENCE / 'ready')
+    args = parser.parse_args()
+    web = args.web_root.resolve()
+    if args.snapshot_web:
+        require(not args.snapshot_web.exists(), 'Refusing to overwrite Web source snapshot')
+        args.snapshot_web.parent.mkdir(parents=True, exist_ok=True)
+        write_json(args.snapshot_web, {'release': RELEASE, 'sourceRoot': str(web), 'files': web_sources(web)})
+        print(json.dumps({'snapshot': str(args.snapshot_web), 'files': len(web_sources(web))}))
+        return
+    require(all([args.standalone, args.integrated]), 'Explicit --standalone and --integrated final build paths are required')
+    for repo, expected in [(web, args.web_commit), (SUITE, args.suite_commit)]:
+        require(bool(expected and re.fullmatch('[0-9a-f]{40}', expected)), 'Both reviewed full lowercase commit SHAs are required')
+        require(git(repo, 'rev-parse', 'HEAD') == expected, 'HEAD differs from reviewed commit: ' + str(repo))
+        require(not git(repo, 'status', '--porcelain'), 'Dirty source checkout: ' + str(repo))
+    for repo, baseline, commit in [(web, BASE_WEB, args.web_commit), (SUITE, BASE_SUITE, args.suite_commit)]:
+        subprocess.run(['git', 'merge-base', '--is-ancestor', baseline, commit], cwd=repo, check=True)
+    require(read_json(web / 'package.json')['version'] == WEB_VERSION, 'Unexpected Web version')
+    require(read_json(SUITE / 'public/manifest-dev.json')['version'] == SUITE_VERSION, 'Unexpected Suite version')
+    announcement = (web / 'src/platform/announcement.ts').read_text(encoding='utf-8')
+    require(re.search(r"APP_VERSION\s*=\s*['\"]0\.1\.23['\"]", announcement) is not None and "1.0.227-dev" in announcement, 'Announcement versions differ')
+    require(args.web_source_snapshot is not None, 'A Web source snapshot captured before final builds is required')
+    web_snapshot = read_json(args.web_source_snapshot)
+    require(web_snapshot['release'] == RELEASE and Path(web_snapshot['sourceRoot']).resolve() == web and web_snapshot['files'] == web_sources(web), 'Web source changed since final build snapshot')
+    standalone, integrated, out = [p.resolve() for p in [args.standalone, args.integrated, args.out]]
+    require(not out.exists(), 'Use a fresh release directory')
+    for path in [web, SUITE, standalone, integrated]:
+        require(not out.is_relative_to(path) and not path.is_relative_to(out), 'Output must not overlap source or build input')
+    audit = read_json(standalone / 'standalone-audit.json')
+    require(audit['singlePlayer'] is True and audit['multiplayerModules'] == [], 'Standalone includes multiplayer modules')
+    inputs = {'standalone': inventory(standalone), 'integrated': inventory(integrated)}
+    require('index.html' in inputs['integrated'] and 'sw.js' in inputs['integrated'], 'Incomplete integrated Web build')
+    out.mkdir(parents=True)
+    source_records = {}
+    for repo, name, commit in [(web, 'source.zip', args.web_commit), (SUITE, 'suite-source.zip', args.suite_commit)]:
+        source_records[name] = source_archive(repo, out / name, commit)
+    archive_path = out / 'DND-Card-Standalone-227.zip'
+    with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        for name in inputs['standalone']:
+            archive.write(standalone / name, 'DND-Card-Standalone/site/' + name)
+        for name, path in [('Start.cmd', web / 'tools/standalone/Start.cmd'), ('Serve.ps1', web / 'tools/standalone/Serve.ps1'), ('使用说明.md', web / 'docs/STANDALONE.md'), ('LICENSE', web / 'LICENSE'), ('LICENSING.md', web / 'docs/LICENSING.md'), ('source.zip', out / 'source.zip')]:
+            archive.write(path, 'DND-Card-Standalone/' + name)
+    with zipfile.ZipFile(archive_path) as archive:
+        require(archive.testzip() is None, 'Standalone archive failed CRC')
+    site = out / 'card-site'
+    shutil.copytree(standalone, site)
+    (site / 'downloads').mkdir(exist_ok=True)
+    shutil.copy2(archive_path, site / 'downloads' / archive_path.name)
+    shutil.copy2(out / 'source.zip', site / 'source.zip')
+    shutil.copy2(web / 'LICENSE', site / 'LICENSE.txt')
+    write_json(site / 'release.json', {'version': 'standalone-1.0.227', 'announcementVersion': WEB_VERSION, 'sourceCommit': args.web_commit})
+    patch = out / 'suite-patch'
+    patch.mkdir()
+    shutil.copytree(integrated, patch / 'workbench')
+    shutil.copy2(web / 'LICENSE', patch / 'workbench/LICENSE')
+    shutil.copy2(web / 'docs/LICENSING.md', patch / 'workbench/LICENSING.md')
+    shutil.copy2(SUITE / 'public/manifest-dev.json', patch / 'manifest-dev.json')
+    for folder in [patch, patch / 'workbench']:
+        for name in source_records:
+            shutil.copy2(out / name, folder / name)
+    (patch / 'card-viewer').mkdir()
+    shutil.copy2(out / 'suite-source.zip', patch / 'card-viewer/suite-source.zip')
+    record = {'release': RELEASE, 'webCommit': args.web_commit, 'suiteCommit': args.suite_commit, 'announcementVersion': WEB_VERSION, 'baselineCommits': {'web': BASE_WEB, 'suite': BASE_SUITE}, 'sources': source_records, 'targets': {}, 'replaceSuiteSubtrees': [], 'runtimeBuild': 'suite-3d-3', 'retainedPublicAssets': [], 'relayChanged': False, 'playerDataChanged': False, 'crossHostDicePriorityFixed': False, 'builder': {'tool': 'tools/package227.py', 'receiptRelease': 227}}
+    for name, folder, manifest, version in [('card', site, 'release.json', 'standalone-1.0.227'), ('suite-dev', patch, 'manifest-dev.json', SUITE_VERSION)]:
+        require(read_json(folder / manifest)['version'] == version, 'Packaged version mismatch')
+        files = inventory(folder)
+        if name == 'suite-dev':
+            require(all(suite_allowed(path) for path in files), 'Unapproved Suite package path')
+        write_json(folder / 'release227-hashes.json', files)
+        write_json(out / (name + '-hashes.json'), files)
+        tar_path = out / (name + '-227.tar.gz')
+        with tarfile.open(tar_path, 'w:gz') as archive:
+            for path in sorted(folder.rglob('*')):
+                if path.is_file():
+                    archive.add(path, arcname=path.relative_to(folder).as_posix(), recursive=False)
+        record['targets'][name] = {'version': version, 'files': len(files), 'bytes': sum((folder / path).stat().st_size for path in files), 'sha256': sha(tar_path), 'manifestSha256': sha(folder / 'release227-hashes.json')}
+    require(inventory(standalone) == inputs['standalone'] and inventory(integrated) == inputs['integrated'], 'Web build input changed while packaging')
+    require(web_sources(web) == web_snapshot['files'], 'Web source changed while packaging')
+    for repo, expected in [(web, args.web_commit), (SUITE, args.suite_commit)]:
+        require(git(repo, 'rev-parse', 'HEAD') == expected and not git(repo, 'status', '--porcelain'), 'Source changed while packaging')
+    write_json(out / 'build-input-hashes.json', inputs)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('deploy227', SUITE / 'tools/deploy-release227.py')
+    deployment = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(deployment)
+    record['baselineHashes'] = deployment.BASELINE_HASHES
+    record['baselineHashManifests'] = deployment.BASELINE_MANIFESTS
+    write_json(out / 'package-receipt.json', record)
+    print(json.dumps(record, ensure_ascii=False, indent=2))
+
+
+if __name__ == '__main__':
+    main()
