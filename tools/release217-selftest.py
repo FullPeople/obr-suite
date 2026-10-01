@@ -2,6 +2,9 @@
 from pathlib import Path
 import hashlib, importlib.util, io, json, sys, tarfile, tempfile
 sys.dont_write_bytecode = True
+# Exercise the same missing-API condition as the production Python interpreter.
+if hasattr(hashlib, 'file_digest'):
+    delattr(hashlib, 'file_digest')
 
 
 def load(name):
@@ -55,6 +58,9 @@ def archive(name, content, duplicate=None, link=False):
     receipt = {'sha256': d.sha(path), 'manifestSha256': hashlib.sha256(manifest).hexdigest(), 'files': len(files), 'bytes': sum(len(value.encode()) for value in content.values())}
     return path, files, receipt
 
+
+payload = b'chunk-boundary' * 160000
+check('streaming SHA256 across multiple chunks without file_digest', lambda: d.require(d.stream_sha256(io.BytesIO(payload)) == p.stream_sha256(io.BytesIO(payload)) == hashlib.sha256(payload).hexdigest(), 'streaming digest mismatch'))
 
 for name in ['../escape', '/etc/passwd', 'C:/escape', 'a\\b', './a', 'a//b']:
     check('reject path ' + name, lambda name=name: rejected(lambda: d.safe_name(name)))

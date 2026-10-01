@@ -16,9 +16,17 @@ def require(ok, message):
         raise ValueError(message)
 
 
+def stream_sha256(stream):
+    # hashlib.file_digest is unavailable on the production server's older Python.
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def sha(path):
     with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+        return stream_sha256(stream)
 
 
 def read_json(path):
