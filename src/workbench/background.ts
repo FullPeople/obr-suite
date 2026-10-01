@@ -28,6 +28,7 @@ import {clampStat,parseStatInput} from '../utils/statEdit';
 import {BC_TRANSITIONS_RUN,BC_TRANSITIONS_STATUS} from '../modules/transitions/protocol';
 import {TIME_STOP_META,readTimeStop} from '../modules/timeStopProtocol';
 import {assetUrl} from '../asset-base';
+import {ANNOUNCEMENT_MODAL_ID} from '../announcement-source';
 import {DEFAULT_BUFFS,STATUS_BUFFS_KEY} from '../modules/statusTracker/types';
 const BIND='com.character-cards/boundCardId',SLUG='com.bestiary/slug',LIST='com.character-cards/list',ROOM_LIST='com.character-cards/list-room',RES='com.obr-suite/resources/data',SHARED_BUFFS='com.obr-suite/workbench/status-catalog',DIRECTORY='com.obr-suite/workbench/cards';
 const MONSTER='com.obr-suite/workbench/monster';
@@ -520,7 +521,7 @@ async function start(){
    }
    const channels:Record<string,string>={timeStop:'com.obr-suite/timestop-toggle',focus:'com.obr-suite/focus-trigger',musicBoard:'com.obr-suite/music-board:toggle',transitions:'com.obr-suite/transitions/open'};
    if(channels[key])await OBR.broadcast.sendMessage(channels[key],{source:'workbench'},{destination:'LOCAL'});
-   else if(key==='announcement')await OBR.modal.open({id:'com.obr-suite/dm-announcement',url:assetUrl('dm-announcement.html'),width:560,height:580});
+   else if(key==='announcement')await OBR.modal.open({id:ANNOUNCEMENT_MODAL_ID,url:assetUrl('dm-announcement.html'),width:560,height:580});
    else if(key==='settings'){const [width,height]=await Promise.all([OBR.viewport.getWidth(),OBR.viewport.getHeight()]);await OBR.popover.open({id:'com.obr-suite/settings',url:assetUrl('settings.html'),width:640,height:580,anchorReference:'POSITION',anchorPosition:{left:width/2,top:height/2},anchorOrigin:{horizontal:'CENTER',vertical:'CENTER'},transformOrigin:{horizontal:'CENTER',vertical:'CENTER'},hidePaper:true});}
    else throw Error('未知操作');return;
   }

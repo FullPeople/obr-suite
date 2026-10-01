@@ -43,7 +43,8 @@ import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "./asset-base";
 import { renderInlineNoSpan } from "./announcement-inline";
 
-const MODAL_ID = "com.obr-suite/dm-announcement";
+import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID} from './announcement-source';
+const MODAL_ID = ANNOUNCEMENT_MODAL_ID;
 
 type SectionKind = "warn" | "info" | "notice" | "release" | "history" | "issues" | "highlights" | "todo" | "changelog" | "footer" | "raw";
 type SectionLang = "zh" | "en" | undefined; // undefined = visible in both
@@ -389,7 +390,7 @@ async function loadAndRender(): Promise<void> {
 
   let md = "";
   try {
-    const url = assetUrl("announcement.md");
+    const url = assetUrl(ANNOUNCEMENT_FILE);
     const res = await fetch(url, { cache: "no-cache" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     md = await res.text();
@@ -420,9 +421,7 @@ async function loadVersionIntoTitle(): Promise<void> {
   const titleEl = document.querySelector<HTMLElement>(".head .title");
   if (!titleEl) return;
   const dev = (import.meta.env.BASE_URL || "").includes("suite-dev");
-  const candidates = dev
-    ? ["manifest-dev.json", "manifest.json"]
-    : ["manifest.json", "manifest-dev.json"];
+  const candidates = dev ? ["manifest-dev.json"] : ["manifest.json"];
   for (const name of candidates) {
     try {
       const res = await fetch(assetUrl(name), { cache: "no-cache" });

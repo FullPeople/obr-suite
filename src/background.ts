@@ -40,6 +40,7 @@ import { setupTransform, teardownTransform } from "./modules/transform";
 import { setupCrossSceneCards } from "./modules/cross-scene-cards";
 import { setupPerfWindow } from "./modules/perfWindow";
 import { assetUrl } from "./asset-base";
+import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID,ANNOUNCEMENT_DAILY_KEY,ANNOUNCEMENT_SEEN_KEY} from './announcement-source';
 import { onViewportResize } from "./utils/viewportAnchor";
 import {
   PANEL_IDS,
@@ -116,14 +117,14 @@ const BC_CLUSTER_ROW_OPEN = "com.obr-suite/cluster-row-open";
 // the cluster row (left of the gear), and — since 2026-08-25 — shown
 // automatically the first time a GM loads the suite on any given day.
 // Cluster-row blinks the megaphone while there's an unseen announcement.
-const ANNOUNCE_MODAL_ID = "com.obr-suite/dm-announcement";
+const ANNOUNCE_MODAL_ID = ANNOUNCEMENT_MODAL_ID;
 const ANNOUNCE_URL = assetUrl("dm-announcement.html");
-const ANNOUNCE_MD_URL = assetUrl("announcement.md");
+const ANNOUNCE_MD_URL = assetUrl(ANNOUNCEMENT_FILE);
 /** YYYY-MM-DD of the last day the announcement auto-opened here. */
-const LS_ANNOUNCE_DAILY = "obr-suite/announce-daily-date";
+const LS_ANNOUNCE_DAILY = ANNOUNCEMENT_DAILY_KEY;
 /** Version string of the announcement the DM has acknowledged. Shared
  *  with cluster-row.ts, which uses it to blink the megaphone. */
-const LS_ANNOUNCE_SEEN_VERSION = "obr-suite/announce-seen-version";
+const LS_ANNOUNCE_SEEN_VERSION = ANNOUNCEMENT_SEEN_KEY;
 
 /** Local calendar day, not UTC — "first time today" should mean the
  *  DM's today, not a date that rolls over mid-session in Asia. */

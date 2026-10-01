@@ -14,22 +14,31 @@ export async function setupTokenResults(){
  starting=task;try{await task;}finally{if(starting===task)starting=undefined;}
 }
 export function setTokenResults(id:string,rows:DiceRollPayload[],visible?:boolean){
- if(closed.has(id))return;groups.set(id,{visible:visible??visibility.get(id)??groups.get(id)?.visible??true,rows:rows.filter(r=>r.itemId).map(r=>({itemId:r.itemId!,text:r.label||r.expression||'',total:r.total,color:r.rollerColor||'#fff',hidden:!!r.hidden}))});serial++;void setupTokenResults().then(refresh);
+ if(closed.has(id))return;
+ if(id.startsWith('history:')){
+  for(const key of groups.keys())if(key.startsWith('history:'))groups.delete(key);
+  // A group's automatic result and its history view represent the same roll.
+  // Keep the live group available for an explicit show, but dismiss its label.
+  const original=id.slice('history:'.length);visibility.set(original,false);const group=groups.get(original);if(group)group.visible=false;
+ }
+ groups.set(id,{visible:visible??visibility.get(id)??groups.get(id)?.visible??true,rows:rows.filter(r=>r.itemId).map(r=>({itemId:r.itemId!,text:r.label||r.expression||'',total:r.total,color:r.rollerColor||'#fff',hidden:!!r.hidden}))});serial++;void setupTokenResults().then(refresh);
 }
 export function toggleTokenResults(id:string,visible:boolean){visibility.set(id,visible);const group=groups.get(id);if(group){group.visible=visible;serial++;void refresh();}}
 export function clearTokenResults(id:string){if(id.startsWith('group-'))closed.add(id);if(closed.size>100)closed.delete(closed.values().next().value!);groups.delete(id);serial++;void refresh();}
+export function resetTokenResults(){groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;void refresh();}
 export function teardownTokenResults(){generation++;starting=undefined;clearTimeout(timer);timer=undefined;bus?.close();bus=undefined;groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;}
 async function refresh(){
- if(!bus||flight===generation)return;const current=bus,ownGeneration=generation;clearTimeout(timer);flight=ownGeneration;
+ if(!bus||flight===generation)return;const current=bus,ownGeneration=generation,own=serial;clearTimeout(timer);flight=ownGeneration;
  try{
   const observation=workbenchObservation(),data=observation.peek();if(epoch!==observation.sceneEpoch()||!data.ready){epoch=observation.sceneEpoch();groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;}
   const ids=new Set([...tracked,...[...groups.values()].flatMap(g=>g.rows.map(r=>r.itemId))]);
   if(!ids.size){bus.postMessage({type:'token-results',groups:[],anchors:{}});return;}
-  const own=serial,[position,scale,dpi]=await Promise.all([OBR.viewport.getPosition(),OBR.viewport.getScale(),OBR.scene.grid.getDpi()]);if(bus!==current||generation!==ownGeneration||own!==serial||epoch!==observation.sceneEpoch())return;
+  const [position,scale,dpi]=await Promise.all([OBR.viewport.getPosition(),OBR.viewport.getScale(),OBR.scene.grid.getDpi()]);if(bus!==current||generation!==ownGeneration||own!==serial||epoch!==observation.sceneEpoch())return;
   const anchors:Record<string,{x:number;y:number}>={};
   for(const item of data.items||[]){if(!ids.has(item.id)||data.role!=='GM'&&!item.visible)continue;const image=item as any,half=image.image?.height&&image.grid?.dpi?Math.abs(image.image.height/image.grid.dpi*dpi*(image.scale?.y??1))/2:dpi/2;
    anchors[item.id]={x:item.position.x*scale+position.x,y:(item.position.y-half)*scale+position.y-40};}
-  bus.postMessage({type:'token-results',anchors,groups:[...groups].map(([id,g])=>({id,visible:g.visible,rows:g.rows.filter(row=>anchors[row.itemId])}))});
+  const history=[...groups].find(([id,g])=>id.startsWith('history:')&&g.visible);
+  bus.postMessage({type:'token-results',anchors,groups:(history?[history]:[...groups]).map(([id,g])=>({id,visible:g.visible,rows:g.rows.filter(row=>anchors[row.itemId])}))});
  }catch(error){console.warn('[dice] token anchor update failed',error);}
- finally{if(flight===ownGeneration)flight=-1;if(bus===current&&generation===ownGeneration&&(groups.size||tracked.size))timer=setTimeout(()=>void refresh(),100);}
+ finally{if(flight===ownGeneration)flight=-1;if(bus===current&&generation===ownGeneration){if(own!==serial)queueMicrotask(()=>void refresh());else if(groups.size||tracked.size)timer=setTimeout(()=>void refresh(),100);}}
 }

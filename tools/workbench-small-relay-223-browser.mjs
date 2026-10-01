@@ -62,7 +62,7 @@ const server=createServer(async(req,res)=>{const u=new URL(req.url,origin);
 process.env.PORT=String(relayPort);process.env.RELAY_ORIGIN=origin;process.env.WORKBENCH_DATA_DIR=join(out,'relay-data');process.env.CARD_READ_BASE=origin;process.env.CARD_WRITE_BASE=origin;
 const {server:relayServer}=await import(pathToFileURL(join(root,'server/workbench-relay/server.mjs')).href);
 await new Promise(r=>server.listen(port,'127.0.0.1',r));
-const browser=await chromium.launch({channel:'msedge',headless:true});
+const browser=await chromium.launch({...(process.env.PLAYWRIGHT_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH}:{channel:'msedge'}),headless:true});
 try{
  const virtual=process.env.VIRTUAL_IDLE==='1';const context=await browser.newContext(),page=await context.newPage();if(virtual)await page.clock.install();page.on('pageerror',e=>errors.push(String(e)));await page.goto(origin+'/');const frame=page.frames().find(f=>f.url().includes('/child'));await frame.waitForFunction(()=>window.moduleReady);await page.evaluate(()=>emit('OBR_READY',{ref:'test',userId:'me'}));await frame.waitForFunction(()=>window.probe);const wire=await frame.evaluate(()=>window.probe.wire());
  const viewer=await context.newPage();viewer.on('pageerror',e=>errors.push(String(e)));await viewer.goto(origin+'/suite-dev/workbench/#suite='+wire.session+'&bridge='+encodeURIComponent(origin)+'&relay='+wire.clientKey);await viewer.waitForFunction(()=>window.getWorkbench?.().cards.length===5&&window.getWorkbench().target?.cardId==='hero0');
