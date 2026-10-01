@@ -62,7 +62,7 @@ function createObservation(){
   try{await task;}finally{if(flight===task)flight=undefined;}
   return read();
  }
- return {read,peek:()=>values,version:()=>serial,onChange:(listener:(change:ObservationChange)=>void)=>{subscribers.add(listener);return()=>subscribers.delete(listener);}};
+ return {read,peek:()=>values,version:()=>serial,sceneEpoch:()=>sceneEpoch,onChange:(listener:(change:ObservationChange)=>void)=>{subscribers.add(listener);return()=>subscribers.delete(listener);}};
 }
 let instance:ReturnType<typeof createObservation>|undefined;
 export const workbenchObservation=()=>instance??=createObservation();

@@ -79,7 +79,7 @@ export function operationLabel(node:Node):string{
   return steps(node)?.join(' → ')||'依公式计算';
 }
 /** The 2D reference has an obsolete reset=assign comment. Actual code and this engine reroll once. */
-export async function evaluateFormula(ast:Node,roll:PhysicalRoller):Promise<FormulaRow[]>{
+export async function evaluateFormula(ast:Node|Node[],roll:PhysicalRoller):Promise<FormulaRow[]>{
   let physicalCount=0;
   function* cast(kind:Kind,count:number,reason:string):Task<ResearchDie[]>{
     const answers:ResearchDie[][]=yield [{kind,count,reason}];return answers[0];
@@ -141,8 +141,8 @@ export async function evaluateFormula(ast:Node,roll:PhysicalRoller):Promise<Form
     }
     throw Error('本地实验尚不支持这个嵌套规则: '+name);
   };
-  const count=ast.type==='call'&&ast.name==='repeat'?constant(ast.args[0]):1,inner=ast.type==='call'&&ast.name==='repeat'?ast.args[1]:ast;
-  const task=together(Array.from({length:count},()=>evaluate(inner))),ids=new Set<string>();let step=task.next();
+  const roots=(Array.isArray(ast)?ast:[ast]).flatMap(node=>node.type==='call'&&node.name==='repeat'?Array.from({length:constant(node.args[0])},()=>node.args[1]):[node]);
+  const task=together(roots.map(inner=>evaluate(inner))),ids=new Set<string>();let step=task.next();
   while(!step.done){
     const groups=step.value;physicalCount+=groups.reduce((n,g)=>n+g.count,0);
     if(physicalCount>100)throw Error('单个公式超过 100 枚骰子的预算（包含追加和重投）');
@@ -154,5 +154,5 @@ export async function evaluateFormula(ast:Node,roll:PhysicalRoller):Promise<Form
     });
     step=task.next(dice);
   }
-  return step.value.map((result,index)=>{if(!result.dice.length)throw Error('请输入至少一颗骰子');return{...result,operation:operationLabel(inner),formula:formatNode(inner),index,total:ensureTotal(result.compute())};});
+  return step.value.map((result,index)=>{if(!result.dice.length)throw Error('请输入至少一颗骰子');return{...result,operation:operationLabel(roots[index]),formula:formatNode(roots[index]),index,total:ensureTotal(result.compute())};});
 }

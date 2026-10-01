@@ -782,7 +782,7 @@ OBR.onReady(async () => {
   installDebugOverlay();
   // 2026-05-16 — scale text + spacing with panel size. Baseline =
   // HISTORY_W × HISTORY_H from dice/index.ts.
-  installPanelZoom({ baseWidth: 320, baseHeight: 218, min:0.7 });
+  if(!document.body.dataset.actionHistory) installPanelZoom({ baseWidth: 320, baseHeight: 218, min:0.7 });
   // Rebuild the LS key with the actual room id and reload history
   // from THIS room's slice. Skipping this step (or running it after
   // the first render) leaks yesterday's "default"-suffixed entries

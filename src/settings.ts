@@ -82,8 +82,8 @@ import {
 
 const POPOVER_ID = "com.obr-suite/settings";
 const KOFI_URL = "https://ko-fi.com/fullpeople";
-const EMAIL = "1763086701@qq.com";
-const GITHUB_URL = "https://github.com/FullPeople";
+const EMAIL = "1763086701psw@gmail.com";
+const GITHUB_URL = "https://github.com/FullPeople/DND-card/issues";
 const BUBBLES_SETTINGS_KEY = "com.obr-suite/bubbles/settings";
 const DEFAULT_BUBBLES_PLAYER_THRESHOLD = 25;
 const DEFAULT_BUBBLES_VERTICAL_OFFSET = -20;
@@ -214,7 +214,7 @@ async function setBubbleOverheadMode(value: boolean): Promise<void> {
 
 const SUPPORT: BilingualHtml = {
   zh: `
-    <p>这套插件由 <b>弗人 FullPeople</b> 利用业余时间开发，所有代码开源于 GitHub。如果这个插件真的让你感到惊喜，欢迎以下方式支持作者：</p>
+    <p>这套插件由 <b>弗人 FullPeople</b> 利用业余时间开发，当前版本附带对应源码。如果这个插件真的让你感到惊喜，欢迎以下方式支持作者：</p>
     <div class="support-row">
       <a class="support-btn kofi" href="${KOFI_URL}" target="_blank" rel="noopener"><span class="ic">${ICONS.coffee}</span> Support on Ko-fi</a>
       <span class="qr-pair" title="微信 / 支付宝">
@@ -222,7 +222,7 @@ const SUPPORT: BilingualHtml = {
         <img class="qr-thumb" src="${assetUrl("zfb.jpg")}" alt="支付宝" loading="lazy">
       </span>
     </div>
-    <p style="font-size:11px;color:#9aa0b3;margin-top:-2px">微信 / 支付宝扫码也可以，备注里留个昵称就能上鸣谢墙。</p>
+    <p style="font-size:11px;color:#9aa0b3;margin-top:-2px">赞助过的朋友请把你们的 cn + 头像/立绘发送到我的邮箱 <a href="mailto:${EMAIL}">${EMAIL}</a>，会更新到弹幕之中！</p>
     <h3>${ICONS.heart} 鸣谢</h3>
     <div class="thanks-call-to-action">
       <p><b>朋友们！感谢支持。</b> 套件现在已经是一套相当完整的工具了 —— 骰子、先攻、怪物图鉴、人物卡、动态迷雾、传送门、状态追踪…… 枭熊原生能力允许的范围，基本都做进来了，并且仍在持续打磨和修复。</p>

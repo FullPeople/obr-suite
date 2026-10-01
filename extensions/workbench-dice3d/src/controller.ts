@@ -13,6 +13,7 @@ import {validateRecipe} from './suite-formula';
 import {formulaCue} from './research/presentation';
 import {packReveal,unpackReveal} from './suite-reveal';
 import {DiceAssets} from './asset-loading';
+import {splitGroupRoll} from './group-batch';
 export interface Transport {id:string;name:string;color?:string;role?:Role;resolveRole?:(id:string)=>Promise<Role|undefined>;mode:string;send:(data:any)=>Promise<void>;listen:(fn:(data:any,source:string)=>void)=>()=>void}
 export interface ResultRecord{id:string;source:string;name:string;color?:string;kinds:Roll['kinds'];results:number[];modifier:number;total:number;secret:boolean;revealed:boolean;complete:boolean;at:number;canReveal:boolean;formulaData?:Roll['formulaData']}
 interface Reservation{request:Request;broker:string;at:number;members:string[]}
@@ -117,10 +118,14 @@ export class Controller {
       else if(event==='error')this.fail('renderer',detail.message);
       else{
         this.log(event,detail);
+        if(event==='render-context-lost'||event==='render-unavailable'){this.overlayReady=false;this.refreshReady();}
+        if(event==='render-context-restored'){this.overlayReady=true;this.refreshReady();}
         if(event==='render-complete')this.completeRecord(detail.roll);
-        if(event==='render-cancelled')setTimeout(()=>this.completeRecord(detail.roll),Math.max(0,(this.retainedUntil.get(detail.roll)??now())-now()));
+        if(event==='render-cancelled'&&!detail.failed)setTimeout(()=>this.completeRecord(detail.roll),Math.max(0,(this.retainedUntil.get(detail.roll)??now())-now()));
         // The persistent layer owns both the projection and per-roll audio. The panel only arms it.
         if(event==='render-queued'&&detail.audio)this.bus.postMessage({type:'audio-plan',roll:detail.roll,theme:detail.theme,plan:detail.audio,start:detail.start});
+        if(event==='render-paused')this.bus.postMessage({type:'audio-pause',roll:detail.roll});
+        if(event==='render-retimed')this.bus.postMessage({type:'audio-retime',roll:detail.roll,at:detail.start});
         if(event==='render-release')this.bus.postMessage({type:'audio-release',roll:detail.roll,at:detail.planned});
         if(event==='render-complete'||event==='render-cancelled'||event==='audio-finished-child')this.bus.postMessage({type:'audio-stop',roll:detail.roll});
         if(event==='render-release'||event==='render-settled'||event==='render-complete'||event==='render-cancelled'){
@@ -162,14 +167,15 @@ export class Controller {
     // Source identity and room colour come from the SDK transport, never popover options.
     // A copied colour string is immutable for this roll even if the player changes it while queued.
     const request:Request={id:options.id??crypto.randomUUID(),source:this.transport.id,name:this.transport.name,
-      kind:options.kind,count:options.count,theme:options.theme,bodyColor:this.transport.color,modifier:options.modifier??0,visibility:options.visibility??'all',seed,recipe:options.recipe,formula:options.formula,preset:options.preset,context:options.context};
+      kind:options.kind,count:options.count,theme:options.theme,bodyColor:this.transport.color,modifier:options.modifier??0,visibility:options.visibility??'all',seed,recipe:options.recipe,groupSize:options.formulas?.length,formula:options.formula,formulas:options.formulas,contexts:options.contexts,preset:options.preset,context:options.context};
     if(typeof request.id!=='string'||request.id.length<1||request.id.length>80)throw Error('非法提交身份');validateRecipe(request);
+    if(request.formulas){if(request.visibility!=='gm'||request.formulas.length!==request.contexts?.length)throw Error('群体需要私有物理预约');for(const [index,context]of request.contexts.entries()){if(!validVisibility(context.visibility))throw Error('无效群体可见范围');this.privateAudiences.set(`${request.id}.g${index}`,audienceFor(context.visibility,this.transport.id,[{id:this.transport.id,role:this.transport.role!},...[...this.peers.values()].filter(p=>p.ready&&p.role&&now()-p.lastSeen<12000).map(p=>({id:p.id,role:p.role!}))]));}}
     if(hiddenRequest(request)){
       if(!this.transport.role)throw Error('尚未取得枭熊玩家角色，不能创建暗骰');
       const broker=this.authority();request.authority=this.transport.id;
       this.privateAudiences.set(request.id,audienceFor(request.visibility!,this.transport.id,[{id:this.transport.id,role:this.transport.role},...[...this.peers.values()].filter(p=>p.ready&&p.role&&now()-p.lastSeen<12000).map(p=>({id:p.id,role:p.role!}))]));
       this.requests.set(request.id,{request,at:now(),authority:broker});
-      const descriptor={...request,seed:0,modifier:0,formula:undefined,preset:undefined,context:undefined};
+      const descriptor={...request,seed:0,modifier:0,formula:undefined,formulas:undefined,contexts:undefined,preset:undefined,context:undefined};
       this.log('hidden-submitted',{id:request.id,count:request.count,scope:request.visibility,broker});
       try{if(broker===this.transport.id)this.accept(descriptor);else await this.send({type:'secret-request',to:broker,request:descriptor})}
       catch(error){this.privateAudiences.delete(request.id);this.requests.delete(request.id);throw error}
@@ -194,7 +200,7 @@ export class Controller {
     // Do not let a synchronous worker reply race a scheduled release, or erase a still-visible
     // incumbent to make capacity. Each request remains a distinct roll.
     if([...this.outgoing.values()].some(out=>!out.started||(out.start||0)>now()))return;
-    if(this.retainedUntil.size>=8)return;
+    if(new Set([...this.heldRolls.values()].map(r=>r.request.batch?.id||r.request.id)).size>=8)return;
     const space=floorBudget(this.queue[0],[...this.heldRolls.values()],this.catalog,this.viewport);
     if(!space.allowed){if(this.waitingForSpace!==this.queue[0].id){this.waitingForSpace=this.queue[0].id;
       this.log('waiting-for-floor-space',{id:this.waitingForSpace,...space,reason:'保留当前骰子大小和场上碰撞，空间释放后投下一条'});this.state()}return}
@@ -220,7 +226,14 @@ export class Controller {
     const pending=this.pending;clearTimeout(this.pendingTimer);this.pending=undefined;
     try{
       if(data.error)throw Error(data.error);
-      const actual=data.roll as Roll;
+      const predicted=data.roll as Roll,parts=splitGroupRoll(predicted);
+      if(predicted.request.groupSize){
+        const descriptors=parts.map(r=>({id:r.request.id,count:r.kinds.length,visibility:r.request.visibility||'all'}));
+        this.registerGroupParts(predicted.request.id,descriptors,this.transport.id);
+        await this.send({type:'group-parts',id:predicted.request.id,parts:descriptors});
+        this.worker.postMessage({type:'release',id:predicted.request.id});this.worker.postMessage({type:'retain',rolls:parts,catalog:this.catalog});
+      }
+      for(const actual of parts){
       let roll=actual;
       if(hiddenRequest(actual.request)){
         const lease=this.reservations.get(actual.request.id);if(!lease||lease.broker!==this.authority())throw Error('暗骰计算期间房间权威变化，请重投');
@@ -235,7 +248,7 @@ export class Controller {
       const bytes=await encodeRoll({...meta,collisions:contacts.length,contacts:contacts.length},poses,contacts),sha=await hash(bytes),chunks=split(bytes);
       const members=[...this.peers.values()].filter(p=>p.ready&&now()-p.lastSeen<12000&&p.version===BUILD&&(!roll.masked||this.reservations.get(roll.request.id)?.members.includes(p.id))).map(p=>p.id);
       // A 100-dice stress roll takes ~25 s to predict per peer; the product tier needs only seconds.
-      const window=roll.kinds.length>20?90000:20000;
+      const window=Math.max(roll.kinds.length>20?90000:20000,roll.request.batch?15000+roll.request.batch.size*2000:0);
       const out:Outgoing={roll,chunks,hash:sha,bytes:bytes.length,wait:new Set([this.transport.id,...members]),members,at:now(),started:false,retry:0,acks:new Set(members),lastStartRetry:0,window,viewers:new Set([this.transport.id,...members])};
       this.outgoing.set(roll.request.id,out);this.rolls.set(roll.request.id,actual);this.addRecord(actual);
       this.requests.delete(roll.request.id);
@@ -244,6 +257,8 @@ export class Controller {
       if(members.length){await this.send({type:'offer',id:roll.request.id,total:chunks.length,bytes:bytes.length,hash:sha,members});
         for(let i=0;i<chunks.length;i++){await this.send({type:'chunk',id:roll.request.id,index:i,data:chunks[i]});if(i%8===7)await new Promise(r=>setTimeout(r,8))}
         await this.send({type:'chunks-done',id:roll.request.id});}
+      }
+      this.requests.delete(predicted.request.id);this.privateAudiences.delete(predicted.request.id);
     }catch(e){this.worker.postMessage({type:'release',id:pending.id});this.fail('physics/trajectory',e);
       if(hiddenRequest(pending)){this.cancelSecret(pending.id);await this.send({type:'secret-failed',id:pending.id,reason:errorText(e)})}
       if(pending.source!==this.transport.id)await this.send({type:'roll-rejected',to:pending.source,id:pending.id,reason:errorText(e)});
@@ -256,8 +271,30 @@ export class Controller {
     if(!this.inbound.has(id))return;
     await this.send({type:'ready',id,to:inbound.source,hash:inbound.assembly.sha});this.log('trajectory-verified',{id,theme:this.rolls.get(id)?.request.theme,hash:inbound.assembly.sha,source:inbound.source,rtt:peer.rtt});
   }
+  private registerGroupParts(id:string,parts:{id:string;count:number;visibility:string}[],source:string){
+    const lease=this.reservations.get(id),size=lease?.request.groupSize;
+    if(!lease||lease.request.source!==source||lease.broker!==this.authority()||!Number.isInteger(size)||!Array.isArray(parts)||parts.length!==size||parts.length<1||parts.length>100||parts.some((p,i)=>p.id!==`${id}.g${i}`||!Number.isInteger(p.count)||p.count<1||!validVisibility(p.visibility))||parts.reduce((n,p)=>n+p.count,0)>100)throw Error('非法群体轨迹清单');
+    for(const [index,p]of parts.entries()){
+      const request:Request={...lease.request,id:p.id,count:p.count,visibility:p.visibility as Request['visibility'],groupSize:undefined,batch:{id,index,size:parts.length}};
+      const prior=this.reservations.get(p.id);if(prior&&JSON.stringify(prior.request)!==JSON.stringify(request))throw Error('群体轨迹清单发生变化');
+      this.reservations.set(p.id,{...lease,request});
+    }
+  }
   private async maybeStart(out:Outgoing){
     if(out.started||out.wait.size)return;
+    const batch=out.roll.request.batch;
+    if(batch){
+      const peers=[...this.outgoing.values()].filter(r=>r.roll.request.batch?.id===batch.id);
+      if(peers.length!==batch.size||peers.some(r=>r.wait.size||r.started))return;
+      const maxRtt=Math.max(0,...[...this.peers.values()].filter(p=>p.ready).map(p=>p.rtt));
+      const lead=out.members.length?Math.min(1500,Math.max(100,maxRtt*1.5+50)):24,start=Math.max(now()+lead,...this.settledAt.values());
+      for(const row of peers){row.started=true;row.start=start;row.lastStartRetry=now();this.retainUntilExit(row.roll,start);}
+      const entries=peers.map(row=>({id:row.roll.request.id,hash:row.hash}));
+      if(out.members.length)await this.send({type:'start-group',id:batch.id,start,entries});
+      for(const row of peers)this.bus.postMessage({type:'start',id:row.roll.request.id,at:start});
+      this.finishReservation(batch.id);this.log('group-start-scheduled',{id:batch.id,start,count:entries.length,leadMs:lead});
+      setTimeout(()=>this.next(),Math.max(0,start-now()+1));return;
+    }
     out.started=true;const maxRtt=Math.max(0,...[...this.peers.values()].filter(p=>p.ready).map(p=>p.rtt));
     const lead=out.members.length?Math.min(1500,Math.max(70,maxRtt*1.5+35)):24;
     // Published incumbent tracks cannot be rewritten. They are final-pose colliders in this
@@ -285,9 +322,14 @@ export class Controller {
   }
   private finishReservation(id:string){if(this.reservation?.request.id===id)this.reservation=undefined;}
   private cancelSecret(id:string){
-    this.finishReservation(id);this.reservations.delete(id);this.requests.delete(id);this.privateRunning.delete(id);this.privateAudiences.delete(id);this.queue=this.queue.filter(r=>r.id!==id);
-    if(!this.started.has(id)&&!this.outgoing.get(id)?.started){this.outgoing.delete(id);this.inbound.delete(id);this.rolls.delete(id);this.records.delete(id);this.secrets.delete(id);this.releasePhysics(id);this.bus.postMessage({type:'discard',id});this.sendRecords();}
-    this.next();
+    const request=this.reservations.get(id)?.request??this.outgoing.get(id)?.roll.request??this.rolls.get(id)?.request??this.requests.get(id)?.request;
+    const master=request?.batch?.id||(request?.groupSize?id:undefined),ids=new Set([id]);
+    if(master){ids.add(master);for(const [child,lease]of this.reservations)if(lease.request.batch?.id===master)ids.add(child);for(const [child,out]of this.outgoing)if(out.roll.request.batch?.id===master)ids.add(child);}
+    // One failed preparation aborts the entire unstarted barrier. Leaving its
+    // siblings/reservation alive would hold the next group until lease timeout.
+    for(const key of ids){this.finishReservation(key);this.reservations.delete(key);this.requests.delete(key);this.privateRunning.delete(key);this.privateAudiences.delete(key);this.queue=this.queue.filter(r=>r.id!==key);
+      if(!this.started.has(key)&&!this.outgoing.get(key)?.started){this.outgoing.delete(key);this.inbound.delete(key);this.rolls.delete(key);this.records.delete(key);this.secrets.delete(key);this.releasePhysics(key);this.bus.postMessage({type:'discard',id:key});}}
+    this.sendRecords();this.next();
   }
   private rememberSecret(roll:Roll,details?:SecretDetails){
     if(!roll.secret)throw Error('缺少暗骰封装');
@@ -386,7 +428,7 @@ export class Controller {
         if(source!==this.authority()&&this.reservations.get(p.id)?.request.source!==source)throw Error('非房间权威或授权暗骰来源发送轨迹');
         if(!this.ready||!Array.isArray(p.members)||!p.members.includes(this.transport.id))break;
         if(this.started.has(p.id))break;
-        const pending=this.inbound.get(p.id);if(pending){if(pending.source!==source||pending.assembly.sha!==p.hash)throw Error('冲突的轨迹清单');if(pending.prepared)await this.sendReady(p.id,pending);break}if(this.inbound.size>=8)throw Error('接收轨迹队列已满');
+        const pending=this.inbound.get(p.id);if(pending){if(pending.source!==source||pending.assembly.sha!==p.hash)throw Error('冲突的轨迹清单');if(pending.prepared)await this.sendReady(p.id,pending);break}if(this.inbound.size>=64)throw Error('接收轨迹队列已满');
         if(typeof p.id!=='string'||p.id.length>80)throw Error('Invalid roll id');
         this.inbound.set(p.id,{source,assembly:new Assembly(p.total,p.bytes,p.hash),at:now(),retry:0,processing:false,prepared:false});await this.ping(source);break;
       }
@@ -398,13 +440,14 @@ export class Controller {
           await this.send({type:'missing',to:source,id:p.id,indices:inbound.assembly.missing()})}
         if(!inbound.processing&&!inbound.assembly.missing().length){inbound.processing=true;const bytes=await inbound.assembly.finish();let roll=await decodeRoll(bytes) as Roll;
           if(roll.request.id!==p.id||roll.request.authority!==source||!this.catalog.themes[roll.request.theme]||roll.kinds.some(k=>!KINDS.includes(k)))throw Error('轨迹身份/皮肤/骰型不合法');
+          if(roll.request.batch){const expected=this.reservations.get(p.id)?.request;if(!expected||expected.source!==source||JSON.stringify(expected.batch)!==JSON.stringify(roll.request.batch)||expected.count!==roll.kinds.length||expected.visibility!==roll.request.visibility)throw Error('群体轨迹与授权不符');}
           if(roll.masked){
             const lease=this.reservations.get(p.id),pack=roll.secret;
             if(!lease||lease.request.source!==source||lease.broker!==this.authority()||!hiddenRequest(roll.request)||roll.request.source!==source||roll.request.seed!==0||roll.request.modifier!==0||roll.diagnostics||!roll.results.every(v=>v===0)||!pack||pack.scope!==roll.request.visibility||!Array.isArray(pack.audience)||pack.audience.length>64||!pack.audience.includes(source)||!Array.isArray(pack.keys)||pack.keys.length>63||!/^[0-9a-f]{64}$/.test(pack.commitment))throw Error('暗骰公开轨迹未脱敏/授权不合法');
             if(['kind','theme','bodyColor','visibility','source','name'].some(k=>(roll.request as any)[k]!==(lease.request as any)[k])||(!lease.request.recipe&&roll.request.count!==lease.request.count)||!!roll.request.recipe!==!!lease.request.recipe)throw Error('暗骰轨迹更改了预约');
             const details=await this.keys.open(pack,source,p.id);this.rememberSecret(roll,details??undefined);
             if(details)roll=unmaskRoll(roll,details,this.catalog);
-          }else if(source!==this.authority()||hiddenRequest(roll.request)||roll.kinds.some((k,i)=>!this.catalog.dice[k].outcomes.some(o=>o.value===roll.results[i])))throw Error('公开轨迹权威/结果不合法');
+          }else if((source!==this.authority()&&this.reservations.get(p.id)?.request.source!==source)||hiddenRequest(roll.request)||roll.kinds.some((k,i)=>!this.catalog.dice[k].outcomes.some(o=>o.value===roll.results[i])))throw Error('公开轨迹权威/结果不合法');
           const request=this.requests.get(p.id);if(request&&(request.request.seed!==roll.request.seed||request.request.source!==roll.request.source||request.request.theme!==roll.request.theme||request.request.bodyColor!==roll.request.bodyColor||(!request.request.recipe&&request.request.count!==roll.request.count)||request.request.kind!==roll.request.kind||(request.request.modifier??0)!==(roll.request.modifier??0)))throw Error('权威更改了原请求');
           this.requests.delete(p.id);
           this.rolls.set(p.id,roll);this.addRecord(roll);this.bus.postMessage({type:'prepare',roll});}
@@ -416,16 +459,21 @@ export class Controller {
       case 'missing':{const out=this.outgoing.get(p.id);if(!out||!out.wait.has(source)||!Array.isArray(p.indices)||p.indices.length>900)break;
         for(const index of p.indices){if(!Number.isInteger(index)||index<0||index>=out.chunks.length)throw Error('Invalid repair index');await this.send({type:'chunk',id:p.id,index,data:out.chunks[index],to:source})}break;}
       case 'ready':{const out=this.outgoing.get(p.id);if(!out||out.hash!==p.hash||!out.members.includes(source))break;out.wait.delete(source);this.log('peer-prepared',{id:p.id,source,hash:p.hash});await this.maybeStart(out);break;}
+      case 'group-parts':{this.registerGroupParts(p.id,p.parts,source);break;}
+      case 'start-group':{
+        const lease=this.reservations.get(p.id);if(!lease||lease.request.source!==source||!Array.isArray(p.entries)||p.entries.length!==lease.request.groupSize||p.entries.some((entry:any,i:number)=>entry.id!==`${p.id}.g${i}`))throw Error('非法群体起播屏障');
+        await Promise.all(p.entries.map((entry:any)=>this.receive({...p,type:'start',id:entry.id,hash:entry.hash},source)));break;
+      }
       case 'start':{const inbound=this.inbound.get(p.id),roll=this.rolls.get(p.id),peer=this.peers.get(source);
         const previous=this.started.get(p.id);if(previous){if(previous.source!==source||previous.hash!==p.hash)throw Error('冲突的开播指令');await this.send({type:'start-ack',id:p.id,to:source,hash:p.hash});break}
         if(!inbound||!roll||inbound.source!==source||inbound.assembly.sha!==p.hash||!peer||peer.rtt<0||!Number.isFinite(p.start))throw Error('未准备完成就收到开播指令');
         const localStart=p.start-peer.offset,late=now()-localStart;if(late>0)this.log('late-network-start',{id:p.id,lateMs:late});
         if(Math.abs(late)>30000)throw Error('开播时间超出实验时钟范围');
-        this.retainUntilExit(roll,localStart);this.worker.postMessage({type:'retain',rolls:[roll],catalog:this.catalog});this.finishReservation(p.id);this.started.set(p.id,{source,hash:p.hash,at:now()});this.bus.postMessage({type:'start',id:p.id,at:localStart});this.inbound.delete(p.id);await this.send({type:'start-ack',id:p.id,to:source,hash:p.hash});this.next();break;}
+        this.retainUntilExit(roll,localStart);this.worker.postMessage({type:'retain',rolls:[roll],catalog:this.catalog});this.finishReservation(roll.request.batch?.id||p.id);this.started.set(p.id,{source,hash:p.hash,at:now()});this.bus.postMessage({type:'start',id:p.id,at:localStart});this.inbound.delete(p.id);await this.send({type:'start-ack',id:p.id,to:source,hash:p.hash});this.next();break;}
       case 'start-ack':{const out=this.outgoing.get(p.id);if(out&&out.hash===p.hash)out.acks.delete(source);break;}
       case 'receipt':this.recordReceipt(source,p.event,p.detail);this.log('peer-receipt',{source,event:p.event,...p.detail});
         if(p.event==='render-complete'||p.event==='render-cancelled')this.viewerFinished(p.detail?.roll,source);this.state();break;
-      case 'abort':{const inbound=this.inbound.get(p.id);if(inbound?.source===source){this.inbound.delete(p.id);this.rolls.delete(p.id);this.records.delete(p.id);this.sendRecords();this.cancelSecret(p.id);this.bus.postMessage({type:'discard',id:p.id});this.fail('remote-abort',p.reason)}break;}
+      case 'abort':{const inbound=this.inbound.get(p.id),lease=this.reservations.get(p.id);if(inbound?.source===source||lease&&(lease.request.source===source||lease.broker===source)){this.inbound.delete(p.id);this.rolls.delete(p.id);this.records.delete(p.id);this.sendRecords();this.cancelSecret(p.id);this.bus.postMessage({type:'discard',id:p.id});this.fail('remote-abort',p.reason)}break;}
     }
   }
   private async tick(){
@@ -443,7 +491,7 @@ export class Controller {
     for(const [id,r] of this.requests){if(r.authority!==this.transport.id&&t-r.at>240000){this.requests.delete(id);this.privateAudiences.delete(id);this.fail('request-timeout',`${id} authority=${r.authority} 排队/预测超出 240 秒上限`)}}
     for(const [id,inbound] of this.inbound){
       const inboundWindow=inbound.assembly.bytes>500000?120000:30000;
-      if(t-inbound.at>inboundWindow){this.inbound.delete(id);this.rolls.delete(id);this.bus.postMessage({type:'discard',id});this.fail('receive-timeout',id);continue}
+      if(t-inbound.at>inboundWindow){this.cancelSecret(id);this.fail('receive-timeout',id);continue}
       if(!inbound.processing&&t-inbound.at>(inbound.retry+1)*2500&&inbound.retry<40){inbound.retry++;await this.send({type:'missing',to:inbound.source,id,indices:inbound.assembly.missing()})}
     }
     for(const [id,out] of this.outgoing){

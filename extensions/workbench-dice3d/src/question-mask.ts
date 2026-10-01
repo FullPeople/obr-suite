@@ -1,9 +1,10 @@
 import * as T from 'three';
+import {glyphTexture} from './glyph-texture';
 import type {Kind} from './types';
 import {RULE_GLYPH_LAYOUTS} from './glyph-layouts';
 /** Full atlas replacement, not a floating decal: EVERY original number is absent. Tetrahedra
  * retain three upright-at-their-corner question marks per face; D% no longer leaks tens. */
-export function questionMask(kind:Kind):T.CanvasTexture{
+export function questionMask(kind:Kind):T.DataTexture{
   const layout=RULE_GLYPH_LAYOUTS.find(l=>l.kind===kind);if(!layout)throw Error('缺少问号字形布局: '+kind);
   const size=2048,canvas=document.createElement('canvas');canvas.width=canvas.height=size;
   const ctx=canvas.getContext('2d');if(!ctx)throw Error('不能创建暗骰问号图集');
@@ -14,5 +15,5 @@ export function questionMask(kind:Kind):T.CanvasTexture{
     for(const slot of slots){ctx.save();ctx.translate((left+slot.u*w)*size,(top+slot.v*h)*size);ctx.rotate(slot.angle);
       ctx.font=`650 ${Math.round(Math.min(w,h)*size*slot.ratio)}px CinzelVariable`;ctx.fillText('?',0,0);ctx.restore();}
   }
-  const texture=new T.CanvasTexture(canvas);texture.flipY=false;texture.name='question-only-'+kind;return texture;
+  const texture=glyphTexture(canvas);canvas.width=canvas.height=1;texture.name='question-only-'+kind;return texture;
 }

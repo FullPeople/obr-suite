@@ -1,3 +1,4 @@
+import {mountActionHistory} from './action-history';
 import {assetUrl} from '../asset-base';
 import {WORKBENCH_DEV,WORKBENCH_PROTOCOL as protocol} from './channel';
 const link=document.querySelector<HTMLAnchorElement>('#open')!,status=document.querySelector<HTMLElement>('#status')!;
@@ -29,3 +30,5 @@ link.addEventListener('click',event=>{
 });
 // END persistent-room-opener
 if(WORKBENCH_DEV){discover(parent);setInterval(()=>{if(!background)discover(parent);},700);}else status.textContent='此入口仅用于 Full Suite-dev。';
+
+if(WORKBENCH_DEV)mountActionHistory();

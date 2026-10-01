@@ -58,7 +58,7 @@ export function maskRoll(roll:Roll,catalog:Catalog):{roll:Roll;details:SecretDet
   const details:SecretDetails={v:1,id:roll.request.id,owner:roll.request.source,salt,seed:roll.request.seed,modifier:roll.request.modifier??0,results:[...roll.results],rotations,formulaData:roll.formulaData};
   // Explicit allowlist: seed, diagnostics/simulationSeed and raw face values must never travel.
   const r=roll.request;
-  return{details,roll:{version:2,request:{id:r.id,source:r.source,name:r.name,kind:r.kind,count:r.count,theme:r.theme,bodyColor:r.bodyColor,authority:r.authority,visibility:r.visibility,seed:0,modifier:0,recipe:r.recipe},
+  return{details,roll:{version:2,request:{id:r.id,source:r.source,name:r.name,kind:r.kind,count:r.count,theme:r.theme,bodyColor:r.bodyColor,authority:r.authority,visibility:r.visibility,seed:0,modifier:0,recipe:r.recipe,batch:r.batch},
     kinds:[...roll.kinds],results:roll.results.map(()=>0),fps:120,frames:roll.frames,poses,contacts:roll.contacts,physicsMs:roll.physicsMs,steps:roll.steps,collisions:roll.collisions,duration:roll.duration,bounds:roll.bounds,masked:true,births:roll.births}};
 }
 export function unmaskRoll(publicRoll:Roll,details:SecretDetails,catalog:Catalog):Roll{

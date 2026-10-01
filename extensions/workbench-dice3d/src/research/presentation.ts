@@ -1,3 +1,4 @@
+import {acquireOverlayCanvas} from '../shared-overlay-canvas';
 import * as T from 'three';
 import {CueRenderer} from '../cue-renderer';
 import {buildCue,type Cue,type Projection,staggerForOrdinal,travelForOrdinal,BEAM_RECOIL,BEAM_AFTERGLOW,totalAt} from '../cue';
@@ -36,10 +37,11 @@ export function dimDiscarded(ids:string[],row:FormulaRow,decisionAt:number){
 /** Research visual phases and compact 2D-style history, wrapped around the exact same number rush. */
 export class FormulaShow extends CueRenderer{
   private fx:HTMLCanvasElement;private context:CanvasRenderingContext2D;private chips=new Map<string,HTMLElement>();private total:HTMLElement;
+  private releaseFx:()=>void;
   private latest=-1;private finished=false;
   constructor(private stage:HTMLElement,roll:Roll,private ids:string[],private row:FormulaRow,private card:HTMLElement,private projection:()=>Projection,private timeline?:RuleTimeline){
     super(stage,roll.request.id,roll.request.name,roll.request.bodyColor);
-    this.fx=document.createElement('canvas');this.fx.className='research-effects';stage.append(this.fx);this.context=this.fx.getContext('2d')!;
+    const layer=acquireOverlayCanvas(stage,'research-effects');this.fx=layer.canvas;this.context=layer.context;this.releaseFx=layer.release;
     const caption=document.createElement('div');caption.className='formula-caption';caption.textContent=row.formula.replaceAll('*','×');card.append(caption);
     const inline=document.createElement('div');inline.className='formula-inline';
     for(const d of row.dice){const chip=document.createElement('span');chip.className='die-chip';chip.title=`${d.kind} · ${d.flags.join(' / ')||'计入'}`;
@@ -56,7 +58,7 @@ export class FormulaShow extends CueRenderer{
     super.draw(age,cue,appear);
     const p=this.projection(),ctx=this.context,ratio=Math.min(devicePixelRatio,1.5);
     if(this.fx.width!==Math.round(p.width*ratio)||this.fx.height!==Math.round(p.height*ratio)){this.fx.width=Math.round(p.width*ratio);this.fx.height=Math.round(p.height*ratio)}
-    ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,p.width,p.height);
+    ctx.setTransform(ratio,0,0,ratio,0,0);
     const decisionAt=this.timeline?.decisionAt??cue.settled+DECISION_DELAY,fade=decisionProgress(age,decisionAt),landed=age>=decisionAt,phase=Math.max(0,age-decisionAt),arrived=new Set(cue.beams.filter(b=>age>=b.reveal).map(b=>this.ids[b.dieIndex]));
     const eventStart=(event:FormulaRow['events'][number])=>event.kind==='max'||event.kind==='min'?this.timeline?.clamps.find(c=>c.kind===event.kind&&c.id===event.dice[0]&&c.label===event.label)?.start??decisionAt:decisionAt;
     const visibleEvents=this.row.events.filter(e=>age>eventStart(e));
@@ -86,5 +88,5 @@ export class FormulaShow extends CueRenderer{
     const total=totalAt(cue,age);if(total!==this.latest){this.latest=total;this.total.textContent=String(total);this.total.animate([{transform:'scale(1.23)'},{transform:'scale(1)'}],{duration:280,easing:'ease-out'});}
     if(!this.finished&&age>=cue.finalReveal){this.finished=true;this.card.classList.add('complete');this.card.animate([{boxShadow:'inset 0 0 0 2px #6faf9180'},{boxShadow:'inset 0 0 0 2px #6faf9100'}],{duration:500});}
   }
-  override destroy(){super.destroy();this.fx.remove();}
+  override destroy(){super.destroy();this.releaseFx();}
 }

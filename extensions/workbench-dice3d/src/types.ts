@@ -1,4 +1,4 @@
-export const BUILD='suite-3d-2';
+export const BUILD='suite-3d-3';
 export const CHANNEL='com.obr-suite/workbench-dice3d.v1';
 export type Kind='d4'|'d6'|'d8'|'d10'|'d12'|'d20'|'d_percentile';
 export const KINDS:Kind[]=['d4','d6','d8','d10','d12','d20','d_percentile'];
@@ -13,8 +13,8 @@ export interface Theme {id:ThemeID;name:string;style?:import('./material-styles'
   audio:ThemeAudio;naturalOne:number[];naturalTwenty:number[]}
 export interface Catalog {version:number;dice:Record<Kind,DieAsset>;themes:Record<ThemeID,Theme>}
 export interface Request {id:string;source:string;name:string;kind:Kind|'mixed';count:number;theme:ThemeID;seed:number;authority?:string;bodyColor?:string;modifier?:number;visibility?:import('./hidden-roll').Visibility;
-  recipe?:boolean;formula?:string;context?:{itemId:string|null;label:string;rollerId:string;collectiveId?:string;expression?:string;ts?:number};preset?:{dice:{type:string;value:number;loser?:boolean;originalValue?:number;subtract?:boolean;burstParent?:number}[];total:number;rowStarts?:number[]}}
-export interface FormulaData {ids:string[];rows:Omit<import('./research/formula').FormulaRow,'compute'>[];logicalRows?:Omit<import('./research/formula').FormulaRow,'compute'>[];births:number[];timeline:import('./research/rule-timeline').RuleTimeline;context?:Request['context'];expression:string}
+  recipe?:boolean;groupSize?:number;batch?:{id:string;index:number;size:number};formula?:string;formulas?:string[];contexts?:NonNullable<Request['context']>[];context?:{itemId:string|null;label:string;rollerId:string;collectiveId?:string;expression?:string;ts?:number;visibility?:import('./hidden-roll').Visibility};preset?:{dice:{type:string;value:number;loser?:boolean;originalValue?:number;subtract?:boolean;burstParent?:number}[];total:number;rowStarts?:number[]}}
+export interface FormulaData {ids:string[];rows:Omit<import('./research/formula').FormulaRow,'compute'>[];logicalRows?:Omit<import('./research/formula').FormulaRow,'compute'>[];births:number[];timeline:import('./research/rule-timeline').RuleTimeline;context?:Request['context'];contexts?:Request['contexts'];expression:string}
 export interface Viewport {w:number;h:number}
 /** One recorded physics contact. Positions are visual units; speed is m/s and impulse N·s, so the
  *  audio mapper can apply the native thresholds unchanged. */

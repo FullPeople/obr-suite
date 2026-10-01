@@ -1,3 +1,4 @@
+import {acquireOverlayCanvas} from './shared-overlay-canvas';
 /**
  * The result show, ported from Desktop Dice' screen-space cue in `floating_bubble_window.cpp`.
  *
@@ -35,24 +36,23 @@ const IMPACT_ANGLES=[-0.78,-0.22,0.31,0.86];
 
 export class CueRenderer{
   private canvas:HTMLCanvasElement;
-  private ctx:CanvasRenderingContext2D;
+  private ctx:CanvasRenderingContext2D;private releaseCanvas:()=>void;
   private particles=new Map<number,Particle[]>();
   private seed:bigint;
   private targetSlot:[number,number]=[0,0];
   private currentSlot:[number,number]=[0,0];
   private previousFrame=0;
+  private anchor?:()=>{x:number;y:number}|undefined;private anchorLabel='';
+  setAnchor(read:()=>{x:number;y:number}|undefined,label:string){this.anchor=read;this.anchorLabel=label;}
   constructor(private container:HTMLElement,rollId:string,private playerName:string,private playerColor?:string){
-    this.canvas=document.createElement('canvas');
-    this.canvas.className='cue-canvas';
-    container.appendChild(this.canvas);
-    this.ctx=this.canvas.getContext('2d')!;
+    const layer=acquireOverlayCanvas(container,'cue-canvas');this.canvas=layer.canvas;this.ctx=layer.context;this.releaseCanvas=layer.release;
     let hash=0n;
     for(const ch of rollId)hash=(hash*131n+BigInt(ch.charCodeAt(0)))&((1n<<64n)-1n);
     this.seed=hash;
   }
   setSlotOffset(x:number,y=0){this.targetSlot=[x,y]}
   slotPosition(){return [...this.currentSlot]}
-  destroy(){this.canvas.remove()}
+  destroy(){this.releaseCanvas()}
   private size(){
     const ratio=Math.min(2,window.devicePixelRatio||1);
     const w=this.container.clientWidth,h=this.container.clientHeight;
@@ -79,18 +79,19 @@ export class CueRenderer{
   draw(elapsed:number,cue:Cue,appear:number){
     const {w,h}=this.size();
     const ctx=this.ctx;
-    ctx.clearRect(0,0,w,h);
+
     const frame=performance.now(),dt=this.previousFrame?Math.min(.05,(frame-this.previousFrame)/1000):1/60;
     this.previousFrame=frame;
     const approach=1-Math.exp(-dt/0.095);
     for(let axis=0;axis<2;axis++)this.currentSlot[axis]+=(this.targetSlot[axis]-this.currentSlot[axis])*approach;
     if(elapsed<cue.settled||appear<=0)return;
     // Concurrent rolls get the native's equal horizontal slots so their totals never stack.
-    const centerX=w*0.5+this.currentSlot[0],centerY=h*0.5+this.currentSlot[1];
+    const point=this.anchor?.();if(this.anchor&&!point)return;
+    const centerX=point?.x??w*0.5+this.currentSlot[0],centerY=point?.y??h*0.5+this.currentSlot[1];
     const centerAge=elapsed-cue.firstBeam;
     const centerOpacity=appear*smoothstep(Math.max(0,centerAge)/0.18)*(1-smoothstep(Math.max(0,(elapsed-cue.finalBeamEnd))/0.28));
     // Nameplate is behind the flying modifier, never an occluder over its launch point.
-    if(centerOpacity>0.01){
+    if(centerOpacity>0.01&&!this.anchor){
       const pendingModifier=cue.modifier&&elapsed<cue.modifier.start;
       ctx.save();ctx.fillStyle=rgba([8/255,10/255,13/255],centerOpacity*0.76);
       ctx.beginPath();ctx.roundRect(centerX-116,centerY+51,232,pendingModifier?68:41,13);ctx.fill();
@@ -224,7 +225,7 @@ export class CueRenderer{
       const color:[number,number,number]=this.playerColor?[1,3,5].map(i=>parseInt(this.playerColor!.slice(i,i+2),16)/255) as [number,number,number]:[0.92,0.84,0.62];
       ctx.save();
       ctx.translate(centerX,centerY);ctx.scale(centerScale,centerScale);ctx.translate(-centerX,-centerY);
-      ctx.font='600 92px CinzelVariable,Georgia,serif';
+      ctx.font=this.anchor?'700 30px CinzelVariable,Georgia,serif':'600 92px CinzelVariable,Georgia,serif';
       ctx.textAlign='center';ctx.textBaseline='middle';
       ctx.fillStyle=rgba([0,0,0],centerOpacity*0.58);
       ctx.fillText(String(shown),centerX+4,centerY+4);
@@ -233,6 +234,7 @@ export class CueRenderer{
       ctx.strokeText(String(shown),centerX,centerY);
       ctx.fillStyle=rgba(color,centerOpacity);
       ctx.fillText(String(shown),centerX,centerY);
+      if(this.anchor){ctx.font='600 13px "Microsoft YaHei",sans-serif';ctx.lineWidth=3;ctx.strokeText(this.anchorLabel,centerX,centerY+25);ctx.fillText(this.anchorLabel,centerX,centerY+25);}
       ctx.restore();
     }
     // Hit-stop dressing: a brief tint plus directional impact lines, never a pause in physics.

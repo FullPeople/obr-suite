@@ -36,6 +36,8 @@ export class RollAudioMixer{
     this.report('audio-roll-start',{roll:id,active:this.tracks.size});
     if(!this.timer)this.timer=window.setInterval(()=>this.tick(),20);
   }
+  pause(id:string){const t=this.tracks.get(id);if(t){t.started=false;t.engine.stop('presentation-pause');}}
+  async retime(id:string,at:number){const t=this.tracks.get(id);if(!t||!t.at)return;const elapsed=(now()-at)/1000;t.hit=t.plan.hits.findIndex(hit=>hit.t>=elapsed);if(t.hit<0)t.hit=t.plan.hits.length;const rules=t.plan.rules||[];t.rule=rules.findIndex(rule=>rule.t>=elapsed);if(t.rule<0)t.rule=rules.length;await this.release(id,at);}
   stop(id:string){const t=this.tracks.get(id);if(!t)return;this.finishedPlayed+=t.engine.played;this.finishedDropped+=t.engine.dropped;
     t.engine.dispose();this.tracks.delete(id);this.report('audio-roll-stop',{roll:id,remaining:this.tracks.size});
     if(!this.tracks.size&&this.timer){clearInterval(this.timer);this.timer=0}}

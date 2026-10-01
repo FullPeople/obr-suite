@@ -32,6 +32,8 @@ let J:any,loading:Promise<any>|null=null,world:any,bi:any,listener:any=null;
 const incumbents=new Map<string,any[]>();
 const incumbentBounds=new Map<string,N.Bounds>();
 const incumbentKinds=new Map<string,Kind[]>();
+const incumbentGroups=new Map<string,string>();
+const retainedBatchCount=()=>new Set([...incumbents.keys()].map(id=>incumbentGroups.get(id)||id)).size;
 // Local rule stages may tumble to a different pose. Keep that pose separately from raw roll
 // witnesses; install it only during another rule prediction and always restore the real world.
 const ruleRestPoses=new Map<string,{position:number[];rotation:number[]}>();
@@ -308,7 +310,7 @@ async function simulate(request:Request,catalog:Catalog,view:Viewport,revisions:
   entered.fill(false);
   beginStep();
 
-  if(incumbents.size>=MAX_RETAINED)throw Error('同场保留 roll 已达 8 条，请等一条演出结束；不得删除仍在场的碰撞体');
+  if(retainedBatchCount()>=MAX_RETAINED)throw Error('同场保留 roll 已达 8 条，请等一条演出结束；不得删除仍在场的碰撞体');
   const slot=slotCursor++%MAX_RETAINED,baseId=slot*20+1;
   const edge=N.selectEntryEdge(N.bigSeed(request.seed));
   const dice:DieState[]=[];const shapes:any[]=[];const walls:any[]=[];
@@ -486,7 +488,7 @@ function releaseIncumbent(id:string){
   const held=incumbents.get(id);
   if(!held)return;
   for(const body of held)destroyBody(body);
-  incumbents.delete(id);
+  incumbents.delete(id);incumbentGroups.delete(id);
   incumbentBounds.delete(id);
   incumbentKinds.delete(id);
   for(const key of ruleRestPoses.keys())if(key.startsWith(id+':'))ruleRestPoses.delete(key);
@@ -517,7 +519,7 @@ async function predict(request:Request,catalog:Catalog,view:Viewport,explicitKin
 async function retainSnapshot(roll:Roll,catalog:Catalog){
   if(incumbents.has(roll.request.id))return;
   await engine();ensureWorld();
-  if(incumbents.size>=MAX_RETAINED)throw Error('接管权威时保留容量不足');
+  if(retainedBatchCount()>=MAX_RETAINED&&!([...incumbentGroups.values()].includes(roll.request.batch?.id||'')))throw Error('接管权威时保留容量不足');
   const held:any[]=[];
   try{for(let index=0;index<roll.kinds.length;index++){
     const kind=roll.kinds[index],parameters=N.PHYSICS[kind];
@@ -527,7 +529,7 @@ async function retainSnapshot(roll:Roll,catalog:Catalog){
     try{settings.mFriction=parameters.friction;settings.mRestitution=parameters.restitution;
       const body=bi.CreateBody(settings);bi.SetUserData(body.GetID(),INCUMBENT_TAG);bi.AddBody(body.GetID(),J.EActivation_DontActivate);held.push(body);
     }finally{J.destroy(settings);shape.Release()}
-  }incumbents.set(roll.request.id,held);incumbentKinds.set(roll.request.id,roll.kinds);if(roll.bounds)incumbentBounds.set(roll.request.id,roll.bounds);}catch(error){for(const body of held)destroyBody(body);throw error}
+  }incumbents.set(roll.request.id,held);if(roll.request.batch)incumbentGroups.set(roll.request.id,roll.request.batch.id);incumbentKinds.set(roll.request.id,roll.kinds);if(roll.bounds)incumbentBounds.set(roll.request.id,roll.bounds);}catch(error){for(const body of held)destroyBody(body);throw error}
 }
 /** Explicit rule presentation: a predominantly upward launch with all six real Jolt DOFs.
  * One initial impulse, then gravity/contact/settling; never drive or snap a quaternion.

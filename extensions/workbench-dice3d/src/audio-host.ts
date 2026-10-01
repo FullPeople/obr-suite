@@ -11,6 +11,8 @@ export function mountAudioHost(client:string,assets?:DiceAssets,catalog?:Catalog
   bus.onmessage=e=>{const p=e.data;void (async()=>{
     if(p.type==='audio-plan')mixer.prepare(p.roll,p.theme,p.plan);
     else if(p.type==='audio-release')await mixer.release(p.roll,p.at);
+    else if(p.type==='audio-pause')mixer.pause(p.roll);
+    else if(p.type==='audio-retime')await mixer.retime(p.roll,p.at);
     else if(p.type==='audio-stop')mixer.stop(p.roll);
     else if(p.type==='audio-command'){
       if(p.action==='unlock')await mixer.resume();

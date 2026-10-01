@@ -1,3 +1,5 @@
+import {beginOverlayFrame} from './shared-overlay-canvas';
+import {recoverPlaybackStart} from './playback-clock';
 import * as T from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
@@ -12,10 +14,11 @@ import {presentationTheme} from './material-styles';
 import {createDiceMaterial,instanceDiceMaterial,addSketchOutline,disposeDiceDecorations} from './dice-materials';
 import {addDynamicOutline} from './dynamic-decorations';
 import {questionMask} from './question-mask';
+import {decodeGlyphTexture} from './glyph-texture';
 import {diePresence} from './die-presence';
 import {DiceAssets} from './asset-loading';
 export interface RollPresentation{cue:Cue;show?:CueRenderer;births?:number[];ruleSounds?:AudioPlan['rules'];onPrepare?:(meshes:T.Mesh[])=>void;onFrame?:(age:number,meshes:T.Mesh[])=>void;onDispose?:()=>void}
-type Active={roll:Roll;meshes:T.Mesh[];start:number;released:boolean;settled:boolean;cue:Cue;show:CueRenderer;slot:number;births?:number[];onFrame?:RollPresentation['onFrame'];onDispose?:()=>void};
+type Active={roll:Roll;meshes:T.Mesh[];start:number;released:boolean;settled:boolean;cue:Cue;show:CueRenderer;slot:number;failures?:number;births?:number[];onFrame?:RollPresentation['onFrame'];onDispose?:()=>void};
 /** Everything the panel's audio engine needs, derived once from the authoritative trace. */
 export interface AudioPlan{impacts:AudioImpact[];hits:{t:number;ordinal:number;maximumFace:boolean}[];
   rules?:{t:number;kind:'max'|'min';pan:number}[];
@@ -43,7 +46,7 @@ export class DiceRenderer {
   private materials=new Map<string,T.MeshPhysicalMaterial>();
   private active:Active[]=[];
   private ready=false;
-  private frameHandle=0;
+  private frameHandle=0;private contextLost=false;private suspendedAt=0;private contextTimer:ReturnType<typeof setTimeout>|undefined;private frameFailures=0;
   private last=0;
   private targetPixelsPerDie=120;
   private frames:number[]=[];
@@ -61,7 +64,11 @@ export class DiceRenderer {
     this.gl.domElement.className='dice-canvas';container.appendChild(this.gl.domElement);
     this.gl.domElement.style.opacity='0';
     this.diceSpace.scale.x=-1;this.scene.add(this.diceSpace);
-    this.gl.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();this.emit('error',{message:'WebGL 上下文丢失，请重新加载测试插件'});this.clear()});
+    const pause=()=>{if(this.suspendedAt)return;this.suspendedAt=now();if(this.frameHandle)cancelAnimationFrame(this.frameHandle);this.frameHandle=0;for(const a of this.active)this.emit('render-paused',{roll:a.roll.request.id});};
+    const resume=()=>{if(this.contextLost||document.hidden)return;const time=now();if(this.suspendedAt){for(const a of this.active){a.start+=Math.max(0,time-Math.max(this.suspendedAt,a.start));this.emit('render-retimed',{roll:a.roll.request.id,start:a.start});}this.suspendedAt=0;}this.last=time;this.wake();};
+    document.addEventListener('visibilitychange',()=>document.hidden?pause():resume());
+    this.gl.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();this.contextLost=true;pause();this.emit('render-context-lost',{active:this.active.length});clearTimeout(this.contextTimer);this.contextTimer=setTimeout(()=>{if(this.contextLost)this.emit('error',{message:'图形上下文尚未恢复，投骰动画暂停；已生成结果保留。请恢复浏览器窗口，必要时刷新。'});},10000);});
+    this.gl.domElement.addEventListener('webglcontextrestored',()=>{clearTimeout(this.contextTimer);this.contextLost=false;void this.gl.compileAsync(this.scene,this.camera).then(()=>{this.emit('render-context-restored',{active:this.active.length});resume();}).catch(error=>this.emit('error',{message:'骰子渲染恢复失败：'+String(error)}));});
     this.camera.up.set(0,1,0);
     this.camera.position.set(0,COS_TILT*CAM_DISTANCE,-SIN_TILT*CAM_DISTANCE);
     this.camera.lookAt(0,0,0);
@@ -88,7 +95,7 @@ export class DiceRenderer {
       const geo=mesh.geometry.clone();geo.scale(40,40,40);geo.computeBoundingSphere();geo.setAttribute('diceGlyph',geo.getAttribute('uv1'));this.geometry.set(kind,geo);
     }));
     const masks=new Map<string,Promise<T.Texture>>();
-    const loadMask=(path:string)=>{let promise=masks.get(path);if(!promise){promise=this.assets.bytes(path).then(async data=>new T.Texture(await createImageBitmap(new Blob([data])))).catch(error=>{throw Error(`贴图解码 ${url(path)}: ${String(error)}`);}).then(mask=>{
+    const loadMask=(path:string)=>{let promise=masks.get(path);if(!promise){promise=this.assets.bytes(path).then(decodeGlyphTexture).catch(error=>{throw Error(`贴图解码 ${url(path)}: ${String(error)}`);}).then(mask=>{
       mask.needsUpdate=true;
       mask.flipY=false;mask.anisotropy=Math.min(8,this.gl.capabilities.getMaxAnisotropy());return mask;});masks.set(path,promise)}return promise;};
     await Promise.all(Object.values(this.catalog.themes).flatMap(theme=>kinds.map(async kind=>{
@@ -100,6 +107,7 @@ export class DiceRenderer {
     this.assets.stage('正在首次编译渲染');
     const warm:T.Mesh[]=[];for(const [key,material] of this.materials){const [id,kind]=key.split(':') as [ThemeID,Kind];const geometry=this.geometry.get(kind)!;const m=new T.Mesh(geometry,material);m.castShadow=true;m.receiveShadow=true;if(this.catalog.themes[id].style==='sketch')addSketchOutline(m,geometry);else addDynamicOutline(m,geometry,this.catalog.themes[id].style!);warm.push(m);this.diceSpace.add(m)}
     await this.gl.compileAsync(this.scene,this.camera);this.gl.render(this.scene,this.camera);this.gl.getContext().finish();for(const m of warm){disposeDiceDecorations(m);this.diceSpace.remove(m)}
+    if(this.contextLost||this.gl.getContext().isContextLost())throw Error('骰子图形初始化中断，无法分配图形资源，请关闭不用的浏览器窗口后重试');
     this.ready=true;this.gl.render(this.scene,this.camera);this.gl.getContext().finish();this.gl.domElement.style.opacity='1';
     const gl=this.gl.getContext(),debug=gl.getExtension('WEBGL_debug_renderer_info');
     this.emit('renderer-ready',{renderer:debug?gl.getParameter(debug.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER),maxTextureSize:this.gl.capabilities.maxTextureSize,
@@ -210,12 +218,19 @@ export class DiceRenderer {
       stingerAt:roll.duration,duration:cue.diceExit,rolling:{activity,pan,step},suppressed:plan.suppressed,merged:plan.merged,voices:plan.pairs};
   }
   private removeMeshes(a:Active){a.onDispose?.();for(const m of a.meshes){disposeDiceDecorations(m);this.diceSpace.remove(m);(m.material as T.Material).dispose()}}
-  clear(){for(const a of this.active){this.removeMeshes(a);a.show.destroy();this.emit('render-cancelled',{roll:a.roll.request.id})}this.active=[];this.layout();this.wake()}
-  wake(){if(!this.frameHandle){this.last=0;this.frameHandle=requestAnimationFrame(()=>this.frame())}}
+  clear(failed=false){for(const a of this.active){this.removeMeshes(a);a.show.destroy();this.emit('render-cancelled',{roll:a.roll.request.id,failed})}this.active=[];this.layout();this.wake()}
+  wake(){if(this.contextLost||document.hidden)return;if(!this.frameHandle){this.frameHandle=requestAnimationFrame(()=>this.frame())}}
   private frame(){
-    this.frameHandle=0;const time=now(),dt=this.last?Math.min(.05,(time-this.last)/1000):1/60;if(this.last)this.frames.push(time-this.last);this.last=time;if(this.frames.length>1200)this.frames.splice(0,this.frames.length-1200);
-    this.animateProjection(dt);
+    this.frameHandle=0;if(this.contextLost||document.hidden)return;
+    try{this.drawFrame();this.frameFailures=0;}catch(error){this.frameFailures++;this.emit('error',{message:'骰子渲染帧异常：'+String(error)});if(this.frameFailures>=3){this.clear(true);this.emit('render-unavailable',{});}}
+    finally{if(this.active.length&&!this.contextLost&&!document.hidden)this.frameHandle=requestAnimationFrame(()=>this.frame());}
+  }
+  private drawFrame(){
+    const time=now();for(const a of this.active){const start=recoverPlaybackStart(a.start,this.last,time);if(start!==a.start){a.start=start;this.emit('render-retimed',{roll:a.roll.request.id,start});}}
+    const dt=this.last?Math.min(.05,(time-this.last)/1000):1/60;if(this.last)this.frames.push(time-this.last);this.last=time;if(this.frames.length>1200)this.frames.splice(0,this.frames.length-1200);
+    this.animateProjection(dt);beginOverlayFrame(this.container);
     for(const a of [...this.active]){
+      try{
       const age=(time-a.start)/1000;if(age<0)continue;
       if(!a.released){a.released=true;this.emit('render-release',{roll:a.roll.request.id,planned:a.start,actual:time,lateMs:time-a.start});}
       const f=Math.min(age*a.roll.fps,a.roll.frames-1),lo=Math.floor(f),hi=Math.min(lo+1,a.roll.frames-1),t=f-lo;
@@ -238,10 +253,11 @@ export class DiceRenderer {
       if(!a.roll.masked)a.show.draw(age,a.cue,1);
       if(age>=a.cue.settled&&!a.settled){a.settled=true;this.emit('render-settled',a.roll.masked?{roll:a.roll.request.id,hidden:true}:{roll:a.roll.request.id,results:a.roll.results,total:a.cue.total})}
       if(age>a.cue.diceExit){this.removeMeshes(a);a.show.destroy();this.active.splice(this.active.indexOf(a),1);this.layout();this.remapSources();this.reslot();this.emit('render-complete',{roll:a.roll.request.id})}
+      a.failures=0;
+      }catch(error){a.failures=(a.failures||0)+1;this.emit('render-frame-retry',{roll:a.roll.request.id,attempt:a.failures,message:String(error)});if(a.failures>=3){this.removeMeshes(a);a.show.destroy();this.active.splice(this.active.indexOf(a),1);this.emit('render-cancelled',{roll:a.roll.request.id,failed:true});this.emit('error',{message:'骰子演出连续失败，保留权威结果：'+String(error)});}}
     }
     this.gl.render(this.scene,this.camera);
     if(this.active.length?time-this.lastMetrics>750:!this.idleReported){this.lastMetrics=time;this.idleReported=!this.active.length;const sorted=[...this.frames].sort((a,b)=>a-b),average=sorted.reduce((n,v)=>n+v,0)/(sorted.length||1);
       this.emit('render-metrics',{fps:average?1000/average:0,p95:sorted[Math.floor(sorted.length*.95)]||0,maxFrame:sorted.at(-1)||0,longTasks:this.longTasks.length,longestTask:Math.max(0,...this.longTasks),activeRolls:this.active.length,dice:this.active.reduce((n,a)=>n+a.meshes.length,0),drawCalls:this.gl.info.render.calls,triangles:this.gl.info.render.triangles,textures:this.gl.info.memory.textures,pixelRatio:this.gl.getPixelRatio()});}
-    if(this.active.length)this.frameHandle=requestAnimationFrame(()=>this.frame());
   }
 }

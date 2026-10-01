@@ -11,6 +11,7 @@ const MODAL=CHANNEL+'/overlay',RESULT='com.obr-suite/dice-roll',THEME='com.obr-s
 let core:Controller|undefined,bus:BroadcastChannel|undefined,start:Promise<void>|undefined,ready=false,lastError='',connection='',profileStop:(()=>void)|undefined,historyStop:(()=>void)|undefined;
 let loadState:DiceLoadingState={ready:false,phase:'连接骰子渲染层'},renderProgress:LoadProgress|undefined,engineProgress:LoadProgress|undefined;
 function updateLoadProgress(){const parts=[renderProgress,engineProgress].filter(Boolean) as LoadProgress[];loadState={...loadState,done:parts.reduce((n,p)=>n+p.done,0),total:parts.reduce((n,p)=>n+p.total,0),bytes:parts.reduce((n,p)=>n+p.bytes,0),phase:renderProgress?.phase||engineProgress?.phase||'连接骰子渲染层'};}
+let generation=0,modalLane:Promise<void>=Promise.resolve();
 const waiters=new Map<string,{resolve:(p:DiceRollPayload)=>void;reject:(e:Error)=>void;timer:ReturnType<typeof setTimeout>}>(),records=new Map<string,ResultRecord>();
 export const resultListeners=new Set<(payload:DiceRollPayload,revealed:boolean)=>void>();
 const payload=(record:ResultRecord):DiceRollPayload=>{
@@ -21,15 +22,15 @@ const payload=(record:ResultRecord):DiceRollPayload=>{
  return{_3dConnection:connection,_3dRows:rowData,rollId:record.id,itemId:context?.itemId??null,rollerId:context?.rollerId||record.source,rollerName:record.name,rollerColor:record.color||'',expression:f.expression,label:context?.label||'',collectiveId:context?.collectiveId,ts:context?.ts??record.at,total:record.total,modifier:delta,winnerIdx:-1,hidden:record.secret&&!record.revealed,dice:dice.map(d=>({type:d.kind==='d_percentile'?'d100':d.kind,value:d.kind==='d_percentile'?Math.max(1,d.value):d.value,loser:!d.kept,originalValue:d.raw!==d.value?d.raw:undefined,subtract:d.sign<0,...(d.parent?{burstParent:dice.findIndex(parent=>parent.id===d.parent)}:{})})),...(rows.length>1?{rowStarts:starts}:{}),sameHighlight:dice.some(d=>d.flags.includes('同值'))} as DiceRollPayload;
 };
 export async function setupDice3d(){
- if(start)return start;
+ if(start)return start;const own=generation;
  start=(async()=>{
-  const observed=await workbenchObservation().read(),p=observed.player;connection=p.connectionId;
+  const observed=await workbenchObservation().read();if(own!==generation)return;const p=observed.player;connection=p.connectionId;
   if(RETIRED_STYLES.includes(p.metadata[THEME] as any)){
-   const removed=p.metadata[THEME];await OBR.player.setMetadata({[THEME]:'ink_sketch'});p.metadata={...p.metadata,[THEME]:'ink_sketch'};
+   const removed=p.metadata[THEME];await OBR.player.setMetadata({[THEME]:'ink_sketch'});if(own!==generation)return;p.metadata={...p.metadata,[THEME]:'ink_sketch'};
    await OBR.notification.show(`已移除材质 ${removed}，后续骰子已改为卡通涂鸦，可在皮肤页重新选择。`,'INFO');
   }
-  bus=new BroadcastChannel(`${CHANNEL}:local:${connection}`);
-  bus.onmessage=e=>{const m=e.data;if(m.type==='load-progress'){if(m.engine)engineProgress=m.progress;else renderProgress=m.progress;updateLoadProgress();}
+  if(own!==generation)return;bus=new BroadcastChannel(`${CHANNEL}:local:${connection}`);
+  bus.onmessage=e=>{if(own!==generation)return;const m=e.data;if(m.type==='load-progress'){if(m.engine)engineProgress=m.progress;else renderProgress=m.progress;updateLoadProgress();}
    else if(m.type==='state'){ready=m.state.ready;const error=m.state.error||'';loadState={...loadState,ready,physics:m.state.physics,overlay:m.state.overlay,error:ready?'':error};if(error&&error!==lastError){void OBR.notification.show('3D 骰子：'+error,'ERROR');for(const [id,w] of waiters){clearTimeout(w.timer);waiters.delete(id);w.reject(Error(error));}}lastError=error;}
    else if(m.type==='history')for(const r of m.records as ResultRecord[]){const previous=records.get(r.id);records.set(r.id,r);if(!r.formulaData)continue;const data=payload(r);
     // Early prediction resolves only the submit RPC, never visible/stored history.
@@ -41,14 +42,15 @@ export async function setupDice3d(){
   core=new Controller({id:p.connectionId,name:p.name,color:p.color,role:observed.role,resolveRole:async id=>(await workbenchObservation().read()).party.find(p=>p.connectionId===id)?.role,mode:'Full Suite 新版 3D',send:data=>OBR.broadcast.sendMessage(CHANNEL,data,{destination:'REMOTE'}),listen:fn=>OBR.broadcast.onMessage(CHANNEL,event=>fn(event.data,event.connectionId))});
   historyStop=OBR.broadcast.onMessage('com.obr-suite/dice3d-history-request',event=>{if(event.connectionId===connection)void dice3dRpc('history',[]).catch(error=>core?.fail('history-snapshot',error));});
   profileStop=workbenchObservation().onChange(()=>{const p=workbenchObservation().peek().player;if(p)void core?.setProfile(p.name,p.color,p.role).catch(e=>core?.fail('profile',e));});
-  await core.init();await OBR.modal.open({id:MODAL,url:`/suite-dev/dice3d/overlay.html?client=${encodeURIComponent(connection)}&v=${BUILD}`,fullScreen:true,hideBackdrop:true,hidePaper:true,disablePointerEvents:true});
- })().catch(error=>{teardownDice3d();loadState={...loadState,error:String(error)};throw error});return start;
+  await core.init();if(own!==generation)return;const url=`/suite-dev/dice3d/overlay.html?client=${encodeURIComponent(connection)}&v=${BUILD}`;
+  const work=modalLane.then(async()=>{if(own===generation)await OBR.modal.open({id:MODAL,url,fullScreen:true,hideBackdrop:true,hidePaper:true,disablePointerEvents:true});});modalLane=work.catch(()=>{});await work;
+ })().catch(error=>{if(own!==generation)return;teardownDice3d();loadState={...loadState,error:String(error)};throw error});return start;
 }
-export function teardownDice3d(close=true){core?.dispose();core=undefined;profileStop?.();profileStop=undefined;historyStop?.();historyStop=undefined;bus?.close();bus=undefined;start=undefined;ready=false;lastError='';renderProgress=undefined;engineProgress=undefined;loadState={ready:false,phase:'连接骰子渲染层'};records.clear();for(const w of waiters.values()){clearTimeout(w.timer);w.reject(Error('3D 投骰模块已关闭'));}waiters.clear();if(close)void OBR.modal.close(MODAL);}
+export function teardownDice3d(close=true){generation++;core?.dispose();core=undefined;profileStop?.();profileStop=undefined;historyStop?.();historyStop=undefined;bus?.close();bus=undefined;start=undefined;ready=false;lastError='';renderProgress=undefined;engineProgress=undefined;loadState={ready:false,phase:'连接骰子渲染层'};records.clear();for(const w of waiters.values()){clearTimeout(w.timer);w.reject(Error('3D 投骰模块已关闭'));}waiters.clear();if(close)modalLane=modalLane.then(()=>OBR.modal.close(MODAL)).catch(error=>console.warn('[dice] overlay close failed',error));}
 async function whenReady(){await setupDice3d();if(!ready)throw Error(lastError||'正在加载骰子，首次渲染会花费一点时间，请等待....');}
 function theme(metadata:Record<string,unknown>):ThemeID{const id=metadata[THEME]??'ink_sketch';if(!STYLE_CHOICES.some(s=>s.id===id))throw Error('未知 3D 材质：'+String(id));return id as ThemeID;}
 export async function submitDice3d(req:QuickRollRequest,compat?:Partial<DiceRollPayload>):Promise<DiceRollPayload>{
- await whenReady();const observed=await workbenchObservation().read(),id=compat?.rollId||crypto.randomUUID();let formula=String(req.expression||'');
+ const own=generation;await whenReady();const observed=await workbenchObservation().read();if(own!==generation)throw Error('骰子场景已改变');const id=compat?.rollId||crypto.randomUUID();let formula=String(req.expression||'');
  if(req.critMode)formula=formula.replace(/(\d*)d(\d+)/gi,(_,n,s)=>`${2*Number(n||1)}d${s}`);
  if(req.advMode==='adv'||req.advMode==='dis')formula=formula.replace(/(\d*)d20\b/gi,(_,n)=>`${req.advMode}(${n||1}d20)`);
  const count=compat?compat.dice!.reduce((n,d)=>n+(d.type==='d100'?2:1),0):initialPhysicalCount(parseFormula(formula));if(count<1||count>100)throw Error('一次公式须包含 1–100 枚实际骰子（d100 算两枚）');
@@ -56,6 +58,20 @@ export async function submitDice3d(req:QuickRollRequest,compat?:Partial<DiceRoll
  const options={id,recipe:true,kind:'mixed',count,theme:theme(observed.player.metadata),modifier:compat?.modifier??0,visibility,formula:compat?undefined:formula,preset:compat?{dice:compat.dice,total:compat.total??compat.dice!.filter(d=>!d.loser).reduce((n,d)=>n+(d.subtract?-d.value:d.value),compat.modifier??0),rowStarts:compat.rowStarts}:undefined,context:{rollerId:observed.player.id,itemId:req.itemId??null,label:String(req.label||'').slice(0,120),collectiveId:req.collectiveId,expression:req.expression,ts:Date.now()}};
  bus!.postMessage({type:'audio-command',action:'unlock'});
  return new Promise<DiceRollPayload>((resolve,reject)=>{const timer=setTimeout(()=>{waiters.delete(id);reject(Error(`3D 投骰 ${id} 超过 240 秒未返回，请查看网络/物理错误`));},240000);waiters.set(id,{resolve,reject,timer});void core!.submit(options).catch(e=>{clearTimeout(timer);waiters.delete(id);reject(e);});});
+}
+/** All target expressions enter one physics frontier; visibility is sealed per
+ * target after prediction and every target waits at the same start barrier. */
+export async function submitDice3dGroup(requests:QuickRollRequest[],collectiveId:string):Promise<DiceRollPayload[]>{
+ const own=generation;await whenReady();const observed=await workbenchObservation().read();if(own!==generation)throw Error('骰子场景已改变');if(observed.role!=='GM')throw Error('只有 DM 可以群体投掷');
+ if(!Array.isArray(requests)||requests.length<2||requests.length>50)throw Error('群体投掷须选择 2–50 个目标');
+ const id=crypto.randomUUID(),formulas=requests.map(req=>{let value=String(req.expression||'');if(req.advMode==='adv'||req.advMode==='dis')value=value.replace(/(\d*)d20\b/gi,(_,n)=>`${req.advMode}(${n||1}d20)`);return value;}),count=formulas.reduce((n,formula)=>n+initialPhysicalCount(parseFormula(formula)),0);
+ if(count>100)throw Error('群体实际骰子不能超过 100 枚');
+ const contexts=requests.map(req=>({rollerId:observed.player.id,itemId:req.itemId??null,label:String(req.label||'').slice(0,120),collectiveId,expression:req.expression,ts:Date.now(),visibility:req.hidden?'gm' as const:'all' as const}));
+ const options={id,recipe:true,kind:'mixed',count,theme:theme(observed.player.metadata),modifier:0,visibility:'gm',formulas,contexts};
+ bus!.postMessage({type:'audio-command',action:'unlock'});
+ const pending=requests.map((_,index)=>new Promise<DiceRollPayload>((resolve,reject)=>{const key=`${id}.g${index}`,timer=setTimeout(()=>{waiters.delete(key);reject(Error('群体投骰超过 240 秒未返回'));},240000);waiters.set(key,{resolve,reject,timer});}));
+ void core!.submit(options).catch(error=>{for(let i=0;i<requests.length;i++){const key=`${id}.g${i}`,waiter=waiters.get(key);if(waiter){clearTimeout(waiter.timer);waiters.delete(key);waiter.reject(error);}}});
+ return Promise.all(pending);
 }
 export async function submitCompat3d(opts:any){const result=await submitDice3d({expression:opts.expression||'',itemId:opts.itemId,label:opts.label,hidden:opts.hidden,collectiveId:opts.collectiveId},{...opts,total:opts.total??opts.dice.filter((d:any)=>!d.loser).reduce((n:number,d:any)=>n+(d.subtract?-d.value:d.value),opts.modifier??0)});return result.rollId;}
 export async function dice3dRpc(method:string,args:any[]){

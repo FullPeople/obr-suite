@@ -10,7 +10,8 @@ import type {PhysicalHop} from './physical-hop';
 
 export function validateRecipe(r:Request){
  if(!r.recipe)return;
- if(r.formula){parseFormula(r.formula);if(r.preset)throw Error('公式和预设结果不能同时提交');}
+ if(r.formulas){if(r.formula||r.preset||!Array.isArray(r.formulas)||!r.formulas.length||r.formulas.length>100||r.contexts?.length!==r.formulas.length)throw Error('群体公式和目标数量不符');for(const formula of r.formulas){const ast=parseFormula(formula);if(ast.type==='call'&&ast.name==='repeat')throw Error('每个群体目标只接受一个结果');}}
+ else if(r.formula){parseFormula(r.formula);if(r.preset)throw Error('公式和预设结果不能同时提交');}
  else if(!r.preset)throw Error('缺少公式或权威兼容结果');
  if(r.preset){const p=r.preset;if(!Array.isArray(p.dice)||!p.dice.length||p.dice.length>100||!Number.isSafeInteger(p.total)||p.dice.some(d=>!/^d(4|6|8|10|12|20|100)$/.test(d.type)||!Number.isInteger(d.value)||d.value<1||d.value>Number(d.type.slice(1))))throw Error('无效或没有模型的兼容结果');}
 }
@@ -47,7 +48,7 @@ export async function predictRecipe(request:Request,catalog:Catalog,cast:(r:Requ
    alignPreset(wave.roll,wanted,catalog);
    release(wave.roll.request.id);await retain(wave.roll);
    const starts=preset.rowStarts?.length?preset.rowStarts:[0];rows=starts.map((start,i)=>{const selected=dice.slice(start,starts[i+1]??dice.length),total=starts.length===1?preset.total:selected.filter(d=>d.kept).reduce((n,d)=>n+d.value*d.sign,request.modifier??0);return{dice:selected,events:[],compute:()=>total,operation:'',formula:request.formula||'',index:i,total};});
-  }else rows=await evaluateFormula(parseFormula(request.formula!),batch);
+  }else rows=await evaluateFormula(request.formulas?request.formulas.map(parseFormula):parseFormula(request.formula!),batch);
   const logicalRows=rows.map(({compute,...row})=>structuredClone(row));
   // Pair each logical percentile with BOTH physical identities; contributions are tens + unit.
   for(const row of rows){
@@ -62,7 +63,7 @@ export async function predictRecipe(request:Request,catalog:Catalog,cast:(r:Requ
   const entry=appendRuleHops(combineWaves(waves,request.name),hops),roll=entry.roll;
   // The wire result is the ACTUAL final engraved face; raw/adjusted rule values remain separate.
   for(const stage of hops)for(const [i,id] of stage.hop.ids.entries())roll.results[entry.ids.indexOf(id)]=stage.hop.surfaces[i];
-  const formulaData:FormulaData={ids:entry.ids,rows:rows.map(({compute,...row})=>row),logicalRows,births:entry.births,timeline:entry.timeline,context:request.context,expression:request.formula||request.context?.expression||''};
+  const formulaData:FormulaData={ids:entry.ids,rows:rows.map(({compute,...row})=>row),logicalRows,births:entry.births,timeline:entry.timeline,context:request.context,contexts:request.contexts,expression:request.formula||request.context?.expression||''};
   Object.assign(roll,{request:{...request,count:roll.kinds.length},formulaData,births:entry.births});
   for(const id of retained)release(id);retained.length=0;await retain(roll);return roll;
  }finally{for(const id of retained)release(id);}

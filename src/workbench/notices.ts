@@ -120,7 +120,7 @@ function deliver() {
 function sceneChanged(value: boolean) {
   if (ready !== value) revision++;
   ready = value;
-  if (value) { openOverlay(); deliver(); return; }
+  if (value) { deliver(); return; }
   clearTimeout(timer); timer = undefined; queue.clear(); attempts = 0;
   overlayOpen = false; rendererReady = false; instance = '';
   modalWork = modalWork.then(() => OBR.modal.close(TOAST)).catch(() => {});
@@ -158,7 +158,7 @@ export function setupWorkbenchNotices() {
   void Promise.all([OBR.scene.isReady(), OBR.player.getConnectionId(), OBR.player.getId()]).then(([initial, id, playerId]) => {
     connection = id; player = playerId;
     if (own === revision) ready = initial;
-    if (ready) { openOverlay(); deliver(); }
+    if (ready) { deliver(); }
   }).catch(error => console.warn('[workbench] notice startup failed', error));
 }
 

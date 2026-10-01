@@ -1,0 +1,11 @@
+import {createRequire} from 'node:module';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import path from 'node:path';
+import {existsSync,mkdirSync} from 'node:fs';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),deps=process.env.DND_SUITE_DEPS||root,out=process.env.DND_DICE3D_OUT;
+if(!out||!path.isAbsolute(out))throw Error('DND_DICE3D_OUT must name a new absolute output directory');
+if(existsSync(out))throw Error('Refusing to overwrite existing output: '+out);
+const req=createRequire(path.join(deps,'package.json')),{build}=await import(pathToFileURL(req.resolve('vite')).href),source=path.join(root,'extensions/workbench-dice3d');
+mkdirSync(out,{recursive:true});
+await build({root:source,base:'/suite-dev/dice3d/',configFile:false,worker:{format:'es'},resolve:{alias:[{find:'three/addons',replacement:path.join(deps,'node_modules/three/examples/jsm')},{find:'three',replacement:path.join(deps,'node_modules/three')}]},build:{outDir:out,emptyOutDir:false,rollupOptions:{input:{overlay:path.join(source,'overlay.html'),skinPreview:path.join(source,'skin-preview.html')}}}});
+console.log('Built current dice3d runtime and pinned assets at '+out);
