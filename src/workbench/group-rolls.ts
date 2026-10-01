@@ -6,7 +6,7 @@ import {workbenchObservation} from './observation';
 export const GROUP_RESULT_CONTROL='com.obr-suite/workbench/group-result-control';
 const abilities=['str','dex','con','int','wis','cha'] as const,labels=['力量','敏捷','体质','智力','感知','魅力'];
 export type GroupTarget={itemId:string;key:string;name:string;ability:Record<string,number>;saves:Record<string,number>;initiative:number;hidden:boolean;result?:number;applied?:boolean;uncertain?:boolean;error?:string};
-export type GroupRollState={id:string;phase:'select'|'rolling'|'resolve'|'settled';targets:GroupTarget[];selectedCount?:number;visible:boolean;kind:'save'|'ability'|'initiative';ability:string;variant:'normal'|'adv'|'dis';field?:'health'|'max health'|'armor class';adjustment?:{field:string;mode:string;value:number;pending:boolean};dc?:number;value?:number;mode?:'damage'|'heal'|'set';error?:string};
+export type GroupRollState={id:string;phase:'select'|'rolling'|'resolve'|'settled';targets:GroupTarget[];selectedCount?:number;loading?:boolean;visible:boolean;kind:'save'|'ability'|'initiative';ability:string;variant:'normal'|'adv'|'dis';field?:'health'|'max health'|'armor class';adjustment?:{field:string;mode:string;value:number;pending:boolean};dc?:number;value?:number;mode?:'damage'|'heal'|'set';error?:string};
 export function targetFromDocument(item:any,document:any,key:string):GroupTarget{
  const doc=document||{},ability:Record<string,number>={},saves:Record<string,number>={};
  for(const key of abilities){const raw=doc.abilities?.[key],score=Number(raw?.total??doc[key]);if(!Number.isFinite(score))throw Error('目标缺少完整属性资料');ability[key]=Number.isFinite(raw?.modifier)?raw.modifier:Math.floor((score-10)/2);const save=Number(raw?.save?.bonus??doc.save?.[key]);saves[key]=Number.isFinite(save)?save:ability[key];}
@@ -26,16 +26,31 @@ export function createGroupRolls(deps:{observation:ReturnType<typeof workbenchOb
   if(group&&(group.phase!=='select'||group.adjustment?.pending))return;
   if(observed.selection.length<2||key===dismissed){group=null;publish();return;}
   if(observed.selection.length>100){groupSelectionKey=key;group={id:'group-'+crypto.randomUUID(),phase:'select',targets:[],selectedCount:observed.selection.length,visible:true,kind:initialKind,ability:'dex',variant:'normal',error:'单批最多 100 枚实体骰，当前选择超过 100 个单位；没有省略或投掷任何目标。'};publish();return;}
-  const results=await Promise.allSettled(observed.selection.map(async id=>{const row=await deps.resolveTarget(id);return targetFromDocument(row.item,row.document,row.key);}));
+  // Enter overview before downloads finish. A cold box selection must not open
+  // dozens of portraits at once or hold up a later single selection/clear.
+  const current:GroupRollState={id:'group-'+crypto.randomUUID(),phase:'select',targets:[],selectedCount:observed.selection.length,loading:true,visible:true,kind:initialKind,ability:'dex',variant:'normal'};
+  groupSelectionKey=key;group=current;publish();
+  const results:PromiseSettledResult<GroupTarget>[]=new Array(observed.selection.length);let cursor=0;
+  await Promise.all(Array.from({length:Math.min(4,observed.selection.length)},async()=>{
+   while(!disposed&&epoch===generation){const index=cursor++;if(index>=observed.selection.length)return;
+    try{const row=await deps.resolveTarget(observed.selection[index]);results[index]={status:'fulfilled',value:targetFromDocument(row.item,row.document,row.key)};}
+    catch(reason){results[index]={status:'rejected',reason};}
+   }
+  }));
   if(disposed||epoch!==generation)return;
   const targets=results.flatMap(row=>row.status==='fulfilled'?[row.value]:[]);
-  groupSelectionKey=key;group=targets.length>=2?{id:'group-'+crypto.randomUUID(),phase:'select',targets,visible:true,kind:initialKind,ability:'dex',variant:'normal'}:null;publish();
+  current.targets=targets;current.loading=false;
+  if(targets.length!==observed.selection.length)current.error=`有 ${observed.selection.length-targets.length} 个单位的资料或权限不可用，请调整选择后重试；不会省略目标执行。`;
+  publish();
  }
  async function handle(message:any){
   const observed=await deps.observation.read();if(observed.role!=='GM'||!observed.ready)throw Error('只有当前场景的 DM 可以操作群体区域');
   if(!group||message.id!==group.id)throw Error('群体区域已改变');
   if(message.action==='close'){close();return;}
   if(message.action==='visibility'){group.visible=!!message.visible;toggleTokenResults(group.id,group.visible);await control(group.id,group.visible?'show':'hide');publish();return;}
+  if(group.loading)throw Error('目标资料仍在读取，请稍后操作');
+  if((group.selectedCount??group.targets.length)>100)throw Error(group.error||'单批最多 100 枚实体骰；没有投掷或省略任何目标');
+  if(group.targets.length!==(group.selectedCount??group.targets.length)||group.targets.length<2)throw Error('目标资料或权限不完整，请调整选择；没有省略目标执行');
   if(busy)throw Error('群体操作正在进行');
   if(message.action==='roll'){
    if(group.adjustment?.pending)throw Error('先完成或关闭当前群体数值调整');
