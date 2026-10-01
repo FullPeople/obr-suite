@@ -41,9 +41,9 @@ async function start(){
  let credentials:{hostKey:string;clientKey:string};try{credentials=JSON.parse(localStorage.getItem(storageKey)||'null');}catch{credentials=null as any;}
  if(!credentials?.hostKey||!credentials?.clientKey){credentials={hostKey:crypto.randomUUID()+crypto.randomUUID(),clientKey:crypto.randomUUID()+crypto.randomUUID()};localStorage.setItem(storageKey,JSON.stringify(credentials));}
  const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(credentials.hostKey));const session=[...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('');
- let child:Window|null=null,relayActive=false,relayPeerSeen=0,chosen='',lastSelection='',last='',refreshing=false,again=false,follow=true,lastCatalog='';
+ let child:Window|null=null,relayActive=false,relayPeerSeen=0,directPeerSeen=0,directClientInstance='',chosen='',lastSelection='',last='',refreshing=false,again=false,follow=true,lastCatalog='';
  let previousSceneCards:string[]=[];let directoryWrite=false;
- let mutation=0,epoch=0,sequence=0,documentCacheVersion=0,clientSelection=0;let clientInstance='';const selectionIntents=new Map<string,number>();
+ let mutation=0,epoch=0,sequence=0,documentCacheVersion=0,clientSelection=0;let clientInstance='',warmClientInstance='';let followRevision=0,mapFollowing=false,mapReturn='';const selectionIntents=new Map<string,number>();
  let accessEpoch=0,accessSignature='',lastAccessEpoch=0,lastDirectory='';
  const warmInFlight=new Set<string>(),warmAgain=new Set<string>();
  const warmCards=new Set<string>(),warmSnapshots=new Map<string,{document:any;state:string;epoch:number}>();
@@ -60,7 +60,7 @@ async function start(){
  const shared=sharedDocuments(relay);
  const inventories=inventoryDocuments(relay,OBR.room.id||'default');
  const hostStarted=Date.now();
- const send=(type:string,extra:Record<string,unknown>={},route?:'relay'|'direct')=>{const data={protocol,session,hostStarted,type,...extra};if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch{}if(route==='relay'||route!=='direct'&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).catch(()=>{});};
+ const send=(type:string,extra:Record<string,unknown>={},route?:'relay'|'direct')=>{const data={protocol,session,hostStarted,type,...extra};if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch{}if(route==='relay'||route!=='direct'&&(!child||child.closed||directClientInstance!==warmClientInstance||Date.now()-directPeerSeen>15000)&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).catch(()=>{});};
  OBR.broadcast.onMessage(OPEN_WIKI_CHANNEL,event=>{if(event.connectionId!==playerConnection)return;try{const entry=sharedEntry((event.data as any)?.entry);send('showWiki',{entry,id:crypto.randomUUID()});}catch{}});
  const panels=panelBridge(send,relay);
  const bubble=(item:Item|undefined)=>((item?.metadata[HP]??item?.metadata[LEGACY]??{}) as Record<string,any>);
@@ -296,11 +296,23 @@ async function start(){
  // the binding in the identity so that this same selected token is retried.
  const selectionIdentity=(selection:string[],items:Item[])=>JSON.stringify(selection.map(id=>{const item=items.find(item=>item.id===id);return [id,item?.metadata[BIND],item?.metadata[SLUG]];}));
  let selectionGeneration=0,selecting=false,selectAgain=false;
+ const followMessage=(type:string,extra:Record<string,unknown>={})=>send(type,{followRevision,clientInstance,clientSelection,...extra});
+ function finishMapFollow(restore=true){if(!mapFollowing)return;if(restore)chosen=mapReturn;mapFollowing=false;mapReturn='';followMessage('followEnd',{itemId:chosen,restore});}
+
  async function refreshSelection(){
   if(!relayActive&&(!child||child.closed))return;
   if(selecting){selectAgain=true;return;}selecting=true;
   try{const list=await catalog();publishAccess(list);const selection=(await observation.read()).selection,signature=selectionIdentity(selection,list.items);
-   if(follow&&signature!==lastSelection){selectionGeneration++;if(selection.length===1)try{const a=await access(selection[0],list);if(canOpen(a)){lastSelection=signature;chosen=a.cardId?`card:${a.cardId}`:selection[0];send('navigate',{itemId:chosen,id:crypto.randomUUID(),clientInstance,clientSelection});}}catch{}else lastSelection=signature;}
+   // Establish the manual/default card before map following captures its return target.
+   if(!chosen)chosen=getState().enabled.characterCards!==false&&list.cards[0]?`card:${list.cards[0].id}`:'';
+   if(follow&&signature!==lastSelection){selectionGeneration++;followRevision++;
+    if(selection.length===1){try{const a=await access(selection[0],list);if(canOpen(a)){
+     if(!mapFollowing)mapReturn=chosen;mapFollowing=true;lastSelection=signature;chosen=a.cardId?`card:${a.cardId}`:selection[0];
+     followMessage('navigate',{itemId:chosen,id:crypto.randomUUID(),followSelection:true});
+    }else finishMapFollow();}catch{finishMapFollow();}}
+    else{lastSelection=signature;if(selection.length>1){if(!mapFollowing)mapReturn=chosen;mapFollowing=true;followMessage('followSelection');}else finishMapFollow();}
+   }
+   if(follow&&selection.length>1)return;
    if(chosen)try{if(!canOpen(await access(chosen,list))){chosen='';lastSelection='';}}catch{chosen='';lastSelection='';}
    if(!chosen)chosen=getState().enabled.characterCards!==false&&list.cards[0]?`card:${list.cards[0].id}`:'';
    if(!chosen){send('selection',{sequence:++sequence,message:'暂无可查看的角色卡'});return;}
@@ -308,7 +320,7 @@ async function start(){
    // A slow first download must not hold the selection gate: a later click on
    // another (already cached) card can finish immediately and wins the generation.
    void snapshot(id,list).then(next=>{if(id!==chosen||generation!==selectionGeneration)return;
-    const signatureNext=JSON.stringify(next.state);if(signatureNext!==last||next.document!==lastDocument){last=signatureNext;lastDocument=next.document;send('selection',next);}
+    const signatureNext=JSON.stringify(next.state);if(signatureNext!==last||next.document!==lastDocument){last=signatureNext;lastDocument=next.document;send('selection',{...next,followRevision});}
    }).catch(error=>{if(id===chosen&&generation===selectionGeneration)send('error',{message:String(error)});});
   }catch(error){send('error',{message:String(error)});}finally{selecting=false;if(selectAgain){selectAgain=false;void refreshSelection();}}
  }
@@ -437,7 +449,7 @@ async function start(){
   }
  });
  async function command(m:any){
-  if(m.type==='groupRoll')return groups.handle(m);
+  if(m.type==='groupRoll'){const result=await groups.handle(m);if(m.action==='close')finishMapFollow();return result;}
   if(m.type==='readCard'){const a=await access(m.itemId);return {document:await read(a)};}
   if(m.type==='assignOwners'){
    const a=await access(m.itemId);if(a.role!=='GM'||!a.cardId)throw Error('仅 DM 可分配角色卡编辑权限');
@@ -614,12 +626,12 @@ async function start(){
  }
  async function receive(m:any,viaRelay=false){if(m.protocol!==protocol||m.session!==session)return;const route=viaRelay?'relay':'direct';
   if(m.type==='cardChanged'){if(typeof m.cardId==='string'&&invalidateCard(m.cardId,m.revision)){void hydrate(m.cardId);void refreshSelection();void refresh();}return;}
-  if(m.type==='hello'){last='';lastCatalog='';lastDirectory='';lastAccessEpoch=0;warmSnapshots.clear();send('ready',{rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},route);if(viaRelay&&child&&!child.closed)send('ready',{rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},'direct');if(!viaRelay)void OBR.action.close().catch(()=>{});void refreshSelection();void refresh();void hydrate();return;}
+  if(m.type==='hello'){last='';lastCatalog='';lastDirectory='';lastAccessEpoch=0;const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(instance!==warmClientInstance){warmClientInstance=instance;warmSnapshots.clear();}send('ready',{rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},route);if(viaRelay&&child&&!child.closed)send('ready',{rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},'direct');if(!viaRelay)void OBR.action.close().catch(()=>{});void refreshSelection();void refresh();void hydrate();return;}
   if(m.type==='ping'){send('pong',{at:Date.now()},route);return;}
   if(m.type==='requestStatus'){const answer=seen.get(m.requestId);if(answer)send('ack',{requestId:m.requestId,...answer},route);else send('requestPending',{requestId:m.requestId,active:activeRequests.has(m.requestId),known:requestRuns.has(m.requestId)},route);return;}
   if(m.type==='cancel'){if(!activeRequests.has(m.requestId)&&!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}
-  if(m.type==='pin'){follow=!m.pinned;if(follow)lastSelection='';void refreshSelection();return;}
-  if(m.type==='select'){if(Number.isSafeInteger(m.clientSelection)){const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(m.clientSelection<(selectionIntents.get(instance)||0))return;selectionIntents.delete(instance);selectionIntents.set(instance,m.clientSelection);while(selectionIntents.size>8)selectionIntents.delete(selectionIntents.keys().next().value!);clientInstance=instance==='legacy'?'':instance;clientSelection=m.clientSelection;}const generation=++selectionGeneration;try{const a=await access(m.itemId);if(generation!==selectionGeneration)return;chosen=a.cardId?`card:${a.cardId}`:m.itemId;const observed=await observation.read();lastSelection=selectionIdentity(observed.selection,observed.items);last='';void refreshSelection();}catch(e){send('error',{message:String(e)});}return;}
+  if(m.type==='pin'){follow=!m.pinned;if(!follow)finishMapFollow(false);if(follow)lastSelection='';void refreshSelection();return;}
+  if(m.type==='select'){if(Number.isSafeInteger(m.clientSelection)){const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(m.clientSelection<(selectionIntents.get(instance)||0))return;selectionIntents.delete(instance);selectionIntents.set(instance,m.clientSelection);while(selectionIntents.size>8)selectionIntents.delete(selectionIntents.keys().next().value!);clientInstance=instance==='legacy'?'':instance;clientSelection=m.clientSelection;}const generation=++selectionGeneration;finishMapFollow(false);try{const a=await access(m.itemId);if(generation!==selectionGeneration)return;chosen=a.cardId?`card:${a.cardId}`:m.itemId;const observed=await observation.read();lastSelection=selectionIdentity(observed.selection,observed.items);last='';void refreshSelection();}catch(e){send('error',{message:String(e)});}return;}
   if(!['groupRoll','assignOwners','readCard','refreshCard','showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
   if(requestRuns.has(m.requestId))return;
   delete m._committed;delete m._inventoryCommitted;
@@ -648,13 +660,13 @@ async function start(){
   // workbench still knows it, so its next ping restores the direct bridge
   // without waiting for a stale-window timeout or relying on the old plugin.
   if(e.data.type==='ping'&&(!child||child.closed)){child=e.source as Window;last='';lastCatalog='';void refreshSelection();void refresh();void hydrate();}
-  if(e.data.type==='hello'){if(child&&!child.closed&&child!==e.source)return;child=e.source as Window;}if(e.source===child)void receive(e.data);
+  if(e.data.type==='hello'){if(child&&!child.closed&&child!==e.source)return;child=e.source as Window;}if(e.source===child){directPeerSeen=Date.now();directClientInstance=typeof e.data.clientInstance==='string'?e.data.clientInstance:'legacy';void receive(e.data);}
  });
  for(const name of DICE_EVENTS)OBR.broadcast.onMessage(name,event=>{if(name==='com.obr-suite/dice-roll'&&!canForwardDiceHistory(event))return;send('diceEvent',{event:name,data:event});});
  OBR.player.onChange(player=>send('diceEvent',{event:'player',data:player}));
  let changeScheduled=false;
  const changed=()=>{if(changeScheduled)return;changeScheduled=true;queueMicrotask(()=>{changeScheduled=false;void refreshSelection();void refresh();void hydrate();for(const id of warmCards)if(!id.startsWith('card:'))void pushWarmSnapshot(id);});};
- observation.onChange(change=>{if(change==='selection')void refreshSelection();else changed();});OBR.scene.onReadyChange(()=>{chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
+ observation.onChange(change=>{if(change==='selection')void refreshSelection();else changed();});OBR.scene.onReadyChange(()=>{followRevision++;finishMapFollow(false);chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
  OBR.broadcast.onMessage('com.obr-suite/cc-card-updated',event=>{const data=event.data as any,id=data?.cardId;if(id){if(!invalidateCard(id,data?.revision))return;void hydrate(id);}else{invalidateCards();void hydrate();}changed();});OBR.broadcast.onMessage('com.obr-suite/workbench/inventory-changed',event=>{if(event.connectionId!==playerConnection)inventories.invalidate();changed();});onStateChange(changed);rollListeners.add(()=>send('rolls',{rolls:getRollHistory()}));
  const connection=await OBR.player.getConnectionId();OBR.broadcast.onMessage('com.obr-suite/workbench-compose',event=>{if(event.connectionId===connection&&typeof(event.data as any)?.expression==='string')send('compose',{compose:{...(event.data as object),id:crypto.randomUUID()}});});
  setInterval(()=>send('pong',{at:Date.now()}),10000);

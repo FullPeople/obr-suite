@@ -23,13 +23,16 @@ function createObservation(){
  OBR.scene.items.onChange(items=>event('items',items));
  OBR.scene.onMetadataChange(scene=>event('scene',scene));
  OBR.room.onMetadataChange(room=>event('room',room));
- OBR.party.onChange(party=>event('party',party));
+ const profile=(player:Partial<Player>)=>{const {selection,syncView,...value}=player;return value;};
+ OBR.party.onChange(party=>{
+  const changed=JSON.stringify((values.party||[]).map(profile))!==JSON.stringify(party.map(profile));
+  set('party',party);if(changed)notify();
+ });
  OBR.player.onChange(player=>{
   // Selection arrives in the same SDK event as profile/permission changes. It
   // does not invalidate the card catalog or require reconciling every card.
-  const {selection:previousSelection,...previousProfile}=values.player||{};
-  const {selection,...profile}=player;
-  const profileChanged=JSON.stringify(previousProfile)!==JSON.stringify(profile);
+  const {selection}=player;
+  const profileChanged=JSON.stringify(profile(values.player||{}))!==JSON.stringify(profile(player));
   const selectionChanged=JSON.stringify(values.selection||[])!==JSON.stringify(selection||[]);
   set('player',player);set('role',player.role);set('selection',selection||[]);
   if(profileChanged)notify();else if(selectionChanged)notify('selection');
