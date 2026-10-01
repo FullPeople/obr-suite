@@ -59,7 +59,13 @@ function engine():Promise<any>{
       assets.plan(['vendor/jolt-physics.wasm.js','vendor/jolt-physics.wasm.wasm']);
       const [,binary]=await Promise.all([assets.bytes('vendor/jolt-physics.wasm.js'),assets.bytes('vendor/jolt-physics.wasm.wasm')]);
       const module=await import(/* @vite-ignore */ moduleURL).catch(error=>{throw Error(`Jolt 模块 ${moduleURL}: ${String(error)}`);});
-      assets.stage('初始化物理引擎');J=await module.default({wasmBinary:new Uint8Array(binary),locateFile:(file:string)=>new URL(file,moduleURL).href});return J;
+      assets.stage('初始化物理引擎');
+      // This pinned Jolt build does not support wasmBinary. Its instantiateWasm
+      // hook consumes our verified bytes and avoids a second, unversioned fetch.
+      const compiled=await WebAssembly.compile(binary);
+      J=await module.default({instantiateWasm:(imports:WebAssembly.Imports,receive:(instance:WebAssembly.Instance)=>void)=>{
+        const instance=new WebAssembly.Instance(compiled,imports);receive(instance);return instance.exports;
+      }});return J;
     })().catch(error=>{loading=null;throw error;});
   }
   return loading;
