@@ -1,0 +1,77 @@
+name: Verify Suite candidate
+on:
+  push:
+    branches: [codex/suite-host-repair-20261001]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: suite-verify-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Check out exact paired Web source
+        uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: aa8df692946015bfc692e3b33c6d621b3dda7582
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install locked Suite dependencies
+        run: npm ci
+      - name: Install locked paired Web dependencies
+        working-directory: .paired-web
+        run: npm ci
+      - name: Install official Chromium
+        id: browser
+        run: |
+          npx playwright install --with-deps chromium
+          node --input-type=module -e "import {chromium} from '@playwright/test'; console.log('CHROMIUM_PATH='+chromium.executablePath())" >> "$GITHUB_ENV"
+      - name: Suite regression tests
+        id: tests
+        run: node tools/verify-suite-candidate.mjs
+      - name: Typecheck and build stable host with paired card viewer
+        run: npm run build
+      - name: Build dev host and shared Three Dragon
+        run: |
+          SUITE_BASE=suite-dev SUITE_CHANNEL=dev npx vite build --outDir dist-workbench-dev
+          npm run build:three-dragon
+          cp -R "$DND_CARD_WEB_ROOT/dist" dist-workbench-dev/workbench
+          node tools/build-workbench-dice.mjs
+          node tools/build-workbench-panels.mjs
+          node tools/build-legacy-card-viewer.mjs --web-built --out-dir dist-workbench-dev
+      - name: Announcement DOM regression
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: node tools/announcement-scope-browser.mjs
+      - name: Action launcher DOM regression
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: node tools/action-launcher-layout-browser.mjs
+      - name: Preserve bounded synthetic-test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suite-verification-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            .local-evidence/verification/*.log
+            .local-evidence/verification/results.json
+            .local-evidence/native-owner/results.json
+            .local-evidence/announcement-scope/*.png
+            .local-evidence/announcement-scope/*.zip
+            .local-evidence/announcement-scope/results.json
+            .local-evidence/action-layout/*.png
+            .local-evidence/action-layout/*.zip
+            .local-evidence/action-layout/results.json

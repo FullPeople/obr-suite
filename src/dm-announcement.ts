@@ -42,6 +42,7 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "./asset-base";
 import { renderInlineNoSpan } from "./announcement-inline";
+import { renderAnnouncementImportant } from "./announcement-important";
 
 import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID} from './announcement-source';
 const MODAL_ID = ANNOUNCEMENT_MODAL_ID;
@@ -365,7 +366,7 @@ function rerenderForLang(activeLang: "zh" | "en"): void {
   const visible = cachedSections.filter(
     (s) => s.lang === undefined || s.lang === activeLang,
   );
-  const bodyHtml: string[] = [];
+  const bodyHtml: string[] = [renderAnnouncementImportant(activeLang)];
   let footerHtml = "";
   for (const s of visible) {
     if (s.kind === "footer") {

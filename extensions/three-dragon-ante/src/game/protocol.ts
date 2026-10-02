@@ -25,7 +25,7 @@ export interface TableSummary {
   /** Public setup summary. Omitted only on tables created by an older build. */
   variant?: TableVariant;
 }
-export type TableError = "connecting" | "hostOffline" | "privateSync" | "storageFailed" | "roomFull" | "tableExists" | "tableFull" | "notHost" | "notAllowed" | "gameStarted" | "invalidEdit" | "cannotLeave" | "tooFewPlayers" | "notSeated" | "staleTable" | "invalidCommand" | "requestFailed" | "recoveryMissing" | "protocolMismatch";
+export type TableError = "connecting" | "hostOffline" | "privateSync" | "storageFailed" | "roomFull" | "tableExists" | "tableFull" | "notHost" | "notAllowed" | "gameStarted" | "invalidEdit" | "cannotLeave" | "tooFewPlayers" | "notSeated" | "staleTable" | "invalidCommand" | "requestFailed" | "recoveryMissing" | "legacyArchiveRequired" | "protocolMismatch";
 /** LOCAL-only outcome for this client's exact rules action. No card IDs.
  * Success revision is the applied rules revision; rejection revision is the
  * submitted base revision. A success also requires the matching authoritative

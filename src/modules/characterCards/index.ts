@@ -1,3 +1,4 @@
+import {canReadNativePopup} from "./native-owner";
 import {WORKBENCH_DEV} from '../../workbench/channel';
 import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR, { type Item } from "@owlbear-rodeo/sdk";
@@ -128,7 +129,7 @@ let ccConnectionId = "";
 let active = false, sceneReady = false, generation = 0, sceneGeneration = 0, selectionGeneration = 0;
 let playerRevision = 0, metadataRevision = 0;
 let selectedIds: string[] = [];
-interface CardEntry { id: string; visibility?: string; owner_ids?: string[] }
+interface CardEntry { id: string; visibility?: string; locked?: boolean; owner_ids?: string[] }
 interface InfoTarget { cardId: string; roomId: string; itemId: string | null }
 let cards = new Map<string, CardEntry>();
 const observedItems = new Map<string, Item>();
@@ -148,12 +149,8 @@ function mayShow(item: Item | undefined, cardId: string): boolean {
   const entry = cards.get(cardId);
   if (!item || item.metadata[BIND_META] !== cardId || !entry) return false;
   if (ccRole === "GM") return true;
-  const owners = Array.isArray(entry.owner_ids) ? entry.owner_ids : [];
-  if (entry.visibility === "dm" || entry.visibility === "owners" && !owners.includes(ccMyId) ||
-      entry.visibility && !["public", "owners"].includes(entry.visibility)) return false;
-  const owns = owners.length ? owners.includes(ccMyId) : item.createdUserId === ccMyId;
   const bubbles = (item.metadata[BUBBLES_META_KEY] ?? item.metadata[EXTERNAL_BUBBLES_META_KEY]) as { locked?: unknown } | undefined;
-  return owns || bubbles?.locked === false && typeof item.createdUserId === "string" && !!item.createdUserId;
+  return canReadNativePopup(item, cardId, entry, ccMyId, false, bubbles?.locked);
 }
 function itemPermissionSignature(item: Item | undefined): string {
   const bubbles = (item?.metadata[BUBBLES_META_KEY] ?? item?.metadata[EXTERNAL_BUBBLES_META_KEY]) as { locked?: unknown } | undefined;

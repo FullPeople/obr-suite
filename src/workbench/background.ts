@@ -1,3 +1,4 @@
+import {nativeCardOwners,ownsNativeToken,canReadNativeCard} from "../modules/characterCards/native-owner";
 import {resourceWidgetPresentation,updateResourceWidgetPresentation,quickbarAttackPresentation} from './resource-presentation';
 import {createGroupRolls} from './group-rolls';
 import {classSummary} from './class-summary';
@@ -97,14 +98,15 @@ async function start(){
   // The catalog may have been produced before another card's slow download.
   // Scene observations must be read now, not replayed from that old catalog.
   ({items,scene}=await observation.read());
-  const tokens=items.filter(i=>i.metadata[BIND]===cardId),defs=definitionsFor(scene);let runtime=documentRuntime(doc,defs);
+  const currentRole=(await observation.read()).role;
+  const tokens=items.filter(i=>i.metadata[BIND]===cardId&&(currentRole==='GM'||ownsNativeToken(i,playerId))),defs=definitionsFor(scene);let runtime=documentRuntime(doc,defs);
   for(const token of tokens)runtime=mergeTokenRuntime(runtime,tokenRuntime(token.metadata,documentRuntime(doc,defs)),token.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined,cardId,documentRevision(doc));
   if(!sameValue(runtime,documentRuntime(doc,defs))){const next=writeRuntime(doc,runtime,defs);if(write){
    // Clearing a token state also retires the matching inventory grant before any
    // pending repair can reapply it. No ordinary runtime state becomes stock.
    let guard: {key:string;revision:number}|undefined;
    if(doc.dnd_card_web&&!sameValue(documentRuntime(doc,defs).conditions,runtime.conditions)){const synced=await inventories.syncNative(`card:${cardId}`,doc.dnd_card_web,next.dnd_card_web,entry=>conditionIdentity(entry,defs));if(synced.ledgerRevision!==undefined)guard={key:inventories.key,revision:synced.ledgerRevision};}
-   const liveTokens=(await observation.read()).items.filter(i=>i.metadata[BIND]===cardId);
+   const liveObservation=await observation.read(),liveTokens=liveObservation.items.filter(i=>i.metadata[BIND]===cardId&&(liveObservation.role==='GM'||ownsNativeToken(i,playerId)));
    const tokenObservation=(rows:Item[])=>rows.map(i=>({id:i.id,runtime:tokenRuntime(i.metadata,documentRuntime(doc,defs)),baseline:i.metadata[RUNTIME_BASELINE]}));
    if(!sameValue(tokenObservation(tokens),tokenObservation(liveTokens)))return doc;
    await persistDocument({key,cardId} as any,doc,next,guard);doc=next;
@@ -133,8 +135,10 @@ async function start(){
  }
  async function writeRuntimeProjection(cardId:string,doc:any,tokens:Item[],defs:any[]){
   const value=documentRuntime(doc,defs),revision=documentRevision(doc),stamp:RuntimeBaseline={version:1,cardId,revision,value};
-  const pending=tokens.filter(item=>!sameValue(item.metadata[RUNTIME_BASELINE],stamp)||!sameValue(tokenRuntime(item.metadata,value),value));if(!pending.length)return;
+  const role=(await observation.read()).role;
+  const pending=tokens.filter(item=>role==='GM'||ownsNativeToken(item,playerId)).filter(item=>!sameValue(item.metadata[RUNTIME_BASELINE],stamp)||!sameValue(tokenRuntime(item.metadata,value),value));if(!pending.length)return;
   await OBR.scene.items.updateItems(pending.map(i=>i.id),drafts=>{for(const item of drafts){const observed=pending.find(i=>i.id===item.id),previous=item.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined;
+   if(observation.peek().role!=='GM'&&!ownsNativeToken(item,playerId))continue;
    if(item.metadata[BIND]!==cardId||!observed||previous?.cardId===cardId&&previous.revision>revision)continue;
    // A genuine scene edit after the read is handled by the next reconciliation.
    if(!sameValue(tokenRuntime(item.metadata,value),tokenRuntime(observed.metadata,value))||!sameValue(item.metadata[RUNTIME_BASELINE],observed.metadata[RUNTIME_BASELINE]))continue;
@@ -169,17 +173,13 @@ async function start(){
   const compact=all.map(c=>({...c,...directory.find(row=>row.id===c.id)})).map(({id,name,owner_ids,locked,visibility,url})=>({id,name,owner_ids,locked,visibility,url}));
   if(role==='GM'&&!directoryWrite&&!sameValue(directory,compact)){directoryWrite=true;void OBR.room.setMetadata({[DIRECTORY]:compact}).catch(error=>console.warn('[workbench] directory recovery pending',error)).finally(()=>{directoryWrite=false;});}
   const cards=all.map(c=>{const tokens=items.filter(i=>i.metadata[BIND]===c.id);
-   // A DM import retains its importer owner; assigning a bound token also grants
-   // access. Recompute token grants, so transferring it revokes the old grant.
-   // These transient grants must not be saved to the room directory.
-   const assigned=(room['com.obr-suite/workbench/card-editors'] as any)?.[c.id];
-   // Explicit room-wide assignment survives scene changes. A stale owner on an
-   // inactive scene's token must not restore a permission the DM revoked.
-   const owner_ids=[...new Set((Array.isArray(assigned)?assigned:[...(Array.isArray(c.owner_ids)?c.owner_ids:[]),...tokens.map(i=>i.createdUserId)]).filter(Boolean))];
-   const own=owner_ids.includes(playerId),locked=c.locked??!!(c.visibility&&c.visibility!=='public');
+   // Native Set Owner is authoritative. Do not revive stale importer/editor
+   // grants when ownership changes or when a token leaves the scene.
+   const owner_ids=nativeCardOwners(tokens,c.id);
+   const own=!!playerId&&owner_ids.includes(playerId),locked=c.locked??!!(c.visibility&&c.visibility!=='public');
    const projectedRevision=Math.max(0,...tokens.map(token=>{const baseline=token.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined;return baseline&&baseline.cardId===c.id?baseline.revision:0;}));if(projectedRevision>documentRevision(documents.get(`${OBR.room.id}:card:${c.id}`)))invalidateCard(c.id,projectedRevision);
-   return {...c,owner_ids,name:c.name||c.title||tokens[0]?.name||c.id,own,write:role==='GM'||own,locked,inScene:tokens.length>0,itemId:tokens[0]?.id||`card:${c.id}`,classSummary:undefined as ReturnType<typeof classSummary>|undefined,resourceWidgets:undefined as ReturnType<typeof resourceWidgetPresentation>|undefined,resourceAttacks:undefined as ReturnType<typeof quickbarAttackPresentation>,documentRevision:0,passive:undefined as number|undefined,coins:{} as Record<string,number>,player:party.filter(p=>c.owner_ids?.includes(p.id)).map(p=>p.name).join('、'),conditions:conditionRows({item:tokens[0],scene},undefined),resources:tokens[0]?.metadata[RES]||[],stats:bubble(tokens[0])};
-  }).filter(c=>role==='GM'||c.own||!c.locked).sort((a,b)=>Number(b.write)-Number(a.write)||Number(b.inScene)-Number(a.inScene)||String(a.name).localeCompare(String(b.name),'zh'));
+   return {...c,owner_ids,name:c.name||c.title||tokens[0]?.name||c.id,own,write:role==='GM'||own,locked,inScene:tokens.length>0,itemId:tokens[0]?.id||`card:${c.id}`,classSummary:undefined as ReturnType<typeof classSummary>|undefined,resourceWidgets:undefined as ReturnType<typeof resourceWidgetPresentation>|undefined,resourceAttacks:undefined as ReturnType<typeof quickbarAttackPresentation>,documentRevision:0,passive:undefined as number|undefined,coins:{} as Record<string,number>,player:party.filter(p=>owner_ids.includes(p.id)).map(p=>p.name).join('、'),conditions:conditionRows({item:tokens[0],scene},undefined),resources:tokens[0]?.metadata[RES]||[],stats:bubble(tokens[0])};
+  }).filter(c=>canReadNativeCard(c,c.owner_ids,playerId,role==='GM')).sort((a,b)=>Number(b.write)-Number(a.write)||Number(b.inScene)-Number(a.inScene)||String(a.name).localeCompare(String(b.name),'zh'));
   for(const c of cards){const doc=documents.get(`${OBR.room.id}:card:${c.id}`);if(!doc)continue;const canonical=documentRuntime(doc,definitionsFor(scene));c.classSummary=classSummary(doc);c.documentRevision=documentRevision(doc);c.passive=doc.core_stats?.passive_perception;c.coins=documentCoins(doc);const defs=definitionsFor(scene);c.conditions=conditionRows({cardId:c.id,scene} as any,doc);(c as any).player=doc.dnd_card_web?.player||doc.identity?.player_name||party.filter(p=>c.owner_ids?.includes(p.id)).map(p=>p.name).join('、');c.stats={...c.stats,...canonical.stats};c.resources=Object.values(canonical.resources);c.resourceWidgets=resourceWidgetPresentation(doc,c.resources);c.resourceAttacks=quickbarAttackPresentation(doc);}
   const ownerRolesKey='com.obr-suite/workbench/owner-roles',ownerRoles={...room[ownerRolesKey] as Record<string,string>,[playerId]:role};for(const p of party)ownerRoles[p.id]=p.role;if(role==='GM'&&!sameValue(ownerRoles,room[ownerRolesKey]))void OBR.room.setMetadata({[ownerRolesKey]:ownerRoles});
   const monsters=items.filter(item=>ownerRoles[item.createdUserId]==='PLAYER'&&!item.metadata[BIND]&&(item.metadata[SLUG]||item.metadata[HP]||item.metadata[LEGACY])&&(role==='GM'||item.createdUserId===playerId||getState().allowPlayerMonsters&&item.metadata['com.obr-suite/workbench/locked']!==true)).map(item=>{
@@ -214,8 +214,8 @@ async function start(){
   if(cardId&&!card)throw Error('没有此角色卡的查看权限');if(!card&&!item)throw Error('未找到角色卡或棋子');
   if(!card&&!item?.metadata[SLUG]&&!item?.metadata[HP]&&!item?.metadata[LEGACY]&&!item?.metadata['com.obr-suite/hp-bar/enabled'])throw Error('棋子没有角色、怪物或生命条组件');
   if(!card&&data.role!=='GM'&&item?.createdUserId!==playerId&&(!getState().allowPlayerMonsters||item?.metadata['com.obr-suite/workbench/locked']===true))throw Error('没有此怪物的阅读权限');
-  const token=item||data.items.find(i=>i.metadata[BIND]===cardId),slug=String(token?.metadata[SLUG]||'');
-  return {...data,item:token,cardId,card,slug,write:card?.write??(data.role==='GM'||token?.createdUserId===playerId),key:cardId?`${OBR.room.id}:card:${cardId}`:`${OBR.room.id}:token:${id}:${slug}`};
+  const token=item||data.items.find(i=>i.metadata[BIND]===cardId&&ownsNativeToken(i,playerId))||data.items.find(i=>i.metadata[BIND]===cardId),slug=String(token?.metadata[SLUG]||'');
+  return {...data,item:token,cardId,card,slug,write:card?card.write&&(!item||data.role==='GM'||ownsNativeToken(item,playerId)):(data.role==='GM'||ownsNativeToken(token,playerId)),key:cardId?`${OBR.room.id}:card:${cardId}`:`${OBR.room.id}:token:${id}:${slug}`};
  }
  async function read(a:Awaited<ReturnType<typeof access>>,fresh=false){
   const key=a.key;const override=a.item?.metadata[MONSTER] as {key:string;revision:number}|undefined;if(override?.key){let cached=monsterOverrides.get(override.key);if(fresh||!cached||cached.revision<override.revision){cached=await relay.send({sharedDocument:{key:override.key,operation:'read'}});monsterOverrides.set(override.key,cached!);}if(cached?.data){monsterSceneDocuments.delete(key);cacheDocument(key,cached.data);return cached.data;}}
@@ -451,14 +451,8 @@ async function start(){
  });
  async function command(m:any){
   if(m.type==='groupRoll'){const result=await groups.handle(m);if(m.action==='close')finishMapFollow();return result;}
-  if(m.type==='readCard'){const a=await access(m.itemId);return {document:await read(a)};}
-  if(m.type==='assignOwners'){
-   const a=await access(m.itemId);if(a.role!=='GM'||!a.cardId)throw Error('仅 DM 可分配角色卡编辑权限');
-   const observed=await observation.read(),ids=m.ownerIds;if(!Array.isArray(ids)||ids.length>32||ids.some(id=>typeof id!=='string'||id!==observed.player.id&&!observed.party.some(p=>p.id===id)&&!a.card.owner_ids.includes(id)))throw Error('请选择房间内的玩家');
-   const key='com.obr-suite/workbench/card-editors',room=await OBR.room.getMetadata();await OBR.room.setMetadata({[key]:{...room[key] as object,[a.cardId]:[...new Set(ids)]}});
-   const tokens=observed.items.filter(item=>item.metadata[BIND]===a.cardId);if(tokens.length)await OBR.scene.items.updateItems(tokens.map(item=>item.id),drafts=>{for(const item of drafts)if(item.metadata[BIND]===a.cardId)item.createdUserId=ids[0]||playerId;});
-   return {snapshot:await snapshot(m.itemId)};
-  }
+  if(m.type==='readCard'){const a=await access(m.itemId),document=await read(a),latest=await access(m.itemId);if(latest.key!==a.key)throw Error('角色关联或权限已改变');return {document};}
+  if(m.type==='assignOwners')throw Error('请使用枭熊棋子的 Set Owner 设置所属玩家');
   if(m.type==='refreshCard'){const a=await access(m.itemId);if(a.cardId){invalidateCard(a.cardId);await read(a,true);}return {snapshot:await snapshot(m.itemId)};}
   if(m.type==='showEntry'){const entry=sharedEntry(m.entry),actor=(await observation.read()).player.name;await publishWorkbenchNotice({noticeId:m.requestId,tokenId:'',tokenName:actor,entry,shared:true,summary:`${actor}展示了 ${entry.name}`,resource:{id:entry.id,name:entry.name,current:0,max:0,type:'number',icon:'gem'},delta:0,prevValue:0});return;}
 
@@ -547,14 +541,14 @@ async function start(){
   if(m.type==='assignName'){
    const name=String(m.name||'').trim().slice(0,160);if(!name)throw Error('名称不能为空');
    const targets=a.cardId?a.items.filter(i=>i.metadata[BIND]===a.cardId):a.item?[a.item]:[];
-   await OBR.scene.items.updateItems(targets.filter(i=>i.type==='IMAGE').map(i=>i.id),drafts=>{for(const item of drafts){const image=item as any;image.text={...image.text,type:image.text?.type||'PLAIN',plainText:String(image.text?.plainText||'').trim()===name?'':name};}});return;
+   await OBR.scene.items.updateItems(targets.filter(i=>i.type==='IMAGE'&&(a.role==='GM'||ownsNativeToken(i,playerId))).map(i=>i.id),drafts=>{for(const item of drafts){if(observation.peek().role!=='GM'&&!ownsNativeToken(item,playerId)||a.cardId&&item.metadata[BIND]!==a.cardId)continue;const image=item as any;image.text={...image.text,type:image.text?.type||'PLAIN',plainText:String(image.text?.plainText||'').trim()===name?'':name};}});return;
   }
   if(m.type==='delete'){
-   if(!a.cardId)throw Error('没有角色卡');const location=documentLocation(a.cardId);await relay.send({deleteCard:{room:location.room,card:location.card}});
+   if(!a.cardId)throw Error('没有角色卡');if(a.role!=='GM'&&a.items.some(item=>item.metadata[BIND]===a.cardId&&!ownsNativeToken(item,playerId)))throw Error('此卡还绑定其他所属玩家的棋子，仅 DM 可删除');const location=documentLocation(a.cardId);await relay.send({deleteCard:{room:location.room,card:location.card}});
    const room=await OBR.room.getMetadata(),deleted=Array.isArray(room[DELETED])?room[DELETED] as string[]:[];
    await OBR.room.setMetadata({[DELETED]:[...new Set([...deleted,a.cardId])],[DIRECTORY]:(room[DIRECTORY] as any[]||[]).filter(c=>c.id!==a.cardId),[ROOM_LIST]:(room[ROOM_LIST] as any[]||[]).filter(c=>c.id!==a.cardId)});
    if(Array.isArray(a.scene[LIST]))await OBR.scene.setMetadata({[LIST]:(a.scene[LIST] as any[]).filter(c=>c.id!==a.cardId)});
-   const ids=a.items.filter(i=>i.metadata[BIND]===a.cardId).map(i=>i.id);if(ids.length)await OBR.scene.items.updateItems(ids,rows=>{for(const row of rows)delete row.metadata[BIND];});
+   const ids=a.items.filter(i=>i.metadata[BIND]===a.cardId).map(i=>i.id);if(ids.length)await OBR.scene.items.updateItems(ids,rows=>{for(const row of rows)if(row.metadata[BIND]===a.cardId&&(observation.peek().role==='GM'||ownsNativeToken(row,playerId)))delete row.metadata[BIND];});
    documents.delete(a.key);documentCacheVersion++;if(chosen===`card:${a.cardId}`)chosen='';await OBR.broadcast.sendMessage('com.obr-suite/cc-card-updated',{cardId:a.cardId,deleted:true},{destination:'ALL'});return;
   }
   if(m.type==='resource'){

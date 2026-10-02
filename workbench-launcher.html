@@ -1,11 +1,12 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>角色卡与常用工具</title>
 <style>
-*{box-sizing:border-box}body{margin:16px;background:#eee;color:#252525;font:14px system-ui}h2{font-size:18px;margin:0 0 12px}
-#open{display:block;padding:11px;width:100%;border:1px solid #777;background:#fafafa;color:inherit;text-align:center;text-decoration:underline;text-underline-offset:3px}
-#open:hover,.btn:hover{background:#fff;border-color:#252525}#open[aria-disabled]{opacity:.5;cursor:wait}a:focus-visible,button:focus-visible{outline:2px solid #444;outline-offset:3px}
-#row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:12px 0 16px}.btn{min-height:36px;padding:6px;border:1px solid #aaa;background:#fafafa;color:inherit;font:inherit;cursor:pointer}.btn.timestop-active{background:#ddd2a3;border-color:#70612d}.btn.blink{box-shadow:inset 0 -3px #857444}
-.tips{border-top:1px solid #ccc;padding-top:10px;font-size:12px;line-height:1.55;color:#555}.tips strong{color:#333}.tips p{margin:6px 0}.tips ol{margin:6px 0 12px;padding-left:20px}.tips li{margin:4px 0}
+*{box-sizing:border-box}html{background:#373942}body{margin:10px;background:#373942;color:#eee;font:14px system-ui}h2{font-size:18px;margin:0 0 12px}
+#open{display:block;padding:11px;width:100%;border:1px solid #777;background:#45474f;color:inherit;text-align:center;text-decoration:underline;text-underline-offset:3px}
+#open:hover,.btn:hover{background:#50535e;border-color:#aaa}#open[aria-disabled]{opacity:.5;cursor:wait}a:focus-visible,button:focus-visible{outline:2px solid #d9c887;outline-offset:3px}
+#row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:12px 0 16px}.btn{min-height:36px;padding:6px;border:1px solid #aaa;background:#45474f;color:inherit;font:inherit;cursor:pointer}.btn.timestop-active{background:#ddd2a3;border-color:#70612d;color:#252525}.btn.blink{box-shadow:inset 0 -3px #857444}
+.tips{border-top:1px solid #737580;padding-top:10px;font-size:12px;line-height:1.55;color:#d0d0d4}.tips strong{color:#eee}.tips p{margin:6px 0}.tips ol{margin:6px 0 12px;padding-left:20px}.tips li{margin:4px 0}
+h2,#open,#status,.tips{overflow-wrap:anywhere}button,a{max-width:100%}
 </style></head>
 <body data-surface="action">
 <nav id="action-tabs" role="tablist" aria-label="Full Suite"><button type="button" role="tab" data-action-tab="home" aria-selected="true" aria-controls="action-home">角色卡 · 规则资料</button><button type="button" role="tab" data-action-tab="history" aria-selected="false" aria-controls="action-history">历史</button></nav>

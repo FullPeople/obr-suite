@@ -1,6 +1,6 @@
 {
   "name": "Full Suite (Dev)",
-  "version": "1.0.227-dev",
+  "version": "1.0.230-dev",
   "manifest_version": 1,
   "author": "FullPeople",
   "description": "Full Suite 测试版 / dev build.",
@@ -16,7 +16,7 @@
     "title": "Full Suite · 角色卡与 Wiki (Dev)",
     "icon": "/suite-dev/exe_icon.png",
     "popover": "/suite-dev/workbench-launcher.html",
-    "width": 420,
+    "width": 210,
     "height": 540
   }
 }

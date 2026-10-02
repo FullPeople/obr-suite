@@ -161,6 +161,8 @@ async function broadcastChanged(
 export interface MountOptions {
   container: HTMLElement;
   getItemId: () => string | null;
+  /** Optional per-token write policy; reads remain available to readonly viewers. */
+  canWrite?: (item?: import("@owlbear-rodeo/sdk").Item) => boolean;
   onChange?: (msg: ChangeNotice) => void;
 }
 
@@ -183,7 +185,7 @@ export function mountResourcePanel(opts: MountOptions): {
     readRevision++;
     for (const cleanup of [...dragCleanups]) cleanup();
     void refresh();
-  });
+  }, opts.canWrite);
   const currentTarget = (itemId: string) => {
     const target = guard.capture();
     return target?.id === itemId ? target : null;
@@ -229,7 +231,7 @@ export function mountResourcePanel(opts: MountOptions): {
   }
 
   async function refresh(): Promise<void> {
-    const target = guard.capture(), own = ++readRevision;
+    const target = guard.capture(false, false), own = ++readRevision;
     const id = getItemId();
     if (!guard.alive()) return;
     if (!id) {
@@ -341,6 +343,13 @@ export function mountResourcePanel(opts: MountOptions): {
     patchAllRowsFromCurrent();
   }
 
+  function disableReadonlyControls(): void {
+    if (opts.canWrite && !opts.canWrite()) {
+      for (const el of container.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button")) el.disabled = true;
+      for (const el of container.querySelectorAll<HTMLElement>("[draggable]")) el.draggable = false;
+    }
+  }
+
   function render(): void {
     const id = getItemId();
     if (!id) {
@@ -356,6 +365,7 @@ export function mountResourcePanel(opts: MountOptions): {
       `;
       container.querySelector<HTMLButtonElement>(".rt-add-first")
         ?.addEventListener("click", () => openCreate());
+      disableReadonlyControls();
       return;
     }
     const sorted = [...currentRender].sort((a, b) => {
@@ -368,6 +378,7 @@ export function mountResourcePanel(opts: MountOptions): {
       <button class="rt-add" type="button">${T("rpAdd")}</button>
     `;
     bindRowEvents();
+    disableReadonlyControls();
   }
 
   // --- row markup ----------------------------------------------------------

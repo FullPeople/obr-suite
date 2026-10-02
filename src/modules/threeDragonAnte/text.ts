@@ -32,6 +32,7 @@ const TEXT:Record<string,readonly [string,string]>={
  notHost:["只有创建这张牌桌的玩家可以主持。","Only this table's creator can host."],cannotLeave:["游戏进行中无法离开座位；可以直接关窗。","You cannot leave a running game. You can close the window."],
  tooFewPlayers:["至少需要两名玩家。","At least two players are needed."],notSeated:["请先加入牌桌。","Join the table first."],staleTable:["牌桌已变化，请重新连接。","The table changed. Reconnect."],
  invalidCommand:["当前无法执行这个操作。","That action is unavailable."],requestFailed:["未收到处理结果，请重新连接后重试。","No result arrived. Reconnect and retry."],
+ legacyArchiveRequired:["检测到旧版牌局的主持已离线。完整手牌与牌库保存在原主持浏览器中，无法从房间信息安全重建。请原主持回到原浏览器恢复牌局；现有牌局未被修改。","The legacy table host is offline. Full hands and deck are stored in the original host's browser and cannot be safely rebuilt from room metadata. Ask that host to restore the table in the original browser. The saved table has not been changed."],
  recoveryMissing:["主持端缺少本局恢复记录，无法还原手牌。请由原主持人恢复，或确认后重新开局。","The host lacks this game's recovery record. Restore the original host's session, or agree to start a new game."],
  protocolMismatch:["玩家与主持人的插件版本不同，请更新后重新连接。","Player and host versions differ. Update and reconnect."],
  druid:["最弱牌组获胜","Weakest flight wins"],priest:["胜者与左邻分奖池","Winner shares stakes with left neighbor"],merchant:["买牌款改付能力拥有者","Purchases pay the ability owner"],warlord:["第三轮未赢则加打一轮","Extra round if owner loses round three"],monarch:["获胜后每位对手获赠 3","On winning, give 3 to each opponent"],dracolich:["结算时每条邪龙 +2","At scoring, +2 per evil dragon"],archmage:["后续出牌均发动","Later cards trigger"],

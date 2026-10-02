@@ -33,6 +33,8 @@ export interface StatBannerOptions {
   container: HTMLElement;
   /** Bound token id, or null when nothing is bound. */
   getItemId: () => string | null;
+  /** Optional per-token write policy; reads remain available to readonly viewers. */
+  canWrite?: (item?: import("@owlbear-rodeo/sdk").Item) => boolean;
   /** GM clients get the lock button; players don't. */
   isGM: boolean;
   /** Fallback values (e.g. cc-info's card-data HP/AC) shown when the
@@ -234,7 +236,7 @@ export function mountStatBanner(opts: StatBannerOptions): {
     readRevision++; viewRevision++;
     localize();
     void refresh();
-  });
+  }, opts.canWrite);
   type Lease = NonNullable<ReturnType<typeof guard.capture>>;
   function localize() {
     if (!guard.alive()) return;
@@ -312,7 +314,7 @@ export function mountStatBanner(opts: StatBannerOptions): {
   }
   render(live);
   async function refresh() {
-    const target = guard.capture(), own = ++readRevision;
+    const target = guard.capture(false, false), own = ++readRevision;
     if (!target) return;
     const next = await readBubbles(target.id);
     if (!target.current() || own !== readRevision) return;

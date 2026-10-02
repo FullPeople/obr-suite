@@ -1,6 +1,6 @@
 import { TABLE_NETWORK, TABLE_ROOM_KEY } from "./protocol";
 
-export interface TableMember { id: string; connectionId: string; name: string }
+export interface TableMember { id: string; connectionId: string; name: string; /** SDK-only room role. */ role?: "GM" | "PLAYER" }
 /** The real SDK supplies connectionId. Never obtain sender identity from data. */
 export interface ControllerPlatform {
   roomId: string;
@@ -20,8 +20,8 @@ export async function sdkTablePlatform(): Promise<ControllerPlatform> {
   return {
     roomId: OBR.room.id,
     self: async () => {
-      const [id, connectionId, name] = await Promise.all([OBR.player.getId(), OBR.player.getConnectionId(), OBR.player.getName()]);
-      return { id, connectionId, name };
+      const [id, connectionId, name, role] = await Promise.all([OBR.player.getId(), OBR.player.getConnectionId(), OBR.player.getName(), OBR.player.getRole()]);
+      return { id, connectionId, name, role };
     },
     players: () => OBR.party.getPlayers(),
     readTable: async () => (await OBR.room.getMetadata())[TABLE_ROOM_KEY],

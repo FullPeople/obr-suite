@@ -1,3 +1,4 @@
+import { legacyLobbySuccessor } from "./legacy-host";
 import { GESTURE_INTERVAL_MS, isClearGesture, readHandGesture, type HandGesture } from "./gesture";
 import { createPrivateIdentity, PrivateLink } from "./private-channel";
 import type { KeyHello, PrivateIdentity } from "./private-channel";
@@ -227,10 +228,9 @@ export class TableController {
     return !!this.saved && !!this.summary && this.summary.id === this.saved.table.id && this.summary.hostPlayerId === this.self.id &&
       this.summary.hostConnectionId === this.self.connectionId && this.saved.table.hostConnectionId === this.self.connectionId && !this.recovering;
   }
-  /** The first seat of a table whose creator has left the room inherits it, so
-   *  a host leaving cannot freeze the game. Ownership moves in the room
-   *  metadata on the next publish; a losing race stands down because serving()
-   *  then fails. */
+  /** Legacy lobbies keep the first online seat succession policy. If all old
+   * seats are absent, a current SDK-verified GM can recover the public lobby.
+   * Active games still require their private archive and are never fabricated. */
   private hostMissingAt = 0; private inheritTimer?: ReturnType<typeof setTimeout>;
   /** Set while this client is taking a table over, so `publish` may replace the
    *  metadata entry that still names the departed creator. Cleared as soon as
@@ -254,11 +254,9 @@ export class TableController {
     const summary = this.summary;
     // A reload or a brief network drop must stay recoverable by the original
     // host, so inheritance waits out the same grace period as `hostOffline`.
-    return !!summary && summary.stage === "lobby" && this.hostMissingAt > 0 && Date.now() - this.hostMissingAt > this.timeoutMs &&
-      // The earliest seat still present in the room inherits; that is unique, so
-      // exactly one client takes over.
-      summary.seats.find(seat => seat.playerId === this.self.id || this.players.some(player => player.id === seat.playerId))?.playerId === this.self.id && summary.hostPlayerId !== this.self.id &&
-      !this.present(summary.hostConnectionId, summary.hostPlayerId) && !this.players.some(player => player.id === summary.hostPlayerId);
+    if (!summary || this.hostMissingAt <= 0 || Date.now() - this.hostMissingAt <= this.timeoutMs) return false;
+    const candidate = legacyLobbySuccessor(summary, [this.self, ...this.players]);
+    return candidate?.id === this.self.id && candidate.connectionId === this.self.connectionId;
   }
   private canClaim(): boolean {
     const summary = this.summary;
@@ -345,8 +343,10 @@ export class TableController {
     if (value != null && !next) { this.incompatible = true; this.resetLinks(); this.saved = null; this.game = null; this.historyPage = undefined; this.omniscient = false; this.pending = undefined; this.actionReceipt = undefined; this.actionResults.clear(); this.actionRetry = undefined; this.fail("protocolMismatch"); return; }
     this.incompatible = false;
     if (next && this.summary?.id === next.id && next.revision < this.summary.revision) return;
-    const changed = next?.id !== this.summary?.id || next?.hostConnectionId !== this.summary?.hostConnectionId;
+    const changed = next?.id !== this.summary?.id || next?.hostPlayerId !== this.summary?.hostPlayerId || next?.hostConnectionId !== this.summary?.hostConnectionId;
     if (changed) {
+      this.hostMissingAt = 0; this.hostSilentAt = 0;
+      if (this.inheritTimer) { clearTimeout(this.inheritTimer); this.inheritTimer = undefined; }
       const handover=this.handoverOut;
       if(handover&&next?.id===handover.next.table.id&&next.hostConnectionId===handover.target.connectionId&&next.revision===handover.next.table.revision&&handover.connection===this.self.connectionId)this.acceptReceipt({requestId:handover.request.requestId,ok:true},false);
       this.omniscient = false;
@@ -403,7 +403,9 @@ export class TableController {
     } else if (this.present(this.summary.hostConnectionId, this.summary.hostPlayerId)) {
       if (!this.active.has(this.summary.hostConnectionId) && !this.hello) await this.handshake();
       this.resumePending();
-    } else this.fail("hostOffline");
+    } else this.fail(this.summary.stage === "playing" && this.hostMissingAt > 0 &&
+      Date.now() - this.hostMissingAt > this.timeoutMs && !this.players.some(player => player.id === this.summary!.hostPlayerId)
+      ? "legacyArchiveRequired" : "hostOffline");
   }
   /** A request that could not be delivered must never park the table. As soon as
    *  the authority is reachable again — the host connection is back, or this
@@ -523,8 +525,9 @@ export class TableController {
       // which is the record this claim exists to replace. Without this the room
       // summary would reject the very first write of the new host, the archive
       // would be dropped, and the handover would retry forever.
+      const candidate = before && legacyLobbySuccessor(before, [this.self, ...this.players]);
       const inheriting = !!this.inheritingFrom && !!before && before.hostPlayerId === this.inheritingFrom &&
-        !this.present(before.hostConnectionId, before.hostPlayerId) && !this.players.some(player => player.id === before.hostPlayerId);
+        before.revision + 1 === saved.table.revision && candidate?.id === this.self.id && candidate.connectionId === this.self.connectionId;
       // The creator taking its own table back from a listed connection that
       // stopped answering. A live second window of the same player answers, so
       // it is never displaced by this.

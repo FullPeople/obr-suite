@@ -1,3 +1,4 @@
+import { legacyLobbySuccessor } from "./legacy-host";
 import { createPrivateIdentity, PrivateLink } from "./private-channel";
 import type { KeyHello, PrivateIdentity } from "./private-channel";
 import { TableStore } from "./store";
@@ -101,9 +102,16 @@ export class TableController {
     return !!this.saved && !!this.summary && this.summary.id === this.saved.table.id && this.summary.hostPlayerId === this.self.id &&
       this.summary.hostConnectionId === this.self.connectionId && this.saved.table.hostConnectionId === this.self.connectionId && !this.recovering;
   }
+  private hostMissingAt = 0;
+  private inheritTimer?: ReturnType<typeof setTimeout>;
+  private inheritingFrom?: string;
   private canClaim(): boolean {
-    return !!this.summary && this.summary.hostPlayerId === this.self.id &&
-      (this.summary.hostConnectionId === this.self.connectionId || !this.present(this.summary.hostConnectionId, this.summary.hostPlayerId));
+    const summary = this.summary;
+    if (!summary) return false;
+    if (summary.hostPlayerId === this.self.id) return summary.hostConnectionId === this.self.connectionId || !this.present(summary.hostConnectionId, summary.hostPlayerId);
+    if (!this.hostMissingAt || Date.now() - this.hostMissingAt <= this.timeoutMs) return false;
+    const candidate = legacyLobbySuccessor(summary, [this.self, ...this.players]);
+    return candidate?.id === this.self.id && candidate.connectionId === this.self.connectionId;
   }
   private enqueue(job: () => Promise<void>): Promise<void> {
     if (this.queued >= 64) return Promise.resolve();
@@ -147,6 +155,7 @@ export class TableController {
     if (!this.running) return;
     this.running = false; this.ready = false; this.epoch++; this.roomRead++; this.selfRead++; this.partyRead++;
     if (this.timer) clearTimeout(this.timer); this.timer = undefined;
+    if (this.inheritTimer) clearTimeout(this.inheritTimer); this.inheritTimer = undefined; this.hostMissingAt = 0;
     for (const dispose of this.disposers.splice(0)) dispose();
     this.resetLinks(); this.creation = undefined; this.pending = undefined;
     await this.work; await this.storage.close();
@@ -158,7 +167,7 @@ export class TableController {
       this.resetLinks(); this.saved = null; this.resetSerial = undefined; this.game = null; this.gameTableRevision = -1;
       if (this.self.id !== player.id) this.pending = undefined;
     }
-    this.self = { id: player.id, connectionId: player.connectionId, name: player.name.slice(0, 200) };
+    this.self = { id: player.id, connectionId: player.connectionId, name: player.name.slice(0, 200), ...(player.role ? { role: player.role } : {}) };
     this.membersChanged();
   }
   private observe(value: unknown): void {
@@ -167,8 +176,10 @@ export class TableController {
     if (value != null && !next) { this.incompatible = true; this.resetLinks(); this.saved = null; this.game = null; this.fail("protocolMismatch"); return; }
     this.incompatible = false;
     if (next && this.summary?.id === next.id && next.revision < this.summary.revision) return;
-    const changed = next?.id !== this.summary?.id || next?.hostConnectionId !== this.summary?.hostConnectionId;
+    const changed = next?.id !== this.summary?.id || next?.hostPlayerId !== this.summary?.hostPlayerId || next?.hostConnectionId !== this.summary?.hostConnectionId;
     if (changed) {
+      this.hostMissingAt = 0;
+      if (this.inheritTimer) clearTimeout(this.inheritTimer); this.inheritTimer = undefined;
       const sameTable = next?.id === this.summary?.id;
       this.resetLinks(); this.saved = null; this.resetSerial = undefined;
       if (!sameTable) { this.game = null; this.gameTableRevision = -1; this.pending = undefined; }
@@ -191,14 +202,24 @@ export class TableController {
   }
   private async reconcile(): Promise<void> {
     if (!this.summary || !this.self.id || this.incompatible) return;
+    if (this.summary.hostPlayerId === this.self.id || this.players.some(player => player.id === this.summary!.hostPlayerId)) {
+      this.hostMissingAt = 0;
+      if (this.inheritTimer) clearTimeout(this.inheritTimer); this.inheritTimer = undefined;
+    } else {
+      if (!this.hostMissingAt) this.hostMissingAt = Date.now();
+      if (this.inheritTimer) clearTimeout(this.inheritTimer);
+      this.inheritTimer = setTimeout(() => { this.inheritTimer = undefined; void this.enqueue(() => this.reconcile()); }, this.timeoutMs + 50);
+    }
     if (this.canClaim()) {
-      if (!this.saved && !this.recovering) await this.recover();
+      if ((!this.saved || !this.serving()) && !this.recovering) await this.recover();
       if (this.saved) { this.updateHostView(); if (this.dirty) await this.publish(); }
     } else if (this.present(this.summary.hostConnectionId, this.summary.hostPlayerId)) {
       if (!this.active.has(this.summary.hostConnectionId) && !this.hello) await this.handshake();
-    } else this.fail("hostOffline");
+    } else this.fail(this.summary.stage === "playing" && this.hostMissingAt > 0 && Date.now() - this.hostMissingAt > this.timeoutMs
+      ? "legacyArchiveRequired" : "hostOffline");
   }
   private async recover(): Promise<void> {
+    if (this.recovering) return;
     const summary = this.summary!;
     this.resetLinks();
     const epoch = this.epoch, tableEpoch = this.tableEpoch;
@@ -207,22 +228,29 @@ export class TableController {
       const loaded = await this.storage.load(this.platform.roomId, summary.id);
       if (!this.alive(epoch, tableEpoch) || !this.canClaim()) return;
       this.resetSerial = loaded?.serial ?? null;
-      if (!loaded || !validRecovery(loaded, this.platform.roomId, summary)) throw Error("recoveryMissing");
-      if (loaded.table.hostConnectionId !== this.self.connectionId && this.present(loaded.table.hostConnectionId, loaded.table.hostPlayerId)) { this.fail("hostOffline"); return; }
-      let saved = loaded;
-      if (loaded.table.hostConnectionId !== this.self.connectionId) {
-        saved = await this.storage.save({ ...loaded, table: { ...loaded.table, hostConnectionId: this.self.connectionId, hostName: this.self.name, revision: loaded.table.revision + 1 } }, loaded.serial) as ControllerRecord;
-      }
+      const takeover = summary.hostPlayerId !== this.self.id;
+      this.inheritingFrom = takeover ? summary.hostPlayerId : undefined;
+      if (loaded && !validRecovery(loaded, this.platform.roomId, takeover ? { ...summary, hostPlayerId: this.self.id } : summary)) throw Error("recoveryMissing");
+      if (loaded && loaded.table.hostConnectionId !== this.self.connectionId && this.present(loaded.table.hostConnectionId, loaded.table.hostPlayerId)) { this.fail("hostOffline"); return; }
+      if (!loaded && !takeover) throw Error("recoveryMissing");
+      let saved: ControllerRecord;
+      if (!loaded) {
+        // Only a lobby has no hidden game state. Keep every historical seat;
+        // active tables never reach this branch or acquire an invented deck.
+        saved = await this.storage.save({ version: 1, roomId: this.platform.roomId, serial: 0, table: { ...summary, hostPlayerId: this.self.id, hostConnectionId: this.self.connectionId, hostName: this.self.name, revision: summary.revision + 1 }, game: null }, null) as ControllerRecord;
+      } else if (loaded.table.hostConnectionId !== this.self.connectionId || takeover) {
+        saved = await this.storage.save({ ...loaded, table: { ...loaded.table, hostPlayerId: this.self.id, hostConnectionId: this.self.connectionId, hostName: this.self.name, revision: loaded.table.revision + 1 } }, loaded.serial) as ControllerRecord;
+      } else saved = loaded;
       if (!this.alive(epoch, tableEpoch) || !this.canClaim()) return;
       this.saved = saved; this.dirty = saved.table.revision !== summary.revision || saved.table.hostConnectionId !== summary.hostConnectionId;
       // Make our own metadata callback recognize the recovered connection as
       // the same authority. Other clients still see a normal connection change.
-      if (saved.table.hostConnectionId !== summary.hostConnectionId) this.summary = { ...summary, hostConnectionId: saved.table.hostConnectionId };
+      if (saved.table.hostConnectionId !== summary.hostConnectionId || takeover) this.summary = { ...summary, hostPlayerId: saved.table.hostPlayerId, hostConnectionId: saved.table.hostConnectionId };
       this.message = undefined;
       if (this.dirty) await this.publish();
       this.updateHostView();
     } catch (error) { if (this.alive(epoch, tableEpoch)) this.fail(errorCode(error, "recoveryMissing")); }
-    finally { if (this.alive(epoch, tableEpoch)) { this.recovering = false; this.emit(); } }
+    finally { this.recovering = false; if (this.alive(epoch, tableEpoch)) this.emit(); }
   }
   private updateHostView(): void {
     if (!this.saved) return;
@@ -239,7 +267,10 @@ export class TableController {
       const before = tableSummary(await this.platform.readTable());
       if (!this.alive(epoch, tableEpoch)) return;
       const initialLobby = !before && !saved.game && saved.table.revision === 1;
-      if (!initialLobby && (!before || before.id !== saved.table.id || before.hostPlayerId !== this.self.id ||
+      const candidate = before && legacyLobbySuccessor(before, [this.self, ...this.players]);
+      const inheriting = !!this.inheritingFrom && !!before && before.hostPlayerId === this.inheritingFrom && before.revision + 1 === saved.table.revision &&
+        candidate?.id === this.self.id && candidate.connectionId === this.self.connectionId;
+      if (!initialLobby && (!before || before.id !== saved.table.id || before.hostPlayerId !== this.self.id && !inheriting ||
           (before.hostConnectionId !== this.self.connectionId && this.present(before.hostConnectionId, before.hostPlayerId)) ||
           before.revision > saved.table.revision)) {
         this.observe(before); throw Error("staleTable");
@@ -249,6 +280,7 @@ export class TableController {
       const value = tableSummary(await this.platform.readTable());
       if (!this.alive(epoch, tableEpoch)) return;
       if (!value || value.id !== saved.table.id || value.hostConnectionId !== this.self.connectionId || value.revision > saved.table.revision) { this.observe(value); throw Error("staleTable"); }
+      if (value.hostPlayerId === this.self.id) this.inheritingFrom = undefined;
       this.summary = value; this.dirty = value.revision !== saved.table.revision;
       if (this.dirty) throw Error("roomFull");
       this.message = undefined; this.updateHostView();
