@@ -4,8 +4,10 @@ import {localViewParts} from '../../extensions/three-dragon-ante/src/game/local-
 import type {TableController} from '../../extensions/three-dragon-ante/src/game/controller';
 import {TABLE_GESTURE} from '../../extensions/three-dragon-ante/src/game/gesture';
 import {TABLE_UI_RESTORE,readUIDraft,type TableUIDraft} from '../../extensions/three-dragon-ante/src/game/ui-command';
+import {legacyTableWorkbench} from './legacy-table';
 /** The table runtime outlives its right-hand view, just like the Owlbear panel. */
 export function tableWorkbench(emit:(instance:string,event:string,name:string,data:unknown)=>void){
+ const legacy=legacyTableWorkbench(emit);
  let controller:TableController|undefined,starting:Promise<void>|undefined,sequence=0;
  const clients=new Map<string,string>();
  let draft:TableUIDraft|null=null;
@@ -13,6 +15,7 @@ export function tableWorkbench(emit:(instance:string,event:string,name:string,da
  async function publish(){if(!controller)return;const connectionId=await OBR.player.getConnectionId();for(const [instance,client] of clients)for(const part of localViewParts(controller.view,client,++sequence))emit(instance,'broadcast',TABLE_VIEW,{connectionId,data:part});}
  async function ready(){if(controller&&!starting)return;if(!starting)starting=(async()=>{const {TableController}=await import('../../extensions/three-dragon-ante/src/game/controller');controller=new TableController(()=>{void publish();},{onGesture(seatId,gesture){void OBR.player.getConnectionId().then(connectionId=>{for(const [instance,clientId] of clients)emit(instance,'broadcast',TABLE_GESTURE,{connectionId,data:{instance,clientId,seatId,gesture}});});}});await controller.start();})().catch(async error=>{const old=controller;controller=undefined;await old?.stop();throw error;}).finally(()=>{starting=undefined;});await starting;}
  return async(instance:string,method:string,args:any[])=>{
+  if(await legacy.request(instance,method,args)&&method!=='dispose')return true;
   if(method==='dispose'){clients.delete(instance);if(!clients.size)await controller?.clearGesture();return;}
   if(method!=='broadcast.sendMessage')return false;
   const [name,data]=args;

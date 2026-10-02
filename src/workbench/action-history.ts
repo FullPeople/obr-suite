@@ -16,6 +16,10 @@ export function mountActionHistory(){
  #action-tabs button[aria-selected=true]{background:#50535e;box-shadow:inset 0 -3px #d9c887}#action-tabs button:hover{background:#50535e}
  #action-tabs button:focus-visible{outline:2px solid #d9c887;outline-offset:1px}
  #action-home{flex:1;min-height:0;overflow:auto;padding:10px;overflow-wrap:anywhere}#action-history{flex:1;min-height:0;position:relative;background:#373942;color:#eee}
+ /* Keep wheel/keyboard scrolling without drawing a scrollbar in the narrow
+    action surface. The history list already applies this to its own rows. */
+ #action-home{scrollbar-width:none;-ms-overflow-style:none}
+ #action-home::-webkit-scrollbar{width:0;height:0;display:none}
  [hidden]{display:none!important}#action-history .box{position:absolute;inset:0}#action-history .foot-drag{display:none}
  #action-history .foot,#action-history .detail{background:#373942}
  /* The action is 210px wide. Wrap actual content rather than clipping it or

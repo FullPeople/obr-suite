@@ -37,7 +37,7 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
    const [event,name]=args,key=`${panel}:${instance}:${event}:${name||''}`;
    if(subscriptions.has(key))return;
    const emit=(data:any)=>send('panelEvent',{panel,instance,event,name,data});
-   if(event==='broadcast'&&typeof name==='string'&&name.startsWith('com.')&&name.length<160){if(['music','studio'].includes(panel)&&!name.startsWith(musicPrefix))throw Error('无效音乐订阅');if(panel==='table'&&!name.startsWith('com.fullpeople/three-dragon-ante/'))throw Error('无效牌桌订阅');subscriptions.set(key,OBR.broadcast.onMessage(name,emit));}
+   if(event==='broadcast'&&typeof name==='string'&&name.startsWith('com.')&&name.length<160){if(['music','studio'].includes(panel)&&!name.startsWith(musicPrefix))throw Error('无效音乐订阅');if(panel==='table'&&!name.startsWith('com.fullpeople/three-dragon-ante/')&&!name.startsWith('com.obr-suite/three-dragon-ante/'))throw Error('无效牌桌订阅');subscriptions.set(key,OBR.broadcast.onMessage(name,emit));}
    else if(Object.prototype.hasOwnProperty.call(events,event))subscriptions.set(key,events[event](emit));else throw Error('无效订阅');return;
   }
   if(method==='broadcast.sendMessage'){

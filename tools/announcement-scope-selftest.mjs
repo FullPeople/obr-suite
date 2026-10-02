@@ -5,7 +5,7 @@ import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {build} from 'rolldown';
 import {workbenchAnnouncement} from './workbench-announcement.mjs';
-const root=resolve(import.meta.dirname,'..'),out=join(root,'.local-evidence/announcement-unit');mkdirSync(out,{recursive:true});
+const root=resolve(import.meta.dirname,'..').replaceAll('\\','/'),out=join(root,'.local-evidence/announcement-unit');mkdirSync(out,{recursive:true});
 const web=process.env.DND_CARD_WEB_ROOT;assert.ok(web,'Set DND_CARD_WEB_ROOT to the exact paired Web checkout');
 const legacy=readFileSync(join(root,'public/announcement.md'),'utf8'),modern=await workbenchAnnouncement(web);
 let count=0;function check(name,value){assert.ok(value,name);count++;}
@@ -41,7 +41,7 @@ for(const channel of ['suite','suite-dev']){
 }
 check('Seen keys independent',saved.suite.key!==saved['suite-dev'].key);check('Daily keys independent',saved.suite.daily!==saved['suite-dev'].daily);
 check('Switching keeps both reads',Object.values(saved).every(value=>localStorage.getItem(value.key)===value.version));
-const webEntry=join(out,'web.ts');writeFileSync(webEntry,`export * from '${resolve(web)}/src/platform/announcement';`);const webResult=await build({input:webEntry,output:{format:'esm'}});const webApi=await import('data:text/javascript;base64,'+Buffer.from(webResult.output.find(o=>o.type==='chunk').code).toString('base64'));
+const webEntry=join(out,'web.ts');writeFileSync(webEntry,`export * from '${resolve(web).replaceAll('\\','/')}/src/platform/announcement';`);const webResult=await build({input:webEntry,output:{format:'esm'}});const webApi=await import('data:text/javascript;base64,'+Buffer.from(webResult.output.find(o=>o.type==='chunk').code).toString('base64'));
 webApi.rememberAnnouncementVersion('standalone-test','standalone');webApi.rememberAnnouncementVersion('suite-test','suite');check('Web modes independent',webApi.readAnnouncementVersion('standalone')==='standalone-test'&&webApi.readAnnouncementVersion('suite')==='suite-test');check('Web acknowledgement does not overwrite hosts',Object.values(saved).every(value=>localStorage.getItem(value.key)===value.version));
 check('Web changed version becomes pending',webApi.announcementPending(webApi.readAnnouncementVersion('suite'),'next-version'));
 console.log(`Announcement scope: ${count} assertions passed; real room/browser layout not verified`);

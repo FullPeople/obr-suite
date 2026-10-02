@@ -7,7 +7,7 @@ import {createServer} from 'node:http';
 import {build} from 'rolldown';
 import {chromium} from '@playwright/test';
 import {workbenchAnnouncement} from './workbench-announcement.mjs';
-const root=resolve(import.meta.dirname,'..'),web=process.env.DND_CARD_WEB_ROOT;
+const root=resolve(import.meta.dirname,'..').replaceAll('\\','/'),web=process.env.DND_CARD_WEB_ROOT;
 assert.ok(web,'Set DND_CARD_WEB_ROOT to the exact paired Web checkout');
 const out=join(root,'.local-evidence/announcement-scope');mkdirSync(out,{recursive:true});
 const notes={suite:readFileSync(join(root,'public/announcement.md'),'utf8'),'suite-dev':await workbenchAnnouncement(web)};

@@ -12,6 +12,8 @@ import { describeError, diag, throttle } from "./diagnostics";
 import { TABLE_UI_RESTORE, readUIDraft, type TableDisplayMode, type TableUICommand, type TableUIDraft } from "./ui-command";
 import {SERVER_WINDOW} from './server-protocol';
 import {setupServerAdmission} from './server-session';
+import {legacyTableWorkbench} from '../../../../src/workbench/legacy-table';
+import {TABLE_READY as STABLE_TABLE_READY,TABLE_COMMAND as STABLE_TABLE_COMMAND} from '../../../../src/modules/threeDragonAnte/protocol';
 
 const PANEL = "com.fullpeople/three-dragon-ante/popover";
 let active = false, epoch = 0, selfId = "";
@@ -28,6 +30,7 @@ let panelInstance = "", panelClient = "", viewSequence = 0, viewRequested = fals
 let publishing: Promise<void> | null = null;
 let displayMode: TableDisplayMode = "full", panelMode: TableDisplayMode = "full", replacePanel = false;
 let uiDraft: TableUIDraft | null = null, restoreClient = "";
+let stableLegacy:ReturnType<typeof legacyTableWorkbench>|undefined;
 const unsubs: Array<() => void> = [];
 
 /** A burst of view requests must cost one batch, not one batch each: every
@@ -263,6 +266,15 @@ export async function setupThreeDragonAnte(): Promise<void> {
   diag("boot", "background ready", { selfId, connection, panel: panelInstance || "(none)" });
   if (!active || generation !== epoch) return;
   errorMessage = undefined;
+  stableLegacy=legacyTableWorkbench(async(_instance,_event,name,value)=>{await sendQueued(()=>OBR.broadcast.sendMessage(name,(value as {data:unknown}).data,{destination:'LOCAL'}));});
+  for(const name of [STABLE_TABLE_READY,STABLE_TABLE_COMMAND])unsubs.push(OBR.broadcast.onMessage(name,event=>{void(async()=>{
+    if(!active||!identity||!(await identity.matches(event.connectionId)))return;
+    const data=event.data as {instance?:unknown;command?:{type?:string;mode?:string}};
+    if(typeof data?.instance!=='string'||data.instance!==panelInstance||!desiredOpen)return;
+    await stableLegacy?.request(data.instance,'broadcast.sendMessage',[name,data]);
+    if(name===STABLE_TABLE_COMMAND&&data.command?.type==='close'){desiredOpen=false;await syncPanel();}
+    else if(name===STABLE_TABLE_COMMAND&&data.command?.type==='display'&&['full','compact'].includes(data.command.mode||'')){displayMode=data.command.mode as TableDisplayMode;await syncPanel();}
+  })().catch(error=>diag('cmd','historical table command failed',{error:describeError(error)}));}));
   unsubs.push(setupServerAdmission(),OBR.broadcast.onMessage(SERVER_WINDOW,event=>{void(async()=>{
     if(!active||!identity||!(await identity.matches(event.connectionId)))return;
     const data=event.data as {instance?:string;command?:{type?:string;mode?:string}};
@@ -305,6 +317,7 @@ export async function teardownThreeDragonAnte(): Promise<void> {
   for (const off of unsubs.splice(0)) off();
   resizeOff?.(); resizeOff = null;
   await starting;
+  await stableLegacy?.stop();stableLegacy=undefined;
   const previous = controller; controller = null;
   await previous?.stop();
   await syncPanel();
