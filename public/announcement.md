@@ -9,7 +9,55 @@
 在枭熊中添加上述扩展地址。启用新版时，请禁用同一房间中的旧版插件。
 [打开车卡网站](https://obr.dnd.center/card/)，完成后导出完整 JSON，再上传到插件。
 
-## 2026-09-28 [release]
+## 2026-10-03 [release] [zh]
+
+### 角色卡、权限与资源
+
+- 保留旧版角色卡、XLSX、地图与原有工具，本轮不把新版工作台整包替换旧版。
+- 使用棋子的原生 Set Owner；生命值、资源、保存和删除操作会重新核对权限。
+- 修复已打开资源设置后撤权仍可能写入的问题，多绑定操作不会越权改动其他所属玩家的棋子。
+- 共用五页阅读器更新布局、法术与来源显示，支持每张卡保存的头像框隐藏设置。
+- 同步旧卡及完整编辑请前往车卡网站或新版 Full Suite。
+
+---
+
+### 三龙牌与历史
+
+- 设置 → 三龙牌增加“恢复此房间的旧版牌局”，沿用原规则与私有存档，仅打开已有牌局。
+- 旧大厅主持和旧座位都离线时，保留宽限时间及在线座位优先，由符合条件的当前 GM 接任。
+- 缺少原主持浏览器私有手牌及牌库时只提示恢复，不自动清桌、重建或伪造牌局。
+- 快速切换骰子历史时，迟到取消不会覆盖新的显示意图；查看头顶结果时 Action 保持打开。
+- 新旧公告及已读状态分开，原有重要权限图文与完整公告历史保留。
+
+---
+
+### 验证范围
+
+- 已在准备的双账号测试房间验证撤权、双方入座、缺失存档保护及旧稳定牌局刷新恢复。
+- 真实断网、多 GM 同时竞争、实体手机及玩家原设备仍待验证；自动检查不代替真实房间验收。
+- 更新后关闭附加窗口，刷新枭熊房间，再重新打开对应窗口。
+- 反馈邮箱：1763086701psw@gmail.com。
+
+## 2026-10-03 [release] [en]
+
+### Character cards and permissions
+
+- Stable tools, XLSX support and maps are retained. Shared repairs do not replace this channel with the dev workbench.
+- Card and resource operations recheck the token's native Set Owner permissions, including an already-open resource editor.
+- Shared five-page viewing receives card layout, source/spell display and per-card portrait-frame settings.
+- Full editing and old-card synchronization are available on the standalone card website or dev Full Suite.
+
+---
+
+### Three-Dragon Ante and verification
+
+- Settings can recover an existing historical table using its original rules and private browser archive.
+- An abandoned lobby keeps its grace period and online-seat priority before an eligible current GM succeeds its host.
+- Missing private hands or deck produces a recovery notice; the existing game is not rebuilt or cleared.
+- Rapid dice-history changes preserve the latest intent and keep the Action panel open.
+- GM/player entry and stable private-game refresh recovery passed in the prepared test room. Actual network outages, competing GMs and physical mobile devices remain unverified.
+
+## 2026-09-28 [history]
 
 ### 角色卡阅读
 
