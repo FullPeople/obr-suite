@@ -1,0 +1,38 @@
+name: Verify scoped stable paired release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 224fa499cd3295c85c724cffb38753fd61d155e8
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm ci
+        working-directory: .paired-web
+      - name: Historical controller and current LOCAL connection guards
+        run: |
+          node tools/three-dragon-stable-recovery-selftest.mjs
+          node tools/three-dragon-local-connection-selftest.mjs
+      - name: Stable typecheck, host and exact paired five-page viewer
+        run: npm run build
+      - name: Require the historical recovery page and viewer
+        run: |
+          test -f dist/three-dragon-ante.html
+          test -f dist/card-viewer/bridge.js
+          test -f dist/announcement.md
