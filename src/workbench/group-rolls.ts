@@ -23,6 +23,9 @@ export function createGroupRolls(deps:{observation:ReturnType<typeof workbenchOb
   if(sceneEpoch!==deps.observation.sceneEpoch()){sceneEpoch=deps.observation.sceneEpoch();if(group)close();selectionKey='';dismissed='';}
   const preparing=!!(observed.scene?.['com.initiative-tracker/combat'] as any)?.preparing,initialKind=preparing?'initiative' as const:'save' as const;
   const key=JSON.stringify([deps.observation.sceneEpoch(),observed.selection,preparing]);if(key===selectionKey)return;selectionKey=key;const epoch=++generation;
+  // Closing suppresses only the current unchanged selection. Once the player
+  // changes it, selecting the same group again starts a new operation.
+  if(dismissed&&key!==dismissed)dismissed='';
   if(group&&(group.phase!=='select'||group.adjustment?.pending))return;
   if(observed.selection.length<2||key===dismissed){group=null;publish();return;}
   if(observed.selection.length>100){groupSelectionKey=key;group={id:'group-'+crypto.randomUUID(),phase:'select',targets:[],selectedCount:observed.selection.length,visible:true,kind:initialKind,ability:'dex',variant:'normal',error:'单批最多 100 枚实体骰，当前选择超过 100 个单位；没有省略或投掷任何目标。'};publish();return;}
