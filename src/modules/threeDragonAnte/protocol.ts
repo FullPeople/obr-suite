@@ -19,7 +19,7 @@ export interface TableSummary {
   seats: TableSeat[];
   revision: number;
 }
-export type TableError = "connecting" | "hostOffline" | "privateSync" | "storageFailed" | "roomFull" | "tableExists" | "tableFull" | "notHost" | "cannotLeave" | "tooFewPlayers" | "notSeated" | "staleTable" | "invalidCommand" | "requestFailed" | "recoveryMissing" | "protocolMismatch";
+export type TableError = "connecting" | "hostOffline" | "privateSync" | "storageFailed" | "roomFull" | "tableExists" | "tableFull" | "notHost" | "cannotLeave" | "tooFewPlayers" | "notSeated" | "staleTable" | "invalidCommand" | "requestFailed" | "recoveryMissing" | "legacyArchiveRequired" | "protocolMismatch";
 export interface TableView {
   table: TableSummary | null;
   selfPlayerId: string;

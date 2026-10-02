@@ -23,6 +23,7 @@ import { itemToInitiativeItem, getCombatState, genTiebreak } from "../utils/meta
 import { getLocalLang } from "../../../state";
 import { t } from "../utils/i18n";
 import { broadcastDiceRoll, isGlobalDarkRollEnabled } from "../../dice";
+import {errorText} from '../../../utils/errorText';
 import { readFixedRoll, consumeFixedRoll, randIntInclusive } from "../../dice/fixed-roll";
 
 export type RollType = "disadvantage" | "normal" | "advantage";
@@ -1009,19 +1010,17 @@ export function useInitiative() {
         console.error("[obr-suite/initiative] deferred count write failed", e);
       });
     };
+    let fallback: ReturnType<typeof setTimeout> | undefined;
     const unsub = OBR.broadcast.onMessage(BC_DICE_FADE_START, (event) => {
       const data = event.data as { rollId?: string } | undefined;
       if (data?.rollId !== rollId) return;
+      if (fallback) clearTimeout(fallback);
       writeFinalValue();
       try { unsub(); } catch {}
     });
     // Safety net: if the climax broadcast somehow doesn't arrive (bad
     // network, modal crash, etc.) write the value after a generous
     // timeout so the initiative column doesn't stay stale forever.
-    setTimeout(() => {
-      writeFinalValue();
-      try { unsub(); } catch {}
-    }, 6000);
 
     try {
       const [rollerId, rollerName] = await Promise.all([
@@ -1053,7 +1052,15 @@ export function useInitiative() {
         // toggle is on.
         hidden: isInvisible || isGlobalDarkRollEnabled(),
       });
-    } catch {}
+      // Start the fallback only after 3D accepted and produced its result.
+      // Slow prediction must not write a silent value before animation exists.
+      if (!writeDone) fallback=setTimeout(() => { writeFinalValue(); try { unsub(); } catch {} }, 6000);
+    } catch (error) {
+      if (fallback) clearTimeout(fallback);
+      try { unsub(); } catch {}
+      console.error('[obr-suite/initiative] dice submission failed',error);
+      void OBR.notification.show('先攻投骰失败：'+errorText(error),'ERROR').catch(()=>{});
+    }
   }, []);
 
   const diceRollingRef = useRef(false);

@@ -74,6 +74,7 @@ export default defineConfig(({ command }) => ({
       },
       input: {
         background: resolve(__dirname, "background.html"),
+        "three-dragon-ante": resolve(__dirname,"three-dragon-ante.html"),
         "workbench-launcher": resolve(__dirname, "workbench-launcher.html"),
         cluster: resolve(__dirname, "cluster.html"),
         "cluster-row": resolve(__dirname, "cluster-row.html"),

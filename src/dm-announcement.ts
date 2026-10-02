@@ -42,8 +42,10 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "./asset-base";
 import { renderInlineNoSpan } from "./announcement-inline";
+import { renderAnnouncementImportant } from "./announcement-important";
 
-const MODAL_ID = "com.obr-suite/dm-announcement";
+import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID} from './announcement-source';
+const MODAL_ID = ANNOUNCEMENT_MODAL_ID;
 
 type SectionKind = "warn" | "info" | "notice" | "release" | "history" | "issues" | "highlights" | "todo" | "changelog" | "footer" | "raw";
 type SectionLang = "zh" | "en" | undefined; // undefined = visible in both
@@ -314,7 +316,8 @@ function renderSection(s: Section): string {
       .map((it) => {
         // "version · description" — version is anything before the
         // first `·` or `-` separator. Fall back to whole string.
-        const sepMatch = it.match(/^([^·\-—]+?)\s*[·\-—]\s*(.+)$/);
+        const sepMatch = it.match(/^(\d+\.\d+\.\d+(?:[-.][\w]+)*)\s*[·\-—]\s*(.+)$/)
+          ?? it.match(/^([^·\-—]+?)\s*[·\-—]\s*(.+)$/);
         const version = sepMatch ? sepMatch[1].trim() : it.trim();
         const desc = sepMatch ? sepMatch[2].trim() : "";
         const versionHtml = `<span class="cl-version">${escapeHtml(version)}</span>`;
@@ -363,7 +366,7 @@ function rerenderForLang(activeLang: "zh" | "en"): void {
   const visible = cachedSections.filter(
     (s) => s.lang === undefined || s.lang === activeLang,
   );
-  const bodyHtml: string[] = [];
+  const bodyHtml: string[] = [renderAnnouncementImportant(activeLang)];
   let footerHtml = "";
   for (const s of visible) {
     if (s.kind === "footer") {
@@ -389,7 +392,7 @@ async function loadAndRender(): Promise<void> {
 
   let md = "";
   try {
-    const url = assetUrl("announcement.md");
+    const url = assetUrl(ANNOUNCEMENT_FILE);
     const res = await fetch(url, { cache: "no-cache" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     md = await res.text();
@@ -414,15 +417,13 @@ async function loadAndRender(): Promise<void> {
 //
 // Pick the channel's own file up front. `BASE_URL` is baked in at build
 // time (`/suite/` or `/suite-dev/`), so it is the one thing that
-// reliably says which build this is. The other name stays as a fallback
-// in case a deploy ever ships only one of the two.
+// reliably says which build this is. Missing channel metadata must not report
+// another channel's version.
 async function loadVersionIntoTitle(): Promise<void> {
   const titleEl = document.querySelector<HTMLElement>(".head .title");
   if (!titleEl) return;
   const dev = (import.meta.env.BASE_URL || "").includes("suite-dev");
-  const candidates = dev
-    ? ["manifest-dev.json", "manifest.json"]
-    : ["manifest.json", "manifest-dev.json"];
+  const candidates = dev ? ["manifest-dev.json"] : ["manifest.json"];
   for (const name of candidates) {
     try {
       const res = await fetch(assetUrl(name), { cache: "no-cache" });
@@ -433,7 +434,7 @@ async function loadVersionIntoTitle(): Promise<void> {
         return;
       }
     } catch {
-      /* try the next candidate */
+      /* Keep the existing title if this channel is unavailable. */
     }
   }
 }

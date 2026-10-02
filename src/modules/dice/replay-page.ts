@@ -1,3 +1,4 @@
+import {DICE_HISTORY_LIMIT,canSeeDiceHistory,diceHistory,storedDiceHistory,type DiceHistoryVisibility} from './history-policy';
 import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
 import { DieResult, sidesOf } from "./types";
@@ -56,6 +57,7 @@ interface HistoryEntry {
   rollId: string;
   ts: number;
   hidden?: boolean;
+  visibility?: DiceHistoryVisibility;
   collectiveId?: string;
   // Mirrors `DiceRollPayload.rowStarts` — present when the roll was
   // wrapped in `repeat(N, …)`. Each entry is the index in `dice[]`
@@ -71,7 +73,7 @@ function loadHistory(): HistoryEntry[] {
     const v = localStorage.getItem(LS_HISTORY);
     if (!v) return [];
     const p = JSON.parse(v);
-    if (Array.isArray(p)) return p;
+    if (Array.isArray(p)) return diceHistory(p,{playerId:myPlayerId,role:myRole});
   } catch {}
   return [];
 }
@@ -151,6 +153,7 @@ let myRole: "GM" | "PLAYER" = "PLAYER";
 let myPlayerId = "";
 
 function buildOverlays(): void {
+  for(const slot of overlays)slot.el.remove();overlays.length=0;
   const history = loadHistory();
   const members = history.filter((h) => h.collectiveId === cid || h.rollId === cid);
   if (!members.length) {
@@ -165,11 +168,6 @@ function buildOverlays(): void {
     // leak to non-DM non-roller clients (they shouldn't even see a
     // bubble exists). DM still gets a bubble but at reduced opacity
     // so it visually distinguishes from the bright members.
-    if (entry.hidden) {
-      const isReceiverDmOrRoller =
-        myRole === "GM" || entry.rollerId === myPlayerId;
-      if (!isReceiverDmOrRoller) continue;   // hide from this client
-    }
     const dimDark = !!entry.hidden && myRole === "GM";
 
     const el = document.createElement("div");
@@ -259,6 +257,7 @@ OBR.onReady(async () => {
   } catch {}
   try { myRole = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch {}
   try { myPlayerId = await OBR.player.getId(); } catch {}
+  OBR.player.onChange(player=>{const changed=myRole!==player.role||myPlayerId!==player.id;myRole=player.role;myPlayerId=player.id;if(changed){buildOverlays();void updatePositions().then(()=>{for(const slot of overlays)slot.el.classList.add('show');});}});
   buildOverlays();
   await updatePositions();
   // Reveal after first paint so overlays don't flash at (0,0).

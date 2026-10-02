@@ -855,7 +855,7 @@ export async function setupBestiary(): Promise<void> {
   // DM-only group-saves popover. Auto-shows when 2+ selected tokens
   // are all bestiary-bound monsters. Lifecycle is paired with the
   // bestiary module's own setup/teardown.
-  await setupGroupSaves();
+  if(!WORKBENCH_DEV)await setupGroupSaves();
 
   // (onViewportResize + BC_PANEL_DRAG_END handlers moved up — they're
   // now registered always-on with internal isOpen / infoPopoverOpen

@@ -1,3 +1,4 @@
+import {ownsNativeToken,canReadNativePopup,canReadNativeCard} from "./native-owner";
 import OBR from "@owlbear-rodeo/sdk";
 import { installDebugOverlay } from "../../utils/debugOverlay";
 import { ICONS } from "../../icons";
@@ -144,6 +145,7 @@ async function ensureRtResourceMount(): Promise<void> {
   const handle=mountResourcePanel({
     container,
     getItemId: () => isCurrent(target)?target.itemId:null,
+    canWrite: item => isCurrent(target) && (item ? canNameItem(item) : target.canName === true),
   });
   rtMountHandle=handle;
   try{await handle.refresh();}catch(error){if(isCurrent(target))console.warn("[cc-info] resource refresh failed",error);}
@@ -301,7 +303,7 @@ async function setTokenBuff(target:InfoTarget,input:HTMLInputElement,buffId:stri
     const next=wanted?[...current.filter(id=>id!==buffId),buffId]:current.filter(id=>id!==buffId);
     await OBR.scene.items.updateItems([itemId],(drafts)=>{
       for(const d of drafts){
-        if(!isCurrent(target))return;
+        if(!isCurrent(target)||!canNameItem(d))return;
         (d.metadata as any)[STATUS_BUFFS_KEY]=next;
         // A dropped buff must not leave its round counter behind.
         const rounds=(d.metadata as any)[STATUS_BUFF_ROUNDS_KEY];
@@ -416,7 +418,7 @@ const cacheKey=(roomId:string,cardId:string)=>JSON.stringify([roomId,cardId]);
 function isCurrent(target:InfoTarget|null):target is InfoTarget{return !!target&&alive&&sceneReady&&target.generation===targetGeneration&&target.scene===sceneGeneration&&target.cardId===currentCardId&&target.roomId===currentRoomId&&target.itemId===boundItemId;}
 function unmountPanels(){rtMountHandle?.unmount();rtMountHandle=null;ccStatHandle?.unmount();ccStatHandle=null;currentDragUnbind?.();currentDragUnbind=null;}
 function invalidate(clear=false){targetGeneration++;loadingTarget=null;requestAbort?.abort();requestAbort=null;if(clear){unmountPanels();renderedTarget=null;lastRendered=null;root.replaceChildren();}root.inert=true;}
-function canNameItem(item:any):boolean {if(!item||!renderedTarget)return false;if(cachedIsGM)return true;const owners=renderedTarget.ownerIds;return owners?.length?owners.includes(playerId):item.createdUserId===playerId;}
+function canNameItem(item:any):boolean {if(!item||!renderedTarget||item.id!==renderedTarget.itemId||item.metadata?.["com.character-cards/boundCardId"]!==renderedTarget.cardId)return false;if(cachedIsGM)return true;return ownsNativeToken(item,playerId);}
 async function targetContext(target:InfoTarget):Promise<{allowed:boolean;live:BubblesData}>{
  const [metadata,items]=await Promise.all([OBR.scene.getMetadata(),target.itemId?OBR.scene.items.getItems([target.itemId]):Promise.resolve([])]);
  const entry=(Array.isArray(metadata["com.character-cards/list"])?metadata["com.character-cards/list"] as any[]:[]).find(c=>c?.id===target.cardId);
@@ -424,14 +426,13 @@ async function targetContext(target:InfoTarget):Promise<{allowed:boolean;live:Bu
  const live=raw&&typeof raw==="object"?{...raw as BubblesData}:{};
  target.buffs=readBuffIds(item);
  target.itemSignature=JSON.stringify([item?.createdUserId,item?.metadata?.["com.character-cards/boundCardId"],live.locked]);
- target.permissionSignature=JSON.stringify([entry?.visibility,entry?.owner_ids]);
+ target.permissionSignature=JSON.stringify([entry?.visibility,entry?.locked]);
  target.ownerIds=Array.isArray(entry?.owner_ids)?entry.owner_ids.filter((id:unknown)=>typeof id==="string"):[];
- target.canName=cachedIsGM||!!item&&(target.ownerIds!.length?target.ownerIds!.includes(playerId):item.createdUserId===playerId);
+ target.canName=cachedIsGM||ownsNativeToken(item,playerId);
  if(target.itemId&&(!item||item.metadata?.["com.character-cards/boundCardId"]!==target.cardId))return {allowed:false,live};
  if(cachedIsGM)return {allowed:true,live};
- if(!entry||entry.visibility==="dm"||(entry.visibility==="owners"&&!target.ownerIds!.includes(playerId))||entry.visibility&&!['public','owners'].includes(entry.visibility))return {allowed:false,live};
- const owns=target.ownerIds!.length?target.ownerIds!.includes(playerId):item?.createdUserId===playerId;
- return {allowed:!target.itemId||!!owns||(live.locked===false&&typeof item?.createdUserId==="string"&&!!item.createdUserId),live};
+ if(!entry)return {allowed:false,live};
+ return {allowed:target.itemId?canReadNativePopup(item,target.cardId,entry,playerId,false,live.locked):canReadNativeCard(entry,[],playerId,false),live};
 }
 
 // Broadcast id mirrored from panel-page.ts. Receiving this with a
@@ -787,6 +788,7 @@ function render(d: any, cardId: string, roomId: string, live: BubblesData = {},l
     ccStatHandle = mountStatBanner({
       container: statMount,
       getItemId: (()=>{const target=renderedTarget!;return ()=>isCurrent(target)?target.itemId:null;})(),
+      canWrite: item => !!renderedTarget && isCurrent(renderedTarget) && (item ? canNameItem(item) : renderedTarget.canName === true),
       isGM: cachedIsGM,
       fallback: statFallback,
       initialLive: live,
@@ -1032,7 +1034,7 @@ OBR.onReady(async () => {
   }),OBR.scene.onMetadataChange(metadata=>{
     const target=loadingTarget??renderedTarget;if(!isCurrent(target))return;
     const entry=(Array.isArray(metadata["com.character-cards/list"])?metadata["com.character-cards/list"] as any[]:[]).find(c=>c?.id===target.cardId);
-    if(JSON.stringify([entry?.visibility,entry?.owner_ids])!==target.permissionSignature){invalidate(true);void showCard(target.cardId,target.roomId,target.itemId);}
+    if(JSON.stringify([entry?.visibility,entry?.locked])!==target.permissionSignature){invalidate(true);void showCard(target.cardId,target.roomId,target.itemId);}
   }),OBR.scene.items.onChange(items=>{
     const target=loadingTarget??renderedTarget;if(!isCurrent(target)||!target.itemId)return;
     const item=items.find(item=>item.id===target.itemId),meta=item?.metadata??{},live=(meta[BUBBLES_META_KEY]??meta[EXTERNAL_BUBBLES_META_KEY]) as BubblesData|undefined;

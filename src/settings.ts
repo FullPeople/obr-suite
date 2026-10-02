@@ -3243,7 +3243,9 @@ const TABS: TabDef[] = [
       return `<h3>${en ? "A separate card table" : "独立的酒馆牌桌"}</h3>
         <p>${en ? "Install Three-Dragon Ante in this room when your table wants to play. It has its own entry and does not need Full Suite to stay open." : "想打牌时，由 DM 将三龙牌安装到房间。它有自己的入口，无需依赖套件窗口。"}</p>
           <a class="layout-editor-btn" href="${url}" target="_blank" rel="noopener">${en ? "Three-Dragon Ante extension address (Dev)" : "三龙牌插件地址（测试版）"}</a>
-        <p><code>${url}</code></p>
+          <p><code>${url}</code></p>
+          <button id="recover-historical-three-dragon" class="layout-editor-btn">${en?'Recover a historical table in this room':'恢复此房间的旧版牌局'}</button>
+          <p>${en?'Only opens an existing historical table. Missing private hands and decks are never reconstructed.':'仅打开已有旧版牌局；缺少原浏览器私有手牌和牌库时会提示恢复，不会重建或清桌。'}</p>
         <p>${en ? "Legendary Edition base game for 2–6 players, with a guided practice table. Uses Owlbear room messages; the host browser runs and saves the game." : "Legendary Edition 基础版，2–6 人，含新手实战引导。通过枭熊房间消息联网，主持人的浏览器运行和保存牌局。"}</p>`;
     },
   },
@@ -3609,6 +3611,7 @@ if (workbenchSettings) {
   onStateRefreshed(() => { workbenchVariablesReady = true; renderContent(); });
 }
 OBR.onReady(async () => {
+  document.addEventListener('click',event=>{if(!(event.target instanceof Element)||!event.target.closest('#recover-historical-three-dragon'))return;void OBR.broadcast.sendMessage('com.obr-suite/three-dragon-ante/open',{existingOnly:true},{destination:'LOCAL'}).catch(error=>console.warn('[three-dragon] recovery request failed',error));});
   const variables = workbenchSettings ? refreshFromScene() : Promise.resolve();
   const bubbles = refreshBubbleSettings();
   const refreshBossPreferences = () => { if (activeTab === "bossBar") renderContent(); };

@@ -1,6 +1,7 @@
 import {setupPanelDragHost} from './utils/panelDragHost';
 import {WORKBENCH_DEV} from './workbench/channel';
 import {setupWorkbench} from './workbench/background';
+import {setupHistoricalTableEntry} from './modules/threeDragonAnte/recovery-entry';
 import { openPanelIds, onPanelGeometryChange, notifyPanelGeometry, setPanelOpen } from "./utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
 import { startSceneSync, refreshFromScene, getState, onStateChange, onStateRefreshed, onStateRefreshFailed, getLocalLang } from "./state";
@@ -704,6 +705,7 @@ function syncModules() {
 
 OBR.onReady(async () => {
   setupWorkbench();
+  setupHistoricalTableEntry();
   // Sync state, then open cluster + activate all enabled modules.
   startSceneSync();
   onStateChange(() => { void syncModules(); });

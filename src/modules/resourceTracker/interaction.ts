@@ -1,8 +1,8 @@
 import OBR, { type Item } from "@owlbear-rodeo/sdk";
 
-/** UI lifetime guard. The host's getItemId remains the access policy; this
- * does not replace card permissions with token-creator permissions. */
-export function createInteractionGuard(getItemId: () => string | null, connected: () => boolean, onInvalidate: () => void = () => {}) {
+/** UI lifetime and optional mutation guard. Read leases never acquire write
+ * access; the host supplies its per-item policy for editable leases. */
+export function createInteractionGuard(getItemId: () => string | null, connected: () => boolean, onInvalidate: () => void = () => {}, canWrite: (item?: Item) => boolean = () => true) {
   let active = true, revision = 0, roleRevision = 0, sceneRevision = 0, ready = false;
   let role: "GM" | "PLAYER" | null = null;
   const unsubs: Array<() => void> = [];
@@ -23,10 +23,10 @@ export function createInteractionGuard(getItemId: () => string | null, connected
     if (!active || initialScene !== sceneRevision) return;
     if (ready !== value) { ready = value; invalidate(); }
   }).catch(() => {});
-  function capture(requireGM = false) {
+  function capture(requireGM = false, writing = true) {
     const id = getItemId(), own = revision;
     const current = (item?: Item) => active && connected() && ready && role !== null &&
-      revision === own && !!id && getItemId() === id && (!item || item.id === id) && (!requireGM || role === "GM");
+      revision === own && !!id && getItemId() === id && (!item || item.id === id) && (!requireGM || role === "GM") && (!writing || canWrite(item));
     return id && current() ? { id, current } : null;
   }
   function dispose() {

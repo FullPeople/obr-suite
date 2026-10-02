@@ -1,4 +1,5 @@
-import OBR from "@owlbear-rodeo/sdk";
+import {nativeCardOwners,canReadNativeCard} from "./native-owner";
+import OBR, {type Item} from "@owlbear-rodeo/sdk";
 import { ICONS } from "../../icons";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
@@ -39,21 +40,12 @@ interface CardEntry {
   uploader: string;
   uploaded_at: string;
   url: string;
-  /** Visibility (added 2026-05-03):
-   *    - undefined / "public" → all clients see this card in the
-   *      sidebar list (default).
-   *    - "dm" → only the DM sees the card row. Other players don't
-   *      get it in their list at all.
-   *    - "owners" → DM + listed `owner_ids` see it. Useful for "this
-   *      is player A's secret backup character — only A and the DM
-   *      should see the card row".
-   *  Soft hide: the data.json on the server isn't access-controlled
-   *  (no auth layer), so a player who knows a card's URL could still
-   *  open it directly. The toggle hides it from the in-app discovery
-   *  flow, which covers the "DM doesn't want NPC cards in players'
-   *  sidebars" use case. */
+  /** Legacy visibility remains a discovery restriction for nonowners.
+   * Native token owners may read locked cards. Historical owner_ids are not grants.
+   * Existing data.json endpoints remain unauthenticated; this UI is not server ACL. */
   visibility?: "public" | "dm" | "owners";
   owner_ids?: string[];
+  locked?: boolean;
   /** Folder/group name (added 2026-09-14). OPTIONAL and never
    *  migrated: an entry without it is simply "未分组" whenever it is
    *  rendered. Every writer in this suite rewrites whole entry arrays
@@ -68,18 +60,30 @@ interface CardEntry {
   render_warning?: string;
 }
 
+let nativeItems: Item[] = [], nativeItemsRequest = 0;
 function canSeeCard(card: CardEntry, isGM: boolean, playerId: string): boolean {
-  if (isGM) return true;
-  const v = card.visibility ?? "public";
-  if (v === "public") return true;
-  if (v === "owners") return Array.isArray(card.owner_ids) && card.owner_ids.includes(playerId);
-  return false;  // "dm" or unknown
+  return canReadNativeCard(card, nativeCardOwners(nativeItems, card.id), playerId, isGM);
+}
+function canWriteCard(card: CardEntry, gm: boolean, player: string): boolean {
+  return gm || !!player && nativeCardOwners(nativeItems, card.id).includes(player);
+}
+function applyNativeItems(items: Item[]): void {
+  if (!panelAlive || sceneReady !== true) return;
+  nativeItemsRequest++; nativeItems = items;
+  for (const op of panelWrites) if (!writeIsCurrent(op)) op.controller.abort();
+  render();
+}
+async function refreshNativeItems(): Promise<void> {
+  const epoch = sceneEpoch, request = ++nativeItemsRequest;
+  try {
+    const items = await OBR.scene.items.getItems();
+    if (panelAlive && sceneReady === true && epoch === sceneEpoch && request === nativeItemsRequest) applyNativeItems(items);
+  } catch { /* No ownership read means no player write grant. */ }
 }
 
 function nextVisibilityLevel(v: CardEntry["visibility"]): CardEntry["visibility"] {
   // Cycle: public → dm → public.
-  // (owners level is set via the owner-picker dialog; the cycle button
-  // skips it to keep the one-click flow simple.)
+  // Native Set Owner supplies ownership; no separate player picker exists.
   if (v === "dm") return "public";
   return "dm";
 }
@@ -289,7 +293,7 @@ function writeIsCurrent(op: PanelWrite, list = cards): boolean {
   if (op.kind === "visibility" && !isGM) return false;
   if (!op.cardId) return true;
   const card = list.find(c => c.id === op.cardId);
-  return card ? canSeeCard(card, isGM, myPlayerId)
+  return card ? canWriteCard(card, isGM, myPlayerId) && (op.kind !== "delete" || isGM || nativeItems.filter(item => item.metadata?.["com.character-cards/boundCardId"] === card.id).every(item => item.createdUserId === myPlayerId))
     : op.kind === "delete" && op.metadataDispatched;
 }
 
@@ -509,6 +513,8 @@ function changeSceneReadiness(ready: boolean, initial = false): void {
   ++sceneEpoch;
   ++metadataRequest;
   sceneReady = ready;
+  nativeItemsRequest++; nativeItems = [];
+  if (ready) void refreshNativeItems();
   if (cardReadRetry) { cardReadRetry = undefined; showError(""); }
   if (initial && ready && metadataLoaded) {
     // The first ready event confirms a snapshot already received during
@@ -984,8 +990,7 @@ function render() {
       sub.textContent = `${c.uploader} · ${timeAgo(c.uploaded_at)}` + (visLabel ? ` · ${visLabel}` : "");
 
       // 👁 / 🔒 visibility toggle — DM only. Cycles public ↔ dm.
-      // owners-mode (specific player allowlist) is set via a separate
-      // dialog; the cycle button keeps the one-click flow simple.
+      // Native token ownership remains independent of this visibility toggle.
       if (isGM) {
         const visBtn = document.createElement("button");
         visBtn.className = "card-vis";
@@ -1006,7 +1011,7 @@ function render() {
       // files are untouched.
       const groupBtn = document.createElement("button");
       groupBtn.className = "card-group";
-      groupBtn.disabled = !canWrite || changing;
+      groupBtn.disabled = !canWrite || !canWriteCard(c, isGM, myPlayerId) || changing;
       groupBtn.textContent = "📁";
       groupBtn.title = tt("ccPanelGroupMove");
       groupBtn.addEventListener("click", async (e) => {
@@ -1020,7 +1025,7 @@ function render() {
       // JSON; the server overwrites the existing card's data.
       const refresh = document.createElement("button");
       refresh.className = "card-refresh";
-      refresh.disabled = !canWrite || changing;
+      refresh.disabled = !canWrite || !canWriteCard(c, isGM, myPlayerId) || changing;
       refresh.classList.toggle("spinning", activeWrites.some(op => op.kind === "refresh" && op.cardId === c.id));
       refresh.textContent = "↻";
       refresh.title = tt("ccPanelRefreshTitle");
@@ -1032,7 +1037,7 @@ function render() {
 
       const del = document.createElement("button");
       del.className = "card-del";
-      del.disabled = !canWrite || changing;
+      del.disabled = !canWrite || !canWriteCard(c, isGM, myPlayerId) || changing;
       del.textContent = "×";
       del.title = tt("ccPanelDeleteTitle");
       del.addEventListener("click", async (e) => {
@@ -1447,6 +1452,7 @@ OBR.onReady(() => {
   // Subscribe before the initial reads so role/scene events can invalidate
   // them even while one host request is slow.
   panelSubscriptions.push(OBR.scene.onMetadataChange(applyCardSnapshot));
+  panelSubscriptions.push(OBR.scene.items.onChange(applyNativeItems));
   panelSubscriptions.push(OBR.scene.onReadyChange((ready) => changeSceneReadiness(ready, sceneReady === undefined)));
   const profile = ++profileRequest;
   void Promise.allSettled([OBR.player.getName(), OBR.player.getId(), OBR.player.getRole()]).then(([name, id, role]) => {

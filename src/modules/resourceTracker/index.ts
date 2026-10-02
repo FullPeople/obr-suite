@@ -1,3 +1,4 @@
+import {ownsNativeToken,CARD_BINDING} from "../characterCards/native-owner";
 // Resource Tracker — background module.
 //
 // Owns the lifecycle of the edit modal (resource-edit.html). The
@@ -11,7 +12,7 @@
 // items.onChange.
 
 import {WORKBENCH_DEV} from '../../workbench/channel';
-import OBR from "@owlbear-rodeo/sdk";
+import OBR, {type Item} from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
 import { getLocalLang, onLangChange } from "../../state";
 import { readResources, commitResourceEdit } from "./storage";
@@ -60,9 +61,9 @@ const MUI_DIALOG_MARGIN = 64;
 const unsubs: Array<() => void> = [];
 let modalOpen = false;
 let enabled = false, lifecycle = 0, sceneRevision = 0, roleRevision = 0, editRevision = 0;
-let sceneReady = false, role: "GM" | "PLAYER" = "PLAYER", connectionId = "";
+let sceneReady = false, role: "GM" | "PLAYER" = "PLAYER", connectionId = "", playerId = "";
 let editSerial: Promise<void> = Promise.resolve();
-interface EditSession { session: string; itemId: string; resourceId: string | null; scene: number; role: number; lifetime: number; saving: boolean }
+interface EditSession { session: string; itemId: string; cardId?: string; resourceId: string | null; scene: number; role: number; lifetime: number; saving: boolean }
 let editor: EditSession | null = null;
 function invalidateEditor() {
   editRevision++;
@@ -72,6 +73,10 @@ function invalidateEditor() {
 function sessionCurrent(value: EditSession): boolean {
   return enabled && sceneReady && editor === value && value.lifetime === lifecycle &&
     value.scene === sceneRevision && value.role === roleRevision && editSessionOpen(value.session);
+}
+function canEditCardToken(item: Item): boolean {
+  // Keep unrelated resource-tracker hosts unchanged; character cards use OWNER.
+  return typeof item.metadata?.[CARD_BINDING] !== "string" || role === "GM" || ownsNativeToken(item, playerId);
 }
 function localMessage(message: { connectionId: string }) { return enabled && !!connectionId && message.connectionId === connectionId; }
 
@@ -205,11 +210,11 @@ async function openModal(payload: OpenPayload): Promise<void> {
   const request = ++editRevision, own = lifecycle, scene = sceneRevision, actor = roleRevision;
   const current = () => enabled && sceneReady && own === lifecycle && scene === sceneRevision && actor === roleRevision && request === editRevision;
   const items = await OBR.scene.items.getItems([payload.itemId]).catch(() => []);
-  if (!current() || !items[0]) return;
+  if (!current() || !items[0] || !canEditCardToken(items[0])) return;
   const resource = payload.resource ? readResources(items[0]).find((value) => value.id === payload.resource!.id) : undefined;
   if (payload.resource && !resource) return;
   const session: EditSession = { session: crypto.randomUUID(), itemId: payload.itemId, resourceId: resource?.id ?? null,
-    scene, role: actor, lifetime: own, saving: false };
+    scene, role: actor, lifetime: own, saving: false, cardId: typeof items[0].metadata[CARD_BINDING] === "string" ? items[0].metadata[CARD_BINDING] as string : undefined };
   editSerial = editSerial.catch(() => {}).then(async () => {
     if (!current()) return;
     if (editor) clearEditSession(editor.session);
@@ -233,7 +238,7 @@ async function applyEditorMessage(message: {connectionId: string; data: unknown}
   if (remove ? !target.resourceId || data.resourceId !== target.resourceId : !data.resource || (target.resourceId && data.resource.id !== target.resourceId)) return;
   target.saving = true;
   try {
-    const changed = await commitResourceEdit(target.itemId, target.resourceId, remove ? null : data.resource!, (item) => item.id === target.itemId && sessionCurrent(target));
+    const changed = await commitResourceEdit(target.itemId, target.resourceId, remove ? null : data.resource!, (item) => item.id === target.itemId && sessionCurrent(target) && (!target.cardId || item.metadata[CARD_BINDING] === target.cardId) && canEditCardToken(item));
     if (!sessionCurrent(target)) return;
     if (!changed) throw Error("Resource changed or is no longer available");
     await closeModal();
@@ -277,6 +282,7 @@ export async function setupResourceTracker(): Promise<void> {
       // Even an unchanged role event is newer than the initial read, but must
       // not invalidate an editor just because the player's name/color changed.
       roleObserved = true;
+      if (player.id && player.id !== playerId) { playerId = player.id; roleRevision++; void closeModal(); }
       const next = player.role === "GM" ? "GM" : "PLAYER";
       if (role === next) return;
       roleRevision++; role = next; void closeModal(); void syncTool().catch(reportEntryError);
@@ -290,13 +296,14 @@ export async function setupResourceTracker(): Promise<void> {
     }));
     unsubs.push(onLangChange(() => { if (enabled && own === lifecycle) void syncTool().catch(reportEntryError); }));
     const actor = roleRevision, scene = sceneRevision;
-    const [initialRole, initialConnection, initialReady] = await Promise.all([
-      OBR.player.getRole(), OBR.player.getConnectionId(), OBR.scene.isReady(),
+    const [initialRole, initialConnection, initialReady, initialPlayer] = await Promise.all([
+      OBR.player.getRole(), OBR.player.getConnectionId(), OBR.scene.isReady(), OBR.player.getId(),
     ]);
     if (!enabled || own !== lifecycle) return;
     if (!roleObserved && actor === roleRevision) role = initialRole === "GM" ? "GM" : "PLAYER";
     if (scene === sceneRevision) sceneReady = initialReady;
     connectionId = initialConnection;
+    if (!playerId) playerId = initialPlayer;
     if (!connectionId) throw new Error("[resources] missing local connection ID");
     toolReady = true;
     unsubs.push(OBR.broadcast.onMessage(BC_OPEN_EDIT, (message) => { if (localMessage(message)) void openModal(message.data as OpenPayload); }));
@@ -312,7 +319,7 @@ export async function setupResourceTracker(): Promise<void> {
 }
 
 export async function teardownResourceTracker(): Promise<void> {
-  enabled = false; toolReady = false; lifecycle++; sceneRevision++; roleRevision++; connectionId = "";
+  enabled = false; toolReady = false; lifecycle++; sceneRevision++; roleRevision++; connectionId = ""; playerId = "";
   invalidateEditor();
   for (const unsubscribe of unsubs.splice(0)) { try { unsubscribe(); } catch {} }
   // Queue removal now, before any await can let a new lifetime register the ID.
