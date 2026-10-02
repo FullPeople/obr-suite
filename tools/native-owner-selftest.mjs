@@ -42,6 +42,18 @@ await check('unlocked nonowner read succeeds; host rejects HP, resource, delete 
 await check('retired assignment request rejects for both player and GM without changing OWNER',async()=>{for(const role of ['PLAYER','GM']){reset({role});await assert.rejects(()=>host.command({type:'assignOwners',itemId:'card:hero',ownerIds:['other']}),/Set Owner/);assert.equal(world.items[0].createdUserId,'me');assert.equal(writes.length,0);}});
 await check('owner transfer revokes cached access immediately; slow read rechecks before returning data',async()=>{reset();readHook=async()=>{world.items[0].createdUserId='other';version++;return {secret:true};};await assert.rejects(()=>host.command({type:'readCard',itemId:'card:hero'}),/权限/);readHook=undefined;assert.equal((await host.catalog()).cards.length,0);});
 await check('multi-bound card name writes touch only the native owned token, not another player token',async()=>{reset({items:[token('other','foreign'),token('me','own')]});assert.equal((await host.access('card:hero')).item.id,'own');await host.command({type:'assignName',itemId:'card:hero',key:'room:card:hero',name:'New Name'});assert.deepEqual(writes.map(i=>i.id),['own']);assert.equal(world.items[0].text,undefined);});
+await check('card tab targets the native owned binding regardless of item order and becomes readonly after transfer',async()=>{
+ reset({locked:false,visibility:'public',items:[token('other','foreign'),token('me','own')]});
+ world.items[1].metadata[HP].health=12;
+ let row=(await host.catalog()).cards[0];
+ assert.equal(row.itemId,'own');assert.equal(row.stats.health,12);
+ assert.equal((await host.access(row.itemId)).write,true);
+ world.items[1].createdUserId='other';version++;
+ row=(await host.catalog()).cards[0];
+ assert.equal(row.itemId,'foreign');assert.equal(row.write,false);
+ assert.equal((await host.access(row.itemId)).write,false);
+ assert.equal(writes.length,0);
+});
 await check('explicit foreign token access is readonly; shared-card delete cannot remove another owner token',async()=>{reset({items:[token('other','foreign'),token('me','own')]});assert.equal((await host.access('foreign')).write,false);assert.equal((await host.access('own')).write,true);await assert.rejects(()=>host.command({type:'delete',itemId:'card:hero'}),/仅 DM/);assert.equal(writes.length,0);});
 await check('runtime projection excludes foreign tokens and rechecks owner inside SDK update callback',async()=>{reset({items:[token('me','own'),token('other','foreign')]});const doc={_suiteRevision:2,runtime:{stats:{health:19},resources:{},conditions:[]}};await host.writeRuntimeProjection('hero',doc,world.items,[]);assert.deepEqual(writes.map(i=>i.id),['own']);writes=[];const update=sdk.scene.items.updateItems;sdk.scene.items.updateItems=async(ids,apply)=>{world.items[0].createdUserId='other';return update(ids,apply);};const before=JSON.stringify(world.items);await host.writeRuntimeProjection('hero',{...doc,_suiteRevision:3},world.items,[]);assert.equal(world.items[0].metadata[RUNTIME_BASELINE].revision,2);sdk.scene.items.updateItems=update;});
 // Actual old-popup gate and viewer context use the same policy, not metadata owner lists.
