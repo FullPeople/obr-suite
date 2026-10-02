@@ -207,17 +207,18 @@ assert.equal((await noticeValues()).length,noNoticesBefore,'monster HP must not 
 assert.equal(await page.evaluate(()=>state.items.find(i=>i.id==='monster').metadata['com.obr-suite/bubbles/data'].health),6);
 reports.push({name:'monster-current-max-and-temp-hp-commit-without-notification',notices:0});
 
-// 205: explicit DM assignment works even without using the player's import entry point.
+// Native Set Owner replaces custom assignments, including existing imported cards.
 await page.evaluate(()=>{for(const f of document.querySelectorAll('iframe'))f.contentWindow.postMessage({id:'OBR_PARTY_EVENT_CHANGE',data:{players:[{id:'writer',role:'PLAYER',name:'玩家',connectionId:'writer-connection'}]}},location.origin);document.querySelector('#writer').contentWindow.postMessage({id:'OBR_PLAYER_EVENT_CHANGE',data:{player:{id:'writer',role:'PLAYER',name:'玩家',selection:[],metadata:{},color:'#555',connectionId:'writer-connection'}}},location.origin);});await sleep(30);
-await frame.evaluate(()=>window.liveProbe.command({type:'assignOwners',itemId:'card:hero1',ownerIds:['writer']}));await sleep(30);
+await assert.rejects(()=>frame.evaluate(()=>window.liveProbe.command({type:'assignOwners',itemId:'card:hero1',ownerIds:['writer']})),/Set Owner/);
+await page.evaluate(()=>{state.items.find(item=>item.id==='token1').createdUserId='writer';for(const f of document.querySelectorAll('iframe'))f.contentWindow.postMessage({id:'OBR_SCENE_ITEMS_EVENT_CHANGE',data:{items:state.items}},location.origin);});await sleep(30);
 assert.equal((await writer.evaluate(()=>window.liveProbe.snapshot('card:hero1'))).state.write,true);
 await assert.rejects(()=>writer.evaluate(()=>window.liveProbe.command({type:'assignOwners',itemId:'card:hero1',ownerIds:['me']})));
-await frame.evaluate(()=>window.liveProbe.command({type:'assignOwners',itemId:'card:hero1',ownerIds:[]}));await sleep(30);
+await page.evaluate(()=>{state.items.find(item=>item.id==='token1').createdUserId='me';for(const f of document.querySelectorAll('iframe'))f.contentWindow.postMessage({id:'OBR_SCENE_ITEMS_EVENT_CHANGE',data:{items:state.items}},location.origin);});await sleep(30);
 assert.equal((await writer.evaluate(()=>window.liveProbe.snapshot('card:hero1'))).state.write,false);
-reports.push({name:'DM-explicit-assignment-grants-and-revokes-player-editor-without-reimport',playerSelfGrantRejected:true});
+reports.push({name:'native-owner-transfer-grants-and-revokes-player-editor-without-reimport',customAssignmentRejected:true,playerSelfGrantRejected:true});
 await page.evaluate(()=>{state.items.find(item=>item.id==='token1').createdUserId='writer';for(const f of document.querySelectorAll('iframe'))f.contentWindow.postMessage({id:'OBR_SCENE_ITEMS_EVENT_CHANGE',data:{items:state.items}},location.origin);});await sleep(30);
-assert.equal((await writer.evaluate(()=>window.liveProbe.snapshot('card:hero1'))).state.write,false);
-reports.push({name:'old-scene-token-owner-cannot-restore-explicitly-revoked-card-permission'});
+assert.equal((await writer.evaluate(()=>window.liveProbe.snapshot('card:hero1'))).state.write,true);
+reports.push({name:'native-scene-owner-is-authoritative-over-old-custom-permission-records'});
 
 
 // A delayed Owlbear status catalog and slow foreign card reads must not stall

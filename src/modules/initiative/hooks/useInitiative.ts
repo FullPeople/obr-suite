@@ -23,7 +23,7 @@ import { itemToInitiativeItem, getCombatState, genTiebreak } from "../utils/meta
 import { getLocalLang } from "../../../state";
 import { t } from "../utils/i18n";
 import { broadcastDiceRoll, isGlobalDarkRollEnabled } from "../../dice";
-import {errorText} from '../../../../extensions/workbench-dice3d/src/types';
+import {errorText} from '../../../utils/errorText';
 import { readFixedRoll, consumeFixedRoll, randIntInclusive } from "../../dice/fixed-roll";
 
 export type RollType = "disadvantage" | "normal" | "advantage";

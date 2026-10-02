@@ -32,7 +32,8 @@ await check('nonowner visibility is separate from writes; no-owner popup never o
 // Exercise actual host catalog/access/command, without copying their logic into a test substitute.
 let version=0,writes=[],world,readHook;
 const sdk={room:{id:'room',setMetadata:async()=>{}},scene:{items:{updateItems:async(ids,apply)=>{const drafts=structuredClone(world.items.filter(i=>ids.includes(i.id)));apply(drafts);writes.push(...drafts);for(const d of drafts)world.items[world.items.findIndex(i=>i.id===d.id)]=d;}}}};
-const hostSource=policy+'\n'+['catalog','access','cacheAccess','command','writeRuntimeProjection'].map(n=>declaration('src/workbench/background.ts',n)).join('\n');
+const RUNTIME_PROJECTION_AUTHORITY='_suiteRuntimeProjectionAuthority';
+const hostSource=policy+'\n'+['runtimeProjectionRights','stampRuntimeProjectionAuthority'].map(n=>declaration('src/workbench/runtime-authority.ts',n)).join('\n')+'\n'+['catalog','access','cacheAccess','command','writeRuntimeProjection'].map(n=>declaration('src/workbench/background.ts',n)).join('\n');
 const host=scope(hostSource,{OBR:sdk,BIND,LIST,ROOM_LIST,DIRECTORY,HP,LEGACY,RES,RUNTIME_BASELINE,SLUG:'slug',DELETED:'deleted',MONSTER:'monster',STATUS_BUFFS_KEY:'buffs',SHARED_BUFFS:'shared-buffs',playerId:'me',origin:'https://example.test',observation:{read:async()=>world,peek:()=>world,version:()=>version,sceneEpoch:()=>1},documentCacheVersion:0,catalogCache:undefined,documents:new Map(),cardLocations:new Map(),directoryWrite:true,previousSceneCards:[],getState:()=>({enabled:{},allowPlayerMonsters:false}),sameValue:(a,b)=>JSON.stringify(a)===JSON.stringify(b),conditionRows:()=>[],documentRevision:d=>d?._suiteRevision||0,bubble:i=>i?.metadata[HP]||{},documentRuntime:d=>d.runtime,tokenRuntime:(m,value)=>m.runtime||value,definitionsFor:()=>[],read:async a=>readHook?readHook(a):({}),accessEpoch:0,accessSignature:'',role:'PLAYER'});
 function reset({role='PLAYER',owner='me',locked=true,visibility='owners',items}={}){writes=[];version++;host.catalogCache=undefined;world={ready:true,role,player:{id:'me',name:'Me',role},party:[],items:items||[token(owner)],scene:{[LIST]:[{id:'hero',name:'Hero',owner_ids:['stale'],visibility,locked}]},room:{[DIRECTORY]:[{id:'hero',name:'Hero',owner_ids:['stale'],visibility,locked}],'com.obr-suite/workbench/card-editors':{hero:['stale']}}};}
 await check('host ignores stale editor/importer grants; native owner sees locked card and keeps existing write right',async()=>{reset();let data=await host.catalog();assert.equal(data.cards.length,1);assert.equal(data.cards[0].write,true);assert.deepEqual([...data.cards[0].owner_ids],['me']);world.room['com.obr-suite/workbench/card-editors']={hero:[]};version++;assert.equal((await host.catalog()).cards[0].write,true);});
@@ -55,7 +56,34 @@ await check('card tab targets the native owned binding regardless of item order 
  assert.equal(writes.length,0);
 });
 await check('explicit foreign token access is readonly; shared-card delete cannot remove another owner token',async()=>{reset({items:[token('other','foreign'),token('me','own')]});assert.equal((await host.access('foreign')).write,false);assert.equal((await host.access('own')).write,true);await assert.rejects(()=>host.command({type:'delete',itemId:'card:hero'}),/仅 DM/);assert.equal(writes.length,0);});
+host.RUNTIME_PROJECTION_AUTHORITY=RUNTIME_PROJECTION_AUTHORITY;
 await check('runtime projection excludes foreign tokens and rechecks owner inside SDK update callback',async()=>{reset({items:[token('me','own'),token('other','foreign')]});const doc={_suiteRevision:2,runtime:{stats:{health:19},resources:{},conditions:[]}};await host.writeRuntimeProjection('hero',doc,world.items,[]);assert.deepEqual(writes.map(i=>i.id),['own']);writes=[];const update=sdk.scene.items.updateItems;sdk.scene.items.updateItems=async(ids,apply)=>{world.items[0].createdUserId='other';return update(ids,apply);};const before=JSON.stringify(world.items);await host.writeRuntimeProjection('hero',{...doc,_suiteRevision:3},world.items,[]);assert.equal(world.items[0].metadata[RUNTIME_BASELINE].revision,2);sdk.scene.items.updateItems=update;});
+await check('GM peer cannot broaden player stats or resources projection to another owner',async()=>{
+ reset({role:'GM',items:[token('me','own'),token('other','foreign')]});
+ const before={runtime:{stats:{health:20,'max health':30},resources:{points:{id:'points',current:3}},conditions:[]}},doc=structuredClone(before);
+ doc._suiteRevision=5;doc.runtime.stats.health=19;doc.runtime.resources.points.current=2;
+ host.stampRuntimeProjectionAuthority(before,doc,'me',false,false,[]);
+ for(const item of world.items){item.metadata.runtime=structuredClone(before.runtime);item.metadata[RES]=Object.values(before.runtime.resources);}
+ await host.writeRuntimeProjection('hero',doc,world.items,[]);
+ assert.equal(world.items[0].metadata[HP].health,19);assert.equal(world.items[0].metadata[RES][0].current,2);
+ assert.equal(world.items[1].metadata[HP].health,20);assert.equal(world.items[1].metadata[RES][0].current,3);
+ assert.equal(world.items[1].metadata[RUNTIME_BASELINE].value.stats.health,20);
+ // A fresh GM peer/refreshed browser sees the persisted scope, not a local grant.
+ writes=[];const reopened=JSON.parse(JSON.stringify(doc));await host.writeRuntimeProjection('hero',reopened,world.items,[]);
+ assert.equal(world.items[1].metadata[HP].health,20);
+ const displayEdit=structuredClone(doc);displayEdit.name='Changed';displayEdit[RUNTIME_PROJECTION_AUTHORITY]={version:1,stats:{playerId:'attacker',allBindings:true}};
+ host.stampRuntimeProjectionAuthority(doc,displayEdit,'gm',true,false,[]);
+ assert.deepEqual(displayEdit[RUNTIME_PROJECTION_AUTHORITY],doc[RUNTIME_PROJECTION_AUTHORITY]);
+ const gmEdit=structuredClone(doc);gmEdit.runtime.stats.health=18;
+ host.stampRuntimeProjectionAuthority(doc,gmEdit,'gm',true,false,[]);await host.writeRuntimeProjection('hero',gmEdit,world.items,[]);
+ assert.equal(world.items[1].metadata[HP].health,18);assert.equal(world.items[1].metadata[RES][0].current,3);
+});
+await check('explicit public condition grant does not authorize foreign HP/resource projection',()=>{
+ const before={runtime:{stats:{health:20},resources:{},conditions:[]}},next=structuredClone(before);
+ next.runtime.stats.health=19;next.runtime.conditions=['restrained'];host.stampRuntimeProjectionAuthority(before,next,'me',false,true,[]);
+ assert.deepEqual(JSON.parse(JSON.stringify(host.runtimeProjectionRights(next,{createdUserId:'other'}))),{stats:false,resources:true,conditions:true});
+ for(const invalid of [null,{version:2},{version:1,stats:null},{version:1,stats:{allBindings:true}}])assert.equal(host.runtimeProjectionRights({[RUNTIME_PROJECTION_AUTHORITY]:invalid},{createdUserId:'other'}).stats,false);
+});
 // Actual old-popup gate and viewer context use the same policy, not metadata owner lists.
 const pop=scope(policy+'\n'+declaration('src/modules/characterCards/index.ts','mayShow'),{cards:new Map(),ccRole:'PLAYER',ccMyId:'me',BIND_META:BIND,BUBBLES_META_KEY:HP,EXTERNAL_BUBBLES_META_KEY:LEGACY});
 await check('actual popup selection gate honors native OWNER over mismatched metadata owner_ids',()=>{pop.cards.set('hero',{id:'hero',visibility:'owners',locked:true,owner_ids:['other']});assert.equal(pop.mayShow(token(),'hero'),true);assert.equal(pop.mayShow(token('other'),'hero'),false);});

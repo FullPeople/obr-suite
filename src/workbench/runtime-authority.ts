@@ -5,6 +5,26 @@ import {conditionIdentity,runtimeConditions} from './conditions';
  * The baseline distinguishes a real scene edit from a token returning with old data. */
 export const RUNTIME_BASELINE='com.obr-suite/workbench/runtime-baseline';
 export const DOCUMENT_REVISION='_suiteRevision';
+export const RUNTIME_PROJECTION_AUTHORITY='_suiteRuntimeProjectionAuthority';
+type ProjectionGrant={playerId:string;allBindings:boolean};
+type ProjectionAuthority={version:1;stats?:ProjectionGrant;resources?:ProjectionGrant;conditions?:ProjectionGrant};
+/** A reader's GM role must not amplify another player's original scene write. */
+export function runtimeProjectionRights(doc:any,item:{createdUserId:string}){
+ const authority=doc?.[RUNTIME_PROJECTION_AUTHORITY] as ProjectionAuthority|undefined;
+ const allowed=(grant:ProjectionGrant|undefined)=>authority===undefined||authority?.version===1&&(grant===undefined||!!grant&&typeof grant.playerId==='string'&&!!grant.playerId&&typeof grant.allBindings==='boolean'&&(grant.allBindings||item.createdUserId===grant.playerId));
+ return {stats:allowed(authority?.stats),resources:allowed(authority?.resources),conditions:allowed(authority?.conditions)};
+}
+/** Stamp only changed runtime categories, using the rechecked SDK identity.
+ * Display edits preserve grants; supplied character JSON cannot broaden them.
+ * An explicit condition grant authorizes conditions, never HP or resources. */
+export function stampRuntimeProjectionAuthority(existing:any,data:any,playerId:string,gm:boolean,conditionGrant:boolean,definitions:any[]){
+ const before=documentRuntime(existing,definitions),after=documentRuntime(data,definitions),old=existing?.[RUNTIME_PROJECTION_AUTHORITY];
+ const authority:ProjectionAuthority={...(old||{}),version:1};let changed=false;
+ for(const category of ['stats','resources','conditions'] as const)if(!sameValue(before[category],after[category])){
+  authority[category]={playerId,allBindings:gm||category==='conditions'&&conditionGrant};changed=true;
+ }
+ if(changed||old!==undefined)data[RUNTIME_PROJECTION_AUTHORITY]=authority;else delete data[RUNTIME_PROJECTION_AUTHORITY];
+}
 export type Runtime={stats:Record<string,any>;resources:Record<string,any>;conditions:string[]};
 export type RuntimeBaseline={version:1;cardId:string;revision:number;value:Runtime};
 const fields=['health','max health','temporary health','armor class'];

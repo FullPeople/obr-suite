@@ -8,7 +8,7 @@ import { localViewParts } from "./local-view";
 import { TABLE_UI_RESTORE, readUIDraft, type TableDisplayMode, type TableUICommand, type TableUIDraft } from "./ui-command";
 
 const PANEL = "com.obr-suite/three-dragon-ante/popover";
-let active = false, epoch = 0, selfId = "", connectionId = "";
+let active = false, epoch = 0, selfId = "";
 let controller: TableController | null = null, starting: Promise<void> | null = null;
 let desiredOpen = false, panelOpen = false, geometryDirty = false, panelRequested = false;
 let syncing: Promise<void> | null = null, resizeOff: (() => void) | null = null;
@@ -126,11 +126,16 @@ async function openTable(): Promise<void> {
   void ensureController();
   await syncPanel();
 }
+async function localSender(sender:string,generation=epoch):Promise<boolean>{
+  const current=await OBR.player.getConnectionId();
+  return active&&generation===epoch&&sender===current;
+}
 async function localCommand(value: unknown, sender: string): Promise<void> {
-  if (!active || sender !== connectionId || !value || typeof value !== "object") return;
+  const generation = epoch;
+  if (!value || typeof value !== "object" || !await localSender(sender,generation)) return;
   const envelope = value as { instance?: unknown; clientId?: unknown; command?: unknown };
   if (envelope.instance !== panelInstance || envelope.clientId !== panelClient || !panelClient || !envelope.command || typeof envelope.command !== "object") return;
-  const command = envelope.command as TableUICommand, generation = epoch;
+  const command = envelope.command as TableUICommand;
   if (command.type === "remember" || command.type === "display" || command.type === "close") {
     if ("draft" in command) {
       const draft = readUIDraft(command.draft);
@@ -153,20 +158,20 @@ async function localCommand(value: unknown, sender: string): Promise<void> {
 export async function setupThreeDragonAnte(): Promise<void> {
   if (active) return;
   active = true; const generation = ++epoch;
-  [selfId, connectionId] = await Promise.all([OBR.player.getId(), OBR.player.getConnectionId()]);
+  selfId = await OBR.player.getId();
   if (!active || generation !== epoch) return;
   errorMessage = undefined;
-  unsubs.push(OBR.broadcast.onMessage(TABLE_OPEN, event => { if (event.connectionId === connectionId) void openTable(); }));
-  unsubs.push(OBR.broadcast.onMessage(TABLE_READY, event => {
+  unsubs.push(OBR.broadcast.onMessage(TABLE_OPEN, event => {void(async()=>{if(await localSender(event.connectionId,generation))await openTable();})().catch(error=>console.warn('[three-dragon] local open failed',error));}));
+  unsubs.push(OBR.broadcast.onMessage(TABLE_READY, event => {void(async()=>{
     const data = event.data as { clientId?: unknown; instance?: unknown };
-    if (event.connectionId !== connectionId || !desiredOpen || data?.instance !== panelInstance || typeof data.clientId !== "string" || !data.clientId || data.clientId.length > 64) return;
+    if (!await localSender(event.connectionId,generation) || !desiredOpen || data?.instance !== panelInstance || typeof data.clientId !== "string" || !data.clientId || data.clientId.length > 64) return;
     panelClient = data.clientId; requestView();
     if (restoreClient !== panelClient) {
       restoreClient = panelClient;
       if (uiDraft) void OBR.broadcast.sendMessage(TABLE_UI_RESTORE, { instance: panelInstance, clientId: panelClient, draft: uiDraft }, { destination: "LOCAL" }).catch(error => console.warn("[three-dragon] local selection restore failed", error));
     }
-  }));
-  unsubs.push(OBR.broadcast.onMessage(TABLE_COMMAND, event => { void localCommand(event.data, event.connectionId); }));
+  })().catch(error=>console.warn('[three-dragon] local ready failed',error));}));
+  unsubs.push(OBR.broadcast.onMessage(TABLE_COMMAND, event => { void localCommand(event.data, event.connectionId).catch(error=>console.warn('[three-dragon] local command failed',error)); }));
   const recoverHost = (metadata: Record<string, unknown>) => {
     const table = metadata[TABLE_ROOM_KEY] as { hostPlayerId?: unknown } | undefined;
     if (active && generation === epoch && table?.hostPlayerId === selfId) void ensureController();
@@ -187,5 +192,5 @@ export async function teardownThreeDragonAnte(): Promise<void> {
   await publishing;
   panelClient = panelInstance = "";
   uiDraft = null; restoreClient = ""; replacePanel = false; displayMode = "full";
-  selfId = connectionId = "";
+  selfId = "";
 }

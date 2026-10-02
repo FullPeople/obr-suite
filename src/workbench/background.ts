@@ -4,7 +4,7 @@ import {createGroupRolls} from './group-rolls';
 import {classSummary} from './class-summary';
 import {withRequestTimeout} from '../request-timeout';
 import {sharedEntry,OPEN_WIKI_CHANNEL} from './shared-entry';
-import {RUNTIME_BASELINE,DOCUMENT_REVISION,documentRevision,documentRuntime,tokenRuntime,mergeTokenRuntime,writeRuntime,mergeMonsterMetadata,type RuntimeBaseline} from './runtime-authority';
+import {RUNTIME_BASELINE,DOCUMENT_REVISION,documentRevision,documentRuntime,tokenRuntime,mergeTokenRuntime,writeRuntime,mergeMonsterMetadata,runtimeProjectionRights,stampRuntimeProjectionAuthority,type RuntimeBaseline} from './runtime-authority';
 import {workbenchObservation} from './observation';
 import {documentChanges,expandChanges} from './document-delta';
 import {documentCoins} from './currency';
@@ -134,15 +134,19 @@ async function start(){
   runtimeProjections.set(key,job);return job.work;
  }
  async function writeRuntimeProjection(cardId:string,doc:any,tokens:Item[],defs:any[]){
-  const value=documentRuntime(doc,defs),revision=documentRevision(doc),stamp:RuntimeBaseline={version:1,cardId,revision,value};
+  const value=documentRuntime(doc,defs),revision=documentRevision(doc);
   const role=(await observation.read()).role;
-  const pending=tokens.filter(item=>role==='GM'||ownsNativeToken(item,playerId)).filter(item=>!sameValue(item.metadata[RUNTIME_BASELINE],stamp)||!sameValue(tokenRuntime(item.metadata,value),value));if(!pending.length)return;
+  const projection=(item:Item)=>{const rights=runtimeProjectionRights(doc,item),current=tokenRuntime(item.metadata,value),next={stats:rights.stats?value.stats:current.stats,resources:rights.resources?value.resources:current.resources,conditions:rights.conditions?value.conditions:current.conditions};return {rights,next,stamp:{version:1,cardId,revision,value:next} as RuntimeBaseline};};
+  const pending=tokens.filter(item=>role==='GM'||ownsNativeToken(item,playerId)).filter(item=>{const {rights,next,stamp}=projection(item);return Object.values(rights).some(Boolean)&&(!sameValue(item.metadata[RUNTIME_BASELINE],stamp)||!sameValue(tokenRuntime(item.metadata,value),next));});if(!pending.length)return;
   await OBR.scene.items.updateItems(pending.map(i=>i.id),drafts=>{for(const item of drafts){const observed=pending.find(i=>i.id===item.id),previous=item.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined;
    if(observation.peek().role!=='GM'&&!ownsNativeToken(item,playerId))continue;
    if(item.metadata[BIND]!==cardId||!observed||previous?.cardId===cardId&&previous.revision>revision)continue;
    // A genuine scene edit after the read is handled by the next reconciliation.
    if(!sameValue(tokenRuntime(item.metadata,value),tokenRuntime(observed.metadata,value))||!sameValue(item.metadata[RUNTIME_BASELINE],observed.metadata[RUNTIME_BASELINE]))continue;
-   item.metadata[HP]={...bubble(item),...value.stats};if(item.metadata[LEGACY])item.metadata[LEGACY]={...item.metadata[LEGACY] as object,...value.stats};item.metadata[RES]=structuredClone(Object.values(value.resources));item.metadata[STATUS_BUFFS_KEY]=[...value.conditions];item.metadata[RUNTIME_BASELINE]=structuredClone(stamp);
+   const {rights,stamp}=projection(item);
+   if(rights.stats){item.metadata[HP]={...bubble(item),...value.stats};if(item.metadata[LEGACY])item.metadata[LEGACY]={...item.metadata[LEGACY] as object,...value.stats};}
+   if(rights.resources)item.metadata[RES]=structuredClone(Object.values(value.resources));
+   if(rights.conditions)item.metadata[STATUS_BUFFS_KEY]=[...value.conditions];item.metadata[RUNTIME_BASELINE]=structuredClone(stamp);
   }});
  }
  async function catalog(){
@@ -238,6 +242,7 @@ async function start(){
  }
  async function persistDocument(a:Awaited<ReturnType<typeof access>>,existing:any,data:any,inventoryGuard?:{key:string;revision:number},conditionGrant=false){
   const permission=await access(`card:${a.cardId}`);if(!permission.write&&!(conditionGrant&&permission.card&&!permission.card.locked))throw Error('角色修改权限已改变');
+  stampRuntimeProjectionAuthority(existing,data,playerId,permission.role==='GM',conditionGrant,definitionsFor(permission.scene));
   data[DOCUMENT_REVISION]=documentRevision(existing)+1;
   const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(existing))),expected=[...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('');
   const location=documentLocation(a.cardId);
