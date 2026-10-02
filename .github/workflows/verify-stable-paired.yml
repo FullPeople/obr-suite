@@ -1,6 +1,9 @@
 name: Verify scoped stable paired release
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - codex/final-stable-paired-20261003
 permissions:
   contents: read
 jobs:
