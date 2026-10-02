@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="544" viewBox="0 0 760 544" font-family="ui-sans-serif, system-ui, sans-serif">
+<rect width="760" height="544" fill="#14161c"/>
+<text x="16" y="28" fill="#e6e8ee" font-size="15" font-weight="600">dynfog — wall derivation output</text>
+<text x="744" y="28" fill="#7d8494" font-size="11" text-anchor="end">faint = drawn fog · white = vision-blocking wall · coloured = opening indicator</text>
+<text x="16" y="60" fill="#f5a623" font-size="12" font-weight="600">1. All four opening kinds on one fog rectangle</text>
+<text x="16" y="74" fill="#7d8494" font-size="10">shut door + shut secret door keep their wall · open door and SHUT window both cut a gap</text>
+<path d="M26.00 76.00 L226.00 76.00 L226.00 216.00 L26.00 216.00 L26.00 76.00" fill="none" stroke="#3b4150" stroke-width="1" stroke-dasharray="3 3"/>
+<path d="M53.20 76.00 L107.60 76.00" fill="none" stroke="#ff4d4d" stroke-width="7" stroke-linecap="round" opacity="0.9"/>
+<path d="M216.40 76.00 L226.00 76.00 L226.00 120.80" fill="none" stroke="#85ff66" stroke-width="7" stroke-linecap="round" opacity="0.9"/>
+<path d="M212.40 216.00 L158.00 216.00" fill="none" stroke="#5dade2" stroke-width="7" stroke-linecap="round" opacity="0.9"/>
+<path d="M49.20 216.00 L26.00 216.00 L26.00 184.80" fill="none" stroke="#b06bff" stroke-width="7" stroke-linecap="round" opacity="0.9"/>
+<path d="M26.00 76.00 L216.40 76.00" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M226.00 120.80 L226.00 216.00 L212.40 216.00" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M158.00 216.00 L26.00 216.00 L26.00 76.00" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="16" y="302" fill="#5b6373" font-size="10">3 wall segments</text>
+<text x="396" y="60" fill="#f5a623" font-size="12" font-weight="600">2. A door on a shared wall opens BOTH overlapping rooms</text>
+<text x="396" y="74" fill="#7d8494" font-size="10">left room owns the door · right room loses the same stretch</text>
+<path d="M406.00 76.00 L566.00 76.00 L566.00 216.00 L406.00 216.00 L406.00 76.00" fill="none" stroke="#3b4150" stroke-width="1" stroke-dasharray="3 3"/>
+<path d="M566.00 76.00 L726.00 76.00 L726.00 216.00 L566.00 216.00 L566.00 76.00" fill="none" stroke="#3b4150" stroke-width="1" stroke-dasharray="3 3"/>
+<path d="M566.00 106.00 L566.00 160.00" fill="none" stroke="#85ff66" stroke-width="7" stroke-linecap="round" opacity="0.9"/>
+<path d="M406.00 76.00 L566.00 76.00 L566.00 106.00" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M566.00 160.00 L566.00 216.00 L406.00 216.00 L406.00 76.00" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M566.00 76.00 L726.00 76.00 L726.00 216.00 L566.00 216.00 L566.00 174.00" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M566.00 92.00 L566.00 76.00" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="396" y="302" fill="#5b6373" font-size="10">4 wall segments</text>
+<text x="16" y="310" fill="#f5a623" font-size="12" font-weight="600">3. Wall-expand keeps the door where it was drawn</text>
+<text x="16" y="324" fill="#7d8494" font-size="10">faint = drawn outline · solid = blocking wall offset 6px inward</text>
+<path d="M26.00 326.00 L246.00 326.00 L246.00 386.00 L106.00 386.00 L106.00 476.00 L26.00 476.00 L26.00 326.00" fill="none" stroke="#3b4150" stroke-width="1" stroke-dasharray="3 3"/>
+<path d="M174.00 326.00 L233.20 326.00" fill="none" stroke="#85ff66" stroke-width="7" stroke-linecap="round" opacity="0.9"/>
+<path d="M32.00 332.00 L174.00 332.00" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M233.20 332.00 L240.00 332.00 L240.00 380.00 L100.00 380.00 L100.00 470.00 L32.00 470.00 L32.00 332.00" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="16" y="552" fill="#5b6373" font-size="10">2 wall segments</text>
+<text x="396" y="310" fill="#f5a623" font-size="12" font-weight="600">4. Freehand curve walls, with a shut window in the middle</text>
+<text x="396" y="324" fill="#7d8494" font-size="10">cardinal spline sampled the same way Owlbear renders it — the window is see-through shut</text>
+<path d="M416.00 446.00 L419.98 431.92 L424.01 418.90 L428.08 406.96 L432.20 396.08 L436.37 386.27 L440.58 377.52 L444.84 369.85 L449.15 363.24 L453.51 357.70 L457.91 353.22 L462.36 349.81 L466.86 347.48 L471.41 346.20 L476.00 346.00 L481.67 347.24 L486.82 350.00 L491.52 354.10 L495.83 359.36 L499.81 365.59 L503.52 372.63 L507.02 380.30 L510.39 388.41 L513.68 396.79 L516.95 405.25 L520.26 413.63 L523.69 421.74 L527.29 429.40 L531.12 436.44 L535.25 442.67 L539.74 447.92 L544.66 452.01 L550.05 454.77 L556.00 456.00 L560.73 455.85 L565.44 454.77 L570.15 452.76 L574.85 449.81 L579.54 445.94 L584.23 441.14 L588.90 435.40 L593.57 428.73 L598.23 421.14 L602.88 412.61 L607.52 403.15 L612.15 392.76 L616.78 381.44 L621.39 369.18 L626.00 356.00" fill="none" stroke="#3b4150" stroke-width="1" stroke-dasharray="3 3"/>
+<path d="M501.00 367.87 L503.52 372.63 L507.02 380.30 L510.39 388.41 L513.68 396.79 L516.95 405.25 L520.26 413.63 L523.69 421.74 L523.94 422.26" fill="none" stroke="#5dade2" stroke-width="7" stroke-linecap="round" opacity="0.9"/>
+<path d="M416.00 446.00 L419.98 431.92 L424.01 418.90 L428.08 406.96 L432.20 396.08 L436.37 386.27 L440.58 377.52 L444.84 369.85 L449.15 363.24 L453.51 357.70 L457.91 353.22 L462.36 349.81 L466.86 347.48 L471.41 346.20 L476.00 346.00 L481.67 347.24 L486.82 350.00 L491.52 354.10 L495.83 359.36 L499.81 365.59 L501.00 367.87" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M523.94 422.26 L527.29 429.40 L531.12 436.44 L535.25 442.67 L539.74 447.92 L544.66 452.01 L550.05 454.77 L556.00 456.00 L560.73 455.85 L565.44 454.77 L570.15 452.76 L574.85 449.81 L579.54 445.94 L584.23 441.14 L588.90 435.40 L593.57 428.73 L598.23 421.14 L602.88 412.61 L607.52 403.15 L612.15 392.76 L616.78 381.44 L621.39 369.18 L626.00 356.00" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="396" y="552" fill="#5b6373" font-size="10">2 wall segments</text>
+</svg>

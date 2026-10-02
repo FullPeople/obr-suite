@@ -2,7 +2,64 @@
 
 All notable changes to this project follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] — 2026-08-25
+
+### Changed
+
+- **The DM announcement is shown automatically, once a day, to GMs.** It used to appear only when the megaphone in the cluster row was clicked, so release notes went unread. `background.ts` now opens it on the first load of each LOCAL calendar day — not UTC, because "first time today" should mean the DM's today, not a date that rolls over mid-session. Players never see it: it carries DM-facing notes, and an unprompted modal appearing mid-session for a player would be worse than useless. Deliberately not gated on the announcement version, so it reads like a game's daily patch notes rather than surfacing only when something was published; it still writes the acknowledged-version key, so opening it also stops the megaphone blinking.
+- **The announcement's close button arms after a 3 s progress bar**, and counts down on the label. With the popup now unprompted, an un-gated button gets dismissed by reflex before anyone reads what changed. Reuses the `.auto-progress` bar that had been left inert in the markup since the old auto-close timer was removed, retimed 5 s → 3 s.
+- **Announcement rewritten as patch notes** — plain-language "what's new / what got fixed", in the style of a game changelog, replacing the project-closure notice. Everything listed is a real change drawn from this file. Verified against the parser's own rules before shipping: every section resolves to a known kind, every `issues` row carries a valid type, every `highlights` row has its separator.
+- **Settings → Support: the closure copy is gone.** The paragraphs about the project "nearing its end", heading for 封盘, and thanking everyone for their company no longer describe the project — the suite is a complete, actively maintained toolkit. Replaced with one line on what it actually covers. The support invitation stays, reworded to "如果这个插件真的让你感到惊喜" / "If this plugin genuinely surprised you". The music-board note also stops framing its retirement as part of a project closure, and "下周我会统一收集" becomes "不定期", since that week was months ago.
+
+## [1.1.11] — 2026-08-20
+
+> Note: 1.0.8 – 1.1.10 shipped without changelog entries; resuming the log here.
+
+### Added
+
+- **Settings → Bestiary → "Repair legacy image URLs" one-click button (DM only).** Scenes created before the 1.1.10 kiwee migration have tokens whose baked-in image URL still points at the retired `obr.dnd.center/5etools-img` proxy. The button rewrites every legacy token image URL **and every transform-snapshot URL** in the current scene to `https://5e.kiwee.top/img`; custom / external images are untouched. Run once per affected scene. Includes an in-flight guard (mid-repair re-renders can't resurrect a clickable button), a scene-ready check before the confirm dialog, and an old→new evidence log in the console. (`src/modules/bestiary/repair-legacy-images.ts`)
+
+### Fixed
+
+- **World-pack import migrates legacy image URLs.** `.fobr` packs exported before the kiwee migration carry the retired proxy verbatim; the importer's rewrite pass now migrates token images and transform snapshots on the way in, so importing an old archive no longer resurrects dead image URLs. (`src/modules/worldPack/importer.ts`)
+- **Settings popover tracks GM-role changes live.** `isGM` used to be sampled once at open; a player promoted to GM mid-session had to reopen the popover to see GM-only controls (module toggles, repair buttons). Now subscribes to `OBR.player.onChange` and re-renders on role change; `getRole` failures are logged instead of silently swallowed.
+
 ## [Unreleased — dev branch]
+
+### Added
+
+- **`fullFog/dynfog` — the fog module's wall / door / light stack rebuilt as a functional port of [owlbear-rodeo/dynamic-fog](https://github.com/owlbear-rodeo/dynamic-fog).** Design notes and the deliberate deviations are in [`docs/DYNAMIC_FOG_PARITY.md`](docs/DYNAMIC_FOG_PARITY.md).
+  - **Walls now come from every FOG-layer drawing.** Shapes drawn with Owlbear's own fog tool (rectangle / circle / triangle / hexagon / freehand curve / line / path) all become native per-client `Wall` items, alongside the fog editor's traced outline. Previously only the editor's outline produced walls, so anything drawn by hand blocked nothing.
+  - **Door tool (fog toolbar, shortcut `O`).** Drag along any wall to carve a door; click to open/close, alt-click or double-click to delete. It snaps to any fog wall rather than requiring the pointer to be over the shape itself, which is what makes it work on the traced outline (that Path is `disableHit`, so it can never be a pointer target).
+  - **Window tool (shortcut `I`).** Same gesture. A window is see-through in **both** states — cyan when glazed, aqua when swung open — and its toggle says whether a creature can *pass*, not whether you can see. Owlbear walls do not affect movement, so that half is carried by the indicator and honoured at the table.
+  - **Secret door tool (shortcut `U`).** Vision-identical to a door, but no indicator is ever built on a player's client and the GM re-checks every incoming toggle request, so a hand-rolled broadcast can't work one either. Dashed purple for the GM.
+  - **Line tool.** Drag a straight fog line, so a bare wall segment can be drawn to hang a door on.
+  - **Players can work the doors.** Indicators render for players on the `DRAWING` layer, below the fog, so undiscovered doors don't leak the floor plan; a 「开关门窗」 toolbar tool (shortcut `K`) flips one. FOG-layer items are GM-writable only, so the click is broadcast and applied by the GM, who owns the permission gate. Governed by the new `fogPlayerDoors` scene setting (default on).
+  - **Lights reach upstream parity.** Range in scene units, full/cone angle, hard/soft edge, PRIMARY/SECONDARY type, cone rotation, and the small self-light that stops a cone-carrier standing in their own dark spot. The old panel had only radius / core radius / falloff.
+  - **A door on a shared wall opens both overlapping fog shapes**, matching upstream's world-space door subtraction. Without it a door between two overlapping rooms looks open while the second shape's wall still blocks vision.
+  - **Light occlusion (`fogLightOcclusion`, default on).** A player only sees a light they don't own when a straight line from one of their own lights reaches it without crossing a wall. Walls only — distance is not part of it — and not transitive, so a row of torches lights up one at a time as line of sight is gained. Lights flagged **Ambient** in Light Settings are exempt, for fixed room lighting; the GM is never occluded. A player carrying no light of their own therefore sees only ambient lights, which is the intended reading of the rule. Backed by a new uniform-grid segment index (`dynfog/light/wallIndex.ts`) over the walls the engine actually emits, so a traced map with tens of thousands of segments still answers in microseconds.
+  - **Light occlusion.** A light on a token you do not own is hidden unless a wall-free sight line reaches it from one of your own lights — so an NPC's torch two rooms away no longer lights your screen. Per-light **Ambient** opts a fixed source (wall sconce, daylight) out of the rule entirely.
+  - **Settings → 动态迷雾** gains the toggles above plus a passthrough for the OBR scene's own **"整张地图铺满迷雾"**. With scene fog unfilled, walls and lights have no visible effect at all — the most likely explanation for "lighting ignores walls".
+  - No new dependencies: upstream's 6.8 MB CanvasKit WASM is replaced by a pure-TS geometry core, since the background iframe loads on every client. `tools/dynfog-selftest.mjs` runs 40 checks under node (geometry plus the line-of-sight index); `tools/dynfog-visual.mjs` renders the engine's actual wall output to [`docs/dynfog-walls.svg`](docs/dynfog-walls.svg).
+
+### Fixed
+
+- **Retired assets actually disappear from the server now.** The deploy scripts (`deploy-suite-dev.sh`, `deploy-suite.sh`, `deploy-full-suite-en.sh`, which live one directory above this repo and are not versioned with it) extracted the release tarball over `/tmp/obr-plugins/<channel>` without clearing it first. `tar` merges into an existing directory rather than replacing it, so that staging directory accumulated every file ever deployed and `cp -r` then published the whole accumulation — the `rm -rf` on the web root could never win. Caught by `fullfog-window-billboard.svg`: deleted from `public/` and absent from `dist/`, yet still served 200 from the dev channel after a deploy. Each script now clears its staging directory before extracting.
+- **Toggling a door no longer flashes the room behind it.** Two causes, both fixed. (1) The Patcher submitted deletions before additions, so closing a door deleted the second wall piece a full round trip before the first was widened back to a closed loop — one rendered frame with an entire wall segment missing, and vision poured straight through it. It now grows before it shrinks, so the blocking set is a superset of the target at every intermediate state and the worst case is one frame of over-blocking, which is invisible. (2) A door toggle bumps every `WallActor`'s signature, because an opening on an overlapping shape can cut a neighbour — and each actor then rewrote *all* of its walls. On a traced map that is thousands of item updates per click and the stall itself reads as a flicker. `WallActor` now patches only the walls whose points or transform actually changed.
+- **The fog editor no longer emits its own `Wall` items on an independent (unbound) save.** The old watcher ignored Paths without `attachedTo`, so the editor built a second wall set inline; the new engine covers both bind modes, and that second, untracked set would have gone on blocking vision after the engine opened a door in its own copy — sealing an unbound map permanently.
+- **`wallExpandPx` is saved with its sign.** It was persisted through `Math.max(0, …)`, so the negative half of the slider (blocking wall pushed *into* the wall material) silently did nothing and disagreed with the editor's magenta wall preview.
+- **Wall-expand works on independent saves.** The stored value is in image pixels, which can only be converted using the map image's grid dpi — unreachable for a Path with no `attachedTo`. Saves now also record the pre-converted map-local value.
+
+### Changed
+
+- **`fullFog` split into two independently switchable modules: `fogEditor` and `dynamicFog`.** They answer different questions — the editor is a content-authoring convenience with no runtime, while the engine is what makes fog block vision at all — and a table that hand-draws its fog should not have to keep the tracer to get walls. Turning the editor off does not invalidate fog it already traced. The settings page loses the several-hundred-word editor manual that used to sit above the dynamic-fog options; the detail now lives in `docs/` and in the editor's own hover text. `fullFog` remains in the state shape as a retired id (pinned off, registered nowhere); a room that had deliberately stored `fullFog: false` migrates once to both new ids off.
+
+### Removed
+
+- `src/modules/fullFog/door/` and `src/modules/fullFog/light/`, superseded by `dynfog/`. Openings and light metadata keep their existing keys, so scenes carry over.
+- `public/fullfog-window-billboard.svg`. Every opening kind now follows one `-open` / `-closed` naming pattern, so the shut window is `fullfog-window-closed.svg`.
+- **Darkvision.** Shipped in this cycle and pulled again before release: two attempts, neither producing the colour disc at the table. The second correctly diagnosed `POST_PROCESS` as viewport-space and moved the ring to `ATTACHMENT`, and it still did not work. Rather than keep guessing at how Owlbear places an effect box, the whole thing is gone — `DarkvisionActor`, `DarkvisionReactor`, `LightConfig.colorRadius` and the `fogDarkvisionForGM` setting. Nothing in a saved scene depends on it; a stale `colorRadius` on a light is simply ignored.
+- **The core-radius and falloff sliders** from Light Settings. Edge already picks the two falloff values anyone reaches for, and a raw source-radius slider is a footgun — set it too large and a torch stops fitting through a doorway. The panel now matches upstream dynamic-fog's control set exactly.
 
 ### Changed
 
