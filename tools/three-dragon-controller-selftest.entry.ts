@@ -49,7 +49,8 @@ try {
   assert.equal(own(alice).revision, initialRevision);
   room.drop = undefined;
   await alice.command({ type: "retry" });
-  await until(() => !alice.view.pending && own(alice).revision === initialRevision + 1, "same action retry receives durable result");
+  // Public revision can arrive before the encrypted private hand; await both.
+  await until(() => !alice.view.pending && own(alice).revision === initialRevision + 1 && own(alice).hand.length === 5 && !!own(alice).committedAnte, "same action retry receives durable private result");
   assert.equal(host.view.game?.revision, initialRevision + 1, "no duplicate rule execution after missing ACK");
   assert.equal(own(alice).hand.length, 5); assert.ok(own(alice).committedAnte);
   assert.equal((watcher.view.game?.seats.find(seat => seat.id === own(alice).selfSeatId))?.handCount, 5);
