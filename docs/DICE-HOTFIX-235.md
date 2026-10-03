@@ -22,3 +22,7 @@
 证据位于仓库外 `U:/CodexWork/2026-10-03/dice-timeout-hotfix235`。最终浏览器为 `browser235-final-async/result.json`，正式 Edge 为 `edge235-final/production-edge.json`，构建为 `runtime-final.build-evidence`。源包绑定实际提交，部署采用独立完整备份和原子交换；最终发布时间、HTTP 散列和回滚目录以部署回执为准。
 
 没有操作用户登录浏览器或真实房间；玩家原设备、实际网络线路及原公式仍待复验。不可将本记录视为此前 59 项任务的全部验收。
+
+## 发布完成
+
+仅新版 Suite `1.0.235-dev` 已完成原子部署与备份。发布后 448 项 HTTPS 校验和实际公开地址 Edge 完整动画通过；准确运行提交、恢复点及未验边界见 [235 发布结果](RELEASE-DICE-235-RESULT.md)。
