@@ -16,18 +16,18 @@ const store=new Map(),opened=[];globalThis.localStorage={getItem:key=>store.get(
 globalThis.location={origin:'https://synthetic.test'};globalThis.window=globalThis;
 const functionSource=(file,names)=>{const text=readFileSync(join(root,file),'utf8');return names.map(name=>{const m=text.match(new RegExp('(?:async )?function '+name+'\\([^]*?\\n}','m'));assert.ok(m,name);return m[0];}).join('\n');};
 const state=functionSource('src/cluster-row.ts',['fetchAnnouncementVersion','applyAnnounceBlink','refreshAnnouncementVersion']);
-const daily=functionSource('src/background.ts',['localDayStamp','maybeShowDailyAnnouncement']);
+
 const notices={suite:legacy,'suite-dev':modern};const saved={};let blink=false;
 globalThis.document={getElementById:()=>({classList:{toggle:(key,value)=>{blink=value;}}})};
 let currentChannel='suite';globalThis.fetch=async url=>{check('Read own asset '+currentChannel,url===`https://synthetic.test/${currentChannel}/${currentChannel==='suite'?'announcement.md':'assets/announcement-dev.md'}`);return {ok:true,text:async()=>notices[currentChannel]};};
 for(const channel of ['suite','suite-dev']){
  currentChannel=channel;
- const entry=join(out,channel+'.ts');writeFileSync(entry,`import {renderAnnouncementImportant} from '${root}/src/announcement-important';import {assetUrl} from '${root}/src/asset-base';import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID,ANNOUNCEMENT_SEEN_KEY,ANNOUNCEMENT_DAILY_KEY} from '${root}/src/announcement-source';
+ const entry=join(out,channel+'.ts');writeFileSync(entry,`import {dailyAnnouncement,localDayStamp} from '${root}/src/announcement-lifecycle';import {renderAnnouncementImportant} from '${root}/src/announcement-important';import {assetUrl} from '${root}/src/asset-base';import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID,ANNOUNCEMENT_SEEN_KEY,ANNOUNCEMENT_DAILY_KEY} from '${root}/src/announcement-source';
  const ANNOUNCEMENT_MD_URL=assetUrl(ANNOUNCEMENT_FILE),LS_ANNOUNCE_SEEN=ANNOUNCEMENT_SEEN_KEY;let cachedAnnounceVersion:string|null=null;
  const ANNOUNCE_MD_URL=ANNOUNCEMENT_MD_URL,ANNOUNCE_URL=assetUrl('dm-announcement.html'),ANNOUNCE_MODAL_ID=ANNOUNCEMENT_MODAL_ID,LS_ANNOUNCE_DAILY=ANNOUNCEMENT_DAILY_KEY,LS_ANNOUNCE_SEEN_VERSION=ANNOUNCEMENT_SEEN_KEY;
  const OBR={player:{getRole:async()=> 'GM'},modal:{open:async value=>(globalThis as any).recordOpened(value)}};
- ${state}\n${daily}
- export {renderAnnouncementImportant,refreshAnnouncementVersion,maybeShowDailyAnnouncement,ANNOUNCEMENT_SEEN_KEY,ANNOUNCEMENT_DAILY_KEY};`);
+ ${state}\nconst maybeShowDailyAnnouncement=dailyAnnouncement({role:()=>OBR.player.getRole(),readDay:()=>localStorage.getItem(LS_ANNOUNCE_DAILY),presentation:{ready:true,token:0},open:()=>OBR.modal.open({id:ANNOUNCE_MODAL_ID,url:ANNOUNCE_URL+'?daily=1'}),warn:()=>{}});
+ export {renderAnnouncementImportant,refreshAnnouncementVersion,maybeShowDailyAnnouncement,localDayStamp,ANNOUNCEMENT_SEEN_KEY,ANNOUNCEMENT_DAILY_KEY};`);
  const result=await build({input:entry,plugins:[{name:'channel',transform(code){return code.includes('import.meta.env.BASE_URL')?code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/'+channel+'/')):undefined;}}],output:{format:'esm'}});
  const api=await import('data:text/javascript;base64,'+Buffer.from(result.output.find(o=>o.type==='chunk').code).toString('base64'));
  globalThis.recordOpened=value=>opened.push(value);
@@ -36,7 +36,9 @@ for(const channel of ['suite','suite-dev']){
  const version=notices[channel].match(/^\s*-\s*(\d+\.\d+\.\d+(?:[-.][\w]+)*)\s*[·\-—]/m)[1];
  localStorage.setItem(api.ANNOUNCEMENT_SEEN_KEY,version);await api.refreshAnnouncementVersion();check(channel+' remembered read',!blink);
  localStorage.setItem(api.ANNOUNCEMENT_SEEN_KEY,'previous-version');await api.refreshAnnouncementVersion();check(channel+' release change unread',blink);
- const before=opened.length;await api.maybeShowDailyAnnouncement();await api.maybeShowDailyAnnouncement();check(channel+' once daily',opened.length===before+1);check(channel+' own modal',opened.at(-1).id===(channel==='suite'?'com.obr-suite/dm-announcement':'com.obr-suite/workbench-announcement'));
+ const before=opened.length;await api.maybeShowDailyAnnouncement();await api.maybeShowDailyAnnouncement();check(channel+' failed or unexposed opens remain eligible',opened.length===before+2);check(channel+' opening does not mark read',localStorage.getItem(api.ANNOUNCEMENT_SEEN_KEY)==='previous-version');
+ // Simulate the modal's separately tested visible exposure and explicit acknowledgement.
+ localStorage.setItem(api.ANNOUNCEMENT_DAILY_KEY,api.localDayStamp());localStorage.setItem(api.ANNOUNCEMENT_SEEN_KEY,version);await api.maybeShowDailyAnnouncement();check(channel+' once daily after exposure',opened.length===before+2);check(channel+' own modal',opened.at(-1).id===(channel==='suite'?'com.obr-suite/dm-announcement':'com.obr-suite/workbench-announcement'));
  saved[channel]={key:api.ANNOUNCEMENT_SEEN_KEY,daily:api.ANNOUNCEMENT_DAILY_KEY,version};
 }
 check('Seen keys independent',saved.suite.key!==saved['suite-dev'].key);check('Daily keys independent',saved.suite.daily!==saved['suite-dev'].daily);

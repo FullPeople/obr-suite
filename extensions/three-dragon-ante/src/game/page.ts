@@ -9,8 +9,8 @@ OBR.onReady(()=>{void(async()=>{
  // The historical channel belongs to Suite's embedded host. The independent
  // extension retains its own pack/server channels so installing both cannot
  // start two historical writers with the same Owlbear connection identity.
- if(location.pathname.endsWith('/workbench-panels/table.html')&&!serverRoom(metadata[SERVER_ROOM_KEY])&&!legacy&&stableLegacy&&(stableLegacy.stage==='playing'||stableLegacy.stage==='lobby'))await import('./stable-legacy-page');
- else if(!serverRoom(metadata[SERVER_ROOM_KEY])&&legacy&&(legacy.stage==='playing'||legacy.stage==='lobby'))await import('./legacy-page');
+ if(location.pathname.endsWith('/workbench-panels/table.html')&&!serverRoom(metadata[SERVER_ROOM_KEY])&&!legacy&&stableLegacy&&(stableLegacy.stage==='playing'||stableLegacy.stage==='lobby'||stableLegacy.stage==='ended'))await import('./stable-legacy-page');
+ else if(!serverRoom(metadata[SERVER_ROOM_KEY])&&legacy&&(legacy.stage==='playing'||legacy.stage==='lobby'||legacy.stage==='ended'))await import('./legacy-page');
  else{const {mountServerPage}=await import('./server-page');await mountServerPage(metadata);}
 })().catch(error=>{
  const root=document.getElementById('table-app');if(root){const message=document.createElement('p');message.textContent='牌桌连接失败，请重试。'+String(error);const retry=document.createElement('button');retry.textContent='重试';retry.onclick=()=>location.reload();root.replaceChildren(message,retry);}

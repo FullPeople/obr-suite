@@ -16,14 +16,14 @@ assert.ok(!notes['suite-dev'].includes('该插件不再更新'));
 const versions=Object.fromEntries(Object.entries(notes).map(([key,value])=>[key,value.match(/^\s*-\s*(\d+\.\d+\.\d+(?:[-.][\w]+)*)\s*[·\-—]/m)[1]]));
 function functions(file,names){const text=readFileSync(join(root,file),'utf8');return names.map(name=>{const match=text.match(new RegExp('(?:async )?function '+name+'\\([^]*?\\n}', 'm'));assert.ok(match,'Missing actual source function '+name);return match[0];}).join('\n');}
 const state=functions('src/cluster-row.ts',['fetchAnnouncementVersion','applyAnnounceBlink','refreshAnnouncementVersion','onAnnounce']);
-const daily=functions('src/background.ts',['localDayStamp','maybeShowDailyAnnouncement']);
+
 for(const channel of ['suite','suite-dev']){
  const entry=join(out,channel+'.ts');
- writeFileSync(entry,`import '${root}/src/dm-announcement';import {assetUrl} from '${root}/src/asset-base';import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID,ANNOUNCEMENT_SEEN_KEY,ANNOUNCEMENT_DAILY_KEY} from '${root}/src/announcement-source';import OBR from '@owlbear-rodeo/sdk';
+ writeFileSync(entry,`import {dailyAnnouncement} from '${root}/src/announcement-lifecycle';import {StartupPresentation} from '${root}/src/workbench/startup-presentation';import '${root}/src/dm-announcement';import {assetUrl} from '${root}/src/asset-base';import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID,ANNOUNCEMENT_SEEN_KEY,ANNOUNCEMENT_DAILY_KEY} from '${root}/src/announcement-source';import OBR from '@owlbear-rodeo/sdk';
  const ANNOUNCEMENT_MD_URL=assetUrl(ANNOUNCEMENT_FILE),ANNOUNCEMENT_URL=assetUrl('dm-announcement.html'),LS_ANNOUNCE_SEEN=ANNOUNCEMENT_SEEN_KEY;let cachedAnnounceVersion:string|null=null;
  const ANNOUNCE_MD_URL=ANNOUNCEMENT_MD_URL,ANNOUNCE_URL=ANNOUNCEMENT_URL,ANNOUNCE_MODAL_ID=ANNOUNCEMENT_MODAL_ID,LS_ANNOUNCE_DAILY=ANNOUNCEMENT_DAILY_KEY,LS_ANNOUNCE_SEEN_VERSION=ANNOUNCEMENT_SEEN_KEY;
- ${state}\n${daily}
- (window as any).noticeProbe={refresh:refreshAnnouncementVersion,open:onAnnounce,daily:maybeShowDailyAnnouncement,seenKey:ANNOUNCEMENT_SEEN_KEY,dailyKey:ANNOUNCEMENT_DAILY_KEY};`);
+ ${state}\nconst presentation=new StartupPresentation();const maybeShowDailyAnnouncement=dailyAnnouncement({role:()=>OBR.player.getRole(),readDay:()=>localStorage.getItem(LS_ANNOUNCE_DAILY),presentation,open:()=>OBR.modal.open({id:ANNOUNCE_MODAL_ID,url:ANNOUNCE_URL+'?daily=1'}),warn:()=>{}});
+ (window as any).noticeProbe={presentation,refresh:refreshAnnouncementVersion,open:onAnnounce,daily:maybeShowDailyAnnouncement,seenKey:ANNOUNCEMENT_SEEN_KEY,dailyKey:ANNOUNCEMENT_DAILY_KEY};`);
  await build({input:entry,plugins:[{name:'sdk-boundary',transform(code){return code.includes('import.meta.env.BASE_URL')?code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/'+channel+'/')):undefined;},resolveId(id){if(id==='@owlbear-rodeo/sdk')return '\0sdk';},load(id){if(id==='\0sdk')return `export default {onReady:fn=>fn(),player:{getRole:async()=> 'GM'},modal:{open:async value=>{window.openedModals=(window.openedModals||[]).concat(value)},close:async id=>{window.closedModal=id}}};`;}}],output:{file:join(out,channel+'.js'),format:'esm'}});
 }
 const html=readFileSync(join(root,'dm-announcement.html'),'utf8');
@@ -56,10 +56,19 @@ for(const width of [360,1280]){
   await page.locator('#ann-lang-en').click();check(`${width} ${channel} English guide`,(await guide.innerText()).includes('Important: setting player Owner permissions'));await guide.locator('summary').click();check(`${width} ${channel} full English text`,(await guide.innerText()).includes('Per-token assignment; one player can own multiple tokens'));
   await page.locator('#ann-lang-zh').click();check(`${width} ${channel} language repeat safe`,await page.locator('.announcement-important').count()===1);
   await page.evaluate(()=>{const p=window.noticeProbe;localStorage.removeItem(p.seenKey);localStorage.removeItem(p.dailyKey);return p.refresh();});check(`${width} ${channel} cold unread`,await page.locator('#btnAnnounce').evaluate(el=>el.classList.contains('blink')));
-  await page.evaluate(()=>window.noticeProbe.open());check(`${width} ${channel} acknowledged`,!await page.locator('#btnAnnounce').evaluate(el=>el.classList.contains('blink')));
+  await page.evaluate(()=>window.noticeProbe.open());check(`${width} ${channel} open request stays unread`,await page.locator('#btnAnnounce').evaluate(el=>el.classList.contains('blink')));
+  await page.waitForFunction(()=>!document.querySelector('#btn-close').disabled);await page.locator('#btn-close').click();await page.evaluate(()=>window.noticeProbe.refresh());check(`${width} ${channel} explicit visible acknowledgement`,!await page.locator('#btnAnnounce').evaluate(el=>el.classList.contains('blink')));
   await page.reload();await page.locator('.announcement-important').waitFor();await page.evaluate(()=>window.noticeProbe.refresh());check(`${width} ${channel} reload keeps read`,!await page.locator('#btnAnnounce').evaluate(el=>el.classList.contains('blink')));
   await page.evaluate(()=>{localStorage.setItem(window.noticeProbe.seenKey,'older-release');return window.noticeProbe.refresh();});check(`${width} ${channel} changed release unread`,await page.locator('#btnAnnounce').evaluate(el=>el.classList.contains('blink')));
-  await page.evaluate(()=>window.noticeProbe.daily());check(`${width} ${channel} daily opens once`,await page.evaluate(()=>window.openedModals.length)===1);await page.evaluate(()=>window.noticeProbe.daily());check(`${width} ${channel} daily remains once`,await page.evaluate(()=>window.openedModals.length)===1);
+  await page.evaluate(()=>{window.noticeProbe.presentation.hello('card-first','playing',window,200);return window.noticeProbe.daily();});check(`${width} ${channel} host does not interrupt intro`,await page.evaluate(()=>!window.openedModals?.length));
+  await page.evaluate(()=>{window.noticeProbe.presentation.update('card-first','cancelled');window.noticeProbe.presentation.releaseClosedWindow();return window.noticeProbe.daily();});check(`${width} ${channel} navigation gap never releases the host notice`,await page.evaluate(()=>!window.openedModals?.length));
+  await page.evaluate(()=>{window.noticeProbe.presentation.hello('card-next','loading',window,300);window.noticeProbe.presentation.hello('first-seen-old','complete',window,100);return window.noticeProbe.daily();});check(`${width} ${channel} stale hello cannot unlock replacement`,await page.evaluate(()=>!window.openedModals?.length));
+  await page.evaluate(()=>{window.noticeProbe.presentation.update('card-next','fading');return window.noticeProbe.daily();});check(`${width} ${channel} host waits through fade-out`,await page.evaluate(()=>!window.openedModals?.length));
+  await page.evaluate(()=>{window.noticeProbe.presentation.update('card-next','complete');return window.noticeProbe.daily();});check(`${width} ${channel} host opens after completion`,await page.evaluate(()=>window.openedModals.length)===1);
+  check(`${width} ${channel} opening alone is not read or shown`,await page.evaluate(()=>localStorage.getItem(window.noticeProbe.seenKey)==='older-release'&&!localStorage.getItem(window.noticeProbe.dailyKey)));
+  await page.goto(origin+'/'+channel+'/dm-announcement.html?daily=1');await page.waitForFunction(()=>!!window.noticeProbe&&!!localStorage.getItem(window.noticeProbe.dailyKey));
+  check(`${width} ${channel} visible content is not acknowledged yet`,await page.evaluate(()=>localStorage.getItem(window.noticeProbe.seenKey)==='older-release'));
+  await page.evaluate(()=>window.noticeProbe.daily());check(`${width} ${channel} daily remains once after visible content`,await page.evaluate(()=>!window.openedModals?.length));
   await page.waitForFunction(()=>!document.querySelector('#btn-close').disabled);await page.locator('#btn-close').click();check(`${width} ${channel} own modal close`,await page.evaluate(()=>window.closedModal)===(channel==='suite'?'com.obr-suite/dm-announcement':'com.obr-suite/workbench-announcement'));
   await page.close();
  }

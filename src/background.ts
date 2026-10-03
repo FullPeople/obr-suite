@@ -1,3 +1,5 @@
+import {dailyAnnouncement} from './announcement-lifecycle';
+import {workbenchStartup} from './workbench/startup-presentation';
 import {setupPanelDragHost} from './utils/panelDragHost';
 import {WORKBENCH_DEV} from './workbench/channel';
 import {setupWorkbench} from './workbench/background';
@@ -40,7 +42,7 @@ import { setupTransform, teardownTransform } from "./modules/transform";
 import { setupCrossSceneCards } from "./modules/cross-scene-cards";
 import { setupPerfWindow } from "./modules/perfWindow";
 import { assetUrl } from "./asset-base";
-import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID,ANNOUNCEMENT_DAILY_KEY,ANNOUNCEMENT_SEEN_KEY} from './announcement-source';
+import {ANNOUNCEMENT_MODAL_ID,ANNOUNCEMENT_DAILY_KEY} from './announcement-source';
 import { onViewportResize } from "./utils/viewportAnchor";
 import {
   PANEL_IDS,
@@ -119,79 +121,17 @@ const BC_CLUSTER_ROW_OPEN = "com.obr-suite/cluster-row-open";
 // Cluster-row blinks the megaphone while there's an unseen announcement.
 const ANNOUNCE_MODAL_ID = ANNOUNCEMENT_MODAL_ID;
 const ANNOUNCE_URL = assetUrl("dm-announcement.html");
-const ANNOUNCE_MD_URL = assetUrl(ANNOUNCEMENT_FILE);
-/** YYYY-MM-DD of the last day the announcement auto-opened here. */
 const LS_ANNOUNCE_DAILY = ANNOUNCEMENT_DAILY_KEY;
-/** Version string of the announcement the DM has acknowledged. Shared
- *  with cluster-row.ts, which uses it to blink the megaphone. */
-const LS_ANNOUNCE_SEEN_VERSION = ANNOUNCEMENT_SEEN_KEY;
-
-/** Local calendar day, not UTC — "first time today" should mean the
- *  DM's today, not a date that rolls over mid-session in Asia. */
-function localDayStamp(): string {
-  const d = new Date();
-  const m = `${d.getMonth() + 1}`.padStart(2, "0");
-  const day = `${d.getDate()}`.padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
-
-/**
- * Show the announcement once a day, to GMs only.
- *
- * Deliberately NOT gated on the announcement version: the point is a
- * daily "here's what changed" like a game's patch notes, so it shows
- * again the next day even if nothing was published in between. The
- * version key is still written, so acknowledging here also stops the
- * megaphone blinking.
- *
- * Players never see it — it carries DM-facing notes, and a modal
- * appearing unprompted mid-session for a player would be worse than
- * useless.
- */
-async function maybeShowDailyAnnouncement(): Promise<void> {
-  try {
-    if ((await OBR.player.getRole()) !== "GM") return;
-  } catch {
-    return;
-  }
-  const today = localDayStamp();
-  try {
-    if (localStorage.getItem(LS_ANNOUNCE_DAILY) === today) return;
-  } catch {
-    // No localStorage (private mode / blocked) — better to skip than to
-    // reopen this on every single load.
-    return;
-  }
-  try {
-    localStorage.setItem(LS_ANNOUNCE_DAILY, today);
-  } catch {}
-
-  // Mark the current announcement acknowledged so the megaphone stops
-  // blinking; failing to read the version is not a reason to skip the
-  // popup.
-  try {
-    const res = await fetch(ANNOUNCE_MD_URL, { cache: "no-cache" });
-    if (res.ok) {
-      const m = (await res.text()).match(
-        /^\s*-\s*(\d+\.\d+\.\d+(?:[-.][\w]+)*)\s*[·\-—]/m,
-      );
-      if (m) localStorage.setItem(LS_ANNOUNCE_SEEN_VERSION, m[1]);
-    }
-  } catch {}
-
-  try {
-    await OBR.modal.open({
-      id: ANNOUNCE_MODAL_ID,
-      url: ANNOUNCE_URL,
-      // Same box the megaphone button opens, so the auto-popup and the
-      // manual open are visually identical.
-      width: 560,
-      height: 580,
-    });
-  } catch (e) {
-    console.warn("[obr-suite] daily announcement failed to open", e);
-  }
-}
+const maybeShowDailyAnnouncement=dailyAnnouncement({
+ role:()=>OBR.player.getRole(),
+ readDay:()=>localStorage.getItem(LS_ANNOUNCE_DAILY),
+ presentation:WORKBENCH_DEV?workbenchStartup:{ready:true,token:0},
+ open:()=>OBR.modal.open({id:ANNOUNCE_MODAL_ID,url:ANNOUNCE_URL+'?daily=1',width:560,height:580}),
+ warn:error=>console.warn('[obr-suite] daily announcement failed to open',error),
+});
+// No workbench client is a valid ready state. Once a client exists, its real
+// presentation lifecycle (including fade-out) owns automatic host eligibility.
+if(WORKBENCH_DEV)workbenchStartup.subscribe(()=>{void maybeShowDailyAnnouncement();});
 
 // Trigger geometry. Anchored bottom-LEFT so it sits in the lower-left
 // quadrant without competing with the global-search popover (top-right)
@@ -704,7 +644,7 @@ function syncModules() {
 }
 
 OBR.onReady(async () => {
-  setupWorkbench();
+  const workbenchReady=setupWorkbench();
   // Sync state, then open cluster + activate all enabled modules.
   startSceneSync();
   onStateChange(() => { void syncModules(); });
@@ -734,7 +674,9 @@ OBR.onReady(async () => {
 
   // Patch notes, once a day, GM only. Fire-and-forget so a slow fetch
   // can't hold up module startup.
-  void maybeShowDailyAnnouncement();
+  // Register the bridge before the first eligibility check, so a recovered
+  // client's pending presentation can invalidate that check.
+  void workbenchReady.then(maybeShowDailyAnnouncement).catch(error=>console.warn('[obr-suite] workbench startup failed',error));
 
   // URL-subscribed homebrew packs — re-fetch every stale subscription
   // (lastFetchedAt older than SUB_STALE_MS) so updates the upstream

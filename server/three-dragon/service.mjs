@@ -96,6 +96,10 @@ export function createTableService({database,origin='https://obr.dnd.center',max
    if(m.role==='PENDING')fail('privateSync');
    if(stage(s.game)==='playing')fail('gameStarted');if(!seat){if(s.table.seats.length>=6)fail('tableFull');next.table.seats.push({playerId:m.id,seatId:m.id,name:m.name});}
   }else if(cmd.type==='leave'||cmd.type==='kick'){
+   // Modern clients scope Leave to the game they saw. An in-flight exit from
+   // an old result must never transfer ownership or remove a newer game's seat.
+   // Historical clients omitted this field; keep that protocol compatible.
+   if(cmd.type==='leave'&&Object.hasOwn(cmd,'gameId')&&cmd.gameId!==(s.game?.id??null))fail('staleTable');
    const playing=stage(s.game)==='playing';if(playing&&(cmd.type!=='leave'||!owner))fail('cannotLeave');const target=cmd.type==='leave'?m.id:cmd.playerId;
    if(cmd.type==='kick'&&!admin(s,m)||target===s.table.hostPlayerId&&cmd.type==='kick')fail('notAllowed');
    if(!playing)next.table.seats=next.table.seats.filter(p=>p.playerId!==target);

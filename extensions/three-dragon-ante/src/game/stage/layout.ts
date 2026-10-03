@@ -24,6 +24,8 @@ export interface SeatPlacement {
   id: string; self: boolean; angle: number; x: number; z: number;
   /** Outward unit normal of the seat, pointing away from the table centre. */
   nx: number; nz: number;
+  /** Name follows this physical seat, including its tangent offset on shared edges. */
+  name: { x: number; z: number };
   /** The seat's contiguous ante | coins | flight strip. */
   strip: SeatStripZone[];
   ante: Pose; coins: Pose; flight: Pose;
@@ -156,6 +158,7 @@ export function seatPlacements(view: PublicView): SeatPlacement[] {
     // screen-up direction is a constant world vector.
     return {
       id: seatId, self: isSelf, angle, x: seatX, z: seatZ, nx: normalX, nz: normalZ, strip: zones, ante, coins, flight,
+      name: { x: seatX + normalX * 1.45, z: seatZ + normalZ * 1.45 },
       flightWidth: flightW,
       coinsBadge: { x: coins.x, z: coins.z }, flightBadge: { x: flight.x, z: flight.z },
     };

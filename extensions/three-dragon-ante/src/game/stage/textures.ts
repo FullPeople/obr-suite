@@ -91,6 +91,13 @@ export function labelTexture(text: string, muted = false, accent?:string): THREE
   while (ctx.measureText(text).width > 740 && parseInt(ctx.font.split(" ")[1]) > 24) {
     const size = parseInt(ctx.font.split(" ")[1]) - 2; ctx.font = `600 ${size}px Georgia, 'Microsoft YaHei', serif`;
   }
+  // Keep unusually long player names inside their own fixed-width nameplate.
+  // Array.from preserves Unicode code points while trimming the visible label.
+  if (ctx.measureText(text).width > 740) {
+    const chars = Array.from(text);
+    while (chars.length && ctx.measureText(chars.join("") + "…").width > 740) chars.pop();
+    text = chars.join("") + "…";
+  }
   ctx.fillText(text, 384, 80); return texture(value);
 }
 

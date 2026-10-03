@@ -86,6 +86,11 @@ export function createGroupRolls(deps:{observation:ReturnType<typeof workbenchOb
    if(settlement&&mode==='damage'&&(!Number.isInteger(dc)||dc!<0||dc!>999)||!Number.isInteger(value)||value<0||value>99999||!['damage','heal','set'].includes(mode)||!['health','max health','armor class'].includes(field))throw Error('无效的 DC、数值或目标字段');
    if(group.targets.length<2||(group.selectedCount??group.targets.length)>100)throw Error('群体调整需要选择 2 至 100 个有效单位');
    if(group.targets.some(t=>t.uncertain))throw Error('有目标的回执不确定，请先核对数值，不能重复操作');
+   if(field==='armor class'){
+    const expected=group,epoch=deps.observation.sceneEpoch(),targets=await Promise.all(group.targets.map(target=>deps.resolveTarget(target.itemId)));
+    if(group!==expected||epoch!==deps.observation.sceneEpoch())throw Error('群体区域已改变');
+    if(targets.some(target=>target.item.metadata?.['com.character-cards/boundCardId']))throw Error('群体中含角色卡，护甲只能在角色卡中修改“护甲等级调整值”；本次未修改任何目标。');
+   }
    const prior=group.adjustment,retry=settlement?group.targets.some(t=>t.applied):!!prior?.pending;
    if(retry&&(settlement?(group.dc!==dc||group.value!==value||group.mode!==mode||(group.field??'health')!==field):(prior!.field!==field||prior!.mode!==mode||prior!.value!==value)))throw Error('部分目标已处理，重试须沿用同一参数');
    const current=group;busy=true;current.error=undefined;

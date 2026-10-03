@@ -21,8 +21,8 @@ test('all 16 retained styles and two legacy styles survive storage and authorize
  assert.equal(styles.length,18);
  for(const style of styles){const doc=native();update(doc,'a',{...shape,style});const loaded=JSON.parse(JSON.stringify(doc));assert.equal(project(loaded,[{id:'a'},{id:'b'},{id:'c'}]).a.style,style);}
 });
-test('two-column modules are valid; unsafe style, geometry, color and icons are rejected atomically',()=>{
- for(const invalid of [{style:'removed-energy'},{style:'ring',color:'url(https://bad)'},{style:'ring',icon:'<img>'},{...shape,w:1},{...shape,x:11},{...shape,h:7},{...shape,page:3000},{style:'ring',x:1},{style:'ring',unexpected:'payload'}]){
+test('one-column compact modules are valid; unsafe style, geometry, color and icons are rejected atomically',()=>{
+ for(const invalid of [{style:'removed-energy'},{style:'ring',color:'url(https://bad)'},{style:'ring',icon:'<img>'},{...shape,w:0},{...shape,x:11},{...shape,h:7},{...shape,page:3000},{style:'ring',x:1},{style:'ring',unexpected:'payload'}]){
   const doc=native(),before=JSON.stringify(doc);assert.throws(()=>update(doc,'a',invalid));assert.equal(JSON.stringify(doc),before);
  }
 });

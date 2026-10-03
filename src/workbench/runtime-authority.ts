@@ -28,6 +28,10 @@ export function stampRuntimeProjectionAuthority(existing:any,data:any,playerId:s
 export type Runtime={stats:Record<string,any>;resources:Record<string,any>;conditions:string[]};
 export type RuntimeBaseline={version:1;cardId:string;revision:number;value:Runtime};
 const fields=['health','max health','temporary health','armor class'];
+const sceneEditableFields=fields.filter(field=>field!=='armor class');
+export function assertCharacterArmorPatch(cardId:unknown,patch:Record<string,unknown>){
+ if(cardId&&Object.hasOwn(patch,'armor class'))throw Error('角色护甲不能直接修改最终值，请在角色卡中修改“护甲等级调整值”。');
+}
 export const documentRevision=(doc:any)=>Number.isSafeInteger(doc?.[DOCUMENT_REVISION])?doc[DOCUMENT_REVISION]:0;
 export function documentRuntime(doc:any,definitions:any[]=[]):Runtime {
  const native=doc?.dnd_card_web,hp=doc?.core_stats?.hp||{},selections=native?.selections;
@@ -48,11 +52,14 @@ export function mergeTokenRuntime(current:Runtime,observed:Runtime,baseline:Runt
  if(!baseline||baseline.version!==1||baseline.cardId!==cardId){
   // Imported legacy cards adopt their existing scene runtime once. A modern card
   // already has a revision: an unstamped old token must not overwrite it.
-  return revision===0?cloneJson(observed):current;
+  if(revision!==0)return current;
+  const result=cloneJson(observed);delete result.stats['armor class'];
+  if(typeof current.stats['armor class']==='number')result.stats['armor class']=current.stats['armor class'];
+  return result;
  }
  if(baseline.revision>revision)return current;
  const before=baseline.value,result=cloneJson(current);
- for(const field of fields)if(!sameValue(before.stats[field],observed.stats[field]))result.stats[field]=changedValue(current.stats[field],before.stats[field],observed.stats[field]);
+ for(const field of sceneEditableFields)if(!sameValue(before.stats[field],observed.stats[field]))result.stats[field]=changedValue(current.stats[field],before.stats[field],observed.stats[field]);
  for(const id of new Set([...Object.keys(before.resources),...Object.keys(observed.resources)])){
   const old=before.resources[id],next=observed.resources[id];if(sameValue(old,next))continue;
   if(old&&next&&current.resources[id]){const row={...current.resources[id]};for(const field of new Set([...Object.keys(old),...Object.keys(next)]))if(!sameValue(old[field],next[field])){const value=changedValue(row[field],old[field],next[field]);if(value===undefined)delete row[field];else row[field]=value;}result.resources[id]=row;}
@@ -65,12 +72,11 @@ export function mergeTokenRuntime(current:Runtime,observed:Runtime,baseline:Runt
 export function writeRuntime(doc:any,runtime:Runtime,definitions:any[]=[]){
  const before=documentRuntime(doc,definitions),result=cloneJson(doc),hp=(result.core_stats||={}).hp||={};
  for(const [key,field] of [['health','current'],['max health','max'],['temporary health','temp']])if(typeof runtime.stats[key]==='number')hp[field]=runtime.stats[key];
- if(typeof runtime.stats['armor class']==='number')result.core_stats.ac=runtime.stats['armor class'];
+ // AC is a derived character projection. Even a legacy/stale scene edit must
+ // not overwrite the document or manufacture a permanent native override.
  result.web_resources=cloneJson(runtime.resources);
  const native=result.dnd_card_web;if(native){native.runtime||={};native.runtime.hp=hp.current;native.runtime.tempHp=hp.temp;native.runtime.resources=cloneJson(runtime.resources);native.selections=runtimeConditions(native.selections||[],native.selections||[],runtime.conditions,definitions);native.revision=(native.revision||0)+1;
  if(runtime.stats['max health']!==before.stats['max health']){native.baseHp=runtime.stats['max health'];native.sheetBonuses={...native.sheetBonuses,hp:0};native.adjustments=[...(native.adjustments||[]).filter((a:any)=>a.target!=='hp'),{id:'suite-hp',target:'hp',value:runtime.stats['max health'],reason:'枭熊场景'}];}
- // Scene AC is a final total; retain the card offset without applying it twice.
- if(runtime.stats['armor class']!==before.stats['armor class'])native.adjustments=[...(native.adjustments||[]).filter((a:any)=>a.target!=='ac'),{id:'suite-ac',target:'ac',value:runtime.stats['armor class']-(native.sheetBonuses?.ac||0),reason:'枭熊场景'}];
  for(const [id,r] of Object.entries(runtime.resources) as [string,any][])if(id.startsWith('spell-slot:')&&native.spellSettings)native.spellSettings.slots[id.split(':')[1]]={max:r.max,used:r.max-r.current};
  result.web_conditions=native.selections.filter((r:any)=>r.entry?.kind==='condition').map((r:any)=>r.entry);
  }else result.web_conditions=runtimeConditions((result.web_conditions||[]).map((entry:any)=>({entry})),[],runtime.conditions,definitions).map((r:any)=>r.entry);

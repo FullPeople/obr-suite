@@ -1,3 +1,5 @@
+import {CompletedTableNavigation} from "./completed-table-navigation";
+import type {TableView} from "./protocol";
 import { TABLE_GESTURE } from "./gesture";
 import OBR from "@owlbear-rodeo/sdk";
 import {getLocalLang,onLangChange,setLocalLang} from "../locale";
@@ -20,9 +22,12 @@ const clientId=crypto.randomUUID(),instance=new URLSearchParams(location.search)
  // page refused what it got", so it must name itself in the console.
  if(logOnce(`drop:${reason}`))diag("view",`part dropped (${reason})`,detail);
 });
+const navigation=new CompletedTableNavigation<TableView>("pack-legacy");
 const unsubs:Array<()=>void>=[],table=document.getElementById("table-app")!;
 const surface=mountTableUI(table,{language:getLocalLang(),gesture:gesture=>{void sendQueued(()=>OBR.broadcast.sendMessage(TABLE_GESTURE,{clientId,instance,gesture},{destination:"LOCAL"})).catch(()=>{});},mode:new URLSearchParams(location.search).get("mode")==="compact"?"compact":"full",send:async command=>{
  if(!alive)return;
+ const local=navigation.command(command.type);
+ if(local){if(timer)clearTimeout(timer);timer=undefined;surface.update(local);return;}
  if(timer)clearTimeout(timer);timer=undefined;
  if(!["close","display","remember"].includes(command.type))timer=setTimeout(()=>surface.failed(),12000);
  if(command.type==="retry"&&!receivedView){diag("cmd","retry re-connects the page",{receivedView});await connectPage();return;}
@@ -80,7 +85,7 @@ function connectPage():Promise<void>{
  if(!view)return;receivedView=true;lastViewAt=Date.now();viewCount++;
  const signature=`${view.connected}|${view.message??""}|${view.game&&"revision"in view.game?view.game.revision:""}|${view.pending}`;
  if(signature!==lastSignature){lastSignature=signature;diag("view","applied",{count:viewCount,connected:view.connected,message:view.message??"",revision:view.game&&"revision"in view.game?view.game.revision:null,pending:view.pending});}
- surface.update(view);
+ surface.update(navigation.update(view));
   // Regular three-second snapshots cannot extend this submission's deadline.
   if(view.pending||surface.waitingForReceipt()){if(timer===undefined)timer=setTimeout(()=>surface.failed(),12000);}
   else{if(timer)clearTimeout(timer);timer=undefined;}
