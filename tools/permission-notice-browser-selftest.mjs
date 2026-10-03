@@ -4,6 +4,7 @@ import {build} from 'rolldown';
 import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {resolve,join,extname} from 'node:path';
 import {createServer} from 'node:http';
+import {createRequire} from 'node:module';
 import {chromium,expect} from '@playwright/test';
 
 const root=resolve(import.meta.dirname,'..');
@@ -14,6 +15,7 @@ const on=(name,fn)=>{const listener={name,fn};mock.listeners.add(listener);const
 const api={onReady:fn=>fn(),player:{getRole:async()=>mock.role,onChange:fn=>on('player',fn)},scene:{isReady:async()=>true,getMetadata:async()=>({}),onMetadataChange:fn=>on('scene',fn),onReadyChange:fn=>on('ready',fn)},viewport:{getWidth:async()=>innerWidth,getHeight:async()=>innerHeight},modal:{open:async opts=>mock.open(opts),close:async id=>mock.close(id)},broadcast:{onMessage:on,sendMessage:async(name,data)=>mock.emit(name,{data})}};
 export default api;`;
 const web=resolve(process.env.DND_CARD_WEB_ROOT||'../card-owner-sync');
+const requireWeb=createRequire(join(web,'package.json'));
 const nav=readFileSync(join(web,'src/ui/Workbench.tsx'),'utf8').match(/<nav className="workbench-modes"[^]*?<\/nav>/)?.[0];assert(nav,'Actual Workbench navigation must exist');
 const entryFile=join(out,'web-toolbar.tsx');
 writeFileSync(entryFile,`import React from '${join(web,'node_modules/react/index.js')}';import {createRoot} from '${join(web,'node_modules/react-dom/client.js')}';import {PlayerPermissionButton} from '${join(web,'src/ui/PlayerPermissionButton.tsx')}';globalThis.React=React;
@@ -21,8 +23,9 @@ const mock=top.noticeFixture,channel=location.pathname.split('/')[1],key='obr-su
 const workbenchRequest=async(type,args)=>{if(mock.role!=='GM')throw Error('GM only');if(args.statusOnly)return {seen:localStorage.getItem(key)==='1'};mock.open({id:'com.obr-suite/'+(channel==='suite-dev'?'workbench-':'')+'player-permissions',url:'/'+channel+'/dm-announcement.html?permissions=1'});};
 function Toolbar(){const [role,setRole]=React.useState(mock.role);React.useEffect(()=>{const listener={name:'player',fn:player=>setRole(player.role)};mock.listeners.add(listener);return()=>mock.listeners.delete(listener);},[]);const wb={role,enabled:{musicBoard:true}},online=true,page='console',change=()=>{};return ${nav};}createRoot(document.getElementById('root')).render(<Toolbar/>);`);
 for(const channel of ['suite','suite-dev'])for(const [input,name] of [[entryFile,'toolbar'],[join(root,'src/dm-announcement.ts'),'notice']]){
- await build({input,plugins:[{name:'permission-fixture',resolveId(id){if(id==='@owlbear-rodeo/sdk')return '\0sdk';},load(id){if(id==='\0sdk')return fixture;},transform(code){return code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/'+channel+'/'));}}],output:{file:join(out,channel+'-'+name+'.js'),format:'esm'},logLevel:'silent'});
+ await build({input,transform:{jsx:{runtime:'automatic',importSource:'react'}},plugins:[{name:'permission-fixture',resolveId(id){if(id==='@owlbear-rodeo/sdk')return '\0sdk';if(id==='react'||id.startsWith('react/'))return requireWeb.resolve(id);},load(id){if(id==='\0sdk')return fixture;},transform(code){return code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/'+channel+'/'));}}],output:{file:join(out,channel+'-'+name+'.js'),format:'esm'},logLevel:'silent'});
 }
+if(process.env.NOTICE_BUILD_ONLY==='1'){console.log('Permission fixture compiled with the paired React runtime');process.exit(0);}
 const host=`window.noticeFixture={role:new URLSearchParams(location.search).get('role')||'GM',listeners:new Set(),opened:[],closed:[],emit(name,data){for(const listener of [...this.listeners])if(listener.name===name)listener.fn(data);},setRole(role){this.role=role;this.emit('player',{role});},open(opts){this.opened.push(opts);document.querySelector('#modal')?.remove();const frame=document.createElement('iframe');frame.id='modal';frame.title='Player permissions';frame.src=opts.url;frame.style='position:fixed;top:100px;left:50%;transform:translateX(-50%);width:min(560px,100vw);height:min(580px,calc(100vh - 110px));border:0';document.body.append(frame);},close(id){this.closed.push(id);document.querySelector('#modal')?.remove();}};`;
 const server=createServer((req,res)=>{
  const url=new URL(req.url,'http://localhost'),path=url.pathname;
@@ -40,7 +43,8 @@ const base=`http://127.0.0.1:${server.address().port}`;
 if(process.env.NOTICE_PREVIEW==='1') { console.log(`Permission notice preview: ${base}`); await new Promise(()=>{}); }
 const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
 const context=await browser.newContext({viewport:{width:1100,height:780}}),results=[],errors=[];
-context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)));
+await context.tracing.start({screenshots:true,snapshots:true,sources:true});
+context.on('page',page=>page.on('pageerror',error=>{errors.push(error.message);console.error('FIXTURE PAGE ERROR',error.message);}));
 const key=channel=>`obr-suite/${channel==='suite-dev'?'workbench/':''}player-permissions-seen`;
 async function open({role='GM',channel='suite-dev'}={}){const page=await context.newPage();await page.goto(`${base}/?channel=${channel}&role=${role}`);await page.frameLocator('#toolbar').getByRole('button',{name:'音乐板',exact:true}).waitFor();return page;}
 const entry=page=>page.frameLocator('#toolbar').getByRole('button',{name:'关于玩家分配卡和权限',exact:true});
@@ -82,4 +86,4 @@ try{
  });
  assert.deepEqual(errors,[]);writeFileSync(join(out,'results.json'),JSON.stringify({passed:results.length,results,errors,realRoomVerified:false},null,2));
  console.log(`Permission notice: ${results.length} browser scenarios passed; synthetic SDK, no live Owlbear room verification.`);
-}catch(error){writeFileSync(join(out,'failure.json'),JSON.stringify({results,errors,error:String(error)},null,2));throw error;}finally{await context.close();await browser.close();await new Promise(resolve=>server.close(resolve));}
+}catch(error){for(const [index,page] of context.pages().entries()){await page.screenshot({path:join(out,`failure-${index}.png`),fullPage:true}).catch(()=>{});writeFileSync(join(out,`failure-${index}.html`),await page.content().catch(()=>''));}writeFileSync(join(out,'failure.json'),JSON.stringify({results,errors,error:String(error)},null,2));throw error;}finally{await context.tracing.stop({path:join(out,'trace.zip')});await context.close();await browser.close();await new Promise(resolve=>server.close(resolve));}
