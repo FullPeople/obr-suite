@@ -151,7 +151,7 @@ async function start(){
  }
  async function catalog(){
   const {ready,scene,room,items,role,party}=await observation.read();
-  const signature=`${observation.version()}:${documentCacheVersion}:${getState().allowPlayerMonsters}`;
+  const signature=`${observation.version()}:${documentCacheVersion}:${getState().allowPlayerMonsters}:${getState().enabled.bestiary}:${getState().enabled.hpBar}`;
   // Movement does not rebuild the sheet projection, but callers such as dice
   // initialization still need the newest complete SDK item objects.
   if(catalogCache?.signature===signature)return {...catalogCache.value,items} as CatalogValue;
@@ -189,9 +189,9 @@ async function start(){
   }).filter(c=>canReadNativeCard(c,c.owner_ids,playerId,role==='GM')).sort((a,b)=>Number(b.write)-Number(a.write)||Number(b.inScene)-Number(a.inScene)||String(a.name).localeCompare(String(b.name),'zh'));
   for(const c of cards){const doc=documents.get(`${OBR.room.id}:card:${c.id}`);if(!doc)continue;const canonical=documentRuntime(doc,definitionsFor(scene));c.classSummary=classSummary(doc);c.documentRevision=documentRevision(doc);c.passive=doc.core_stats?.passive_perception;c.coins=documentCoins(doc);const defs=definitionsFor(scene);c.conditions=conditionRows({cardId:c.id,scene} as any,doc);(c as any).player=doc.dnd_card_web?.player||doc.identity?.player_name||party.filter(p=>c.owner_ids?.includes(p.id)).map(p=>p.name).join('、');c.stats={...c.stats,...canonical.stats};c.resources=Object.values(canonical.resources);c.resourceWidgets=resourceWidgetPresentation(doc,c.resources);c.resourceAttacks=quickbarAttackPresentation(doc);c.resourceHidden=hiddenResourcePresentation(doc,c.resources);}
   const ownerRolesKey='com.obr-suite/workbench/owner-roles',ownerRoles={...room[ownerRolesKey] as Record<string,string>,[playerId]:role};for(const p of party)ownerRoles[p.id]=p.role;if(role==='GM'&&!sameValue(ownerRoles,room[ownerRolesKey]))void OBR.room.setMetadata({[ownerRolesKey]:ownerRoles});
-  const monsters=items.filter(item=>ownerRoles[item.createdUserId]==='PLAYER'&&!item.metadata[BIND]&&(item.metadata[SLUG]||item.metadata[HP]||item.metadata[LEGACY])&&(role==='GM'||item.createdUserId===playerId||getState().allowPlayerMonsters&&item.metadata['com.obr-suite/workbench/locked']!==true)).map(item=>{
-   const raw=monsterOverrides.get((item.metadata[MONSTER] as any)?.key)?.data||(scene['com.bestiary/monsters'] as any)?.[String(item.metadata[SLUG])]||documents.get(`${OBR.room.id}:token:${item.id}:${item.metadata[SLUG]||''}`),stats=bubble(item);
-   return {id:item.id,kind:'monster',name:item.name||raw?.name||'怪物',write:role==='GM'||item.createdUserId===playerId,locked:item.metadata['com.obr-suite/workbench/locked']===true,inScene:true,itemId:item.id,resources:(Array.isArray(item.metadata[RES])?item.metadata[RES]:[]) as any[],stats:{health:raw?.hp?.average,'max health':raw?.hp?.average,'temporary health':0,'armor class':typeof raw?.ac?.[0]==='number'?raw.ac[0]:raw?.ac?.[0]?.ac,...stats},passive:raw?.passive??(raw?.wis?10+Math.floor((raw.wis-10)/2):undefined),coins:{},conditions:conditionRows({item,scene} as any,undefined),player:party.find(p=>p.id===item.createdUserId)?.name,resourceWidgets:resourceWidgetPresentation(raw,Array.isArray(item.metadata[RES])?item.metadata[RES] as any[]:[])};
+  const monsters=items.filter(item=>ownerRoles[item.createdUserId]==='PLAYER'&&hasMonsterComponent(item)&&(role==='GM'||item.createdUserId===playerId||getState().allowPlayerMonsters&&item.metadata['com.obr-suite/workbench/locked']!==true)).map(item=>{
+   const raw=item.metadata[SLUG]?(monsterOverrides.get((item.metadata[MONSTER] as any)?.key)?.data||(scene['com.bestiary/monsters'] as any)?.[String(item.metadata[SLUG])]||documents.get(`${OBR.room.id}:token:${item.id}:${item.metadata[SLUG]}`)):undefined,stats=bubble(item);
+   return {id:item.id,targetId:`monster:${item.id}`,kind:'monster',name:item.name||raw?.name||'怪物',write:role==='GM'||item.createdUserId===playerId,locked:item.metadata['com.obr-suite/workbench/locked']===true,inScene:true,itemId:item.id,resources:(Array.isArray(item.metadata[RES])?item.metadata[RES]:[]) as any[],stats:{health:raw?.hp?.average,'max health':raw?.hp?.average,'temporary health':0,'armor class':typeof raw?.ac?.[0]==='number'?raw.ac[0]:raw?.ac?.[0]?.ac,...stats},passive:raw?.passive??(raw?.wis?10+Math.floor((raw.wis-10)/2):undefined),coins:{},conditions:conditionRows({item,scene} as any,undefined),player:party.find(p=>p.id===item.createdUserId)?.name,resourceWidgets:resourceWidgetPresentation(raw,Array.isArray(item.metadata[RES])?item.metadata[RES] as any[]:[])};
   });
   const value={cards,monsters,items,scene,room,role,all};catalogCache={signature,value};return value;
  }
@@ -200,45 +200,67 @@ async function start(){
   const cards=list.cards.map(({id,itemId,write,locked})=>({id,itemId,itemIds:list.items.filter(item=>item.metadata[BIND]===id).map(item=>item.id),write,locked}));
   // The overview lists player-owned monsters only. Cache grants additionally
   // cover every readable scene token, using the same access rules as selection.
-  const monsters=list.items.filter(item=>!item.metadata[BIND]&&(item.metadata[SLUG]||item.metadata[HP]||item.metadata[LEGACY]||item.metadata['com.obr-suite/hp-bar/enabled'])&&(list.role==='GM'||item.createdUserId===playerId||settings.allowPlayerMonsters&&item.metadata['com.obr-suite/workbench/locked']!==true)).map(item=>({id:item.id,itemId:item.id,key:`${OBR.room.id}:token:${item.id}:${item.metadata[SLUG]||''}`,write:list.role==='GM'||item.createdUserId===playerId,locked:item.metadata['com.obr-suite/workbench/locked']===true}));
+  const monsters=list.items.filter(item=>hasMonsterComponent(item)&&(list.role==='GM'||item.createdUserId===playerId||settings.allowPlayerMonsters&&item.metadata['com.obr-suite/workbench/locked']!==true)).map(item=>({id:item.id,itemId:item.id,targetId:`monster:${item.id}`,kind:item.metadata[SLUG]?'monster':'token',key:`${OBR.room.id}:token:${item.id}:${item.metadata[SLUG]||''}`,write:list.role==='GM'||item.createdUserId===playerId,locked:item.metadata['com.obr-suite/workbench/locked']===true}));
   const value={room:OBR.room.id||'default',scope:JSON.stringify([OBR.room.id,playerId,observation.sceneEpoch()]),role:list.role,enabled,cards,monsters};
   const signature=JSON.stringify(value);if(signature!==accessSignature){accessSignature=signature;accessEpoch++;}
   return {...value,epoch:accessEpoch};
  }
- function publishAccess(list:CatalogValue){const access=cacheAccess(list);for(const id of warmCards)if(!(id.startsWith('card:')?access.cards.some(card=>id===`card:${card.id}`):access.monsters.some(card=>id===card.itemId))){warmCards.delete(id);warmSnapshots.delete(id);}if(access.epoch!==lastAccessEpoch){lastAccessEpoch=access.epoch;send('access',{access});}
+ function publishAccess(list:CatalogValue){const access=cacheAccess(list);for(const id of warmCards)if(!(id.startsWith('card:')?access.cards.some(card=>id===`card:${card.id}`):access.monsters.some(card=>id===card.itemId||id===card.targetId)||access.cards.some(card=>card.itemIds.includes(id)))){warmCards.delete(id);warmSnapshots.delete(id);}if(access.epoch!==lastAccessEpoch){lastAccessEpoch=access.epoch;send('access',{access});}
   // Card tabs and permissions must not wait for the shared rules or inventory
   // ledger. The full catalog supplies those independent sections afterwards.
   const directory={cards:list.cards.map(({id,name,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})=>({id,name,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})),monsters:list.monsters,role:list.role,enabled:access.enabled};
   const signature=JSON.stringify(directory);if(signature!==lastDirectory){lastDirectory=signature;send('directory',{sequence:++sequence,access,...directory});}return access;}
  function warmCard(id:string){warmCards.delete(id);warmCards.add(id);while(warmCards.size>24){const old=warmCards.values().next().value!;warmCards.delete(old);warmSnapshots.delete(old);}}
+ // While following a multi-bound card, retain the selected native token.
+ // A canonical background card refresh must not switch its monster alternative
+ // back to the first binding. Explicit card-tab choices still use the primary.
+ function warmSnapshotTarget(id:string){
+  if(id.startsWith('monster:'))return id;
+  const items=observation.peek().items||[],cardId=id.startsWith('card:')?id.slice(5):items.find(item=>item.id===id)?.metadata[BIND];
+  if(cardId&&chosen===`card:${cardId}`)return chosen;
+  if(cardId&&mapFollowing&&!chosen.startsWith('card:')&&!chosen.startsWith('monster:')&&items.find(item=>item.id===chosen)?.metadata[BIND]===cardId)return chosen;
+  return id;
+ }
  async function pushWarmSnapshot(id:string){if(!warmCards.has(id)||!relayActive&&(!child||child.closed))return;if(warmInFlight.has(id)){warmAgain.add(id);return;}warmInFlight.add(id);try{
-  const next=await snapshot(id);if(!warmCards.has(id))return;const old=warmSnapshots.get(id),state=JSON.stringify(next.state);
+  const target=warmSnapshotTarget(id),next=await snapshot(target);if(!warmCards.has(id)||warmSnapshotTarget(id)!==target)return;const old=warmSnapshots.get(id),state=JSON.stringify(next.state);
   if(!old||old.document!==next.document||old.state!==state||old.epoch!==next.access.epoch){warmSnapshots.set(id,{document:next.document,state,epoch:next.access.epoch});send('cacheSnapshot',next);}
  }catch{/* A later access directory removes denied entries; never publish failed reads. */}finally{warmInFlight.delete(id);if(warmAgain.delete(id))void pushWarmSnapshot(id);}}
  type CatalogValue={cards:any[];monsters:any[];items:Item[];scene:Record<string,unknown>;room:Record<string,unknown>;role:"GM"|"PLAYER";all:any[]};
+ // A retained HP payload is not an active component after explicit removal.
+ // Character HP alone never creates a second monster target; a bestiary link does.
+ function hasMonsterComponent(item:Item|undefined){
+  if(!item)return false;const meta=item.metadata;
+  if(typeof meta[SLUG]==='string'&&meta[SLUG])return getState().enabled.bestiary!==false;
+  if(meta[BIND]||getState().enabled.hpBar===false||meta['com.obr-suite/hp-bar/enabled']===false)return false;
+  if(meta['com.obr-suite/hp-bar/enabled']===true)return true;
+  const stats=bubble(item);return fields.some(field=>typeof stats[field]==='number'&&Number.isFinite(stats[field]));
+ }
+ function targetReadIdentity(a:{key:string;cardId:string;item?:Item;scene:Record<string,unknown>}){
+  if(a.cardId)return a.key;
+  const meta=a.item?.metadata;return JSON.stringify([a.key,meta?.[BIND],meta?.[MONSTER],meta?.['com.obr-suite/hp-bar/enabled'],a.item?.createdUserId,meta?.['com.obr-suite/workbench/locked'],meta?.[SLUG]?(a.scene['com.bestiary/monsters'] as any)?.[String(meta[SLUG])]:undefined]);
+ }
  async function access(id:string,existing?:Awaited<ReturnType<typeof catalog>>){
-  const data=existing||await catalog(),item=data.items.find(i=>i.id===id),cardId=id.startsWith('card:')?id.slice(5):String(item?.metadata[BIND]||''),card=data.cards.find(c=>c.id===cardId);
+  const data=existing||await catalog(),monster=id.startsWith('monster:'),itemId=monster?id.slice(8):id,item=data.items.find(i=>i.id===itemId),cardId=id.startsWith('card:')?id.slice(5):monster?'':String(item?.metadata[BIND]||''),card=data.cards.find(c=>c.id===cardId);
   if(cardId&&!card)throw Error('没有此角色卡的查看权限');if(!card&&!item)throw Error('未找到角色卡或棋子');
-  if(!card&&!item?.metadata[SLUG]&&!item?.metadata[HP]&&!item?.metadata[LEGACY]&&!item?.metadata['com.obr-suite/hp-bar/enabled'])throw Error('棋子没有角色、怪物或生命条组件');
+  if(!card&&!hasMonsterComponent(item))throw Error('棋子没有角色、怪物或生命条组件');
   if(!card&&data.role!=='GM'&&item?.createdUserId!==playerId&&(!getState().allowPlayerMonsters||item?.metadata['com.obr-suite/workbench/locked']===true))throw Error('没有此怪物的阅读权限');
   const token=item||data.items.find(i=>i.metadata[BIND]===cardId&&ownsNativeToken(i,playerId))||data.items.find(i=>i.metadata[BIND]===cardId),slug=String(token?.metadata[SLUG]||'');
-  return {...data,item:token,cardId,card,slug,write:card?card.write&&(!item||data.role==='GM'||ownsNativeToken(item,playerId)):(data.role==='GM'||ownsNativeToken(token,playerId)),key:cardId?`${OBR.room.id}:card:${cardId}`:`${OBR.room.id}:token:${id}:${slug}`};
+  return {...data,item:token,cardId,card,slug,targetId:cardId?`card:${cardId}`:`monster:${token!.id}`,write:card?card.write&&(!item||data.role==='GM'||ownsNativeToken(item,playerId)):(data.role==='GM'||ownsNativeToken(token,playerId)),key:cardId?`${OBR.room.id}:card:${cardId}`:`${OBR.room.id}:token:${token!.id}:${slug}`};
  }
  async function read(a:Awaited<ReturnType<typeof access>>,fresh=false){
-  const key=a.key;const override=a.item?.metadata[MONSTER] as {key:string;revision:number}|undefined;if(override?.key){let cached=monsterOverrides.get(override.key);if(fresh||!cached||cached.revision<override.revision){cached=await relay.send({sharedDocument:{key:override.key,operation:'read'}});monsterOverrides.set(override.key,cached!);}if(cached?.data){monsterSceneDocuments.delete(key);cacheDocument(key,cached.data);return cached.data;}}
+  const key=a.key;if(a.cardId)return loadCard(a.cardId,key,fresh);const override=(a.slug?a.item?.metadata[MONSTER]:undefined) as {key:string;revision:number}|undefined;if(override?.key){let cached=monsterOverrides.get(override.key);if(fresh||!cached||cached.revision<override.revision){cached=await relay.send({sharedDocument:{key:override.key,operation:'read'}});monsterOverrides.set(override.key,cached!);}if(cached?.data){monsterSceneDocuments.delete(key);cacheDocument(key,cached.data);return cached.data;}}
   // A scene-owned definition can arrive or be replaced after the library read.
   // Cache against its observed identity; a removed override must not stay alive.
   const sceneDocument=a.slug?(a.scene['com.bestiary/monsters'] as any)?.[a.slug]:undefined;
   if(!a.cardId&&!fresh&&documents.get(key)&&monsterSceneDocuments.has(key)&&monsterSceneDocuments.get(key)===sceneDocument)return documents.get(key);let doc:any=null;
-  if(a.cardId)return loadCard(a.cardId,key,fresh);
-  else if(a.slug){doc=sceneDocument;if(!doc){const data=await import('../modules/bestiary/data');doc=data.getRawMonster(a.slug);if(!doc){doc=await data.loadMonsterBySlug(a.slug);}}}
+  if(a.slug){doc=sceneDocument;if(!doc){const data=await import('../modules/bestiary/data');doc=data.getRawMonster(a.slug);if(!doc){doc=await data.loadMonsterBySlug(a.slug);}}}
   monsterSceneDocuments.set(key,sceneDocument);cacheDocument(key,doc);return doc;
  }
- function live(a:Awaited<ReturnType<typeof access>>){const ids=a.item?.metadata[STATUS_BUFFS_KEY];const custom=a.scene[SHARED_BUFFS];const defs=[...DEFAULT_BUFFS,...(Array.isArray(custom)?custom:[])].filter(d=>d&&typeof d.id==='string');return {conditions:Array.isArray(ids)?ids.map(id=>defs.find(v=>v.id===id)||{id,name:id}):undefined,resources:a.item?.metadata[RES]};}
+ function live(a:Awaited<ReturnType<typeof access>>){const ids=a.item?.metadata[STATUS_BUFFS_KEY];const custom=a.scene[SHARED_BUFFS];const defs=[...DEFAULT_BUFFS,...(Array.isArray(custom)?custom:[])].filter(d=>d&&typeof d.id==='string');return {conditions:Array.isArray(ids)?ids.map(id=>defs.find(v=>v.id===id)||{id,name:id}):undefined,resources:Array.isArray(a.item?.metadata[RES])?a.item!.metadata[RES]:[]};}
  async function snapshot(id:string,existing?:Awaited<ReturnType<typeof catalog>>){
-  let a=await access(id,existing);const sceneEpoch=observation.sceneEpoch(),key=a.key,doc=await read(a);a=await access(id);if(a.key!==key||sceneEpoch!==observation.sceneEpoch())throw Error('角色关联或场景已改变');
+  let a=await access(id,existing);const sceneEpoch=observation.sceneEpoch(),identity=targetReadIdentity(a),doc=await read(a);a=await access(id);if(targetReadIdentity(a)!==identity||sceneEpoch!==observation.sceneEpoch())throw Error('角色关联或场景已改变');
   const b=bubble(a.item),canonical=a.cardId?documentRuntime(doc,definitionsFor(a.scene)):undefined;
-  return {sequence:++sequence,clientInstance,clientSelection,access:publishAccess(a),state:{key:a.key,itemId:a.item?.id||`card:${a.cardId}`,name:doc?.identity?.character_name||doc?.name||a.card?.name||a.item?.name,cardId:a.cardId,slug:a.slug,kind:a.cardId?'character':a.slug?'monster':'token',documentRevision:a.cardId?documentRevision(doc):undefined,projectionPending:!!a.cardId&&a.items.some(item=>item.metadata[BIND]===a.cardId&&(item.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined)?.revision!==documentRevision(doc)),stats:canonical?{...a.card?.stats,...canonical.stats}:Object.fromEntries(fields.filter(k=>typeof b[k]==='number').map(k=>[k,b[k]])),write:a.write,role:a.role,pinned:!follow,tokenPortrait:tokenPortrait(a.item),locked:a.card?.locked??a.item?.metadata['com.obr-suite/workbench/locked']===true,statsLocked:b.locked!==false,...live(a),conditions:conditionRows(a,doc),resources:canonical?Object.values(canonical.resources):live(a).resources},document:doc};
+  return {sequence:++sequence,clientInstance,clientSelection,access:publishAccess(a),state:{key:a.key,targetId:a.targetId,itemId:a.item?.id||`card:${a.cardId}`,name:doc?.identity?.character_name||doc?.name||a.card?.name||a.item?.name,cardId:a.cardId,slug:a.slug,kind:a.cardId?'character':a.slug?'monster':'token',documentRevision:a.cardId?documentRevision(doc):undefined,projectionPending:!!a.cardId&&a.items.some(item=>item.metadata[BIND]===a.cardId&&(item.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined)?.revision!==documentRevision(doc)),stats:canonical?{...a.card?.stats,...canonical.stats}:Object.fromEntries(fields.filter(k=>typeof b[k]==='number').map(k=>[k,b[k]])),write:a.write,role:a.role,pinned:!follow,tokenPortrait:tokenPortrait(a.item),locked:a.card?.locked??a.item?.metadata['com.obr-suite/workbench/locked']===true,statsLocked:b.locked!==false,...live(a),conditions:conditionRows(a,doc),resources:canonical?Object.values(canonical.resources):live(a).resources},document:doc};
  }
  async function persistDocument(a:Awaited<ReturnType<typeof access>>,existing:any,data:any,inventoryGuard?:{key:string;revision:number},conditionGrant=false){
   const permission=await access(`card:${a.cardId}`);if(!permission.write&&!(conditionGrant&&permission.card&&!permission.card.locked))throw Error('角色修改权限已改变');
@@ -271,13 +293,13 @@ async function start(){
   // Never seed a legacy backpack before its document has arrived. It can be added
   // to the ledger after hydration without holding up selection or other cards.
   const definitions:InventoryDefinition[]=[{id:publicId,name:'公共仓库',kind:'public',write:data.role==='GM'||!ledger.data.containers[publicId]?.locked},...data.cards.filter(c=>ledger.data.containers[`card:${c.id}`]||documents.has(`${OBR.room.id}:card:${c.id}`)).map(c=>({id:`card:${c.id}`,name:c.name,kind:'card' as const,write:c.write,document:documents.get(`${OBR.room.id}:card:${c.id}`)}))];
-  for(const item of data.items.filter(i=>!i.metadata[BIND]&&(i.metadata[SLUG]||i.metadata[HP]||i.metadata[LEGACY])&&(data.role==='GM'||i.createdUserId===playerId)))definitions.push({id:`monster:${item.id}`,name:item.name,kind:'monster',write:true});
+  for(const item of data.items.filter(i=>hasMonsterComponent(i)&&(data.role==='GM'||i.createdUserId===playerId)))definitions.push({id:`monster:${item.id}`,name:item.name,kind:'monster',write:true});
   return {definitions,publicId,gm:data.role==='GM',authority:{gm:data.role==='GM',read:new Set(definitions.map(d=>d.id)),write:new Set(definitions.filter(d=>d.write).map(d=>d.id)),give:new Set(definitions.filter(d=>d.kind!=='monster'||d.write).map(d=>d.id))}};
  }
  async function inventoryMirror(id:string,container:any,conditionIds:string[]=[],conditionEntries:any[]=[]){
   if(!id.startsWith('card:')&&!id.startsWith('monster:'))return;
   const current=await inventories.read(true),pending=current.data.projections?.[id];if(!pending)return;container=current.data.containers[id];conditionIds=pending.conditions;conditionEntries=pending.entries||[];
-  const a=await access(id.startsWith('card:')?id:id.slice(8)),oldConditions=a.cardId?(await read(a,true))?.dnd_card_web?.selections?.filter((s:any)=>s.entry.kind==='condition')||[]:[];
+  const a=await access(id),oldConditions=a.cardId?(await read(a,true))?.dnd_card_web?.selections?.filter((s:any)=>s.entry.kind==='condition')||[]:[];
   const custom=Array.isArray(a.scene[SHARED_BUFFS])?a.scene[SHARED_BUFFS] as any[]:[],defs=[...DEFAULT_BUFFS,...custom],identify=(entry:any)=>conditionIdentity(entry,defs);
   if(a.cardId){const existing=await read(a,true),doc=inventoryProjection(existing,container,conditionIds,conditionEntries,identify);if(JSON.stringify(doc)!==JSON.stringify(existing))await persistDocument(a,existing,doc,{key:inventories.key,revision:current.revision});}
   if(!conditionIds.length)return;
@@ -303,7 +325,7 @@ async function start(){
  const canOpen=(a:Awaited<ReturnType<typeof access>>)=>a.cardId?getState().enabled.characterCards!==false:a.slug?getState().enabled.bestiary!==false:getState().enabled.hpBar!==false;
  // A token can acquire or change its binding after the selection event. Keep
  // the binding in the identity so that this same selected token is retried.
- const selectionIdentity=(selection:string[],items:Item[])=>JSON.stringify(selection.map(id=>{const item=items.find(item=>item.id===id);return [id,item?.metadata[BIND],item?.metadata[SLUG]];}));
+ const selectionIdentity=(selection:string[],items:Item[])=>JSON.stringify(selection.map(id=>{const item=items.find(item=>item.id===id);return [id,item?.metadata[BIND],item?.metadata[SLUG],hasMonsterComponent(item),item?.createdUserId,item?.metadata['com.obr-suite/workbench/locked']];}));
  let selectionGeneration=0,selecting=false,selectAgain=false;
  const followMessage=(type:string,extra:Record<string,unknown>={})=>send(type,{followRevision,clientInstance,clientSelection,...extra});
  function finishMapFollow(restore=true){if(!mapFollowing)return;if(restore)chosen=mapReturn;mapFollowing=false;mapReturn='';followMessage('followEnd',{itemId:chosen,restore});}
@@ -316,7 +338,7 @@ async function start(){
    if(!chosen)chosen=getState().enabled.characterCards!==false&&list.cards[0]?`card:${list.cards[0].id}`:'';
    if(follow&&signature!==lastSelection){selectionGeneration++;followRevision++;
     if(selection.length===1){try{const a=await access(selection[0],list);if(canOpen(a)){
-     if(!mapFollowing)mapReturn=chosen;mapFollowing=true;lastSelection=signature;chosen=a.cardId?`card:${a.cardId}`:selection[0];
+     if(!mapFollowing)mapReturn=chosen;mapFollowing=true;lastSelection=signature;chosen=a.cardId?selection[0]:a.targetId;
      followMessage('navigate',{itemId:chosen,id:crypto.randomUUID(),followSelection:true});
     }else finishMapFollow();}catch{finishMapFollow();}}
     else{lastSelection=signature;if(selection.length>1){if(!mapFollowing)mapReturn=chosen;mapFollowing=true;followMessage('followSelection');}else finishMapFollow();}
@@ -363,6 +385,10 @@ async function start(){
    const signature=JSON.stringify(data);if(signature!==lastCatalog){lastCatalog=signature;send('catalog',{sequence:++sequence,access,...data});}
   }catch(error){console.warn('[workbench] catalog refresh',error);}finally{refreshing=false;if(again){again=false;void refresh();}}
  }
+ function assertMonsterWrite(a:Awaited<ReturnType<typeof access>>,item:Item,grant=false){
+  if(observation.peek().role!=='GM'&&!ownsNativeToken(item,playerId)&&!(grant&&item.createdUserId&&item.metadata['com.obr-suite/workbench/locked']!==true))throw Error('怪物修改权限已改变');
+  if(item.metadata[BIND]!==a.item?.metadata[BIND]||item.metadata[SLUG]!==a.item?.metadata[SLUG]||!hasMonsterComponent(item))throw Error('怪物关联已改变');
+ }
  async function setTokens(a:Awaited<ReturnType<typeof access>>,patch:any){
   if(a.cardId){
    const doc=await read(a);
@@ -372,7 +398,7 @@ async function start(){
    return;
   }
   const ids=a.cardId?a.items.filter(i=>i.metadata[BIND]===a.cardId).map(i=>i.id):a.item?[a.item.id]:[];if(!ids.length)return;
-  await OBR.scene.items.updateItems(ids,items=>{for(const item of items){if(a.cardId&&item.metadata[BIND]!==a.cardId)continue;
+  await OBR.scene.items.updateItems(ids,items=>{for(const item of items){if(a.cardId&&item.metadata[BIND]!==a.cardId)continue;assertMonsterWrite(a,item);
    item.metadata=mergeMonsterMetadata(item.metadata,a.item?.metadata||{},patch);
   }});
  }
@@ -416,7 +442,7 @@ async function start(){
  }
  function conditionRows(a:{scene:Record<string,any>;item?:Item;cardId?:string},doc:any):ConditionRow[]{
   const defs=definitionsFor(a.scene),saved=a.cardId?(doc?.dnd_card_web?.selections?.filter((s:any)=>s.entry?.kind==='condition')||(doc?.web_conditions||[]).map((entry:any)=>({entry}))):Object.values(a.item?.metadata['com.obr-suite/workbench/condition-details'] as any||{});
-  const ids=a.cardId?documentRuntime(doc,defs).conditions:(a.item?.metadata[STATUS_BUFFS_KEY] as string[]||[]);
+  const ids=a.cardId?documentRuntime(doc,defs).conditions:(Array.isArray(a.item?.metadata[STATUS_BUFFS_KEY])?a.item!.metadata[STATUS_BUFFS_KEY] as string[]:[]);
   return ids.map(id=>{const original=saved.find((s:any)=>s.entry&&conditionIdentity(s.entry,defs)===id),definition=defs.find(v=>v.id===id),entry=original?.entry||definition?.entry||{id:'suite-condition:'+id,kind:'condition',name:definition?.name||id,english:id,source:'IMPORTED',edition:'both',packId:'imported',revision:'1',entries:[],raw:{_suiteStatusId:id}};return {id,name:entry.name,entry,level:original?.level||1};});
  }
  const changeCondition=conditionCommands({
@@ -438,7 +464,7 @@ async function start(){
     if(change.after)publishStatusDefinitions(defs.filter(def=>def.id===change.after!.id));
     try{await setTokens(a,{conditions:next.map(row=>row.id)});}catch(error){console.warn('[workbench] condition projection pending',error);}
    }else{
-    await OBR.scene.items.updateItems([a.item!.id],items=>{for(const item of items){if(!a.write&&item.metadata['com.obr-suite/workbench/locked']===true)throw Error('目标怪物已上锁');if(item.metadata[BIND]||item.metadata[SLUG]!==a.item!.metadata[SLUG])throw Error('怪物关联已改变');const oldIds=a.item!.metadata[STATUS_BUFFS_KEY] as string[]||[],liveIds=item.metadata[STATUS_BUFFS_KEY] as string[]||[];if(oldIds.includes(change.conditionId)!==liveIds.includes(change.conditionId))throw Error('怪物状态已改变');item.metadata[STATUS_BUFFS_KEY]=[...liveIds.filter(id=>id!==change.conditionId),...(change.after?[change.conditionId]:[])];const details={...item.metadata['com.obr-suite/workbench/condition-details'] as any};if(change.after)details[change.conditionId]={entry:change.after.entry,level:change.after.level||1};else delete details[change.conditionId];item.metadata['com.obr-suite/workbench/condition-details']=details;}});
+    await OBR.scene.items.updateItems([a.item!.id],items=>{for(const item of items){assertMonsterWrite(a,item,change.grant&&!a.write);const oldIds=a.item!.metadata[STATUS_BUFFS_KEY] as string[]||[],liveIds=item.metadata[STATUS_BUFFS_KEY] as string[]||[];if(oldIds.includes(change.conditionId)!==liveIds.includes(change.conditionId))throw Error('怪物状态已改变');item.metadata[STATUS_BUFFS_KEY]=[...liveIds.filter(id=>id!==change.conditionId),...(change.after?[change.conditionId]:[])];const details={...item.metadata['com.obr-suite/workbench/condition-details'] as any};if(change.after)details[change.conditionId]={entry:change.after.entry,level:change.after.level||1};else delete details[change.conditionId];item.metadata['com.obr-suite/workbench/condition-details']=details;}});
     if(change.after)publishStatusDefinitions(defs.filter(def=>def.id===change.after!.id));
    }
   },
@@ -459,7 +485,7 @@ async function start(){
  });
  async function command(m:any){
   if(m.type==='groupRoll'){const result=await groups.handle(m);if(m.action==='close')finishMapFollow();return result;}
-  if(m.type==='readCard'){const a=await access(m.itemId),document=await read(a),latest=await access(m.itemId);if(latest.key!==a.key)throw Error('角色关联或权限已改变');return {document};}
+  if(m.type==='readCard'){const a=await access(m.itemId),sceneEpoch=observation.sceneEpoch(),identity=targetReadIdentity(a),document=await read(a),latest=await access(m.itemId);if(targetReadIdentity(latest)!==identity||sceneEpoch!==observation.sceneEpoch())throw Error('角色关联或权限已改变');return {document};}
   if(m.type==='assignOwners')throw Error('请使用枭熊棋子的 Set Owner 设置所属玩家');
   if(m.type==='refreshCard'){const a=await access(m.itemId);if(a.cardId){invalidateCard(a.cardId);await read(a,true);}return {snapshot:await snapshot(m.itemId)};}
   if(m.type==='showEntry'){const entry=sharedEntry(m.entry),actor=(await observation.read()).player.name;await publishWorkbenchNotice({noticeId:m.requestId,tokenId:'',tokenName:actor,entry,shared:true,summary:`${actor}展示了 ${entry.name}`,resource:{id:entry.id,name:entry.name,current:0,max:0,type:'number',icon:'gem'},delta:0,prevValue:0});return;}
@@ -535,16 +561,17 @@ async function start(){
   if(m.type==='monsterSave'){
    if(a.cardId||!a.item)throw Error('当前不是怪物卡');
    const data=m.data;if(!data||typeof data.name!=='string'||!data.name.trim()||JSON.stringify(data).length>500_000)throw Error('怪物资料无效');
-   const previous=await read(a);if(JSON.stringify(previous)!==JSON.stringify(m.expected))throw Error('怪物资料已经更新，请重新打开编辑');
+   const identity=targetReadIdentity(a),sceneEpoch=observation.sceneEpoch(),previous=await read(a);if(JSON.stringify(previous)!==JSON.stringify(m.expected))throw Error('怪物资料已经更新，请重新打开编辑');
    const index=a.item.metadata[MONSTER] as {key:string;revision:number}|undefined;
    const key=index?.key||`monster_${(OBR.room.id||'default').replace(/[^a-zA-Z0-9_-]/g,'_')}_${a.item.id.replace(/[^a-zA-Z0-9_-]/g,'_')}`;
    const latest=await relay.send({sharedDocument:{key,operation:'read'}});if(index&&latest.revision!==index.revision&&JSON.stringify(latest.data)!==JSON.stringify(m.expected))throw Error('怪物资料已经更新，请重新打开编辑');
+   const permission=await access(a.targetId);if(!permission.write||targetReadIdentity(permission)!==identity||sceneEpoch!==observation.sceneEpoch())throw Error('怪物关联或权限已改变');
    const saved=await relay.send({sharedDocument:{key,operation:'write',expected:latest.revision,data}});
    monsterOverrides.set(key,saved);cacheDocument(a.key,data);
-   const verify=await access(a.item.id);if(!verify.write||verify.key!==a.key)throw Error('怪物关联或权限已改变');
-   await OBR.scene.items.updateItems([a.item.id],items=>{for(const item of items){item.metadata[MONSTER]={key,revision:saved.revision};item.name=data.name;}});
+   const verify=await access(a.targetId);if(!verify.write||targetReadIdentity(verify)!==identity||sceneEpoch!==observation.sceneEpoch())throw Error('怪物关联或权限已改变');
+   await OBR.scene.items.updateItems([a.item.id],items=>{for(const item of items){assertMonsterWrite(a,item);if(!sameValue(item.metadata[MONSTER],index))throw Error('怪物资料已改变');item.metadata[MONSTER]={key,revision:saved.revision};item.name=data.name;}});
    const stats:Record<string,number>={};if(data.hp?.average!==previous?.hp?.average&&Number.isFinite(data.hp?.average)){stats['max health']=Math.max(0,data.hp.average);stats.health=Math.min(bubble(a.item).health??data.hp.average,data.hp.average);}const ac=(raw:any)=>typeof raw?.ac?.[0]==='number'?raw.ac[0]:raw?.ac?.[0]?.ac;if(ac(data)!==ac(previous)&&Number.isFinite(ac(data)))stats['armor class']=ac(data);if(Object.keys(stats).length)await setTokens(a,{stats});
-   return {snapshot:await snapshot(a.item.id)};
+   return {snapshot:await snapshot(a.targetId)};
   }
   if(m.type==='assignName'){
    const name=String(m.name||'').trim().slice(0,160);if(!name)throw Error('名称不能为空');
@@ -573,10 +600,10 @@ async function start(){
    doc.web_resources=resources;if(native){native.runtime.resources=resources;for(const [key,r] of Object.entries(resources) as [string,any][]){if(key.startsWith('spell-slot:')&&native.spellSettings)native.spellSettings.slots[key.split(':')[1]]={max:r.max,used:r.max-r.current};}native.revision++;}
    for(const [key,r] of Object.entries(resources) as [string,any][]){if(key.startsWith('spell-slot:')&&doc.spellcasting?.spell_slots)doc.spellcasting.spell_slots[key.split(':')[1]]={max:r.max,used:r.max-r.current,current:r.current};}
    if(doc.core_stats?.hit_dice)doc.core_stats.hit_dice.current=Object.entries(resources).filter(([id])=>id.startsWith('hit-die:')).reduce((n,[,r]:any)=>n+r.current,0);
-   if(a.cardId){await persistDocument(a,existing,doc);m._committed={kind:'document',id:`card:${a.cardId}`};await resourceNotices(a,beforeResources,resources);}m._phase='sync-token';await setTokens(a,{resources:Object.entries(resources).map(([id,r]:[string,any])=>({...r,id}))});if(!a.cardId)await resourceNotices(a,beforeResources,resources);return {snapshot:await snapshot(a.cardId?`card:${a.cardId}`:a.item!.id)};
+   if(a.cardId){await persistDocument(a,existing,doc);m._committed={kind:'document',id:`card:${a.cardId}`};await resourceNotices(a,beforeResources,resources);}m._phase='sync-token';await setTokens(a,{resources:Object.entries(resources).map(([id,r]:[string,any])=>({...r,id}))});if(!a.cardId)await resourceNotices(a,beforeResources,resources);return {snapshot:await snapshot(a.targetId)};
   }
   if(m.type==='lock'){
-   if(!a.cardId){if(!a.item)throw Error('没有怪物卡');await OBR.scene.items.updateItems([a.item.id],rows=>{for(const row of rows)row.metadata['com.obr-suite/workbench/locked']=!!m.locked;});return {snapshot:await snapshot(a.item.id)};}const locked=!!m.locked,update=(list:any[])=>list.map(c=>c.id===a.cardId?{...c,locked,visibility:locked?'owners':'public'}:c);
+   if(!a.cardId){if(!a.item)throw Error('没有怪物卡');await OBR.scene.items.updateItems([a.item.id],rows=>{for(const row of rows){assertMonsterWrite(a,row);row.metadata['com.obr-suite/workbench/locked']=!!m.locked;}});return {snapshot:await snapshot(a.targetId)};}const locked=!!m.locked,update=(list:any[])=>list.map(c=>c.id===a.cardId?{...c,locked,visibility:locked?'owners':'public'}:c);
    if(Array.isArray(a.scene[LIST]))await OBR.scene.setMetadata({[LIST]:update(a.scene[LIST] as any[])});
    if(Array.isArray(a.room[DIRECTORY]))await OBR.room.setMetadata({[DIRECTORY]:update(a.room[DIRECTORY] as any[])});
    if(Array.isArray(a.room[ROOM_LIST]))await OBR.room.setMetadata({[ROOM_LIST]:update(a.room[ROOM_LIST] as any[])});return {snapshot:await snapshot(`card:${a.cardId}`)};
@@ -588,7 +615,7 @@ async function start(){
    if(Object.keys(patch).some(k=>current[k]!==m.expected?.[k]))throw Error('场景数值已改变，请重试');
    const max=patch['max health']??current['max health'];if(typeof max==='number'&&('health' in patch||'max health' in patch))patch.health=Math.min(patch.health??current.health??0,max);
    if(a.cardId){const existing=await read(a),runtime=documentRuntime(existing,definitionsFor(a.scene)),doc=writeRuntime(existing,{...runtime,stats:{...runtime.stats,...patch}},definitionsFor(a.scene));m._phase='save-document';await persistDocument(a,existing,doc);m._committed={kind:'document',id:`card:${a.cardId}`};}
-   if(a.cardId)await statNotices(a,current,{...current,...patch});await setTokens(a,{stats:patch});if(!a.cardId){m._committed={kind:'token',id:a.item!.id};await statNotices(a,current,{...current,...patch});}return {snapshot:await snapshot(a.cardId?`card:${a.cardId}`:m.itemId)};
+   if(a.cardId)await statNotices(a,current,{...current,...patch});await setTokens(a,{stats:patch});if(!a.cardId){m._committed={kind:'token',id:a.targetId};await statNotices(a,current,{...current,...patch});}return {snapshot:await snapshot(a.cardId?`card:${a.cardId}`:m.itemId)};
   }
   let deltaDocument:any;if(m.delta){const doc=deltaDocument=await read(a);if(!doc?.dnd_card_web)throw Error('角色增量需要原始资料');m.previous=expandChanges(doc.dnd_card_web,m.delta.native,'before');m.native=expandChanges(doc.dnd_card_web,m.delta.native,'after');m.previousData=expandChanges(doc,m.delta.legacy,'before');m.data=expandChanges(doc,m.delta.legacy,'after');m.observed={...expandChanges(doc,m.delta.legacy,'observed'),dnd_card_web:expandChanges(doc.dnd_card_web,m.delta.native,'observed')};}
   if(!a.cardId||!m.native||m.native.schemaVersion!==1||!m.data||m.data.schema_version!=='0.3'||JSON.stringify(m.native).length>3_000_000)throw Error('角色资料无效');
@@ -634,7 +661,7 @@ async function start(){
   if(m.type==='requestStatus'){const answer=seen.get(m.requestId);if(answer)send('ack',{requestId:m.requestId,...answer},route);else send('requestPending',{requestId:m.requestId,active:activeRequests.has(m.requestId),known:requestRuns.has(m.requestId)},route);return;}
   if(m.type==='cancel'){if(!activeRequests.has(m.requestId)&&!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}
   if(m.type==='pin'){follow=!m.pinned;if(!follow)finishMapFollow(false);if(follow)lastSelection='';void refreshSelection();return;}
-  if(m.type==='select'){if(Number.isSafeInteger(m.clientSelection)){const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(m.clientSelection<(selectionIntents.get(instance)||0))return;selectionIntents.delete(instance);selectionIntents.set(instance,m.clientSelection);while(selectionIntents.size>8)selectionIntents.delete(selectionIntents.keys().next().value!);clientInstance=instance==='legacy'?'':instance;clientSelection=m.clientSelection;}const generation=++selectionGeneration;finishMapFollow(false);try{const a=await access(m.itemId);if(generation!==selectionGeneration)return;chosen=a.cardId?`card:${a.cardId}`:m.itemId;const observed=await observation.read();lastSelection=selectionIdentity(observed.selection,observed.items);last='';void refreshSelection();}catch(e){send('error',{message:String(e)});}return;}
+  if(m.type==='select'){if(Number.isSafeInteger(m.clientSelection)){const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(m.clientSelection<(selectionIntents.get(instance)||0))return;selectionIntents.delete(instance);selectionIntents.set(instance,m.clientSelection);while(selectionIntents.size>8)selectionIntents.delete(selectionIntents.keys().next().value!);clientInstance=instance==='legacy'?'':instance;clientSelection=m.clientSelection;}const generation=++selectionGeneration;finishMapFollow(false);try{const a=await access(m.itemId);if(generation!==selectionGeneration)return;chosen=a.targetId;const observed=await observation.read();lastSelection=selectionIdentity(observed.selection,observed.items);last='';void refreshSelection();}catch(e){send('error',{message:String(e)});}return;}
   if(!['groupRoll','assignOwners','readCard','refreshCard','showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
   if(requestRuns.has(m.requestId))return;
   delete m._committed;delete m._inventoryCommitted;
