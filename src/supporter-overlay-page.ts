@@ -55,16 +55,16 @@ function supporterFontSize(amount: number): number {
 // always shows the same colour. All ten are tuned for legibility on
 // the overlay's near-black backdrop.
 const SUPPORTER_PALETTE = [
-  "#ffd323", // gold
-  "#ff6545", // coral
-  "#00e3c3", // teal
-  "#299dff", // sky
-  "#b45cff", // lavender
-  "#93ef28", // lime
-  "#ff499b", // rose
-  "#ff941c", // amber
-  "#2deb82", // mint
-  "#697cff", // periwinkle
+  "#d1a552", // gold
+  "#cb8070", // coral
+  "#66b3a5", // teal
+  "#739fc9", // sky
+  "#ac89c1", // lavender
+  "#a6bb72", // lime
+  "#cb87a4", // rose
+  "#cd985d", // amber
+  "#7ab79a", // mint
+  "#929dc5", // periwinkle
 ];
 function supporterColor(name: string): string {
   // Tiny stable string hash → palette index.
@@ -343,9 +343,9 @@ function tickSlot(slot: Slot, now: number): void {
     if (workbenchMarquee) {
       slot.el.style.transition='none';slot.el.style.opacity='1';slot.state='in';
       const distance=innerWidth+24+(slot.rect?.w||200);
-      marqueeNextAt[slot.lane!]=now+((slot.rect?.w||200)+42)/MARQUEE_SPEED*1000+200+Math.random()*650;
+      marqueeNextAt[slot.lane!]=now+((slot.rect?.w||200)+30)/MARQUEE_SPEED*1000+60+Math.random()*160;
       slot.animation=slot.el.animate([{transform:'translateX(0)'},{transform:`translateX(-${distance}px)`}],{duration:distance/MARQUEE_SPEED*1000,easing:'linear'});
-      slot.animation.onfinish=()=>{slot.el.style.opacity='0';slot.state='void';slot.stateUntil=performance.now()+150+Math.random()*600;slot.current=null;slot.rect=null;};
+      slot.animation.onfinish=()=>{slot.el.style.opacity='0';slot.state='void';slot.stateUntil=performance.now()+70+Math.random()*160;slot.current=null;slot.rect=null;};
       return;
     }
     // Force a reflow so the opacity transition kicks in from 0 → 1.
@@ -417,7 +417,7 @@ function setVisible(visible: boolean): void {
     if(workbenchMarquee)marqueeNextAt.splice(0,marqueeNextAt.length,...Array(Math.max(1,Math.min(MARQUEE_LANES,Math.floor(innerHeight/68)))).fill(now));
     for (const s of slots) {
       s.state = "out";
-      s.stateUntil = now + Math.random() * (workbenchMarquee?2200:3500);
+      s.stateUntil = now + Math.random() * (workbenchMarquee?1200:3500);
       s.el.style.opacity = "0";
     }
     startLoop();
@@ -492,7 +492,7 @@ function startHeartbeatWatchdog(): void {
 
 // === Boot =========================================================
 
-const SLOT_COUNT = workbenchMarquee ? 16 : 100;
+const SLOT_COUNT = workbenchMarquee ? 24 : 100;
 
 OBR.onReady(async () => {
   // Default to ZH; broadcast carries the actual choice from settings.
