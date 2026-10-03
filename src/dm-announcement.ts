@@ -44,6 +44,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "./asset-base";
 import { renderInlineNoSpan } from "./announcement-inline";
 import { renderAnnouncementImportant } from "./announcement-important";
+import { mountPlayerPermissionNotice } from './player-permission-notice';
 
 import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID,ANNOUNCEMENT_SEEN_KEY,ANNOUNCEMENT_DAILY_KEY} from './announcement-source';
 const MODAL_ID = ANNOUNCEMENT_MODAL_ID;
@@ -481,6 +482,10 @@ function startReadGate(): void {
 }
 
 OBR.onReady(() => {
+  if (new URLSearchParams(location.search).get('permissions') === '1') {
+    mountPlayerPermissionNotice(readAnnounceLang());
+    return;
+  }
   void loadAndRender();
   void loadVersionIntoTitle();
 

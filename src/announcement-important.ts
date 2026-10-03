@@ -71,3 +71,8 @@ export function renderAnnouncementImportant(language: "zh" | "en"): string {
   const title = language === "zh" ? "关于设置玩家单独权限的重要说明" : "Important: setting player Owner permissions";
   return `<details class="announcement-important"><summary>${title}</summary>${IMPORTANT_NOTES[language]}</details>`;
 }
+
+/** The dedicated permission notice uses the same guide, fully expanded. */
+export function renderPlayerPermissionGuide(language: "zh" | "en"): string {
+  return `<section class="announcement-important">${IMPORTANT_NOTES[language]}</section>`;
+}
