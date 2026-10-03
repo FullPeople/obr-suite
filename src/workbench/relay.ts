@@ -21,9 +21,12 @@ export class Relay {
   }
   this.retryAt=0;this.failures=0;this.lastError=undefined;this.alive?.();return data;
  }
- private async post(message:any){
+ private async post(message:any,beforeSend?:()=>void|Promise<void>){
   if(Date.now()<this.retryAt)throw this.lastError;
   const encoded=await wireBody(message);
+  // Registration and compression can suspend long enough for an owner grant
+  // to be revoked. Recheck immediately before transmitting the mutation.
+  try{await beforeSend?.();}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}
   return withRequestTimeout(60000,this.abort.signal,async signal=>this.response(await fetch(this.endpoint(),{method:'POST',headers:{Authorization:`Bearer ${this.secret}`,...encoded.headers},body:encoded.body as BodyInit,signal}),!message?.register));
  }
  private async register(){
@@ -31,7 +34,7 @@ export class Relay {
   if(!this.registration)this.registration=this.post({register:true,clientKey:this.clientKey,...(this.room?{room:this.room}:{})}).then(()=>{this.active=true;}).finally(()=>{this.registration=undefined;});
   await this.registration;
  }
- async send(message:any){await this.register();return this.post(message);}
+ async send(message:any,beforeSend?:()=>void|Promise<void>){await this.register();return this.post(message,beforeSend);}
  private async pause(ms:number){await new Promise<void>(resolve=>{const finish=()=>{clearTimeout(timer);this.abort.signal.removeEventListener('abort',finish);resolve();},timer=setTimeout(finish,ms);if(this.abort.signal.aborted)finish();else this.abort.signal.addEventListener('abort',finish,{once:true});});}
  private async poll(){while(!this.stopped){try{
   if(Date.now()<this.retryAt){await this.pause(this.retryAt-Date.now());if(this.stopped)break;}

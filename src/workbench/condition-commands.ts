@@ -2,14 +2,14 @@ import {sameValue} from './merge';
 
 export type ConditionRow={id:string;name:string;entry?:any;level?:number};
 type Change={itemId:string;conditionId:string;before:ConditionRow|null;after:ConditionRow|null;grant?:boolean};
-type Adapter={read:(id:string)=>Promise<{rows:ConditionRow[];write:boolean;receive?:boolean}>;write:(change:Change)=>Promise<void>;snapshot:(id:string)=>Promise<any>;catalog:()=>Promise<any>;notice?:(changes:Change[])=>Promise<void>};
+type Adapter={read:(id:string)=>Promise<{rows:ConditionRow[];write:boolean;receive?:boolean}>;write:(change:Change,beforeWrite?:()=>void|Promise<void>)=>Promise<void>;snapshot:(id:string)=>Promise<any>;catalog:()=>Promise<any>;notice?:(changes:Change[])=>Promise<void>};
 /** Runtime edits use the existing character document / monster metadata owner.
  * A transfer has two durable writes. On a definite second-write failure, roll
  * back only the specific unchanged target field; never roll back an unknown write. */
 export function conditionCommands(api:Adapter){
  const history=new Map<string,Change[]>();
  const row=(rows:ConditionRow[],id:string)=>rows.find(r=>r.id===id)||null;
- return async(message:any)=>{
+ const run=async(message:any,beforeWrite?:()=>void|Promise<void>)=>{
   let changes:Change[]=[];
   if(message.action==='history'){
    const previous=history.get(String(message.reference));if(!previous)throw Error('状态操作的撤销记录已过期');
@@ -31,9 +31,9 @@ export function conditionCommands(api:Adapter){
   // Validate all fields before the first write. Each write rechecks the field.
   for(const change of changes){const current=await api.read(change.itemId);if(!current.write&&!(change.grant&&current.receive))throw Error('角色状态修改权限已改变');if(!sameValue(row(current.rows,change.conditionId),change.before))throw Error(`状态已改变，请重试（${change.before?.name||change.after?.name}）`);}
   const committed:Change[]=[];
-  try{for(const change of changes){await api.write(change);committed.push(change);}}
+  try{for(const change of changes){await beforeWrite?.();await api.write(change,beforeWrite);committed.push(change);}}
   catch(error){const e=error as any,rollbackErrors:string[]=[];
-   if(!e?.uncertain)for(const change of [...committed].reverse())try{await api.write({...change,before:change.after,after:change.before});}catch(failure){rollbackErrors.push(`${change.itemId}: ${String(failure)}`);}
+   if(!e?.uncertain)for(const change of [...committed].reverse())try{await beforeWrite?.();await api.write({...change,before:change.after,after:change.before},beforeWrite);}catch(failure){rollbackErrors.push(`${change.itemId}: ${String(failure)}`);}
    if(e?.uncertain&&!committed.length)throw error;
    if(e?.uncertain||rollbackErrors.length)throw Object.assign(Error('状态转交部分结果暂时无法确认，请核对两张角色卡。'),{uncertain:true,diagnostic:{...e?.diagnostic,code:'CONDITION_TRANSFER_PARTIAL',requestId:message.requestId,committed:committed.map(c=>c.itemId),rollbackErrors,cause:String(error),causeDiagnostic:e?.diagnostic}});
    throw error;
@@ -44,4 +44,5 @@ export function conditionCommands(api:Adapter){
   const catalog=await api.catalog().catch(error=>{console.warn('[workbench] condition catalog pending',error);return undefined;});
   return {snapshots,catalog,...(changes.length?{historyId:reference,undo:{itemId:message.itemId,action:'history',reference}}:{})};
  };
+ return Object.assign(run,{targets:(message:any):string[]=>message.action==='history'?(history.get(String(message.reference))||[]).map(change=>change.itemId):[message.itemId,message.to].filter((id):id is string=>typeof id==='string')});
 }
