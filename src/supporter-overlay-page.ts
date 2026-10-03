@@ -25,7 +25,7 @@ interface Supporter { name: string; amount: number; }
 
 const BC_VISIBILITY = "com.obr-suite/supporter-overlay/visibility";
 const workbenchMarquee = new URLSearchParams(location.search).get('workbench') === '1';
-const MARQUEE_SPEED = 150;
+const MARQUEE_SPEED = 240;
 const MARQUEE_LANES = 4;
 const marqueeNextAt = Array.from({length:MARQUEE_LANES},()=>0);
 
@@ -43,8 +43,8 @@ function supporterFontSize(amount: number): number {
   // Same sqrt curve as settings.ts. Slightly LARGER ceiling on the
   // overlay because we're on a fullscreen backdrop instead of a
   // 640px popup — bigger names read better at that scale.
-  const raw = 10 + 2.5 * Math.sqrt(Math.max(0, amount));
-  return Math.max(13, Math.min(46, Math.round(raw * 10) / 10));
+  const raw = 18 + 2.5 * Math.sqrt(Math.max(0, amount));
+  return Math.max(21, Math.min(54, Math.round(raw * 10) / 10));
 }
 
 // 2026-05-14 — per-name colour palette. The user wanted the
@@ -55,16 +55,16 @@ function supporterFontSize(amount: number): number {
 // always shows the same colour. All ten are tuned for legibility on
 // the overlay's near-black backdrop.
 const SUPPORTER_PALETTE = [
-  "#f5d76e", // gold
-  "#ff8c6b", // coral
-  "#5fd6c4", // teal
-  "#6cb6ff", // sky
-  "#c89bff", // lavender
-  "#a8e063", // lime
-  "#ff8fb3", // rose
-  "#ffb347", // amber
-  "#7fe0a8", // mint
-  "#8c9eff", // periwinkle
+  "#ffd323", // gold
+  "#ff6545", // coral
+  "#00e3c3", // teal
+  "#299dff", // sky
+  "#b45cff", // lavender
+  "#93ef28", // lime
+  "#ff499b", // rose
+  "#ff941c", // amber
+  "#2deb82", // mint
+  "#697cff", // periwinkle
 ];
 function supporterColor(name: string): string {
   // Tiny stable string hash → palette index.
@@ -324,7 +324,7 @@ function placeSlot(slot: Slot, s: Supporter): void {
     w: Math.max(60, Math.ceil(measured.width) + 8),
     h: Math.max(Math.ceil(measured.height), 24),
   };
-  const pos = workbenchMarquee ? {x:innerWidth+12,y:6+(slot.lane||0)*68} : pickPosition(box.w, box.h, activeRects(slot)) ?? { x: 20, y: 20 };
+  const pos = workbenchMarquee ? {x:innerWidth+12,y:6+(slot.lane||0)*68+Math.random()*4} : pickPosition(box.w, box.h, activeRects(slot)) ?? { x: 20, y: 20 };
 
   slot.el.style.left = `${pos.x}px`;
   slot.el.style.top = `${pos.y}px`;
@@ -335,7 +335,7 @@ function placeSlot(slot: Slot, s: Supporter): void {
 function tickSlot(slot: Slot, now: number): void {
   if (slot.state === "void") {
     if (now < slot.stateUntil) return;
-    if(workbenchMarquee){const lane=marqueeNextAt.indexOf(Math.min(...marqueeNextAt));if(marqueeNextAt[lane]>now)return;slot.lane=lane;}
+    if(workbenchMarquee){const available=marqueeNextAt.flatMap((at,lane)=>at<=now?[lane]:[]);if(!available.length)return;slot.lane=available[Math.floor(Math.random()*available.length)];}
     // Pick a new supporter, place it, start fade-in.
     const s = pickSupporter();
     if (!s) return;
@@ -343,9 +343,9 @@ function tickSlot(slot: Slot, now: number): void {
     if (workbenchMarquee) {
       slot.el.style.transition='none';slot.el.style.opacity='1';slot.state='in';
       const distance=innerWidth+24+(slot.rect?.w||200);
-      marqueeNextAt[slot.lane!]=now+((slot.rect?.w||200)+42)/MARQUEE_SPEED*1000;
+      marqueeNextAt[slot.lane!]=now+((slot.rect?.w||200)+42)/MARQUEE_SPEED*1000+200+Math.random()*650;
       slot.animation=slot.el.animate([{transform:'translateX(0)'},{transform:`translateX(-${distance}px)`}],{duration:distance/MARQUEE_SPEED*1000,easing:'linear'});
-      slot.animation.onfinish=()=>{slot.el.style.opacity='0';slot.state='void';slot.stateUntil=performance.now()+100;slot.current=null;slot.rect=null;};
+      slot.animation.onfinish=()=>{slot.el.style.opacity='0';slot.state='void';slot.stateUntil=performance.now()+150+Math.random()*600;slot.current=null;slot.rect=null;};
       return;
     }
     // Force a reflow so the opacity transition kicks in from 0 → 1.
@@ -417,7 +417,7 @@ function setVisible(visible: boolean): void {
     if(workbenchMarquee)marqueeNextAt.fill(now);
     for (const s of slots) {
       s.state = "out";
-      s.stateUntil = now + Math.random() * (workbenchMarquee?450:3500);
+      s.stateUntil = now + Math.random() * (workbenchMarquee?2200:3500);
       s.el.style.opacity = "0";
     }
     startLoop();

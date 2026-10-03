@@ -108,5 +108,6 @@
   { "name": "一梦", "amount":30 },
   { "name": "塔", "amount":26.6 },
   { "name": "小白", "amount":10 },
-  { "name": "欧欧", "amount":100 }
+  { "name": "欧欧", "amount":100 },
+  { "name": "洛伦兹力", "amount":100 }
 ]
