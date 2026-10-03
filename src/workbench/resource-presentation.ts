@@ -2,7 +2,7 @@
 export const RESOURCE_WIDGET_STYLES = ['ring','pips','pool','half','orbit','square','segments','reservoir','matrix','fraction','counter','poolchips','poolbars','poolpips','ready','diamond','bar','icon'] as const;
 export const RESOURCE_WIDGET_ICONS = ['spark','diamond','shield','flame','leaf','bottle'] as const;
 export type ResourceAppearance = {style:typeof RESOURCE_WIDGET_STYLES[number];color?:string;icon?:typeof RESOURCE_WIDGET_ICONS[number]};
-export type ResourceWidgetPresentation = ResourceAppearance & {x:number;y:number;w:number;h:number;page:number;members?:string[];label?:string};
+export type ResourceWidgetPresentation = ResourceAppearance & {x:number;y:number;w:number;h:number;page:number;resourceArea?:boolean;contentScale?:number;split?:number;members?:string[];label?:string};
 const object = (value:unknown):value is Record<string,any> => !!value && typeof value==='object' && !Array.isArray(value);
 const style = (value:unknown):value is ResourceAppearance['style'] => RESOURCE_WIDGET_STYLES.includes(value as ResourceAppearance['style']);
 const color = (value:unknown):value is string => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value);
@@ -18,7 +18,7 @@ function widget(value:unknown):ResourceWidgetPresentation|undefined {
  if(!object(value)||!style(value.style))return;
  const {x,y,w,h,page}=value;
  if(![x,y,w,h,page].every(Number.isSafeInteger)||x<0||y<0||w<2||h<2||x+w>12||y+h>6||page<0||page>2999)return;
- return {style:value.style,x,y,w,h,page,...(color(value.color)?{color:value.color}:{}),...(icon(value.icon)?{icon:value.icon}:{})};
+ return {style:value.style,x,y,w,h,page,...(color(value.color)?{color:value.color}:{}),...(icon(value.icon)?{icon:value.icon}:{}),...(typeof value.resourceArea==='boolean'?{resourceArea:value.resourceArea}:{}),...(Number.isFinite(value.contentScale)&&value.contentScale>=.5&&value.contentScale<=2?{contentScale:value.contentScale}:{}),...(Number.isFinite(value.split)&&value.split>=.2&&value.split<=.55?{split:value.split}:{})};
 }
 
 /** Restricted to resource IDs already authorized for this recipient, including group members. */
@@ -53,8 +53,9 @@ export function updateResourceWidgetPresentation(document:any,id:string,presenta
  if(native!==undefined&&!object(native))throw Error('角色资料格式无效');
  const resources=native?.runtime?.resources||document.web_resources||{};
  if(presentation!==null){
-  if(!object(presentation)||Object.keys(presentation).some(key=>!['style','color','icon','x','y','w','h','page','members','label'].includes(key))||!style(presentation.style)
+  if(!object(presentation)||Object.keys(presentation).some(key=>!['style','color','icon','x','y','w','h','page','members','label','resourceArea','contentScale','split'].includes(key))||!style(presentation.style)
    ||presentation.color!==undefined&&!color(presentation.color)||presentation.icon!==undefined&&!icon(presentation.icon))throw Error('无效资源展示样式');
+  if(presentation.resourceArea!==undefined&&typeof presentation.resourceArea!=='boolean'||presentation.contentScale!==undefined&&(!Number.isFinite(presentation.contentScale)||presentation.contentScale<.5||presentation.contentScale>2)||presentation.split!==undefined&&(!Number.isFinite(presentation.split)||presentation.split<.2||presentation.split>.55))throw Error('无效资源展示比例');
   if(['x','y','w','h','page'].some(key=>key in presentation)&&!widget(presentation))throw Error('无效资源展示布局');
   if(presentation.members!==undefined&&(!Array.isArray(presentation.members)||presentation.members.length<2||presentation.members.length>12||new Set(presentation.members).size!==presentation.members.length||!presentation.members.includes(id)||presentation.members.some((key:unknown)=>typeof key!=='string'||key!==id&&!Object.hasOwn(resources,key))))throw Error('无效资源分组');
   if(presentation.label!==undefined&&(typeof presentation.label!=='string'||presentation.label.length>100))throw Error('无效资源分组名称');
@@ -77,4 +78,10 @@ export function updateResourceWidgetPresentation(document:any,id:string,presenta
   }
  }else Object.defineProperty(widgets,id,{value:{...(previous||{x:0,y:0,w:4,h:2,page:0}),...(presentation as object)},writable:true,enumerable:true,configurable:true});
  if(native)delete document.web_resource_widgets;
+}
+
+/** Visibility is a layout preference, restricted to already authorized pools. */
+export function hiddenResourcePresentation(document:any,resources:readonly {id?:string}[]):string[]{
+ const hidden=document?.dnd_card_web?.quickbarLayout?.hidden,allowed=new Set(resources.map(row=>`resource:${row.id}`));
+ return Array.isArray(hidden)?[...new Set(hidden.filter((id:unknown):id is string=>typeof id==='string'&&allowed.has(id)))]:[];
 }
