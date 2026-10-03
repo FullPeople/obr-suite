@@ -4,7 +4,7 @@ import {build} from 'rolldown';
 import {mkdirSync,writeFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {pathToFileURL} from 'node:url';
-const root=resolve(import.meta.dirname,'..'),out=join(root,'.local-evidence/owner-authority');mkdirSync(out,{recursive:true});
+const root=resolve(import.meta.dirname,'..').replaceAll('\\','/'),out=join(root,'.local-evidence/owner-authority');mkdirSync(out,{recursive:true});
 const entry=join(out,'entry.mjs');
 writeFileSync(entry,`import assert from 'node:assert/strict';import {workbenchObservation} from '${root}/src/workbench/observation';import {Relay} from '${root}/src/workbench/relay';
 const api=globalThis.sdk,observe=workbenchObservation(),checks=[];
