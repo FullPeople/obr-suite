@@ -1,0 +1,13 @@
+# Exact paired startup follow-up on current Owner 243
+
+Candidate only; no deployment receipt. Based on dev `0956dead8541c7dbc16ce24c8560a7c2d98c4286`, retaining all concurrent 243 production code, Windows fixture fixes, and 1.0.243-dev. Suite src equals the previously verified `2a1bd61dfd47793b9905d69523eceb83faeaa6f8` (tree `51cb0114cda4be51193b8b69cbf938a9a283d18e`). This commit only pins the exact new Web `47c7e14d274f66afe554d88bc9845750272602a2` and selects Node 22 for its candidate CI. See Web docs/STARTUP-243-INTEGRATION.md for the bounded saved-editor/read-only and failed-recovery changes.
+
+Local Node 22.23.3 npm ci, all 25 synthetic regression groups and build:workbench-dev with DND_CARD_WEB_ROOT=/workspace/web-integration passed. The Web tree used locally is exactly the pinned commit tree `83c82f435204e91da2d5a0de181cd98f2580278f`; local six saved-editor/recovery and eighteen startup-order production browser cases passed. Exact paired CI must finish before any official branch integration or deployment. Existing 242 or concurrent 243 green CI does not prove this new combination.
+
+The selected environment lacks existing SSH deployment configuration; production HTTPS reads fail at proxy CONNECT 403 before an origin response. No deployment apply, official dev/main write, stable/oldstable update, service/relay write or player-data operation is performed here. Concurrent production release ownership must be coordinated first. Fresh-user 5–7 s transfer tails, real logged-in multiplayer rooms, and physical-phone acceptance remain open.
+
+## Integration with completed concurrent 243 receipts
+
+Final Web main source integration is `04d8a8408ed7e2815dabb9c14617fd369ee11ebb`, preserving completed concurrent main `93dea042a3de689111b8da88c3cb701b9f013625`. This Suite merge preserves dev `5f3aaaed5174dbe6965c7a3333516f938e42cba9` and all its completed 243 receipts. Production remains Web `fbccf5725e93e605b016858d3f45d35bddb27f08` / Suite `207f584347b6797c70eabaedff9825d8cdc36b88`; source integration does not mean deployment.
+
+The prior exact pair passed Web's full 18 jobs [37140345696](https://github.com/FullPeople/DND-card-web/actions/runs/37140345696), Suite [37140429936](https://github.com/FullPeople/obr-suite/actions/runs/37140429936), and controlled/public profile [37140345663](https://github.com/FullPeople/DND-card-web/actions/runs/37140345663). This commit pins the resulting Web main exactly and re-verifies the paired Suite before the official dev fast-forward. Suite src remains unchanged. An existing server deployment channel is still absent; there is no deployment apply or real-room/physical-phone acceptance.

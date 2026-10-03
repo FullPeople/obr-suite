@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
+    branches: [fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,12 +22,12 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: fbccf5725e93e605b016858d3f45d35bddb27f08
+          ref: 04d8a8408ed7e2815dabb9c14617fd369ee11ebb
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
       - name: Install locked Suite dependencies
         run: npm ci
       - name: Install locked paired Web dependencies
