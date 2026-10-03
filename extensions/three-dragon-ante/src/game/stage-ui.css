@@ -70,6 +70,11 @@
 /* Notices overlay the table; changing text never changes the canvas or hand size. */
 .table-shell>.board-scroll{position:relative}
 .table-shell:not([data-phase=lobby])>#toolbar{position:absolute;right:14px;bottom:42px;z-index:7;max-width:200px;padding:0;background:transparent;justify-content:flex-end}
+/* Results keep Leave/Join in their own row under the header. The portrait
+ * hand dock occupies the bottom 218px, so gameplay overlay coordinates would
+ * put these essential navigation buttons underneath interactive hand cards. */
+.table-shell[data-phase=ended]>#toolbar{position:relative;inset:auto;z-index:9;max-width:none;padding:8px 20px;background:#160f0b55;justify-content:flex-start}
+@media(max-width:580px){.table-shell[data-phase=ended]>#toolbar{padding:6px 10px}}
 /* The banner is the table's persistent answer to "what is happening now?".
  * It carries the phase name at all times during a game, and the waiting line is
  * the largest text on the felt so "waiting for whom" is never inferred. */

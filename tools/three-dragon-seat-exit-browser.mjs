@@ -55,7 +55,16 @@ try{
    </script><iframe src="${source}" onload="${embedded?'':"send({id:'OBR_READY',data:{ref:'fixture',userId:member}})"}"></iframe>`});
   });
   await p.goto(origin+'/host');const frame=p.frames().find(f=>f.parentFrame());await frame.getByRole('button',{name:'离开座位',exact:true}).waitFor();
-  await frame.getByRole('button',{name:'离开座位',exact:true}).click();assert.equal(await frame.locator('#lobby').isVisible(),true,'main screen visible while ACK is deliberately withheld');assert.equal(await frame.locator('#stage-host').isVisible(),false);assert.deepEqual(await frame.evaluate(()=>window.__socket.messages.filter(m=>m.type==='command').map(m=>m.command.type)),['leave'],'exit must not reset or delete the room');
+  await frame.waitForFunction(()=>document.getElementById('table-app')?.dataset.renderer==='webgl');
+  const leave=frame.getByRole('button',{name:'离开座位',exact:true});
+  const reachability=await leave.evaluate(button=>{const rect=button.getBoundingClientRect(),toolbar=document.getElementById('toolbar').getBoundingClientRect(),dock=document.querySelector('.player-dock').getBoundingClientRect(),hit=document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2);return{renderer:document.getElementById('table-app').dataset.renderer,viewport:{width:innerWidth,height:innerHeight},button:rect.toJSON(),toolbar:toolbar.toJSON(),dock:dock.toJSON(),hit:hit?.outerHTML.slice(0,300),clickable:!!hit&&button.contains(hit)};});
+  const endControls=await frame.evaluate(()=>[...document.querySelectorAll('.table-header button,#toolbar button')].filter(button=>!button.disabled&&button.getBoundingClientRect().width>0).map(button=>{const rect=button.getBoundingClientRect(),hit=document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2);return{text:button.textContent,clickable:!!hit&&button.contains(hit)};}));
+  writeFileSync(join(out,`${mode}-${owner?'owner':'guest'}-ended-hit.json`),JSON.stringify({...reachability,endControls},null,2));
+  await p.screenshot({path:join(out,`${mode}-${owner?'owner':'guest'}-ended.png`)});
+  assert.equal(reachability.clickable,true,'completed-game Leave must be a real unobstructed pointer target');
+  assert.ok(endControls.every(control=>control.clickable),'all visible enabled end-screen controls must remain unobstructed');
+  if(reachability.dock.height>0)assert.ok(reachability.toolbar.bottom<=reachability.dock.top,'ended controls occupy a row clear of the hand dock');
+  await leave.click();assert.equal(await frame.locator('#lobby').isVisible(),true,'main screen visible while ACK is deliberately withheld');assert.equal(await frame.locator('#stage-host').isVisible(),false);assert.deepEqual(await frame.evaluate(()=>window.__socket.messages.filter(m=>m.type==='command').map(m=>m.command.type)),['leave'],'exit must not reset or delete the room');
   await frame.evaluate(publicWire=>{const socket=window.__socket;socket.receive({type:'view',seq:2,view:publicWire});socket.receive({type:'ack',id:socket.messages.findLast(m=>m.type==='command').id,ok:true});},publicWire);
   await frame.getByRole('button',{name:'加入牌桌',exact:true}).waitFor();assert.equal(await frame.locator('#lobby').isVisible(),true);
   await p.screenshot({path:join(out,`${mode}-${owner?'owner':'guest'}-left.png`)});await p.reload();const reopened=p.frames().find(f=>f.parentFrame());await reopened.waitForFunction(()=>window.__socket?.messages.some(m=>m.type==='auth'));await reopened.locator('#lobby').waitFor({state:'visible'});assert.equal(await reopened.locator('#stage-host').isVisible(),false);
