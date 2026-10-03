@@ -1,0 +1,7 @@
+# Exact paired startup follow-up on current Owner 243
+
+Candidate only; no deployment receipt. Based on dev `0956dead8541c7dbc16ce24c8560a7c2d98c4286`, retaining all concurrent 243 production code, Windows fixture fixes, and 1.0.243-dev. Suite src equals the previously verified `2a1bd61dfd47793b9905d69523eceb83faeaa6f8` (tree `51cb0114cda4be51193b8b69cbf938a9a283d18e`). This commit only pins the exact new Web `47c7e14d274f66afe554d88bc9845750272602a2` and selects Node 22 for its candidate CI. See Web docs/STARTUP-243-INTEGRATION.md for the bounded saved-editor/read-only and failed-recovery changes.
+
+Local Node 22.23.3 npm ci, all 25 synthetic regression groups and build:workbench-dev with DND_CARD_WEB_ROOT=/workspace/web-integration passed. The Web tree used locally is exactly the pinned commit tree `83c82f435204e91da2d5a0de181cd98f2580278f`; local six saved-editor/recovery and eighteen startup-order production browser cases passed. Exact paired CI must finish before any official branch integration or deployment. Existing 242 or concurrent 243 green CI does not prove this new combination.
+
+The selected environment lacks existing SSH deployment configuration; production HTTPS reads fail at proxy CONNECT 403 before an origin response. No deployment apply, official dev/main write, stable/oldstable update, service/relay write or player-data operation is performed here. Concurrent production release ownership must be coordinated first. Fresh-user 5–7 s transfer tails, real logged-in multiplayer rooms, and physical-phone acceptance remain open.
