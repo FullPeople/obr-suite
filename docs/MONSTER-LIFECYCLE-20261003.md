@@ -1,6 +1,6 @@
 # Workbench monster lifecycle repair — 2026-10-03
 
-Base: dev `c8397b04192ac26c4e954de813501c67acfdd783`. This is an independent review candidate, not a merge or deployment. Stable main and old automatic bestiary popovers are not changed by this candidate.
+Initial base: dev `c8397b04192ac26c4e954de813501c67acfdd783`. The final candidate absorbs the subsequently advanced official dev `e12a6ab9320b7257979021a51c05c9bf8972b071`, preserving release 236 and its resource-dashboard changes. The paired Web includes official main `4ef1eb37c4c8ea34291b06d39a21c586ff5e6866`. This is an independent review candidate; official branches, deployments and old automatic bestiary popovers remain untouched. Earlier green runs are retained as historical evidence and the integrated candidate is revalidated.
 
 ## Scope
 
