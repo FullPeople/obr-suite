@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003]
+    branches: [codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: e51d9a2eec89bf41ef2abf5496215e889a0a6320
+          ref: b67f8d76f9b14ba24ad16b088ab00c8ca4b5464d
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
