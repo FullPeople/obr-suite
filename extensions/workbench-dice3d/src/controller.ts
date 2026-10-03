@@ -18,8 +18,8 @@ export interface Transport {id:string;name:string;color?:string;role?:Role;resol
 export interface ResultRecord{visibility?:DiceHistoryVisibility;id:string;source:string;name:string;color?:string;kinds:Roll['kinds'];results:number[];modifier:number;total:number;secret:boolean;revealed:boolean;complete:boolean;at:number;canReveal:boolean;formulaData?:Roll['formulaData']}
 interface Reservation{request:Request;broker:string;at:number;members:string[]}
 interface SecretArchive{request:Request;kinds:Roll['kinds'];commitment:string;details?:SecretDetails;complete:boolean;revealed:boolean}
-interface Received {source:string;assembly:Assembly;at:number;retry:number;processing:boolean;prepared:boolean}
-interface Outgoing {uploading:boolean;roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>}
+interface Received {source:string;assembly:Assembly;at:number;retry:number;processing:boolean;prepared:boolean;start?:{hash:string;start:number}}
+interface Outgoing {uploading:boolean;roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>;repairs?:Map<string,Set<number>>;repairing?:boolean}
 export class Controller {
   readonly bus:BroadcastChannel;
   private worker=new Worker(new URL('./physics.worker.ts',import.meta.url),{type:'module'});
@@ -266,11 +266,22 @@ export class Controller {
     }finally{this.next();this.state()}
   }
   private async sendReady(id:string,inbound:Received){
-    if(!this.inbound.has(id))return;
+    if(this.disabled||this.inbound.get(id)!==inbound)return;
     const peer=this.peers.get(inbound.source);
     if(!peer||peer.rtt<0){setTimeout(()=>{void this.sendReady(id,inbound).catch(e=>this.fail('ready-clock',e))},150);return}
     if(!this.inbound.has(id))return;
     await this.send({type:'ready',id,to:inbound.source,hash:inbound.assembly.sha});this.log('trajectory-verified',{id,theme:this.rolls.get(id)?.request.theme,hash:inbound.assembly.sha,source:inbound.source,rtt:peer.rtt});
+    if(inbound.start&&this.inbound.get(id)===inbound)await this.receive({v:1,build:BUILD,from:inbound.source,type:'start',id,...inbound.start},inbound.source);
+  }
+  private async repair(out:Outgoing){
+    if(out.repairing)return;out.repairing=true;
+    try{while(this.outgoing.get(out.roll.request.id)===out){
+      const next=[...(out.repairs||[])].find(([,indices])=>indices.size);if(!next)break;
+      const [member,indices]=next,index=indices.values().next().value!;indices.delete(index);
+      if(!out.members.includes(member)||!out.acks.has(member)&&out.started)continue;
+      await this.send({type:'chunk',id:out.roll.request.id,index,data:out.chunks[index],to:member});
+    }}catch(error){if(this.outgoing.get(out.roll.request.id)===out)this.fail('trajectory-repair',error);}
+    finally{out.repairing=false;}
   }
   private registerGroupParts(id:string,parts:{id:string;count:number;visibility:string}[],source:string){
     const lease=this.reservations.get(id),size=lease?.request.groupSize;
@@ -458,8 +469,12 @@ export class Controller {
       case 'chunks-done':{const inbound=this.inbound.get(p.id);if(inbound?.source===source&&!inbound.processing&&inbound.assembly.missing().length){
         inbound.retry++;await this.send({type:'missing',to:source,id:p.id,indices:inbound.assembly.missing()})}break}
       case 'retire':{const held=this.heldRolls.get(p.id);if(held?.request.authority===source)this.releasePhysics(p.id);break}
-      case 'missing':{const out=this.outgoing.get(p.id);if(!out||!out.wait.has(source)||!Array.isArray(p.indices)||p.indices.length>900)break;
-        for(const index of p.indices){if(!Number.isInteger(index)||index<0||index>=out.chunks.length)throw Error('Invalid repair index');await this.send({type:'chunk',id:p.id,index,data:out.chunks[index],to:source})}break;}
+      case 'missing':{const out=this.outgoing.get(p.id);if(!out||!out.members.includes(source)||!Array.isArray(p.indices)||p.indices.length>out.chunks.length)break;
+        for(const index of p.indices)if(!Number.isInteger(index)||index<0||index>=out.chunks.length)throw Error('Invalid repair index');
+        out.repairs??=new Map();const indices=out.repairs.get(source)||new Set<number>();for(const index of p.indices)indices.add(index);out.repairs.set(source,indices);
+        // The receive lane must remain free for pong/ready/start-ack while paced
+        // repair packets are sent. Duplicate NACKs coalesce into the same pump.
+        void this.repair(out);break;}
       case 'ready':{const out=this.outgoing.get(p.id);if(!out||out.hash!==p.hash||!out.members.includes(source))break;out.wait.delete(source);this.log('peer-prepared',{id:p.id,source,hash:p.hash});await this.maybeStart(out);break;}
       case 'group-parts':{this.registerGroupParts(p.id,p.parts,source);break;}
       case 'start-group':{
@@ -468,9 +483,17 @@ export class Controller {
       }
       case 'start':{const inbound=this.inbound.get(p.id),roll=this.rolls.get(p.id),peer=this.peers.get(source);
         const previous=this.started.get(p.id);if(previous){if(previous.source!==source||previous.hash!==p.hash)throw Error('冲突的开播指令');await this.send({type:'start-ack',id:p.id,to:source,hash:p.hash});break}
-        if(!inbound||!roll||inbound.source!==source||inbound.assembly.sha!==p.hash||!peer||peer.rtt<0||!Number.isFinite(p.start))throw Error('未准备完成就收到开播指令');
-        const localStart=p.start-peer.offset,late=now()-localStart;if(late>0)this.log('late-network-start',{id:p.id,lateMs:late});
-        if(Math.abs(late)>30000)throw Error('开播时间超出实验时钟范围');
+        if(!Number.isFinite(p.start))throw Error('无效开播时间');
+        // The offer may be retried after a lost initial manifest. Its sender
+        // remains authenticated when the later offer/trajectory is accepted.
+        if(!inbound)break;
+        if(inbound.source!==source||inbound.assembly.sha!==p.hash)throw Error('开播身份/散列不匹配');
+        if(!roll||!inbound.prepared||!peer||peer.rtt<0){inbound.start={hash:p.hash,start:p.start};break;}
+        let localStart=p.start-peer.offset;const late=now()-localStart;if(late>0)this.log('late-network-start',{id:p.id,lateMs:late});
+        if(late < -30000)throw Error('开播时间超出实验时钟范围');
+        // A slow spectator uses the SAME verified trajectory from its beginning;
+        // it must not jump past the complete animation or resample the result.
+        if(late>250)localStart=now()+70;
         this.retainUntilExit(roll,localStart);this.worker.postMessage({type:'retain',rolls:[roll],catalog:this.catalog});this.finishReservation(roll.request.batch?.id||p.id);this.started.set(p.id,{source,hash:p.hash,at:now()});this.bus.postMessage({type:'start',id:p.id,at:localStart});this.inbound.delete(p.id);await this.send({type:'start-ack',id:p.id,to:source,hash:p.hash});this.next();break;}
       case 'start-ack':{const out=this.outgoing.get(p.id);if(out&&out.hash===p.hash)out.acks.delete(source);break;}
       case 'receipt':this.recordReceipt(source,p.event,p.detail);this.log('peer-receipt',{source,event:p.event,...p.detail});
@@ -494,12 +517,18 @@ export class Controller {
     for(const [id,inbound] of this.inbound){
       const inboundWindow=inbound.assembly.bytes>500000?120000:30000;
       if(t-inbound.at>inboundWindow){this.cancelSecret(id);this.fail('receive-timeout',id);continue}
+      if(inbound.processing&&!inbound.prepared&&t-inbound.at>(inbound.retry+1)*2500){inbound.retry++;const roll=this.rolls.get(id);if(roll)this.bus.postMessage({type:'prepare',roll});}
       if(!inbound.processing&&t-inbound.at>(inbound.retry+1)*2500&&inbound.retry<40){inbound.retry++;await this.send({type:'missing',to:inbound.source,id,indices:inbound.assembly.missing()})}
     }
     for(const [id,out] of this.outgoing){
       if(out.uploading)continue;
-      if(!out.started&&t-out.at>(out.retry+1)*2500&&out.retry<out.window/2500){out.retry++;for(const member of out.wait)if(member!==this.transport.id)await this.send({type:'offer',to:member,id,total:out.chunks.length,bytes:out.bytes,hash:out.hash,members:out.members})}
-      if(out.started&&out.acks.size&&t-out.lastStartRetry>500){out.lastStartRetry=t;if(t-out.start!>10000){this.fail('start-ack-timeout',`${id} 未确认 ${[...out.acks].join(',')}`);out.acks.clear()}else for(const member of out.acks)await this.send({type:'start',to:member,id,start:out.start,hash:out.hash})}
+      if(!out.started&&t-out.at>2500){for(const member of out.wait){
+        if(member===this.transport.id||member===out.roll.request.source)continue;
+        out.wait.delete(member);this.log('spectator-preparation-late',{id,member});
+      }await this.maybeStart(out);}
+      if(!out.started&&t-out.at>(out.retry+1)*2500&&out.retry<out.window/2500){out.retry++;if(out.wait.has(this.transport.id))this.bus.postMessage({type:'prepare',roll:this.rolls.get(id)||out.roll});for(const member of out.wait)if(member!==this.transport.id)await this.send({type:'offer',to:member,id,total:out.chunks.length,bytes:out.bytes,hash:out.hash,members:out.members})}
+      if(out.started&&out.acks.size&&t-out.lastStartRetry>1000){out.lastStartRetry=t;if(t-out.start!>20000){this.log('spectator-start-unconfirmed',{id,members:[...out.acks]});out.acks.clear();}
+        else for(const member of out.acks){await this.send({type:'offer',to:member,id,total:out.chunks.length,bytes:out.bytes,hash:out.hash,members:out.members});await this.send({type:'start',to:member,id,start:out.start,hash:out.hash});}}
       if(!out.started&&t-out.at>out.window){await this.send({type:'abort',id,reason:`等待播放器准备超时（${out.window/1000} 秒）`});this.bus.postMessage({type:'discard',id});this.outgoing.delete(id);this.rolls.delete(id);this.releasePhysics(id);this.cancelSecret(id);this.fail('prepare-timeout',`${id} 等待 ${[...out.wait].join(',')}`)}
       else if(out.started&&t-out.at>60000)this.outgoing.delete(id);
     }

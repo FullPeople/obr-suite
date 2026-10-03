@@ -7,6 +7,9 @@ const root=resolve(import.meta.dirname,'..'),output=resolve(process.env.WORKBENC
 const physicalPanelAdapter=`
 async function performPhysicalPanelRoll(expr,label,hidden,clearInput){
  if(readFixedRoll())return false;
+ // A repeated click/Enter after the first submit has already cleared the field.
+ // Preserve the original panel's empty-input handling; never send an empty recipe.
+ if(!String(expr||'').trim())return false;
  const targets=await getOwnedSelectedTokenIds(),collectiveId='col-'+crypto.randomUUID();
  lastRolledExpression=expr;saveLastExpr(expr);btnLastRoll.disabled=false;
  if(clearInput){setExpression('');labelText='';labelInput.value='';}

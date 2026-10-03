@@ -412,10 +412,13 @@ async function close() {
   try { await OBR.modal.close(MODAL_ID); } catch {}
 }
 
+let submitting = false;
 async function fireRoll(opts) {
+  if (submitting) return;
   const expression = exprInput.value.trim();
   const label = labelInput.value.trim();
   if (!expression) return;
+  submitting = true;
   try {
     await OBR.broadcast.sendMessage(
       BC_QUICK_ROLL,
@@ -430,8 +433,11 @@ async function fireRoll(opts) {
       },
       { destination: "LOCAL" },
     );
-  } catch (e) { console.error("[rollable-quick]", e); }
-  await close();
+    await close();
+  } catch (e) {
+    console.error("[rollable-quick]", e);
+    await OBR.notification.show(e?.message || String(e), "ERROR");
+  } finally { submitting = false; }
 }
 
 OBR.onReady(async () => {
