@@ -32,22 +32,22 @@ function initial(def:InventoryDefinition):Container{
  return {id:def.id,name:def.name,kind:def.kind,items,columns:4,capacity:Math.max(def.kind==='public'?20:24,Math.ceil(items.length/4)*4),revision:1};
 }
 /** Room ledger is the single authority for all stock locations. Card JSON is a projection. */
-export function inventoryDocuments(relay:Relay,room:string){
+export function inventoryDocuments(relay:Relay,room:string,validateDefinitions?:(definitions:InventoryDefinition[])=>void|Promise<void>){
  const key=`inventory_${room.replace(/[^a-zA-Z0-9_-]/g,'_')}`;let cached:{revision:number;data:Ledger}|undefined,readAt=0;
  let reading:Promise<any>|undefined;
  async function read(force=false){if(force||!cached||Date.now()-readAt>10000){if(!reading)reading=relay.send({sharedDocument:{key,operation:'read'}}).finally(()=>{reading=undefined;});const value=await reading;if(!cached||value.revision>=cached.revision){cached={revision:value.revision,data:value.data||emptyLedger()};readAt=Date.now();}}return cached!;}
- async function transaction<T extends {ledger:Ledger}>(change:(ledger:Ledger)=>T){
-  for(let attempt=0;attempt<5;attempt++){const current=await read(true),result=change(current.data);if(result.ledger===current.data)return {...result,revision:current.revision};try{const next=await relay.send({sharedDocument:{key,operation:'write',expected:current.revision,data:result.ledger}});if(!cached||next.revision>=cached.revision){cached=next;readAt=Date.now();}return {...result,revision:next.revision};}catch(error){const status=(error as any)?.status;if(status===409&&attempt<4)continue;if(status&&status<500)throw error;
+ async function transaction<T extends {ledger:Ledger}>(change:(ledger:Ledger)=>T,beforeSend?:()=>void|Promise<void>){
+  for(let attempt=0;attempt<5;attempt++){const current=await read(true),result=change(current.data);if(result.ledger===current.data)return {...result,revision:current.revision};try{const next=await relay.send({sharedDocument:{key,operation:'write',expected:current.revision,data:result.ledger}},beforeSend);if(!cached||next.revision>=cached.revision){cached=next;readAt=Date.now();}return {...result,revision:next.revision};}catch(error){if((error as any)?.notSent)throw error;const status=(error as any)?.status;if(status===409&&attempt<4)continue;if(status&&status<500)throw error;
    try{const next=await relay.send({sharedDocument:{key,operation:'read'}}),added=result.ledger.receipts.filter(receipt=>!current.data.receipts.some(r=>r.id===receipt.id));if(same(next.data,result.ledger)||added.length&&added.every(receipt=>next.data?.receipts?.some((r:any)=>r.id===receipt.id))){if(!cached||next.revision>=cached.revision){cached=next;readAt=Date.now();}return {...result,revision:next.revision};}}catch{}
    throw Object.assign(Error('库存保存结果暂时无法确认；本地改动已保留，请恢复连接后核对。'),{uncertain:true,diagnostic:{code:'INVENTORY_RESULT_UNKNOWN'}});
   }}
   throw Error('背包正在被其他人修改，请重试');
  }
- async function ensure(definitions:InventoryDefinition[]){const value=await read();if(definitions.every(def=>value.data.containers[def.id]&&!value.data.containers[def.id].items.some(r=>r.kind==='resource'&&r.slot<9000)))return value;await transaction(previous=>{const next=structuredClone(previous);let changed=false;for(const def of definitions){if(!Object.prototype.hasOwnProperty.call(next.containers,def.id)){next.containers[def.id]=initial(def);changed=true;}const c=next.containers[def.id];for(const row of c.items.filter(r=>r.kind==='resource'&&r.slot<9000)){let slot=9000;while(c.items.some(r=>r.slot===slot))slot++;row.slot=slot;c.revision++;changed=true;}}return {ledger:changed?next:previous};});return read();}
+ async function ensure(definitions:InventoryDefinition[],beforeSend?:()=>void|Promise<void>){const value=await read();if(definitions.every(def=>value.data.containers[def.id]&&!value.data.containers[def.id].items.some(r=>r.kind==='resource'&&r.slot<9000)))return value;await transaction(previous=>{const next=structuredClone(previous);let changed=false;for(const def of definitions){if(!Object.prototype.hasOwnProperty.call(next.containers,def.id)){next.containers[def.id]=initial(def);changed=true;}const c=next.containers[def.id];for(const row of c.items.filter(r=>r.kind==='resource'&&r.slot<9000)){let slot=9000;while(c.items.some(r=>r.slot===slot))slot++;row.slot=slot;c.revision++;changed=true;}}return {ledger:changed?next:previous};},async()=>{await beforeSend?.();await validateDefinitions?.(definitions);});return read();}
 
  async function view(definitions:InventoryDefinition[],gm:boolean,publicId:string){const value=await ensure(definitions);return {revision:value.revision,publicId,access:definitions.map(d=>JSON.stringify([d.id,d.write,d.name])).join('|'),silent:gm&&!!value.data.silent,containers:Object.fromEntries(definitions.map(def=>[def.id,{...value.data.containers[def.id],name:def.name,write:gm||def.kind==='public'&&!value.data.containers[def.id]?.locked||def.kind!=='public'&&def.write}]))};}
- async function command(message:any,authority:InventoryAuthority){return transaction(previous=>inventoryOperation(previous,message,authority));}
- async function syncNative(id:string,before:any,after:any,identify=conditionIdentity):Promise<NativeInventorySync>{
+ async function command(message:any,authority:InventoryAuthority,beforeSend?:()=>void|Promise<void>){return transaction(previous=>inventoryOperation(previous,message,authority),beforeSend);}
+ async function syncNative(id:string,before:any,after:any,identify=conditionIdentity,beforeSend?:()=>void|Promise<void>):Promise<NativeInventorySync>{
   // A no-op must not read the ledger, clear pending projections, or manufacture
   // an inventory guard. Concurrent transfers/grants remain authoritative.
   if(!nativeInventoryChanged(before,after,identify))return {};
@@ -69,7 +69,7 @@ export function inventoryDocuments(relay:Relay,room:string){
    if(remaining.length!==container.items.length){container.items=remaining;changed=true;}
    for(const coin of Object.keys(moneyNames)){const old=Number(before?.inventory?.coins?.[coin])||0,next=Number(after?.inventory?.coins?.[coin])||0;if(old===next)continue;const row=container.items.find(item=>item.coin===coin);if(row){if(row.quantity===next)continue;if(row.quantity!==old)throw Error('货币已被转移，请重试');row.quantity=next;row.revision++;changed=true;}}
    if(changed){container.revision++;recordProjection(ledger,previous,id);}return {ledger:changed?ledger:previous,modified:changed};
-  });
+  },beforeSend);
   const container=result.ledger.containers[id],projection=result.ledger.projections?.[id];
   return {container,projection,ledgerRevision:result.revision,ledgerCommitted:result.modified};
  }
