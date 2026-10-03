@@ -414,7 +414,7 @@ function setVisible(visible: boolean): void {
     // "out" state with a random stateUntil makes the rAF loop trigger
     // spawn (void state) at a randomised time.
     const now = performance.now();
-    if(workbenchMarquee)marqueeNextAt.fill(now);
+    if(workbenchMarquee)marqueeNextAt.splice(0,marqueeNextAt.length,...Array(Math.max(1,Math.min(MARQUEE_LANES,Math.floor(innerHeight/68)))).fill(now));
     for (const s of slots) {
       s.state = "out";
       s.stateUntil = now + Math.random() * (workbenchMarquee?2200:3500);
@@ -444,7 +444,9 @@ function setVisible(visible: boolean): void {
 // names stay where they are; new spawns use the updated hole.
 // (Cheap to leave existing names possibly overlapping the new hole
 // for a few seconds — they'll cycle out and respawn in valid spots.)
-window.addEventListener("resize", () => { /* getHoleRect reads live */ });
+window.addEventListener("resize", () => {
+  if (workbenchMarquee && _currentVisible) { setVisible(false); setVisible(true); }
+});
 
 // === Heartbeat watchdog ===========================================
 //
