@@ -1,3 +1,4 @@
+import {afterVisiblePaint,announcementVersion,localDayStamp} from './announcement-lifecycle';
 // DM-only scene-ready announcement modal.
 //
 // Content lives in `public/announcement.md` so the user can edit it
@@ -44,7 +45,7 @@ import { assetUrl } from "./asset-base";
 import { renderInlineNoSpan } from "./announcement-inline";
 import { renderAnnouncementImportant } from "./announcement-important";
 
-import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID} from './announcement-source';
+import {ANNOUNCEMENT_FILE,ANNOUNCEMENT_MODAL_ID,ANNOUNCEMENT_SEEN_KEY,ANNOUNCEMENT_DAILY_KEY} from './announcement-source';
 const MODAL_ID = ANNOUNCEMENT_MODAL_ID;
 
 type SectionKind = "warn" | "info" | "notice" | "release" | "history" | "issues" | "highlights" | "todo" | "changelog" | "footer" | "raw";
@@ -358,6 +359,7 @@ function writeAnnounceLang(v: "zh" | "en") {
 }
 
 let cachedSections: Section[] | null = null;
+let visibleVersion:string|null=null;
 
 function rerenderForLang(activeLang: "zh" | "en"): void {
   const bodyEl = document.getElementById("body");
@@ -398,6 +400,7 @@ async function loadAndRender(): Promise<void> {
     md = await res.text();
   } catch (e) {
     bodyEl.innerHTML = `<div class="alert-row warn"><span class="dot"></span><span class="text">公告加载失败：${escapeHtml(String((e as Error).message ?? e))}</span></div>`;
+    afterVisiblePaint(startReadGate);
     return;
   }
 
@@ -405,6 +408,11 @@ async function loadAndRender(): Promise<void> {
   const lang = readAnnounceLang();
   applyLangButtons(lang);
   rerenderForLang(lang);
+  afterVisiblePaint(()=>{
+    visibleVersion=announcementVersion(md);
+    if(new URLSearchParams(location.search).get('daily')==='1')try{localStorage.setItem(ANNOUNCEMENT_DAILY_KEY,localDayStamp());}catch{}
+    startReadGate();
+  });
 }
 
 // 2026-05-14 — stamp the running build version into the modal title.
@@ -484,9 +492,11 @@ OBR.onReady(() => {
   // announcement is shown unprompted once a day (see background.ts), so
   // without a gate it would be dismissed by reflex before anyone read
   // what changed.
-  startReadGate();
+  const closeButton=document.getElementById('btn-close') as HTMLButtonElement|null;
+  if(closeButton)closeButton.disabled=true;
 
   document.getElementById("btn-close")?.addEventListener("click", async () => {
+    if(visibleVersion)try{localStorage.setItem(ANNOUNCEMENT_SEEN_KEY,visibleVersion);}catch{}
     try { await OBR.modal.close(MODAL_ID); } catch {}
   });
 

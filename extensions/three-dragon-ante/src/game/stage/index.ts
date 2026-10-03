@@ -1001,7 +1001,7 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
   }
 
   function refreshInfo() {
-    const view = model.view, signature = JSON.stringify([model.language, view?.id, view?.seats.map(s => [s.id, s.name, s.gold, s.debt, s.strength]), view?.stakes, view?.hole, view?.deckCount, view?.discard.length, view?.activeSeatId]);
+    const view = model.view, signature = JSON.stringify([model.language, view?.id, view && "selfSeatId" in view ? view.selfSeatId : null, view?.seats.map(s => [s.id, s.name, s.gold, s.debt, s.strength]), view?.stakes, view?.hole, view?.deckCount, view?.discard.length, view?.activeSeatId]);
     if (signature === infoSignature) return; infoSignature = signature; freeOwnedGroup(infoGroup); freeOwnedGroup(moneyGroup); freeOwnedGroup(stackGroup);
     if (!view) { label(infoGroup, model.language === "zh" ? "三龙牌" : "THREE DRAGON ANTE", new THREE.Vector3(0, .5, 0), 5); return; }
     // Only anonymous paper edges beneath the exposed top card. Public counts
@@ -1056,7 +1056,10 @@ export function mountTableStage(canvas: HTMLCanvasElement, options: StageOptions
     for (const seat of seatPlacements(view)) {
       const value = view.seats.find(s => s.id === seat.id)!; pile(seat.id, value.gold);
       const active = view.activeSeatId === seat.id ? "◆ " : "";
-      if(!seat.self)label(infoGroup,active+value.name,new THREE.Vector3(Math.sin(seat.angle)*7.5,.55,Math.cos(seat.angle)*7.5),2.4,false,seatColors[view.seats.findIndex(other=>other.id===seat.id)]);
+      if(!seat.self){
+        const name = label(infoGroup,active+value.name,new THREE.Vector3(seat.name.x,.55,seat.name.z),2.4,false,seatColors[view.seats.findIndex(other=>other.id===seat.id)]);
+        name.userData.seatName = seat.id;
+      }
       if (value.debt) label(infoGroup, `${model.language === "zh" ? "欠债" : "Debt"} ${value.debt}`, moneyLocation(seat.id).add(new THREE.Vector3(.3, .2, 1)), 1.8, true);
     }
   }

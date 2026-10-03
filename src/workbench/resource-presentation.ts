@@ -2,10 +2,13 @@
 export const RESOURCE_WIDGET_STYLES = ['ring','pips','pool','half','orbit','square','segments','reservoir','matrix','fraction','counter','poolchips','poolbars','poolpips','ready','diamond','bar','icon'] as const;
 export const RESOURCE_WIDGET_ICONS = ['spark','diamond','shield','flame','leaf','bottle'] as const;
 export type ResourceAppearance = {style:typeof RESOURCE_WIDGET_STYLES[number];color?:string;icon?:typeof RESOURCE_WIDGET_ICONS[number]};
-export type ResourceWidgetPresentation = ResourceAppearance & {x:number;y:number;w:number;h:number;page:number;resourceArea?:boolean;contentScale?:number;split?:number;members?:string[];label?:string};
+export type ResourceWidgetPresentation = ResourceAppearance & {x:number;y:number;w:number;h:number;page:number;resourceArea?:boolean;contentScale?:number;split?:number;background?:string;borderWidth?:number;borderRadius?:number;padding?:number;gap?:number;members?:string[];label?:string};
 const object = (value:unknown):value is Record<string,any> => !!value && typeof value==='object' && !Array.isArray(value);
 const style = (value:unknown):value is ResourceAppearance['style'] => RESOURCE_WIDGET_STYLES.includes(value as ResourceAppearance['style']);
 const color = (value:unknown):value is string => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value);
+const frameKeys=['borderWidth','borderRadius','padding','gap'] as const;
+const validFrame=(value:Record<string,any>)=>(value.background===undefined||value.background==='transparent'||color(value.background))&&frameKeys.every(key=>value[key]===undefined||Number.isInteger(value[key])&&value[key]>=0&&value[key]<=(key==='borderWidth'?8:key==='borderRadius'?32:16));
+const frame=(value:Record<string,any>)=>({...((value.background==='transparent'||color(value.background))?{background:value.background}:{}),...Object.fromEntries(frameKeys.filter(key=>value[key]!==undefined).map(key=>[key,value[key]]))});
 const icon = (value:unknown):value is ResourceAppearance['icon'] => RESOURCE_WIDGET_ICONS.includes(value as typeof RESOURCE_WIDGET_ICONS[number]);
 
 /** Public inventory has appearance only; grid placement belongs to the character dashboard. */
@@ -17,8 +20,8 @@ export function validResourceAppearance(value:unknown):value is ResourceAppearan
 function widget(value:unknown):ResourceWidgetPresentation|undefined {
  if(!object(value)||!style(value.style))return;
  const {x,y,w,h,page}=value;
- if(![x,y,w,h,page].every(Number.isSafeInteger)||x<0||y<0||w<2||h<2||x+w>12||y+h>6||page<0||page>2999)return;
- return {style:value.style,x,y,w,h,page,...(color(value.color)?{color:value.color}:{}),...(icon(value.icon)?{icon:value.icon}:{}),...(typeof value.resourceArea==='boolean'?{resourceArea:value.resourceArea}:{}),...(Number.isFinite(value.contentScale)&&value.contentScale>=.5&&value.contentScale<=2?{contentScale:value.contentScale}:{}),...(Number.isFinite(value.split)&&value.split>=.2&&value.split<=.55?{split:value.split}:{})};
+ if(![x,y,w,h,page].every(Number.isSafeInteger)||x<0||y<0||w<1||h<1||x+w>12||y+h>6||page<0||page>2999||!validFrame(value))return;
+ return {style:value.style,x,y,w,h,page,...(color(value.color)?{color:value.color}:{}),...(icon(value.icon)?{icon:value.icon}:{}),...(typeof value.resourceArea==='boolean'?{resourceArea:value.resourceArea}:{}),...(Number.isFinite(value.contentScale)&&value.contentScale>=.25&&value.contentScale<=2?{contentScale:value.contentScale}:{}),...(Number.isFinite(value.split)&&value.split>=.2&&value.split<=.55?{split:value.split}:{}),...frame(value)};
 }
 
 /** Restricted to resource IDs already authorized for this recipient, including group members. */
@@ -53,9 +56,9 @@ export function updateResourceWidgetPresentation(document:any,id:string,presenta
  if(native!==undefined&&!object(native))throw Error('角色资料格式无效');
  const resources=native?.runtime?.resources||document.web_resources||{};
  if(presentation!==null){
-  if(!object(presentation)||Object.keys(presentation).some(key=>!['style','color','icon','x','y','w','h','page','members','label','resourceArea','contentScale','split'].includes(key))||!style(presentation.style)
+  if(!object(presentation)||Object.keys(presentation).some(key=>!['style','color','icon','x','y','w','h','page','members','label','resourceArea','contentScale','split','background',...frameKeys].includes(key))||!style(presentation.style)||!validFrame(presentation)
    ||presentation.color!==undefined&&!color(presentation.color)||presentation.icon!==undefined&&!icon(presentation.icon))throw Error('无效资源展示样式');
-  if(presentation.resourceArea!==undefined&&typeof presentation.resourceArea!=='boolean'||presentation.contentScale!==undefined&&(!Number.isFinite(presentation.contentScale)||presentation.contentScale<.5||presentation.contentScale>2)||presentation.split!==undefined&&(!Number.isFinite(presentation.split)||presentation.split<.2||presentation.split>.55))throw Error('无效资源展示比例');
+  if(presentation.resourceArea!==undefined&&typeof presentation.resourceArea!=='boolean'||presentation.contentScale!==undefined&&(!Number.isFinite(presentation.contentScale)||presentation.contentScale<.25||presentation.contentScale>2)||presentation.split!==undefined&&(!Number.isFinite(presentation.split)||presentation.split<.2||presentation.split>.55))throw Error('无效资源展示比例');
   if(['x','y','w','h','page'].some(key=>key in presentation)&&!widget(presentation))throw Error('无效资源展示布局');
   if(presentation.members!==undefined&&(!Array.isArray(presentation.members)||presentation.members.length<2||presentation.members.length>12||new Set(presentation.members).size!==presentation.members.length||!presentation.members.includes(id)||presentation.members.some((key:unknown)=>typeof key!=='string'||key!==id&&!Object.hasOwn(resources,key))))throw Error('无效资源分组');
   if(presentation.label!==undefined&&(typeof presentation.label!=='string'||presentation.label.length>100))throw Error('无效资源分组名称');

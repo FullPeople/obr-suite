@@ -1,10 +1,11 @@
+import {workbenchStartup} from './startup-presentation';
 import {nativeCardOwners,ownsNativeToken,canReadNativeCard} from "../modules/characterCards/native-owner";
 import {resourceWidgetPresentation,updateResourceWidgetPresentation,quickbarAttackPresentation,hiddenResourcePresentation} from './resource-presentation';
 import {createGroupRolls} from './group-rolls';
 import {classSummary} from './class-summary';
 import {withRequestTimeout} from '../request-timeout';
 import {sharedEntry,OPEN_WIKI_CHANNEL} from './shared-entry';
-import {RUNTIME_BASELINE,DOCUMENT_REVISION,documentRevision,documentRuntime,tokenRuntime,mergeTokenRuntime,writeRuntime,mergeMonsterMetadata,runtimeProjectionRights,stampRuntimeProjectionAuthority,type RuntimeBaseline} from './runtime-authority';
+import {RUNTIME_BASELINE,DOCUMENT_REVISION,documentRevision,documentRuntime,tokenRuntime,mergeTokenRuntime,writeRuntime,mergeMonsterMetadata,runtimeProjectionRights,stampRuntimeProjectionAuthority,assertCharacterArmorPatch,type RuntimeBaseline} from './runtime-authority';
 import {workbenchObservation} from './observation';
 import {documentChanges,expandChanges} from './document-delta';
 import {documentCoins} from './currency';
@@ -36,7 +37,7 @@ const MONSTER='com.obr-suite/workbench/monster';
 const monsterOverrides=new Map<string,{revision:number;data:any}>();
 const DELETED='com.obr-suite/workbench/deleted-cards';
 const fields=['health','max health','temporary health','armor class'];
-export function setupWorkbench(){if(WORKBENCH_DEV){setupWorkbenchNotices();void setupWorkbenchDice().catch(error=>{console.error('[workbench] dice startup failed',error);void OBR.notification.show(String(error),'ERROR');});void start();}}
+export function setupWorkbench(){if(WORKBENCH_DEV){setupWorkbenchNotices();void setupWorkbenchDice().catch(error=>{console.error('[workbench] dice startup failed',error);void OBR.notification.show(String(error),'ERROR');});return start();}return Promise.resolve();}
 async function start(){
  const observation=workbenchObservation();
  const [playerId,playerConnection]=await Promise.all([OBR.player.getId(),OBR.player.getConnectionId()]),origin=location.origin,storageKey=`workbench:v2:${OBR.room.id}:${playerId}`;
@@ -611,6 +612,7 @@ async function start(){
   if(m.type==='statsLock'){if(a.role!=='GM')throw Error('仅 DM 可锁定生命条');await setTokens(a,{stats:{locked:!!m.locked}});return;}
   if(m.type==='stats'){
    const patch={...m.patch},current=a.card?.stats||bubble(a.item);if(!Object.keys(patch).length||Object.keys(patch).some(k=>!fields.includes(k)))throw Error('无效数值');
+   assertCharacterArmorPatch(a.cardId,patch);
    for(const k of Object.keys(patch)){const value=typeof patch[k]==='string'?parseStatInput(patch[k],current[k]||0):patch[k];if(!Number.isInteger(value)||Math.abs(value)>99999)throw Error('无效数值');patch[k]=clampStat(k as any,value);}
    if(Object.keys(patch).some(k=>current[k]!==m.expected?.[k]))throw Error('场景数值已改变，请重试');
    const max=patch['max health']??current['max health'];if(typeof max==='number'&&('health' in patch||'max health' in patch))patch.health=Math.min(patch.health??current.health??0,max);
@@ -656,8 +658,9 @@ async function start(){
  }
  async function receive(m:any,viaRelay=false){if(m.protocol!==protocol||m.session!==session)return;const route=viaRelay?'relay':'direct';
   if(m.type==='cardChanged'){if(typeof m.cardId==='string'&&invalidateCard(m.cardId,m.revision)){void hydrate(m.cardId);void refreshSelection();void refresh();}return;}
-  if(m.type==='hello'){last='';lastCatalog='';lastDirectory='';lastAccessEpoch=0;const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(instance!==warmClientInstance){warmClientInstance=instance;warmSnapshots.clear();}send('ready',{rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},route);if(viaRelay&&child&&!child.closed)send('ready',{rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},'direct');if(!viaRelay)void OBR.action.close().catch(()=>{});void refreshSelection();void refresh();void hydrate();return;}
-  if(m.type==='ping'){send('pong',{at:Date.now()},route);return;}
+  if(m.type==='startup'){workbenchStartup.update(m.clientInstance,m.startupPhase);return;}
+  if(m.type==='hello'){workbenchStartup.hello(typeof m.clientInstance==='string'?m.clientInstance:'legacy',m.startupPhase,viaRelay?undefined:child||undefined,m.clientStarted);last='';lastCatalog='';lastDirectory='';lastAccessEpoch=0;const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(instance!==warmClientInstance){warmClientInstance=instance;warmSnapshots.clear();}send('ready',{rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},route);if(viaRelay&&child&&!child.closed)send('ready',{rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},'direct');if(!viaRelay)void OBR.action.close().catch(()=>{});void refreshSelection();void refresh();void hydrate();return;}
+  if(m.type==='ping'){workbenchStartup.update(m.clientInstance,m.startupPhase);send('pong',{at:Date.now()},route);return;}
   if(m.type==='requestStatus'){const answer=seen.get(m.requestId);if(answer)send('ack',{requestId:m.requestId,...answer},route);else send('requestPending',{requestId:m.requestId,active:activeRequests.has(m.requestId),known:requestRuns.has(m.requestId)},route);return;}
   if(m.type==='cancel'){if(!activeRequests.has(m.requestId)&&!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}
   if(m.type==='pin'){follow=!m.pinned;if(!follow)finishMapFollow(false);if(follow)lastSelection='';void refreshSelection();return;}
@@ -689,7 +692,7 @@ async function start(){
   // Reloading the host keeps the browser's WindowProxy alive. The existing
   // workbench still knows it, so its next ping restores the direct bridge
   // without waiting for a stale-window timeout or relying on the old plugin.
-  if(e.data.type==='ping'&&(!child||child.closed)){child=e.source as Window;last='';lastCatalog='';void refreshSelection();void refresh();void hydrate();}
+  if(e.data.type==='ping'&&(!child||child.closed)){child=e.source as Window;workbenchStartup.hello(typeof e.data.clientInstance==='string'?e.data.clientInstance:'legacy',e.data.startupPhase,child,e.data.clientStarted);last='';lastCatalog='';void refreshSelection();void refresh();void hydrate();}
   if(e.data.type==='hello'){if(child&&!child.closed&&child!==e.source)return;child=e.source as Window;}if(e.source===child){directPeerSeen=Date.now();directClientInstance=typeof e.data.clientInstance==='string'?e.data.clientInstance:'legacy';void receive(e.data);}
  });
  for(const name of DICE_EVENTS)OBR.broadcast.onMessage(name,event=>{if(name==='com.obr-suite/dice-roll'&&!canForwardDiceHistory(event))return;send('diceEvent',{event:name,data:event});});
@@ -699,6 +702,8 @@ async function start(){
  observation.onChange(change=>{if(change==='selection')void refreshSelection();else changed();});OBR.scene.onReadyChange(()=>{followRevision++;finishMapFollow(false);chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
  OBR.broadcast.onMessage('com.obr-suite/cc-card-updated',event=>{const data=event.data as any,id=data?.cardId;if(id){if(!invalidateCard(id,data?.revision))return;void hydrate(id);}else{invalidateCards();void hydrate();}changed();});OBR.broadcast.onMessage('com.obr-suite/workbench/inventory-changed',event=>{if(event.connectionId!==playerConnection)inventories.invalidate();changed();});onStateChange(changed);rollListeners.add(()=>send('rolls',{rolls:getRollHistory()}));
  const connection=await OBR.player.getConnectionId();OBR.broadcast.onMessage('com.obr-suite/workbench-compose',event=>{if(event.connectionId===connection&&typeof(event.data as any)?.expression==='string')send('compose',{compose:{...(event.data as object),id:crypto.randomUUID()}});});
- setInterval(()=>send('pong',{at:Date.now()}),10000);
+ // Reuse the transport heartbeat to inspect an actual closed WindowProxy.
+ // A navigation keeps that proxy alive and must keep pending notices blocked.
+ setInterval(()=>{workbenchStartup.releaseClosedWindow();send('pong',{at:Date.now()});},10000);
  setInterval(()=>{changed();scheduleInventoryRepair();},4000);
 }

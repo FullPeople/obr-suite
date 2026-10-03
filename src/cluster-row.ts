@@ -343,10 +343,6 @@ async function refreshAnnouncementVersion() {
 }
 
 async function onAnnounce() {
-  if (cachedAnnounceVersion) {
-    try { localStorage.setItem(LS_ANNOUNCE_SEEN, cachedAnnounceVersion); } catch {}
-  }
-  applyAnnounceBlink();
   try {
     await OBR.modal.open({
       id: ANNOUNCEMENT_MODAL_ID,
