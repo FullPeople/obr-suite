@@ -6,7 +6,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 
-const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
+const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8').replaceAll('\r\n','\n');
 const source=read('src/player-permission-notice.ts').replace(/^import .*;\n/gm,'').replaceAll('export ','');
 const guide=read('src/announcement-important.ts').replace(/^import .*;\n/gm,'').replaceAll('export ','');
 const compile=code=>ts.transpileModule(code,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
