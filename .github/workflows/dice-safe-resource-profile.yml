@@ -1,0 +1,172 @@
+name: Verify safe dice resources
+on:
+  push:
+    branches: [fix/dice-safe-resources-20261004]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: dice-safe-resource-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+  BASELINE_REF: 308a7ccf0cb70794055ac75170bf112a36989993
+  DICE_LATENCY_SOFTWARE: '1'
+  DICE_LATENCY_SMALL: '1'
+jobs:
+  paired_timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DICE_LATENCY_CORE: '1'
+      DICE_LATENCY_VIDEO: '0'
+      DICE_LATENCY_SCREENSHOTS: '0'
+      DICE_LATENCY_PIXELS: '0'
+      DICE_LATENCY_WIDTH: '844'
+      DICE_LATENCY_HEIGHT: '390'
+      DICE_LATENCY_DPR: '2'
+      DICE_LATENCY_THEME: royal_ember_resin
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: fb584043c6bed831b9ca92eab783653770c24fe6
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prepare identical diagnostic harness at immutable baseline
+        run: |
+          test "$(git rev-parse "$BASELINE_REF^{commit}")" = "$BASELINE_REF"
+          git worktree add --detach .baseline "$BASELINE_REF"
+          cp tools/dice-latency-{build,browser}.mjs tools/dice-independent-scene.mjs .baseline/tools/
+          npm ci
+          npm --prefix .paired-web ci
+          npm --prefix .baseline ci
+          npx playwright install --with-deps chromium
+      - name: Build both sources with the same paired Web
+        run: |
+          node --test tools/dice-independent-scene.test.mjs
+          node tools/dice-latency-build.mjs
+          (cd .baseline && node tools/dice-latency-build.mjs)
+      - name: Same-runner baseline, candidate, baseline without capture or readback
+        run: |
+          export DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/small-paired/baseline-before"
+          (cd .baseline && node tools/dice-latency-browser.mjs)
+          export DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/small-paired/candidate"
+          node tools/dice-latency-browser.mjs
+          export DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/small-paired/baseline-after"
+          (cd .baseline && node tools/dice-latency-browser.mjs)
+          node tools/dice-small-profile-summary.mjs .local-evidence/small-paired
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-safe-landscape-timing-${{ github.sha }}
+          path: .local-evidence/small-paired/
+          include-hidden-files: true
+          retention-days: 7
+  captured_behavior:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DICE_LATENCY_VIDEO: '1'
+      DICE_LATENCY_SCREENSHOTS: '1'
+      DICE_LATENCY_PIXELS: '1'
+      DICE_LATENCY_RECOVERY: '1'
+      DICE_LATENCY_WIDTH: '390'
+      DICE_LATENCY_HEIGHT: '844'
+      DICE_LATENCY_DPR: '3'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: fb584043c6bed831b9ca92eab783653770c24fe6
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies and official browser
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Verify inherited visual-module evidence and immutable production bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .local-evidence/dice-inherited-visual
+          gh api repos/FullPeople/obr-suite/actions/runs/37233243394 > .local-evidence/dice-inherited-visual/run.json
+          gh api 'repos/FullPeople/obr-suite/actions/runs/37233243394/jobs?per_page=100' > .local-evidence/dice-inherited-visual/jobs.json
+          gh api 'repos/FullPeople/obr-suite/actions/runs/37233243394/artifacts?per_page=100' > .local-evidence/dice-inherited-visual/artifacts.json
+          node --test tools/dice-inherited-visual.test.mjs
+          node tools/dice-inherited-visual.mjs
+      - name: Capture complete animations, genuine visible pixels, privacy and recovery
+        run: |
+          node tools/dice-latency-build.mjs
+          node tools/dice-latency-browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-safe-captured-metrics-${{ github.sha }}
+          path: |
+            .local-evidence/dice-inherited-visual/*.json
+            .local-evidence/dice-latency/browser/*.json
+            .local-evidence/dice-latency/browser/*.png
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-safe-captured-video-${{ github.sha }}
+          path: .local-evidence/dice-latency/browser/video/
+          include-hidden-files: true
+          retention-days: 7
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DICE_IDLE_SOFTWARE: '1'
+      DICE_IDLE_ROUNDS: '21'
+      DICE_IDLE_CYCLES: '2'
+      DICE_IDLE_WAIT_MS: '1000'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: fb584043c6bed831b9ca92eab783653770c24fe6
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies and official browser
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Validate probe contracts and build real-engine observation fixture
+        run: |
+          node --test tools/dice-idle-probe-contract.test.mjs
+          node tools/dice-idle-lifecycle-build.mjs
+      - name: Repeated small rolls, real context pause, post-pause audio, idle and teardown
+        run: node tools/dice-idle-lifecycle-browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-safe-lifecycle-${{ github.sha }}
+          path: .local-evidence/dice-idle/
+          include-hidden-files: true
+          retention-days: 7

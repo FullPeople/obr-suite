@@ -19,7 +19,7 @@ export interface ResultRecord{visibility?:DiceHistoryVisibility;id:string;source
 interface Reservation{request:Request;broker:string;at:number;members:string[]}
 interface SecretArchive{request:Request;kinds:Roll['kinds'];commitment:string;details?:SecretDetails;complete:boolean;revealed:boolean}
 interface Received {source:string;assembly:Assembly;at:number;retry:number;processing:boolean;prepared:boolean;start?:{hash:string;start:number}}
-interface Outgoing {inlineOffer?:boolean;dispatching?:boolean;uploading:boolean;roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>;repairs?:Map<string,Set<number>>;repairing?:boolean}
+interface Outgoing {dispatching?:boolean;uploading:boolean;roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>;repairs?:Map<string,Set<number>>;repairing?:boolean}
 export class Controller {
   readonly bus:BroadcastChannel;
   private worker=new Worker(new URL('./physics.worker.ts',import.meta.url),{type:'module'});
@@ -113,7 +113,7 @@ export class Controller {
   log(event:string,detail:any){if(this.disposed)return;this.events.push({at:now(),event,detail});if(this.events.length>2500)this.events.splice(0,500);this.postLocal({type:'log',event,detail});console.info(`[DiceLab] ${event}`,detail)}
   fail(stage:string,error:unknown){if(this.disposed)return;this.error=`${stage}: ${errorText(error)}`;this.failures++;this.log('failure',{stage,error:this.error});this.state()}
   state(){if(this.disposed)return;this.postLocal({type:'state',state:{id:this.transport.id,name:this.transport.name,color:this.transport.color,mode:this.transport.mode,version:BUILD,ready:this.ready,overlay:this.overlayReady,physics:this.physicsReady&&!this.disabled,peers:[...this.peers.values()],queued:this.queue.length,busy:this.pending?.id||'',work:this.waitingForSpace?'桌面空间不足，保留当前骰子，等待演出结束后继续投掷':this.pending?'正在预测物理轨迹…':this.queue.length?'正在按提交顺序准备…':[...this.requests.values()].filter(r=>r.authority!==this.transport.id).map(r=>r.status||'已提交，等待房间计算…')[0]||'',bytesSent:this.bytesSent,bytesReceived:this.bytesReceived,packetsSent:this.packetsSent,packetsReceived:this.packetsReceived,metrics:this.metrics,error:this.error,failures:this.failures,completed:this.completed,receipts:this.receipts.slice(-30),stress:!!this.stress}})}
-  private async send(data:any,stamp?:(packet:any)=>void){this.assertLive();const p={v:1,build:BUILD,from:this.transport.id,...data};if(p.type==='hello'){await this.keys.ready;this.assertLive();p.born=this.born;p.color=this.transport.color;p.role=this.transport.role;p.publicKey=this.keys.publicKey;p.session=this.session;p.inlineRollV1=true;p.inlineChunkV1=true}let bytes=0;const beforeDispatch=()=>{this.assertLive();stamp?.(p);bytes=sizeOf(p);if(bytes>MAX_MESSAGE_BYTES)throw Error(`消息超限 ${bytes}`);};if(this.transport.sendTimed)await this.transport.sendTimed(p,beforeDispatch);else{beforeDispatch();await this.transport.send(p);}this.assertLive();this.bytesSent+=bytes;this.packetsSent++}
+  private async send(data:any,stamp?:(packet:any)=>void){this.assertLive();const p={v:1,build:BUILD,from:this.transport.id,...data};if(p.type==='hello'){await this.keys.ready;this.assertLive();p.born=this.born;p.color=this.transport.color;p.role=this.transport.role;p.publicKey=this.keys.publicKey;p.session=this.session}let bytes=0;const beforeDispatch=()=>{this.assertLive();stamp?.(p);bytes=sizeOf(p);if(bytes>MAX_MESSAGE_BYTES)throw Error(`消息超限 ${bytes}`);};if(this.transport.sendTimed)await this.transport.sendTimed(p,beforeDispatch);else{beforeDispatch();await this.transport.send(p);}this.assertLive();this.bytesSent+=bytes;this.packetsSent++}
   private authority(){return [{id:this.transport.id,born:this.born,ready:this.ready},...[...this.peers.values()].filter(p=>now()-p.lastSeen<12000)]
     .filter(p=>p.ready).sort((a,b)=>a.born-b.born||a.id.localeCompare(b.id))[0]?.id||this.transport.id}
   private async ping(id:string){if(this.clocks.get(id)?.some(s=>now()-s.at<4000)||[...this.probes.values()].some(p=>p.to===id&&now()-p.t<2500))return;const nonce=crypto.randomUUID(),probe={to:id,t:now()};this.probes.set(nonce,probe);await this.send({type:'ping',to:id,nonce,t:probe.t},packet=>{packet.t=probe.t=now();})}
@@ -271,15 +271,11 @@ export class Controller {
       this.requests.delete(roll.request.id);
       this.log('trajectory-ready',{id:roll.request.id,source:roll.request.source,theme:roll.request.theme,physicsMs:roll.physicsMs,steps:roll.steps,collisions:roll.collisions,diagnostics:roll.diagnostics,bytes:bytes.length,rawBytes:poses.byteLength,chunks:chunks.length,hash:sha,results:roll.results,members});
       this.postLocal({type:'prepare',roll:actual});
-      // Small traces can share their first fragment with the manifest's paced message. Negotiate per
-      // frozen audience; old peers, grouped/large rolls and oversized envelopes keep
-      // the original protocol. Integrity, private wrapping and ready barriers are identical.
-      out.inlineOffer=!roll.request.batch&&roll.kinds.length<10&&members.length>0&&members.every(id=>chunks.length===1?this.peers.get(id)?.inlineRollV1===true:this.peers.get(id)?.inlineChunkV1===true);
-      if(out.inlineOffer){const packet={...this.offer(out),v:1,build:BUILD,from:this.transport.id};
-        if([undefined,...members].some(to=>sizeOf({...packet,...(to?{to}:{})})>MAX_MESSAGE_BYTES))out.inlineOffer=false;}
+      // Keep every trajectory on the established manifest/chunk queue. A peer restart
+      // may cancel the roll while a send is awaiting acknowledgement.
       if(members.length){await this.send(this.offer(out));
-        if(!out.inlineOffer||chunks.length>1){for(let i=out.inlineOffer?1:0;i<chunks.length&&this.outgoing.get(roll.request.id)===out;i++){await this.send({type:'chunk',id:roll.request.id,index:i,data:chunks[i]});if(i%8===7)await new Promise(r=>setTimeout(r,8))}
-          if(this.outgoing.get(roll.request.id)===out)await this.send({type:'chunks-done',id:roll.request.id});}}
+        for(let i=0;i<chunks.length&&this.outgoing.get(roll.request.id)===out;i++){await this.send({type:'chunk',id:roll.request.id,index:i,data:chunks[i]});if(i%8===7)await new Promise(r=>setTimeout(r,8))}
+        if(this.outgoing.get(roll.request.id)===out)await this.send({type:'chunks-done',id:roll.request.id});}
       if(this.outgoing.get(roll.request.id)!==out)return;
       out.uploading=false;out.at=now();await this.maybeStart(out);
       }
@@ -293,7 +289,7 @@ export class Controller {
       if(pending.source!==this.transport.id)await this.send({type:'roll-rejected',to:pending.source,id:pending.id,reason:errorText(e)});
     }finally{this.next();this.state()}
   }
-  private offer(out:Outgoing,to?:string){return {type:'offer',...(to?{to}:{}),id:out.roll.request.id,total:out.chunks.length,bytes:out.bytes,hash:out.hash,members:out.members,...(out.inlineOffer?{inlineChunk:out.chunks[0]}:{})};}
+  private offer(out:Outgoing,to?:string){return {type:'offer',...(to?{to}:{}),id:out.roll.request.id,total:out.chunks.length,bytes:out.bytes,hash:out.hash,members:out.members};}
   private async sendReady(id:string,inbound:Received){
     if(this.disabled||this.inbound.get(id)!==inbound)return;
     const peer=this.peers.get(inbound.source);
@@ -466,7 +462,7 @@ export class Controller {
         }
         if(!Number.isSafeInteger(p.born)||p.born<0)throw Error('Invalid authority join order');
         if(!this.ready)this.born=Math.max(this.born,p.born+1);
-        const isNew=!existing;this.peers.set(source,{id:source,session:p.session,name:p.name,color:p.color,role,lastSeen:now(),ready:p.ready===true,rtt:existing?.rtt??-1,offset:existing?.offset??0,version:p.build,born:p.born,inlineRollV1:p.inlineRollV1===true,inlineChunkV1:p.inlineChunkV1===true});
+        const isNew=!existing;this.peers.set(source,{id:source,session:p.session,name:p.name,color:p.color,role,lastSeen:now(),ready:p.ready===true,rtt:existing?.rtt??-1,offset:existing?.offset??0,version:p.build,born:p.born});
         if(isNew||restarted){await this.send({type:'hello',ready:this.ready,name:this.transport.name,to:source});this.log('peer-joined',{source,name:p.name})}if(isNew||restarted||!this.clocks.get(source)?.some(s=>now()-s.at<4000))await this.ping(source);this.state();break;
       }
       case 'secret-request':{
@@ -515,14 +511,10 @@ export class Controller {
         if(source!==this.authority()&&this.reservations.get(p.id)?.request.source!==source)throw Error('非房间权威或授权暗骰来源发送轨迹');
         if(!this.ready||!Array.isArray(p.members)||!p.members.includes(this.transport.id))break;
         if(this.started.has(p.id))break;
-        // Validate an embedded first chunk before retaining its manifest, including
-        // duplicate offers. Reuse the normal Assembly/decode/authorization path below.
-        let inlineAssembly:Assembly|undefined;
-        if(p.inlineChunk!==undefined){if(typeof p.inlineChunk!=='string')throw Error('Invalid inline trajectory');inlineAssembly=new Assembly(p.total,p.bytes,p.hash);inlineAssembly.add(0,p.inlineChunk);}
-        const pending=this.inbound.get(p.id);if(pending){if(pending.source!==source||pending.assembly.sha!==p.hash||pending.assembly.total!==p.total||pending.assembly.bytes!==p.bytes)throw Error('冲突的轨迹清单');if(p.inlineChunk!==undefined)await this.receiveChunk({id:p.id,index:0,data:p.inlineChunk},source);if(pending.prepared)await this.sendReady(p.id,pending);break}if(this.inbound.size>=64)throw Error('接收轨迹队列已满');
+        const pending=this.inbound.get(p.id);if(pending){if(pending.source!==source||pending.assembly.sha!==p.hash||pending.assembly.total!==p.total||pending.assembly.bytes!==p.bytes)throw Error('冲突的轨迹清单');if(pending.prepared)await this.sendReady(p.id,pending);break}if(this.inbound.size>=64)throw Error('接收轨迹队列已满');
         if(typeof p.id!=='string'||p.id.length>80)throw Error('Invalid roll id');
-        this.inbound.set(p.id,{source,assembly:inlineAssembly??new Assembly(p.total,p.bytes,p.hash),at:now(),retry:0,processing:false,prepared:false});
-        await this.ping(source);if(p.inlineChunk!==undefined)await this.receiveChunk({id:p.id,index:0,data:p.inlineChunk},source);break;
+        this.inbound.set(p.id,{source,assembly:new Assembly(p.total,p.bytes,p.hash),at:now(),retry:0,processing:false,prepared:false});
+        await this.ping(source);break;
       }
       case 'chunk':await this.receiveChunk(p,source);break;
       case 'chunks-done':{const inbound=this.inbound.get(p.id);if(inbound?.source===source&&!inbound.processing&&inbound.assembly.missing().length){

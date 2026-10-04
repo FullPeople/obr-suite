@@ -1,0 +1,117 @@
+{
+  "referenceSuite": "3d596cbf032ad2afac0451866e98e885418e27e9",
+  "baselineSuite": "308a7ccf0cb70794055ac75170bf112a36989993",
+  "pairedWeb": "fb584043c6bed831b9ca92eab783653770c24fe6",
+  "run": 37233243394,
+  "runUrl": "https://github.com/FullPeople/obr-suite/actions/runs/37233243394",
+  "scope": "Only identical visual/physics/asset modules; modified controller E2E is excluded; only the exact Peer capability-field deletion is permitted in types, whose runtime bytes remain identical. The safe SHA does not claim a fresh 45-case end-to-end viewport run. Current end-to-end protocol/capture/lifecycle must pass separately.",
+  "evidence": {
+    "browserJobsPassed": 6,
+    "strictRawRgbaPairs": 30,
+    "viewportCases": 45,
+    "localRawPairsComparedEqual": 30,
+    "artifactsMaterializedThroughSupportedFileTool": true,
+    "clearAlphaExtrema": [
+      0,
+      0
+    ]
+  },
+  "artifacts": [
+    {
+      "id": 11314678734,
+      "name": "dice-small-candidate-rgba-3d596cbf032ad2afac0451866e98e885418e27e9",
+      "digest": "sha256:8bd677ba7e2161c363c2a718f634e9eb819a3949e623fcade297bd0e778614be",
+      "sizeBytes": 2572886,
+      "url": "https://github.com/FullPeople/obr-suite/actions/runs/37233243394/artifacts/11314678734"
+    },
+    {
+      "id": 11314663774,
+      "name": "dice-small-view-390x844-dpr1-3d596cbf032ad2afac0451866e98e885418e27e9",
+      "digest": "sha256:622ccbdae29e225d942654487a40b07a5812731b9c28aec6ae3a46a402e5e2c7",
+      "sizeBytes": 1307227,
+      "url": "https://github.com/FullPeople/obr-suite/actions/runs/37233243394/artifacts/11314663774"
+    },
+    {
+      "id": 11314658744,
+      "name": "dice-small-view-844x390-dpr3-3d596cbf032ad2afac0451866e98e885418e27e9",
+      "digest": "sha256:b5bba1b3e2408f00fa7f023af63d8fbe420ed7716fb48db561c2d4a41dcbf7a7",
+      "sizeBytes": 8856002,
+      "url": "https://github.com/FullPeople/obr-suite/actions/runs/37233243394/artifacts/11314658744"
+    },
+    {
+      "id": 11314484166,
+      "name": "dice-small-baseline-rgba-3d596cbf032ad2afac0451866e98e885418e27e9",
+      "digest": "sha256:326e3422b3c51dc473dd4fbafe2106efba5ed993017131d05b3f030bf0f56000",
+      "sizeBytes": 2572826,
+      "url": "https://github.com/FullPeople/obr-suite/actions/runs/37233243394/artifacts/11314484166"
+    },
+    {
+      "id": 11314434195,
+      "name": "dice-small-view-844x390-dpr2-3d596cbf032ad2afac0451866e98e885418e27e9",
+      "digest": "sha256:e909f816f5a9aed67a625cd8f707f809a063d54a07ffa7b587d0a77f0685ba62",
+      "sizeBytes": 4523272,
+      "url": "https://github.com/FullPeople/obr-suite/actions/runs/37233243394/artifacts/11314434195"
+    },
+    {
+      "id": 11314409290,
+      "name": "dice-small-baseline-render-png-3d596cbf032ad2afac0451866e98e885418e27e9",
+      "digest": "sha256:cd0d88a4b79f5264d949625feb11cbfd66cc87fa7a925eface5584650e6415e9",
+      "sizeBytes": 4325809,
+      "url": "https://github.com/FullPeople/obr-suite/actions/runs/37233243394/artifacts/11314409290"
+    },
+    {
+      "id": 11314339378,
+      "name": "dice-small-candidate-render-png-3d596cbf032ad2afac0451866e98e885418e27e9",
+      "digest": "sha256:c889d9824835f03584a1fbf98f4e477436e18d0a7a05d94fe5fa0d5feaf5195c",
+      "sizeBytes": 4325877,
+      "url": "https://github.com/FullPeople/obr-suite/actions/runs/37233243394/artifacts/11314339378"
+    },
+    {
+      "id": 11314299360,
+      "name": "dice-small-pixel-metrics-3d596cbf032ad2afac0451866e98e885418e27e9",
+      "digest": "sha256:61ca1710d1a47b0a74c2842fa5fcf20c3425590cd635673d6d06aa32b1ec19df",
+      "sizeBytes": 45092,
+      "url": "https://github.com/FullPeople/obr-suite/actions/runs/37233243394/artifacts/11314299360"
+    },
+    {
+      "id": 11314224543,
+      "name": "dice-small-view-768x1024-dpr1.5-3d596cbf032ad2afac0451866e98e885418e27e9",
+      "digest": "sha256:cab17df6e9913d5ba9d964f458530f34532143d043498d36067ef0585370bada",
+      "sizeBytes": 5891164,
+      "url": "https://github.com/FullPeople/obr-suite/actions/runs/37233243394/artifacts/11314224543"
+    },
+    {
+      "id": 11314199530,
+      "name": "dice-small-view-390x844-dpr3-3d596cbf032ad2afac0451866e98e885418e27e9",
+      "digest": "sha256:8a70ccf50aefa9fd21993eab381c67d8e6e2f0fef798e1cc915bdf1b50eb301e",
+      "sizeBytes": 7374787,
+      "url": "https://github.com/FullPeople/obr-suite/actions/runs/37233243394/artifacts/11314199530"
+    }
+  ],
+  "inspectedImages": [
+    {
+      "artifactRelativePath": "render-candidate/candidate-overlay-context-restored.png",
+      "sha256": "3c10abf90cf0aad0eef9de6395820310f88261b5546dbd7c8ac65b7579bc3e69"
+    },
+    {
+      "artifactRelativePath": "render-candidate/candidate-preview-context-reopened.png",
+      "sha256": "4f91806dea4d7a2cb59438455bff83c550de3b765180d3431ffd0464b29feaba"
+    },
+    {
+      "artifactRelativePath": "render-candidate/candidate-overlay-transparent-clear.png",
+      "sha256": "9e7249eb53b33c60ce12326267daa8a28adca08ab42bf4b1a49b5e9204c8866d"
+    },
+    {
+      "artifactRelativePath": "view-390x844-dpr3/390x844-dpr3-3-result.png",
+      "sha256": "6955e990b24b3664546ef790e9e70aa87de778a682dc6a6ddb0edb4ae4c702d9"
+    },
+    {
+      "artifactRelativePath": "view-844x390-dpr2/844x390-dpr2-3-result.png",
+      "sha256": "34a7881f390a846faf7a2276ad2988def26a555e64c85dc7fa10b14ef740d615"
+    },
+    {
+      "artifactRelativePath": "view-768x1024-dpr1.5/768x1024-dpr1.5-3-result.png",
+      "sha256": "14c27135e467d7728bf3fc40604109264c98b2e08aeef3e298e4ab274451001d"
+    }
+  ]
+}
