@@ -12,10 +12,11 @@ import './research/research.css';
 import './suite-overlay.css';
 import {DiceAssets} from './asset-loading';
 import {diceCatalog} from './asset-catalog';
+import {requiredAudioPaths} from './audio';
 export async function mountOverlay(container:HTMLElement,client:string){
   const bus=new BroadcastChannel(`${CHANNEL}:local:${client}`),assets=new DiceAssets(progress=>bus.postMessage({type:'load-progress',progress}));
   const catalog=diceCatalog(),parents=new Map<string,{id:string;pending:Set<string>;failed?:boolean}>();
-  const audioPaths=Object.values(catalog.themes).flatMap(t=>[...Object.values(t.audio.impacts).flatMap(Object.values),t.audio.rolling,t.audio.tension,t.audio.natural_1,t.audio.natural_20]);
+  const audioPaths=Object.values(catalog.themes).flatMap(requiredAudioPaths);
   assets.plan(['assets/fonts/Cinzel-Variable.ttf',...Object.values(catalog.dice).map(d=>d.model),...Object.values(catalog.themes).flatMap(t=>Object.values(t.masks)),...audioPaths]);
   const audio=mountAudioHost(client,assets,catalog);(window as any).__diceLabAudio=audio;
   // The result numbers use the same Cinzel variable font the native ships; canvas needs it loaded.
@@ -69,7 +70,9 @@ export async function mountOverlay(container:HTMLElement,client:string){
     else if(p.type==='result-bubble'&&p.highlight)bus.postMessage({type:'suite-reveal-highlight',id:p.record.id});
   }catch(error){bus.postMessage({type:'renderer-event',event:'error',detail:{message:errorText(error)}})}};
   assets.stage('加载模型、数字贴图和音效');
-  await Promise.all([audio.warmup(),renderer.init()]);assets.stage('首次渲染完成');
+  // Visual readiness alone is insufficient: every current sound, for every peer theme, must be ready.
+  const audioReady=audio.warmup(),visualReady=renderer.init();
+  await Promise.all([audioReady,visualReady]);assets.stage('首次渲染完成');
   bus.postMessage({type:'overlay-ready',detail:rendererDetail});return renderer;
 }
 if(location.pathname.endsWith('/overlay.html')){

@@ -3,6 +3,7 @@ import * as T from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import {DiceAssets} from './asset-loading';
+import {createVerifiedTextureLoader} from './verified-texture-loader';
 import {diceCatalog} from './asset-catalog';
 import {STYLE_CHOICES} from './material-styles';
 import {createDiceMaterial,instanceDiceMaterial,addSketchOutline,disposeDiceDecorations} from './dice-materials';
@@ -46,11 +47,11 @@ addEventListener('pagehide',()=>{cancelAnimationFrame(frame);for(const mesh of m
 async function init(){
  const assets=new DiceAssets(p=>{status.textContent=`正在准备 3D 展示… ${p.done}/${p.total}`;});catalog=diceCatalog();
  assets.plan([...KINDS.map(k=>catalog.dice[k].model),...Object.values(catalog.themes).flatMap(t=>Object.values(t.masks))]);
- const loader=new GLTFLoader(),textures=new Map<string,Promise<T.Texture>>();
+ const loader=new GLTFLoader(),loadMask=createVerifiedTextureLoader(assets,async bytes=>{const t=new T.Texture(await createImageBitmap(new Blob([bytes])));t.needsUpdate=true;t.flipY=false;t.anisotropy=Math.min(8,gl.capabilities.getMaxAnisotropy());return t;});
  await Promise.all(KINDS.map(async kind=>{const model=await loader.parseAsync(await assets.bytes(catalog.dice[kind].model),url(''));const mesh=model.scene.getObjectByName('RenderMesh') as T.Mesh;
   if(!mesh?.isMesh||!mesh.geometry.getAttribute('uv1'))throw Error('预览模型缺少数字 UV：'+kind);const geo=mesh.geometry.clone();geo.scale(40,40,40);geo.setAttribute('diceGlyph',geo.getAttribute('uv1'));geometry.set(kind,geo);
  }));
- await Promise.all(Object.values(catalog.themes).flatMap(theme=>KINDS.map(async kind=>{const path=theme.masks[kind];let mask=textures.get(path);if(!mask){mask=assets.bytes(path).then(async bytes=>{const t=new T.Texture(await createImageBitmap(new Blob([bytes])));t.needsUpdate=true;t.flipY=false;t.anisotropy=Math.min(8,gl.capabilities.getMaxAnisotropy());return t;});textures.set(path,mask);}bases.set(`${theme.id}:${kind}`,createDiceMaterial(theme,await mask));})));
+ await Promise.all(Object.values(catalog.themes).flatMap(theme=>KINDS.map(async kind=>{bases.set(`${theme.id}:${kind}`,createDiceMaterial(theme,await loadMask(theme.masks[kind])));})));
  rebuild();await gl.compileAsync(scene,camera);loaded=true;gl.render(scene,camera);status.textContent='';document.body.dataset.previewReady='true';parent.postMessage({channel,ready:true},location.origin);wake();
 }
 void init().catch(report);

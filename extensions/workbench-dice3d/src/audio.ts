@@ -14,13 +14,17 @@ import {AUDIO_MAPPING,IMPACT_VOICES,RESULT_HIT_VOICES,resultHitGain,resultHitRat
   type AudioImpact,type ImpactStrength} from './audio-map';
 
 interface Voice{left:GainNode;right:GainNode;merger:ChannelMergerNode;source:AudioBufferSourceNode|null;endsAt:number}
-export interface LoadedThemeAudio{impacts:Record<'die_on_ground'|'die_on_die',Record<ImpactStrength,AudioBuffer>>;
-  rolling:AudioBuffer;tension:AudioBuffer;natural_1:AudioBuffer;natural_20:AudioBuffer;mix:Record<string,number>}
+export interface RollThemeAudio{impacts:Record<'die_on_ground'|'die_on_die',Record<ImpactStrength,AudioBuffer>>;
+  rolling:AudioBuffer;natural_1?:AudioBuffer;natural_20?:AudioBuffer;mix:Record<string,number>}
+export interface LoadedThemeAudio extends RollThemeAudio{tension:AudioBuffer;natural_1:AudioBuffer;natural_20:AudioBuffer}
 export interface RollingState{activity:number;pan:number}
+/** Current cues use all collision strengths and rolling, including reveal/emphasis hits. */
+export const requiredAudioPaths=(theme:Theme)=>[...Object.values(theme.audio.impacts).flatMap(Object.values),theme.audio.rolling];
 
 export class DiceAudio{
-  constructor(context:AudioContext|null=null,cache?:Map<string,LoadedThemeAudio>,private assets=new DiceAssets()){this.ctx=context;if(cache)this.buffers=cache}
+  constructor(context:AudioContext|null=null,cache?:Map<string,RollThemeAudio>,private assets=new DiceAssets()){this.ctx=context;if(cache)this.buffers=cache}
   private decoded=new Map<string,Promise<AudioBuffer>>();
+  private requiredLoading=new Map<string,Promise<RollThemeAudio>>();
   private ctx:AudioContext|null=null;
   private master:GainNode|null=null;
   private impactVoices:Voice[]=[];
@@ -31,11 +35,11 @@ export class DiceAudio{
   private rollingPan=0;
   private rollingStarted=false;
   private stingerVoice:Voice|null=null;
-  private buffers=new Map<string,LoadedThemeAudio>();
+  private buffers=new Map<string,RollThemeAudio>();
   private ruleBuffers=new Map<string,AudioBuffer>();
   private impacts:AudioImpact[]=[];
   private impactCursor=0;
-  private themeAudio:LoadedThemeAudio|null=null;
+  private themeAudio:RollThemeAudio|null=null;
   private themeId='';
   private atWall=0;
   private volume=1;
@@ -69,7 +73,7 @@ export class DiceAudio{
     return{left,right,merger,source:null,endsAt:0};
   }
   async resume(){const ctx=this.ensure();if(!ctx)throw Error('Web Audio 不可用');if(ctx.state==='suspended')await ctx.resume()}
-  fork(){const ctx=this.ensure();if(!ctx)throw Error('Web Audio 不可用');const child=new DiceAudio(ctx,this.buffers,this.assets);child.decoded=this.decoded;child.ruleBuffers=this.ruleBuffers;child.setVolume(this.volume);child.ensure();return child}
+  fork(){const ctx=this.ensure();if(!ctx)throw Error('Web Audio 不可用');const child=new DiceAudio(ctx,this.buffers,this.assets);child.decoded=this.decoded;child.requiredLoading=this.requiredLoading;child.ruleBuffers=this.ruleBuffers;child.setVolume(this.volume);child.ensure();return child}
   dispose(){this.stop('dispose');for(const voice of [...this.impactVoices,...this.hitVoices,this.rolling!,this.stingerVoice!]){
     if(voice){voice.left.disconnect();voice.right.disconnect();voice.merger.disconnect()}}
     this.master?.disconnect();}
@@ -77,25 +81,51 @@ export class DiceAudio{
     this.volume=Math.max(0,Math.min(1,value));
     if(this.master)this.master.gain.value=this.volume;
   }
-  /** Decodes the theme's ten strict wavs once; a missing or undecodable file fails the roll. */
-  async load(theme:Theme,base:string):Promise<LoadedThemeAudio>{
+  private decode(path:string,base:string):Promise<AudioBuffer>{
+    let pending=this.decoded.get(path);
+    if(!pending){
+      pending=this.assets.bytes(path).then(data=>this.ctx!.decodeAudioData(data.slice(0))).catch(error=>{
+        if(this.decoded.get(path)===pending)this.decoded.delete(path);
+        throw Error(`音频解码 ${base+path}: ${String(error)}`);
+      });
+      this.decoded.set(path,pending);
+    }
+    return pending;
+  }
+  /** Required by every current roll; no fallback or partial success for audible sounds. */
+  async loadRequired(theme:Theme,base:string):Promise<RollThemeAudio>{
     const ctx=this.ensure();
     if(!ctx)throw Error('Web Audio 不可用');
     const cached=this.buffers.get(theme.id);
     if(cached)return cached;
-    const decode=(path:string)=>{let pending=this.decoded.get(path);if(!pending){pending=this.assets.bytes(path).then(data=>ctx.decodeAudioData(data.slice(0))).catch(error=>{throw Error(`音频解码 ${base+path}: ${String(error)}`);});this.decoded.set(path,pending);}return pending;};
-    const impacts={die_on_ground:{} as Record<ImpactStrength,AudioBuffer>,die_on_die:{} as Record<ImpactStrength,AudioBuffer>};
-    await Promise.all((['die_on_ground','die_on_die'] as const).flatMap(surface=>
-      (['light','medium','heavy'] as const).map(async strength=>{impacts[surface][strength]=await decode(theme.audio.impacts[surface][strength])})));
-    const [rolling,tension,natural_1,natural_20]=await Promise.all([theme.audio.rolling,theme.audio.tension,theme.audio.natural_1,theme.audio.natural_20].map(decode));
-    const audio:LoadedThemeAudio={impacts,
-      rolling,tension,natural_1,natural_20,
-      mix:theme.audio.mix as unknown as Record<string,number>};
-    this.buffers.set(theme.id,audio);this.themeId=theme.id;
+    let pending=this.requiredLoading.get(theme.id);
+    if(!pending){
+      pending=(async()=>{
+        const impacts={die_on_ground:{} as Record<ImpactStrength,AudioBuffer>,die_on_die:{} as Record<ImpactStrength,AudioBuffer>};
+        await Promise.all((['die_on_ground','die_on_die'] as const).flatMap(surface=>
+          (['light','medium','heavy'] as const).map(async strength=>{impacts[surface][strength]=await this.decode(theme.audio.impacts[surface][strength],base)})));
+        const audio:RollThemeAudio={impacts,rolling:await this.decode(theme.audio.rolling,base),mix:theme.audio.mix as unknown as Record<string,number>};
+        this.buffers.set(theme.id,audio);this.themeId=theme.id;
+        return audio;
+      })().catch(error=>{if(this.requiredLoading.get(theme.id)===pending)this.requiredLoading.delete(theme.id);throw error;});
+      this.requiredLoading.set(theme.id,pending);
+    }
+    return pending;
+  }
+  /** Optional explicit plans preload their cue before release, never asynchronously at playback. */
+  async loadStinger(theme:Theme,base:string,naturalTwenty:boolean):Promise<RollThemeAudio>{
+    const audio=await this.loadRequired(theme,base),key=naturalTwenty?'natural_20':'natural_1';
+    audio[key]=await this.decode(theme.audio[key],base);
     return audio;
   }
+  /** Preserve the strict ten-wav API for callers that explicitly request the full theme. */
+  async load(theme:Theme,base:string):Promise<LoadedThemeAudio>{
+    const audio=await this.loadRequired(theme,base);
+    const [tension,natural_1,natural_20]=await Promise.all([theme.audio.tension,theme.audio.natural_1,theme.audio.natural_20].map(path=>this.decode(path,base)));
+    return Object.assign(audio,{tension,natural_1,natural_20});
+  }
   /** Starts one roll's schedule. `atWall` is the layer's actual release time on the shared clock. */
-  start(impacts:AudioImpact[],audio:LoadedThemeAudio,atWall:number){
+  start(impacts:AudioImpact[],audio:RollThemeAudio,atWall:number){
     this.stop('new_roll');
     this.impacts=impacts;this.impactCursor=0;this.themeAudio=audio;this.atWall=atWall;
     this.rollingBuffer=audio.rolling;this.rollingVolume=0;this.rollingPan=0;this.rollingStarted=false;
@@ -193,9 +223,11 @@ export class DiceAudio{
   stinger(naturalTwenty:boolean){
     const audio=this.themeAudio;
     if(!this.ctx||!audio)return;
+    const buffer=naturalTwenty?audio.natural_20:audio.natural_1;
+    if(!buffer)throw Error('开播前未准备显式音频提示');
     const voice=this.stingerVoice!;
     try{voice.source?.stop()}catch{}
-    this.fire(voice,naturalTwenty?audio.natural_20:audio.natural_1,now(),audio.mix.stinger_gain,0);
+    this.fire(voice,buffer,now(),audio.mix.stinger_gain,0);
   }
   /** Hard stop on interrupt: the native flushes voices rather than fading them out. */
   stop(_reason:string){

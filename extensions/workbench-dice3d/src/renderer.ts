@@ -16,8 +16,10 @@ import {createDiceMaterial,instanceDiceMaterial,addSketchOutline,disposeDiceDeco
 import {addDynamicOutline} from './dynamic-decorations';
 import {questionMask} from './question-mask';
 import {decodeGlyphTexture} from './glyph-texture';
+import {createVerifiedTextureLoader} from './verified-texture-loader';
 import {diePresence} from './die-presence';
 import {DiceAssets} from './asset-loading';
+import {cueSlots} from './cue-layout';
 export interface RollPresentation{cue:Cue;show?:CueRenderer;births?:number[];ruleSounds?:AudioPlan['rules'];onPrepare?:(meshes:T.Mesh[])=>void;onFrame?:(age:number,meshes:T.Mesh[])=>void;onDispose?:()=>void}
 type Active={roll:Roll;meshes:T.Mesh[];start:number;released:boolean;settled:boolean;cue:Cue;show:CueRenderer;slot:number;failures?:number;births?:number[];onFrame?:RollPresentation['onFrame'];onDispose?:()=>void};
 /** Everything the panel's audio engine needs, derived once from the authoritative trace. */
@@ -98,12 +100,12 @@ export class DiceRenderer {
       if(!mesh?.isMesh||!mesh.geometry.getAttribute('uv1'))throw Error(`模型缺少 RenderMesh/数字 UV: ${kind}`);
       const geo=mesh.geometry.clone();geo.scale(40,40,40);geo.computeBoundingSphere();geo.setAttribute('diceGlyph',geo.getAttribute('uv1'));this.geometry.set(kind,geo);
     }));
-    const masks=new Map<string,Promise<T.Texture>>();
-    const loadMask=(path:string)=>{let promise=masks.get(path);if(!promise){promise=this.assets.bytes(path).then(decodeGlyphTexture).catch(error=>{throw Error(`贴图解码 ${url(path)}: ${String(error)}`);}).then(mask=>{
+    const loadMask=createVerifiedTextureLoader(this.assets,async bytes=>{const mask=await decodeGlyphTexture(bytes);
       mask.needsUpdate=true;
-      mask.flipY=false;mask.anisotropy=Math.min(8,this.gl.capabilities.getMaxAnisotropy());return mask;});masks.set(path,promise)}return promise;};
+      mask.flipY=false;mask.anisotropy=Math.min(8,this.gl.capabilities.getMaxAnisotropy());return mask;});
     await Promise.all(Object.values(this.catalog.themes).flatMap(theme=>kinds.map(async kind=>{
-      this.materials.set(`${theme.id}:${kind}`,createDiceMaterial(theme,await loadMask(theme.masks[kind])));
+      const path=theme.masks[kind],mask=await loadMask(path).catch(error=>{throw Error(`贴图解码 ${url(path)}: ${String(error)}`);});
+      this.materials.set(`${theme.id}:${kind}`,createDiceMaterial(theme,mask));
     })));
     for(const kind of kinds){const mask=questionMask(kind);mask.anisotropy=Math.min(8,this.gl.capabilities.getMaxAnisotropy());
       for(const theme of Object.values(this.catalog.themes))this.materials.set(`${theme.id}:${kind}:hidden`,createDiceMaterial(theme,mask));}
@@ -123,7 +125,12 @@ export class DiceRenderer {
   private layout(){
     const w=Math.max(1,this.container.clientWidth),h=Math.max(1,this.container.clientHeight);
     this.targetPixelsPerDie=fitPixelsPerDie(makeProjection(w,h),this.active.flatMap(a=>a.roll.bounds?[a.roll.bounds]:[]));
-    const pixelsPerDie=this.active.some(a=>a.released)?this.projection.pixelsPerDie:this.targetPixelsPerDie;
+    const resized=w!==this.projection.width||h!==this.projection.height;
+    // A smaller viewport cannot wait for the zoom easing: settled dice would be cut off
+    // immediately after rotation. Fit a contraction now; retain smooth zoom-in and the
+    // existing same-viewport transition when another roll widens the physical table.
+    const pixelsPerDie=this.active.some(a=>a.released)?
+      (resized?Math.min(this.projection.pixelsPerDie,this.targetPixelsPerDie):this.projection.pixelsPerDie):this.targetPixelsPerDie;
     const halfW=(w*0.5)/pixelsPerDie,halfH=(h*0.5)/pixelsPerDie;
     Object.assign(this.camera,{left:-halfW,right:halfW,top:halfH*1.24,bottom:-halfH*0.76});
     this.camera.updateProjectionMatrix();
@@ -149,7 +156,7 @@ export class DiceRenderer {
       // Preserve the committed flight order/times; only remap the true landing positions.
       for(const a of this.active)for(const beam of a.cue.beams){const o=((a.roll.frames-1)*a.roll.kinds.length+beam.dieIndex)*7,p=a.roll.poses;
         [beam.sourceX,beam.sourceY]=projectVisual(this.projection,p[o],p[o+1],p[o+2]);}
-      this.reslot();this.emit('viewport',{w:this.projection.width,h:this.projection.height});
+      this.reslot(true);this.emit('viewport',{w:this.projection.width,h:this.projection.height});
     }
     if(this.ready)this.wake();
   }
@@ -178,12 +185,11 @@ export class DiceRenderer {
     this.emit('render-queued',{roll:roll.request.id,count:meshes.length,start,theme:roll.request.theme,bodyColor:roll.request.bodyColor,view:{...this.projection},audio:{...this.audioPlan(roll,cue),rules:presentation?.ruleSounds}});this.wake();
   }
   /** Concurrent rolls share the layer with equal horizontal slots, as the native layout does. */
-  private reslot(){
+  private reslot(snap=false){
     const visible=this.active.filter(a=>!a.roll.masked),count=visible.length;if(!count)return;
-    const columns=Math.min(count,Math.max(1,Math.floor(this.projection.width/250))),rows=Math.ceil(count/columns);
-    visible.forEach((a,index)=>{const row=Math.floor(index/columns),inRow=Math.min(columns,count-row*columns);
-      a.slot=(index%columns-(inRow-1)*.5)*Math.min(300,this.projection.width/(inRow+0.25));
-      a.show.setSlotOffset(a.slot,(row-(rows-1)*.5)*Math.min(170,this.projection.height/(rows+1)));});
+    const slots=cueSlots(this.projection.width,this.projection.height,count,visible.some(a=>!!a.cue?.modifier));
+    visible.forEach((a,index)=>{const slot=slots[index];a.slot=slot.x;
+      a.show.setSlotOffset(slot.x,slot.y,slot.width,slot.height,snap);});
   }
   /**
    * The audio plan, derived once from the authoritative trace: contact impacts with their screen pan,

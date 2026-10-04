@@ -64,7 +64,10 @@ export function fitPixelsPerDie(p:Projection,bounds:Bounds[]):number{
   let pixels=p.pixelsPerDie;
   // Fitting y=0 alone clips the top of a die against the far wall: the tilted projection
   // also lifts its height towards screen top. Include the tallest locked hull and border.
-  const headroom=.040*SIN_TILT+.001,border=8;
+  // ResizeObserver can report a temporarily collapsed layer. Keep the camera finite and
+  // forward-facing until its usable size returns rather than subtracting an 8px border
+  // from a 1px dimension and producing a negative projection scale.
+  const headroom=.040*SIN_TILT+.001,border=Math.min(8,p.width*.25,p.height*.19);
   for(const b of bounds)pixels=Math.min(pixels,
     (p.width*.5-border)/((Math.max(Math.abs(b.minX),Math.abs(b.maxX))+.001)*VISUAL_PER_METER),
     (p.height*.62-border)/((Math.max(.001,b.maxZ)*COS_TILT+headroom)*VISUAL_PER_METER),
