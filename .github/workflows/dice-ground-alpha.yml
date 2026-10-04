@@ -1,0 +1,47 @@
+name: Diagnose dice ground alpha cache
+on:
+  push:
+    branches: [fix/dice-ground-alpha-probe-20261004]
+permissions:
+  contents: read
+jobs:
+  ground_alpha_diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies and official Chromium
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Probe control flow and real SDK/Jolt build
+        run: |
+          node --check tools/dice-ground-alpha-browser.mjs
+          node tools/dice-ground-alpha-probe.test.mjs
+          node tools/dice-latency-build.mjs
+      - name: Run seven fixed-pose diagnostic cases
+        run: node tools/dice-ground-alpha-browser.mjs
+      - name: Preserve exact-pixel reports and PNGs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dice-ground-alpha-${{ github.sha }}
+          include-hidden-files: true
+          retention-days: 7
+          path: .local-evidence/dice-ground-alpha/
