@@ -14,12 +14,12 @@ import {formulaCue} from './research/presentation';
 import {packReveal,unpackReveal} from './suite-reveal';
 import {diceCatalog} from './asset-catalog';
 import {splitGroupRoll} from './group-batch';
-export interface Transport {id:string;name:string;color?:string;role?:Role;resolveRole?:(id:string)=>Promise<Role|undefined>;mode:string;send:(data:any)=>Promise<void>;listen:(fn:(data:any,source:string)=>void)=>()=>void}
+export interface Transport {id:string;name:string;color?:string;role?:Role;resolveRole?:(id:string)=>Promise<Role|undefined>;mode:string;send:(data:any)=>Promise<void>;sendTimed?:(data:any,beforeDispatch:()=>void)=>Promise<void>;listen:(fn:(data:any,source:string)=>void)=>()=>void}
 export interface ResultRecord{visibility?:DiceHistoryVisibility;id:string;source:string;name:string;color?:string;kinds:Roll['kinds'];results:number[];modifier:number;total:number;secret:boolean;revealed:boolean;complete:boolean;at:number;canReveal:boolean;formulaData?:Roll['formulaData']}
 interface Reservation{request:Request;broker:string;at:number;members:string[]}
 interface SecretArchive{request:Request;kinds:Roll['kinds'];commitment:string;details?:SecretDetails;complete:boolean;revealed:boolean}
 interface Received {source:string;assembly:Assembly;at:number;retry:number;processing:boolean;prepared:boolean;start?:{hash:string;start:number}}
-interface Outgoing {uploading:boolean;roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>;repairs?:Map<string,Set<number>>;repairing?:boolean}
+interface Outgoing {dispatching?:boolean;uploading:boolean;roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>;repairs?:Map<string,Set<number>>;repairing?:boolean}
 export class Controller {
   readonly bus:BroadcastChannel;
   private worker=new Worker(new URL('./physics.worker.ts',import.meta.url),{type:'module'});
@@ -75,7 +75,7 @@ export class Controller {
     if(transport.color!==undefined)transport.color=normalizePlayerColor(transport.color);
     this.bus=new BroadcastChannel(`${CHANNEL}:local:${transport.id}`);
     this.bus.onmessage=e=>{void this.onLocal(e.data).catch(e=>this.fail('local-command',e))};
-    this.stopTransport=transport.listen((p,s)=>{this.inbox=this.inbox.then(()=>this.receive(p,s)).catch(e=>this.fail('network-receive',e))});
+    this.stopTransport=transport.listen((p,s)=>{const receivedAt=now();this.inbox=this.inbox.then(()=>this.receive(p,s,receivedAt)).catch(e=>this.fail('network-receive',e))});
     this.worker.onerror=e=>{const pending=this.pending;this.disabled=true;this.pending=undefined;clearTimeout(this.pendingTimer);this.refreshReady();
       this.fail('physics-worker',e.message);if(pending&&hiddenRequest(pending)){this.cancelSecret(pending.id);void this.send({type:'secret-failed',id:pending.id,reason:'暗骰来源的物理计算器发生错误'}).catch(error=>this.fail('hidden-failure-notice',error))}this.next()};
     this.worker.onmessage=e=>{void this.onWorker(e.data).catch(e=>this.fail('physics-result',e))};
@@ -101,10 +101,10 @@ export class Controller {
   log(event:string,detail:any){this.events.push({at:now(),event,detail});if(this.events.length>2500)this.events.splice(0,500);this.bus.postMessage({type:'log',event,detail});console.info(`[DiceLab] ${event}`,detail)}
   fail(stage:string,error:unknown){this.error=`${stage}: ${errorText(error)}`;this.failures++;this.log('failure',{stage,error:this.error});this.state()}
   state(){this.bus.postMessage({type:'state',state:{id:this.transport.id,name:this.transport.name,color:this.transport.color,mode:this.transport.mode,version:BUILD,ready:this.ready,overlay:this.overlayReady,physics:this.physicsReady&&!this.disabled,peers:[...this.peers.values()],queued:this.queue.length,busy:this.pending?.id||'',work:this.waitingForSpace?'桌面空间不足，保留当前骰子，等待演出结束后继续投掷':this.pending?'正在预测物理轨迹…':this.queue.length?'正在按提交顺序准备…':[...this.requests.values()].filter(r=>r.authority!==this.transport.id).map(r=>r.status||'已提交，等待房间计算…')[0]||'',bytesSent:this.bytesSent,bytesReceived:this.bytesReceived,packetsSent:this.packetsSent,packetsReceived:this.packetsReceived,metrics:this.metrics,error:this.error,failures:this.failures,completed:this.completed,receipts:this.receipts.slice(-30),stress:!!this.stress}})}
-  private async send(data:any){const p={v:1,build:BUILD,from:this.transport.id,...data};if(p.type==='hello'){await this.keys.ready;p.born=this.born;p.color=this.transport.color;p.role=this.transport.role;p.publicKey=this.keys.publicKey;p.session=this.session}const bytes=sizeOf(p);if(bytes>MAX_MESSAGE_BYTES)throw Error(`消息超限 ${bytes}`);await this.transport.send(p);this.bytesSent+=bytes;this.packetsSent++}
+  private async send(data:any,stamp?:(packet:any)=>void){const p={v:1,build:BUILD,from:this.transport.id,...data};if(p.type==='hello'){await this.keys.ready;p.born=this.born;p.color=this.transport.color;p.role=this.transport.role;p.publicKey=this.keys.publicKey;p.session=this.session}let bytes=0;const beforeDispatch=()=>{stamp?.(p);bytes=sizeOf(p);if(bytes>MAX_MESSAGE_BYTES)throw Error(`消息超限 ${bytes}`);};if(this.transport.sendTimed)await this.transport.sendTimed(p,beforeDispatch);else{beforeDispatch();await this.transport.send(p);}this.bytesSent+=bytes;this.packetsSent++}
   private authority(){return [{id:this.transport.id,born:this.born,ready:this.ready},...[...this.peers.values()].filter(p=>now()-p.lastSeen<12000)]
     .filter(p=>p.ready).sort((a,b)=>a.born-b.born||a.id.localeCompare(b.id))[0]?.id||this.transport.id}
-  private async ping(id:string){if([...this.probes.values()].some(p=>p.to===id&&now()-p.t<2500))return;const nonce=crypto.randomUUID(),t=now();this.probes.set(nonce,{to:id,t});await this.send({type:'ping',to:id,nonce,t})}
+  private async ping(id:string){if(this.clocks.get(id)?.some(s=>now()-s.at<4000)||[...this.probes.values()].some(p=>p.to===id&&now()-p.t<2500))return;const nonce=crypto.randomUUID(),probe={to:id,t:now()};this.probes.set(nonce,probe);await this.send({type:'ping',to:id,nonce,t:probe.t},packet=>{packet.t=probe.t=now();})}
   private async onLocal(p:any){
     if(p?.type==='panel-ready'){this.state();this.sendRecords();return}
     if(p?.type==='overlay-ready'){
@@ -199,7 +199,7 @@ export class Controller {
     if(this.disabled||this.pending||this.reservation||!this.queue.length)return;
     // Do not let a synchronous worker reply race a scheduled release, or erase a still-visible
     // incumbent to make capacity. Each request remains a distinct roll.
-    if([...this.outgoing.values()].some(out=>!out.started||(out.start||0)>now()))return;
+    if([...this.outgoing.values()].some(out=>out.dispatching||!out.started||(out.start||0)>now()))return;
     if(new Set([...this.heldRolls.values()].map(r=>r.request.batch?.id||r.request.id)).size>=8)return;
     const space=floorBudget(this.queue[0],[...this.heldRolls.values()],this.catalog,this.viewport);
     if(!space.allowed){if(this.waitingForSpace!==this.queue[0].id){this.waitingForSpace=this.queue[0].id;
@@ -299,27 +299,40 @@ export class Controller {
       const peers=[...this.outgoing.values()].filter(r=>r.roll.request.batch?.id===batch.id);
       if(peers.length!==batch.size||peers.some(r=>r.uploading||r.wait.size||r.started))return;
       const maxRtt=Math.max(0,...[...this.peers.values()].filter(p=>p.ready).map(p=>p.rtt));
-      const lead=out.members.length?Math.min(1500,Math.max(100,maxRtt*1.5+50)):24,start=Math.max(now()+lead,...this.settledAt.values());
-      for(const row of peers){row.started=true;row.start=start;row.lastStartRetry=now();this.retainUntilExit(row.roll,start);}
+      const lead=out.members.length?Math.min(1500,Math.max(100,maxRtt*1.5+50)):24;
       const entries=peers.map(row=>({id:row.roll.request.id,hash:row.hash}));
-      if(out.members.length)await this.send({type:'start-group',id:batch.id,start,entries});
-      for(const row of peers)this.bus.postMessage({type:'start',id:row.roll.request.id,at:start});
-      this.finishReservation(batch.id);this.log('group-start-scheduled',{id:batch.id,start,count:entries.length,leadMs:lead});
-      setTimeout(()=>this.next(),Math.max(0,start-now()+1));return;
+      await this.dispatchStart(peers,{type:'start-group',id:batch.id,entries},lead,batch.id);return;
     }
-    out.started=true;const maxRtt=Math.max(0,...[...this.peers.values()].filter(p=>p.ready).map(p=>p.rtt));
+    const maxRtt=Math.max(0,...[...this.peers.values()].filter(p=>p.ready).map(p=>p.rtt));
     const lead=out.members.length?Math.min(1500,Math.max(70,maxRtt*1.5+35)):24;
-    // Published incumbent tracks cannot be rewritten. They are final-pose colliders in this
-    // prediction, so do not play that collision before the old visible die has reached that pose.
-    // Prediction/network preparation still overlap; all result/beam shows remain independent.
-    const start=Math.max(now()+lead,...this.settledAt.values());
-    out.start=start;out.lastStartRetry=now();
-    this.retainUntilExit(out.roll,start);
-    if(out.members.length)await this.send({type:'start',id:out.roll.request.id,start,hash:out.hash});
-    this.bus.postMessage({type:'start',id:out.roll.request.id,at:start});
-    this.finishReservation(out.roll.request.id);
-    this.log('roll-start-scheduled',{id:out.roll.request.id,start,leadMs:lead,collisionWaitMs:Math.max(0,start-now()-lead),prepareWaitMs:now()-out.at,hash:out.hash});
-    setTimeout(()=>this.next(),Math.max(0,start-now()+1));
+    await this.dispatchStart([out],{type:'start',id:out.roll.request.id,hash:out.hash},lead,out.roll.request.id);
+  }
+  private async dispatchStart(rows:Outgoing[],packet:any,lead:number,reservationId:string){
+    let dispatched=false,start=0;
+    for(const row of rows){row.started=true;row.dispatching=true;}
+    const arm=(wire:any)=>{
+      // Start once at actual dispatch, never when enqueued or when its SDK ACK
+      // arrives. Rejected-rate retries and uncertain-ACK repair reuse this time.
+      if(dispatched){wire.start=start;return;}
+      // Published incumbent tracks cannot be rewritten. They are final-pose
+      // colliders, so preserve their settled lower bound for the new animation.
+      start=Math.max(now()+lead,...this.settledAt.values());wire.start=start;dispatched=true;
+      for(const row of rows){row.start=start;row.lastStartRetry=now();this.retainUntilExit(row.roll,start);this.bus.postMessage({type:'start',id:row.roll.request.id,at:start});}
+      for(const row of rows)row.dispatching=false;
+      this.finishReservation(reservationId);
+      if(packet.type==='start-group')this.log('group-start-scheduled',{id:reservationId,start,count:rows.length,leadMs:lead});
+      else this.log('roll-start-scheduled',{id:reservationId,start,leadMs:lead,collisionWaitMs:Math.max(0,start-now()-lead),prepareWaitMs:now()-rows[0].at,hash:rows[0].hash});
+      setTimeout(()=>this.next(),Math.max(0,start-now()+1));
+    };
+    try{if(rows[0].members.length)await this.send(packet,arm);else arm(packet);}
+    catch(error){
+      if(!dispatched){for(const row of rows){row.started=false;row.start=undefined;row.lastStartRetry=0;}throw error;}
+      // The authoritative trajectory is already armed. Releasing physics or
+      // rejecting the roll here would corrupt it. Existing bounded start-ACK
+      // recovery delivers the same hash/time; late peers play the full trace.
+      this.log('start-send-unconfirmed',{id:reservationId,start,reason:errorText(error)});
+    }finally{for(const row of rows)row.dispatching=false;}
+    this.next();
   }
   private async beginSecret(descriptor:Request){
     if(descriptor.source!==this.transport.id||this.privateRunning.has(descriptor.id))return;
@@ -374,7 +387,7 @@ export class Controller {
     this.sendRecords();this.bus.postMessage({type:'suite-unmask-archive',id:p.id,details:d});this.bus.postMessage({type:'result-bubble',record,highlight:true});this.log('hidden-revealed',{id:p.id,owner:source});
   }
   private recordReceipt(peer:string,event:string,detail:any){this.receipts.push({peer,event,...detail});if(this.receipts.length>120)this.receipts.splice(0,30)}
-  private async receive(p:any,source:string){
+  private async receive(p:any,source:string,receivedAt=now()){
     if(!p||p.v!==1||p.from!==source)throw Error('消息身份/协议不匹配');
     if(p.from===this.transport.id)return;
     const bytes=sizeOf(p);if(bytes>MAX_MESSAGE_BYTES)throw Error('接收消息超过 15 KB');this.bytesReceived+=bytes;this.packetsReceived++;
@@ -390,7 +403,7 @@ export class Controller {
         const restarted=!!existing&&existing.session!==p.session;
         await this.keys.remember(source,p.publicKey,restarted);
         if(restarted){
-          existing!.ready=false;
+          existing!.ready=false;existing!.rtt=-1;existing!.offset=0;this.clocks.delete(source);for(const [nonce,probe]of this.probes)if(probe.to===source)this.probes.delete(nonce);
           this.log('peer-session-restarted',{source});
           // A reload has lost its old wrapping key and prepared traces. Never silently replay or
           // make a hidden payload public to recover it. Future submissions use the new handshake.
@@ -434,9 +447,17 @@ export class Controller {
       case 'request-ack':{const r=this.requests.get(p.id);if(r?.authority===source){r.status='房间已收到，正在准备…';this.log('request-accepted',{id:p.id,authority:source})}break}
       case 'queue-status':{const r=this.requests.get(p.id);if(r?.authority===source){r.status=p.space?'桌面空间不足，等待前一批演出结束后继续投掷':`等待房间计算，第 ${Number(p.position)||1} 条`;this.state()}break}
       case 'roll-rejected':{const r=this.requests.get(p.id);if(r?.authority===source){this.requests.delete(p.id);this.privateAudiences.delete(p.id);this.fail('authority-rejected',p.reason)}break}
-      case 'ping':await this.send({type:'pong',to:source,nonce:p.nonce,remote:now()});break;
-      case 'pong':{const probe=this.probes.get(p.nonce);if(!probe||probe.to!==source)break;this.probes.delete(p.nonce);const end=now(),rtt=end-probe.t;
-        if(existing&&Number.isFinite(p.remote)){const samples=[...(this.clocks.get(source)||[]).filter(s=>end-s.at<10000),{at:end,rtt,offset:p.remote-(probe.t+end)/2}].slice(-8);this.clocks.set(source,samples);const best=[...samples].sort((a,b)=>a.rtt-b.rtt)[0];existing.rtt=best.rtt;existing.offset=best.offset;}break;}
+      case 'ping':await this.send({type:'pong',to:source,nonce:p.nonce,received:receivedAt,remote:now()},packet=>{packet.remote=now();});break;
+      case 'pong':{const probe=this.probes.get(p.nonce);if(!probe||probe.to!==source)break;this.probes.delete(p.nonce);const end=receivedAt,elapsed=end-probe.t;
+        // Four timestamps exclude both paced sending and serial-inbox work. Old
+        // peers without t2 still use the original estimate; no barrier is bypassed.
+        if(!existing||!Number.isFinite(p.remote)||Math.abs(p.remote)>Number.MAX_SAFE_INTEGER||!Number.isFinite(elapsed)||elapsed<0||elapsed>10000)break;
+        let rtt=elapsed,offset=p.remote-(probe.t+end)/2;
+        if(p.received!==undefined){const processing=p.remote-p.received;
+          if(!Number.isFinite(p.received)||Math.abs(p.received)>Number.MAX_SAFE_INTEGER||processing<0||processing>elapsed+1)break;
+          rtt=Math.max(0,elapsed-processing);offset=((p.received-probe.t)+(p.remote-end))/2;
+        }
+        const samples=[...(this.clocks.get(source)||[]).filter(s=>end-s.at<10000),{at:end,rtt,offset}].slice(-8);this.clocks.set(source,samples);const best=[...samples].sort((a,b)=>a.rtt-b.rtt)[0];existing.rtt=best.rtt;existing.offset=best.offset;break;}
       case 'offer':{
         if(source!==this.authority()&&this.reservations.get(p.id)?.request.source!==source)throw Error('非房间权威或授权暗骰来源发送轨迹');
         if(!this.ready||!Array.isArray(p.members)||!p.members.includes(this.transport.id))break;
@@ -521,7 +542,7 @@ export class Controller {
       if(!inbound.processing&&t-inbound.at>(inbound.retry+1)*2500&&inbound.retry<40){inbound.retry++;await this.send({type:'missing',to:inbound.source,id,indices:inbound.assembly.missing()})}
     }
     for(const [id,out] of this.outgoing){
-      if(out.uploading)continue;
+      if(out.uploading||out.dispatching)continue;
       if(!out.started&&t-out.at>2500){for(const member of out.wait){
         if(member===this.transport.id||member===out.roll.request.source)continue;
         out.wait.delete(member);this.log('spectator-preparation-late',{id,member});

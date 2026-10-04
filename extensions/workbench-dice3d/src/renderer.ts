@@ -1,3 +1,4 @@
+import {DiceRenderRegion,withRenderRegion} from './render-region';
 import {beginOverlayFrame} from './shared-overlay-canvas';
 import {recoverPlaybackStart} from './playback-clock';
 import * as T from 'three';
@@ -49,6 +50,8 @@ export class DiceRenderer {
   private frameHandle=0;private contextLost=false;private suspendedAt=0;private contextTimer:ReturnType<typeof setTimeout>|undefined;private frameFailures=0;
   private last=0;
   private targetPixelsPerDie=120;
+  private readonly rendererSize=new T.Vector2();
+  private renderRegion!:DiceRenderRegion;
   private frames:number[]=[];
   private longTasks:number[]=[];
   private lastMetrics=0;
@@ -80,6 +83,7 @@ export class DiceRenderer {
     const rim=new T.DirectionalLight(0xe2edff,.65);rim.position.set(3,4.4,-5);this.scene.add(rim);
     const pmrem=new T.PMREMGenerator(this.gl),room=new RoomEnvironment();this.scene.environment=pmrem.fromScene(room,.04).texture;room.dispose();pmrem.dispose();
     const ground=new T.Mesh(new T.PlaneGeometry(38,22),new T.ShadowMaterial({opacity:.32}));ground.rotation.x=-Math.PI/2;ground.position.y=-.015;ground.receiveShadow=true;this.scene.add(ground);
+    this.renderRegion=new DiceRenderRegion(this.scene,this.camera,key,ground);
     new ResizeObserver(()=>this.resize()).observe(container);this.resize();
     if(PerformanceObserver.supportedEntryTypes.includes('longtask')){this.observer=new PerformanceObserver(list=>{for(const e of list.getEntries())if(e.startTime>=this.metricsSince)this.longTasks.push(e.duration);if(this.longTasks.length>5000)this.longTasks.splice(0,1000)});this.observer.observe({entryTypes:['longtask']})}
   }
@@ -122,7 +126,11 @@ export class DiceRenderer {
     const pixelsPerDie=this.active.some(a=>a.released)?this.projection.pixelsPerDie:this.targetPixelsPerDie;
     const halfW=(w*0.5)/pixelsPerDie,halfH=(h*0.5)/pixelsPerDie;
     Object.assign(this.camera,{left:-halfW,right:halfW,top:halfH*1.24,bottom:-halfH*0.76});
-    this.camera.updateProjectionMatrix();this.gl.setSize(w,h,false);
+    this.camera.updateProjectionMatrix();
+    // Three setSize rewrites both canvas dimensions even when nothing changed.
+    // Check actual backing size too; setPixelRatio already resizes it itself.
+    const size=this.gl.getSize(this.rendererSize),ratio=this.gl.getPixelRatio(),canvas=this.gl.domElement;
+    if(size.x!==w||size.y!==h||canvas.width!==Math.floor(w*ratio)||canvas.height!==Math.floor(h*ratio))this.gl.setSize(w,h,false);
     this.projection={width:w,height:h,pixelsPerDie};
   }
   private remapSources(){for(const a of this.active)for(const beam of a.cue.beams){const o=((a.roll.frames-1)*a.roll.kinds.length+beam.dieIndex)*7,p=a.roll.poses;
@@ -161,7 +169,7 @@ export class DiceRenderer {
       const m=new T.Mesh(geometry,material);m.castShadow=false;m.receiveShadow=true;m.visible=false;
       if(theme.style==='sketch')addSketchOutline(m,geometry);
       else addDynamicOutline(m,geometry,theme.style!);
-      this.diceSpace.add(m);return m;
+      this.renderRegion.register(m);this.diceSpace.add(m);return m;
     });
     try{presentation?.onPrepare?.(meshes);}catch(error){
       presentation?.onDispose?.();for(const m of meshes){disposeDiceDecorations(m);this.diceSpace.remove(m);(m.material as T.Material).dispose();}show.destroy();throw error;
@@ -256,7 +264,7 @@ export class DiceRenderer {
       a.failures=0;
       }catch(error){a.failures=(a.failures||0)+1;this.emit('render-frame-retry',{roll:a.roll.request.id,attempt:a.failures,message:String(error)});if(a.failures>=3){this.removeMeshes(a);a.show.destroy();this.active.splice(this.active.indexOf(a),1);this.emit('render-cancelled',{roll:a.roll.request.id,failed:true});this.emit('error',{message:'骰子演出连续失败，保留权威结果：'+String(error)});}}
     }
-    this.gl.render(this.scene,this.camera);
+    withRenderRegion(this.gl,this.renderRegion.get({...this.projection,pixelRatio:this.gl.getPixelRatio()}),()=>{this.gl.render(this.scene,this.camera);});
     if(this.active.length?time-this.lastMetrics>750:!this.idleReported){this.lastMetrics=time;this.idleReported=!this.active.length;const sorted=[...this.frames].sort((a,b)=>a-b),average=sorted.reduce((n,v)=>n+v,0)/(sorted.length||1);
       this.emit('render-metrics',{fps:average?1000/average:0,p95:sorted[Math.floor(sorted.length*.95)]||0,maxFrame:sorted.at(-1)||0,longTasks:this.longTasks.length,longestTask:Math.max(0,...this.longTasks),activeRolls:this.active.length,dice:this.active.reduce((n,a)=>n+a.meshes.length,0),drawCalls:this.gl.info.render.calls,triangles:this.gl.info.render.triangles,textures:this.gl.info.memory.textures,pixelRatio:this.gl.getPixelRatio()});}
   }

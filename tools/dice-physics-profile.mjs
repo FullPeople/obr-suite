@@ -1,0 +1,21 @@
+// Real locked Jolt/WASM and product codec; local-file transport, no GPU claim.
+import assert from 'node:assert/strict';
+import {readFile,writeFile,mkdir} from 'node:fs/promises';
+import {resolve,sep} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {build} from 'rolldown';
+const out=resolve(process.env.DND_DICE_EVIDENCE||'.local-evidence/dice-physics'),source=resolve('extensions/workbench-dice3d/src'),pub=resolve('extensions/workbench-dice3d/public');await mkdir(out,{recursive:true});
+const entry=resolve(out,'entry.ts'),bundle=resolve(out,'physics.mjs');await writeFile(entry,`import ${JSON.stringify(source+'/physics.worker.ts')};export {diceCatalog} from ${JSON.stringify(source+'/asset-catalog.ts')};export * from ${JSON.stringify(source+'/wire.mjs')};`);
+await build({input:entry,platform:'node',external:[/^node:/],plugins:[{name:'local-verified-vendor',async load(id){if(id.replaceAll('\\','/')===(source+'/physics.worker.ts').replaceAll('\\','/')){const code=await readFile(id,'utf8'),expected="new URL(url('vendor/jolt-physics.wasm.js'),self.location.origin).href";assert(code.includes(expected));return code.replace(expected,JSON.stringify(pathToFileURL(pub+'/vendor/jolt-physics.wasm.js').href));}}}],output:{file:bundle,format:'esm'}});
+const waiters=new Map();globalThis.self={location:{origin:'https://local.invalid'},postMessage(data){const item=waiters.get(data.id||data.type);if(item){waiters.delete(data.id||data.type);clearTimeout(item.timer);item.resolve(data);}}};
+globalThis.fetch=async input=>{const u=new URL(String(input),'https://local.invalid');assert.equal(u.origin,'https://local.invalid');assert(u.pathname.startsWith('/suite-dev/dice3d/'));const file=resolve(pub,u.pathname.slice('/suite-dev/dice3d/'.length));assert(file.startsWith(pub+sep));return new Response(await readFile(file));};
+const {diceCatalog,encodeRoll,decodeRoll,split}=await import(pathToFileURL(bundle).href),catalog=diceCatalog();
+const run=data=>new Promise((resolve,reject)=>{const key=data.request?.id||({warmup:'warm',retain:'retained'})[data.type];if(key){const timer=setTimeout(()=>{waiters.delete(key);reject(Error('physics probe timeout: '+key));},120000);waiters.set(key,{resolve,reject,timer});}self.onmessage({data});if(!key)resolve();});
+const began=performance.now(),warm=await run({type:'warmup',catalog,view:{w:1920,h:1080}});assert(!warm.error,JSON.stringify(warm));const coldMs=performance.now()-began,measures=[];let serial=0;
+for(const scenario of [{formula:'1d20',count:1},{formula:'2d6+1d20+5',count:3},{formula:'20d6',count:20},{formula:'max(20d6,4)',count:20},{formula:'100d6',count:100}])for(const seed of scenario.count===100?[123456]:[1,7,123456]){
+ const id='profile-'+(++serial),request={id,source:'synthetic-profile',name:'Synthetic profile',kind:'mixed',theme:'ink_sketch',bodyColor:'#76bceb',modifier:0,visibility:'all',recipe:true,...scenario,seed},start=performance.now(),response=await run({request,catalog,view:{w:1920,h:1080}}),wallMs=performance.now()-start;assert(!response.error,JSON.stringify(response));
+ const {poses,contacts,...meta}=response.roll,encodeStart=performance.now(),bytes=await encodeRoll({...meta,collisions:contacts.length,contacts:contacts.length},poses,contacts),encodeMs=performance.now()-encodeStart,decodeStart=performance.now(),decoded=await decodeRoll(bytes),decodeMs=performance.now()-decodeStart;
+ assert.deepEqual(new Uint8Array(decoded.poses.buffer),new Uint8Array(poses.buffer,poses.byteOffset,poses.byteLength));assert.deepEqual(decoded.results,meta.results);assert.deepEqual(decoded.formulaData,JSON.parse(JSON.stringify(meta.formulaData)));
+ const chunks=split(bytes).length;measures.push({formula:scenario.formula,seed,wallMs,physicsMs:meta.physicsMs,encodeMs,decodeMs,frames:meta.frames,duration:meta.duration,diagnostics:meta.diagnostics,bytes:bytes.length,chunks,offerThroughDoneMinimumMs:(chunks+1)*100});await run({type:'release',id});
+}
+const report={success:true,node:process.version,realJolt:true,realWorkerThread:false,realGPU:false,localFileAssets:true,view:{width:1920,height:1080},coldMs,warm,measures};await writeFile(resolve(out,'result.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));

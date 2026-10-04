@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {outlineGeometry} from './outline-geometry';
 import type {MaterialStyle} from './material-styles';
 /** Thin, depth-tested contour treatments. No collision geometry or face normals are modified. */
 export function addDynamicOutline(mesh:T.Mesh,geometry:T.BufferGeometry,style:MaterialStyle){
@@ -16,7 +17,7 @@ export function addDynamicOutline(mesh:T.Mesh,geometry:T.BufferGeometry,style:Ma
         gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);
       }`,fragmentShader:'void main(){gl_FragColor=vec4(.012,.017,.024,1.);}'});
   const shell=new T.Mesh(geometry,shellMaterial);shell.userData.diceDecoration=true;mesh.add(shell);
-  const edgeGeometry=new T.EdgesGeometry(geometry,24);
+  const edgeGeometry=outlineGeometry(geometry);
   // The complete real bevel edge is retained. A fragment pulse runs along it without replacing
   // it with particles or moving the rigid body's silhouette, including during physical hops.
   // Fade the emitted colour, not alpha. Overlapping edge fragments must not depend on
@@ -31,5 +32,5 @@ export function addDynamicOutline(mesh:T.Mesh,geometry:T.BufferGeometry,style:Ma
           gl_FragColor=vec4(mix(tint*.16,tint,pulse),1.);
         }else{gl_FragColor=vec4(.012,.017,.024,1.);}
       }`});
-  const edges=new T.LineSegments(edgeGeometry,edgeMaterial);edges.userData.diceDecoration=true;edges.userData.ownsGeometry=true;mesh.add(edges);
+  const edges=new T.LineSegments(edgeGeometry,edgeMaterial);edges.userData.diceDecoration=true;mesh.add(edges);
 }

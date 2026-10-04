@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {outlineGeometry} from './outline-geometry';
 import type {Theme} from './types';
 import {STYLE_SETTINGS,lettering,bodyRGB} from './material-styles';
 import {DYNAMIC_HELPERS,DYNAMIC_BODY,DYNAMIC_LIGHT,DYNAMIC_INK} from './dynamic-materials';
@@ -16,7 +17,9 @@ export function createDiceMaterial(theme:Theme,mask:T.Texture):T.MeshPhysicalMat
       diceGlyph:this.userData.glyphColor,diceOutline:this.userData.glyphOutline,diceWipe:this.userData.glyphWipe,diceTime:this.userData.time});
     shader.vertexShader='attribute vec2 diceGlyph; varying vec2 vDiceGlyph; varying vec3 vDiceLocal; varying vec3 vDiceViewLocal;\n'+shader.vertexShader;
     shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvDiceGlyph=diceGlyph; vDiceLocal=position; vDiceViewLocal=inverseTransformDirection(vec3(0.,0.,1.),modelViewMatrix);');
-    shader.fragmentShader=`uniform sampler2D diceMask; uniform vec2 diceTexel; uniform vec3 diceGlyph; uniform vec3 diceOutline; uniform float diceStyle; uniform float diceWipe; uniform float diceTime;
+    // Each immutable style already has its own program key. A compile-time value
+    // removes unreachable material/light branches without changing visible math.
+    shader.fragmentShader=`uniform sampler2D diceMask; uniform vec2 diceTexel; uniform vec3 diceGlyph; uniform vec3 diceOutline; const float diceStyle = ${code.toFixed(1)}; uniform float diceWipe; uniform float diceTime;
       varying vec2 vDiceGlyph; varying vec3 vDiceLocal; varying vec3 vDiceViewLocal;
       float diceNoise(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
       float diceCloud(vec3 p){return .5+.24*sin(p.x*4.+sin(p.z*3.))+.18*sin(p.y*7.+p.z*5.+sin(p.x*4.));}
@@ -105,7 +108,7 @@ export function createDiceMaterial(theme:Theme,mask:T.Texture):T.MeshPhysicalMat
       }
     `);
   };
-  mat.customProgramCacheKey=()=>`dice-inlay-v3-${theme.style}`;
+  mat.customProgramCacheKey=()=>`dice-inlay-v4-static-style-${theme.style}`;
   return mat;
 }
 
@@ -126,15 +129,13 @@ export function addSketchOutline(mesh:T.Mesh,geometry:T.BufferGeometry){
       gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);
     }`,fragmentShader:'void main(){gl_FragColor=vec4(.018,.023,.035,1.);}'});
   const shell=new T.Mesh(geometry,outline);shell.userData.diceDecoration=true;mesh.add(shell);
-  const edges=new T.EdgesGeometry(geometry,24),array=edges.getAttribute('position'),points:number[]=[];
-  for(let i=0;i<array.count;i+=2)for(let k=0;k<6;k++)for(const t of [k/6,(k+1)/6])for(let axis=0;axis<3;axis++)points.push(array.getComponent(i,axis)*(1-t)+array.getComponent(i+1,axis)*t);
-  edges.dispose();const lineGeo=new T.BufferGeometry();lineGeo.setAttribute('position',new T.Float32BufferAttribute(points,3));
+  const lineGeo=outlineGeometry(geometry,true);
   const ink=new T.ShaderMaterial({depthWrite:false,uniforms:{time},
     vertexShader:`uniform float time; void main(){float tick=floor(time*8.);vec3 p=position*1.002;
       p+=vec3(sin(p.y*23.+tick),sin(p.z*21.+tick*1.3),sin(p.x*19.+tick*.7))*.003;
       gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);}`,
     fragmentShader:'void main(){gl_FragColor=vec4(.018,.023,.035,1.);}'});
-  const lines=new T.LineSegments(lineGeo,ink);lines.userData.diceDecoration=true;lines.userData.ownsGeometry=true;mesh.add(lines);
+  const lines=new T.LineSegments(lineGeo,ink);lines.userData.diceDecoration=true;mesh.add(lines);
 }
 export function disposeDiceDecorations(mesh:T.Mesh){for(const child of [...mesh.children])if(child.userData.diceDecoration){
   const drawable=child as T.Mesh;(drawable.material as T.Material).dispose();if(child.userData.ownsGeometry)drawable.geometry.dispose();mesh.remove(child);

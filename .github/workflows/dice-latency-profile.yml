@@ -1,0 +1,200 @@
+name: Profile dice latency candidate
+on:
+  push:
+    branches: [fix/dice-latency-recovered-20261004]
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Immutable Suite baseline SHA
+        required: true
+        default: ca684455cef7decacb8bd0d5cffc011b77b500a3
+permissions:
+  contents: read
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, candidate]
+        capture: [video, none]
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      DICE_LATENCY_VIDEO: ${{ matrix.capture == 'none' && '0' || '1' }}
+      DICE_LATENCY_SCREENSHOTS: ${{ matrix.capture == 'none' && '0' || '1' }}
+      DICE_LATENCY_SOFTWARE: '1'
+      DICE_LATENCY_RECOVERY: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install paired Web dependencies
+        working-directory: .paired-web
+        run: npm ci
+      - name: Prepare baseline with identical measurement harness
+        if: matrix.variant == 'baseline'
+        env:
+          BASELINE_REF: ${{ inputs.baseline_ref || 'ca684455cef7decacb8bd0d5cffc011b77b500a3' }}
+        run: |
+          test "$(git rev-parse "$BASELINE_REF^{commit}")" = "$BASELINE_REF"
+          git worktree add --detach .baseline "$BASELINE_REF"
+          cp tools/dice-latency-build.mjs tools/dice-latency-browser.mjs tools/dice-physics-profile.mjs .baseline/tools/
+      - name: Install locked dependencies and official browser
+        run: |
+          if [ '${{ matrix.variant }}' = baseline ]; then cd .baseline; fi
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Candidate clock, outline and existing recovery regressions
+        if: matrix.variant == 'candidate'
+        env:
+          OUTLINE_BASELINE_REF: ${{ inputs.baseline_ref || 'ca684455cef7decacb8bd0d5cffc011b77b500a3' }}
+        run: |
+          node tools/dice-clock-latency-selftest.mjs
+          node tools/dice-transport-latency-selftest.mjs
+          node tools/dice-outline-latency-selftest.mjs
+          node tools/dice-renderer-resize-selftest.mjs
+          node tools/dice-static-style-selftest.mjs
+          node tools/dice-render-region-selftest.mjs
+          DICE_LATENCY_BASELINE="$OUTLINE_BASELINE_REF" node tools/dice-outline-profile.mjs
+          node tools/dice-timeout235-selftest.mjs
+          node tools/workbench-dice3d-selftest.mjs
+          node tools/workbench-dice-lifecycle-217.mjs
+          node tools/workbench-group-217-selftest.mjs
+      - name: Measure actual Jolt physics and lossless codec
+        run: |
+          if [ '${{ matrix.variant }}' = baseline ]; then cd .baseline; fi
+          node tools/dice-physics-profile.mjs
+      - name: Build actual SDK, worker, verified WASM and renderer
+        run: |
+          if [ '${{ matrix.variant }}' = baseline ]; then cd .baseline; fi
+          node tools/dice-latency-build.mjs
+      - name: Measure two clients and capture full animations
+        run: |
+          if [ '${{ matrix.variant }}' = baseline ]; then cd .baseline; fi
+          node tools/dice-latency-browser.mjs
+      - name: Preserve measurements, screenshots and videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dice-latency-${{ matrix.variant }}-${{ matrix.capture }}-${{ github.sha }}
+          include-hidden-files: true
+          retention-days: 7
+          path: |
+            .local-evidence/dice-latency/browser/
+            .local-evidence/dice-physics/result.json
+            .local-evidence/dice-outline-profile/result.json
+            .local-evidence/dice-render-profile/
+            .local-evidence/dice-render-region/*.json
+            .cache/dice-static-style/*.json
+            .cache/dice-renderer-resize/*.json
+            .cache/dice-clock-latency/*.json
+            .cache/dice-transport-latency/*.json
+            .baseline/.local-evidence/dice-latency/browser/
+            .baseline/.local-evidence/dice-physics/result.json
+
+  renderer_diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies and official browser
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Build actual renderer with diagnostic-only probes
+        run: node tools/dice-latency-build.mjs
+      - name: Fixed-pose renderer costs and exact-pixel A/B
+        run: node tools/dice-render-profile.mjs
+      - name: Preserve renderer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dice-renderer-diagnostics-${{ github.sha }}
+          include-hidden-files: true
+          retention-days: 7
+          path: .local-evidence/dice-render-profile/
+
+  paired_benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        capture: [none]
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      DICE_LATENCY_CORE: '1'
+      DICE_LATENCY_SOFTWARE: '1'
+      DICE_LATENCY_VIDEO: ${{ matrix.capture == 'none' && '0' || '1' }}
+      DICE_LATENCY_SCREENSHOTS: ${{ matrix.capture == 'none' && '0' || '1' }}
+      BASELINE_REF: ${{ inputs.baseline_ref || 'ca684455cef7decacb8bd0d5cffc011b77b500a3' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prepare identical harness and locked dependencies
+        run: |
+          test "$(git rev-parse "$BASELINE_REF^{commit}")" = "$BASELINE_REF"
+          git worktree add --detach .baseline "$BASELINE_REF"
+          cp tools/dice-latency-build.mjs tools/dice-latency-browser.mjs .baseline/tools/
+          npm ci
+          npm --prefix .paired-web ci
+          npm --prefix .baseline ci
+          npx playwright install --with-deps chromium
+      - name: Build both sources on this same runner
+        run: |
+          node tools/dice-latency-build.mjs
+          (cd .baseline && node tools/dice-latency-build.mjs)
+      - name: Same-host baseline, candidate, baseline calibration
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/paired-benchmark/baseline-before"
+          (cd .baseline && node tools/dice-latency-browser.mjs)
+          export DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/paired-benchmark/candidate"
+          node tools/dice-latency-browser.mjs
+          export DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/paired-benchmark/baseline-after"
+          (cd .baseline && node tools/dice-latency-browser.mjs)
+      - name: Preserve same-host comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dice-paired-benchmark-${{ matrix.capture }}-${{ github.sha }}
+          include-hidden-files: true
+          retention-days: 7
+          path: .local-evidence/paired-benchmark/
