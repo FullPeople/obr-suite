@@ -49,6 +49,7 @@ export class DiceRenderer {
   private frameHandle=0;private contextLost=false;private suspendedAt=0;private contextTimer:ReturnType<typeof setTimeout>|undefined;private frameFailures=0;
   private last=0;
   private targetPixelsPerDie=120;
+  private readonly rendererSize=new T.Vector2();
   private frames:number[]=[];
   private longTasks:number[]=[];
   private lastMetrics=0;
@@ -122,7 +123,11 @@ export class DiceRenderer {
     const pixelsPerDie=this.active.some(a=>a.released)?this.projection.pixelsPerDie:this.targetPixelsPerDie;
     const halfW=(w*0.5)/pixelsPerDie,halfH=(h*0.5)/pixelsPerDie;
     Object.assign(this.camera,{left:-halfW,right:halfW,top:halfH*1.24,bottom:-halfH*0.76});
-    this.camera.updateProjectionMatrix();this.gl.setSize(w,h,false);
+    this.camera.updateProjectionMatrix();
+    // Three setSize rewrites both canvas dimensions even when nothing changed.
+    // Check actual backing size too; setPixelRatio already resizes it itself.
+    const size=this.gl.getSize(this.rendererSize),ratio=this.gl.getPixelRatio(),canvas=this.gl.domElement;
+    if(size.x!==w||size.y!==h||canvas.width!==Math.floor(w*ratio)||canvas.height!==Math.floor(h*ratio))this.gl.setSize(w,h,false);
     this.projection={width:w,height:h,pixelsPerDie};
   }
   private remapSources(){for(const a of this.active)for(const beam of a.cue.beams){const o=((a.roll.frames-1)*a.roll.kinds.length+beam.dieIndex)*7,p=a.roll.poses;

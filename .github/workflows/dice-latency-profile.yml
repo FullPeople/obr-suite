@@ -18,8 +18,11 @@ jobs:
       fail-fast: false
       matrix:
         variant: [baseline, candidate]
+        capture: [video, none]
     env:
       DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      DICE_LATENCY_VIDEO: ${{ matrix.capture == 'none' && '0' || '1' }}
+      DICE_LATENCY_SCREENSHOTS: ${{ matrix.capture == 'none' && '0' || '1' }}
       DICE_LATENCY_SOFTWARE: '1'
       DICE_LATENCY_RECOVERY: '1'
     steps:
@@ -60,6 +63,7 @@ jobs:
           node tools/dice-clock-latency-selftest.mjs
           node tools/dice-transport-latency-selftest.mjs
           node tools/dice-outline-latency-selftest.mjs
+          node tools/dice-renderer-resize-selftest.mjs
           DICE_LATENCY_BASELINE="$OUTLINE_BASELINE_REF" node tools/dice-outline-profile.mjs
           node tools/dice-timeout235-selftest.mjs
           node tools/workbench-dice3d-selftest.mjs
@@ -81,7 +85,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dice-latency-${{ matrix.variant }}-${{ github.sha }}
+          name: dice-latency-${{ matrix.variant }}-${{ matrix.capture }}-${{ github.sha }}
           include-hidden-files: true
           retention-days: 7
           path: |
@@ -89,6 +93,7 @@ jobs:
             .local-evidence/dice-physics/result.json
             .local-evidence/dice-outline-profile/result.json
             .local-evidence/dice-render-profile/
+            .cache/dice-renderer-resize/*.json
             .cache/dice-clock-latency/*.json
             .cache/dice-transport-latency/*.json
             .baseline/.local-evidence/dice-latency/browser/

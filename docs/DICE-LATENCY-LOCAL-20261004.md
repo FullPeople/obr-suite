@@ -96,3 +96,9 @@ DICE_LATENCY_SOFTWARE=1 DICE_LATENCY_RECOVERY=1 node tools/dice-latency-browser.
 - 录像两端可见骰子、数字、私骰问号；首轮Player视频尾部未录到最后一轮最终20/退出。完成JSON有20，但视频收尾证据不足。后续夹具已补空闲帧检查、尾缓冲及最终截图。
 
 后续新增单客户端固定真实姿态渲染A/B：保持分辨率、阴影2048²/PCF、模型和公式不变，比较编译期style常量、阴影重复pass、全屏透明地面与轮廓成本、保守scissor。降画质诊断项只定位，不作为产品交付；宣称无损的项需逐通道像素相等。测试hook只存在诊断构建。当前尚未把这些实验应用到产品。最终Web配对推进至测试夹具修订 `05dcfdb645339cac9f68d1f6009f44b7e63d5c25`，三项UI生产源码未变化。
+
+## 渲染诊断第二步
+
+3311251固定姿态实验的五种材质与20骰全部严格WebGL像素对照通过，但render+finish墙钟仅0.2–1.5ms，与真实播放帧间隔不一致；这组时间不作为GPU成本结论。下一轮每样本加完整RGBA同步readPixels，单独记录拷贝/等待及整个frame墙钟，并增加无视频、无截图的同画质双端对照，排查采集开销。
+
+仅新增一个可独立验证的产品guard：layout相同逻辑尺寸与实际backing尺寸不再调用Three.setSize，避免每次add/clear/退出重写canvas尺寸。真实宽高、DPR/quality、backing损坏恢复、相机投影仍按原合同更新；context恢复路径未改。真实Three sizing方法红基线4/13、候选13/13，双类型检查通过；是否降低真实首帧等待待CI，不预先宣称。shader、阴影冻结、scissor仍只是诊断项，尚未用于生产。
