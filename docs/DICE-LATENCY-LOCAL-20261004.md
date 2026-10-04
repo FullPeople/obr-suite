@@ -102,3 +102,22 @@ DICE_LATENCY_SOFTWARE=1 DICE_LATENCY_RECOVERY=1 node tools/dice-latency-browser.
 3311251固定姿态实验的五种材质与20骰全部严格WebGL像素对照通过，但render+finish墙钟仅0.2–1.5ms，与真实播放帧间隔不一致；这组时间不作为GPU成本结论。下一轮每样本加完整RGBA同步readPixels，单独记录拷贝/等待及整个frame墙钟，并增加无视频、无截图的同画质双端对照，排查采集开销。
 
 仅新增一个可独立验证的产品guard：layout相同逻辑尺寸与实际backing尺寸不再调用Three.setSize，避免每次add/clear/退出重写canvas尺寸。真实宽高、DPR/quality、backing损坏恢复、相机投影仍按原合同更新；context恢复路径未改。真实Three sizing方法红基线4/13、候选13/13，双类型检查通过；是否降低真实首帧等待待CI，不预先宣称。shader、阴影冻结、scissor仍只是诊断项，尚未用于生产。
+
+## 同姿态同步读回定位（70c92eb）
+
+37188335989 五个性能/诊断 job 与完整 Suite 37188335990 均通过。无录像、无正常截图组仍有单骰约283ms、20骰约800ms的帧P95，不能把卡顿都归因于录像。跨host差值仍不能归因于代码。
+
+在同一个SwiftShader进程、相同真实Jolt姿态、同尺寸完整RGBA同步读回的5次样本中：
+
+- 单骰整帧墙钟约65–69ms，保守scissor约25–28ms，常量style+scissor约14–22ms。
+- 20骰约150ms，常量style约79ms，合并scissor约72ms。
+- 同姿态冻结阴影仅节省约4–6ms，暂不加入更复杂的动态阴影缓存。
+- 声称保真的实验项在五种材质、两个姿态、单骰/20骰测试中WebGL逐通道0差。去地面全部产生差；去轮廓只在有轮廓的sketch场景产生差。
+
+这是含同步等待及同尺寸readback/copy开销的墙钟，不是纯GPU时间、rAF间隔或真实设备FPS。静态材质现已准备产品候选：每style原已独立程序key，整数style改成编译期常量，其他完整shader公式与70c基线逐字节相同；动态颜色、time与glyph uniforms独立。透明空白裁剪待保守生产helper/复杂规则fallback与更广像素测试。端到端性能将使用同一runner基线→候选→基线，减少不同host约2倍速度差的干扰。
+
+## 组合生产候选
+
+保守region现已合入本地：当前世界矩阵/真实方向光到地面的投影加PCF/bias/轮廓余量，逐帧重算；未知可见drawable、涡旋、深度mask等完整视口fallback。先恢复Three保存的透明clear状态/颜色写入、完整清空旧画面，再裁空白，finally恢复scissor/autoClear；独审发现的context恢复黑底和异常mask残影边界已补两项红对照。没有改shadow缓存、2048²/PCF、画质、物理、动画时间或权限。
+
+18项、七真实模型84姿态4视口DPR的88,694包含性点通过；scratch复用前后10,000随机帧边界完全相同。Node100骰helper P95约0.35ms、V8统计分配约0.64MB/get（此前约0.56ms/2.58MB），只用于CPU分配风险评估。组合再通过resize13、style8、双类型与真实59资产构建。下一次CI将核17场景WebGL严格像素、可见复杂规则fallback、真实context loss恢复首帧，以及同host前后基线包夹的无采集端到端对照。均尚未提前声称通过。

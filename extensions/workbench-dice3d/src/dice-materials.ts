@@ -17,7 +17,9 @@ export function createDiceMaterial(theme:Theme,mask:T.Texture):T.MeshPhysicalMat
       diceGlyph:this.userData.glyphColor,diceOutline:this.userData.glyphOutline,diceWipe:this.userData.glyphWipe,diceTime:this.userData.time});
     shader.vertexShader='attribute vec2 diceGlyph; varying vec2 vDiceGlyph; varying vec3 vDiceLocal; varying vec3 vDiceViewLocal;\n'+shader.vertexShader;
     shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvDiceGlyph=diceGlyph; vDiceLocal=position; vDiceViewLocal=inverseTransformDirection(vec3(0.,0.,1.),modelViewMatrix);');
-    shader.fragmentShader=`uniform sampler2D diceMask; uniform vec2 diceTexel; uniform vec3 diceGlyph; uniform vec3 diceOutline; uniform float diceStyle; uniform float diceWipe; uniform float diceTime;
+    // Each immutable style already has its own program key. A compile-time value
+    // removes unreachable material/light branches without changing visible math.
+    shader.fragmentShader=`uniform sampler2D diceMask; uniform vec2 diceTexel; uniform vec3 diceGlyph; uniform vec3 diceOutline; const float diceStyle = ${code.toFixed(1)}; uniform float diceWipe; uniform float diceTime;
       varying vec2 vDiceGlyph; varying vec3 vDiceLocal; varying vec3 vDiceViewLocal;
       float diceNoise(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
       float diceCloud(vec3 p){return .5+.24*sin(p.x*4.+sin(p.z*3.))+.18*sin(p.y*7.+p.z*5.+sin(p.x*4.));}
@@ -106,7 +108,7 @@ export function createDiceMaterial(theme:Theme,mask:T.Texture):T.MeshPhysicalMat
       }
     `);
   };
-  mat.customProgramCacheKey=()=>`dice-inlay-v3-${theme.style}`;
+  mat.customProgramCacheKey=()=>`dice-inlay-v4-static-style-${theme.style}`;
   return mat;
 }
 
