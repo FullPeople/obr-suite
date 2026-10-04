@@ -1,0 +1,51 @@
+// Diagnostic A/B only: real renderer, locked assets and Jolt trajectory. No product flags.
+import {chromium} from '@playwright/test';
+import {createServer} from 'node:http';
+import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {resolve,extname,sep} from 'node:path';
+import {execFileSync} from 'node:child_process';
+import assert from 'node:assert/strict';
+const root=resolve(process.env.DND_DICE_LATENCY_BUILD||'.local-evidence/dice-latency/runtime'),out=resolve('.local-evidence/dice-render-profile'),origin='http://127.0.0.1:5237';mkdirSync(out,{recursive:true});
+const source=readFileSync('tools/workbench-dice3d-sdk-probe.mjs','utf8');let template=source.slice(source.indexOf('res.end(`')+9,source.indexOf('`);});')).replace('${JSON.stringify(base)}',JSON.stringify(origin+'/suite-dev/')).replace("frame('sdk-verify.html','background')","frame('extensions/workbench-dice3d/sdk-verify.html','background')").replace("metadata:{},ids:[]","metadata:{'com.obr-suite/dice/3d-theme':new URLSearchParams(location.search).get('theme')||'ink_sketch'},ids:[]");
+const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.wasm':'application/wasm','.png':'image/png','.json':'application/json','.svg':'image/svg+xml','.wav':'audio/wav','.ttf':'font/ttf'};
+const server=createServer((req,res)=>{const path=decodeURIComponent(new URL(req.url,origin).pathname);if(path==='/fixture'){res.setHeader('Content-Type','text/html');return res.end(template);}const file=resolve(root,path.replace(/^\/suite-dev\//,''));if(!file.startsWith(root+sep)){res.writeHead(403);return res.end();}try{res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');res.end(readFileSync(file));}catch{res.writeHead(404);res.end(path);}});await new Promise(r=>server.listen(5237,'127.0.0.1',r));
+const browser=await chromium.launch({headless:true,args:['--disable-background-timer-throttling','--disable-renderer-backgrounding','--use-angle=swiftshader','--enable-unsafe-swiftshader']});const rows=[],errors=[];
+try{
+ for(const [theme,expression] of [['ink_sketch','1d20'],['ink_sketch','20d6'],['stage6_calibration','1d20'],['brushed_metal','1d20'],['godot_blue_cat_eye','1d20'],['royal_ember_resin','1d20']]){
+  const context=await browser.newContext({viewport:{width:1280,height:800},deviceScaleFactor:1});await context.addInitScript(()=>{window.__diceProfileSeed=()=>7;});const page=await context.newPage();page.on('pageerror',e=>errors.push(String(e)));await page.exposeFunction('sendRemote',()=>{});
+  try{
+   await page.goto(origin+'/fixture?name=Host&theme='+theme);await page.waitForFunction(()=>document.querySelector('#background')?.contentWindow?.suiteHostProbe?.events.filter(e=>e.type==='state').at(-1)?.state.ready,null,{timeout:120000,polling:100});const sdk=page.frames().find(f=>f.url().includes('sdk-verify')),overlay=page.frames().find(f=>f.url().includes('overlay.html'));
+   const roll=await sdk.evaluate(expression=>window.suiteHostProbe.submitDice3d({expression,itemId:null}),expression);
+   await overlay.waitForFunction(()=>window.__diceProfileRenderer?.active.length,null,{timeout:120000,polling:20});
+   const data=await overlay.evaluate(async()=>{
+    const r=window.__diceProfileRenderer,T=window.__diceProfileThree,gl=r.gl.getContext(),active=r.active[0];cancelAnimationFrame(r.frameHandle);r.frameHandle=0;
+    const meshes=r.active.flatMap(a=>a.meshes),ground=r.scene.children.find(m=>m.material?.isShadowMaterial),light=r.scene.children.find(l=>l.isDirectionalLight&&l.castShadow),originalRender=r.gl.render.bind(r.gl),originalAuto=r.gl.shadowMap.autoUpdate;
+    const saved=meshes.map(m=>({mesh:m,compile:m.material.onBeforeCompile,key:m.material.customProgramCacheKey}));
+    const samples=[],images=[],pixelComparisons=[],stages=[],renderer=gl.getParameter(gl.getExtension('WEBGL_debug_renderer_info').UNMASKED_RENDERER_WEBGL);
+    let variant='baseline',lastDraw,rect;
+    const box=new T.Box3(),p=new T.Vector3(),q=new T.Vector3(),size=new T.Vector2();
+    function region(){r.scene.updateMatrixWorld(true);r.camera.updateMatrixWorld(true);let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;const w=r.projection.width,h=r.projection.height;
+     function include(v){q.copy(v).project(r.camera);const x=(q.x+1)*w/2,y=(q.y+1)*h/2;minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}
+     for(const m of meshes)if(m.visible){box.setFromObject(m);for(const x of [box.min.x,box.max.x])for(const y of [box.min.y,box.max.y])for(const z of [box.min.z,box.max.z]){p.set(x,y,z);include(p);if(m.castShadow){const dy=y-ground.position.y;p.set(x-dy*light.position.x/light.position.y,ground.position.y,z-dy*light.position.z/light.position.y);include(p);}}}
+     if(!Number.isFinite(minX))return{x:0,y:0,w:0,h:0};const x=Math.max(0,Math.floor(minX)-16),y=Math.max(0,Math.floor(minY)-16);return{x,y,w:Math.max(0,Math.min(w,Math.ceil(maxX)+16)-x),h:Math.max(0,Math.min(h,Math.ceil(maxY)+16)-y)};
+    }
+    r.gl.render=(scene,camera)=>{r.gl.setScissorTest(false);r.gl.clear();rect=null;if(variant==='scissor'||variant==='constant+scissor'){rect=region();r.gl.setScissor(rect.x,rect.y,rect.w,rect.h);r.gl.setScissorTest(true);}const begin=performance.now();originalRender(scene,camera);const submitted=performance.now();gl.finish();const finished=performance.now();lastDraw={submitMs:submitted-begin,finishMs:finished-submitted,renderFinishWallMs:finished-begin,drawCalls:r.gl.info.render.calls,triangles:r.gl.info.render.triangles,lines:r.gl.info.render.lines,scissor:rect};r.gl.setScissorTest(false);};
+    function setVariant(name){variant=name;ground.visible=name!=='no-ground';r.gl.shadowMap.autoUpdate=name!=='frozen-shadow';for(const {mesh,compile,key} of saved){for(const child of mesh.children)child.visible=name!=='no-outline';const constant=name==='constant-style'||name==='constant+scissor';mesh.material.onBeforeCompile=constant?function(shader,renderer){compile.call(this,shader,renderer);const value=shader.uniforms.diceStyle.value;shader.fragmentShader=shader.fragmentShader.replace('uniform float diceStyle;',`const float diceStyle = ${value.toFixed(1)};`);}:compile;mesh.material.customProgramCacheKey=constant?()=>key.call(mesh.material)+'-profile-constant':key;mesh.material.needsUpdate=true;}}
+    for(const age of [.6,1.5]){
+     const fixed=active.start+age*1000;window.__diceProfileTime=fixed;
+     const draw=()=>{r.last=fixed-16;const began=performance.now();r.drawFrame();return{...lastDraw,wholeFrameMs:performance.now()-began};};
+     setVariant('baseline');draw();draw();let reference=new Uint8Array(gl.drawingBufferWidth*gl.drawingBufferHeight*4);gl.readPixels(0,0,gl.drawingBufferWidth,gl.drawingBufferHeight,gl.RGBA,gl.UNSIGNED_BYTE,reference);const nontransparent=reference.filter((v,i)=>i%4===3&&v>0).length;if(nontransparent<100)throw Error('Diagnostic reference has no visible dice/shadow');stages.push({age,nontransparent,width:gl.drawingBufferWidth,height:gl.drawingBufferHeight});
+     for(const name of ['baseline','constant-style','frozen-shadow','no-ground','no-outline','scissor','constant+scissor','baseline-repeat']){
+      setVariant(name);draw();draw();const runs=[];for(let n=0;n<5;n++)runs.push(draw());const pixels=new Uint8Array(reference.length);gl.readPixels(0,0,gl.drawingBufferWidth,gl.drawingBufferHeight,gl.RGBA,gl.UNSIGNED_BYTE,pixels);let different=0,maxDelta=0;for(let n=0;n<pixels.length;n++){const delta=Math.abs(pixels[n]-reference[n]);if(delta)different++;maxDelta=Math.max(maxDelta,delta);}samples.push({age,variant:name,runs});pixelComparisons.push({age,variant:name,differentChannels:different,maxDelta,exact:different===0});images.push({age,variant:name,png:r.gl.domElement.toDataURL('image/png')});
+     }
+    }
+    r.gl.render=originalRender;r.gl.shadowMap.autoUpdate=originalAuto;
+    return{renderer,view:{...r.projection},physicalCount:meshes.length,duration:active.roll.duration,results:active.roll.results,samples,pixelComparisons,images,stages};
+   });
+   const prefix=theme+'-'+expression;for(const img of data.images){writeFileSync(out+'/'+prefix+'-'+img.age+'-'+img.variant+'.png',Buffer.from(img.png.split(',')[1],'base64'));delete img.png;}
+   rows.push({theme,expression,rollId:roll.rollId,...data});writeFileSync(out+'/partial.json',JSON.stringify({rows,errors},null,2));console.log(JSON.stringify({theme,expression,samples:data.samples.map(s=>({age:s.age,variant:s.variant,medianRenderFinishWallMs:[...s.runs].sort((a,b)=>a.renderFinishWallMs-b.renderFinishWallMs)[2].renderFinishWallMs,medianWholeFrameMs:[...s.runs].sort((a,b)=>a.wholeFrameMs-b.wholeFrameMs)[2].wholeFrameMs})),pixels:data.pixelComparisons}));
+  }finally{await context.close();}
+ }
+ assert.deepEqual(errors,[]);for(const row of rows)for(const c of row.pixelComparisons)if(['constant-style','scissor','constant+scissor','frozen-shadow','baseline-repeat'].includes(c.variant))assert(c.exact,`${row.theme} ${row.expression} ${c.age} ${c.variant}: ${c.differentChannels} channels changed`);
+ writeFileSync(out+'/result.json',JSON.stringify({success:true,source:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),browser:await browser.version(),singleClient:true,softwareGPU:true,measurement:'fixed real Jolt pose, actual WebGL; wholeFrameMs includes all JS and render+finish wall time; not hardware GPU timestamps. Pixel equality covers WebGL RGBA only, not DOM/2D FX or complex formula rules',rows,errors},null,2));
+}catch(error){writeFileSync(out+'/failure.json',JSON.stringify({error:String(error),rows,errors},null,2));throw error;}finally{await browser.close();await new Promise(r=>server.close(r));}
