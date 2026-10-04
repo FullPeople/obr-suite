@@ -186,3 +186,59 @@ ground_live_sequence:
 For three rounds, increase the CI job timeout to 60 minutes. No performance
 threshold is an acceptance gate; exact pixels, exercised controls, real trace
 identity and absence of fatal fixture faults are.
+
+
+## Investigating first-read Canvas2D instability
+
+CI run 37196413964 on bbd03c2 completed nine timing legs and reached the real
+seed-2 clamp with zero WebGL differences and zero cue-canvas differences. The
+first research-effects pair differed in 19 RGB channels by one byte; alpha was
+identical. The runtime took the original fallback (`unknown body child`), with
+zero builds and zero hits in that context. This does **not** establish that the
+cache caused the difference, nor prove an internal browser backend switch.
+
+The 2D rule-label draw happens before the WebGL runtime interception. The first
+`getImageData` lies between the two equal-age drawings. A first-read or rendering
+backend effect is a falsifiable hypothesis, not an accepted explanation.
+
+For the next authorized CI diagnostic, use:
+
+```sh
+DICE_GROUND_SEQUENCE_MODE=clamp-diagnostic node tools/dice-ground-sequence-browser.mjs
+```
+
+This short mode creates four fresh real seed-2 clamp contexts:
+
+1. Default Canvas2D creation, disabled cache, original bypass → original bypass.
+2. Default Canvas2D creation, candidate first → original bypass.
+3. Explicit `willReadFrequently: true`, disabled cache, original → original.
+4. The same explicit hint, candidate first → original bypass.
+
+Each context records three consecutive pairs. Pair zero contains its FIRST
+output: there is no preparation draw, discarded read, hidden warm-up or
+replacement of a failing first output by a later stable frame. Any mismatch
+keeps `pass: false`; diagnostic mode collects the remaining evidence and then
+fails the job if any pair differs. It also verifies real clamp FX, zero cache
+builds/hits, unchanged logical canvas inputs and the same authoritative trace
+across contexts. The hint is not proof of the browser's internal CPU/GPU backend.
+
+Every differing 2D surface now exports candidate and reference PNGs made directly
+from the exact observed RGBA bytes with a lossless Node PNG encoder. No extra
+Canvas2D redraw/re-encoding can erase a translucent one-byte difference. The
+report includes raw-RGBA SHA-256, context attributes, individual channel counts,
+first differing pixels and logical draw inputs. PNG bytes have an independent
+Pillow decoding test, including the actual [20,33,43,78]/[20,33,42,78] counterexample.
+
+`DICE_GROUND_SEQUENCE_MODE=correctness-only` skips timing but retains the complete
+strict sequence. The default is still `full`, with normal Canvas2D creation.
+Only an explicitly configured correctness context may use
+`DICE_GROUND_SEQUENCE_2D_READBACK=frequent`. That option affects only cue-canvas
+and research-effects at their FIRST getContext; glyph textures, WebGL and all
+normal timing contexts remain unchanged. Reports identify this boundary and do
+not claim equivalence to the unmodified browser backend. No hint becomes the
+accepted default merely because it makes a failing comparison pass.
+
+A short diagnostic or correctness-only pass is never a full-suite pass. After
+the cause and any legitimate fixture policy are established, rerun the entire
+A/B/A timing and strict sequence. Zero RGBA tolerance and the real FX assertions
+remain mandatory in all modes.

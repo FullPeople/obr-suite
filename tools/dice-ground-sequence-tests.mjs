@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {sourceEvidence,probePlugin,once,SAFE_SUITE,SAFE_WEB} from './dice-ground-sequence-build.mjs';
-import {fixtureHTML,installSequenceFixture} from './dice-ground-sequence-fixture.mjs';
+import {fixtureHTML,installSequenceFixture,installSequenceContext} from './dice-ground-sequence-fixture.mjs';
+import {inflateSync} from 'node:zlib';
+import {encodeRgbaPng} from './dice-ground-sequence-pixels.mjs';
 import {compareBytes,summarizeFrames,assertSameAuthority} from './dice-ground-sequence-metrics.mjs';
 const root=resolve('.'),plugin=probePlugin(root);
 for(const file of ['extensions/workbench-dice3d/src/controller.ts','src/workbench/dice3d.ts','src/workbench/dice3d-verify.ts','extensions/workbench-dice3d/src/renderer.ts']){
@@ -31,7 +33,18 @@ const fixture=readFileSync('tools/dice-ground-sequence-fixture.mjs','utf8');
 for(const banned of ['.readPixels(','.finish(','.getQueryParameter(','.toDataURL(','setAlphaGain('])assert(!fixture.includes(banned),'Timing fixture contains readback/query/capture: '+banned);
 const browser=readFileSync('tools/dice-ground-sequence-browser.mjs','utf8');assert(browser.includes("assert.equal(process.env.CI,'true'"));assert(!browser.includes('.screenshot('));assert(!browser.includes('recordVideo:'));
 assert(browser.includes("['baseline-before','cache','baseline-after']"));assert(browser.includes('DICE_GROUND_SEQUENCE_ROUNDS||1'));assert(browser.includes('DICE_GROUND_SEQUENCE_MIN_BODIES||20'));
-const correctness=readFileSync('tools/dice-ground-sequence-correctness.mjs','utf8');assert(correctness.indexOf('const before=compact();draw();')<correctness.indexOf('p.withOriginal(()=>{draw();reference=read();})'));assert(correctness.includes('exact:differentChannels===0'));assert(!correctness.includes('maxDelta<='));
+const correctness=readFileSync('tools/dice-ground-sequence-correctness.mjs','utf8');assert(correctness.indexOf('const before=compact();if(originalOnly)')<correctness.indexOf('let reference,referenceInputs;p.withOriginal(()=>{draw();reference=read();'));assert(correctness.includes('exact:differentChannels===0'));assert(!correctness.includes('maxDelta<='));
+const raw=Buffer.from([20,33,43,78,20,33,42,78,255,0,128,1,0,0,0,0]),png=encodeRgbaPng({width:2,height:2,rgba:raw});
+assert.deepEqual([...png.subarray(0,8)],[137,80,78,71,13,10,26,10]);let offset=8;const chunks=[];while(offset<png.length){const length=png.readUInt32BE(offset),type=png.toString('ascii',offset+4,offset+8);chunks.push({type,data:png.subarray(offset+8,offset+8+length)});offset+=length+12;}
+assert.deepEqual(chunks.map(chunk=>chunk.type),['IHDR','IDAT','IEND']);assert.equal(chunks[0].data[9],6);const decoded=inflateSync(chunks[1].data);assert.deepEqual(Buffer.concat([decoded.subarray(1,9),decoded.subarray(10,18)]),raw,'Evidence PNG changed translucent RGB by even one byte');assert.throws(()=>encodeRgbaPng({width:2,height:2,rgba:[0]}),/RGBA length/);
+assert(browser.includes("mode==='clamp-diagnostic'"));assert(browser.includes('for(let pair=0;pair<3;pair++)'));assert(browser.includes('assert(report.baselineDiagnostics.every(row=>row.pass)'));assert(correctness.includes('rgbaBase64:base64(layer.rgba)'));assert(correctness.includes('record.logicalInputsSame'));
+const priorCanvas=globalThis.HTMLCanvasElement,priorConfig=globalThis.__diceSequenceConfig,priorSeed=globalThis.__diceSequenceSeed,priorId=globalThis.__diceSequenceRollId;
+try{
+ const calls=[];class Canvas{constructor(className){this.classList={contains:name=>name===className};}getContext(...args){calls.push(args);return {args};}}globalThis.HTMLCanvasElement=Canvas;const native=Canvas.prototype.getContext;
+ installSequenceContext({fixedClock:false,readback2D:'frequent',seed:7});assert.equal(Canvas.prototype.getContext,native,'Timing must not install any Canvas2D readback override');
+ installSequenceContext({fixedClock:true,readback2D:'default',seed:7});assert.equal(Canvas.prototype.getContext,native,'Default correctness context must retain normal Canvas2D creation');
+ installSequenceContext({fixedClock:true,readback2D:'frequent',seed:7});new Canvas('research-effects').getContext('2d',{alpha:true});assert.deepEqual(calls.at(-1),['2d',{alpha:true,willReadFrequently:true}]);new Canvas('glyph-mask').getContext('2d');assert.deepEqual(calls.at(-1),['2d']);new Canvas('cue-canvas').getContext('webgl2',{alpha:true});assert.deepEqual(calls.at(-1),['webgl2',{alpha:true}]);
+}finally{globalThis.HTMLCanvasElement=priorCanvas;globalThis.__diceSequenceConfig=priorConfig;globalThis.__diceSequenceSeed=priorSeed;globalThis.__diceSequenceRollId=priorId;}
 const savedGlobals={config:globalThis.__diceSequenceConfig,renderer:globalThis.__diceProfileRenderer,three:globalThis.__diceProfileThree,profile:globalThis.__diceSequenceProfile,probe:globalThis.__diceGroundLiveProbe};
 try{
  globalThis.__diceSequenceConfig={enabled:true,minBodies:20,stableFrames:3};let emitted=0,drew=0,receivedTrust;

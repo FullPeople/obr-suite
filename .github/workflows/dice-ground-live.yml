@@ -13,6 +13,7 @@ jobs:
     env:
       DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
       DICE_GROUND_SEQUENCE_ROUNDS: '1'
+      DICE_GROUND_SEQUENCE_MODE: clamp-diagnostic
       DICE_GROUND_SEQUENCE_MIN_BODIES: '20'
       DICE_GROUND_SEQUENCE_SOFTWARE: '1'
     steps:
@@ -41,7 +42,7 @@ jobs:
           node tools/dice-ground-sequence-tests.mjs
       - name: Build hash-verified real SDK and Jolt fixture
         run: node tools/dice-ground-sequence-build.mjs
-      - name: Serial A-B-A timing and separate strict dynamic pixels
+      - name: Calibrate original and candidate clamp readback without tolerance
         run: node tools/dice-ground-sequence-browser.mjs
       - name: Preserve complete diagnostic evidence
         if: always()

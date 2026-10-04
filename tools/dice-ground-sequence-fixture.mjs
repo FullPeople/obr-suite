@@ -48,3 +48,16 @@ export function fixtureHTML(origin,{single=false}={}){
  if(m.nonce)e.source.postMessage({id:m.id+'_RESPONSE'+m.nonce,data},e.origin);
  });frame('extensions/workbench-dice3d/sdk-verify.html','background');</script></body></html>`;
 }
+
+/** Browser init script. The optional hint is restricted to correctness contexts
+ * and the two real overlay surfaces, before their FIRST getContext call. This
+ * never changes normal timing or creates a replacement output surface. */
+export function installSequenceContext(config){
+ globalThis.__diceSequenceConfig=config;globalThis.__diceSequenceSeed=config.seed;globalThis.__diceSequenceRollId=config.rollId;
+ if(!config.fixedClock||config.readback2D!=='frequent')return;
+ const original=HTMLCanvasElement.prototype.getContext;
+ HTMLCanvasElement.prototype.getContext=function(kind,options){
+  if(kind==='2d'&&(this.classList.contains('cue-canvas')||this.classList.contains('research-effects')))return original.call(this,kind,{...options,willReadFrequently:true});
+  return original.apply(this,arguments);
+ };
+}

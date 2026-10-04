@@ -16,9 +16,11 @@ export function installCorrectnessHarness(){
   const gl=r.gl.getContext();if(gl.isContextLost())fail('Lost WebGL context during comparison');
   const width=gl.drawingBufferWidth,height=gl.drawingBufferHeight,rgba=new Uint8Array(width*height*4);
   gl.finish();gl.readPixels(0,0,width,height,gl.RGBA,gl.UNSIGNED_BYTE,rgba);if(gl.getError()!==gl.NO_ERROR)fail('WebGL render/readback error');
-  const layers=[...document.querySelectorAll('canvas')].filter(canvas=>canvas!==r.gl.domElement).map((canvas,index)=>{const context=canvas.getContext('2d');if(!context)return null;return {index,width:canvas.width,height:canvas.height,className:canvas.className,rgba:context.getImageData(0,0,canvas.width,canvas.height).data};}).filter(Boolean);
+  const layers=[...document.querySelectorAll('canvas')].filter(canvas=>canvas!==r.gl.domElement).map((canvas,index)=>{const context=canvas.getContext('2d');if(!context)return null;return {index,width:canvas.width,height:canvas.height,className:canvas.className,contextAttributes:context.getContextAttributes?.()??null,rgba:context.getImageData(0,0,canvas.width,canvas.height).data};}).filter(Boolean);
   return {width,height,rgba,layers};
  }
+ function inputIdentity(){return JSON.stringify({time:globalThis.__diceSequenceTime,projection:r.projection,devicePixelRatio,active:r.active.map(active=>({id:active.roll.request.id,age:(globalThis.__diceSequenceTime-active.start)/1000,seed:active.roll.request.seed,kinds:active.roll.kinds,results:active.roll.results,finalPoses:Array.from(active.roll.poses.slice(-active.meshes.length*7)),cue:active.cue,formulaData:active.roll.formulaData}))});}
+ function base64(bytes){let text='';for(let i=0;i<bytes.length;i+=32768)text+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(text);}
  function png(){return r.gl.domElement.toDataURL('image/png');}
  function compare(a,b){
   if(a.length!==b.length)fail('Pixel surface dimensions changed within comparison');
@@ -32,19 +34,20 @@ export function installCorrectnessHarness(){
   r.projection.pixelsPerDie=r.targetPixelsPerDie;r.layout();
   return active;
  }
- function run({name,id=state.activeId,age=state.age,capture=false,negative=false,expectEmpty=false}){
+ function run({name,id=state.activeId,age=state.age,capture=false,negative=false,expectEmpty=false,originalOnly=false}){
   if(id)select(id,age);
   const compact=()=>{const snapshot=p.snapshot(),{records,...counters}=snapshot;return {...counters,lastRecord:records?.at(-1)??null};};
-  const before=compact();draw();const after=compact(),candidate=read(),candidatePng=png();
-  let reference;p.withOriginal(()=>{draw();reference=read();});
+  const before=compact();if(originalOnly)p.withOriginal(draw);else draw();const after=compact(),candidate=read(),candidatePng=png(),candidateInputs=inputIdentity();
+  let reference,referenceInputs;p.withOriginal(()=>{draw();reference=read();referenceInputs=inputIdentity();});
   const rgba=compare(candidate.rgba,reference.rgba),referencePng=capture||negative||!rgba.exact?png():null;
   if(candidate.layers.length!==reference.layers.length)fail('Cue canvas count changed in bypass');
-  const layers=candidate.layers.map((layer,index)=>{const ref=reference.layers[index];if(layer.width!==ref.width||layer.height!==ref.height||layer.className!==ref.className)fail('Cue canvas identity changed');return {className:layer.className,width:layer.width,height:layer.height,...compare(layer.rgba,ref.rgba)};});
+  const layers=candidate.layers.map((layer,index)=>{const ref=reference.layers[index];if(layer.width!==ref.width||layer.height!==ref.height||layer.className!==ref.className)fail('Cue canvas identity changed');return {className:layer.className,width:layer.width,height:layer.height,contextAttributes:layer.contextAttributes,referenceContextAttributes:ref.contextAttributes,...compare(layer.rgba,ref.rgba)};});
   const bodies=r.active.flatMap(active=>active.meshes),known=new Set([ground,...bodies,...bodies.flatMap(body=>body.children.filter(child=>child.userData.diceDecoration))]),unknownVisibleDrawables=[];r.scene.traverseVisible(object=>{if((object.isMesh||object.isLine||object.isPoints||object.isSprite)&&!known.has(object))unknownVisibleDrawables.push({name:object.name,type:object.type});});
   const nonzeroAlpha=candidate.rgba.reduce((sum,value,i)=>sum+(i%4===3&&value>0?1:0),0);
-  const record={name,step:state.step++,id,age,time:globalThis.__diceSequenceTime,width:candidate.width,height:candidate.height,rgba,layers,nonzeroAlpha,unknownVisibleDrawables,statsBefore:before,statsAfter:after,renderPath:after.hits>before.hits?'cache-hit':after.builds>before.builds?'original-plus-build':'original-fallback',negative,expectEmpty,images:[]};
+  const record={name,step:state.step++,id,age,time:globalThis.__diceSequenceTime,width:candidate.width,height:candidate.height,rgba,layers,nonzeroAlpha,unknownVisibleDrawables,statsBefore:before,statsAfter:after,readback2D:globalThis.__diceSequenceConfig.readback2D??'default',originalOnly,logicalInputsSame:candidateInputs===referenceInputs,logicalInputs:JSON.parse(candidateInputs),referenceLogicalInputs:candidateInputs===referenceInputs?undefined:JSON.parse(referenceInputs),renderPath:originalOnly?'original-bypass':after.hits>before.hits?'cache-hit':after.builds>before.builds?'original-plus-build':'original-fallback',negative,expectEmpty,images:[]};
   if(capture||negative||!rgba.exact||layers.some(layer=>!layer.exact))record.images.push({name:'candidate-first',png:candidatePng});if(referencePng)record.images.push({name:'original-bypass-reference',png:referencePng});
-  record.exact=rgba.exact&&layers.every(layer=>layer.exact);record.pass=negative?!rgba.exact:record.exact;
+  for(let index=0;index<layers.length;index++)if(!layers[index].exact){for(const [label,layer] of [['candidate-first',candidate.layers[index]],['original-reference',reference.layers[index]]])record.images.push({name:label+'-layer-'+index+'-'+layer.className,width:layer.width,height:layer.height,rgbaBase64:base64(layer.rgba),encoding:'Lossless PNG from observed RGBA bytes; no Canvas2D re-encoding'});}
+  record.exact=rgba.exact&&layers.every(layer=>layer.exact);record.pass=(negative?!rgba.exact:record.exact)&&record.logicalInputsSame;
   if(expectEmpty&&(nonzeroAlpha!==0||after.resources?.liveTargets!==0))record.pass=false;
   state.rows.push(record);return record;
  }

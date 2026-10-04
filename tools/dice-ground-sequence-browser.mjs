@@ -6,27 +6,31 @@ import {createServer} from 'node:http';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve,extname,sep} from 'node:path';
 import {cpus,availableParallelism,totalmem,release} from 'node:os';
-import {fixtureHTML} from './dice-ground-sequence-fixture.mjs';
+import {createHash} from 'node:crypto';
+import {encodeRgbaPng} from './dice-ground-sequence-pixels.mjs';
+import {fixtureHTML,installSequenceContext} from './dice-ground-sequence-fixture.mjs';
 import {installCorrectnessHarness} from './dice-ground-sequence-correctness.mjs';
 import {summarizeFrames,assertSameAuthority,summarizeAba} from './dice-ground-sequence-metrics.mjs';
 assert.equal(process.env.CI,'true','This browser runner is CI-only; local browser execution is not authorized');
 const root=resolve(process.env.DICE_GROUND_SEQUENCE_BUILD||'.local-evidence/dice-ground-sequence/runtime');
 const out=resolve(process.env.DICE_GROUND_SEQUENCE_OUT||'.local-evidence/dice-ground-sequence/results');
 const port=Number(process.env.DICE_GROUND_SEQUENCE_PORT||5242),origin='http://127.0.0.1:'+port;
+const mode=process.env.DICE_GROUND_SEQUENCE_MODE||'full',readback2D=process.env.DICE_GROUND_SEQUENCE_2D_READBACK||'default';
+assert(['full','correctness-only','clamp-diagnostic'].includes(mode),'Unknown experiment mode');assert(['default','frequent'].includes(readback2D),'Unknown correctness Canvas2D readback policy');
 const rounds=Number(process.env.DICE_GROUND_SEQUENCE_ROUNDS||1),minBodies=Number(process.env.DICE_GROUND_SEQUENCE_MIN_BODIES||20);
 assert([1,2,3].includes(rounds),'Use one exploratory round, at most three repeated rounds');assert.equal(minBodies,20,'Timing evidence is scoped to the reviewed 20-caster threshold');
 mkdirSync(out,{recursive:true});const source=JSON.parse(readFileSync(resolve(root,'ground-sequence-source.json'),'utf8'));
-const report={schema:'dice-ground-live-sequence.v1',success:false,source,rounds,minBodies,realSDK:true,realJolt:true,realWebGL:true,realOwlbearRoom:false,productionClaim:false,softwareGPURequested:process.env.DICE_GROUND_SEQUENCE_SOFTWARE!=='0',viewport:{width:1280,height:800,dpr:1},timingBoundary:'CPU drawFrame return and real wall-clock completion. No GPU timestamp/presentation claim. Build, compile, signature and fallback cost remain inside whole drawFrame and wall time.',normalCapture:{screenshots:false,video:false,readPixels:false,finish:false,gpuTimestampQueries:false},host:{cpuModel:cpus()[0]?.model,logicalCpus:cpus().length,availableParallelism:availableParallelism(),memoryBytes:totalmem(),osRelease:release(),arch:process.arch,node:process.version},timing:[],pairedComparisons:[],correctness:[],errors:[]};
+const report={schema:'dice-ground-live-sequence.v1',success:false,source,mode,correctnessReadback2D:readback2D,rounds,minBodies,realSDK:true,realJolt:true,realWebGL:true,realOwlbearRoom:false,productionClaim:false,softwareGPURequested:process.env.DICE_GROUND_SEQUENCE_SOFTWARE!=='0',viewport:{width:1280,height:800,dpr:1},timingBoundary:'CPU drawFrame return and real wall-clock completion. No GPU timestamp/presentation claim. Build, compile, signature and fallback cost remain inside whole drawFrame and wall time.',normalCapture:{screenshots:false,video:false,readPixels:false,finish:false,gpuTimestampQueries:false},host:{cpuModel:cpus()[0]?.model,logicalCpus:cpus().length,availableParallelism:availableParallelism(),memoryBytes:totalmem(),osRelease:release(),arch:process.arch,node:process.version},timing:[],pairedComparisons:[],baselineDiagnostics:[],correctness:[],errors:[]};
 const save=()=>writeFileSync(resolve(out,'result.json'),JSON.stringify(report,null,2));
 const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.wasm':'application/wasm','.png':'image/png','.json':'application/json','.svg':'image/svg+xml','.wav':'audio/wav','.ttf':'font/ttf'};
 const server=createServer((req,res)=>{try{const u=new URL(req.url,origin);if(u.pathname==='/fixture'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end(fixtureHTML(origin,{single:u.searchParams.get('single')==='1'}));return;}if(u.pathname==='/favicon.ico'){res.writeHead(204);res.end();return;}const file=resolve(root,decodeURIComponent(u.pathname).replace(/^\/suite-dev\//,''));if(!file.startsWith(root+sep)){res.writeHead(403);res.end();return;}res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');res.end(readFileSync(file));}catch(error){res.writeHead(404);res.end(String(error));}});
 let browser,live;
-async function openSession({clients=1,enabled=false,seed=7,rollId,fixedClock=false,minBodies:threshold=minBodies}){
+async function openSession({clients=1,enabled=false,seed=7,rollId,fixedClock=false,minBodies:threshold=minBodies,readback2D:readbackPolicy=readback2D}){
  const context=await browser.newContext({viewport:{width:report.viewport.width,height:report.viewport.height},deviceScaleFactor:1});
- await context.addInitScript(config=>{window.__diceSequenceConfig=config;window.__diceSequenceSeed=config.seed;window.__diceSequenceRollId=config.rollId;},{enabled,seed,rollId,fixedClock,minBodies:threshold,stableFrames:3});
- const session={context,pages:[],sdk:[],overlays:[],errors:[],consoleErrors:[],ready:[],transport:[]};live=session;
+ await context.addInitScript(installSequenceContext,{enabled,seed,rollId,fixedClock,minBodies:threshold,stableFrames:3,readback2D:fixedClock?readbackPolicy:'default'});
+ const session={context,pages:[],sdk:[],overlays:[],errors:[],consoleErrors:[],consoleWarnings:[],ready:[],transport:[]};live=session;
  for(const name of ['Host','Player'].slice(0,clients)){
-  const page=await context.newPage();session.pages.push(page);page.on('pageerror',error=>session.errors.push({client:name,error:String(error)}));page.on('console',message=>{if(message.type()==='error')session.consoleErrors.push({client:name,text:message.text()});});
+  const page=await context.newPage();session.pages.push(page);page.on('pageerror',error=>session.errors.push({client:name,error:String(error)}));page.on('console',message=>{if(message.type()==='error')session.consoleErrors.push({client:name,text:message.text()});if(fixedClock&&message.type()==='warning'&&/Canvas2D|readback|willReadFrequently/i.test(message.text()))session.consoleWarnings.push({client:name,text:message.text()});});
   await page.exposeBinding('sendRemote',async({page:sender},packet)=>{for(const other of session.pages)if(other!==sender){const queued=Date.now();setTimeout(()=>{session.transport.push({type:packet.data?.type,queuedAt:queued,deliveredAt:Date.now()});void other.evaluate(value=>window.deliver?.(value),packet).catch(error=>session.errors.push({transportError:String(error)}));},10);}});
   const began=Date.now();await page.goto(origin+'/fixture?name='+name+'&single='+(clients===1?'1':'0'));
   await page.waitForFunction(()=>document.querySelector('#background')?.contentWindow?.suiteHostProbe?.events.filter(e=>e.type==='state').at(-1)?.state.ready,null,{timeout:120000,polling:100});
@@ -73,11 +77,38 @@ async function timingLeg(scenario,round,mode){
  row.transport= session.transport;row.consoleErrors=session.consoleErrors;report.timing.push(row);save();await closeSession(session);
  console.log(JSON.stringify({phase:'timing',scenario:scenario.id,round,mode,clients:row.clients.map(client=>({wallMs:client.timings.releaseToCompletionMs,p95Ms:client.timings.frameIntervalP95Ms,wholeJsMs:client.timings.wholeJsTotalMs,hits:client.probe.hits,builds:client.probe.builds,retimes:client.retimes.length}))}));return row;
 }
-function preserveImages(prefix,row){for(const image of row.images||[]){assert(image.png.startsWith('data:image/png;base64,'));const filename=prefix+'-'+image.name+'.png';writeFileSync(resolve(out,filename),Buffer.from(image.png.split(',')[1],'base64'));image.file=filename;delete image.png;}}
-async function correctnessStep(session,params){
+function preserveImages(prefix,row){for(const image of row.images||[]){
+ const filename=prefix+'-'+image.name+'.png';
+ if(image.rgbaBase64){const rgba=Buffer.from(image.rgbaBase64,'base64');writeFileSync(resolve(out,filename),encodeRgbaPng({width:image.width,height:image.height,rgba}));image.rawRgbaSha256=createHash('sha256').update(rgba).digest('hex');delete image.rgbaBase64;}
+ else{assert(image.png.startsWith('data:image/png;base64,'));writeFileSync(resolve(out,filename),Buffer.from(image.png.split(',')[1],'base64'));delete image.png;}
+ image.file=filename;
+}}
+async function correctnessStep(session,params,{allowMismatch=false,target=report.correctness}={}){
  const row=await session.overlays[0].evaluate(params=>window.__diceSequenceCorrectness.run(params),params);
- preserveImages('correctness-'+report.correctness.length+'-'+params.name,row);report.correctness.push(row);save();
- assert(row.pass,'Strict candidate-first RGBA/cue comparison failed: '+params.name+' '+JSON.stringify(row.rgba));return row;
+ preserveImages((target===report.correctness?'correctness-':'baseline-diagnostic-')+target.length+'-'+params.name,row);target.push(row);save();
+ assert(row.logicalInputsSame,'Logical draw inputs changed within strict pair: '+params.name);
+ if(!allowMismatch)assert(row.pass,'Strict RGBA comparison failed: '+params.name+' '+JSON.stringify({webgl:row.rgba,layers:row.layers.filter(layer=>!layer.exact)}));return row;
+}
+async function clampDiagnostic(){
+ const variants=[],rollId='ground-sequence-correct-clamp2';
+ for(const policy of ['default','frequent'])for(const originalOnly of [true,false]){
+  const label=policy+'-'+(originalOnly?'disabled-original-repeat':'candidate-first'),session=await openSession({clients:1,enabled:!originalOnly,seed:2,rollId,fixedClock:true,minBodies:1,readback2D:policy});
+  await submit(session,'max(2d6,6)',rollId,2);await waitActive(session,rollId);await session.overlays[0].evaluate(installCorrectnessHarness);
+  const plan=await session.overlays[0].evaluate(id=>window.__diceSequenceCorrectness.getPlan(id),rollId);assert(plan.clamps.length>0,'Diagnostic lacks actual seed-2 clamp');
+  const episode=plan.clamps[0],age=(episode.start+episode.end)/2,rows=[];
+  // No preparation draw or discarded warm-up. Pair 0 contains the FIRST output.
+  for(let pair=0;pair<3;pair++){
+   const row=await correctnessStep(session,{name:label+'-pair-'+pair,id:rollId,age,capture:pair===0,originalOnly},{allowMismatch:true,target:report.baselineDiagnostics});
+   if(policy==='frequent')assert(row.layers.every(layer=>layer.contextAttributes?.willReadFrequently===true),'Requested correctness-only 2D hint was not applied at first context creation');assert(row.unknownVisibleDrawables.length>0,'Diagnostic clamp lacks real visible FX');assert.equal(row.statsAfter.hits,0,'Clamp diagnostic unexpectedly hit cache');assert.equal(row.statsAfter.builds,0,'Clamp diagnostic unexpectedly built cache');rows.push(row);
+  }
+  const collected=await collectOverlay(session.overlays[0],rollId);variants.push({label,policy,originalOnly,rows,clients:[{rolls:collected.rolls}],consoleWarnings:session.consoleWarnings});
+  await closeSession(session);
+ }
+ assertSameAuthority(variants);
+ report.baselineDiagnosticSummary=variants.map(variant=>({label:variant.label,policy:variant.policy,originalOnly:variant.originalOnly,firstPairExact:variant.rows[0].pass,allPairsExact:variant.rows.every(row=>row.pass),comparisons:variant.rows.map(row=>({name:row.name,pass:row.pass,logicalInputsSame:row.logicalInputsSame,webgl:row.rgba,layers:row.layers})),consoleWarnings:variant.consoleWarnings}));
+ const baseline=variants.find(variant=>variant.policy==='default'&&variant.originalOnly),hinted=variants.find(variant=>variant.policy==='frequent'&&variant.originalOnly);
+ report.baselineReproduction={defaultOriginalUnstable:baseline.rows.some(row=>!row.pass),frequentHintOriginalStable:hinted.rows.every(row=>row.pass),backendSwitchProven:false,note:'The willReadFrequently option is a browser hint, not proof of its internal backend. Every first output is retained; no tolerance or warm-up replacement is used.'};save();
+ assert(report.baselineDiagnostics.every(row=>row.pass),'Strict clamp diagnostic found unstable baseline or candidate output; inspect baselineDiagnosticSummary and lossless per-layer RGBA PNGs');
 }
 async function correctness(){
  const id='ground-sequence-correct-20d6',session=await openSession({clients:1,enabled:true,seed:7,rollId:id,fixedClock:true,minBodies:1});
@@ -137,7 +168,7 @@ try{
  browser=await chromium.launch({...(process.env.PLAYWRIGHT_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH}:{}),headless:true,args:['--disable-background-timer-throttling','--disable-renderer-backgrounding',...(report.softwareGPURequested?['--use-angle=swiftshader','--enable-unsafe-swiftshader']:[])]});
  report.browser=await browser.version();
  const scenarios=[{id:'single-20d6',clients:1,expression:'20d6',seed:7},{id:'two-client-20d6',clients:2,expression:'20d6',seed:7},{id:'single-control',clients:1,expression:'1d20',seed:7}];
- for(let round=0;round<rounds;round++)for(const scenario of scenarios){const legs=[];for(const mode of ['baseline-before','cache','baseline-after'])legs.push(await timingLeg(scenario,round,mode));assertSameAuthority(legs);report.pairedComparisons.push({scenario:scenario.id,round,clients:summarizeAba(legs)});save();}
- await correctness();report.success=true;report.summary={timingLegs:report.timing.length,strictSteps:report.correctness.length,allExactExceptRequiredNegative:report.correctness.every(row=>row.pass),speedThresholdApplied:false,cacheAcceptedForProduction:false};save();console.log(JSON.stringify(report.summary));
+ if(mode==='full')for(let round=0;round<rounds;round++)for(const scenario of scenarios){const legs=[];for(const mode of ['baseline-before','cache','baseline-after'])legs.push(await timingLeg(scenario,round,mode));assertSameAuthority(legs);report.pairedComparisons.push({scenario:scenario.id,round,clients:summarizeAba(legs)});save();}
+ if(mode==='clamp-diagnostic')await clampDiagnostic();else await correctness();report.success=true;report.summary={timingLegs:report.timing.length,strictSteps:report.correctness.length,diagnosticPairs:report.baselineDiagnostics.length,fullSuiteCompleted:mode==='full',allExactExceptRequiredNegative:report.correctness.every(row=>row.pass),speedThresholdApplied:false,cacheAcceptedForProduction:false};save();console.log(JSON.stringify(report.summary));
 }catch(error){report.error=String(error.stack||error);if(live){report.errors.push(...live.errors);report.failureContext={consoleErrors:live.consoleErrors,overlayDiagnostics:await Promise.all(live.overlays.map(frame=>frame.evaluate(()=>({probe:window.__diceGroundLiveProbe?.snapshot(),events:window.__diceSequenceProfile?.events,frames:window.__diceSequenceProfile?.frames})).catch(error=>({error:String(error)})))),diagnostics:await Promise.all(live.pages.map(page=>page.evaluate(()=>({fixture:window.fixture,frames:[...document.querySelectorAll('iframe')].map(frame=>({url:frame.src,events:frame.contentWindow?.suiteHostProbe?.events?.slice(-50)}))})).catch(error=>({error:String(error)}))))};}save();throw error;}
 finally{if(live)await live.context.close();if(browser)await browser.close();if(server.listening)await new Promise(done=>server.close(done));}
