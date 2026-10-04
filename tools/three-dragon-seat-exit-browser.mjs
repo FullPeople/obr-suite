@@ -1,15 +1,23 @@
-// Synthetic room transport, real production standalone/Suite table entries and
-// real Three.js rendering. This does not claim native Owlbear-room coverage.
+// Historical game regression: synthetic transport and isolated Suite fixture,
+// plus retained legacy standalone bundle and real Three.js rendering. Public
+// Suite entries are website links; this is not current-product/room acceptance.
 import {build} from 'rolldown';
 import {chromium} from '@playwright/test';
-import {readFileSync,writeFileSync,mkdirSync,existsSync,mkdtempSync} from 'node:fs';
-import {join,resolve,extname} from 'node:path';
+import {readFileSync,writeFileSync,mkdirSync,existsSync,mkdtempSync,readdirSync} from 'node:fs';
+import {join,resolve,extname,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
+import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import assert from 'node:assert/strict';
 const root=resolve('.'),base=join(root,'extensions/three-dragon-ante/src/game'),out=resolve('.local-evidence/three-dragon-seat-exit');mkdirSync(out,{recursive:true});
 const tmp=mkdtempSync(join(tmpdir(),'tda-browser-seat-exit-')),origin='https://three-dragon-fixture.invalid';
 const checks=[],errors=[];
+const historicalRoot=join(tmp,'historical-suite');
+execFileSync(process.execPath,[join(root,'tools/build-workbench-panels.mjs')],{cwd:root,env:{...process.env,WORKBENCH_PANEL_ONLY:'historical-table',WORKBENCH_PANEL_OUT:join(historicalRoot,'workbench-panels')},stdio:'inherit'});
+const currencyAssets=new Set();
+for(const file of readdirSync(join(historicalRoot,'workbench-panels')).filter(name=>name.endsWith('.js'))){const path=join(historicalRoot,'workbench-panels',file),code=readFileSync(path,'utf8');for(const match of code.matchAll(/new URL\(["']([^"']*art\/currency\/[^"']+)["'],\s*import\.meta\.url\)/g)){const asset=resolve(dirname(path),match[1]);assert.ok(existsSync(asset),'Generated historical currency URL resolves: '+match[1]);assert.ok(readFileSync(asset).length>0);currencyAssets.add(asset);}}
+assert.equal(currencyAssets.size,2,'Both generated gold/silver currency textures must resolve before browser launch');
+checks.push('Historical fixture generated currency URLs resolve to both nonempty texture files');
 const entry=`import{mountTableStage}from ${JSON.stringify(join(base,'stage/index.ts'))};import{createGame,projectSeat,projectPublic}from ${JSON.stringify(join(base,'rules/index.ts'))};
 const surface=mountTableStage(document.querySelector('canvas'),{quality:'low'});window.h={surface,set(n,self){const state=createGame({id:'same-game-'+n,seed:7341,seats:Array.from({length:n},(_,i)=>({id:'s'+i,name:['Very long player name '.repeat(5),'一位名字特别长的玩家'.repeat(7),'Cyra','Dorian','Elara','Finn'][i]}))});const view=self===null?projectPublic(state):projectSeat(state,'s'+self);surface.update({view,language:'zh',connected:true,animate:false,reducedMotion:true});}};h.set(5,0);`;
 const probe=`window.__seatNames=()=>{scene.updateMatrixWorld(true);camera.updateMatrixWorld();const rect=canvas.getBoundingClientRect();return infoGroup.children.filter(o=>o.userData.seatName).map(o=>{const points=[[-.5,-80/768],[.5,-80/768],[-.5,80/768],[.5,80/768]].map(([x,y])=>new THREE.Vector3(x,y,0).applyMatrix4(o.matrixWorld).project(camera)).map(p=>({x:rect.left+(p.x+1)*rect.width/2,y:rect.top+(1-p.y)*rect.height/2}));return{id:o.userData.seatName,x:o.position.x,z:o.position.z,left:Math.min(...points.map(p=>p.x)),right:Math.max(...points.map(p=>p.x)),top:Math.min(...points.map(p=>p.y)),bottom:Math.max(...points.map(p=>p.y))};});};return handle;`;
@@ -44,11 +52,11 @@ try{
    window.WebSocket=Socket;
   },{room,wire,member});
   const p=await actor.newPage();p.on('pageerror',e=>errors.push(mode+': '+String(e)));
-  const roots={'/three-dragon-ante-dev/':resolve('extensions/three-dragon-ante/dist'),'/suite-dev/':resolve('dist-workbench-dev')};
+  const roots={'/three-dragon-ante-dev/':resolve('extensions/three-dragon-ante/dist'),'/suite-dev/':historicalRoot};
   await p.route(origin+'/**',route=>{
    const pathname=new URL(route.request().url()).pathname,prefix=Object.keys(roots).find(k=>pathname.startsWith(k));
    if(prefix){const file=resolve(roots[prefix],pathname.slice(prefix.length));if(!file.replaceAll('\\','/').startsWith(roots[prefix].replaceAll('\\','/')+'/')||!existsSync(file))return route.fulfill({status:404});return route.fulfill({body:readFileSync(file),contentType:({'.js':'text/javascript','.html':'text/html','.css':'text/css','.webp':'image/webp','.png':'image/png','.svg':'image/svg+xml'})[extname(file)]||'application/octet-stream'});}
-   const embedded=mode==='suite',source=embedded?'/suite-dev/workbench-panels/table.html':'/three-dragon-ante-dev/index.html?obrref='+Buffer.from(origin+' fixture-room').toString('base64');
+   const embedded=mode==='suite',source=embedded?'/suite-dev/workbench-panels/historical-table.html':'/three-dragon-ante-dev/index.html?obrref='+Buffer.from(origin+' fixture-room').toString('base64');
    return route.fulfill({contentType:'text/html',body:`<!doctype html><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%}iframe{width:100%;height:100%;border:0}</style><script>
    const embedded=${embedded},channel=${JSON.stringify(channel)},wire=${JSON.stringify(wire)},room=${JSON.stringify(room)},member=${JSON.stringify(member)};function send(value){document.querySelector('iframe').contentWindow.postMessage(value,location.origin)};
    addEventListener('message',event=>{if(event.source!==document.querySelector('iframe').contentWindow)return;const m=event.data;let method=m.method,args=m.args||[],field;const map={OBR_ROOM_GET_METADATA:['room.getMetadata','metadata'],OBR_PLAYER_GET_ID:['player.getId','id'],OBR_PLAYER_GET_NAME:['player.getName','name'],OBR_PLAYER_GET_ROLE:['player.getRole','role'],OBR_PLAYER_GET_CONNECTION_ID:['player.getConnectionId','connectionId'],OBR_PARTY_GET_PLAYERS:['party.getPlayers','players'],OBR_BROADCAST_SEND_MESSAGE:['broadcast.sendMessage']};if(!embedded){const spec=map[m.id];if(!spec)return;[method,field]=spec;}let result;if(method==='init')result={roomId:'fixture-room',playerId:member,preferences:{}};else if(method==='room.getMetadata')result={'com.fullpeople/three-dragon-ante/server-v1':room};else if(method==='player.getId')result=member;else if(method==='player.getName')result='玩家';else if(method==='player.getRole')result='PLAYER';else if(method==='player.getConnectionId')result='connection-'+member;else if(method==='party.getPlayers')result=[];send(embedded?{channel,id:m.id,result}:{id:m.id+'_RESPONSE'+m.nonce,data:field?{[field]:result}:{}});});
@@ -68,8 +76,8 @@ try{
   await frame.evaluate(publicWire=>{const socket=window.__socket;socket.receive({type:'view',seq:2,view:publicWire});socket.receive({type:'ack',id:socket.messages.findLast(m=>m.type==='command').id,ok:true});},publicWire);
   await frame.getByRole('button',{name:'加入牌桌',exact:true}).waitFor();assert.equal(await frame.locator('#lobby').isVisible(),true);
   await p.screenshot({path:join(out,`${mode}-${owner?'owner':'guest'}-left.png`)});await p.reload();const reopened=p.frames().find(f=>f.parentFrame());await reopened.waitForFunction(()=>window.__socket?.messages.some(m=>m.type==='auth'));await reopened.locator('#lobby').waitFor({state:'visible'});assert.equal(await reopened.locator('#stage-host').isVisible(),false);
-  checks.push(`${mode} ${owner?'owner':'guest'} production entry: Leave shows main screen before ACK and remains there after refresh`);await actor.close();
+  checks.push(`${mode} ${owner?'owner':'guest'} historical fixture: Leave shows main screen before ACK and remains there after refresh`);await actor.close();
  }
- assert.deepEqual(errors,[]);writeFileSync(join(out,'results.json'),JSON.stringify({passed:true,checks,errors,scope:'Synthetic transport/identity; actual entry bundles and WebGL rendering. No live room or player data.'},null,2));console.log(checks.join('\n'));
+ assert.deepEqual(errors,[]);writeFileSync(join(out,'results.json'),JSON.stringify({passed:true,checks,errors,scope:'Synthetic transport/identity; isolated historical entry bundles and WebGL rendering. No public-product, live-room or player-data acceptance.'},null,2));console.log(checks.join('\n'));
 }catch(error){writeFileSync(join(out,'results.json'),JSON.stringify({passed:false,error:String(error),checks,errors},null,2));throw error;}
 finally{await context.tracing.stop({path:join(out,'trace.zip')});await browser.close();}

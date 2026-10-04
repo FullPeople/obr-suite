@@ -147,6 +147,9 @@ export default defineConfig(({ command }) => ({
         "boss-bar": resolve(__dirname, "boss-bar.html"),
         // Shared music controls; playback lives in the background module.
         "music-board": resolve(__dirname, "music-board.html"),
+        // Public compatibility URL is a static website link; historical game
+        // source is exercised by a separate fixture, never this product entry.
+        "three-dragon-ante": resolve(__dirname, "three-dragon-ante.html"),
       },
     },
   },

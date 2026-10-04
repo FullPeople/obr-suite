@@ -1,0 +1,4 @@
+/* Preserve the original guide's dark palette. The generic settings panel theme
+   replaces --text with dark ink while the guide card retains --bg-soft, making
+   that combination unreadable. The surrounding workbench dialog owns its chrome. */
+:root{color-scheme:dark}

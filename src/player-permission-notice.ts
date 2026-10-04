@@ -17,8 +17,12 @@ export function hasReadPlayerPermissions(): boolean {
   catch { return false; }
 }
 
+export function markPlayerPermissionsRead(): void {
+  localStorage.setItem(PLAYER_PERMISSION_SEEN_KEY, '1');
+}
+
 /** A close, failed open, visible paint or scroll alone never marks this read. */
-export function mountPlayerPermissionNotice(initialLanguage: 'zh' | 'en'): void {
+export function mountPlayerPermissionNotice(initialLanguage: 'zh' | 'en', acknowledge: () => Promise<unknown> = async () => { markPlayerPermissionsRead(); }): void {
   const body = document.getElementById('body')!;
   const button = document.getElementById('btn-close') as HTMLButtonElement;
   const credit = document.getElementById('credit')!;
@@ -89,7 +93,7 @@ export function mountPlayerPermissionNotice(initialLanguage: 'zh' | 'en'): void 
       if (role !== 'GM' || revision !== roleRevision || !canAcknowledge()) return;
       // Write only here, after rechecking the current role/layout. Storage
       // failures keep the notice open and its toolbar entry visible.
-      localStorage.setItem(PLAYER_PERMISSION_SEEN_KEY, '1');
+      await acknowledge();
       await OBR.modal.close(PLAYER_PERMISSION_MODAL_ID);
     } catch {
       credit.textContent = language === 'zh' ? '未能保存确认，请重试。' : 'Could not save acknowledgment. Please retry.';

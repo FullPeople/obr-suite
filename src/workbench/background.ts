@@ -56,10 +56,11 @@ async function start(){
  const stockHistory=new Map<string,{changes:{id:string;before:any[];after:any[]}[];lockChanges?:{id:string;before:boolean;after:boolean}[]}>();
  let queue=Promise.resolve(),groupQueue=Promise.resolve();const seen=new Map<string,any>(),documents=new Map<string,any>(),documentTimes=new Map<string,number>();
  function cacheDocument(key:string,value:any){if(documents.get(key)!==value)documentCacheVersion++;documents.set(key,value);return documents;}
- const cardReads=new Map<string,Promise<any>>(),cardEtags=new Map<string,string>(),cardLocations=new Map<string,CardLocation>();
+ const cardReads=new Map<string,Promise<any>>(),cardEtags=new Map<string,string>(),cardLocations=new Map<string,CardLocation|Error>();
  const monsterSceneDocuments=new Map<string,any>();
  const cardInvalidations=new Map<string,number>();
  const cardReadControllers=new Map<string,AbortController>(),cardNotifiedRevisions=new Map<string,number>();
+ const cardReadFailures=new Map<string,{error:Error;retryAt:number}>(),selectionFailures=new Map<string,string>();
  const activeRequests=new Set<string>(),cancelledRequests=new Set<string>(),requestRuns=new Map<string,Promise<void>>();
  const relay=new Relay(new URL('relay',assetUrl('')).href,session,'host',credentials.hostKey,m=>{relayActive=true;relayPeerSeen=Date.now();void receive(m,true);},credentials.clientKey,undefined,(OBR.room.id||'default').replace(/[^a-zA-Z0-9_-]/g,'_'));
  const shared=sharedDocuments(relay);
@@ -73,7 +74,7 @@ async function start(){
  const viewPublications=new Map<string,number>();
  const send=(type:string,extra:Record<string,unknown>={},route?:'relay'|'direct')=>{
   const data={protocol,session,hostStarted,type,...extra};
-  const retryable=['selection','access','directory','catalog','cacheSnapshot'].includes(type);
+  const retryable=['selection','access','directory','catalog','cacheSnapshot','selectionError'].includes(type);
   const state=extra.state as {key?:string;itemId?:string}|undefined;
   const publicationKey=type==='cacheSnapshot'?`${type}:${state?.key||''}:${state?.itemId||''}`:type;
   const publication=retryable?++viewPublication:0,viewer=warmClientInstance;
@@ -85,6 +86,7 @@ async function start(){
    else if(type==='access')lastAccessEpoch=0;
    else if(type==='directory')lastDirectory='';
    else if(type==='catalog')lastCatalog='';
+   else if(type==='selectionError')selectionFailures.delete(String(extra.targetId||''));
    else{const signature=JSON.stringify(extra.state),epoch=(extra.access as {epoch?:number}|undefined)?.epoch;for(const [id,snapshot] of warmSnapshots)if(snapshot.document===extra.document&&snapshot.state===signature&&snapshot.epoch===epoch)warmSnapshots.delete(id);}
   };
   if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch{failed();}
@@ -93,23 +95,31 @@ async function start(){
  OBR.broadcast.onMessage(OPEN_WIKI_CHANNEL,event=>{if(event.connectionId!==playerConnection)return;try{const entry=sharedEntry((event.data as any)?.entry);send('showWiki',{entry,id:crypto.randomUUID()});}catch{}});
  const panels=panelBridge(send,relay);
  const bubble=(item:Item|undefined)=>((item?.metadata[HP]??item?.metadata[LEGACY]??{}) as Record<string,any>);
- const documentLocation=(id:string)=>cardLocations.get(id)||cardLocation(origin,OBR.room.id||'default',id);
+ const documentLocation=(id:string)=>{const value=cardLocations.get(id);if(value instanceof Error)throw value;return value||cardLocation(origin,OBR.room.id||'default',id);};
  const definitionsFor=(scene:Record<string,unknown>)=>[...DEFAULT_BUFFS,...(Array.isArray(scene[SHARED_BUFFS])?scene[SHARED_BUFFS] as any[]:[])];
  async function loadCard(cardId:string,key:string,fresh=false){
   const cached=documents.get(key);if(!fresh&&cached&&documentTimes.has(key))return cached;
   // Reuse an in-flight read. Ten observers must not fetch ten copies of the portrait.
   const flight=cardReads.get(key);if(flight)return flight;
+  // A stable HTTP failure is not dirtiness. Only an explicit retry, location
+  // change or card invalidation should refetch a missing/denied document.
+  const failed=cardReadFailures.get(key);if(failed&&Date.now()<failed.retryAt)throw failed.error;
   const task=(async()=>{for(;;){const generation=cardInvalidations.get(key)||0,etag=cardEtags.get(key),controller=new AbortController();cardReadControllers.set(key,controller);const timeout=setTimeout(()=>controller.abort(),45000);
   try{const r=await fetch(documentLocation(cardId).url,{headers:etag?{'If-None-Match':etag}:{},cache:'no-store',signal:controller.signal});
   // A remote commit can arrive while this GET still carries an older response.
   // All readers share the next GET; completing the old one must not erase dirtiness.
   if(generation!==(cardInvalidations.get(key)||0)){await r.body?.cancel().catch(()=>{});continue;}
-  if(r.status===304&&documents.has(key)){if(documentRevision(documents.get(key))<(cardNotifiedRevisions.get(key)||0)){cardEtags.delete(key);continue;}documentTimes.set(key,Date.now());return documents.get(key);}if(!r.ok)throw Error(`角色读取失败（${r.status}）`);const doc=await r.json(),latest=documents.get(key);
+  if(r.status===304&&documents.has(key)){if(documentRevision(documents.get(key))<(cardNotifiedRevisions.get(key)||0)){cardEtags.delete(key);continue;}cardReadFailures.delete(key);documentTimes.set(key,Date.now());return documents.get(key);}if(!r.ok)throw Object.assign(Error(`角色读取失败（${r.status}）`),{status:r.status});const doc=await r.json(),latest=documents.get(key);
   if(generation!==(cardInvalidations.get(key)||0))continue;
   // A GET begun before a write may finish afterwards. Never poison the cache with it.
-  if(latest&&documentRevision(latest)>documentRevision(doc))return latest;
-  const nextEtag=r.headers.get('etag');if(nextEtag)cardEtags.set(key,nextEtag);cacheDocument(key,doc);documentTimes.set(key,Date.now());return doc;
-  }catch(error){if(generation===(cardInvalidations.get(key)||0))throw error;}finally{clearTimeout(timeout);if(cardReadControllers.get(key)===controller)cardReadControllers.delete(key);}
+  if(latest&&documentRevision(latest)>documentRevision(doc)){cardReadFailures.delete(key);return latest;}
+  cardReadFailures.delete(key);const nextEtag=r.headers.get('etag');if(nextEtag)cardEtags.set(key,nextEtag);cacheDocument(key,doc);documentTimes.set(key,Date.now());return doc;
+  }catch(error){if(generation===(cardInvalidations.get(key)||0)){
+   const status=Number.isInteger((error as any)?.status)?(error as any).status:0;
+   documentTimes.delete(key);const invalidLocation=(error as any)?.diagnostic?.code==='INVALID_CARD_LOCATION';
+   const safe=Object.assign(Error(invalidLocation?'角色资料地址不受支持；请刷新目录后核对':status===404?'角色资料暂不可用（404）；请刷新目录或重新读取后核对':status===403?'角色资料读取被拒绝（403）；请核对当前连接和权限':status?`角色读取失败（${status}）；可重新读取`:'角色读取超时或连接中断；可重新读取'),{status,retryable:true,diagnostic:{code:invalidLocation?'INVALID_CARD_LOCATION':'CARD_READ_FAILED',status,httpStatus:status,operation:'readCard',phase:'read-card',at:new Date().toISOString(),version:devManifest.version,requestId:crypto.randomUUID()}});
+   cardReadFailures.set(key,{error:safe,retryAt:[400,403,404,410,422].includes(status)?Infinity:Date.now()+15000});while(cardReadFailures.size>256)cardReadFailures.delete(cardReadFailures.keys().next().value!);throw safe;
+  }}finally{clearTimeout(timeout);if(cardReadControllers.get(key)===controller)cardReadControllers.delete(key);}
   }})();cardReads.set(key,task);try{return await task;}finally{if(cardReads.get(key)===task)cardReads.delete(key);}
  }
  function invalidateCard(cardId:string,revision?:number){const key=`${OBR.room.id}:card:${cardId}`;
@@ -117,9 +127,9 @@ async function start(){
    if(documents.has(key)&&documentRevision(documents.get(key))>=revision!||revision!<=(cardNotifiedRevisions.get(key)??-1))return false;
    cardNotifiedRevisions.set(key,revision!);
   }
-  cardInvalidations.set(key,(cardInvalidations.get(key)||0)+1);documentTimes.delete(key);cardEtags.delete(key);cardReadControllers.get(key)?.abort();return true;
+  cardReadFailures.delete(key);cardInvalidations.set(key,(cardInvalidations.get(key)||0)+1);documentTimes.delete(key);cardEtags.delete(key);cardReadControllers.get(key)?.abort();return true;
  }
- function invalidateCards(){for(const key of new Set([...documents.keys(),...cardReads.keys()])){cardInvalidations.set(key,(cardInvalidations.get(key)||0)+1);documentTimes.delete(key);cardEtags.delete(key);cardReadControllers.get(key)?.abort();}}
+ function invalidateCards(){for(const key of new Set([...documents.keys(),...cardReads.keys(),...cardReadFailures.keys()])){cardReadFailures.delete(key);cardInvalidations.set(key,(cardInvalidations.get(key)||0)+1);documentTimes.delete(key);cardEtags.delete(key);cardReadControllers.get(key)?.abort();}}
  async function reconcileRuntime(cardId:string,key:string,items:Item[],scene:Record<string,unknown>,doc:any,write:boolean){
   if(!write||!(await access(`card:${cardId}`)).write)return doc;
   const originalAuthority=observation.authorityVersion('card:'+cardId);
@@ -179,7 +189,8 @@ async function start(){
   }});
  }
  async function catalog(){
-  const {ready,scene,room,items,role,party}=await observation.read();
+  const {ready,scene,room,items,role,party,player}=await observation.read();
+  if(player.id!==playerId||player.connectionId&&player.connectionId!==playerConnection)throw Object.assign(Error('账号或枭熊连接已改变；请从当前房间重新打开工作台'),{status:403});
   const signature=`${observation.version()}:${documentCacheVersion}:${getState().allowPlayerMonsters}:${getState().enabled.bestiary}:${getState().enabled.hpBar}`;
   // Movement does not rebuild the sheet projection, but callers such as dice
   // initialization still need the newest complete SDK item objects.
@@ -199,7 +210,14 @@ async function start(){
   // Retain a room directory independently of scene tokens, including inferred legacy ownership.
   for(const c of all){c.name=c.name||c.title||items.find(i=>i.metadata[BIND]===c.id)?.name||c.id;if(!Array.isArray(c.owner_ids)||!c.owner_ids.length){const owners=[...new Set(items.filter(i=>i.metadata[BIND]===c.id).map(i=>i.createdUserId))];if(owners.length)c.owner_ids=owners;}}
   // Legacy uploads retain their original room URL when moved between scenes.
-  for(const c of all)if(typeof c.url==='string'){const next=cardLocation(origin,OBR.room.id||'default',c.id,c.url),previous=cardLocations.get(c.id);cardLocations.set(c.id,next);if(previous&&previous.url!==next.url)invalidateCard(c.id);}
+  for(const c of all){
+   // The durable directory already wins recovery writes below. Its document
+   // location must also win reads/deletes over a stale scene mirror.
+   const recorded=directory.find(row=>row.id===c.id),url=typeof recorded?.url==='string'?recorded.url:c.url,previous=cardLocations.get(c.id);
+   if(typeof url!=='string'){if(previous){cardLocations.delete(c.id);invalidateCard(c.id);}continue;}
+   let next:CardLocation|Error;try{next=cardLocation(origin,OBR.room.id||'default',c.id,url);}catch(error){next=error instanceof Error?error:Error('角色资料地址无效');}
+   cardLocations.set(c.id,next);const identity=(value:CardLocation|Error)=>value instanceof Error?value.message:value.url;if(previous&&identity(previous)!==identity(next))invalidateCard(c.id);
+  }
   // Recovery may fill missing directory entries, but an old scene snapshot
   // must not overwrite an existing room entry on every room-change event.
   // Rename/lock/import commands update the directory explicitly.
@@ -270,9 +288,9 @@ async function start(){
  }
  async function access(id:string,existing?:Awaited<ReturnType<typeof catalog>>){
   const data=existing||await catalog(),monster=id.startsWith('monster:'),itemId=monster?id.slice(8):id,item=data.items.find(i=>i.id===itemId),cardId=id.startsWith('card:')?id.slice(5):monster?'':String(item?.metadata[BIND]||''),card=data.cards.find(c=>c.id===cardId);
-  if(cardId&&!card)throw Error('没有此角色卡的查看权限');if(!card&&!item)throw Error('未找到角色卡或棋子');
+  if(cardId&&!card)throw Object.assign(Error('没有此角色卡的查看权限'),{status:403});if(!card&&!item)throw Object.assign(Error('未找到角色卡或棋子'),{status:404});
   if(!card&&!hasMonsterComponent(item))throw Error('棋子没有角色、怪物或生命条组件');
-  if(!card&&data.role!=='GM'&&item?.createdUserId!==playerId&&(!getState().allowPlayerMonsters||item?.metadata['com.obr-suite/workbench/locked']===true))throw Error('没有此怪物的阅读权限');
+  if(!card&&data.role!=='GM'&&item?.createdUserId!==playerId&&(!getState().allowPlayerMonsters||item?.metadata['com.obr-suite/workbench/locked']===true))throw Object.assign(Error('没有此怪物的阅读权限'),{status:403});
   const token=item||data.items.find(i=>i.metadata[BIND]===cardId&&ownsNativeToken(i,playerId))||data.items.find(i=>i.metadata[BIND]===cardId),slug=String(token?.metadata[SLUG]||'');
   return {...data,item:token,cardId,card,slug,targetId:cardId?`card:${cardId}`:`monster:${token!.id}`,write:card?card.write&&(!item||data.role==='GM'||ownsNativeToken(item,playerId)):(data.role==='GM'||ownsNativeToken(token,playerId)),key:cardId?`${OBR.room.id}:card:${cardId}`:`${OBR.room.id}:token:${token!.id}:${slug}`};
  }
@@ -362,10 +380,18 @@ async function start(){
  const followMessage=(type:string,extra:Record<string,unknown>={})=>send(type,{followRevision,clientInstance,clientSelection,...extra});
  function finishMapFollow(restore=true){if(!mapFollowing)return;if(restore)chosen=mapReturn;mapFollowing=false;mapReturn='';followMessage('followEnd',{itemId:chosen,restore});}
 
+ function selectionFailure(id:string,error:unknown,issuedAccess?:ReturnType<typeof cacheAccess>){
+  const e=error as any,status=Number.isInteger(e?.status)?e.status:0;
+  const bound=observation.peek().items?.find(item=>item.id===id)?.metadata[BIND],targetId=id.startsWith('card:')||id.startsWith('monster:')?id:typeof bound==='string'?`card:${bound}`:id;
+  const signature=JSON.stringify([clientInstance,clientSelection,followRevision,selectionGeneration,issuedAccess?.room,issuedAccess?.scope,issuedAccess?.epoch,status]);if(selectionFailures.get(targetId)===signature)return;selectionFailures.set(targetId,signature);while(selectionFailures.size>64)selectionFailures.delete(selectionFailures.keys().next().value!);
+  const message=status===404?'角色资料暂不可用（404）；请刷新目录或重新读取后核对':status===403?'当前角色的查看权限或连接已改变；请刷新目录后核对':status?`角色读取失败（${status}）；可重新读取`:'角色读取未完成；请核对连接后重新读取';
+  send('selectionError',{access:issuedAccess,sequence:++sequence,clientInstance,clientSelection,followRevision,targetId,...(!id.startsWith('card:')?{itemId:id.replace(/^monster:/,'')}:{}),message,status,retryable:true,diagnostic:{code:'CARD_READ_FAILED',at:new Date().toISOString(),operation:'select',phase:'read-card',status,httpStatus:status,version:devManifest.version,requestId:crypto.randomUUID(),connection:child&&!child.closed?'direct':relayActive?'relay':'offline'}});
+ }
  async function refreshSelection(){
   if(!relayActive&&(!child||child.closed))return;
   if(selecting){selectAgain=true;return;}selecting=true;
-  try{const list=await catalog();publishAccess(list);const selection=(await observation.read()).selection,signature=selectionIdentity(selection,list.items);
+  let issuedAccess:ReturnType<typeof cacheAccess>|undefined;
+  try{const list=await catalog();issuedAccess=publishAccess(list);const selection=(await observation.read()).selection,signature=selectionIdentity(selection,list.items);
    // Establish the manual/default card before map following captures its return target.
    if(!chosen)chosen=getState().enabled.characterCards!==false&&list.cards[0]?`card:${list.cards[0].id}`:'';
    if(follow&&signature!==lastSelection){selectionGeneration++;followRevision++;
@@ -379,13 +405,13 @@ async function start(){
    if(chosen)try{if(!canOpen(await access(chosen,list))){chosen='';lastSelection='';}}catch{chosen='';lastSelection='';}
    if(!chosen)chosen=getState().enabled.characterCards!==false&&list.cards[0]?`card:${list.cards[0].id}`:'';
    if(!chosen){send('selection',{sequence:++sequence,message:'暂无可查看的角色卡'});return;}
-   const id=chosen,generation=selectionGeneration;warmCard(id);
+   const id=chosen,generation=selectionGeneration,readScene=observation.sceneEpoch(),readAuthority=observation.authorityVersion(id),readAccess=issuedAccess;warmCard(id);
    // A slow first download must not hold the selection gate: a later click on
    // another (already cached) card can finish immediately and wins the generation.
    void snapshot(id,list).then(next=>{if(id!==chosen||generation!==selectionGeneration)return;
-    const signatureNext=JSON.stringify(next.state);if(signatureNext!==last||next.document!==lastDocument){last=signatureNext;lastDocument=next.document;send('selection',{...next,followRevision});}
-   }).catch(error=>{if(id===chosen&&generation===selectionGeneration)send('error',{message:String(error)});});
-  }catch(error){send('error',{message:String(error)});}finally{selecting=false;if(selectAgain){selectAgain=false;void refreshSelection();}}
+    selectionFailures.delete(next.state.targetId);const signatureNext=JSON.stringify(next.state);if(signatureNext!==last||next.document!==lastDocument){last=signatureNext;lastDocument=next.document;send('selection',{...next,followRevision});}
+   }).catch(error=>{if(id===chosen&&generation===selectionGeneration&&readScene===observation.sceneEpoch()&&readAuthority===observation.authorityVersion(id))selectionFailure(id,error,readAccess);});
+  }catch(error){if(chosen)selectionFailure(chosen,error,issuedAccess);else send('error',{message:'角色目录读取未完成；请核对连接后刷新目录'});}finally{selecting=false;if(selectAgain){selectAgain=false;void refreshSelection();}}
  }
  type HydrationJob={key:string;card:Awaited<ReturnType<typeof catalog>>['cards'][number];list:Awaited<ReturnType<typeof catalog>>;started:boolean;promise:Promise<void>;resolve:()=>void};
  const cardHydrations=new Map<string,HydrationJob>(),hydrationQueue:HydrationJob[]=[];let backgroundHydrations=0;
@@ -408,7 +434,7 @@ async function start(){
   let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r),job:HydrationJob={key,card,list,started:false,promise,resolve};cardHydrations.set(key,job);
   if(priority)startHydration(job,false);else{hydrationQueue.push(job);pumpHydrations();}return promise;
  }
- async function hydrate(cardId?:string){const list=await catalog();publishAccess(list);for(const card of list.cards.slice(0,24))if(warmCards.size<24)warmCard(`card:${card.id}`);await Promise.all(list.cards.filter(c=>!cardId||c.id===cardId).map(c=>scheduleHydration(c,list,chosen===`card:${c.id}`)));}
+ async function hydrate(cardId?:string){let list:CatalogValue;try{list=await catalog();}catch{return;}publishAccess(list);for(const card of list.cards.slice(0,24))if(warmCards.size<24)warmCard(`card:${card.id}`);await Promise.all(list.cards.filter(c=>!cardId||c.id===cardId).map(c=>scheduleHydration(c,list,chosen===`card:${c.id}`)));}
  async function refresh(){if(!relayActive&&(!child||child.closed))return;if(refreshing){again=true;return;}refreshing=true;
   try{
    const observedVersion=observation.version(),startedEpoch=epoch;
@@ -518,6 +544,7 @@ async function start(){
  });
  async function command(m:any){
   if(m.type==='groupRoll'){const result=await groups.handle(m);if(m.action==='close')finishMapFollow();return result;}
+  if(m.type==='refreshCatalog'){await observation.refreshCatalog();const list=await catalog();return {catalog:{cards:list.cards,monsters:list.monsters,sequence:++sequence},access:publishAccess(list)};}
   if(m.type==='readCard'){const a=await access(m.itemId),sceneEpoch=observation.sceneEpoch(),identity=targetReadIdentity(a),document=await read(a),latest=await access(m.itemId);if(targetReadIdentity(latest)!==identity||sceneEpoch!==observation.sceneEpoch())throw Error('角色关联或权限已改变');return {document};}
   if(m.type==='assignOwners')throw Error('请使用枭熊棋子的 Set Owner 设置所属玩家');
   if(m.type==='refreshCard'){const a=await access(m.itemId);if(a.cardId){invalidateCard(a.cardId);await read(a,true);}return {snapshot:await snapshot(m.itemId)};}
@@ -614,12 +641,18 @@ async function start(){
    await m._beforeMutation?.();await OBR.scene.items.updateItems(targets.filter(i=>i.type==='IMAGE'&&(a.role==='GM'||ownsNativeToken(i,playerId))).map(i=>i.id),drafts=>{m._assertAuthority?.();for(const item of drafts){if(observation.peek().role!=='GM'&&!ownsNativeToken(item,playerId)||a.cardId&&item.metadata[BIND]!==a.cardId)continue;const image=item as any;image.text={...image.text,type:image.text?.type||'PLAIN',plainText:String(image.text?.plainText||'').trim()===name?'':name};}});return;
   }
   if(m.type==='delete'){
-   if(!a.cardId)throw Error('没有角色卡');if(a.role!=='GM'&&a.items.some(item=>item.metadata[BIND]===a.cardId&&!ownsNativeToken(item,playerId)))throw Error('此卡还绑定其他所属玩家的棋子，仅 DM 可删除');const location=documentLocation(a.cardId);await relay.send({deleteCard:{room:location.room,card:location.card}},m._beforeMutation);
+   if(!a.cardId)throw Error('没有角色卡');if(a.role!=='GM'&&a.items.some(item=>item.metadata[BIND]===a.cardId&&!ownsNativeToken(item,playerId)))throw Error('此卡还绑定其他所属玩家的棋子，仅 DM 可删除');const location=documentLocation(a.cardId);
+   try{await relay.send({deleteCard:{room:location.room,card:location.card}},m._beforeMutation);}catch(error){const e=error as any;if(e?.notSent||e?.status&&e.status<500)throw error;throw Object.assign(Error('删除结果尚未确认；请先刷新目录并核对，勿重复提交'),{uncertain:true,status:e?.status,diagnostic:{code:'DELETE_RESULT_UNKNOWN',operation:'delete',phase:'delete-document'}});}
+   // The durable delete (including idempotent storage 404) has completed.
+   // Later SDK projection failures must never turn this receipt into zero writes.
+   m._committed={kind:'delete',id:a.targetId};m._phase='delete-directory';
+   documents.delete(a.key);documentCacheVersion++;invalidateCard(a.cardId);
+   await m._beforeMutation?.();
    const room=await OBR.room.getMetadata(),deleted=Array.isArray(room[DELETED])?room[DELETED] as string[]:[];
-   await OBR.room.setMetadata({[DELETED]:[...new Set([...deleted,a.cardId])],[DIRECTORY]:(room[DIRECTORY] as any[]||[]).filter(c=>c.id!==a.cardId),[ROOM_LIST]:(room[ROOM_LIST] as any[]||[]).filter(c=>c.id!==a.cardId)});
-   if(Array.isArray(a.scene[LIST]))await OBR.scene.setMetadata({[LIST]:(a.scene[LIST] as any[]).filter(c=>c.id!==a.cardId)});
-   const ids=a.items.filter(i=>i.metadata[BIND]===a.cardId).map(i=>i.id);if(ids.length)await OBR.scene.items.updateItems(ids,rows=>{for(const row of rows)if(row.metadata[BIND]===a.cardId&&(observation.peek().role==='GM'||ownsNativeToken(row,playerId)))delete row.metadata[BIND];});
-   documents.delete(a.key);documentCacheVersion++;if(chosen===`card:${a.cardId}`)chosen='';await OBR.broadcast.sendMessage('com.obr-suite/cc-card-updated',{cardId:a.cardId,deleted:true},{destination:'ALL'});return;
+   await m._beforeMutation?.();await OBR.room.setMetadata({[DELETED]:[...new Set([...deleted,a.cardId])],[DIRECTORY]:(room[DIRECTORY] as any[]||[]).filter(c=>c.id!==a.cardId),[ROOM_LIST]:(room[ROOM_LIST] as any[]||[]).filter(c=>c.id!==a.cardId)});
+   const scene=await OBR.scene.getMetadata();m._assertAuthority?.();if(Array.isArray(scene[LIST]))await OBR.scene.setMetadata({[LIST]:(scene[LIST] as any[]).filter(c=>c.id!==a.cardId)});
+   const ids=a.items.filter(i=>i.metadata[BIND]===a.cardId).map(i=>i.id);m._assertAuthority?.();if(ids.length)await OBR.scene.items.updateItems(ids,rows=>{m._assertAuthority?.();for(const row of rows)if(row.metadata[BIND]===a.cardId&&(observation.peek().role==='GM'||ownsNativeToken(row,playerId)))delete row.metadata[BIND];});
+   documents.delete(a.key);documentCacheVersion++;if(chosen===`card:${a.cardId}`)chosen='';await OBR.broadcast.sendMessage('com.obr-suite/cc-card-updated',{cardId:a.cardId,deleted:true},{destination:'ALL'});return {deleted:true,cleanupPending:false};
   }
   if(m.type==='resource'){
    if(!getState().enabled.resourceTracker)throw Error('资源模块已关闭');
@@ -699,8 +732,8 @@ async function start(){
   if(m.type==='requestStatus'){const answer=seen.get(m.requestId);if(answer)send('ack',{requestId:m.requestId,...answer},route);else send('requestPending',{requestId:m.requestId,active:activeRequests.has(m.requestId),known:requestRuns.has(m.requestId)},route);return;}
   if(m.type==='cancel'){if(!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}
   if(m.type==='pin'){follow=!m.pinned;if(!follow)finishMapFollow(false);if(follow)lastSelection='';void refreshSelection();return;}
-  if(m.type==='select'){if(Number.isSafeInteger(m.clientSelection)){const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(m.clientSelection<(selectionIntents.get(instance)||0))return;selectionIntents.delete(instance);selectionIntents.set(instance,m.clientSelection);while(selectionIntents.size>8)selectionIntents.delete(selectionIntents.keys().next().value!);clientInstance=instance==='legacy'?'':instance;clientSelection=m.clientSelection;}const generation=++selectionGeneration;finishMapFollow(false);try{const a=await access(m.itemId);if(generation!==selectionGeneration)return;chosen=a.targetId;const observed=await observation.read();lastSelection=selectionIdentity(observed.selection,observed.items);last='';void refreshSelection();}catch(e){send('error',{message:String(e)});}return;}
-  if(!['groupRoll','assignOwners','readCard','refreshCard','showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
+  if(m.type==='select'){if(Number.isSafeInteger(m.clientSelection)){const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(m.clientSelection<(selectionIntents.get(instance)||0))return;selectionIntents.delete(instance);selectionIntents.set(instance,m.clientSelection);while(selectionIntents.size>8)selectionIntents.delete(selectionIntents.keys().next().value!);clientInstance=instance==='legacy'?'':instance;clientSelection=m.clientSelection;}const generation=++selectionGeneration;finishMapFollow(false);let issuedAccess:ReturnType<typeof cacheAccess>|undefined;const readScene=observation.sceneEpoch();try{const list=await catalog();issuedAccess=publishAccess(list);const a=await access(m.itemId,list);if(generation!==selectionGeneration)return;chosen=a.targetId;const observed=await observation.read();lastSelection=selectionIdentity(observed.selection,observed.items);last='';void refreshSelection();}catch(e){if(generation===selectionGeneration&&readScene===observation.sceneEpoch())selectionFailure(m.itemId,e,issuedAccess);}return;}
+  if(!['groupRoll','assignOwners','readCard','refreshCard','refreshCatalog','showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
   if(requestRuns.has(m.requestId))return;
   delete m._committed;delete m._partialCommitted;delete m._inventoryCommitted;delete m._beforeMutation;delete m._assertAuthority;
   const targetMutation=['save','stats','statsLock','resource','delete','assignName','lock','monsterSave','condition','inventory'].includes(m.type);
@@ -714,13 +747,15 @@ async function start(){
   const receivedAt=performance.now();
   const run=async()=>{let answer=seen.get(m.requestId);if(!answer){const began=performance.now(),steps:{phase:string;ms:number}[]=[];let phase='authorize',phaseStart=began;
    Object.defineProperty(m,'_phase',{configurable:true,get:()=>phase,set:(next:string)=>{const now=performance.now();steps.push({phase,ms:Math.round((now-phaseStart)*10)/10});phase=next;phaseStart=now;}});
-   const writes=!['readCard','refreshCard','diceRpc','roll','panelRpc','showEntry'].includes(m.type);if(writes){mutation++;epoch++;}try{
+   const writes=!['readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','showEntry'].includes(m.type);if(writes){mutation++;epoch++;}try{
    if(cancelledRequests.delete(m.requestId)||typeof m.expiresAt==='number'&&Date.now()>m.expiresAt)throw Error('操作在执行前已取消或过期；未修改数据');
    await beforeMutation();Object.defineProperty(m,'_beforeMutation',{value:beforeMutation,configurable:true});Object.defineProperty(m,'_assertAuthority',{value:assertAuthority,configurable:true});
    activeRequests.add(m.requestId);send('requestPending',{requestId:m.requestId,active:true},route);m._phase='authorize';answer={ok:true,result:await command(m)};
   }catch(error){const e=error as any;answer={ok:false,uncertain:!!e?.uncertain,message:e?.message||String(error),diagnostic:{version:devManifest.version,at:new Date().toISOString(),requestId:m.requestId,requestType:m.type,phase:m._phase,httpStatus:e?.status,...e?.diagnostic,stack:typeof e?.stack==='string'?e.stack.split('\n').slice(0,6).join('\n'):undefined}};
+   if(['delete','readCard','refreshCard','refreshCatalog'].includes(m.type))answer.diagnostic={code:e?.diagnostic?.code||'REQUEST_FAILED',operation:m.type,phase:m._phase,status:Number.isInteger(e?.status)?e.status:0,httpStatus:Number.isInteger(e?.status)?e.status:0,version:devManifest.version,at:new Date().toISOString(),requestId:m.requestId,uncertain:!!e?.uncertain,notSent:!!e?.notSent,connection:route};
    if(m._partialCommitted){answer.uncertain=true;answer.message='怪物资料已写入，但棋子关联未确认；请重新读取后核对，勿重复提交。';answer.diagnostic={...answer.diagnostic,code:'MONSTER_DOCUMENT_LINK_PENDING',committed:m._partialCommitted};}
-   if(m._committed){
+   if(m._committed?.kind==='delete'){answer={ok:true,result:{deleted:true,cleanupPending:true,warning:'角色资料已删除；目录或棋子关联清理尚未完成，请刷新目录核对。',diagnostic:{code:'DELETE_CLEANUP_PENDING',operation:'delete',phase:m._phase,at:new Date().toISOString(),version:devManifest.version,requestId:m.requestId,committed:true}}};}
+   else if(m._committed){
     // A committed document/ledger cannot become a failed mutation merely because
     // a renderer, notification, or refresh timed out. Retry projections only.
     const diagnostic={...answer.diagnostic,code:'COMMITTED_PROJECTION_PENDING',committed:true};
@@ -728,8 +763,8 @@ async function start(){
     try{if(m._committed.kind==='document'||m._committed.kind==='token')result.snapshot=await snapshot(m._committed.id);else{const context=await inventoryContext();result.historyId=m._committed.historyId;result.inventory=await inventories.view(context.definitions,context.gm,context.publicId);result.sequence=++sequence;}}catch{}
     answer={ok:true,result};void hydrate();scheduleInventoryRepair();
    }else if(m._inventoryCommitted){answer.uncertain=true;answer.diagnostic={...answer.diagnostic,code:'PARTIAL_INVENTORY_COMMIT',inventoryCommitted:true};}
-  }finally{activeRequests.delete(m.requestId);if(writes){mutation--;epoch++;}}steps.push({phase,ms:Math.round((performance.now()-phaseStart)*10)/10});answer.timing={transport:route,version:devManifest.version,queueMs:Math.round(began-receivedAt),hostMs:Math.round(performance.now()-began),steps};seen.set(m.requestId,answer);if(seen.size>256)seen.delete(seen.keys().next().value!);}send('ack',{requestId:m.requestId,...answer},route);if(!['readCard','refreshCard','diceRpc','roll','panelRpc','showEntry'].includes(m.type)){void refreshSelection();void refresh();}};
-  const task=m.type==='groupRoll'?(groupQueue=groupQueue.then(run).catch(()=>{})):['readCard','refreshCard','diceRpc','roll','panelRpc','console','showEntry'].includes(m.type)||m.type==='inventory'&&['silent','containerLock'].includes(m.operation?.action)?run():(queue=queue.then(run).catch(()=>{}));requestRuns.set(m.requestId,task);void task.finally(()=>{requestRuns.delete(m.requestId);cancelledRequests.delete(m.requestId);});
+  }finally{activeRequests.delete(m.requestId);if(writes){mutation--;epoch++;}}steps.push({phase,ms:Math.round((performance.now()-phaseStart)*10)/10});answer.timing={transport:route,version:devManifest.version,queueMs:Math.round(began-receivedAt),hostMs:Math.round(performance.now()-began),steps};seen.set(m.requestId,answer);if(seen.size>256)seen.delete(seen.keys().next().value!);}send('ack',{requestId:m.requestId,...answer},route);if(!['readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','showEntry'].includes(m.type)){void refreshSelection();void refresh();}};
+  const task=m.type==='groupRoll'?(groupQueue=groupQueue.then(run).catch(()=>{})):['readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','console','showEntry'].includes(m.type)||m.type==='inventory'&&['silent','containerLock'].includes(m.operation?.action)?run():(queue=queue.then(run).catch(()=>{}));requestRuns.set(m.requestId,task);void task.finally(()=>{requestRuns.delete(m.requestId);cancelledRequests.delete(m.requestId);});
  }
  window.addEventListener('message',e=>{if(e.origin!==origin||e.data?.protocol!==protocol||!e.source)return;
   if(e.data.type==='discover'){try{const source=e.source as Window;if(source!==window&&source.parent===parent)source.postMessage({protocol,type:'background',nonce:e.data.nonce,session,clientKey:credentials.clientKey},origin);}catch{}return;}

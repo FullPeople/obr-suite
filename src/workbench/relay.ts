@@ -22,7 +22,7 @@ export class Relay {
   this.retryAt=0;this.failures=0;this.lastError=undefined;this.alive?.();return data;
  }
  private async post(message:any,beforeSend?:()=>void|Promise<void>){
-  if(Date.now()<this.retryAt)throw this.lastError;
+  if(Date.now()<this.retryAt)throw Object.assign(Error(this.lastError?.message||'中继连接暂不可用'),{status:this.lastError?.status,notSent:true});
   const encoded=await wireBody(message);
   // Registration and compression can suspend long enough for an owner grant
   // to be revoked. Recheck immediately before transmitting the mutation.
@@ -34,7 +34,7 @@ export class Relay {
   if(!this.registration)this.registration=this.post({register:true,clientKey:this.clientKey,...(this.room?{room:this.room}:{})}).then(()=>{this.active=true;}).finally(()=>{this.registration=undefined;});
   await this.registration;
  }
- async send(message:any,beforeSend?:()=>void|Promise<void>){await this.register();return this.post(message,beforeSend);}
+ async send(message:any,beforeSend?:()=>void|Promise<void>){try{await this.register();}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}return this.post(message,beforeSend);}
  private async pause(ms:number){await new Promise<void>(resolve=>{const finish=()=>{clearTimeout(timer);this.abort.signal.removeEventListener('abort',finish);resolve();},timer=setTimeout(finish,ms);if(this.abort.signal.aborted)finish();else this.abort.signal.addEventListener('abort',finish,{once:true});});}
  private async poll(){while(!this.stopped){try{
   if(Date.now()<this.retryAt){await this.pause(this.retryAt-Date.now());if(this.stopped)break;}

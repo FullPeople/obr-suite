@@ -3237,14 +3237,12 @@ const TABS: TabDef[] = [
     en: `${ICONS.box} Three-Dragon Ante`,
     dynamicBody: (lang) => {
       const en = lang === "en";
-        // The independently deployed table is currently in public testing.
-        // Both Suite channels must link to the actual published manifest.
-        const url = "https://obr.dnd.center/three-dragon-ante-dev/manifest.json";
+        const url = "https://obr.dnd.center/three-dragon-ante/";
       return `<h3>${en ? "A separate card table" : "独立的酒馆牌桌"}</h3>
-        <p>${en ? "Install Three-Dragon Ante in this room when your table wants to play. It has its own entry and does not need Full Suite to stay open." : "想打牌时，由 DM 将三龙牌安装到房间。它有自己的入口，无需依赖套件窗口。"}</p>
-          <a class="layout-editor-btn" href="${url}" target="_blank" rel="noopener">${en ? "Three-Dragon Ante extension address (Dev)" : "三龙牌插件地址（测试版）"}</a>
+        <p>${en ? "Open the online website in a new tab. Create or join a room using a room code or invitation link and a unique player name." : "在新标签页打开线上网站，用房间码或邀请链接和不重名的玩家名字创建、加入房间。"}</p>
+          <a class="layout-editor-btn" href="${url}" target="_blank" rel="noopener noreferrer">${en ? "Open Three-Dragon Ante online" : "打开线上三龙牌"}</a>
         <p><code>${url}</code></p>
-        <p>${en ? "Legendary Edition base game for 2–6 players, with a guided practice table. Uses Owlbear room messages; the host browser runs and saves the game." : "Legendary Edition 基础版，2–6 人，含新手实战引导。通过枭熊房间消息联网，主持人的浏览器运行和保存牌局。"}</p>`;
+        <p>${en ? "The online server saves your game. This Suite workspace stays open while you play." : "线上服务器保存牌局。打牌时，当前 Suite 工作区继续保留。"}</p>`;
     },
   },
   {

@@ -1,3 +1,4 @@
+import {markPlayerPermissionsRead} from '../player-permission-notice';
 import OBR from '@owlbear-rodeo/sdk';
 import {getState} from '../state';
 import {assetUrl} from '../asset-base';
@@ -19,8 +20,14 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
  };
  return async function request(panel:string,instance:string,method:string,args:any[]){
   if(typeof instance!=='string'||!/^[a-zA-Z0-9-]{1,80}$/.test(instance))throw Error('无效窗口');
-  if(!['settings','music','studio','table','notes'].includes(panel))throw Error('无效功能页');
+  if(!['settings','music','studio','table','notes','permissions'].includes(panel))throw Error('无效功能页');
   if(panel==='notes'){if(!notes)throw Error('笔记存储暂不可用');return notes(method,args);}
+  // The local GM guide has no scene, room, metadata or broadcast capability.
+  if(panel==='permissions'&&method!=='dispose'){
+   if(await OBR.player.getRole()!=='GM')throw Error('仅 DM 可查看权限说明');
+   if(!['init','player.getRole','subscribe','permissions.acknowledge'].includes(method)||method==='subscribe'&&(args[0]!=='player'||args[1]!==undefined))throw Error('无效权限说明操作');
+   if(method==='permissions.acknowledge'){if(args.length)throw Error('无效权限确认');markPlayerPermissionsRead();return {seen:true};}
+  }
   if(['music','studio'].includes(panel)&&getState().enabled.musicBoard===false)throw Error('音乐模块未开启');
   if(method==='init'){
    const [playerId,role,sceneReady,scene,room]=await Promise.all([OBR.player.getId(),OBR.player.getRole(),OBR.scene.isReady(),panel==='settings'?OBR.scene.getMetadata():Promise.resolve({}),panel==='settings'?OBR.room.getMetadata():Promise.resolve({})]);

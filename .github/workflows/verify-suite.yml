@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
+    branches: [fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 04d8a8408ed7e2815dabb9c14617fd369ee11ebb
+          ref: 8e5987789f8a526256f02f4544eef0b281324370
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -43,15 +43,23 @@ jobs:
         run: node tools/verify-suite-candidate.mjs
       - name: Typecheck and build stable host with paired card viewer
         run: npm run build
-      - name: Build dev host and shared Three Dragon
+      - name: Build dev host and retained historical Three Dragon fixture
         run: |
-          SUITE_BASE=suite-dev SUITE_CHANNEL=dev npx vite build --outDir dist-workbench-dev
+          npm run build:workbench-dev
           npm run build:three-dragon
-          cp -R "$DND_CARD_WEB_ROOT/dist" dist-workbench-dev/workbench
-          node tools/build-workbench-dice.mjs
-          node tools/build-workbench-panels.mjs
-          node tools/build-legacy-card-viewer.mjs --web-built --out-dir dist-workbench-dev
-      - name: Three Dragon layout and exit browser regression
+      - name: Verify public-link source archive is reproducible
+        shell: bash
+        run: |
+          set -euo pipefail
+          for source in tools/three-dragon-website-entry.html tools/build-workbench-panels.mjs tools/build-three-dragon-overlay.mjs three-dragon-ante.html vite.config.ts; do
+            tar -xOf dist-workbench-dev/workbench/suite-source.zip "$source" | cmp - "$source"
+          done
+      - name: Verify final public website links and retired-game negative controls
+        run: node tools/three-dragon-website-entry-selftest.mjs --built
+      - name: Public website links wide and narrow browser regression
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: node tools/three-dragon-website-entry-browser.mjs
+      - name: Historical Three Dragon layout and exit fixture regression
         if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
         run: node tools/three-dragon-seat-exit-browser.mjs
       - name: Announcement DOM regression
@@ -75,6 +83,8 @@ jobs:
           if-no-files-found: warn
           include-hidden-files: true
           path: |
+            .local-evidence/three-dragon-website-entry/
+            .local-evidence/three-dragon-website-browser/
             .local-evidence/three-dragon-seat-exit/
             .local-evidence/owner-cold-browser/
             .local-evidence/verification/owner-cold-sdk/vm-results.json
@@ -99,6 +109,8 @@ jobs:
           if-no-files-found: warn
           include-hidden-files: true
           path: |
+            .local-evidence/three-dragon-website-entry/
+            .local-evidence/three-dragon-website-browser/
             .local-evidence/three-dragon-seat-exit/*.png
             .local-evidence/three-dragon-seat-exit/*.json
             .local-evidence/announcement-scope/*.png
