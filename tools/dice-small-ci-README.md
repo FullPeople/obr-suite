@@ -66,3 +66,16 @@ DICE_IDLE_SOFTWARE=1 DICE_IDLE_ROUNDS=21 DICE_IDLE_CYCLES=2 DICE_IDLE_WAIT_MS=10
 The local preparation validated syntax, YAML, inert probe contracts, candidate and
 baseline diagnostic builds with pinned Web, and all 59 runtime asset hashes. No
 local browser was run; the first actual browser assertions belong to CI.
+
+Independent sequential cases now wait outside their timed interval until both real
+controllers have no held/retained rolls and both physics workers report zero
+incumbents/bounds/kinds/groups. The observations are retained in result JSON;
+render-complete/result logs alone cannot satisfy the boundary. Concurrent/group
+submissions remain concurrent internally. The group fixture explicitly supplies
+one public row and one hidden GM row and checks their distinct visibility.
+
+Pixel evidence uploads are split into JSON, baseline/candidate render PNG,
+baseline/candidate raw RGBA, and five viewport PNG bundles. This preserves the
+first oversized archive on GitHub while making new evidence accessible through
+the supported small-file download path. Explicit restored/cleared/reopened PNGs
+are retained alongside the normal material-reference images.

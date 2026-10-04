@@ -76,7 +76,7 @@ export async function runIdleProbe(){
   browser=await chromium.launch({headless:process.env.DICE_IDLE_HEADFUL!=='1',...(process.env.PLAYWRIGHT_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH}:{}),args:process.env.DICE_IDLE_SOFTWARE==='1'?['--use-angle=swiftshader','--enable-unsafe-swiftshader']:[]});
   context=await browser.newContext({viewport:{width:1280,height:800},deviceScaleFactor:1});
   await context.addInitScript(installIdleCounters);
-  page=await context.newPage();page.on('pageerror',e=>errors.push(String(e)));await page.exposeBinding('sendRemote',async()=>{});
+  page=await context.newPage();page.on('pageerror',e=>errors.push(e.stack||String(e)));await page.exposeBinding('sendRemote',async()=>{});
   await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort('blockedbyclient'));
   cdp=await context.newCDPSession(page);await cdp.send('Performance.enable');
   const bg=()=>page.frames().find(f=>f.url().includes('sdk-verify')),overlay=()=>page.frames().find(f=>f.url().includes('/overlay.html'));

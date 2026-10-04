@@ -62,13 +62,14 @@ jobs:
         run: |
           test "$(git rev-parse "$BASELINE_REF^{commit}")" = "$BASELINE_REF"
           git worktree add --detach .baseline "$BASELINE_REF"
-          cp tools/dice-latency-{build,browser}.mjs .baseline/tools/
+          cp tools/dice-latency-{build,browser}.mjs tools/dice-independent-scene.mjs .baseline/tools/
           npm ci
           npm --prefix .paired-web ci
           npm --prefix .baseline ci
           npx playwright install --with-deps chromium
       - name: Build both sources with the same paired Web
         run: |
+          node --test tools/dice-independent-scene.test.mjs
           node tools/dice-latency-build.mjs
           (cd .baseline && node tools/dice-latency-build.mjs)
       - name: Same-runner baseline, candidate, baseline without capture or readback
@@ -157,7 +158,7 @@ jobs:
         run: |
           test "$(git rev-parse "$BASELINE_REF^{commit}")" = "$BASELINE_REF"
           git worktree add --detach .baseline "$BASELINE_REF"
-          cp tools/dice-latency-{build,browser}.mjs tools/dice-small-preservation-build.mjs .baseline/tools/
+          cp tools/dice-latency-{build,browser}.mjs tools/dice-independent-scene.mjs tools/dice-small-preservation-build.mjs .baseline/tools/
           npm ci
           npm --prefix .paired-web ci
           npm --prefix .baseline ci
@@ -176,10 +177,82 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: dice-small-pixels-viewports-${{ github.sha }}
+          name: dice-small-pixel-metrics-${{ github.sha }}
           path: |
-            .local-evidence/dice-small-preservation/
-            .local-evidence/dice-small-viewport-browser/
+            .local-evidence/dice-small-preservation/*.json
+            .local-evidence/dice-small-viewport-browser/*.json
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-small-baseline-render-png-${{ github.sha }}
+          path: |
+            .local-evidence/dice-small-preservation/baseline-*.png
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-small-baseline-rgba-${{ github.sha }}
+          path: |
+            .local-evidence/dice-small-preservation/baseline-*.rgba
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-small-candidate-render-png-${{ github.sha }}
+          path: |
+            .local-evidence/dice-small-preservation/candidate-*.png
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-small-candidate-rgba-${{ github.sha }}
+          path: |
+            .local-evidence/dice-small-preservation/candidate-*.rgba
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-small-view-390x844-dpr3-${{ github.sha }}
+          path: |
+            .local-evidence/dice-small-viewport-browser/390x844-dpr3-*.png
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-small-view-844x390-dpr2-${{ github.sha }}
+          path: |
+            .local-evidence/dice-small-viewport-browser/844x390-dpr2-*.png
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-small-view-768x1024-dpr1.5-${{ github.sha }}
+          path: |
+            .local-evidence/dice-small-viewport-browser/768x1024-dpr1.5-*.png
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-small-view-390x844-dpr1-${{ github.sha }}
+          path: |
+            .local-evidence/dice-small-viewport-browser/390x844-dpr1-*.png
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-small-view-844x390-dpr3-${{ github.sha }}
+          path: |
+            .local-evidence/dice-small-viewport-browser/844x390-dpr3-*.png
           include-hidden-files: true
           retention-days: 7
   lifecycle:
