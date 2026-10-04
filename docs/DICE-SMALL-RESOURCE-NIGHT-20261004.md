@@ -9,7 +9,7 @@ Suite 官方 dev 父基线：`308a7ccf0cb70794055ac75170bf112a36989993`（245，
 - 小骰协议、移动视口、必要音频预热：`764a3216f3619210ec6b56c20708242320d7d6d8`。
 - 验证字节相同的数字纹理共享：`148ae7c2cde5ad9fd7e697b5a3f4e9bad937edbb`。
 - 控制器及空闲音频生命周期：`a7242c5faab1cb1e1c8505dc24ecbddd8c07e0f1`。
-- 配对 Web 撤读正文释放分支：`fdfb6ce5ad411220f4de017dd0437e4790e1b6b3`，父 main `40d9dfee082545f52dc05f782ab2da274d1d0bad`，来自独立候选 `af9fb07178d9babae99f385b35a59cb953421429`。
+- 配对 Web 撤读正文释放分支：`fb584043c6bed831b9ca92eab783653770c24fe6`，父 main `40d9dfee082545f52dc05f782ab2da274d1d0bad`，来自独立候选 `af9fb07178d9babae99f385b35a59cb953421429`。
 
 使用 Git 三方 cherry-pick。纹理补丁自动合入 renderer；audio-mixer 的真实冲突同时保留 releaseGeneration、same-clock retime 防重复播放及 stopIdleTimer，没有用任一旧文件覆盖新代码。六个独立组合边界测试已纳入仓库。被否决的 dirty-clear、ground-cache、ground-mask、多区域重复绘制实验均不包含。
 
