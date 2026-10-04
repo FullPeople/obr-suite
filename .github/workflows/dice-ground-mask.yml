@@ -1,0 +1,51 @@
+name: Diagnose one-pass ground shadow mask
+on:
+  push:
+    branches: [fix/dice-ground-mask-20261004]
+permissions:
+  contents: read
+jobs:
+  ground_mask_sequence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      DICE_GROUND_MASK_SEQUENCE_ROUNDS: '1'
+      DICE_GROUND_MASK_SEQUENCE_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Offline boundaries and build
+        run: |
+          node tools/dice-ground-mask-selftest.mjs
+          node --check tools/dice-ground-mask-sequence-browser.mjs
+          node tools/dice-ground-mask-sequence-tests.mjs
+          node tools/dice-ground-mask-sequence-build.mjs
+      - name: One exploratory sequence and strict pixels
+        run: node tools/dice-ground-mask-sequence-browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-ground-mask-sequence-${{ github.sha }}
+          include-hidden-files: true
+          retention-days: 7
+          path: |
+            .local-evidence/dice-ground-mask-sequence/results/
+            .local-evidence/dice-ground-mask-sequence/runtime/ground-mask-sequence-source.json
