@@ -36,7 +36,7 @@ const IMPACT_ANGLES=[-0.78,-0.22,0.31,0.86];
 
 export class CueRenderer{
   private canvas:HTMLCanvasElement;
-  private ctx:CanvasRenderingContext2D;private releaseCanvas:()=>void;
+  private ctx:CanvasRenderingContext2D;private releaseCanvas:()=>void;private markCanvasDirty:()=>void;
   private particles=new Map<number,Particle[]>();
   private seed:bigint;
   private targetSlot:[number,number]=[0,0];
@@ -45,7 +45,7 @@ export class CueRenderer{
   private anchor?:()=>{x:number;y:number}|undefined;private anchorLabel='';
   setAnchor(read:()=>{x:number;y:number}|undefined,label:string){this.anchor=read;this.anchorLabel=label;}
   constructor(private container:HTMLElement,rollId:string,private playerName:string,private playerColor?:string){
-    const layer=acquireOverlayCanvas(container,'cue-canvas');this.canvas=layer.canvas;this.ctx=layer.context;this.releaseCanvas=layer.release;
+    const layer=acquireOverlayCanvas(container,'cue-canvas');this.canvas=layer.canvas;this.ctx=layer.context;this.releaseCanvas=layer.release;this.markCanvasDirty=layer.markDirty;
     let hash=0n;
     for(const ch of rollId)hash=(hash*131n+BigInt(ch.charCodeAt(0)))&((1n<<64n)-1n);
     this.seed=hash;
@@ -90,6 +90,7 @@ export class CueRenderer{
     const centerX=point?.x??w*0.5+this.currentSlot[0],centerY=point?.y??h*0.5+this.currentSlot[1];
     const centerAge=elapsed-cue.firstBeam;
     const centerOpacity=appear*smoothstep(Math.max(0,centerAge)/0.18)*(1-smoothstep(Math.max(0,(elapsed-cue.finalBeamEnd))/0.28));
+    if(centerOpacity>0.01)this.markCanvasDirty();
     // Nameplate is behind the flying modifier, never an occluder over its launch point.
     if(centerOpacity>0.01&&!this.anchor){
       const pendingModifier=cue.modifier&&elapsed<cue.modifier.start;
@@ -110,6 +111,7 @@ export class CueRenderer{
     for(const beam of flights){
       const window=beam.reveal+BEAM_AFTERGLOW;
       if(elapsed<beam.start||elapsed>window)continue;
+      this.markCanvasDirty();
       const sourceAge=elapsed-beam.start;
       const flightPhase=Math.max(0,Math.min(1,(sourceAge-beam.recoil)/beam.travel));
       const progress=Math.pow(flightPhase,3.45);

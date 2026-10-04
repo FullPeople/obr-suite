@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
+    branches: [fix/dice-overlay-costs-20261004, fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
   workflow_dispatch:
 permissions:
   contents: read
