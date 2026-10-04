@@ -10,10 +10,10 @@ jobs:
     timeout-minutes: 90
     env:
       DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
-      DICE_PASS_REPEATS: '1'
+      DICE_PASS_REPEATS: '3'
       DICE_PASS_SOFTWARE: '1'
       DICE_PASS_GPU: '1'
-      DICE_PASS_TRACE: '1'
+      DICE_PASS_TRACE: '0'
     steps:
       - uses: actions/checkout@v6
         with:

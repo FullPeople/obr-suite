@@ -22,9 +22,10 @@ build or self-tests. Never bypass a local browser permission failure.
 Browser execution uses official Playwright Chromium and a local mock Owlbear
 host with the actual SDK, Jolt worker, verified WASM/assets and renderer. It does
 not join a real room. `DICE_PASS_REPEATS` defaults to 3. The narrowly scoped push
-workflow initially requests **one exploratory round**, to fit an approximately
-10–15 minute browser budget (initialization/platform variance can increase it).
-Repeat at least three bracketed rounds before claiming a stable direction.
+workflow now requests **three bracketed rounds**, following the completed first
+exploratory round. The separate trace is disabled for this repeat; its first-round
+artifact is retained. Initialization/platform variance affects the total runtime.
+Use all three bracketed rounds before claiming a stable direction.
 The workflow has one runner/job and only triggers on
 `fix/dice-pass-budget-20261004`; it has no publication/deployment step.
 
@@ -81,8 +82,15 @@ post-retime logical age, phase, slot, entire drawFrame JS CPU, inclusive show CP
 whole GL-pass CPU, submitted/attempted per-layer 2D paint/clear counts, retimes,
 audio schedule starts/restarts, and last show transition state. The separate
 render hook records main/shadow GL draw counters and CPU submission spans.
-Authoritative pose SHA-256, actual outcomes, contacts and complete cue schedules
-must match across conditions. Completion is checked from actual SDK events and
+Authoritative pose SHA-256, actual outcomes and complete cue schedules must match
+exactly across conditions. Client 0's original contacts also remain JSON-exact
+across every sender case, including the dual-client sender. Existing wire.mjs
+serializes t/kind/a/b/seq/x/y/z/speed/impulse using Float32. Receiver contacts must
+therefore exactly equal Math.fround of those ten sender fields; no other field is
+rounded or omitted, and receiver actual values are never rounded to excuse drift.
+There is no epsilon tolerance. Real encodeRoll/decodeRoll round-trip tests establish
+this boundary, with negative controls for sub-Float32 sender drift, noncanonical
+receiver values, one-ULP receiver changes, missing/extra fields, poses and outcomes. Completion is checked from actual SDK events and
 results, with zero active rolls, no context loss and no render faults.
 
 Phases are physics (<settled), settled-wait (<firstBeam), gathering
@@ -115,3 +123,13 @@ Syntax, transform tests, fake GL/DOM tests and build/asset checks can run locall
 The local environment prohibits Chromium AF_UNIX startup. Browser results remain
 unverified until the authorized CI run. No permission bypass or local browser
 launch belongs in this change.
+
+### First CI round and comparator correction
+
+The first exploratory run at `e665072cff9a08f62621aec2be9c571fb463707a`
+completed all 15 browser cases, with zero case failures. Its final comparator
+failed only for the two dual-client receivers because it compared their existing
+wire-Float32 contacts with the sender's original doubles. Offline reanalysis of
+those unchanged raw artifacts using the exact codec rule above passes all
+invariants. This does not relabel the original CI run as green, and does not add
+new timing evidence. The three-round workflow is a separate pending verification.
