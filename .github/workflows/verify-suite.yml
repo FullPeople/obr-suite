@@ -17,6 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Check out exact paired Web source
         uses: actions/checkout@v6
