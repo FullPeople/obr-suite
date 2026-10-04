@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          ref: a1ddc1cb6eb684b96b5e1a89f1ceff7c158af91a
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          ref: a1ddc1cb6eb684b96b5e1a89f1ceff7c158af91a
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -161,7 +161,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          ref: a1ddc1cb6eb684b96b5e1a89f1ceff7c158af91a
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
