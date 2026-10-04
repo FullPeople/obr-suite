@@ -1,0 +1,49 @@
+name: Diagnose cold ground build costs
+on:
+  push:
+    branches: [fix/dice-ground-build-cost-20261004]
+permissions:
+  contents: read
+jobs:
+  cold_build_attribution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      DICE_GROUND_SEQUENCE_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies and official Chromium
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Verify zero behavioral changes and build exact probes
+        run: |
+          node tools/dice-ground-warm-tests.mjs
+          node tools/dice-ground-warm-prepare.mjs
+          DICE_GROUND_LIVE_RUNTIME="$PWD/.local-evidence/dice-ground-warm/profile-runtime.mjs" DICE_GROUND_SEQUENCE_BUILD="$PWD/.local-evidence/dice-ground-warm/runtime" node tools/dice-ground-sequence-build.mjs
+      - name: Attribute two real cold-build sequences without removing checks
+        run: |
+          DICE_GROUND_SEQUENCE_BUILD="$PWD/.local-evidence/dice-ground-warm/runtime" node tools/dice-ground-warm-browser.mjs
+          node tools/dice-ground-warm-summarize.mjs .local-evidence/dice-ground-warm/results/result.json > .local-evidence/dice-ground-warm/summary.json
+      - name: Preserve all costs and failed diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dice-ground-cold-build-${{ github.sha }}
+          include-hidden-files: true
+          retention-days: 7
+          path: .local-evidence/dice-ground-warm/
