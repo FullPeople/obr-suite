@@ -1,8 +1,8 @@
-# 骰子延迟候选：等待浏览器验证，尚未合并或部署
+# 骰子性能候选：浏览器证实改善，尚未合并或部署
 
 ## 基线与恢复记录
 
-当前候选基于官方 GitHub branches API核实的 Suite dev `7783de080b0a32465150fbb2672daf848d5385b5`，精确配套 Web main `41a652373019cb912edb0fa7e0eef13f702c2fef`。保留244的读取恢复、删除管理、权限与网站链接变化。本地remote refspec只跟踪旧专用分支，普通fetch后的origin引用曾陈旧；最终使用官方API和明确SHA核验，未在旧236基线交付。
+最初恢复候选基于当时官方 GitHub branches API核实的 Suite dev `7783de080b0a32465150fbb2672daf848d5385b5`，精确配套 Web main `41a652373019cb912edb0fa7e0eef13f702c2fef`。保留244的读取恢复、删除管理、权限与网站链接变化。本地remote refspec只跟踪旧专用分支，普通fetch后的origin引用曾陈旧；最终使用官方API和明确SHA核验，未在旧236基线交付。
 
 本轮最初在0527461/04d8建立候选。2026-10-04 06:56 UTC执行环境恢复到早期快照，未提交的工程树及原始证据丢失；没有推送。随后从精确远端和会话中已记录的源码差量重建，并在最新244上重新测试。Controller SHA256重新得到 `65d96bc1433fcc85e930e664931f8db98ff1ff1992452326ebef68d8409cce59`，与独立审阅版本相同。以下数据均为恢复后的新实测；不把丢失的原JSON当作可交付证据。
 
@@ -121,3 +121,16 @@ DICE_LATENCY_SOFTWARE=1 DICE_LATENCY_RECOVERY=1 node tools/dice-latency-browser.
 保守region现已合入本地：当前世界矩阵/真实方向光到地面的投影加PCF/bias/轮廓余量，逐帧重算；未知可见drawable、涡旋、深度mask等完整视口fallback。先恢复Three保存的透明clear状态/颜色写入、完整清空旧画面，再裁空白，finally恢复scissor/autoClear；独审发现的context恢复黑底和异常mask残影边界已补两项红对照。没有改shadow缓存、2048²/PCF、画质、物理、动画时间或权限。
 
 18项、七真实模型84姿态4视口DPR的88,694包含性点通过；scratch复用前后10,000随机帧边界完全相同。Node100骰helper P95约0.35ms、V8统计分配约0.64MB/get（此前约0.56ms/2.58MB），只用于CPU分配风险评估。组合再通过resize13、style8、双类型与真实59资产构建。下一次CI将核17场景WebGL严格像素、可见复杂规则fallback、真实context loss恢复首帧，以及同host前后基线包夹的无采集端到端对照。均尚未提前声称通过。
+
+## ab6ea44 同 host 验证结果
+
+性能六job `37189859152` 与完整Suite `37189859148` 全通过。基线→候选→基线在同一AMD EPYC 7763 / 4逻辑核 / Node22.23.3 runner串行，使用同Web05dcfdb、同场景、同seed与无采集设置。
+
+- 暖单骰首提交帧中位1549.85→955.30→1658.55ms；rAF平均频率中位4.63→12.12→4.56次/秒。
+- 暖单骰P95两段基线283–300ms，候选133–150ms。
+- 20骰P95从750–817ms到467–500ms；实际演出约54–57秒到33.3–33.5秒，仍远高于声明10.71秒，并有104次retime。不能称卡顿解决，也不能外推真实GPU。
+- 17场景34个production固定姿态WebGL逐通道相同；sketch单骰真实context-loss恢复第一帧逐通道相同、GL无错、两角透明。
+- 完整双端视频有骰子/结果、优势舍弃、私投隔离和最终20后清空。无采集core20骰是62、完整视频序列20骰是72，seed位置不同，不能用其时长直接估算录像开销。
+- 发现max规则seed7刚好无需修正，clampEpisodes=0；该轮不能宣称实际触发了FX整屏fallback。下一诊断明确用已由真实Jolt查证的seed2，并断言clamp、可见额外drawable与关闭scissor都发生。
+
+下一轮仅加强诊断：恢复断言前先保存reference/当前数据，记录实际production裁剪状态；另试DPR1的不重叠多区域scissor（其余DPR/未知FX整屏fallback）以测多骰间空白的成本。多区域尚非产品改动，必须逐像素通过后才评价是否值得进一步实现。
