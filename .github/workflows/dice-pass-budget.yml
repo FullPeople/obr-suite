@@ -1,0 +1,49 @@
+name: Diagnose dice pass budgets
+on:
+  push:
+    branches: [fix/dice-pass-budget-20261004]
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      DICE_PASS_REPEATS: '1'
+      DICE_PASS_SOFTWARE: '1'
+      DICE_PASS_GPU: '1'
+      DICE_PASS_TRACE: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies and official Chromium
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Prove diagnostic boundaries and optional GPU query handling
+        run: node --test tools/dice-pass-*.test.mjs
+      - name: Build diagnostic-only fixture with all 59 asset locks
+        run: node tools/dice-pass-build.mjs
+      - name: Serial single-client ablations, dual-client controls and separate trace
+        run: node tools/dice-pass-browser.mjs
+      - name: Preserve raw frames, failures and diagnostic provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dice-pass-budget-${{ github.sha }}
+          include-hidden-files: true
+          retention-days: 7
+          path: .local-evidence/dice-pass-budget/
