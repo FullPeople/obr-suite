@@ -1,0 +1,58 @@
+name: Explore stage-one dice overlay costs
+on:
+  push:
+    branches: [fix/dice-overlay-brackets-20261004]
+permissions:
+  contents: read
+jobs:
+  single_bracket:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install and test the unchanged measurement harness
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          node tools/dice-latency-fixture-selftest.mjs
+          node --test tools/dice-overlay-brackets-summary.test.mjs
+          npx playwright install --with-deps chromium
+      - name: Prepare two exact source checkouts with byte-identical fixture tools
+        run: |
+          git fetch --no-tags origin 99e3026cbc7ebfc057372ab1fa7f4f41d35fd1aa
+          node tools/dice-overlay-brackets-run.mjs prepare
+      - name: Install and build both sources outside measured runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in baseline stage1; do
+            (cd ".bracket-sources/$variant" && npm ci && node tools/dice-latency-build.mjs) \
+              > ".local-evidence/dice-overlay-brackets/build-$variant.log" 2>&1
+          done
+          node tools/dice-overlay-brackets-run.mjs validate-builds
+      - name: One same-runner baseline, stage-one, baseline bracket
+        run: node tools/dice-overlay-brackets-run.mjs measure
+      - name: Preserve raw events, both clients, provenance and exploratory analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dice-overlay-single-bracket-${{ github.sha }}
+          include-hidden-files: true
+          retention-days: 7
+          path: |
+            .local-evidence/dice-overlay-brackets/
+            .cache/dice-latency-fixture/result.json
