@@ -1,0 +1,94 @@
+name: Profile dice latency candidate
+on:
+  push:
+    branches: [fix/dice-latency-recovered-20261004]
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Immutable Suite baseline SHA
+        required: true
+        default: ca684455cef7decacb8bd0d5cffc011b77b500a3
+permissions:
+  contents: read
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, candidate]
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      DICE_LATENCY_SOFTWARE: '1'
+      DICE_LATENCY_RECOVERY: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: f9bfb7e2ba12e6ef338f9ec505473bb944e00bfd
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install paired Web dependencies
+        working-directory: .paired-web
+        run: npm ci
+      - name: Prepare baseline with identical measurement harness
+        if: matrix.variant == 'baseline'
+        env:
+          BASELINE_REF: ${{ inputs.baseline_ref || 'ca684455cef7decacb8bd0d5cffc011b77b500a3' }}
+        run: |
+          test "$(git rev-parse "$BASELINE_REF^{commit}")" = "$BASELINE_REF"
+          git worktree add --detach .baseline "$BASELINE_REF"
+          cp tools/dice-latency-build.mjs tools/dice-latency-browser.mjs tools/dice-physics-profile.mjs .baseline/tools/
+      - name: Install locked dependencies and official browser
+        run: |
+          if [ '${{ matrix.variant }}' = baseline ]; then cd .baseline; fi
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Candidate clock, outline and existing recovery regressions
+        if: matrix.variant == 'candidate'
+        env:
+          OUTLINE_BASELINE_REF: ${{ inputs.baseline_ref || 'ca684455cef7decacb8bd0d5cffc011b77b500a3' }}
+        run: |
+          node tools/dice-clock-latency-selftest.mjs
+          node tools/dice-transport-latency-selftest.mjs
+          node tools/dice-outline-latency-selftest.mjs
+          DICE_LATENCY_BASELINE="$OUTLINE_BASELINE_REF" node tools/dice-outline-profile.mjs
+          node tools/dice-timeout235-selftest.mjs
+          node tools/workbench-dice3d-selftest.mjs
+          node tools/workbench-dice-lifecycle-217.mjs
+          node tools/workbench-group-217-selftest.mjs
+      - name: Measure actual Jolt physics and lossless codec
+        run: |
+          if [ '${{ matrix.variant }}' = baseline ]; then cd .baseline; fi
+          node tools/dice-physics-profile.mjs
+      - name: Build actual SDK, worker, verified WASM and renderer
+        run: |
+          if [ '${{ matrix.variant }}' = baseline ]; then cd .baseline; fi
+          node tools/dice-latency-build.mjs
+      - name: Measure two clients and capture full animations
+        run: |
+          if [ '${{ matrix.variant }}' = baseline ]; then cd .baseline; fi
+          node tools/dice-latency-browser.mjs
+      - name: Preserve measurements, screenshots and videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dice-latency-${{ matrix.variant }}-${{ github.sha }}
+          include-hidden-files: true
+          retention-days: 7
+          path: |
+            .local-evidence/dice-latency/browser/
+            .local-evidence/dice-physics/result.json
+            .local-evidence/dice-outline-profile/result.json
+            .cache/dice-clock-latency/*.json
+            .cache/dice-transport-latency/*.json
+            .baseline/.local-evidence/dice-latency/browser/
+            .baseline/.local-evidence/dice-physics/result.json

@@ -1,0 +1,1 @@
+export default {broadcast:{sendMessage:async(channel:string,data:any,options:any)=>{((globalThis as any).__diceSdkSent??=[]).push({channel,data:structuredClone(data),options,at:performance.timeOrigin+performance.now()});}}};

@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {outlineGeometry} from './outline-geometry';
 import type {Theme} from './types';
 import {STYLE_SETTINGS,lettering,bodyRGB} from './material-styles';
 import {DYNAMIC_HELPERS,DYNAMIC_BODY,DYNAMIC_LIGHT,DYNAMIC_INK} from './dynamic-materials';
@@ -126,15 +127,13 @@ export function addSketchOutline(mesh:T.Mesh,geometry:T.BufferGeometry){
       gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);
     }`,fragmentShader:'void main(){gl_FragColor=vec4(.018,.023,.035,1.);}'});
   const shell=new T.Mesh(geometry,outline);shell.userData.diceDecoration=true;mesh.add(shell);
-  const edges=new T.EdgesGeometry(geometry,24),array=edges.getAttribute('position'),points:number[]=[];
-  for(let i=0;i<array.count;i+=2)for(let k=0;k<6;k++)for(const t of [k/6,(k+1)/6])for(let axis=0;axis<3;axis++)points.push(array.getComponent(i,axis)*(1-t)+array.getComponent(i+1,axis)*t);
-  edges.dispose();const lineGeo=new T.BufferGeometry();lineGeo.setAttribute('position',new T.Float32BufferAttribute(points,3));
+  const lineGeo=outlineGeometry(geometry,true);
   const ink=new T.ShaderMaterial({depthWrite:false,uniforms:{time},
     vertexShader:`uniform float time; void main(){float tick=floor(time*8.);vec3 p=position*1.002;
       p+=vec3(sin(p.y*23.+tick),sin(p.z*21.+tick*1.3),sin(p.x*19.+tick*.7))*.003;
       gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);}`,
     fragmentShader:'void main(){gl_FragColor=vec4(.018,.023,.035,1.);}'});
-  const lines=new T.LineSegments(lineGeo,ink);lines.userData.diceDecoration=true;lines.userData.ownsGeometry=true;mesh.add(lines);
+  const lines=new T.LineSegments(lineGeo,ink);lines.userData.diceDecoration=true;mesh.add(lines);
 }
 export function disposeDiceDecorations(mesh:T.Mesh){for(const child of [...mesh.children])if(child.userData.diceDecoration){
   const drawable=child as T.Mesh;(drawable.material as T.Material).dispose();if(child.userData.ownsGeometry)drawable.geometry.dispose();mesh.remove(child);
