@@ -1,0 +1,55 @@
+name: Diagnose live ground alpha reuse
+on:
+  push:
+    branches: [fix/dice-ground-live-20261004]
+permissions:
+  contents: read
+jobs:
+  ground_live_sequence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      DICE_GROUND_SEQUENCE_ROUNDS: '1'
+      DICE_GROUND_SEQUENCE_MIN_BODIES: '20'
+      DICE_GROUND_SEQUENCE_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 05dcfdb645339cac9f68d1f6009f44b7e63d5c25
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install exact dependencies and official Chromium
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Offline runtime and harness checks
+        run: |
+          node --check tools/dice-ground-sequence-browser.mjs
+          node tools/dice-ground-live-runtime.test.mjs
+          node tools/dice-ground-sequence-tests.mjs
+      - name: Build hash-verified real SDK and Jolt fixture
+        run: node tools/dice-ground-sequence-build.mjs
+      - name: Serial A-B-A timing and separate strict dynamic pixels
+        run: node tools/dice-ground-sequence-browser.mjs
+      - name: Preserve complete diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dice-ground-live-sequence-${{ github.sha }}
+          include-hidden-files: true
+          retention-days: 7
+          path: |
+            .local-evidence/dice-ground-sequence/results/
+            .local-evidence/dice-ground-sequence/runtime/ground-sequence-source.json
