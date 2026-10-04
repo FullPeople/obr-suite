@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
-const source=readFileSync(new URL('../src/workbench/panel-rpc.ts',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export function panelBridge','function panelBridge');
+const source=readFileSync(new URL('../src/workbench/panel-rpc.ts',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace('export function panelBridge','function panelBridge');
 const listeners=new Map(),calls=[],events=[],hostStorage=new Map();let role='GM',failStorage=false;
 const api={room:{id:'test-room'},player:{getRole:async()=>role,getId:async()=>'test-gm',onChange:fn=>{listeners.set('player',fn);return()=>listeners.delete('player');}},scene:{isReady:async()=>true},party:{},broadcast:{}};
 const context=vm.createContext({console,OBR:api,localStorage:{getItem:key=>hostStorage.get(key)||null},markPlayerPermissionsRead:()=>{if(failStorage)throw Error('host storage denied');hostStorage.set('obr-suite/workbench/player-permissions-seen','1');},setupServerAdmission(){},tableWorkbench:()=>async(...args)=>calls.push(args),getState:()=>({enabled:{}})});
