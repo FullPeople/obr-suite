@@ -1,0 +1,61 @@
+name: Verify dice cross-window ready
+on:
+  push:
+    branches: [fix/dice-cross-window-ready-246-20261005]
+permissions:
+  contents: read
+concurrency:
+  group: dice-cross-window-ready-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify_cross_window:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 46dd3287d11866bff057a428baeac9336c57a978
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies and official browser
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Check scoped production and deterministic red-green boundaries
+        run: |
+          npx tsc --noEmit
+          npx tsc --noEmit -p extensions/workbench-dice3d/tsconfig.json
+          DND_DICE_EVIDENCE=.local-evidence/cross-window/clock node tools/dice-ready-clock-wakeup-selftest.mjs
+          DND_DICE_EVIDENCE=.local-evidence/cross-window/history node tools/dice-quick-history.test.mjs
+          node tools/dice-clock-latency-selftest.mjs
+          node tools/dice-controller-dispose-selftest.mjs
+          node tools/dice-idle-lifecycle-selftest.mjs
+          node tools/workbench-dice-history-218.mjs
+          node tools/workbench-dice3d-selftest.mjs
+      - name: Verify actual quick and full-panel history DOM
+        env:
+          DND_DICE_EVIDENCE: .local-evidence/cross-window/panel-browser
+        run: node tools/dice-quick-history-browser.mjs
+      - name: Verify actual card opener bridge and independent window visibility
+        env:
+          DND_DICE_EVIDENCE: .local-evidence/cross-window/opener-browser
+          DICE_CROSS_HEADFUL: '1'
+        run: xvfb-run -a -s '-screen 0 2560x1440x24' node tools/dice-cross-window-browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-cross-window-${{ github.sha }}
+          path: .local-evidence/cross-window/
+          include-hidden-files: true
+          retention-days: 7
