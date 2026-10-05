@@ -1,7 +1,7 @@
 name: Verify dice cross-window ready
 on:
   push:
-    branches: [fix/dice-cross-window-ready-246-20261005, fix/dice-cross-window-tail-246-20261005]
+    branches: [codex/dice-tail247-20261005, fix/dice-cross-window-ready-246-20261005, fix/dice-cross-window-tail-246-20261005]
 permissions:
   contents: read
 concurrency:
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 46dd3287d11866bff057a428baeac9336c57a978
+          ref: 2bfc832916896e85aa22b4f36f3ba66a7bae6749
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
