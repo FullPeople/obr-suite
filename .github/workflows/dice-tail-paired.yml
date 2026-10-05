@@ -1,0 +1,73 @@
+name: Compare ready tail slot
+on:
+  push:
+    branches: [fix/dice-ready-tail-slot-246-20261005]
+permissions:
+  contents: read
+concurrency:
+  group: dice-tail-paired-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  compare_tail_slot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      BASELINE_REF: be3b13df39477491dda0b6ec152b1bf836e22b4a
+      DICE_LATENCY_TAIL: '1'
+      DICE_LATENCY_SOFTWARE: '1'
+      DICE_LATENCY_PIXELS: '1'
+      DICE_LATENCY_VIDEO: '0'
+      DICE_LATENCY_SCREENSHOTS: '0'
+      DICE_LATENCY_WIDTH: '844'
+      DICE_LATENCY_HEIGHT: '390'
+      DICE_LATENCY_DPR: '2'
+      DICE_LATENCY_THEME: royal_ember_resin
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 2bfc832916896e85aa22b4f36f3ba66a7bae6749
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prepare immutable baseline and identical diagnostic tools
+        run: |
+          test "$(git rev-parse "$BASELINE_REF^{commit}")" = "$BASELINE_REF"
+          git worktree add --detach .baseline "$BASELINE_REF"
+          cp tools/dice-latency-{build,browser}.mjs tools/dice-tail-{trace.mjs,trace.test.mjs,source-guard.mjs,paired-config.json} tools/dice-independent-scene.mjs .baseline/tools/
+          npm ci
+          npm --prefix .paired-web ci
+          npm --prefix .baseline ci
+          npx playwright install --with-deps chromium
+      - name: Verify original and frozen candidate source and trace boundaries
+        run: |
+          node --test tools/dice-tail-trace.test.mjs tools/dice-independent-scene.test.mjs
+          DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/dice-tail-paired/production-selftest" node tools/dice-ready-tail-slot-selftest.mjs
+          DICE_TAIL_SOURCE_MODE=candidate DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/dice-tail-paired/candidate" node tools/dice-tail-source-guard.mjs
+          (cd .baseline && DICE_TAIL_SOURCE_MODE=baseline DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/dice-tail-paired/baseline-before" node tools/dice-tail-source-guard.mjs)
+      - name: Build both sources with identical paired Web and observations
+        run: |
+          DICE_TAIL_SOURCE_MODE=candidate node tools/dice-latency-build.mjs
+          (cd .baseline && DICE_TAIL_SOURCE_MODE=baseline node tools/dice-latency-build.mjs)
+      - name: Observe four original cases, four candidate cases, four original cases
+        run: |
+          (cd .baseline && DICE_TAIL_SOURCE_MODE=baseline DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/dice-tail-paired/baseline-before" node tools/dice-latency-browser.mjs)
+          DICE_TAIL_SOURCE_MODE=candidate DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/dice-tail-paired/candidate" node tools/dice-latency-browser.mjs
+          mkdir -p .local-evidence/dice-tail-paired/baseline-after
+          cp .local-evidence/dice-tail-paired/baseline-before/source-guard.json .local-evidence/dice-tail-paired/baseline-after/source-guard.json
+          (cd .baseline && DICE_TAIL_SOURCE_MODE=baseline DND_DICE_EVIDENCE="$GITHUB_WORKSPACE/.local-evidence/dice-tail-paired/baseline-after" node tools/dice-latency-browser.mjs)
+          node tools/dice-tail-paired-summary.mjs .local-evidence/dice-tail-paired
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-tail-paired-${{ github.sha }}
+          path: .local-evidence/dice-tail-paired/
+          include-hidden-files: true
+          retention-days: 7

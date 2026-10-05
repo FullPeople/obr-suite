@@ -1,5 +1,7 @@
 # Cross-window dice readiness, 2026-10-05
 
+This document describes the standalone cross-window branch. The combined delivery branch includes ready-tail too; see [combined delivery](DICE-CROSS-WINDOW-TAIL-DELIVERY-20261005.md).
+
 ## Scope and release boundary
 
 This candidate is based on Suite dev `8e2cd6fd0fe969d36694338457e9e4d3428c1c00`, whose runtime remains release 246 (`be3b13df39477491dda0b6ec152b1bf836e22b4a`). Its paired Web is `46dd3287d11866bff057a428baeac9336c57a978`, whose runtime is `2bfc832916896e85aa22b4f36f3ba66a7bae6749`.
