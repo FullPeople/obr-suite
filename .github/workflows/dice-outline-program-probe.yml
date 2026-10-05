@@ -1,0 +1,54 @@
+name: Observe first sketch outline program lifetime
+on:
+  push:
+    branches: [test/dice-outline-program-20261005]
+permissions:
+  contents: read
+concurrency:
+  group: dice-outline-program-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+  DND_DICE_EVIDENCE: ${{ github.workspace }}/.local-evidence/dice-outline-program
+  DICE_LATENCY_SOFTWARE: '1'
+jobs:
+  first_sketch_program_lifetime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 46dd3287d11866bff057a428baeac9336c57a978
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies and official browser
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Guard exact production bytes and observer contracts
+        run: |
+          node tools/dice-outline-program-sourceguard.mjs
+          node --test tools/dice-outline-program-test.mjs
+          npx tsc --noEmit -p extensions/workbench-dice3d/tsconfig.json
+      - name: Build observation-only real SDK and Jolt fixture
+        run: node tools/dice-outline-program-build.mjs
+      - name: Observe first ink_sketch 1d6 program lifetime
+        run: node tools/dice-outline-program-browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-outline-program-${{ github.sha }}
+          path: |
+            .local-evidence/dice-outline-program/*.json
+            .local-evidence/dice-outline-program/*.png
+          include-hidden-files: true
+          retention-days: 7

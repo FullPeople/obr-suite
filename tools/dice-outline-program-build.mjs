@@ -1,0 +1,14 @@
+import {build,loadConfigFromFile} from 'vite';
+import {resolve} from 'node:path';
+import {mkdirSync,writeFileSync} from 'node:fs';
+import {verifyDiceAssets} from './dice-pinned-assets.mjs';
+import {verifyOutlineProgramSources} from './dice-outline-program-sourceguard.mjs';
+import {outlineProgramPlugin} from './dice-outline-program-instrument.mjs';
+const evidence=resolve(process.env.DND_DICE_EVIDENCE||'.local-evidence/dice-outline-program');mkdirSync(evidence,{recursive:true});
+const source=verifyOutlineProgramSources();writeFileSync(resolve(evidence,'sourceguard.json'),JSON.stringify(source,null,2));
+process.env.SUITE_BASE='suite-dev';process.env.SUITE_CHANNEL='dev';
+const root=resolve('.'),out=resolve(process.env.DND_DICE_LATENCY_BUILD||'.local-evidence/dice-outline-program/runtime');
+const {config}=await loadConfigFromFile({command:'build',mode:'production'},resolve('vite.config.ts'));
+await build({...config,plugins:[...(config.plugins||[]),outlineProgramPlugin()],worker:{format:'es'},root,configFile:false,base:'/suite-dev/',build:{...config.build,outDir:out,emptyOutDir:true,copyPublicDir:false,rollupOptions:{...config.build.rollupOptions,input:{'sdk-verify':resolve('extensions/workbench-dice3d/sdk-verify.html')}}}});
+const overlayRoot=resolve('extensions/workbench-dice3d');await build({root:overlayRoot,plugins:[outlineProgramPlugin()],configFile:false,base:'/suite-dev/dice3d/',worker:{format:'es'},build:{outDir:resolve(out,'dice3d'),emptyOutDir:true,rollupOptions:{input:{overlay:resolve(overlayRoot,'overlay.html')}}}});
+const report={out,source,assets:verifyDiceAssets(resolve(out,'dice3d'),{normalize:true})};writeFileSync(resolve(evidence,'build.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({out,verifiedAssets:true}));
