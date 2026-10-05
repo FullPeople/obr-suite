@@ -44,7 +44,7 @@ jobs:
         run: |
           test "$(git rev-parse "$BASELINE_REF^{commit}")" = "$BASELINE_REF"
           git worktree add --detach .baseline "$BASELINE_REF"
-          cp tools/dice-latency-{build,browser}.mjs tools/dice-independent-scene.mjs .baseline/tools/
+          cp tools/dice-latency-{build,browser}.mjs tools/dice-independent-scene.mjs tools/dice-tail-trace.mjs .baseline/tools/
           npm ci
           npm --prefix .paired-web ci
           npm --prefix .baseline ci
@@ -182,7 +182,7 @@ jobs:
         run: |
           test "$(git rev-parse "$BASELINE_REF^{commit}")" = "$BASELINE_REF"
           git worktree add --detach .baseline "$BASELINE_REF"
-          cp tools/dice-latency-{build,browser}.mjs tools/dice-independent-scene.mjs tools/dice-small-preservation-build.mjs .baseline/tools/
+          cp tools/dice-latency-{build,browser}.mjs tools/dice-independent-scene.mjs tools/dice-tail-trace.mjs tools/dice-small-preservation-build.mjs .baseline/tools/
           npm ci
           npm --prefix .paired-web ci
           npm --prefix .baseline ci
