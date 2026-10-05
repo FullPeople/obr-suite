@@ -35,3 +35,7 @@ Both browser runners explicitly remove Playwright's three default flags that dis
 ## Prior evidence limitation
 
 The earlier general latency runner used `--disable-background-timer-throttling` and `--disable-renderer-backgrounding`; its “card-quick-rpc” case invoked the host RPC directly, bypassing the external card, iframe initialization and opener/relay bridge. Those results cannot establish natural cross-window click-to-visible-die latency. This candidate removes two code-proven waits/traffic sources; it does not establish that the user's complete immediate-display requirement is now met on every device.
+
+## Combining with the separate ready-tail branch
+
+A local integration-only check found one textual conflict in the peer-session-restart block. Keep the ready-tail branch's `cancelled` list and its two-phase whole-group cancellation; use `dropInbound(id)` in the preceding inbound cleanup loop. Do not revert that block to the older sequential abort loop. With this resolution, the tail regression passes 34/34 and ready-clock 18/18. This check is not a merge or publication of the combined runtime.
