@@ -1,0 +1,16 @@
+{
+  "baseline": "be3b13df39477491dda0b6ec152b1bf836e22b4a",
+  "pairedWeb": "2bfc832916896e85aa22b4f36f3ba66a7bae6749",
+  "productChanges": {
+    "extensions/workbench-dice3d/src/controller.ts": {
+      "baselineSHA256": "6160f5afb4b85d0781d089bea9960998aea520b85711213b6cb29faa9194b7e3",
+      "candidateSHA256": "5a5f2d3bdadffd744746a06f245506e7470d2641495d56b5a4d9792c143d47ba",
+      "baselineGitBlob": "1173603ea2b7f5046be8d002cc00a5a9dc544998",
+      "candidateGitBlob": "5ec97e5b89278cba5091ccc5caa80b21d8ca4c5a"
+    }
+  },
+  "candidateTests": {
+    "tools/dice-ready-tail-slot.test.ts": "ecb66a5a84323e1a137e2371b3fd71c72d607c9418fb13e896728a758269d32c",
+    "tools/dice-ready-tail-slot-selftest.mjs": "b52a98e4100d8ea23dbe60099571c42c68c2979aeac5f5676beeb6fbe44f973e"
+  }
+}
