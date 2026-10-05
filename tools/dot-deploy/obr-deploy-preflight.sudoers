@@ -1,0 +1,2 @@
+# Root-owned fixed read-only helper; no arbitrary arguments, shell or SETENV.
+obr-deploy ALL=(root) NOPASSWD: /usr/bin/python3 -I -B /usr/local/libexec/obr-deploy/server_preflight.py

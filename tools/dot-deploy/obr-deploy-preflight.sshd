@@ -1,0 +1,16 @@
+# REVIEW TEMPLATE. Administrator must include this at the END of sshd_config,
+# validate with sshd -t, then reload SSH after explicit user approval.
+# Do not place Match blocks in a top-of-file include followed by global-only options.
+Match User obr-deploy
+    AuthenticationMethods publickey
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    AuthorizedKeysCommand none
+    AuthorizedKeysFile /var/lib/obr-deploy/.ssh/authorized_keys
+    ForceCommand /usr/bin/sudo -n /usr/bin/python3 -I -B /usr/local/libexec/obr-deploy/server_preflight.py
+    DisableForwarding yes
+    PermitTTY no
+    PermitTunnel no
+    PermitUserRC no
+# PermitUserEnvironment remains the existing global 'no'; this sshd version
+# does not allow that directive in Match. The installer verifies it is still no.
