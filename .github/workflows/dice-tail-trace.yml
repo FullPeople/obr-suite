@@ -1,0 +1,59 @@
+name: Trace dice tail barrier
+on:
+  push:
+    branches: [test/dice-tail-trace-20261005]
+permissions:
+  contents: read
+concurrency:
+  group: dice-tail-trace-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  trace_tail_barrier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      DND_DICE_EVIDENCE: ${{ github.workspace }}/.local-evidence/dice-tail/browser
+      DICE_LATENCY_TAIL: '1'
+      DICE_LATENCY_SOFTWARE: '1'
+      DICE_LATENCY_PIXELS: '1'
+      DICE_LATENCY_VIDEO: '0'
+      DICE_LATENCY_SCREENSHOTS: '0'
+      DICE_LATENCY_WIDTH: '844'
+      DICE_LATENCY_HEIGHT: '390'
+      DICE_LATENCY_DPR: '2'
+      DICE_LATENCY_THEME: royal_ember_resin
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: fb584043c6bed831b9ca92eab783653770c24fe6
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install pinned dependencies and official Chromium
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Assert immutable production bytes, injection boundaries and instrumented types
+        run: |
+          node --test tools/dice-tail-trace.test.mjs tools/dice-independent-scene.test.mjs
+          node tools/dice-tail-source-guard.mjs
+      - name: Build and measure only the original tail barrier
+        run: |
+          node tools/dice-latency-build.mjs
+          node tools/dice-latency-browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-tail-trace-${{ github.sha }}
+          path: .local-evidence/dice-tail/browser/
+          include-hidden-files: true
+          retention-days: 7
