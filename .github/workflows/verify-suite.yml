@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 2bfc832916896e85aa22b4f36f3ba66a7bae6749
+          ref: d33e91012cd56d20e5c2d2e3261dacd7cea09ac0
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -34,6 +34,11 @@ jobs:
       - name: Install locked paired Web dependencies
         working-directory: .paired-web
         run: npm ci
+      - name: Verify pinned progress source and linked mechanism evidence
+        working-directory: .paired-web
+        run: |
+          npm run verify:automation-source
+          npm run verify:automation-progress
       - name: Install official Chromium
         id: browser
         run: |
@@ -120,3 +125,11 @@ jobs:
             .local-evidence/action-layout/results.json
             .local-evidence/permission-notice/*.png
             .local-evidence/permission-notice/results.json
+      - name: Preserve exact paired production build for the progress release
+        uses: actions/upload-artifact@v4
+        with:
+          name: automation-progress248-suite-build
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            dist-workbench-dev/
