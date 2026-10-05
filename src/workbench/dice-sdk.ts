@@ -36,7 +36,11 @@ function install3dChoices(){
  on('player',()=>{selected=String(reads['player.getMetadata']?.['com.obr-suite/dice/3d-theme']||'ink_sketch');update();});
  const title=document.createElement('p');title.textContent='骰子材质 · 使用你的枭熊玩家颜色';const volume=document.createElement('input');volume.type='range';volume.min='0';volume.max='100';volume.value=localStorage.getItem('obr-suite/dice3d/volume')||'100';volume.setAttribute('aria-label','3D 骰子音量');volume.oninput=()=>{localStorage.setItem('obr-suite/dice3d/volume',volume.value);void rpc('dice3d.audio',Number(volume.value)/100);};const label=document.createElement('label');label.className='dice3d-volume';label.textContent='骰子音量 ';label.append(volume);skinPane.replaceChildren(title,material,label,preview);update();
 }
-const api:any={isAvailable:true,isReady:true,onReady:(fn:()=>void)=>{void ready.then(async()=>{void watchLoading();await fn();install3dChoices();await rpc('dice3d.history');document.body.dataset.bridgeReady='true';parent.postMessage({channel,ready:true},location.origin);}).catch(error=>{loading.update({ready:false,error:String(error)});document.body.dataset.bridgeError=String(error);});},room:{get id(){return roomId;}},
+const api:any={isAvailable:true,isReady:true,onReady:(fn:()=>void)=>{void ready.then(async()=>{void watchLoading();await fn();install3dChoices();
+ // A quick composer has no history consumer. Replaying every saved result on
+ // each open needlessly occupies the shared, rate-limited dice transport.
+ if(subscriptions.get('com.obr-suite/dice-roll')?.size)await rpc('dice3d.history');
+ document.body.dataset.bridgeReady='true';parent.postMessage({channel,ready:true},location.origin);}).catch(error=>{loading.update({ready:false,error:String(error)});document.body.dataset.bridgeError=String(error);});},room:{get id(){return roomId;}},
  dice3d:{submit:async(req:any)=>{const result=await rpc('dice3d.submit',{...req,visibility:'all',globalDark:localStorage.getItem('obr-suite/dice/global-dark-roll')==='1'});rememberExpression(req.expression);return result;}},
  player:Object.fromEntries(['getId','getConnectionId','getName','getColor','getRole','getMetadata','getSelection','setMetadata'].map(key=>[key,async(...args:any[])=>{if(key==='setMetadata'){const result=await rpc('player.'+key,...args);reads['player.getMetadata']={...reads['player.getMetadata'],...args[0]};return result;}return read('player.'+key,...args);}])),
  party:{getPlayers:()=>read('party.getPlayers')},
