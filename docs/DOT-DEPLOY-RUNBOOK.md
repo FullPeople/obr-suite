@@ -1,97 +1,71 @@
-# dot GitHub 部署接入：预检阶段，2026-10-06
+# dot GitHub 部署接入 · 只读预检阶段
 
-本分支只准备连接与只读预检。没有安装服务器文件、创建账号/密钥、填写 Secrets、修改 Environment/保护规则/防火墙、切换线上版本或开启持续部署。`server_preflight.py` 没有发布、上传、回滚和任意 shell 入口。原发布器仍是生产发布与回滚的权威；自动生产发布尚未接通。
+2026-10-06 用户批准后，已安装专用账号、固定只读入口及 SSH 隔离，配置两个 Environment。**生产发布尚未接通。** 本工作流仅手动触发预检；没有生产写入、上传或回滚入口，也没有持续发布触发器。最终实际 SSH/OIDC 结果与完整 CI 以交接回执为准，不能由配置完成推断通过。
 
-## 已核对的目标与权限边界
-
-| 仓库 | 唯一发布源分支 | 本阶段 Environment | 固定站点 | 当前线上版本 |
+| 仓库 | 允许分支 | Environment | 固定目标 | 配置时线上版本 |
 | --- | --- | --- | --- | --- |
-| FullPeople/DND-card-web | main | production-card | https://obr.dnd.center/card/ → /var/www/obr-plugins/card | standalone-1.0.246 |
-| FullPeople/obr-suite | dev | production-suite-dev | https://obr.dnd.center/suite-dev/ → /var/www/obr-plugins/suite-dev | 1.0.247-dev |
+| FullPeople/DND-card-web | main | production-card | obr.dnd.center/card/ → /var/www/obr-plugins/card | standalone-1.0.248 |
+| FullPeople/obr-suite | dev | production-suite-dev | obr.dnd.center/suite-dev/ → /var/www/obr-plugins/suite-dev | 1.0.248-dev |
 
-FUS、稳定 `/suite/`、独立三龙站点、后台服务、relay、Nginx、systemd 和玩家数据不纳入发布。只读保护校验会散列固定保护文件/站点并读取服务运行起点；不读取数据库、密码、私钥或令牌文件。
+FUS、稳定 suite、独立三龙站点、后台服务、relay、Nginx、systemd 与玩家数据均不纳入发布。配置前发现其他发布已从246/247推进到248；保留新的产品与 CI 基线，以正常合并更新准备分支，未强推、回退或覆盖线上。
 
-本机 SSH 已用既有认证、严格主机校验完成只读调查。服务器目前仅有 root 可进行通常的 SSH 登录，没有可复用的专用部署账号。既有 root 私钥不会放入 GitHub。服务器已有 `/run/lock/obr-static-release.lock`、`/root/codex-release-packages/`、`/root/codex-release-receipts/` 和本轮完整备份。
+## 已执行的持续授权
 
-服务器 SSH Ed25519 公钥指纹为 `SHA256:bS1JRj3+1zJntm+ZOKtjlRhK7MjAAOEdKOdnKq+2yco`。这是公钥指纹，不是秘密；工作流固定检查它，没有关闭主机校验。
+- 服务器 `obr-deploy`（uid996）：密码锁定；home、authorized_keys、helper 与 sudoers 均由 root 管理。唯一 sudo 命令 `/usr/bin/python3 -I -B /usr/local/libexec/obr-deploy/server_preflight.py`；不接受可变参数。helper 只接受 `preflight`，固定仓库/分支/Environment/目标与 JSON 字段，没有通用命令入口。
+- `/etc/ssh/obr-deploy-preflight.conf` 在主配置末尾以 Match all + Include 加载。只针对此账号允许公钥、禁用密码/键盘认证及云动态 AuthorizedKeysCommand；固定 authorized_keys 和 ForceCommand，禁用转发、PTY、tunnel、user rc。用户环境继承既有全局 no。`sshd -t`、原 root/sync 有效配置一致检查、SSH reload 和 root 重新连接通过。未修改防火墙。
+- 两个 Environment 仅允许表中精确 branch，无 tag/通配符；审批人 FullPeople，管理员不可跳过。同账号人工审批保留，Prevent self-review 关闭；dot 不能代替人工审批。
+- `DEPLOY_KNOWN_HOSTS` 已填入已核对的服务器公开 host key；指纹固定为 `SHA256:bS1JRj3+1zJntm+ZOKtjlRhK7MjAAOEdKOdnKq+2yco`。未读取服务器私钥。
+- 安装期间持有既有 `/run/lock/obr-static-release.lock`。五站点全量散列、固定保护文件与后台服务状态前后一致；任意 sudo 与 publish 负例被拒绝。安装回执 `/root/codex-release-receipts/dot-deploy-preflight-20261006.json`；SSH 配置原件仅保存在服务器 root 管理目录，未上传仓库。
 
-## 实际检查结果与缺口
+## 用户安全入口步骤
 
-- 线上 card 有 1011 个文件，suite-dev 有 5113 个文件；当前全树匹配各自发布回执，归档内容/源 ZIP 绑定校验通过。246、247 完整备份分别有 941、5103 个文件，并匹配原始基线。锁可取得，renameat2 可用，调查时剩余服务器空间约 10.2 GiB。
-- 旧回执的 relay 运行起点已变化，因此当前受控历史回滚会因保护门禁停止。保留此限制；不能将旧备份存在表述为“此刻可以无条件回滚”。没有执行回滚或覆盖保护基线。
-- Web `production-card` 已存在，允许分支列表为空、无 Secrets/Variables、无 required reviewer；Suite 没有专用 Environment。没有修改这些设置。
-- Web main 的调查基线是 `b0e61826849b54b9264d9254cbec4759e23f7640`；Suite dev 是 `64a0cbb215f77a94bea0c84d11aabd9408660bfa`；Suite 默认 main 是 `639c8217b41905fbde4222783ff16e95bde13b67`。main/dev 当前是 `[skip ci]` 文档提交，旧成功 CI 不是这些新 SHA 的成功门禁。合入预检工具后必须为最终 SHA 执行完整 CI。
-- Suite 默认分支是 main。首次 workflow_dispatch 注册需要 workflow 路径同时存在于默认 main 与执行 dev；另备一个仅添加这些新文件的 main 注册分支，不能整体合入 dev 到稳定 main。
-- 当前 GitHub 连接可读取两个仓库，已识别 FullPeople；提供创建 issue、读取/重跑部分 Actions 的工具，但没有创建 workflow_dispatch 的工具。dot 本身的连接方式尚未确认；本机 gh 有权限不代表 dot 已能触发。工作流需要 dot 自己的现有登录态/API能力，或另经确认的 IssueOps 触发适配。没有创建新的 dot 凭据或 PAT。
+尚未由工具创建或读取部署私钥；安装时 authorized_keys 为空、Environment Secrets 为空。用户只选择/生成**一个**专用身份，沿用到两个 Environment；不复用 root 私钥，不创建第二套 PAT/SSH 身份。
 
-## 需要用户逐项批准的配置（尚未执行）
-
-1. **一个服务器账号 `obr-deploy` 与只读固定入口。** 目标是从 GitHub-hosted runner 使用 TCP 22 连接 obr.dnd.center。锁定账号密码，无通用 sudo；账号/home/.ssh 布局由 root 管理，账号不能写入 authorized_keys 或发布脚本。唯一 sudo 命令是 `/usr/bin/python3 -I -B /usr/local/libexec/obr-deploy/server_preflight.py`，无可变参数。SSH 公钥必须带 `restrict,command="/usr/bin/sudo -n /usr/bin/python3 -I -B /usr/local/libexec/obr-deploy/server_preflight.py"`。禁用 PTY、端口/agent/X11 转发与用户 rc；用户请求的远端命令被固定入口代替。入口只返回指定目标与保护状态的散列/容量/门禁结果，不能上传、发布、回滚、改服务或运行任意命令。后果是一个持续存在但只读的服务器访问授权；撤销对应 authorized_keys 项和 sudoers 文件即可停止该入口。此阶段没有任何生产写权限。
-2. **复用 Web `production-card`，新建 Suite `production-suite-dev`。** 只允许 branch main/dev（无 tag/通配符），设置 required reviewer 为用户确认的审批人，禁用管理员跳过审批；保留任何新发现的现有审批。如审批人为 FullPeople 且 dot 使用同一 FullPeople 身份，开启 Prevent self-review 会阻止该身份审批自己触发的运行。需用户决定保留同账号人工审批，还是指定另一个已有审批人；不擅自创建账号或放松审批。本阶段工作流仅 workflow_dispatch，绝不增加 push/workflow_run/issue 发布触发器。
-3. **一个专用 SSH 身份，由用户通过安全入口管理。** 未发现既有受限部署身份可复用；先经用户批准，再由用户在安全平台/密钥管理入口生成或选择一个身份，把公钥以第1项限制安装到服务器，把同一私钥分别提交到两个 Environment 的 `DEPLOY_SSH_KEY`。不创建第二套 SSH 密钥，不复制 root 私钥，不写入聊天、截图、日志、仓库或 GitHub repository-level Secret。`DEPLOY_KNOWN_HOSTS` 是 Environment Variable，内容是与上述指纹匹配的唯一 `obr.dnd.center ssh-ed25519 ...` 公钥行，由平台入口填写。工作流没有密码回退和主机信任回退。
-
-4. **只针对 `obr-deploy` 的 SSH 隔离设置和 SSH 服务 reload。** 实测全局启用了云平台动态 `AuthorizedKeysCommand`。仅设置 authorized_keys 上的 restrict 不能约束该替代认证路径，故必须先安装 `obr-deploy-preflight.sshd` 对应的 Match User 配置：仅允许公钥、关闭密码/键盘认证、禁用此账号的动态公钥入口、固定唯一 authorized_keys 文件、ForceCommand 固定 helper、DisableForwarding、禁止 PTY/tunnel/user-rc。user-environment 继承现有全局 no；本服务器不允许该选项写在 Match 中，安装器检查最终有效值仍为 no。固定配置文件建议 `/etc/ssh/obr-deploy-preflight.conf`，管理员审查后在主配置末尾 Include，执行 `sshd -t` 并 reload SSH；不影响 root/其他用户的规则，不重启或断开现有连接。若配置结构/平台机制不允许如此隔离，停止而非扩大权限。后果是此账号失去常规终端与云平台临时公钥登录能力，只能使用指定入口；保留账号时不能先移除这个限制再留下动态认证路径。
-
-账号和固定 sudo 入口的安装模板见 `tools/dot-deploy/admin-install-preflight.sh`。它在创建账号前检查已批准并生效的 Match User 规则；没有替用户编辑/reload SSH 配置。这些均是审查材料，不是本轮已执行操作。需要 root 是因为历史发布根和服务保护文件目前由 root 管理；授予的是精确只读程序，并非 root shell。管理员安装/检查完成、用户填好认证材料后才运行一次 GitHub 连接预检。**不修改防火墙；GitHub runner 到 TCP 22 的实际可达性尚待该次运行验收。**
-
-## 工作流与输入
-
-- 名称 `Dot deployment preflight`，路径 `.github/workflows/dot-deploy-preflight.yml`。
-- 唯一触发是 workflow_dispatch；目标、host、port、账号、路径、命令、Environment、允许分支均不能由输入改写。
-- 输入 `ci_run_ids`：逗号分隔的完整成功 CI run IDs，必须对应执行分支的精确当前 SHA，不能用旧发布的绿灯顶替。
-- Web 必须包含 `.github/workflows/web.yml` 的完整 verify/全部浏览器矩阵。
-- Suite 必须同时包含 `.github/workflows/verify-suite.yml`、`dice-cross-window-ready.yml`、`dice-release246-profile.yml`。保持精确配套 Web SHA、`DND_CARD_WEB_ROOT`、原来的类型/构建/浏览器/源码/时钟/资源/视口门禁。所有 jobs 必须 completed/success，取消、失败、跳过或分页不全都拒绝。
-- 输入 `expected_release_sha256`：目标当前 `release.json` 的完整 SHA256。本轮 card 为 `9ea58837f7f53f6e4d11008661b24c99c4f1d4b32903ad31eec4382308319e2b`，suite-dev 为 `d855baa42db68d3c4a8e24f60bc86c6cc4d79f14d7ce4af03b2d64083311a705`。再次运行前需刷新，不能无限沿用历史值。
-- GitHub 提供短时 OIDC。服务器用官方固定 JWKS 与 OpenSSL 验证签名，检查 repository ID、owner ID、branch、Environment、workflow 路径/SHA、github-hosted runner、event、audience、有效期。SSH key 单独泄漏也不能替代正确的 GitHub job 身份。JWT 不打印或持久保存，不另设凭据。
-- `concurrency.cancel-in-progress:false` 保留运行；跨仓库全局串行依靠现有服务器锁，抢锁失败即停止，不能依靠 GitHub 仓库内 concurrency 假称全局串行。
-- GitHub-hosted runner 执行预检，电脑关机不影响已经触发的运行。服务器没有安装自托管 runner。
-
-## 触发与看结果（配置验收后才适用）
-
-dot 必须使用自己的现有 GitHub 认证进行以下 API/网页操作，不读取本机会话的 token。REST 入口是 `POST /repos/FullPeople/DND-card-web/actions/workflows/dot-deploy-preflight.yml/dispatches`，Suite 则是 `FullPeople/obr-suite` 同一路径；ref 分别 main/dev，inputs 如上。该 API 需要现有认证的 Actions write 权限。当前连接器未提供此调用，不能将以下 CLI 示例当成 dot 已验收。
+服务器安全控制台由管理员把该身份公钥写成唯一一行，保持 root 所有、0644，目录0755：
 
 ```text
-gh workflow run dot-deploy-preflight.yml --repo FullPeople/DND-card-web --ref main -f ci_run_ids=<exact-full-ci-run> -f expected_release_sha256=<fresh-card-release-hash>
-gh workflow run dot-deploy-preflight.yml --repo FullPeople/obr-suite --ref dev -f ci_run_ids=<suite-ci>,<cross-window-ci>,<resource-ci> -f expected_release_sha256=<fresh-suite-dev-release-hash>
-gh run list --repo FullPeople/DND-card-web --workflow dot-deploy-preflight.yml
-gh run view <run-id> --repo FullPeople/DND-card-web
+restrict,command="/usr/bin/sudo -n /usr/bin/python3 -I -B /usr/local/libexec/obr-deploy/server_preflight.py" ssh-ed25519 <public-key>
 ```
 
-在 Actions 页面批准对应 Environment 等待项；dot 不代替用户审批。查看 run conclusion、job summary 及 `dot-preflight-<run_id>` artifact 的 `preflight.json`。必须为 `ok:true`、正确 target/精确 SHA，且 onlineVersionWrites/persistentServerWrites=false。签名验证只暂存公开验签公钥/签名字节，SSH 私钥只在托管 runner 的临时目录短暂存在并清理；JWT 和私钥没有日志、证据上传或仓库写入路径。
+将同一私钥分别通过 GitHub Environment 的安全输入框提交为 `DEPLOY_SSH_KEY`：
 
-`Validate dot deploy contract` / `.github/workflows/dot-deploy-contract.yml` 是无认证材料的 Linux 单元测试，独立分支上的成功只证明合约测试通过，不证明 SSH/OIDC/Environment 或 dot 首次触发通过。
+- [Web Environment 设置](https://github.com/FullPeople/DND-card-web/settings/environments) → production-card。
+- [Suite Environment 设置](https://github.com/FullPeople/obr-suite/settings/environments) → production-suite-dev。
 
-## 正式发布前的独立确认与验收
+密码、令牌、私钥不进入聊天、截图、日志或仓库。授权完成后只检查 Secret 名称、服务器公钥数量/指纹、权限；不读取 Secret 值。真实 GitHub runner TCP22 可达性、受限 SSH 与真实 OIDC 尚须单次预检验收。
 
-本阶段没有自动发布工作流、生产写入 sudo 权限或待执行的服务器 apply。正式部署仍需以下具体工作与用户确认，不能将预检工作流称为“自动部署已打通”：
+## 工作流、输入与门禁
 
-1. 用户确认正式允许的仓库/分支/目标及“手动 dot 请求后审批发布”或“指定分支完整 CI 成功后请求审批发布”的触发条件；任何持续触发器只在该确认后添加。分支保护/审批人配置需单独审查，禁止强推、删除保护或绕过审批。
-2. 准备精确 SHA 组合的完整候选产物、GitHub artifact SHA256/源 ZIP 绑定/manifest 与逐文件散列；Suite 现有 CI 产出主要是证据，仍需增加受校验的生产包产物，不能发布未经过完整门禁的新构建。CI gate、实际打包源码/配套 Web SHA、发布 SHA 必须一致。
-3. 审查并安装固定生产发布适配器，复用已有 atomic_frontends.py 的归档校验、全树基线、全局锁、所有本轮备份先于任何切换、保留旧哈希资源与源码别名、renameat2、逐步回执、失败回滚、保护散列和回滚漂移拒绝。不得接受上传的可执行发布器、客户端任意路径或 root 命令。现有成对发布器与单目标发布器的目标集合/保护集合不同，必须针对这两个范围审查；不能只改 TARGETS 而漏保护集合。
-4. 先在 GitHub runner 完成一次新连接/只读预检，用 dot 自身认证触发并看见结果。当前阶段此项未完成，因为第1至3项持续授权尚未批准/配置。
-5. 展示预检与完整候选包结果、刷新线上及 Git 现场，获得首次生产发布确认，然后按 Environment 规则人工审批。发布后验证公网版本/全量文件/源码/压缩/必要交互和所有非目标保护状态。
+工作流名 `Dot deployment preflight`，路径 `.github/workflows/dot-deploy-preflight.yml`，唯一触发 `workflow_dispatch`。Suite 默认 main 只注册同一套预检文件；不得把 dev 产品整体合入 main。main 上 Suite 预检主动拒绝，实际执行仅 dev。
 
-本轮历史包审计验证了当前已发布产物；新预检入口返回 `candidateArtifactValidated:false`，明确未验新候选包。真实玩家设备和真实 Owlbear 房间不由部署连接测试验收。
+输入均必填：
 
-## 现有回滚入口（本轮只检查，未执行）
+- `ci_run_ids`：逗号分隔的最终分支精确 SHA 完整成功 CI IDs。Web 必须 Verify web（web.yml，完整 verify/浏览器矩阵）；Suite 必须 verify-suite.yml、dice-cross-window-ready.yml、dice-release246-profile.yml（保留四资源 job）。所有 jobs 必须 completed/success，失败、取消、跳过和分页不全均拒绝。
+- `expected_release_sha256`：当前目标 release.json SHA256。配置时 card `d156e0fdc5cf848911cdacec2d61ef2ad6318428b1db607faf10bed38dbfa50a`；suite-dev `cbcc8b635eaf2d6b71e80205e246d33f70af69e306c72addc99723e1e2e56e16`。每次运行前刷新，不能沿用旧线上值。
 
-Suite 247 的固定历史入口：
+保留最新既有完整 CI 与其精确 paired Web SHA；当前 Suite verify-suite 的配套 Web 是 `0dde358a2382d4c3d88977165f3a854feb0609e4`，含新自动化来源验证。接入不重写已有测试门禁。
+
+服务器固定验证 GitHub 官方 JWKS/RS256、issuer/audience、repository ID/owner ID、branch、Environment、workflow 路径/SHA、job SHA、github-hosted、event 和短期有效期；SSH key 本身不能绕过 OIDC。运行前后复核当前分支头，旧绿灯不能替代当前 SHA。
+
+使用 GitHub-hosted runner，不安装本机/服务器自托管 runner；触发后用户电脑离线不影响任务。仓库 concurrency 不取消既有运行；跨仓库串行依靠服务器现有全局锁，锁忙即拒绝。只读检查验证当前全树、保护状态、备份/暂存容量和 renameat2，不持久改线上；返回 `candidateArtifactValidated:false`，不冒充新候选包验收。
+
+## dot 触发与查结果
+
+dot 使用自身现有 GitHub 认证调用 `POST /repos/<固定仓库>/actions/workflows/dot-deploy-preflight.yml/dispatches`，ref main/dev，inputs 如上。需要现有认证的 Actions write；不得依赖本机 gh token。当前可用连接器已实际验过 Actions rerun，但没有首次 dispatch 工具；dot 首次请求仍需其现有认证/API能力验收，或另行审查触发适配。不能把本机 CLI 成功表述为 dot 已可用。
 
 ```text
-python3 /root/codex-release-packages/dice-cross-window-tail247-20261005-r2/atomic_frontends.py --archives /root/codex-release-packages/dice-cross-window-tail247-20261005-r2 --receipt-sha 5ee9fe5309e19af7f14eb5c581f5c8a33757e45564212096a6d1bd4246e07411 --rollback
+gh workflow run dot-deploy-preflight.yml --repo FullPeople/DND-card-web --ref main -f ci_run_ids=<exact-ci> -f expected_release_sha256=<fresh-hash>
+gh workflow run dot-deploy-preflight.yml --repo FullPeople/obr-suite --ref dev -f ci_run_ids=<suite-ci>,<cross-window-ci>,<resource-ci> -f expected_release_sha256=<fresh-hash>
+gh run list --repo <fixed-repository> --workflow dot-deploy-preflight.yml
+gh run view <run-id> --repo <fixed-repository>
 ```
 
-Web 246 的旧成对入口同时涉及 card 与 suite-dev，不能当成独立 card 回滚命令：
+FullPeople 在 Actions 网页人工批准对应 Environment。查看 conclusion、summary 与 `dot-preflight-<run-id>` artifact 的 `preflight.json`；验收必须 `ok:true`、正确 target/精确 SHA，onlineVersionWrites/persistentServerWrites=false。密钥仅托管 runner 临时目录使用后清理；JWT 只在内存/stdin，不输出。合约工作流 `Validate dot deploy contract` / dot-deploy-contract.yml 无凭据，只证明授权与拒绝合约测试通过。
 
-```text
-python3 /root/codex-release-packages/resource-repair246-20261005/atomic_frontends.py --archives /root/codex-release-packages/resource-repair246-20261005 --receipt-sha c38fcb4a19d9771451fd5cbefe5a8ea6cfec4d40f02a489edbe3f4e4d78a43ed --rollback
-```
+## 正式发布与回滚仍需完成
 
-两者目前保护状态不匹配；246 还会检查配套 suite-dev 是否仍为246，当前已247，因此不可直接执行。以后 dot 的固定回滚工作流必须关联新的发布回执、指定 Environment 人工审批、同一个受限账号/固定入口，并保留漂移拒绝。此阶段 SSH 入口明确拒绝 rollback。管理员需独立审查历史恢复影响，不修改旧回执让门禁强行通过。
+真实预检通过后展示结果，用户再确认首次生产目标和持续触发条件。随后准备精确 SHA 产物（含 Suite 受校验生产包）、全文件/源 ZIP 绑定和 artifact 散列，审查固定生产入口并另行批准写权限。复用原 atomic_frontends.py 的全局锁、归档/全树校验、全部目标本轮备份先于切换、历史资源保留、renameat2、发布回执、失败回滚及保护漂移拒绝；不接受上传的可执行发布器、任意路径/root 命令。
 
-## 参考
+最新248发布的管理员恢复入口为 `/root/codex-release-packages/automation-progress248-20261006/atomic_frontends.py`，受其精确 package-receipt 散列及原保护状态约束，目标成对 card + suite-dev。最终交接另给实际校验结果；不得只回滚其中一站、改写旧回执或使用246/247的旧入口恢复248。新账号/helper 明确拒绝 rollback；dot 固定回滚工作流尚未启用。撤销访问时先撤销 authorized_keys/Environment Secret 与 sudo 入口，再停用账号，保留限制直到账号停用；不留下云动态认证路径。
 
-- GitHub workflow_dispatch 默认分支注册及 Actions write：[GitHub workflows API](https://docs.github.com/en/rest/actions/workflows)。
-- 人工审批与 self-review 行为：[Reviewing deployments](https://docs.github.com/en/actions/how-tos/managing-workflow-runs-and-deployments/managing-deployments/reviewing-deployments)。
-- 官方 JWT claims/JWKS：[OpenID Connect reference](https://docs.github.com/en/actions/reference/security/oidc)。
-- 固定命令与 restrict：[OpenSSH sshd manual](https://man.openbsd.org/sshd.8)。
+参考：[GitHub workflows API](https://docs.github.com/en/rest/actions/workflows)、[Environment 审批](https://docs.github.com/en/actions/how-tos/managing-workflow-runs-and-deployments/managing-deployments/reviewing-deployments)、[OIDC](https://docs.github.com/en/actions/reference/security/oidc)、[OpenSSH](https://man.openbsd.org/sshd.8)。
