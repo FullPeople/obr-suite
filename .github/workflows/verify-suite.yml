@@ -1,0 +1,135 @@
+name: Verify Suite candidate
+on:
+  push:
+    branches: [codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: suite-verify-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out exact paired Web source
+        uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 0dde358a2382d4c3d88977165f3a854feb0609e4
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked Suite dependencies
+        run: npm ci
+      - name: Install locked paired Web dependencies
+        working-directory: .paired-web
+        run: npm ci
+      - name: Verify pinned progress source and linked mechanism evidence
+        working-directory: .paired-web
+        run: |
+          npm run verify:automation-source
+          npm run verify:automation-progress
+      - name: Install official Chromium
+        id: browser
+        run: |
+          npx playwright install --with-deps chromium
+          node --input-type=module -e "import {chromium} from '@playwright/test'; console.log('CHROMIUM_PATH='+chromium.executablePath())" >> "$GITHUB_ENV"
+      - name: Suite regression tests
+        id: tests
+        run: node tools/verify-suite-candidate.mjs
+      - name: Typecheck and build stable host with paired card viewer
+        run: npm run build
+      - name: Build dev host and retained historical Three Dragon fixture
+        run: |
+          npm run build:workbench-dev
+          npm run build:three-dragon
+      - name: Verify public-link source archive is reproducible
+        shell: bash
+        run: |
+          set -euo pipefail
+          for source in tools/three-dragon-website-entry.html tools/build-workbench-panels.mjs tools/build-three-dragon-overlay.mjs three-dragon-ante.html vite.config.ts; do
+            tar -xOf dist-workbench-dev/workbench/suite-source.zip "$source" | cmp - "$source"
+          done
+      - name: Verify final public website links and retired-game negative controls
+        run: node tools/three-dragon-website-entry-selftest.mjs --built
+      - name: Public website links wide and narrow browser regression
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: node tools/three-dragon-website-entry-browser.mjs
+      - name: Historical Three Dragon layout and exit fixture regression
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: node tools/three-dragon-seat-exit-browser.mjs
+      - name: Announcement DOM regression
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: node tools/announcement-scope-browser.mjs
+      - name: Action launcher DOM regression
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: node tools/action-launcher-layout-browser.mjs
+      - name: Cold player SDK browser regression
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: WEB_ROOT="$DND_CARD_WEB_ROOT" PLAYWRIGHT_EXECUTABLE_PATH="$CHROMIUM_PATH" PROFILE_OUT=.local-evidence/owner-cold-browser EXPECT_PASS=1 node tools/workbench-owner-cold-sdk-selftest.mjs
+      - name: Permission guide browser and wide/narrow screenshots
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: node tools/permission-notice-browser-selftest.mjs
+      - name: Preserve bounded synthetic-test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suite-verification-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            .local-evidence/three-dragon-website-entry/
+            .local-evidence/three-dragon-website-browser/
+            .local-evidence/three-dragon-seat-exit/
+            .local-evidence/owner-cold-browser/
+            .local-evidence/verification/owner-cold-sdk/vm-results.json
+            .local-evidence/permission-notice/
+            .local-evidence/verification/*.log
+            .local-evidence/verification/results.json
+            .local-evidence/native-owner/results.json
+            .local-evidence/announcement-scope/*.png
+            .local-evidence/announcement-scope/*.zip
+            .local-evidence/announcement-scope/results.json
+            .local-evidence/action-layout/*.png
+            .local-evidence/action-layout/*.zip
+            .local-evidence/action-layout/results.json
+            .local-evidence/permission-notice/*.png
+            .local-evidence/permission-notice/results.json
+      - name: Preserve compact visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suite-visual-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            .local-evidence/three-dragon-website-entry/
+            .local-evidence/three-dragon-website-browser/
+            .local-evidence/three-dragon-seat-exit/*.png
+            .local-evidence/three-dragon-seat-exit/*.json
+            .local-evidence/announcement-scope/*.png
+            .local-evidence/announcement-scope/results.json
+            .local-evidence/action-layout/*.png
+            .local-evidence/action-layout/results.json
+            .local-evidence/permission-notice/*.png
+            .local-evidence/permission-notice/results.json
+      - name: Preserve exact paired production build for the progress release
+        uses: actions/upload-artifact@v4
+        with:
+          name: automation-progress248-suite-build
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            dist-workbench-dev/
