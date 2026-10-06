@@ -18,8 +18,8 @@ AUDIENCE = 'https://obr.dnd.center/dot-deploy'
 ROOT = Path('/var/www/obr-plugins')
 LOCK = Path('/run/lock/obr-static-release.lock')
 POLICIES = {
-    'card': {'repository':'FullPeople/DND-card-web', 'repository_id':'1378484252', 'branch':'main', 'environment':'production-card', 'ci_paths':('.github/workflows/web.yml',)},
-    'suite-dev': {'repository':'FullPeople/obr-suite', 'repository_id':'1222135055', 'branch':'dev', 'environment':'production-suite-dev', 'ci_paths':('.github/workflows/verify-suite.yml','.github/workflows/dice-cross-window-ready.yml','.github/workflows/dice-release246-profile.yml')},
+    'card': {'repository':'FullPeople/DND-card-web', 'repository_id':'1378484252', 'branch':'main', 'environment':'production-card', 'subject':'repo:FullPeople@166210040/DND-card-web@1378484252:environment:production-card', 'ci_paths':('.github/workflows/web.yml',)},
+    'suite-dev': {'repository':'FullPeople/obr-suite', 'repository_id':'1222135055', 'branch':'dev', 'environment':'production-suite-dev', 'subject':'repo:FullPeople/obr-suite:environment:production-suite-dev', 'ci_paths':('.github/workflows/verify-suite.yml','.github/workflows/dice-cross-window-ready.yml','.github/workflows/dice-release246-profile.yml')},
 }
 SHA = re.compile(r'[a-f0-9]{40}')
 HASH = re.compile(r'[a-f0-9]{64}')
@@ -97,7 +97,7 @@ def authorize(request, claims, now=None):
     require(len(set(request['ci_run_ids'].split(',')))==len(request['ci_run_ids'].split(',')),'duplicate-ci-runs')
     require(isinstance(request['expected_release_sha256'],str) and HASH.fullmatch(request['expected_release_sha256']),'invalid-baseline-hash')
     policy = POLICIES[request['target']]; repo = policy['repository']; branch = policy['branch']
-    expected = {'iss':ISSUER, 'aud':AUDIENCE, 'repository':repo, 'repository_id':policy['repository_id'], 'repository_owner_id':'166210040', 'ref':'refs/heads/'+branch, 'ref_type':'branch', 'sub':'repo:'+repo+':environment:'+policy['environment'], 'environment':policy['environment'], 'event_name':'workflow_dispatch', 'runner_environment':'github-hosted', 'workflow_ref':repo+'/.github/workflows/dot-deploy-preflight.yml@refs/heads/'+branch, 'sha':request['sha'], 'workflow_sha':request['sha']}
+    expected = {'iss':ISSUER, 'aud':AUDIENCE, 'repository':repo, 'repository_id':policy['repository_id'], 'repository_owner_id':'166210040', 'ref':'refs/heads/'+branch, 'ref_type':'branch', 'sub':policy['subject'], 'environment':policy['environment'], 'event_name':'workflow_dispatch', 'runner_environment':'github-hosted', 'workflow_ref':repo+'/.github/workflows/dot-deploy-preflight.yml@refs/heads/'+branch, 'sha':request['sha'], 'workflow_sha':request['sha']}
     require(all(claims.get(k)==v for k,v in expected.items()),'oidc-scope-denied')
     now = int(time.time()) if now is None else now
     for field in ('iat','nbf','exp'): require(type(claims.get(field)) is int,'invalid-token-time')
