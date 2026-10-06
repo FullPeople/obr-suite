@@ -36,7 +36,7 @@ restrict,command="/usr/bin/sudo -n /usr/bin/python3 -I -B /usr/local/libexec/obr
 
 ## 工作流、输入与门禁
 
-工作流名 `Dot deployment preflight`，路径 `.github/workflows/dot-deploy-preflight.yml`，唯一触发 `workflow_dispatch`。Suite 默认 main 只注册同一套预检文件；不得把 dev 产品整体合入 main。main 上 Suite 预检主动拒绝，实际执行仅 dev。
+工作流名 `Dot deployment preflight`，路径 `.github/workflows/dot-deploy-preflight.yml`，唯一触发 `workflow_dispatch`。Suite 默认 main 注册同一套预检文件及完整CI入口；跨窗口/四资源CI仅补workflow_dispatch，测试内容不变。不得把 dev 产品整体合入 main。main 上 Suite 预检主动拒绝，实际执行仅 dev。
 
 输入均必填：
 
