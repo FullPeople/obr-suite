@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 0dde358a2382d4c3d88977165f3a854feb0609e4
+          ref: b4f65410970ece89018d53fc3e79950951c344f5
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -38,6 +38,7 @@ jobs:
         working-directory: .paired-web
         run: |
           npm run verify:automation-source
+          npm run verify:automation-runtime
           npm run verify:automation-progress
       - name: Install official Chromium
         id: browser
@@ -128,7 +129,7 @@ jobs:
       - name: Preserve exact paired production build for the progress release
         uses: actions/upload-artifact@v4
         with:
-          name: automation-progress248-suite-build
+          name: automation-progress249-suite-build
           retention-days: 7
           if-no-files-found: error
           path: |
