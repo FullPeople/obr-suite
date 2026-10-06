@@ -1,5 +1,6 @@
 name: Verify released dice resources 246
 on:
+  workflow_dispatch:
   push:
     branches: [codex/resource-repair246-20261005, dev]
 permissions:

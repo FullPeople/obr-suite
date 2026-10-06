@@ -1,5 +1,6 @@
 name: Verify dice cross-window ready
 on:
+  workflow_dispatch:
   push:
     branches: [codex/dice-tail247-20261005, fix/dice-cross-window-ready-246-20261005, fix/dice-cross-window-tail-246-20261005]
 permissions:

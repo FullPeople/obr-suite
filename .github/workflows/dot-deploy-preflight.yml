@@ -1,0 +1,63 @@
+name: Dot deployment preflight
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_ids:
+        description: 'Successful full CI run IDs for this exact branch SHA, comma separated'
+        type: string
+        required: true
+      expected_release_sha256:
+        description: 'SHA256 of the current suite-dev/release.json; drift stops the check'
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: obr-static-preflight
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Enforce fixed repository and branch
+        env:
+          ALLOWED_REPOSITORY: FullPeople/obr-suite
+          ALLOWED_REF: refs/heads/dev
+        run: |
+          test "$GITHUB_REPOSITORY" = "$ALLOWED_REPOSITORY"
+          test "$GITHUB_REF" = "$ALLOWED_REF"
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+      - name: Test authorization and rejection behavior without credentials
+        working-directory: tools/dot-deploy
+        run: python3 -B -m unittest -v test_preflight
+  preflight:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: production-suite-dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Fixed SSH entry point - read only
+        env:
+          CI_RUN_IDS: ${{ inputs.ci_run_ids }}
+          EXPECTED_RELEASE_SHA256: ${{ inputs.expected_release_sha256 }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+        run: python3 -B tools/dot-deploy/runner_preflight.py
+      - name: Preserve only the sanitized check result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dot-preflight-${{ github.run_id }}
+          path: .local-evidence/dot-deploy/preflight.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
