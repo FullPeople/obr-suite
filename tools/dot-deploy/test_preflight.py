@@ -17,17 +17,34 @@ def request(target='card'):
 
 def claims(target='card'):
     p=s.POLICIES[target]; repo=p['repository']; ref='refs/heads/'+p['branch']
-    return {'iss':s.ISSUER,'aud':s.AUDIENCE,'repository':repo,'repository_id':p['repository_id'],'repository_owner_id':'166210040','ref':ref,'ref_type':'branch','sub':'repo:'+repo+':environment:'+p['environment'],'environment':p['environment'],'event_name':'workflow_dispatch','runner_environment':'github-hosted','workflow_ref':repo+'/.github/workflows/dot-deploy-preflight.yml@'+ref,'workflow_sha':'a'*40,'sha':'a'*40,'iat':NOW-60,'nbf':NOW-60,'exp':NOW+240,'run_id':'456'}
+    # Pin externally specified identity values independently of helper policy data.
+    subject='repo:FullPeople@166210040/DND-card-web@1378484252:environment:production-card' if target=='card' else 'repo:FullPeople/obr-suite:environment:production-suite-dev'
+    return {'iss':s.ISSUER,'aud':s.AUDIENCE,'repository':repo,'repository_id':p['repository_id'],'repository_owner_id':'166210040','ref':ref,'ref_type':'branch','sub':subject,'environment':p['environment'],'event_name':'workflow_dispatch','runner_environment':'github-hosted','workflow_ref':repo+'/.github/workflows/dot-deploy-preflight.yml@'+ref,'workflow_sha':'a'*40,'sha':'a'*40,'iat':NOW-60,'nbf':NOW-60,'exp':NOW+240,'run_id':'456'}
 
 class Authorization(unittest.TestCase):
     def test_both_exact_scopes(self):
         for target in s.POLICIES: self.assertEqual(s.authorize(request(target),claims(target),NOW),s.POLICIES[target])
+
+    def test_web_requires_only_the_exact_immutable_subject(self):
+        valid='repo:FullPeople@166210040/DND-card-web@1378484252:environment:production-card'
+        self.assertEqual(s.POLICIES['card']['subject'],valid)
+        for subject in ('repo:FullPeople/DND-card-web:environment:production-card',valid.replace('@166210040','@1'),valid.replace('@1378484252','@1'),valid.replace('production-card','production-suite-dev'),valid.replace('DND-card-web','dnd-card-web'),valid+':ref:refs/heads/main',None):
+            modified=claims(); modified['sub']=subject
+            with self.subTest(subject=subject),self.assertRaises(s.Denied): s.authorize(request(),modified,NOW)
+
+    def test_suite_retains_its_single_existing_subject(self):
+        self.assertEqual(s.POLICIES['suite-dev']['subject'],'repo:FullPeople/obr-suite:environment:production-suite-dev')
+        for subject in (claims()['sub'],'repo:FullPeople@166210040/obr-suite@1222135055:environment:production-suite-dev'):
+            modified=claims('suite-dev'); modified['sub']=subject
+            with self.subTest(subject=subject),self.assertRaises(s.Denied): s.authorize(request('suite-dev'),modified,NOW)
 
     def test_forged_claims_and_cross_repo_target(self):
         original=claims()
         for field in ('iss','aud','repository','repository_id','repository_owner_id','ref','ref_type','sub','environment','event_name','runner_environment','workflow_ref','workflow_sha','sha'):
             modified=copy.deepcopy(original); modified[field]='untrusted'
             with self.subTest(field=field),self.assertRaises(s.Denied): s.authorize(request(),modified,NOW)
+            missing=copy.deepcopy(original); missing.pop(field)
+            with self.subTest(missing_field=field),self.assertRaises(s.Denied): s.authorize(request(),missing,NOW)
         with self.assertRaises(s.Denied): s.authorize(request('suite-dev'),claims(),NOW)
 
     def test_forbidden_operations_paths_and_fields(self):
