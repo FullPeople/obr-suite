@@ -21,10 +21,11 @@ const server=remote?null:createServer((req,res)=>{
  catch{res.writeHead(404);res.end(path);}
 });
 if(server)await new Promise(r=>server.listen(port,'127.0.0.1',r));
-let browser;const cases=[],errors=[];
+let browser,activeCase;const cases=[],errors=[];
 try{
  browser=await chromium.launch({headless:true,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader'],...(process.env.PLAYWRIGHT_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH}:{})});
  for(const name of ['font-pending-restore','audio-pending-restore','font-rejected-restore','font-completes-while-lost']){
+  activeCase=name;
   const context=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:3,serviceWorkers:'block'});
   const client='synthetic-production-252-'+name;let pending,firstRequest=true,requested;
   const requestSeen=new Promise(r=>requested=r);
@@ -48,6 +49,10 @@ try{
    },client);
    await page.goto(base+'dice3d/overlay.html?client='+client,{waitUntil:'domcontentloaded'});
    await requestSeen;await page.waitForFunction(()=>!!window.__productionGl,null,{timeout:30000});
+   // The diagnostic harness used renderer.ready. Observe the same actual
+   // product boundary without injecting its private profile variable: init()
+   // exposes the native canvas only after visual compilation has completed.
+   await page.waitForFunction(()=>window.__productionGl.canvas.style.opacity==='1',null,{timeout:30000});
    if(name==='font-rejected-restore')await page.waitForFunction(()=>window.__productionSignals.some(s=>s.packet.type==='renderer-event'&&s.packet.event==='error'));
    await page.evaluate(()=>{window.__productionLose=window.__productionGl.getExtension('WEBGL_lose_context');if(!window.__productionLose)throw Error('Native WebGL context-loss extension required');window.__productionLose.loseContext();});
    await page.waitForFunction(()=>window.__productionGl.isContextLost());
@@ -83,5 +88,5 @@ try{
  assert.deepEqual(errors,[]);
  writeFileSync(join(out,'result.json'),JSON.stringify({passed:true,base,binding,browser:await browser.version(),unmodifiedProductionFiles:true,genuineWebGL:true,syntheticClientOnly:true,physicalGpu:false,playerDataWritten:false,latencyClaim:false,cases,errors},null,2)+'\n');
  console.log(JSON.stringify({passed:true,cases:cases.length,normalRecoveries:cases.filter(c=>c.recovered).length,productionFiles:binding.files,pinnedAssets:binding.pinnedAssets}));
-}catch(error){writeFileSync(join(out,'failure.json'),JSON.stringify({passed:false,error:String(error),base,binding,cases,errors},null,2)+'\n');throw error;}
+}catch(error){writeFileSync(join(out,'failure.json'),JSON.stringify({passed:false,error:String(error),activeCase,base,binding,cases,errors},null,2)+'\n');throw error;}
 finally{if(browser)await browser.close();if(server)await new Promise(r=>server.close(r));}
