@@ -8,5 +8,5 @@ if(target){
  location.replace(`${assetUrl('card-viewer/index.html')}?${params}`);
 }else{
  const app=document.getElementById('app');
- if(app)app.innerHTML='<div class="cc-loading">请从角色卡列表重新打开。旧版编辑已停用；JSON / XLSX 请从角色卡列表上传。<br><a href="https://obr.dnd.center/card/" target="_blank" rel="noopener">前往角色卡网站</a></div>';
+ if(app)app.innerHTML='<div class="cc-loading">请从角色卡列表重新打开。旧版编辑已停用；JSON / XLSX 请从角色卡列表上传。<br><a href="https://dnd.center/card/" target="_blank" rel="noopener">前往角色卡网站</a></div>';
 }
