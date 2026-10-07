@@ -7,7 +7,7 @@
 新版安装地址（可以选中复制）：
 [https://obr.dnd.center/suite-dev/manifest-dev.json](https://obr.dnd.center/suite-dev/manifest-dev.json)
 在枭熊中添加上述扩展地址。启用新版时，请禁用同一房间中的旧版插件。
-[打开车卡网站](https://obr.dnd.center/card/)，完成后导出完整 JSON，再上传到插件。
+[打开车卡网站](https://dnd.center/card/)，完成后导出完整 JSON，再上传到插件。
 
 ## 2026-09-30 [release]
 
