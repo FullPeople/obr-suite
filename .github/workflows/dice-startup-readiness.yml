@@ -2,7 +2,7 @@ name: Verify complete dice startup readiness
 on:
   workflow_dispatch:
   push:
-    branches: [codex/card-suite-followup-suite-20261007]
+    branches: [codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007]
 permissions:
   contents: read
 concurrency:

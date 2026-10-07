@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
+    branches: [codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
   workflow_dispatch:
 permissions:
   contents: read
@@ -56,6 +56,10 @@ jobs:
         run: |
           npm run build:workbench-dev
           npm run build:three-dragon
+      - name: Verify exact production dice package and native readiness
+        run: |
+          node tools/dice-production-package-selftest.mjs
+          PLAYWRIGHT_EXECUTABLE_PATH="$CHROMIUM_PATH" node tools/dice-production-readiness-browser.mjs
       - name: Verify public-link source archive is reproducible
         shell: bash
         run: |
@@ -101,6 +105,8 @@ jobs:
             .local-evidence/verification/*.log
             .local-evidence/verification/results.json
             .local-evidence/native-owner/results.json
+            .local-evidence/production-dice/package/result.json
+            .local-evidence/production-dice/browser/
             .local-evidence/announcement-scope/*.png
             .local-evidence/announcement-scope/*.zip
             .local-evidence/announcement-scope/results.json
@@ -131,7 +137,7 @@ jobs:
       - name: Preserve exact paired production build for the progress release
         uses: actions/upload-artifact@v4
         with:
-          name: verified-followup251-suite-build
+          name: verified-suite-dev-production-${{ github.sha }}
           retention-days: 7
           if-no-files-found: error
           path: |
