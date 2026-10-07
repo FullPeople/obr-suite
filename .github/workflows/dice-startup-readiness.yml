@@ -1,0 +1,61 @@
+name: Verify complete dice startup readiness
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/card-suite-followup-suite-20261007]
+permissions:
+  contents: read
+concurrency:
+  group: dice-startup-readiness-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 63a0f8e52f5505085c43f6e691757da173b6da56
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies and Chromium
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Fog menu retirement and complete readiness unit contracts
+        run: |
+          FOG_MENU_EVIDENCE=.local-evidence/startup/fog node tools/fog-menu-retirement-selftest.mjs
+          DND_DICE_EVIDENCE=.local-evidence/startup/unit node tools/dice-audio-warmup-selftest.mjs
+          node tools/dice-readiness-negative-control.mjs
+      - name: Genuine WebGL loss, restoration, failed font and recovery
+        run: |
+          DND_DICE_LATENCY_BUILD=.local-evidence/startup/runtime node tools/dice-latency-build.mjs
+          DND_DICE_LATENCY_BUILD=.local-evidence/startup/runtime DND_DICE_EVIDENCE=.local-evidence/startup/browser node tools/dice-startup-readiness-browser.mjs
+      - name: Reproduce the font-only unsafe readiness with the same browser harness
+        run: |
+          export DICE_CONTEXT_BASELINE="$(node -e 'console.log(require("./.local-evidence/startup/negative/control.json").revision)')"
+          DND_DICE_LATENCY_BUILD=.local-evidence/startup/unsafe-runtime node tools/dice-latency-build.mjs
+          DND_DICE_LATENCY_BUILD=.local-evidence/startup/unsafe-runtime DND_DICE_EVIDENCE=.local-evidence/startup/unsafe-browser DICE_CONTEXT_EXPECT_UNSAFE=1 node tools/dice-startup-readiness-browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: complete-startup-readiness-${{ github.sha }}
+          retention-days: 7
+          include-hidden-files: true
+          path: |
+            .local-evidence/startup/unit/result.json
+            .local-evidence/startup/negative/
+            .local-evidence/startup/fog/
+            .local-evidence/startup/browser/
+            .local-evidence/startup/unsafe-browser/
