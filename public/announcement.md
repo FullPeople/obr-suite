@@ -11,6 +11,24 @@
 
 ## 2026-10-07 [release] [zh]
 
+### 地图与五页查看器
+
+- 移除“编辑地图迷雾”右键入口，动态迷雾设置与运行保留。
+- 五页查看器同步工具熟练选择的显示与自适应法术位图标修复；原始 JSON 导出、手工记录和资源余额保留。
+- 骰子冷启动修复适用于新版 Full Suite，旧稳定插件没有新版 3D 骰子模块。
+- 真实房间和实体手机仍待验证。关闭附加窗口，刷新枭熊房间，再重新打开插件。
+
+## 2026-10-07 [release] [en]
+
+### Map menu and five-page viewer
+
+- Remove the Edit Map Fog context menu entry while preserving dynamic fog settings and behavior.
+- Update tool proficiency display and responsive spell slot icon painting in the shared viewer; preserve original JSON export, manual records and resource balances.
+- The dice cold startup fix applies to the new Full Suite; the stable extension does not contain that 3D dice module.
+- Real-room and physical-device validation remains outstanding. Close extension windows, refresh the room and reopen the extension.
+
+## 2026-10-07 [history] [zh]
+
 ### 五页角色卡查看器
 
 - 查看器顶部增加「导出 JSON」，下载本次收到的完整原文，保留未知字段、手工记录与资源余额。
@@ -20,7 +38,7 @@
 - 感谢「别名」支持 50 元。战俑工具选择仍待处理，真实房间和实体手机仍待验证。
 - 更新后关闭附加窗口，刷新枭熊房间，再重新打开对应窗口。
 
-## 2026-10-07 [release] [en]
+## 2026-10-07 [history] [en]
 
 ### Five-page character viewer
 
