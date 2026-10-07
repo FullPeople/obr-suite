@@ -9,7 +9,29 @@
 在枭熊中添加上述扩展地址。启用新版时，请禁用同一房间中的旧版插件。
 [打开车卡网站](https://obr.dnd.center/card/)，完成后导出完整 JSON，再上传到插件。
 
-## 2026-10-03 [release] [zh]
+## 2026-10-07 [release] [zh]
+
+### 五页角色卡查看器
+
+- 查看器顶部增加「导出 JSON」，下载本次收到的完整原文，保留未知字段、手工记录与资源余额。
+- 已知工具熟练改用中文名称，盾牌熟练显示统一；自定义名称与未知条目的原名保留。
+- 刷新失败时清除上次卡面与导出入口，避免误用旧资料。
+- 本轮只配套更新稳定版查看器，原有 XLSX、地图和工具继续保留。
+- 感谢「别名」支持 50 元。战俑工具选择仍待处理，真实房间和实体手机仍待验证。
+- 更新后关闭附加窗口，刷新枭熊房间，再重新打开对应窗口。
+
+## 2026-10-07 [release] [en]
+
+### Five-page character viewer
+
+- Export the original loaded JSON, preserving unknown fields, manual records and resource balances.
+- Display known tool proficiency names in Chinese while retaining custom and unknown labels.
+- Clear the previous character and export action when refreshing fails.
+- This update reuses the stable viewer adapter; existing XLSX, maps and tools are preserved.
+- Warforged tool selection, real-room and physical-device validation remain outstanding.
+- Close extension windows, refresh the Owlbear room and reopen the extension after updating.
+
+## 2026-10-03 [history] [zh]
 
 ### 角色卡、权限与资源
 
@@ -38,7 +60,7 @@
 - 更新后关闭附加窗口，刷新枭熊房间，再重新打开对应窗口。
 - 反馈邮箱：1763086701psw@gmail.com。
 
-## 2026-10-03 [release] [en]
+## 2026-10-03 [history] [en]
 
 ### Character cards and permissions
 
