@@ -602,8 +602,8 @@ const modules: Partial<Record<keyof ReturnType<typeof getState>["enabled"], Modu
   circleImage: { setup: setupCircleImage, teardown: teardownCircleImage },
   musicBoard: { setup: setupMusicBoard, teardown: teardownMusicBoard },
   // 2026-08-25 — `fullFog` split into two independently switchable
-  // modules. `fogEditor` is the right-click map tracer and has no
-  // runtime; `dynamicFog` is the engine that turns FOG-layer drawings
+  // modules. `fogEditor` now only cleans up the retired map-editor menu;
+  // `dynamicFog` is the engine that turns FOG-layer drawings
   // into per-client walls and owns doors / windows / lights. The
   // engine's AUTHORING surface (light context menu, fog-tool modes,
   // indicators, player toggle tool, occlusion) is gated
@@ -644,6 +644,8 @@ function syncModules() {
 }
 
 OBR.onReady(async () => {
+  // Always remove the retired map-editor menu, independent of saved module flags.
+  void setupFogEditor();
   const workbenchReady=setupWorkbench();
   // Sync state, then open cluster + activate all enabled modules.
   startSceneSync();

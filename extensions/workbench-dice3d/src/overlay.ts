@@ -19,10 +19,13 @@ export async function mountOverlay(container:HTMLElement,client:string){
   const audioPaths=Object.values(catalog.themes).flatMap(requiredAudioPaths);
   assets.plan(['assets/fonts/Cinzel-Variable.ttf',...Object.values(catalog.dice).map(d=>d.model),...Object.values(catalog.themes).flatMap(t=>Object.values(t.masks)),...audioPaths]);
   const audio=mountAudioHost(client,assets,catalog);(window as any).__diceLabAudio=audio;
-  // The result numbers use the same Cinzel variable font the native ships; canvas needs it loaded.
-  const face=new FontFace('CinzelVariable',await assets.bytes('assets/fonts/Cinzel-Variable.ttf'),{weight:'400 900'});
-  await face.load();document.fonts.add(face);
   let rendererDetail:any,anchors:Record<string,{x:number;y:number}>={};
+  let resourcesReady=false,initialReady=false,contextLost=false;
+  const publishInitialReady=()=>{
+    if(!resourcesReady||contextLost||initialReady)return;
+    initialReady=true;assets.stage('首次渲染完成');
+    bus.postMessage({type:'overlay-ready',detail:rendererDetail});
+  };
   const tracking=new Map<string,string>(),labels=document.createElement('div');labels.className='token-result-layer';container.append(labels);
   const track=()=>bus.postMessage({type:'track-tokens',ids:[...new Set(tracking.values())]});
   const labelNodes=new Map<string,HTMLDivElement>();
@@ -35,6 +38,12 @@ export async function mountOverlay(container:HTMLElement,client:string){
 
   const renderer=new DiceRenderer(container,catalog,(event,detail)=>{
     if(event==='renderer-ready'){rendererDetail=detail;return;}
+    if(event==='render-context-lost')contextLost=true;
+    if(event==='render-context-restored'){
+      contextLost=false;
+      // Recovery cannot replace the first font/audio/visual readiness barrier.
+      if(!initialReady){publishInitialReady();return;}
+    }
     if(event==='render-complete'||event==='render-cancelled'){tracking.delete(detail.roll);track();}
     const parent=parents.get(detail?.roll);
     if(parent&&(event==='render-complete'||event==='render-cancelled')){parent.failed ||= !!detail.failed;parent.pending.delete(detail.roll);bus.postMessage({type:'renderer-event',event:'audio-finished-child',detail});if(!parent.pending.size){bus.postMessage({type:'renderer-event',event:parent.failed?'render-cancelled':event,detail:{...detail,roll:parent.id,failed:parent.failed}});for(const [id,value] of parents)if(value===parent)parents.delete(id);}return;}
@@ -70,10 +79,16 @@ export async function mountOverlay(container:HTMLElement,client:string){
     else if(p.type==='result-bubble'&&p.highlight)bus.postMessage({type:'suite-reveal-highlight',id:p.record.id});
   }catch(error){bus.postMessage({type:'renderer-event',event:'error',detail:{message:errorText(error)}})}};
   assets.stage('加载模型、数字贴图和音效');
+  // Font I/O must not postpone all model and sound initialization. Result canvases
+  // still require the native Cinzel font before the same all-assets ready barrier.
+  const fontReady=(async()=>{
+    const face=new FontFace('CinzelVariable',await assets.bytes('assets/fonts/Cinzel-Variable.ttf'),{weight:'400 900'});
+    await face.load();document.fonts.add(face);
+  })();
   // Visual readiness alone is insufficient: every current sound, for every peer theme, must be ready.
   const audioReady=audio.warmup(),visualReady=renderer.init();
-  await Promise.all([audioReady,visualReady]);assets.stage('首次渲染完成');
-  bus.postMessage({type:'overlay-ready',detail:rendererDetail});return renderer;
+  await Promise.all([fontReady,audioReady,visualReady]);resourcesReady=true;
+  publishInitialReady();return renderer;
 }
 if(location.pathname.endsWith('/overlay.html')){
   document.body.classList.add('overlay');

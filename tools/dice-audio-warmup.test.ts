@@ -193,13 +193,17 @@ const messages:any[]=[];
 (globalThis as any).BroadcastChannel=class{onmessage:any;constructor(_name:string){}postMessage(message:any){messages.push(message)}};
 (globalThis as any).localStorage={getItem:()=>null};
 (globalThis as any).document={fonts:{add(){}},createElement:()=>({className:'',append(){}})};
-(globalThis as any).FontFace=class{async load(){return this}};
+(globalThis as any).FontFace=class{async load(){await (globalThis as any).__diceFontDecode;return this}};
 const {mountOverlay}=await import('../extensions/workbench-dice3d/src/overlay');
 async function overlayCase(run:(h:{assets:ControlledAssets;visual:ReturnType<typeof deferred>;mounted:Promise<unknown>;ready:ReturnType<typeof observe>})=>Promise<void>,configure:(assets:ControlledAssets)=>void=()=>{}){
   const assets=new ControlledAssets(),visual=deferred(),original=DiceAssets.prototype.bytes;configure(assets);messages.length=0;
   (globalThis as any).__diceOverlayVisual=visual;DiceAssets.prototype.bytes=path=>assets.bytes(path);
   const mounted=mountOverlay({append(){}} as any,'audio-selftest'),ready=observe(mounted);
-  try{await run({assets,visual,mounted,ready})}finally{DiceAssets.prototype.bytes=original}
+  try{await run({assets,visual,mounted,ready})}finally{
+    DiceAssets.prototype.bytes=original;
+    delete (globalThis as any).__diceFontDecode;
+    delete (globalThis as any).__diceOverlayConstructorFailure;
+  }
 }
 await test('overlay progress is 49 to 40, and visual-ready cannot bypass slow required audio',async()=>{
   let finish!:()=>void;
@@ -222,6 +226,90 @@ await test('overlay required audio failure never publishes overlay-ready',async(
     visual.resolve(new ArrayBuffer(0));await assert.rejects(mounted,/injected download failure/);
     assert.equal(messages.filter(m=>m.type==='overlay-ready').length,0);
   },assets=>assets.failures.set(requiredPaths[0],1));
+});
+const fontPath='assets/fonts/Cinzel-Variable.ttf';
+const rendererEvent=(event:string)=>(globalThis as any).__diceOverlayEvent(event,{testContextBoundary:true});
+const initialReadyCount=()=>messages.filter(m=>m.type==='overlay-ready').length;
+const restoredCount=()=>messages.filter(m=>m.type==='renderer-event'&&m.event==='render-context-restored').length;
+await test('slow font download overlaps visual and required audio work but keeps ready closed',async()=>{
+  let finish!:()=>void;
+  await overlayCase(async({assets,visual,mounted,ready})=>{
+    visual.resolve(new ArrayBuffer(0));await flush();
+    assert(requiredPaths.every(p=>assets.calls.has(p)));assert.equal(ready.state,'pending');assert.equal(initialReadyCount(),0);
+    finish();await mounted;assert.equal(initialReadyCount(),1);
+  },a=>{finish=a.hold(fontPath)});
+});
+await test('font download failure keeps ready closed after other branches finish',async()=>{
+  await overlayCase(async({visual,mounted})=>{
+    visual.resolve(new ArrayBuffer(0));await assert.rejects(mounted,/injected download failure/);await flush();assert.equal(initialReadyCount(),0);
+  },a=>a.failures.set(fontPath,1));
+});
+await test('font decode remains mandatory after visual and audio completion',async()=>{
+  const decode=deferred();
+  await overlayCase(async({visual,mounted,ready})=>{
+    visual.resolve(new ArrayBuffer(0));await flush();assert.equal(ready.state,'pending');assert.equal(initialReadyCount(),0);
+    decode.resolve(new ArrayBuffer(0));await mounted;assert.equal(initialReadyCount(),1);
+  },()=>{(globalThis as any).__diceFontDecode=decode.promise});
+});
+await test('font decode failure never advertises readiness',async()=>{
+  const decode=deferred();
+  await overlayCase(async({visual,mounted})=>{
+    visual.resolve(new ArrayBuffer(0));decode.reject(Error('injected font decode failure'));
+    await assert.rejects(mounted,/font decode failure/);assert.equal(initialReadyCount(),0);
+  },()=>{(globalThis as any).__diceFontDecode=decode.promise});
+});
+await test('pending font decode cannot restore readiness; normal later recovery is forwarded',async()=>{
+  const decode=deferred();
+  await overlayCase(async({visual,mounted,ready})=>{
+    visual.resolve(new ArrayBuffer(0));await flush();rendererEvent('render-context-lost');rendererEvent('render-context-restored');
+    assert.equal(ready.state,'pending');assert.equal(initialReadyCount(),0);assert.equal(restoredCount(),0);
+    decode.resolve(new ArrayBuffer(0));await mounted;assert.equal(initialReadyCount(),1);
+    rendererEvent('render-context-lost');rendererEvent('render-context-restored');assert.equal(restoredCount(),1);assert.equal(initialReadyCount(),1);
+  },()=>{(globalThis as any).__diceFontDecode=decode.promise});
+});
+await test('font rejection cannot be bypassed by later context restoration',async()=>{
+  await overlayCase(async({visual,mounted})=>{
+    visual.resolve(new ArrayBuffer(0));await assert.rejects(mounted,/injected download failure/);await flush();
+    rendererEvent('render-context-lost');rendererEvent('render-context-restored');assert.equal(initialReadyCount(),0);assert.equal(restoredCount(),0);
+  },a=>a.failures.set(fontPath,1));
+});
+await test('required audio rejection cannot be bypassed by later context restoration',async()=>{
+  await overlayCase(async({visual,mounted})=>{
+    visual.resolve(new ArrayBuffer(0));await assert.rejects(mounted,/injected download failure/);await flush();
+    rendererEvent('render-context-lost');rendererEvent('render-context-restored');assert.equal(initialReadyCount(),0);assert.equal(restoredCount(),0);
+  },a=>a.failures.set(requiredPaths[0],1));
+});
+await test('visual rejection cannot be bypassed by later context restoration',async()=>{
+  await overlayCase(async({visual,mounted})=>{
+    visual.reject(Error('injected visual failure'));await assert.rejects(mounted,/visual failure/);await flush();
+    rendererEvent('render-context-lost');rendererEvent('render-context-restored');assert.equal(initialReadyCount(),0);assert.equal(restoredCount(),0);
+  });
+});
+await test('resources finishing while context is lost wait for restoration before initial ready',async()=>{
+  const decode=deferred();
+  await overlayCase(async({visual,mounted})=>{
+    visual.resolve(new ArrayBuffer(0));await flush();rendererEvent('render-context-lost');
+    decode.resolve(new ArrayBuffer(0));await mounted;assert.equal(initialReadyCount(),0);
+    rendererEvent('render-context-restored');assert.equal(initialReadyCount(),1);assert.equal(restoredCount(),0);
+    rendererEvent('render-context-lost');rendererEvent('render-context-restored');assert.equal(initialReadyCount(),1);assert.equal(restoredCount(),1);
+  },()=>{(globalThis as any).__diceFontDecode=decode.promise});
+});
+await test('late visual rejection after font failure remains handled',async()=>{
+  await overlayCase(async({visual,mounted})=>{
+    await assert.rejects(mounted,/injected download failure/);visual.reject(Error('late visual failure'));await flush();assert.equal(initialReadyCount(),0);
+  },a=>a.failures.set(fontPath,1));
+});
+await test('visual failure remains failed after late font decode completion',async()=>{
+  const decode=deferred();
+  await overlayCase(async({visual,mounted})=>{
+    visual.reject(Error('injected visual failure'));await assert.rejects(mounted,/visual failure/);
+    decode.resolve(new ArrayBuffer(0));await flush();rendererEvent('render-context-restored');assert.equal(initialReadyCount(),0);assert.equal(restoredCount(),0);
+  },()=>{(globalThis as any).__diceFontDecode=decode.promise});
+});
+await test('synchronous renderer constructor failure starts no font work',async()=>{
+  await overlayCase(async({assets,mounted})=>{
+    await assert.rejects(mounted,/renderer constructor failure/);assert.equal(assets.calls.has(fontPath),false);assert.equal(initialReadyCount(),0);
+  },()=>{(globalThis as any).__diceOverlayConstructorFailure=true});
 });
 await flush();await test('no unhandled asynchronous rejections',async()=>{assert.deepEqual(unhandled,[])});
 const byteCount=(paths:string[])=>paths.reduce((sum,path)=>sum+statSync('extensions/workbench-dice3d/public/'+path).size,0);

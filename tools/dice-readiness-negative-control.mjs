@@ -1,0 +1,21 @@
+// A local synthetic Git commit only. Never publish this unsafe source.
+import {execFileSync,spawnSync} from 'node:child_process';
+import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {resolve,join} from 'node:path';
+import {createHash} from 'node:crypto';
+import assert from 'node:assert/strict';
+const out=resolve(process.env.DND_DICE_EVIDENCE||'.local-evidence/startup/negative');mkdirSync(out,{recursive:true});
+const env={...process.env,GIT_INDEX_FILE:join(out,'control.index')};
+const git=(...args)=>execFileSync('git',args,{env,maxBuffer:16*1024*1024});
+git('read-tree','HEAD');git('apply','--cached','--reverse','tools/dice-readiness-only.patch');
+const tree=git('write-tree').toString().trim();
+const revision=git('-c','user.name=Synthetic readiness control','-c','user.email=fixture@example.invalid','commit-tree',tree,'-p',git('rev-parse','HEAD').toString().trim(),'-m','Unsafe readiness negative control; never publish').toString().trim();
+const sha256=createHash('sha256').update(git('cat-file','blob',revision+':extensions/workbench-dice3d/src/overlay.ts')).digest('hex');
+assert.equal(sha256,'a3d12abb975b04f25c72ab6ae044cf2824e91f96f30466bb8697bcf3f8898d7e');
+const run=spawnSync(process.execPath,['tools/dice-audio-warmup-selftest.mjs'],{env:{...process.env,DICE_AUDIO_BASELINE:revision,DND_DICE_EVIDENCE:join(out,'unit')},encoding:'utf8',maxBuffer:16*1024*1024});
+writeFileSync(join(out,'unit.log'),(run.stdout||'')+(run.stderr||''));
+const report=JSON.parse(readFileSync(join(out,'unit/result.json'),'utf8'));
+assert.equal(run.status,1,'Unsafe source must fail the readiness regressions');
+const failed=report.results.filter(r=>!r.passed);assert.equal(failed.length,6);
+writeFileSync(join(out,'control.json'),JSON.stringify({revision,sha256,expectedFailingCases:failed.length,remotePublished:false},null,2)+'\n');
+console.log(JSON.stringify({revision,expectedFailingCases:failed.length}));
