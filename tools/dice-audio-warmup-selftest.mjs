@@ -10,7 +10,10 @@ await build({input:'tools/dice-audio-warmup.test.ts',platform:'node',external:[/
 }}]:[]),{name:'headless-overlay-visual-boundary',load(id){
   if(id.endsWith('.css'))return {code:'',moduleType:'js'};
   if(id.replaceAll('\\','/').endsWith('/extensions/workbench-dice3d/src/renderer.ts'))return `
-    export class DiceRenderer { constructor(container,catalog,report){this.report=report;}
+    export class DiceRenderer { constructor(container,catalog,report){
+      if(globalThis.__diceOverlayConstructorFailure)throw Error('injected renderer constructor failure');
+      this.report=report;globalThis.__diceOverlayEvent=(event,detail={})=>report(event,detail);
+    }
       async init(){await globalThis.__diceOverlayVisual.promise;this.report('renderer-ready',{testVisualBoundary:true});}
     }`;
 }}],output:{file:join(output,'selftest.mjs'),format:'esm',codeSplitting:false}});

@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
+    branches: [codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: ae6d213676d8eca71436e34c2400a5261479ecca
+          ref: 7085b0ef1c30d1549afb10bfbb7b787fd27deea7
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -48,6 +48,8 @@ jobs:
       - name: Suite regression tests
         id: tests
         run: node tools/verify-suite-candidate.mjs
+      - name: Retired fog context menu
+        run: FOG_MENU_EVIDENCE=.local-evidence/fog-menu node tools/fog-menu-retirement-selftest.mjs
       - name: Typecheck and build stable host with paired card viewer
         run: npm run build
       - name: Build dev host and retained historical Three Dragon fixture
@@ -129,7 +131,7 @@ jobs:
       - name: Preserve exact paired production build for the progress release
         uses: actions/upload-artifact@v4
         with:
-          name: verified-web-fixes250-suite-build
+          name: verified-followup251-suite-build
           retention-days: 7
           if-no-files-found: error
           path: |

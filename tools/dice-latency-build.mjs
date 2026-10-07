@@ -1,11 +1,15 @@
 import {build,loadConfigFromFile} from 'vite';
 import {resolve} from 'node:path';
+import {execFileSync} from 'node:child_process';
 import {verifyDiceAssets} from './dice-pinned-assets.mjs';
 import {instrumentTail} from './dice-tail-trace.mjs';
 process.env.SUITE_BASE='suite-dev';process.env.SUITE_CHANNEL='dev';
 const root=resolve('.'),out=resolve(process.env.DND_DICE_LATENCY_BUILD||'.local-evidence/dice-latency/runtime');
 if(!process.env.DND_CARD_WEB_ROOT)throw Error('Set DND_CARD_WEB_ROOT to the exact paired Web checkout');
-const timing={name:'dice-fixture-timing',enforce:'pre',transform(code,id){const original=code;if(process.env.DICE_LATENCY_TAIL==='1')code=instrumentTail(code,id)??code;const file=id.replaceAll('\\','/');
+const timing={name:'dice-fixture-timing',enforce:'pre',load(id){
+ if(process.env.DICE_CONTEXT_BASELINE&&id.replaceAll('\\','/').endsWith('/extensions/workbench-dice3d/src/overlay.ts'))
+  return execFileSync('git',['show',process.env.DICE_CONTEXT_BASELINE+':extensions/workbench-dice3d/src/overlay.ts'],{encoding:'utf8'});
+},transform(code,id){const original=code;if(process.env.DICE_LATENCY_TAIL==='1')code=instrumentTail(code,id)??code;const file=id.replaceAll('\\','/');
  if(file.endsWith('/extensions/workbench-dice3d/src/controller.ts')){const marker='const seed=crypto.getRandomValues(new Uint32Array(1))[0];';if(!code.includes(marker))throw Error('Submission seed probe boundary changed');return code.replace(marker,'const seed=(globalThis as any).__diceProfileSeed?.()??crypto.getRandomValues(new Uint32Array(1))[0];');}
  if(file.endsWith('/src/workbench/dice3d.ts'))return code+`\n(globalThis as any).__diceProfileControllerState=()=>{const c=core as any;return c?{heldRolls:c.heldRolls.size,retainedUntil:c.retainedUntil.size,queued:c.queue.length,pending:!!c.pending}:null;};\n`;
  if(file.endsWith('/extensions/workbench-dice3d/src/physics.worker.ts'))return code+`\n(globalThis as any).__diceProfileIndependentState=()=>({incumbents:incumbents.size,bounds:incumbentBounds.size,kinds:incumbentKinds.size,groups:incumbentGroups.size});\n`;
