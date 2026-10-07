@@ -15,11 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 224fa499cd3295c85c724cffb38753fd61d155e8
+          ref: ae6d213676d8eca71436e34c2400a5261479ecca
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -28,10 +29,24 @@ jobs:
       - run: npm ci
       - run: npm ci
         working-directory: .paired-web
+      - name: Verify exact paired Web progress inputs
+        working-directory: .paired-web
+        run: |
+          npm run verify:automation-source
+          npm run verify:automation-runtime
+          npm run verify:automation-progress
+      - name: Install paired browser dependency
+        working-directory: .paired-web
+        run: npx playwright install --with-deps chromium
       - name: Historical controller and current LOCAL connection guards
         run: |
           node tools/three-dragon-stable-recovery-selftest.mjs
           node tools/three-dragon-local-connection-selftest.mjs
+      - name: Preserved stable announcement, inventory and dependency guards
+        run: |
+          node tools/announcement-inline-selftest.mjs
+          node tools/inventory-model-selftest.mjs
+          node tools/bestiary-dependency-selftest.mjs
       - name: Stable typecheck, host and exact paired five-page viewer
         run: npm run build
       - name: Require the historical recovery page and viewer
@@ -39,3 +54,23 @@ jobs:
           test -f dist/three-dragon-ante.html
           test -f dist/card-viewer/bridge.js
           test -f dist/announcement.md
+      - name: Build exact standalone comparison
+        working-directory: .paired-web
+        run: npm run build:standalone
+      - name: Actual stable fullscreen viewer export and caption regression
+        working-directory: .paired-web
+        env:
+          LEGACY_SUITE_ROOT: ${{ github.workspace }}
+        run: npx playwright test --config playwright.legacy-viewer.config.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-viewer250-evidence
+          include-hidden-files: true
+          if-no-files-found: warn
+          path: .paired-web/.local-evidence/legacy-viewer/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-stable-viewer250-build
+          if-no-files-found: error
+          path: dist/
