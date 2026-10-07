@@ -2,7 +2,7 @@ name: Verify released dice resources 246
 on:
   workflow_dispatch:
   push:
-    branches: [codex/card-suite-followup-suite-20261007, codex/resource-repair246-20261005, dev]
+    branches: [codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/resource-repair246-20261005, dev]
 permissions:
   contents: read
   actions: read
