@@ -2329,7 +2329,7 @@ const TABS: TabDef[] = [
     moduleId: "characterCards",
     dynamicBody: (lang) => {
       const desc = lang === "zh" ? CHARCARD_DESC.zh : CHARCARD_DESC.en;
-      const btns = `<div class="dl-row"><a class="dl-btn" href="https://obr.dnd.center/card/" target="_blank" rel="noopener">${lang === "zh" ? "进入车卡网站" : "Open character website"}</a></div>`;
+      const btns = `<div class="dl-row"><a class="dl-btn" href="https://dnd.center/card/" target="_blank" rel="noopener">${lang === "zh" ? "进入车卡网站" : "Open character website"}</a></div>`;
       return `${desc}${btns}`;
     },
   },
