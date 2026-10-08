@@ -3237,7 +3237,7 @@ const TABS: TabDef[] = [
     en: `${ICONS.box} Three-Dragon Ante`,
     dynamicBody: (lang) => {
       const en = lang === "en";
-        const url = "https://obr.dnd.center/three-dragon-ante/";
+        const url = "https://dnd.center/3-dragon/";
       return `<h3>${en ? "A separate card table" : "独立的酒馆牌桌"}</h3>
         <p>${en ? "Open the online website in a new tab. Create or join a room using a room code or invitation link and a unique player name." : "在新标签页打开线上网站，用房间码或邀请链接和不重名的玩家名字创建、加入房间。"}</p>
           <a class="layout-editor-btn" href="${url}" target="_blank" rel="noopener noreferrer">${en ? "Open Three-Dragon Ante online" : "打开线上三龙牌"}</a>

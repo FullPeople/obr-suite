@@ -5,7 +5,7 @@ import {chromium} from '@playwright/test';
 import {readFileSync,mkdirSync,writeFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 const root=resolve(import.meta.dirname,'..'),out=join(root,'.local-evidence/three-dragon-website-browser');mkdirSync(out,{recursive:true});
-const origin='https://suite-fixture.invalid',website='https://obr.dnd.center/three-dragon-ante/';
+const origin='https://suite-fixture.invalid',website='https://dnd.center/3-dragon/';
 const entries=new Map([['/suite/three-dragon-ante.html','dist/three-dragon-ante.html'],['/suite-dev/three-dragon-ante.html','dist-workbench-dev/three-dragon-ante.html'],['/suite-dev/workbench-panels/table.html','dist-workbench-dev/workbench-panels/table.html']].map(([url,file])=>[url,readFileSync(join(root,file),'utf8')]));
 const parent='<!doctype html><meta charset="utf-8"><button id="parent-settings">父宿主设置</button><iframe title="Suite website link" style="display:block;width:100%;height:600px;border:0" src="/suite-dev/workbench-panels/table.html"></iframe><script>window.received=[];addEventListener("message",event=>{const frame=document.querySelector("iframe");if(event.origin!==location.origin||event.source!==frame?.contentWindow||event.data?.channel!=="workbench-panel-frame/v1")return;received.push(event.data);if(event.data.close)frame.remove();});</script>';
 const checks=[],errors=[],requests=[];

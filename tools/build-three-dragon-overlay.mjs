@@ -11,7 +11,7 @@ const out=resolve(process.env.TDA_OVERLAY_OUT||join(suiteRoot,'.local-evidence/t
 if(existsSync(out))throw Error('Use a new overlay output directory; existing evidence is preserved.');
 const targets=(process.env.TDA_OVERLAY_TARGETS||'suite-dev,suite').split(',');
 if(new Set(targets).size!==targets.length||targets.some(value=>!['suite-dev','suite'].includes(value)))throw Error('Unsupported or duplicate Suite targets.');
-const website='https://obr.dnd.center/three-dragon-ante/';
+const website='https://dnd.center/3-dragon/';
 const html=readFileSync(join(suiteRoot,'tools/three-dragon-website-entry.html'),'utf8');
 if(!html.includes(`href="${website}"`)||/<iframe|websocket|owlbear-rodeo|\/three-dragon-api\//i.test(html))throw Error('Website entry may only link to the public website.');
 const sha=file=>createHash('sha256').update(readFileSync(file)).digest('hex');

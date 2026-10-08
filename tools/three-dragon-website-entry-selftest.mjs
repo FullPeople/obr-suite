@@ -6,7 +6,7 @@ import {resolve,join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {spawnSync} from 'node:child_process';
 import vm from 'node:vm';
-const root=resolve(import.meta.dirname,'..'),out=join(root,'.local-evidence/three-dragon-website-entry'),website='https://obr.dnd.center/three-dragon-ante/';mkdirSync(out,{recursive:true});
+const root=resolve(import.meta.dirname,'..'),out=join(root,'.local-evidence/three-dragon-website-entry'),website='https://dnd.center/3-dragon/';mkdirSync(out,{recursive:true});
 const template=readFileSync(join(root,'tools/three-dragon-website-entry.html'),'utf8').replaceAll('\r\n','\n');
 const checks=[];function check(name,fn){fn();checks.push(name);console.log('PASS '+name);}
 function inspect(html){
