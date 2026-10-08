@@ -29,6 +29,7 @@ try{
  check(await page.evaluate(()=>window.writes.length)===0,'opening settings never writes placeholder defaults');
  check(await page.evaluate(()=>window.calls.filter(v=>['scene.getMetadata','room.getMetadata','player.getRole'].includes(v)).length)===0,'batched init removes separate startup metadata/role round trips');
  await page.evaluate(()=>{window.allowInit=false;document.querySelector('iframe').src='/panels/settings.html?workbench=1'});await panel.locator('#ui-night').waitFor();await panel.locator('#ui-night').check();
+ await page.waitForFunction(()=>document.documentElement.dataset.suiteNight==='true',undefined,{timeout:5000});
  check(await panel.locator('html').getAttribute('data-suite-night')==='true'&&await page.locator('html').getAttribute('data-suite-night')==='true','night mode works locally before Owlbear connects');
  check(await panel.locator('html').evaluate(e=>getComputedStyle(e).getPropertyValue('--bg').trim())==='#202125','night panel uses readable dark palette');
  await page.evaluate(()=>{window.held=[];window.failNext=true;document.querySelector('iframe').src='/panels/settings.html?workbench=1&reload=1'});await panel.locator('#ui-night').waitFor();check(await panel.locator('#ui-night').isChecked(),'night mode survives reopening');await page.evaluate(()=>window.release());await panel.locator('body[data-bridge-ready=true]').waitFor({timeout:7000});check(true,'failed read-only initialization retries and recovers');
