@@ -7,9 +7,19 @@
 新版安装地址（可以选中复制）：
 [https://obr.dnd.center/suite-dev/manifest-dev.json](https://obr.dnd.center/suite-dev/manifest-dev.json)
 在枭熊中添加上述扩展地址。启用新版时，请禁用同一房间中的旧版插件。
-[打开车卡网站](https://dnd.center/card/)，完成后导出完整 JSON，再上传到插件。
+[打开车卡网站](https://dnd.center/card/?intro=0)，完成后导出完整 JSON，再上传到插件。
 
-## 2026-09-30 [release]
+## 2026-10-08 [release]
+
+### 角色卡与规则资料
+
+- 同步新版角色卡与 Wiki：上栏调色盘统一调整界面、Wiki 和角色卡组件。
+- Wiki 条目右键可创建自定义副本；法术悬浮提示精简学习者列表。
+- 更新 11 个职业图标，使用提供的 PSD，统一为留空的透明正方形。
+- 独立站支持临时公开云端存储与分享；枭熊端继续使用房间保存，不接入云端。
+- 角色卡库展示完整 A4 卡面，点击进入全屏查看五页；手机侧栏可展开。
+
+## 2026-09-30 [history]
 
 ### 角色卡阅读
 
