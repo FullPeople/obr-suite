@@ -69,7 +69,8 @@ const IMPORTANT_NOTES: Record<"zh" | "en", string> = {
 
 export function renderAnnouncementImportant(language: "zh" | "en"): string {
   const title = language === "zh" ? "关于设置玩家单独权限的重要说明" : "Important: setting player Owner permissions";
-  return `<details class="announcement-important"><summary>${title}</summary>${IMPORTANT_NOTES[language]}</details>`;
+  const poster=language === "zh" ? `<section class="announcement-cloud-poster" style="padding:16px 10px;border:2px solid #595959;background:#ededeb;color:#343532"><strong style="display:block;font-size:clamp(22px,4vw,36px);line-height:1.3">现在支持云端存储/分享角色卡了！！！</strong><p style="font-size:13px;margin:8px 0 0">云端功能在 <a href="https://dnd.center/card/?intro=0" target="_blank" rel="noopener">独立站</a> 使用，详情请打开独立站右上角的云端存储。枭熊角色卡继续使用房间保存。</p></section>` : `<section style="padding:16px;border:2px solid #595959"><strong style="font-size:28px">Cloud storage and sharing are available on the standalone site!</strong><p><a href="https://dnd.center/card/?intro=0" target="_blank" rel="noopener">Open the standalone card app</a>. Owlbear cards continue to use room storage.</p></section>`;
+  return `${poster}<details class="announcement-important"><summary>${title}</summary>${IMPORTANT_NOTES[language]}</details>`;
 }
 
 /** The dedicated permission notice uses the same guide, fully expanded. */

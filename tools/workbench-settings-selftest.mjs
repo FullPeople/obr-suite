@@ -4,11 +4,15 @@ export async function auditSettings({page,bg,check,out,expect}){
  const settings=page.frameLocator('iframe[title="Full Suite 设置"]');
  await settings.locator('body[data-bridge-ready=true]').waitFor();
  check(await settings.locator('[data-tab=basics],[data-tab=libraries],[data-tab=characterCards],[data-tab=transitions],[data-tab=version]').count()===0,'settings exclude duplicated rules, downloads and obsolete launchers');
- await settings.locator('#ui-tone').fill('#987044');await settings.locator('#ui-tone').dispatchEvent('change');
- await expect.poll(()=>page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--suite-tone').trim())).toBe('#987044');
- await page.getByRole('button',{name:'总览',exact:true}).click();await page.getByRole('button',{name:'设置',exact:true}).click();
- await settings.locator('body[data-bridge-ready=true]').waitFor();check(await settings.locator('#ui-tone').inputValue()==='#987044','UI tone affects the shell immediately and persists when settings reopen');
- await settings.locator('#tone-reset').click();await expect(settings.locator('#tone-hex')).toHaveValue('#50525B');await settings.locator('[data-tone="#667464"]').click();await expect(settings.locator('#tone-hex')).toHaveValue('#667464');await settings.locator('#tone-hex').fill('#50525B');await settings.locator('#tone-hex').dispatchEvent('change');check(true,'named palette, hex input and graphite default agree');
+ check(await settings.locator('input[type=color],#ui-tone,#tone-hex').count()===0,'settings have no duplicate color entry');
+ await page.getByRole('button',{name:'调色盘',exact:true}).click();
+ const palette=page.getByRole('dialog',{name:'调色盘',exact:true});await palette.getByRole('button',{name:'基础界面',exact:true}).click();
+ await palette.getByRole('textbox',{name:'链接与强调颜色代码',exact:true}).fill('#987044');await palette.getByRole('textbox',{name:'链接与强调颜色代码',exact:true}).blur();
+ await expect.poll(()=>page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--ui-accent').trim())).toBe('#987044');
+ await expect.poll(()=>settings.locator('html').evaluate(el=>getComputedStyle(el).getPropertyValue('--accent').trim())).toBe('#987044');
+ await palette.getByRole('button',{name:'关闭调色盘'}).click();await page.getByRole('button',{name:'总览',exact:true}).click();await page.getByRole('button',{name:'设置',exact:true}).click();await settings.locator('body[data-bridge-ready=true]').waitFor();
+ check(await settings.locator('html').evaluate(el=>getComputedStyle(el).getPropertyValue('--accent').trim())==='#987044','top-bar palette propagates to panels and survives reopening');
+ await page.getByRole('button',{name:'调色盘',exact:true}).click();await palette.getByRole('button',{name:'恢复这一组',exact:true}).click();await palette.getByRole('button',{name:'关闭调色盘'}).click();
  for(const [tab,key,storage] of [['dice','sfxDice','obr-suite/sfx-dice'],['initiative','sfxInitiative','obr-suite/sfx-initiative']]){
   await settings.locator(`[data-tab=${tab}]`).click();const toggle=settings.locator(`[data-key=${key}]`);const before=await toggle.getAttribute('aria-pressed');await toggle.click();
   await bg.waitForFunction(([key,value])=>localStorage.getItem(key)===value,[storage,before==='true'?'0':'1']);check(true,`${tab} personal sound setting reaches the Owlbear host`);await toggle.click();
