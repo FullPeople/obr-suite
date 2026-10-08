@@ -35,6 +35,8 @@ import OBR, {
 } from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
 import { DEFAULT_PLAYER_THRESHOLD, SCENE_BUBBLES_SETTINGS_KEY, readScenePlayerThreshold, quantiseRatio } from "./display-policy";
+import { resolveAnchorBox, type AnchorBox, type AnchorRef, type Frame } from "./anchor-box";
+import { BUBBLE_ANCHORS_KEY, encodeAnchors, pruneAnchors, readAnchors, sameRef } from "./anchor-memory";
 import { bossReplacesHealthBar, onPresentedBossesChange, presentedBossesRevision } from "../bossBar/suppression";
 
 const PLUGIN_ID = "com.obr-suite/bubbles";
@@ -303,6 +305,7 @@ let cachedAutoScaleText = false;
 let cachedVerticalOffset = DEFAULT_VERTICAL_OFFSET;
 let cachedOffsetByText = false;
 let cachedOverheadMode = false;
+let cachedAnchorMode: AnchorMode = "canvas";
 function readCombatActive(meta: Record<string, unknown>): boolean {
   const c = meta[COMBAT_STATE_KEY] as { inCombat?: boolean; preparing?: boolean } | undefined;
   return !!(c?.inCombat || c?.preparing);
@@ -319,6 +322,22 @@ function readSceneOffsetByText(meta: Record<string, unknown>): boolean {
 function readSceneOverheadMode(meta: Record<string, unknown>): boolean {
   const settings = meta[SCENE_BUBBLES_SETTINGS_KEY] as { overheadMode?: unknown } | undefined;
   return !!settings?.overheadMode;
+}
+// 2026-10-08 — which rectangle the bubble cluster is laid out against:
+//
+//   "canvas" — the token's whole PNG, transparent padding included
+//              (the historical behaviour)
+//   "box"    — the token's footprint on the grid, snapped to the grid
+//              lines while the token is lined up and rigidly followed
+//              afterwards (see anchor-box.ts)
+//
+// DM-synced, like the other bubble settings. Anything unrecognised —
+// missing field, an older scene, a hand-edited value — resolves to
+// "canvas", so an untouched table renders exactly as before.
+export type AnchorMode = "canvas" | "box";
+function readSceneAnchorMode(meta: Record<string, unknown>): AnchorMode {
+  const settings = meta[SCENE_BUBBLES_SETTINGS_KEY] as { anchorMode?: unknown } | undefined;
+  return settings?.anchorMode === "box" ? "box" : "canvas";
 }
 // One-shot migration: if the scene has NO bubble-settings object yet
 // but this client carries legacy per-client localStorage values for
@@ -529,6 +548,136 @@ function getImageNativeLocalCenter(image: Image, sceneDpi: number): Vector2 {
   p = Math2.multiply(p, sceneDpi / image.grid.dpi);
   // No rotation, no scale, no parent.position addition.
   return p;
+}
+
+// --- Grid-box anchoring (anchorMode === "box") --------------------------
+//
+// The canvas rect above is what the bubble cluster has always been laid
+// out against, and it measures the WHOLE PNG — transparent padding
+// included. Art that isn't centred in its own canvas (a dragon whose
+// crown reaches above the ring, a token with a baked-in shadow, a
+// creature drawn into the top half of a big sheet) therefore drops the
+// bar well below the visible token, and two tokens on the same row end
+// up on two different lines.
+//
+// `anchorMode: "box"` swaps the canvas rect for the token's grid
+// footprint. `anchor-box.ts` owns the maths; this section owns the glue:
+// where the frame comes from, where the memory lives, and when it is
+// written back.
+//
+// The memory is a per-token "where did the box sit inside its cells the
+// last time the token was lined up". It is what keeps a token parked on
+// an intersection (or nudged half a cell) from either snapping a whole
+// cell away or drifting off its neighbours, and it survives a reload
+// because it lives in scene metadata. GM-only writes, exactly like the
+// rest of the DM-synced bubble settings.
+let anchorMemory = new Map<string, AnchorRef>();
+let anchorDirty = false;
+let anchorFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Coalesce bursts of dragging into a single metadata write. Scene
+ *  metadata is replicated to every client, so we don't want to write on
+ *  every frame a token crosses a grid line. */
+const ANCHOR_FLUSH_MS = 1200;
+
+function readAnchorMode(): AnchorMode {
+  return cachedAnchorMode;
+}
+
+/**
+ * Build the anchoring frame from the SAME two helpers the canvas path
+ * uses, so "where is this token" keeps exactly one definition.
+ */
+function anchorFrameOf(image: Image, sceneDpi: number): Frame {
+  const center = getImageCenter(image, sceneDpi);
+  const size = getRenderedSize(image, sceneDpi);
+  const pos = image.position ?? { x: 0, y: 0 };
+  const scale = image.scale ?? { x: 1, y: 1 };
+  return {
+    centerX: center.x,
+    centerY: center.y,
+    width: size.width,
+    height: size.height,
+    px: Number.isFinite(pos.x) ? pos.x : 0,
+    py: Number.isFinite(pos.y) ? pos.y : 0,
+    rot: Number.isFinite(image.rotation) ? image.rotation : 0,
+    sx: Number.isFinite(scale.x) ? scale.x : 1,
+    sy: Number.isFinite(scale.y) ? scale.y : 1,
+  };
+}
+
+/**
+ * The box to lay this token's bubbles out against, or `null` to keep the
+ * canvas rect (mode off, or nothing memorised for a token that has never
+ * been seen aligned).
+ *
+ * Also takes the snapshot on every frame the token IS aligned, which is
+ * the only way the memory ever gets (re)learned.
+ */
+function anchorBoxFor(image: Image, sceneDpi: number): AnchorBox | null {
+  if (readAnchorMode() !== "box") return null;
+  try {
+    const prev = anchorMemory.get(image.id);
+    const resolved = resolveAnchorBox(anchorFrameOf(image, sceneDpi), sceneDpi, prev);
+    if (!resolved) return null;
+    if (resolved.snapshot && !sameRef(prev, resolved.snapshot)) {
+      // Delete + set so the freshest calibration sits at the tail of the
+      // eviction order (see MAX_ANCHORS in anchor-memory.ts).
+      anchorMemory.delete(image.id);
+      anchorMemory.set(image.id, resolved.snapshot);
+      anchorDirty = true;
+    }
+    return resolved.box;
+  } catch (e) {
+    // One unreadable token must never take the whole sync loop down —
+    // it just keeps the canvas rect.
+    console.warn("[obr-suite/bubbles] anchor box failed", e);
+    return null;
+  }
+}
+
+/** Adopt the room's memory. Skipped while a local calibration is still
+ *  waiting to be written, otherwise the echo of our own write would
+ *  swallow it. */
+function loadAnchorMemory(meta: Record<string, unknown>): void {
+  if (anchorDirty) return;
+  anchorMemory = readAnchors(meta);
+}
+
+/** Drop memories for tokens that left the scene, then trim to the cap. */
+function pruneAnchorMemory(liveIds: Set<string>): void {
+  if (pruneAnchors(anchorMemory, liveIds)) anchorDirty = true;
+}
+
+function scheduleAnchorFlush(): void {
+  if (!anchorDirty || anchorFlushTimer !== null) return;
+  anchorFlushTimer = setTimeout(() => {
+    anchorFlushTimer = null;
+    void flushAnchorMemory();
+  }, ANCHOR_FLUSH_MS);
+}
+
+async function flushAnchorMemory(): Promise<void> {
+  if (!anchorDirty || role !== "GM") return;
+  const payload = encodeAnchors(anchorMemory);
+  anchorDirty = false;
+  try {
+    // Shallow top-level merge, same as the settings write — other
+    // namespaces in scene metadata are untouched.
+    await OBR.scene.setMetadata({ [BUBBLE_ANCHORS_KEY]: payload });
+  } catch (e) {
+    anchorDirty = true;
+    console.warn("[obr-suite/bubbles] anchor memory write failed", e);
+  }
+}
+
+function resetAnchorMemory(): void {
+  anchorMemory = new Map();
+  anchorDirty = false;
+  if (anchorFlushTimer !== null) {
+    clearTimeout(anchorFlushTimer);
+    anchorFlushTimer = null;
+  }
 }
 
 // Polygon points for a rounded rectangle anchored at (0, 0) extending
@@ -1115,6 +1264,7 @@ function computeLayout(
   offsetByText: boolean,
   autoScaleText: boolean,
   overheadMode: boolean = false,
+  anchorBox: AnchorBox | null = null,
 ): BarLayout {
   // World centre + rendered size. Sign of parent.scale (signed,
   // not |scale|) feeds into every position-offset computation so
@@ -1122,10 +1272,22 @@ function computeLayout(
   // rather than flying off to one side.
   const center = getImageCenter(image, sceneDpi);
   const size = getRenderedSize(image, sceneDpi);
+  // 2026-10-08 — `anchorMode: "box"` swaps the canvas rect for the
+  // token's grid footprint. Every consumer of these four numbers (bar
+  // width via totalSpan, the below/above anchor, the AC bubble's right
+  // edge, tokenScale) derives from them and nothing else, so this single
+  // substitution is the entire geometry change — and when `anchorBox` is
+  // null the canvas path is bit-for-bit what it was.
+  const box = anchorBox ?? {
+    centerX: center.x,
+    centerY: center.y,
+    width: size.width,
+    height: size.height,
+  };
   const flipX = (image.scale?.x ?? 1) < 0 ? -1 : 1;
   const flipY = (image.scale?.y ?? 1) < 0 ? -1 : 1;
   return computeLayoutFromMetrics(
-    center.x, center.y, size.width, size.height,
+    box.centerX, box.centerY, box.width, box.height,
     sceneDpi, data, userScale, verticalOffset, offsetByText, autoScaleText,
     flipX, flipY, overheadMode,
   );
@@ -1681,10 +1843,15 @@ async function syncBubbles(): Promise<void> {
     }
 
     const wanted = new Map<string, Wanted>();
+    // Every token we lay out is a token whose anchor memory is still
+    // live; anything else is a leftover from a token that was deleted or
+    // moved to another layer and gets pruned below.
+    const liveIds = new Set<string>();
     for (const it of allItems) {
       // Match upstream — Character / Mount / Prop layers all show bubbles.
       if (it.layer !== "CHARACTER" && it.layer !== "MOUNT" && it.layer !== "PROP") continue;
       if (!isImage(it)) continue;
+      liveIds.add(it.id);
       // Per-suite gating: only render bubbles for tokens explicitly
       // bound to a character card or a bestiary monster. Avoids
       // accidentally bubble-ifying random NPC art or terrain props
@@ -1719,7 +1886,11 @@ async function syncBubbles(): Promise<void> {
       }
 
       const statsVisible = !d.hide;
-      const layout = computeLayout(it, sceneDpi, effectiveData, userScale, verticalOffset, offsetByTextFlag, autoScaleText, overheadModeFlag);
+      // 2026-10-08 — resolves to null unless the table turned on
+      // `anchorMode: "box"`, in which case it also records the snapshot
+      // whenever this token is currently lined up with the grid.
+      const anchorBox = anchorBoxFor(it, sceneDpi);
+      const layout = computeLayout(it, sceneDpi, effectiveData, userScale, verticalOffset, offsetByTextFlag, autoScaleText, overheadModeFlag, anchorBox);
       // Silhouette suppresses AC and the temp bubble entry. The
       // geometryKey reflects what items will exist so a viewMode
       // flip drives a structure-rebuild instead of slipping
@@ -1750,6 +1921,12 @@ async function syncBubbles(): Promise<void> {
         // corner radius, border, inline-vs-stacked icons); must invalidate
         // the cache when toggled.
         overheadModeFlag ? "O" : "S",
+        // 2026-10-08 — anchor basis. The resolved geometry above already
+        // differs between the two modes for most tokens, but a token
+        // whose grid box happens to coincide with its canvas (a
+        // perfectly-framed 1×1 image) would otherwise keep the bar it
+        // baked under the other mode.
+        readAnchorMode() === "box" ? "B" : "C",
         // parent.scale sign — flips position-offset signs in builders.
         // Need a rebuild on flip so the new bake takes effect.
         layout.flipX, layout.flipY,
@@ -1773,6 +1950,14 @@ async function syncBubbles(): Promise<void> {
         rebuildHash,
         statsVisible,
       });
+    }
+
+    // 2026-10-08 — anchor memory housekeeping. Pruning drops tokens that
+    // left the scene; the flush is deferred so a drag across several
+    // grid lines costs one metadata write instead of one per frame.
+    if (readAnchorMode() === "box") {
+      pruneAnchorMemory(liveIds);
+      scheduleAnchorFlush();
     }
 
     // Drop bubbles for tokens that lost data or were removed.
@@ -2051,6 +2236,10 @@ export async function setupBubbles(): Promise<void> {
     cachedVerticalOffset = readSceneVerticalOffset(meta as Record<string, unknown>);
     cachedOffsetByText = readSceneOffsetByText(meta as Record<string, unknown>);
     cachedOverheadMode = readSceneOverheadMode(meta as Record<string, unknown>);
+    cachedAnchorMode = readSceneAnchorMode(meta as Record<string, unknown>);
+    // 2026-10-08 — adopt whatever this room already learned about its
+    // tokens' in-cell positions before the first sync pass runs.
+    loadAnchorMemory(meta as Record<string, unknown>);
   } catch {}
   if (!active()) return;
 
@@ -2064,28 +2253,37 @@ export async function setupBubbles(): Promise<void> {
       const nextVOffset = readSceneVerticalOffset(meta as Record<string, unknown>);
       const nextOffsetByText = readSceneOffsetByText(meta as Record<string, unknown>);
       const nextOverhead = readSceneOverheadMode(meta as Record<string, unknown>);
+      const nextAnchor = readSceneAnchorMode(meta as Record<string, unknown>);
+      // 2026-10-08 — another client (or this one, after its own flush)
+      // rewrote the anchor table. `loadAnchorMemory` is a no-op while a
+      // local calibration is still queued, so this can't swallow one.
+      loadAnchorMemory(meta as Record<string, unknown>);
       if (
         next !== cachedCombatActive ||
         nextThreshold !== cachedPlayerThreshold ||
         nextAutoScale !== cachedAutoScaleText ||
         nextVOffset !== cachedVerticalOffset ||
         nextOffsetByText !== cachedOffsetByText ||
-        nextOverhead !== cachedOverheadMode
+        nextOverhead !== cachedOverheadMode ||
+        nextAnchor !== cachedAnchorMode
       ) {
         const autoScaleChanged = nextAutoScale !== cachedAutoScaleText;
         // Any of the layout-affecting DM settings (offset / offset-by-
-        // text / overhead mode) changing also needs a full rebuild,
-        // not just a patchGeometry — same reasoning as autoScale.
+        // text / overhead mode / anchor basis) changing also needs a
+        // full rebuild, not just a patchGeometry — same reasoning as
+        // autoScale.
         const layoutChanged =
           nextVOffset !== cachedVerticalOffset ||
           nextOffsetByText !== cachedOffsetByText ||
-          nextOverhead !== cachedOverheadMode;
+          nextOverhead !== cachedOverheadMode ||
+          nextAnchor !== cachedAnchorMode;
         cachedCombatActive = next;
         cachedPlayerThreshold = nextThreshold;
         cachedAutoScaleText = nextAutoScale;
         cachedVerticalOffset = nextVOffset;
         cachedOffsetByText = nextOffsetByText;
         cachedOverheadMode = nextOverhead;
+        cachedAnchorMode = nextAnchor;
         if (autoScaleChanged || layoutChanged) {
           void clearAll();
         }
@@ -2159,6 +2357,14 @@ export async function teardownBubbles(): Promise<void> {
     pendingTimer = null;
   }
   try { await OBR.tool.removeMode(LEGACY_GUARD_MODE_ID); } catch {}
+  // 2026-10-08 — a calibration learned moments before a reload / disable
+  // is still worth keeping, so push it before dropping the store.
+  if (anchorFlushTimer !== null) {
+    clearTimeout(anchorFlushTimer);
+    anchorFlushTimer = null;
+  }
+  await flushAnchorMemory();
+  resetAnchorMemory();
   await clearAll();
 }
 
