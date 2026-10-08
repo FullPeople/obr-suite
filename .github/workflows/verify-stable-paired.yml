@@ -54,7 +54,7 @@ jobs:
         run: npm run build
       - name: Settings palette and browser persistence
         run: |
-          WORKBENCH_PANEL_OUT=.local-evidence/palette257/panels node tools/build-workbench-panels.mjs
+          WORKBENCH_PANEL_OUT="$PWD/.local-evidence/palette257/panels" WORKBENCH_PANEL_ONLY=settings node tools/build-workbench-panels.mjs
           WORKBENCH_SETTINGS_TEST_OUT=.local-evidence/palette257 node tools/workbench-palette257-selftest.mjs
       - name: Retired fog entry and unchanged engine lifecycle
         run: node tools/fog-menu-retirement-selftest.mjs
