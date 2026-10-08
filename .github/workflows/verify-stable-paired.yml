@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - codex/palette-258-stable
       - codex/unified-ui-stable-20261008
       - codex/card-links-stable-20261008
       - codex/card-suite-followup-stable-20261007
@@ -23,7 +24,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 553ab51d84e48f4fc06647f646fd09a60c5a4874
+          ref: 65186f93eca87170b1e2f96cee2766af459053d8
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -74,7 +75,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: stable-viewer257-evidence
+          name: stable-viewer258-evidence
           include-hidden-files: true
           if-no-files-found: warn
           path: |
@@ -83,6 +84,6 @@ jobs:
             .local-evidence/palette257/settings-palette.png
       - uses: actions/upload-artifact@v4
         with:
-          name: verified-stable-viewer257-build
+          name: verified-stable-viewer258-build
           if-no-files-found: error
           path: dist/
