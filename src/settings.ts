@@ -3239,10 +3239,10 @@ const TABS: TabDef[] = [
       const en = lang === "en";
         // The independently deployed table is currently in public testing.
         // Both Suite channels must link to the actual published manifest.
-        const url = "https://obr.dnd.center/three-dragon-ante-dev/manifest.json";
+        const url = "https://dnd.center/3-dragon/manifest.json";
       return `<h3>${en ? "A separate card table" : "独立的酒馆牌桌"}</h3>
         <p>${en ? "Install Three-Dragon Ante in this room when your table wants to play. It has its own entry and does not need Full Suite to stay open." : "想打牌时，由 DM 将三龙牌安装到房间。它有自己的入口，无需依赖套件窗口。"}</p>
-          <a class="layout-editor-btn" href="${url}" target="_blank" rel="noopener">${en ? "Three-Dragon Ante extension address (Dev)" : "三龙牌插件地址（测试版）"}</a>
+          <a class="layout-editor-btn" href="${url}" target="_blank" rel="noopener">${en ? "Three-Dragon Ante extension address" : "三龙牌插件地址"}</a>
           <p><code>${url}</code></p>
           <button id="recover-historical-three-dragon" class="layout-editor-btn">${en?'Recover a historical table in this room':'恢复此房间的旧版牌局'}</button>
           <p>${en?'Only opens an existing historical table. Missing private hands and decks are never reconstructed.':'仅打开已有旧版牌局；缺少原浏览器私有手牌和牌库时会提示恢复，不会重建或清桌。'}</p>
