@@ -27,7 +27,7 @@ for(const [name,file,entry] of [...(historical?[['historical-table','tools/fixtu
 }
 if(!process.env.WORKBENCH_PANEL_ONLY||process.env.WORKBENCH_PANEL_ONLY==='table'){
  const html=readFileSync(join(root,'tools/three-dragon-website-entry.html'),'utf8');
- if(!html.includes('href="https://obr.dnd.center/three-dragon-ante/"')||/<iframe|<script[^>]*src=|owlbear-rodeo|\/three-dragon-api\//i.test(html))throw Error('Public table entry must be the reviewed website link');
+ if(!html.includes('href="https://dnd.center/3-dragon/"')||/<iframe|<script[^>]*src=|owlbear-rodeo|\/three-dragon-api\//i.test(html))throw Error('Public table entry must be the reviewed website link');
  writeFileSync(join(out,'table.html'),html);
 }
 if(historical){const art=join(root,'extensions/three-dragon-ante/src/game/art');copyTree(art,join(out,'art'));copyTree(art,join(dirname(out),'art'));}
