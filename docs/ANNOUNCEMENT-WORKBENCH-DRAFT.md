@@ -11,7 +11,7 @@
 在枭熊中使用时，角色卡独立打开为标签页，也可以和枭熊放在浏览器拆分视图中使用。
 只想车卡或查资料？也有无需枭熊的单机网页，一定程度上从查资料的角度来说比5etool还好用大概
 *测试版和枭熊插件的链接使用方式一致，使用时请禁用现在的旧版本。当然旧版本也会进行保留！新版本更适合平板端和电脑端。*
-[**安装测试版**](https://obr.dnd.center/suite-dev/manifest-dev.json) · [**打开单机版**](https://obr.dnd.center/card/)
+[**安装测试版**](https://obr.dnd.center/suite-dev/manifest-dev.json) · [**打开单机版**](https://dnd.center/card/)
 首次打开需要加载资料库，之后会使用本地缓存。新版仍在持续迭代，欢迎把遇到的问题和不顺手的地方反馈给我！
 
 ## 公告版本 [changelog]
