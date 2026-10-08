@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - codex/unified-ui-stable-20261008
       - codex/card-links-stable-20261008
       - codex/card-suite-followup-stable-20261007
       - codex/final-stable-paired-20261003
@@ -22,7 +23,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 9e194f19263cb6f9dd8ba487b6985112a6cc6734
+          ref: 553ab51d84e48f4fc06647f646fd09a60c5a4874
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -51,6 +52,10 @@ jobs:
           node tools/bestiary-dependency-selftest.mjs
       - name: Stable typecheck, host and exact paired five-page viewer
         run: npm run build
+      - name: Settings palette and browser persistence
+        run: |
+          WORKBENCH_PANEL_OUT="$PWD/.local-evidence/palette257/panels" WORKBENCH_PANEL_ONLY=settings node tools/build-workbench-panels.mjs
+          WORKBENCH_SETTINGS_TEST_OUT=.local-evidence/palette257 node tools/workbench-palette257-selftest.mjs
       - name: Retired fog entry and unchanged engine lifecycle
         run: node tools/fog-menu-retirement-selftest.mjs
       - name: Require the historical recovery page and viewer
@@ -69,12 +74,15 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: stable-viewer255-evidence
+          name: stable-viewer257-evidence
           include-hidden-files: true
           if-no-files-found: warn
-          path: .paired-web/.local-evidence/legacy-viewer/
+          path: |
+            .paired-web/.local-evidence/legacy-viewer/
+            .local-evidence/palette257/results.json
+            .local-evidence/palette257/settings-palette.png
       - uses: actions/upload-artifact@v4
         with:
-          name: verified-stable-viewer255-build
+          name: verified-stable-viewer257-build
           if-no-files-found: error
           path: dist/

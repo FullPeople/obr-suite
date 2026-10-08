@@ -7,9 +7,19 @@
 新版安装地址（可以选中复制）：
 [https://obr.dnd.center/suite-dev/manifest-dev.json](https://obr.dnd.center/suite-dev/manifest-dev.json)
 在枭熊中添加上述扩展地址。启用新版时，请禁用同一房间中的旧版插件。
-[打开车卡网站](https://dnd.center/card/)，完成后导出完整 JSON，再上传到插件。
+[打开车卡网站](https://dnd.center/card/?intro=0)，完成后导出完整 JSON，再上传到插件。
 
-## 2026-10-07 [release] [zh]
+## 2026-10-08 [release] [zh]
+
+### 五页查看器与界面
+
+- 五页查看器同步角色卡组件配色和精简后的法术悬浮提示；完整 Wiki 保留学习范围。
+- 更新 11 个职业图标，使用提供的 PSD，统一为留空的透明正方形。
+- 独立站已支持临时公开云端存储与分享，枭熊端继续使用房间保存。
+- 新版 Full Suite 同步统一调色盘和 Wiki 右键创建自定义副本；旧插件保持原有功能范围。
+- 原始 JSON、资源余额、枭熊权限和三龙牌入口保持。
+
+## 2026-10-07 [history] [zh]
 
 ### 地图与五页查看器
 
@@ -18,7 +28,7 @@
 - 骰子冷启动修复适用于新版 Full Suite，旧稳定插件没有新版 3D 骰子模块。
 - 真实房间和实体手机仍待验证。关闭附加窗口，刷新枭熊房间，再重新打开插件。
 
-## 2026-10-07 [release] [en]
+## 2026-10-07 [history] [en]
 
 ### Map menu and five-page viewer
 
