@@ -52,6 +52,10 @@ jobs:
           node tools/bestiary-dependency-selftest.mjs
       - name: Stable typecheck, host and exact paired five-page viewer
         run: npm run build
+      - name: Settings palette and browser persistence
+        run: |
+          WORKBENCH_PANEL_OUT=.local-evidence/palette257/panels node tools/build-workbench-panels.mjs
+          WORKBENCH_SETTINGS_TEST_OUT=.local-evidence/palette257 node tools/workbench-palette257-selftest.mjs
       - name: Retired fog entry and unchanged engine lifecycle
         run: node tools/fog-menu-retirement-selftest.mjs
       - name: Require the historical recovery page and viewer
@@ -73,7 +77,10 @@ jobs:
           name: stable-viewer257-evidence
           include-hidden-files: true
           if-no-files-found: warn
-          path: .paired-web/.local-evidence/legacy-viewer/
+          path: |
+            .paired-web/.local-evidence/legacy-viewer/
+            .local-evidence/palette257/results.json
+            .local-evidence/palette257/settings-palette.png
       - uses: actions/upload-artifact@v4
         with:
           name: verified-stable-viewer257-build
