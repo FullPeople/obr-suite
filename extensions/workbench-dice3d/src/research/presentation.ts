@@ -40,9 +40,9 @@ export class FormulaShow extends CueRenderer{
   private releaseFx:()=>void;
   private latest=-1;private finished=false;
   private historyAttached:boolean;
-  constructor(private stage:HTMLElement,roll:Roll,private ids:string[],private row:FormulaRow,private card:HTMLElement,private projection:()=>Projection,private timeline?:RuleTimeline){
+  constructor(private stage:HTMLElement,roll:Roll,private ids:string[],private row:FormulaRow,private card:HTMLElement,private projection:()=>Projection,private timeline?:RuleTimeline,updateHistory=true){
     super(stage,roll.request.id,roll.request.name,roll.request.bodyColor);
-    this.historyAttached=card.isConnected;
+    this.historyAttached=updateHistory;
     const layer=acquireOverlayCanvas(stage,'research-effects');this.fx=layer.canvas;this.context=layer.context;this.releaseFx=layer.release;
     const caption=document.createElement('div');caption.className='formula-caption';caption.textContent=row.formula.replaceAll('*','×');card.append(caption);
     const inline=document.createElement('div');inline.className='formula-inline';
@@ -64,7 +64,7 @@ export class FormulaShow extends CueRenderer{
     const decisionAt=this.timeline?.decisionAt??cue.settled+DECISION_DELAY,fade=decisionProgress(age,decisionAt),landed=age>=decisionAt,phase=Math.max(0,age-decisionAt),arrived=new Set(cue.beams.filter(b=>age>=b.reveal).map(b=>this.ids[b.dieIndex]));
     const eventStart=(event:FormulaRow['events'][number])=>event.kind==='max'||event.kind==='min'?this.timeline?.clamps.find(c=>c.kind===event.kind&&c.id===event.dice[0]&&c.label===event.label)?.start??decisionAt:decisionAt;
     const visibleEvents=this.row.events.filter(e=>age>eventStart(e));
-    const history=this.historyAttached||(this.historyAttached=this.card.isConnected);
+    const history=this.historyAttached;
     if(history){const note=visibleEvents.map(e=>e.label+(e.physicalNote?`（${e.physicalNote}）`:'')).join(' · ')||(landed?'真实落地 → 数字汇集 → 加值到账':'等待真实落地');const node=this.card.querySelector('.rule-note')!;if(node.textContent!==note)node.textContent=note;}
     const point=(id:string)=>{const index=this.ids.indexOf(id),o=((this.roll.frames-1)*this.ids.length+index)*7;return projectVisual(p,this.roll.poses[o],this.roll.poses[o+1],this.roll.poses[o+2]);};
     const alpha=fade*Math.max(0,1-(age-cue.finalReveal)/.8);
