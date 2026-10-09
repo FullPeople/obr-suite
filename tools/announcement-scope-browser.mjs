@@ -47,7 +47,7 @@ for(const width of [360,1280]){
   const guide=page.locator('.announcement-important');check(`${width} ${channel} guide collapsed`,!await guide.evaluate(el=>el.open));
   check(`${width} ${channel} exact Chinese title`,await guide.locator('summary').innerText()==='关于设置玩家单独权限的重要说明');
   const body=await page.locator('#body').innerText();check(`${width} ${channel} no wrong release`,channel==='suite'?body.includes('该插件不再更新'):!body.includes('该插件不再更新'));
-  check(`${width} ${channel} own notice version`,(await page.locator('.cl-version').innerText())===versions[channel]);
+  check(`${width} ${channel} own notice version`,(await page.locator('.cl-version').first().innerText())===versions[channel]);
   await guide.locator('summary').click();check(`${width} ${channel} original guide retained`,(await guide.innerText()).includes('每个 Token 单独指派；一个玩家可以拥有多个角色（PC + 召唤物等）。'));
   await page.waitForFunction(()=>[...document.querySelectorAll('.announcement-important img')].every(img=>img.complete&&img.naturalWidth>0));
   check(`${width} ${channel} three own-channel images`,await guide.locator('img').count()===3&&await guide.locator('img').evaluateAll((imgs,channel)=>imgs.every(img=>new URL(img.src).pathname.startsWith('/'+channel+'/')),channel));
