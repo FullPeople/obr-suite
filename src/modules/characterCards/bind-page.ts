@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import {characterDirectory} from './directory';
 import { ICONS } from "../../icons";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang } from "../../state";
@@ -40,9 +41,8 @@ function escapeHtml(s: string) {
 
 async function getCards(): Promise<CardEntry[]> {
   try {
-    const meta = await OBR.scene.getMetadata();
-    const list = meta[SCENE_META_KEY];
-    return Array.isArray(list) ? (list as CardEntry[]) : [];
+    const [scene,room] = await Promise.all([OBR.scene.getMetadata(),OBR.room.getMetadata()]);
+    return characterDirectory(scene,room).map(entry=>({...entry,name:entry.name||entry.id,uploader:entry.uploader||'',uploaded_at:entry.uploaded_at||'',url:entry.url||''}));
   } catch {
     return [];
   }
@@ -166,6 +166,8 @@ function sanitizeAutoResources(arr: AutoResource[]): AutoResource[] {
 
 async function bindTo(cardId: string | null) {
   if (!itemId) return;
+  if(await OBR.player.getRole()!=='GM'||!await OBR.scene.isReady())return;
+  if(cardId&&!(await getCards()).some(card=>card.id===cardId))return;
   // Resolve the new dex-mod + bubbles seed up front (before the bind
   // write) so we can include them in the same `updateItems` call —
   // single round-trip, and the initiative tracker / bubbles bar see
@@ -185,6 +187,8 @@ async function bindTo(cardId: string | null) {
   // resolves — evidence per project discipline.
   const repairLog: Array<{ name: string; oldId: string; newId: string }> = [];
   try {
+    if(await OBR.player.getRole()!=='GM'||!await OBR.scene.isReady())return;
+    if(cardId&&!(await getCards()).some(card=>card.id===cardId))return;
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       const d = drafts[0];
       if (!d) return;
@@ -358,6 +362,7 @@ async function bindTo(cardId: string | null) {
 
 OBR.onReady(async () => {
   applyI18nDom(lang);
+  if(await OBR.player.getRole()!=='GM'){listEl.textContent=lang==='zh'?'只有 GM 可以管理棋子绑定。':'Only the GM can manage token bindings.';return;}
   const [cards, boundId] = await Promise.all([getCards(), getCurrentBinding()]);
 
   // 撤销 ID 修复 — shown only when this token carries the pre-repair
@@ -380,6 +385,7 @@ OBR.onReady(async () => {
             ? "确认撤销 ID 修复？\n\n仅恢复资源 ID 为旧值（旧的重复/空 ID 会回来，相关计数可能重新串联）。数值和新增资源不受影响。"
             : "Undo the ID repair?\n\nOnly resource IDs revert to their old values (the old duplicate/empty ids return, so affected trackers may cross-link again). Values and added resources are untouched.";
           if (!window.confirm(confirmMsg)) return;
+          if(await OBR.player.getRole()!=='GM'||!await OBR.scene.isReady())return;
           btn.disabled = true;
           const n = await restoreResourceIdBackup(itemId);
           const msg = n === null
