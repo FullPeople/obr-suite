@@ -10,12 +10,12 @@ const clients=[],metadata={},packets=[];
 const tick=async()=>{for(let i=0;i<15;i++)await new Promise(resolve=>setImmediate(resolve));};
 function client(role){
  const connectionId=`connection-${++sequence}`,listeners=new Map(),sceneListeners=[],opens=[],closes=[],live=new Set(),timers=new Map();
- const state={role,ready:true,openBarrier:undefined,metadataBarrier:undefined};
+ const state={role,ready:true,readyFailures:0,openBarrier:undefined,metadataBarrier:undefined};
  const api={player:{getConnectionId:async()=>connectionId,getRole:async()=>state.role},party:{getPlayers:async()=>clients.filter(c=>c.connectionId!==connectionId).map(c=>({connectionId:c.connectionId,role:c.state.role}))},
-  scene:{isReady:async()=>state.ready,onReadyChange:fn=>{sceneListeners.push(fn);return()=>{};},getMetadata:async()=>{await state.metadataBarrier;return {...metadata};},setMetadata:async value=>Object.assign(metadata,value)},
+  scene:{isReady:async()=>{if(state.readyFailures){state.readyFailures--;throw Error('readiness failed');}return state.ready;},onReadyChange:fn=>{sceneListeners.push(fn);return()=>sceneListeners.splice(sceneListeners.indexOf(fn),1);},getMetadata:async()=>{await state.metadataBarrier;return {...metadata};},setMetadata:async value=>Object.assign(metadata,value)},
   popover:{open:async()=>{},close:async()=>{}},viewport:{getWidth:async()=>1200,getHeight:async()=>800},
   modal:{open:async data=>{opens.push(data);await state.openBarrier;live.add(data.id);},close:async id=>{closes.push(id);live.delete(id);}},
-  broadcast:{onMessage:(name,fn)=>{if(!listeners.has(name))listeners.set(name,[]);listeners.get(name).push(fn);return()=>{};},sendMessage:async(name,data,options)=>{packets.push({sender:connectionId,name,data,options});for(const target of clients){if(options.destination==='LOCAL'&&target.connectionId!==connectionId||options.destination==='REMOTE'&&target.connectionId===connectionId)continue;target.deliver(name,data,connectionId);}}},
+  broadcast:{onMessage:(name,fn)=>{if(!listeners.has(name))listeners.set(name,[]);listeners.get(name).push(fn);return()=>listeners.get(name).splice(listeners.get(name).indexOf(fn),1);},sendMessage:async(name,data,options)=>{packets.push({sender:connectionId,name,data,options});for(const target of clients){if(options.destination==='LOCAL'&&target.connectionId!==connectionId||options.destination==='REMOTE'&&target.connectionId===connectionId)continue;target.deliver(name,data,connectionId);}}},
  };
  const context=vm.createContext({console,Date:{now:()=>clock},crypto:webcrypto,TextEncoder,setTimeout:(fn)=>{const id=Symbol();timers.set(id,fn);return id;},clearTimeout:id=>timers.delete(id)}),cache=new Map();
  function load(name){if(cache.has(name))return cache.get(name);const module={exports:{}};cache.set(name,module.exports);
@@ -75,5 +75,12 @@ await check('fresh role revocation while metadata is loading prevents any room b
 });
 await check('oversized and empty invisible requests do not open a presentation',async()=>{
  await assert.rejects(()=>request(gm,{extra:'x'.repeat(12001)}),/配置过长/);await assert.rejects(()=>request(gm,{config:{...config,title:'',subtitle:'',body:'',decoration:'none',background:'transparent'}}),/填写文字/);
+});
+await check('failed initialization can retry without retaining duplicate room handlers',async()=>{
+ const retry=client('PLAYER');retry.state.readyFailures=1;await assert.rejects(()=>retry.controller.setupTextEffects(),/readiness failed/);
+ await Promise.all([retry.controller.setupTextEffects(),retry.controller.setupTextEffects()]);
+ const original=packets.findLast(v=>v.name===p.PLAY).data,event={...original,id:webcrypto.randomUUID(),order:original.order+1000};
+ retry.deliver(p.PLAY,event,gm.connectionId);await tick();assert.equal(retry.opens.length,1);
+ const before=retry.closes.length;retry.scene(false);await tick();assert.equal(retry.closes.length,before+1);
 });
 console.log(`Text effects: ${count} scenarios passed; real Owlbear room not exercised.`);

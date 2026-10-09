@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
+    branches: [codex/text-effects-20261009, codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
   workflow_dispatch:
 permissions:
   contents: read
@@ -63,6 +63,20 @@ jobs:
           npm run build:three-dragon
       - name: Document editing, separate monster tabs and readable camera bindings
         run: xvfb-run -a npm run test:workbench
+      - name: Text presentation navigation, presets, native display and narrow layouts
+        env:
+          TEXT_EFFECT_PANEL_OUT: ${{ github.workspace }}/dist-workbench-dev/workbench-panels
+          PLAYWRIGHT_EXECUTABLE_PATH: ${{ env.CHROMIUM_PATH }}
+        run: |
+          mkdir -p .local-evidence/text-effects/browser
+          node node_modules/vite/bin/vite.js --config tools/text-effects-browser.vite.ts > .local-evidence/text-effects/browser/server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:5197/tests/fixtures/text-effects/index.html > /dev/null; then break; fi
+            sleep 1
+          done
+          node tools/text-effects-browser-selftest.mjs
       - name: Verify built settings palette and browser persistence
         run: |
           mkdir -p .local-evidence/palette257
@@ -130,6 +144,7 @@ jobs:
             .local-evidence/permission-notice/
             .local-evidence/verification/*.log
             .local-evidence/verification/results.json
+            .local-evidence/text-effects/browser/
             .local-evidence/native-owner/results.json
             .local-evidence/production-dice/package/result.json
             .local-evidence/production-dice/browser/
