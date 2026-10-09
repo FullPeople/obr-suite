@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import ts from 'typescript';
-const files=new Map(['model','protocol','index'].map(name=>[name,ts.transpileModule(readFileSync(new URL(`../src/modules/textEffects/${name}.ts`,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText]));
+const files=new Map(['catalog','model','motion','protocol','index'].map(name=>[name,ts.transpileModule(readFileSync(new URL(`../src/modules/textEffects/${name}.ts`,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText]));
 let clock=1000000,sequence=0;
 const clients=[],metadata={},packets=[];
 const tick=async()=>{for(let i=0;i<15;i++)await new Promise(resolve=>setImmediate(resolve));};
@@ -22,8 +22,8 @@ function client(role){
   const require=path=>path==='@owlbear-rodeo/sdk'?{__esModule:true,default:api}:path.includes('asset-base')?{assetUrl:file=>'/suite-dev/'+file}:path.includes('transitions/protocol')?{prefersReducedMotion:()=>false}:load(path.replace('./',''));
   const fn=vm.runInContext(`(function(require,module,exports){${files.get(name)}\n})`,context);fn(require,module,module.exports);return module.exports;
  }
- const controller=load('index'),model=load('model'),protocol=load('protocol');
- const result={connectionId,state,opens,closes,live,timers,controller,model,protocol,deliver:(name,data,sender)=>listeners.get(name)?.forEach(fn=>fn({connectionId:sender,data})),scene:ready=>{state.ready=ready;sceneListeners.forEach(fn=>fn(ready));}};clients.push(result);return result;
+ const controller=load('index'),model=load('model'),protocol=load('protocol'),catalog=load('catalog'),motion=load('motion');
+ const result={connectionId,state,opens,closes,live,timers,controller,model,protocol,catalog,motion,deliver:(name,data,sender)=>listeners.get(name)?.forEach(fn=>fn({connectionId:sender,data})),scene:ready=>{state.ready=ready;sceneListeners.forEach(fn=>fn(ready));}};clients.push(result);return result;
 }
 const gm=client('GM'),player=client('PLAYER'),other=client('PLAYER');
 await Promise.all(clients.map(c=>c.controller.setupTextEffects()));
@@ -82,5 +82,20 @@ await check('failed initialization can retry without retaining duplicate room ha
  const original=packets.findLast(v=>v.name===p.PLAY).data,event={...original,id:webcrypto.randomUUID(),order:original.order+1000};
  retry.deliver(p.PLAY,event,gm.connectionId);await tick();assert.equal(retry.opens.length,1);
  const before=retry.closes.length;retry.scene(false);await tick();assert.equal(retry.closes.length,before+1);
+});
+await check('all reference options validate and legacy drafts migrate without losing content',async()=>{
+ const {catalog,model}=gm;
+ for(const[key,choices]of [['entry',catalog.ENTRY_EFFECTS],['leave',catalog.EXIT_EFFECTS],['idle',catalog.HOLD_EFFECTS],['decoration',catalog.ORNAMENTS],['flow',catalog.FLOWS],['entryEase',catalog.EASINGS],['entryOrder',catalog.ORDERS]])for(const choice of choices)assert.ok(model.parseConfig({...config,[key]:choice.id}),key+'/'+choice.id);
+ const legacy={};for(const key of ['version','title','subtitle','body','font','size','color','accent','outline','outlineColor','glow','spacing','align','position','motion','decoration','background','backgroundColor','opacity','enter','hold','exit'])legacy[key]=config[key];legacy.motion='left';legacy.position='bottom';legacy.align='right';const restored=model.parseConfig(legacy);assert.equal(restored.entry,'slide');assert.equal(restored.entryDirection,'left');assert.equal(restored.anchor,'bottom-right');assert.equal(restored.title,legacy.title);
+ for(const bad of [{entry:'missing'},{thirdColor:'true'},{outerOutline:17},{subtitleDelay:Infinity},{glitchColor:'url(x)'},{wrapChars:61},{decorationColor:'#fff'},{scrollFade:0}])assert.equal(model.parseConfig({...config,...bad}),null);
+});
+await check('motion endpoints, seeded randomness and every easing stay finite and deterministic',async()=>{
+ const {catalog,motion}=gm,ctx={size:48,x:80,y:15,index:2,count:7,seed:313,power:1,direction:'left',ease:'auto'};
+ for(const[key,choices,fn]of [['entry',catalog.ENTRY_EFFECTS,motion.entrance],['leave',catalog.EXIT_EFFECTS,motion.departure]])for(const choice of choices){for(const ease of catalog.EASINGS)for(const p of [0,.2,.5,.9,1]){const a=fn(choice.id,p,{...ctx,ease:ease.id}),b=fn(choice.id,p,{...ctx,ease:ease.id});assert.equal(JSON.stringify(a),JSON.stringify(b));assert.ok(Object.values(a).filter(v=>typeof v==='number').every(Number.isFinite));}if(key==='entry')assert.equal(JSON.stringify(fn(choice.id,1,ctx)),JSON.stringify(motion.neutral()));else assert.equal(fn(choice.id,1,ctx).opacity,choice.id==='none'?1:0);}
+ for(const effect of catalog.HOLD_EFFECTS)for(const t of [0,300,4000])assert.ok(Object.values(motion.holding(effect.id,t,ctx)).filter(v=>typeof v==='number').every(Number.isFinite));
+ for(const order of catalog.ORDERS){assert.equal(motion.stagger(0,2,7,order.id,.8),0);assert.equal(motion.stagger(1,2,7,order.id,.8),1);}
+});
+await check('maximum Chinese config stays under native payload limit and extended timing is shared',async()=>{
+ const large={...config,title:'字'.repeat(160),subtitle:'字'.repeat(240),body:'字'.repeat(1800),flow:'char',startDelay:500,endDelay:300,subtitleDelay:200};assert.ok(new TextEncoder().encode(JSON.stringify({requestId:webcrypto.randomUUID(),action:'play',preview:false,config:large})).length<12000);const result=await request(gm,{preview:true,config:large});assert.equal(result.expiresAt,clock+500+gm.model.duration(large)+500);
 });
 console.log(`Text effects: ${count} scenarios passed; real Owlbear room not exercised.`);

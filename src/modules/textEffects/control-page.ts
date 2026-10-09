@@ -1,104 +1,65 @@
 import OBR from '@owlbear-rodeo/sdk';
-import { DEFAULT_CONFIG, PRESETS, parseConfig, duration, hasContent, type TextEffectConfig } from './model';
+import { DEFAULT_CONFIG, PRESETS, parseConfig, duration, entryTime, narrationTime, hasContent, type TextEffectConfig } from './model';
+import { STYLE_PRESETS } from './catalog';
+import { editorHTML, factor } from './editor-view';
 import { REQUEST, STATUS, identifier } from './protocol';
 import { renderEffect } from './renderer';
 import './control.css';
-
-const STORAGE = 'com.obr-suite/text-effects/editor/v1';
-const root = document.getElementById('app')!;
-const choices = (values: [string, string][]) => values.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
-const select = (name: string, label: string, values: [string, string][]) => `<label>${label}<select name="${name}" aria-label="${label}">${choices(values)}</select></label>`;
-const range = (name: string, label: string, min: number, max: number, step = 1) => `<label>${label}<span class="te-range"><input type="range" name="${name}" min="${min}" max="${max}" step="${step}"><output data-value="${name}"></output></span></label>`;
-const color = (name: string, label: string) => `<label class="te-color-label">${label}<input type="color" name="${name}"></label>`;
-root.innerHTML = `<main class="te-editor">
-  <header class="te-editor-head"><div><h1>文字演出</h1><p>配置文字和效果，预览后直接在枭熊中播放。</p></div><button type="button" id="close">返回工作区</button></header>
-  <div class="te-template-bar"><label>演出预设<select id="presets" aria-label="演出预设"></select></label><button type="button" id="apply">应用预设</button><input id="preset-name" aria-label="预设名称" placeholder="我的预设名称" maxlength="48"><button type="button" id="save-preset">保存预设</button><button type="button" id="delete-preset">删除预设</button></div>
-  <div class="te-editor-grid"><form id="settings">
-    <fieldset><legend>文字</legend><label>标题<textarea name="title" rows="2" maxlength="160" placeholder="例如：战斗开始"></textarea></label><label>副标题<input name="subtitle" maxlength="240" placeholder="可留空"></label><label>正文<textarea name="body" rows="4" maxlength="1800" placeholder="旁白、场景描述或多行文字，可留空"></textarea></label></fieldset>
-    <fieldset><legend>文字样式</legend><div class="te-two">${select('font', '字体', [['serif', '宋体 / 衬线'], ['sans', '黑体 / 无衬线'], ['mono', '等宽']])}${select('align', '文字对齐', [['center', '居中'], ['left', '靠左'], ['right', '靠右']])}${color('color', '文字颜色')}${color('accent', '效果颜色')}${color('outlineColor', '描边颜色')}${select('position', '显示位置', [['center', '画面中央'], ['top', '画面上方'], ['bottom', '画面下方']])}</div>${range('size', '标题大小', 2, 14, 0.5)}${range('spacing', '字间距', 0, 20)}${range('outline', '描边粗细', 0, 4, 0.5)}${range('glow', '发光范围', 0, 60)}</fieldset>
-    <fieldset><legend>动画与效果</legend><div class="te-two">${select('motion', '文字入场', [['fade', '淡入'], ['rise', '向上浮现'], ['left', '从左滑入'], ['right', '从右滑入'], ['zoom', '缩放显现'], ['typewriter', '逐字出现']])}${select('decoration', '画面效果', [['none', '无'], ['rays', '光芒'], ['mist', '雾气'], ['sparks', '光点'], ['rings', '光环']])}</div><div class="te-three"><label>入场（秒）<input type="number" name="enter" min="0" max="3" step="0.1"></label><label>停留（秒）<input type="number" name="hold" min="0.5" max="20" step="0.1"></label><label>退场（秒）<input type="number" name="exit" min="0" max="3" step="0.1"></label></div></fieldset>
-    <fieldset><legend>背景</legend><div class="te-two">${select('background', '背景样式', [['transparent', '透明'], ['band', '横幅'], ['dim', '暗幕'], ['solid', '纯色']])}${color('backgroundColor', '背景颜色')}</div>${range('opacity', '背景不透明度', 0, 1, 0.05)}</fieldset>
-  </form><aside class="te-preview-column"><div class="te-preview-head"><strong>画面预览</strong><span id="duration"></span></div><div id="preview" class="te-preview" aria-label="文字演出预览"></div><div class="te-preview-tools"><button type="button" id="preview-play">播放预览</button><button type="button" id="preview-stop">停止预览</button><label><input id="reduced" type="checkbox">简化动态效果</label></div><p class="te-preview-note">预览和保存预设只影响自己。房间播放由 DM 发起。</p><div class="te-publish"><button type="button" id="owlbear-preview" disabled>在枭熊中预览</button><button type="button" id="room-play" class="te-primary" disabled>播放到房间</button><button type="button" id="room-stop" disabled>停止本次演出</button></div><p id="status" role="status" aria-live="polite">正在连接枭熊，可先调整配置并播放预览。</p><p id="error" role="alert" hidden></p></aside></div>
-</main>`;
-const form = document.getElementById('settings') as HTMLFormElement, preview = document.getElementById('preview')!;
-const status = document.getElementById('status')!, error = document.getElementById('error')!;
-const button = (id: string) => document.getElementById(id) as HTMLButtonElement;
-const reduced = document.getElementById('reduced') as HTMLInputElement;
-const presetSelect = document.getElementById('presets') as HTMLSelectElement, presetName = document.getElementById('preset-name') as HTMLInputElement;
-let config = structuredClone(DEFAULT_CONFIG), saved: { name: string; config: TextEffectConfig }[] = [];
-let connected = false, sceneReady = false, role = '', busy = false, connection = '';
-let presentation: ReturnType<typeof renderEffect> | undefined, stopTarget: { id: string; preview: boolean; expiresAt: number } | undefined;
-const pending = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-function showError(message = '') { error.textContent = message; error.hidden = !message; }
-try {
-  const stored = JSON.parse(localStorage.getItem(STORAGE) || 'null');
-  config = parseConfig(stored?.draft) || config;
-  if (Array.isArray(stored?.presets)) for (const preset of stored.presets.slice(0, 20)) {
-    const parsed = parseConfig(preset?.config);
-    if (parsed && typeof preset.name === 'string' && preset.name.trim() && preset.name.length <= 48) saved.push({ name: preset.name, config: parsed });
-  }
-} catch { showError('已保存的预设未能读取，本次配置仍可使用。'); }
-function persist() { try { localStorage.setItem(STORAGE, JSON.stringify({ draft: config, presets: saved })); return true; } catch { showError('浏览器未能保存配置；本次预览和播放仍可使用。'); return false; } }
-function listPresets(selected = 'builtin:0') {
-  presetSelect.replaceChildren();
-  for (const [list, prefix] of [[PRESETS, 'builtin'], [saved, 'saved']] as const) for (const [i, preset] of list.entries()) {
-    const option = document.createElement('option'); option.value = `${prefix}:${i}`; option.textContent = prefix === 'saved' ? `我的预设 · ${preset.name}` : preset.name; presetSelect.append(option);
-  }
-  presetSelect.value = selected; button('delete-preset').disabled = !selected.startsWith('saved:');
+const STORAGE='com.obr-suite/text-effects/editor/v1';
+const root=document.getElementById('app')!;root.innerHTML=editorHTML();
+const form=document.getElementById('settings') as HTMLFormElement,preview=document.getElementById('preview')!;
+const status=document.getElementById('status')!,error=document.getElementById('error')!;
+const button=(id:string)=>document.getElementById(id) as HTMLButtonElement;
+const reduced=document.getElementById('reduced') as HTMLInputElement,presetName=document.getElementById('preset-name') as HTMLInputElement;
+let config=structuredClone(DEFAULT_CONFIG),saved:{name:string;config:TextEffectConfig}[]=[];
+let connected=false,sceneReady=false,role='',busy=false,connection='',selected='',phase='entry';
+let deleted:{preset:{name:string;config:TextEffectConfig};index:number}|undefined;
+let presentation:ReturnType<typeof renderEffect>|undefined,stopTarget:{id:string;preview:boolean;expiresAt:number}|undefined;
+const pending=new Map<string,{resolve:(value:any)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
+function showError(message=''){error.textContent=message;error.hidden=!message;}
+try{const stored=JSON.parse(localStorage.getItem(STORAGE)||'null');config=parseConfig(stored?.draft)||config;if(Array.isArray(stored?.presets))for(const preset of stored.presets.slice(0,20)){const parsed=parseConfig(preset?.config);if(parsed&&typeof preset.name==='string'&&preset.name.trim()&&preset.name.length<=48)saved.push({name:preset.name,config:parsed});}}catch{showError('已保存的预设未能读取，本次配置仍可使用。');}
+function persist(){try{localStorage.setItem(STORAGE,JSON.stringify({draft:config,presets:saved}));return true;}catch{showError('浏览器未能保存配置；本次预览和播放仍可使用。');return false;}}
+function listPresets(next=selected){
+ selected=next;
+ for(const[list,id,prefix]of[[PRESETS,'presets','builtin'],[saved,'saved-presets','saved']]as const){const container=document.getElementById(id)!;container.replaceChildren();for(const[i,preset]of list.entries()){const item=document.createElement('button');item.type='button';item.textContent=preset.name;item.dataset.preset=`${prefix}:${i}`;item.setAttribute('aria-pressed',String(item.dataset.preset===selected));container.append(item);}container.hidden=!list.length;}
+ button('delete-preset').hidden=!selected.startsWith('saved:');button('undo-delete').hidden=!deleted;
 }
-function controls() {
-  for (const key of Object.keys(DEFAULT_CONFIG) as (keyof TextEffectConfig)[]) {
-    const input = form.elements.namedItem(key) as HTMLInputElement | null;
-    if (input) input.value = String(['enter', 'hold', 'exit'].includes(key) ? Number(config[key]) / 1000 : config[key]);
-  }
-  updateOutputs();
+const directions=(effect:string)=>effect==='shutter'||effect==='flip'?['horizontal','vertical']:effect==='wipe'?['left','right','up','down','center']:['left','right','up','down'];
+function controls(skip?:Element){
+ for(const input of form.querySelectorAll<HTMLInputElement|HTMLTextAreaElement>('[name]')){if(input===skip)continue;const key=input.name as keyof TextEffectConfig;if(input instanceof HTMLInputElement&&input.type==='checkbox')input.checked=Boolean(config[key]);else input.value=String(typeof config[key]==='number'?Number(config[key])/factor(key):config[key]);}
+ for(const input of form.querySelectorAll<HTMLInputElement>('[data-slider]'))input.value=String(Number(config[input.dataset.slider as keyof TextEffectConfig])/factor(input.dataset.slider!));
+ for(const item of form.querySelectorAll<HTMLButtonElement>('[data-key]')){const active=String(config[item.dataset.key as keyof TextEffectConfig])===item.dataset.option;item.setAttribute('aria-pressed',String(active));item.tabIndex=active?0:-1;}
+ for(const item of root.querySelectorAll<HTMLButtonElement>('[data-palette]')){const p=STYLE_PRESETS[Number(item.dataset.palette)];item.setAttribute('aria-pressed',String(config.color===p.color&&config.color2===p.color2&&config.fill===p.fill));}
+ const conditions:Record<string,boolean>={body:!!config.body,subtitle:!!config.subtitle,gradient:config.fill==='gradient',third:config.fill==='gradient'&&config.thirdColor,shadow:config.shadow,'char-solo':['char','solo'].includes(config.flow),char:config.flow==='char',solo:config.flow==='solo',spread:config.flow==='spread','line-sweep':['line','sweep'].includes(config.flow),sweep:config.flow==='sweep',scroll:config.flow==='scroll','entry-direction':['slide','wipe','shutter','flip'].includes(config.entry),'exit-direction':['slide','wipe','shutter'].includes(config.leave),idle:config.idle!=='none',leave:config.leave!=='none',glitch:[config.entry,config.leave,config.idle].includes('glitch'),decoration:config.decoration!=='none',structural:!['none','rays','mist','sparks','rings'].includes(config.decoration),tape:config.decoration==='tape','deco-fill':['band','box','frame'].includes(config.decoration),'deco-line':['box','frame','lines','underline','sides','bar','corners'].includes(config.decoration),'deco-line-color':['box','frame','lines','underline','sides','bar','corners','tape'].includes(config.decoration),ambient:['rays','mist','sparks','rings'].includes(config.decoration),extend:['frame','lines','underline','sides'].includes(config.decoration),box:config.decoration==='box',band:config.decoration==='band','entry-power':!['fade','typewriter','wipe'].includes(config.entry),'exit-power':!['none','fade','erase','wipe'].includes(config.leave),background:config.background!=='transparent'};
+ for(const [key,effect]of [['entryDirection',config.entry],['exitDirection',config.leave]])for(const item of form.querySelectorAll<HTMLButtonElement>(`[data-key="${key}"]`))item.hidden=!directions(effect).includes(item.dataset.option!);
+ for(const node of form.querySelectorAll<HTMLElement>('[data-condition]'))node.hidden=!conditions[node.dataset.condition!];
+ for(const name of ['title','subtitle','body']as const)root.querySelector(`[data-count="${name}"]`)!.textContent=`${config[name].length} / ${name==='title'?160:name==='subtitle'?240:1800}`;
+ document.getElementById('duration')!.textContent=`${(duration(config)/1000).toFixed(1)} 秒`;
 }
-function updateOutputs() {
-  for (const output of form.querySelectorAll<HTMLOutputElement>('output')) {
-    const key = output.dataset.value as keyof TextEffectConfig;
-    output.textContent = key === 'opacity' ? `${Math.round(config.opacity * 100)}%` : key === 'size' ? `${config.size}%` : String(config[key]);
-  }
-  document.getElementById('duration')!.textContent = `总时长 ${(duration(config) / 1000).toFixed(1)} 秒`;
+function draw(playing=false,part?:string){
+ presentation?.dispose();let offset=0;if(part==='leave')offset=duration(config)-config.exit-config.endDelay;else if(part==='idle')offset=config.startDelay+entryTime(config)+narrationTime(config);
+ presentation=renderEffect(preview,config,{startsAt:playing?Date.now()-offset:undefined,reduced:reduced.checked,onComplete:()=>draw()});
+ const pages=Number(preview.dataset.pages||1);document.getElementById('duration')!.textContent=`${(duration(config)/1000).toFixed(1)} 秒${pages>1?` · ${pages} 页`:''}`;button('preview-stop').disabled=!playing;
 }
-function draw(playing = false) {
-  presentation?.dispose();
-  presentation = renderEffect(preview, config, { startsAt: playing ? Date.now() : undefined, reduced: reduced.checked, onComplete: () => draw() });
-  const pages = Number(preview.dataset.pages || 1);
-  document.getElementById('duration')!.textContent = `总时长 ${(duration(config) / 1000).toFixed(1)} 秒${pages > 1 ? ` · 正文 ${pages} 页` : ''}`;
-  button('preview-stop').disabled = !playing;
-}
-function availability() {
-  button('owlbear-preview').disabled = busy || !connected || !sceneReady;
-  button('room-play').disabled = busy || !connected || !sceneReady || role !== 'GM';
-  button('room-stop').disabled = busy || !connected || !sceneReady || !stopTarget || stopTarget.expiresAt <= Date.now() || !stopTarget.preview && role !== 'GM';
-}
-form.addEventListener('submit', event => event.preventDefault());
-form.addEventListener('input', () => {
-  const values: Record<string, unknown> = { version: 1 };
-  for (const [key, value] of new FormData(form)) values[key] = typeof DEFAULT_CONFIG[key as keyof TextEffectConfig] === 'number' ? ['enter', 'hold', 'exit'].includes(key) ? Math.round(Number(value) * 1000) : Number(value) : value;
-  const parsed = parseConfig(values);
-  if (!parsed || !form.checkValidity()) { showError('请检查文字长度和动画时长。'); return; }
-  showError(); config = parsed; persist(); updateOutputs(); draw();
+function availability(){button('owlbear-preview').disabled=busy||!connected||!sceneReady;button('room-play').disabled=busy||!connected||!sceneReady||role!=='GM';button('room-stop').disabled=busy||!connected||!sceneReady||!stopTarget||stopTarget.expiresAt<=Date.now()||!stopTarget.preview&&role!=='GM';}
+function update(key:string,value:unknown,skip?:Element){const next={...config,[key]:value};if(key==='entry'||key==='leave'){const directionKey=key==='entry'?'entryDirection':'exitDirection',allowed=directions(String(value));if(!allowed.includes(next[directionKey]))next[directionKey]=allowed[0];}const parsed=parseConfig(next);if(!parsed||!form.checkValidity()){showError('请检查输入的数值和文字长度。');return;}config=parsed;showError();selected='';listPresets();controls(skip);persist();draw(['entry','leave','idle'].includes(key),key);}
+form.addEventListener('submit',event=>event.preventDefault());
+form.addEventListener('input',event=>{const input=event.target as HTMLInputElement,key=input.name||input.dataset.slider;if(!key)return;const value=input.type==='checkbox'?input.checked:typeof DEFAULT_CONFIG[key as keyof TextEffectConfig]==='number'?Number(input.value)*factor(key):input.value;update(key,value,input);});
+root.addEventListener('click',event=>{
+ const item=(event.target as Element).closest<HTMLButtonElement>('button');if(!item)return;
+ if(item.dataset.key){const key=item.dataset.key,value=typeof DEFAULT_CONFIG[key as keyof TextEffectConfig]==='number'?Number(item.dataset.option):item.dataset.option;update(key,value);}
+ if(item.dataset.preset){const[kind,index]=item.dataset.preset.split(':'),preset=(kind==='saved'?saved:PRESETS)[Number(index)];if(!preset)return;config=structuredClone(preset.config);presetName.value=kind==='saved'?preset.name:'';listPresets(item.dataset.preset);controls();draw();persist();showError();status.textContent=`已应用“${preset.name}”。`;}
+ if(item.dataset.palette){const p=STYLE_PRESETS[Number(item.dataset.palette)];config=parseConfig({...config,...p,glowColor:p.accent,subtitleColor:p.accent,decorationLineColor:p.accent})!;selected='';listPresets();controls();draw();persist();}
+ if(item.dataset.tab){for(const tab of root.querySelectorAll<HTMLButtonElement>('[data-tab]')){const active=tab===item;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}for(const panel of form.querySelectorAll<HTMLElement>('[role=tabpanel]'))panel.hidden=panel.id!==`pane-${item.dataset.tab}`;form.scrollTop=0;}
+ if(item.dataset.phase){phase=item.dataset.phase;for(const tab of root.querySelectorAll<HTMLButtonElement>('[data-phase]')){const active=tab===item;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}for(const panel of root.querySelectorAll<HTMLElement>('[data-phase-panel]'))panel.hidden=panel.dataset.phasePanel!==phase;}
+ if(item.dataset.backdrop){preview.dataset.backdrop=item.dataset.backdrop;for(const choice of root.querySelectorAll('[data-backdrop]'))choice.setAttribute('aria-pressed',String(choice===item));}
 });
-button('preview-play').onclick = () => { if (!hasContent(config)) { showError('请填写文字或选择视觉效果。'); return; } showError(); draw(true); };
-button('preview-stop').onclick = () => draw(); reduced.onchange = () => draw();
-presetSelect.onchange = () => { button('delete-preset').disabled = !presetSelect.value.startsWith('saved:'); };
-button('apply').onclick = () => {
-  const [kind, index] = presetSelect.value.split(':'), preset = (kind === 'saved' ? saved : PRESETS)[Number(index)];
-  if (!preset) return; config = structuredClone(preset.config); presetName.value = kind === 'saved' ? preset.name : ''; controls(); draw(); showError(); persist(); status.textContent = `已应用“${preset.name}”。`;
-};
-button('save-preset').onclick = () => {
-  const name = presetName.value.trim(); if (!name) { showError('请先填写预设名称。'); presetName.focus(); return; }
-  const index = saved.findIndex(p => p.name === name);
-  if (index < 0 && saved.length >= 20) { showError('最多保存 20 个预设，请先删除一个。'); return; }
-  const next = { name, config: structuredClone(config) }; if (index >= 0) saved[index] = next; else saved.push(next);
-  showError(); if (persist()) status.textContent = `已保存“${name}”。`; listPresets(`saved:${index >= 0 ? index : saved.length - 1}`);
-};
-button('delete-preset').onclick = () => {
-  if (!presetSelect.value.startsWith('saved:')) return;
-  const index = Number(presetSelect.value.split(':')[1]), preset = saved[index]; if (!preset) return;
-  if (!confirm(`删除预设“${preset.name}”？`)) return; saved.splice(index, 1); listPresets(); persist(); status.textContent = '预设已删除。';
-};
+root.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(event.key))return;const target=(event.target as Element).closest<HTMLButtonElement>('button');if(!target||!target.matches('[data-key],[data-tab],[data-phase]'))return;const group=target.parentElement!,items=Array.from(group.querySelectorAll<HTMLButtonElement>(':scope > button')).filter(item=>!item.hidden);let i=items.indexOf(target);i=event.key==='Home'?0:event.key==='End'?items.length-1:(i+(['ArrowRight','ArrowDown'].includes(event.key)?1:items.length-1))%items.length;event.preventDefault();items[i].focus();items[i].click();});
+button('preview-play').onclick=()=>{if(!form.checkValidity()||!hasContent(config)){showError('请检查配置，并填写文字或选择视觉效果。');return;}showError();draw(true);};button('preview-stop').onclick=()=>draw();reduced.onchange=()=>draw();
+button('save-preset').onclick=()=>{document.getElementById('preset-entry')!.hidden=false;presetName.focus();};button('cancel-save').onclick=()=>{document.getElementById('preset-entry')!.hidden=true;};
+button('confirm-save').onclick=()=>{if(!form.checkValidity())return;const name=presetName.value.trim();if(!name){showError('请填写预设名称。');presetName.focus();return;}const index=saved.findIndex(p=>p.name===name);if(index<0&&saved.length>=20){showError('最多保存 20 个预设，请先删除一个。');return;}const next={name,config:structuredClone(config)};if(index>=0)saved[index]=next;else saved.push(next);showError();if(persist())status.textContent=`已保存“${name}”。`;listPresets(`saved:${index>=0?index:saved.length-1}`);document.getElementById('preset-entry')!.hidden=true;};
+presetName.onkeydown=event=>{if(event.key==='Enter')button('confirm-save').click();if(event.key==='Escape')button('cancel-save').click();};
+button('delete-preset').onclick=()=>{if(!selected.startsWith('saved:'))return;const index=Number(selected.split(':')[1]);if(!saved[index])return;deleted={preset:saved[index],index};saved.splice(index,1);listPresets('');persist();status.textContent='预设已删除，可以撤销。';};button('undo-delete').onclick=()=>{if(!deleted)return;if(saved.length>=20){showError('预设已满，无法撤销删除。');return;}saved.splice(deleted.index,0,deleted.preset);const index=deleted.index;deleted=undefined;listPresets(`saved:${index}`);persist();status.textContent='预设已恢复。';};
 function receive(value: any) {
   const waiting = pending.get(value?.requestId); if (!waiting) return;
   clearTimeout(waiting.timer); pending.delete(value.requestId);
