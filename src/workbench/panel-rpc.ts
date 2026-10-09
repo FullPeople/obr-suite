@@ -1,4 +1,6 @@
 import {markPlayerPermissionsRead} from '../player-permission-notice';
+import { requestTextEffect } from '../modules/textEffects';
+import { REQUEST as TEXT_EFFECT_REQUEST, STATUS as TEXT_EFFECT_STATUS } from '../modules/textEffects/protocol';
 import OBR from '@owlbear-rodeo/sdk';
 import {getState} from '../state';
 import {assetUrl} from '../asset-base';
@@ -20,7 +22,15 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
  };
  return async function request(panel:string,instance:string,method:string,args:any[]){
   if(typeof instance!=='string'||!/^[a-zA-Z0-9-]{1,80}$/.test(instance))throw Error('无效窗口');
-  if(!['settings','music','studio','table','notes','permissions'].includes(panel))throw Error('无效功能页');
+  if(!['settings','music','studio','table','notes','permissions','textEffects'].includes(panel))throw Error('无效功能页');
+  if(panel==='textEffects'&&method!=='dispose'){
+   if(method==='broadcast.sendMessage'){
+    if(args.length!==3||args[0]!==TEXT_EFFECT_REQUEST||args[2]?.destination!=='LOCAL')throw Error('无效文字演出操作');
+    return requestTextEffect(args[1]);
+   }
+   if(method==='subscribe'&&!(args[0]==='player'&&args[1]===undefined||args[0]==='sceneReady'&&args[1]===undefined||args[0]==='broadcast'&&args[1]===TEXT_EFFECT_STATUS))throw Error('无效文字演出订阅');
+   if(!['init','subscribe','player.getConnectionId','player.getRole','scene.isReady'].includes(method))throw Error('无效文字演出操作');
+  }
   if(panel==='notes'){if(!notes)throw Error('笔记存储暂不可用');return notes(method,args);}
   // The local GM guide has no scene, room, metadata or broadcast capability.
   if(panel==='permissions'&&method!=='dispose'){

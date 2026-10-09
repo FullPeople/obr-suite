@@ -94,7 +94,7 @@ async function start(){
   if(route==='relay'||route!=='direct'&&(!child||child.closed||directClientInstance!==warmClientInstance||Date.now()-directPeerSeen>15000)&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).catch(failed);
  };
  OBR.broadcast.onMessage(OPEN_WIKI_CHANNEL,event=>{if(event.connectionId!==playerConnection)return;try{const entry=sharedEntry((event.data as any)?.entry);send('showWiki',{entry,id:crypto.randomUUID()});}catch{}});
- OBR.broadcast.onMessage('com.obr-suite/workbench/open-page',event=>{if(event.connectionId!==playerConnection)return;const page=(event.data as any)?.page;if(['settings','announcement','features','music','console'].includes(page))send('navigate',{page});});
+ OBR.broadcast.onMessage('com.obr-suite/workbench/open-page',event=>{if(event.connectionId!==playerConnection)return;const page=(event.data as any)?.page;if(['settings','announcement','features','music','textEffects','console'].includes(page))send('navigate',{page});});
  const panels=panelBridge(send,relay);
  const bubble=(item:Item|undefined)=>((item?.metadata[HP]??item?.metadata[LEGACY]??{}) as Record<string,any>);
  const documentLocation=(id:string)=>{const value=cardLocations.get(id);if(value instanceof Error)throw value;return value||cardLocation(origin,OBR.room.id||'default',id);};

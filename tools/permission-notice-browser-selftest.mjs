@@ -58,9 +58,10 @@ async function openGuide(page){await entry(page).click();await modal(page).locat
 async function scrollBottom(page){await modal(page).locator('#body').evaluate(body=>{body.scrollTop=body.scrollHeight;body.dispatchEvent(new Event('scroll'));});}
 async function check(name,run){await run();results.push(name);console.log('PASS',results.length,name);}
 try{
- await check('DM red bold entry sits immediately to the right of music',async()=>{
+ await check('DM red bold entry follows music and the independent text presentation button',async()=>{
   const page=await open();await expect(entry(page)).toBeVisible();
-  assert.equal(await entry(page).evaluate(button=>button.previousElementSibling.textContent),'音乐板');
+  assert.equal(await entry(page).evaluate(button=>button.previousElementSibling.textContent),'文字演出');
+  assert.equal(await entry(page).evaluate(button=>button.previousElementSibling.previousElementSibling.textContent),'音乐板');
   const style=await entry(page).evaluate(button=>({color:getComputedStyle(button).color,weight:getComputedStyle(button).fontWeight}));assert.equal(style.color,'rgb(189, 37, 37)');assert(Number(style.weight)>=700);
   await page.screenshot({path:join(out,'toolbar-wide.png')});await page.setViewportSize({width:390,height:844});await entry(page).scrollIntoViewIfNeeded();await page.screenshot({path:join(out,'toolbar-narrow.png')});await page.close();
  });

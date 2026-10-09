@@ -170,6 +170,8 @@ function renderRow() {
     );
   }
 
+  parts.push(btnHTML({ id: 'btnTextEffects', labelHtml: lang === 'zh' ? '文字演出' : 'Text effects' }));
+
   // Popup toggles group (悬浮窗) — bestiary auto-popup + character-card
   // auto-info. Dice-history toggle moved out: it has its own dedicated
   // trigger button at the bottom-right.
@@ -260,6 +262,9 @@ function renderRow() {
   document.getElementById("btnTimeStop")?.addEventListener("click", onTimeStop);
   document.getElementById("btnFocus")?.addEventListener("click", onFocus);
   document.getElementById("btnMusic")?.addEventListener("click", onMusic);
+  document.getElementById('btnTextEffects')?.addEventListener('click', () => {
+    void OBR.broadcast.sendMessage('com.obr-suite/text-effects/open', {}, { destination: 'LOCAL' }).catch(() => {});
+  });
   document.getElementById("btnTransitions")?.addEventListener("click", () => {
     void OBR.broadcast.sendMessage(BC_TRANSITIONS_OPEN, {}, { destination: "LOCAL" })
       .catch(error => console.warn("[obr-suite] open transitions failed", error));

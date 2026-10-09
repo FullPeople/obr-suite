@@ -30,6 +30,7 @@ import { setupStatusTracker, teardownStatusTracker } from "./modules/statusTrack
 import { setupHpBar, teardownHpBar } from "./modules/hpBar";
 import { setupBossBar, teardownBossBar, setBossBarObstacles } from "./modules/bossBar";
 import { setupTransitions, teardownTransitions } from "./modules/transitions";
+import { setupTextEffects } from "./modules/textEffects";
 import { setupMetadataInspector, teardownMetadataInspector } from "./modules/metadata-inspector";
 import {
   setupDynamicFog,
@@ -646,6 +647,7 @@ function syncModules() {
 OBR.onReady(async () => {
   // Always remove the retired map-editor menu, independent of saved module flags.
   void setupFogEditor();
+  void setupTextEffects().catch(error => console.warn('[text-effects] startup failed', error));
   const workbenchReady=setupWorkbench();
   // Sync state, then open cluster + activate all enabled modules.
   startSceneSync();
