@@ -1,3 +1,4 @@
+import {locateSceneItem} from '../../workbench/locate';
 import OBR from "@owlbear-rodeo/sdk";
 import { installDebugOverlay } from "../../utils/debugOverlay";
 import { ICONS } from "../../icons";
@@ -472,7 +473,7 @@ function applyRoleGating() {
     el.readOnly = !canEdit;
     el.title = canEdit ? "" : (_curLang === "en" ? "Read-only for players" : "玩家端只读");
   });
-  root.querySelectorAll<HTMLButtonElement>(".stat-lock").forEach((el) => {
+  root.querySelectorAll<HTMLButtonElement>(".stat-lock:not(.token-locate)").forEach((el) => {
     el.style.display = isGMRole ? "" : "none";
   });
 }
@@ -576,7 +577,7 @@ function render(m: any) {
                data-field="armor class" value="${escapeHtml(String(liveAc))}"
                title="${statTip}">
       </div>
-      ${renderLockButton(liveBubbles.locked !== false)}
+      <button class="stat-lock token-locate" id="monster-locate" type="button" aria-label="${en?'Locate character':'定位到角色'}" ${currentItemId?'':'disabled'} title="${en?'Locate character':'定位到角色'}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="6"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg></button>${renderLockButton(liveBubbles.locked !== false)}
     </div>
   ` : "";
 
@@ -810,6 +811,11 @@ function render(m: any) {
     if (currentMonsterDragUnbind) currentMonsterDragUnbind();
     currentMonsterDragUnbind = bindPanelDrag(handle, PANEL_IDS.bestiaryInfo);
   }
+  const locateBtn=root.querySelector<HTMLButtonElement>('#monster-locate');
+  locateBtn?.addEventListener('click',()=>{const id=currentItemId,slug=currentSlug;if(!id||locateBtn.disabled)return;locateBtn.disabled=true;
+   const assertReadable=async()=>{const [items,role,player,ready]=await Promise.all([OBR.scene.items.getItems([id]),OBR.player.getRole(),OBR.player.getId(),OBR.scene.isReady()]),item=items[0];if(!ready||currentItemId!==id||currentSlug!==slug||!item||item.metadata['com.bestiary/slug']!==slug||!(role==='GM'||item.createdUserId===player||getState().allowPlayerMonsters&&item.metadata['com.obr-suite/workbench/locked']!==true))throw Error('角色绑定、场景或查看权限已改变');};
+   void locateSceneItem(OBR,id,assertReadable).catch(error=>console.warn('[monster-info] locate failed',error)).finally(()=>{if(currentItemId===id)locateBtn.disabled=false;});
+  });
   const pinBtn = root.querySelector<HTMLButtonElement>("#panel-pin-btn");
   if (pinBtn) {
     pinBtn.addEventListener("click", (e) => {

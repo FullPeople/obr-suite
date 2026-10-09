@@ -81,6 +81,7 @@ function supporterColor(name: string): string {
 // `<img>` before the name. The map MUST stay in sync with the one in
 // src/settings.ts — both render the same supporter list.
 const SUPPORTER_AVATARS: Record<string, string> = {
+  "用短弓磨死欧吕尔的神秘红发女子": "supporter-avatars/auril-redhead.jpg",
   "Dino":                       "supporter-avatars/Dino.jpg",
   "St.Monk":                    "supporter-avatars/St_Monk.png",
   "lingkkkkuang":               "supporter-avatars/lingkkkkuang.png",

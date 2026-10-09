@@ -77,7 +77,7 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
    'scene.setMetadata':v=>OBR.scene.setMetadata(v),'room.setMetadata':v=>OBR.room.setMetadata(v),'scene.fog.setFilled':v=>OBR.scene.fog.setFilled(!!v),
    'scene.items.addItems':v=>OBR.scene.items.addItems(v),'scene.items.deleteItems':v=>OBR.scene.items.deleteItems(v),'scene.local.addItems':v=>OBR.scene.local.addItems(v),'scene.local.deleteItems':v=>OBR.scene.local.deleteItems(v),
    'assets.downloadImages':(...v)=>OBR.assets.downloadImages(v[0],v[1],v[2]),'assets.uploadImages':(...v)=>OBR.assets.uploadImages(v[0],v[1]),
-   'popover.open':v=>{const url=new URL(v.url,location.href);if(url.origin!==location.origin||!url.pathname.startsWith(new URL(assetUrl(''),location.href).pathname))throw Error('无效窗口地址');return OBR.popover.open(v);}
+   'popover.open':v=>{const url=new URL(v.url,location.href);if(url.origin!==location.origin||!url.pathname.startsWith(new URL(assetUrl(''),location.href).pathname))throw Error('无效窗口地址');throw Error('请在工作台内打开设置，当前版本不在枭熊界面中弹出窗口。');}
   };
   if(!Object.prototype.hasOwnProperty.call(writes,method))throw Error('不支持的设置操作：'+method);return writes[method](...args);
  };

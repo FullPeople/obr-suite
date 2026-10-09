@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {locateSceneItem} from '../src/workbench/locate.ts';
+let readable=true,checks=0,animation,queries=0;
+const api={scene:{items:{getItemBounds:async ids=>{queries++;assert.deepEqual(ids,['token']);return {min:{x:400,y:300},max:{x:600,y:500}};}}},viewport:{getWidth:async()=>1200,getHeight:async()=>800,getScale:async()=>2,animateTo:async value=>{animation=value;}}};
+const guard=async()=>{checks++;if(!readable)throw Error('revoked');};
+await locateSceneItem(api,'token',guard);assert.equal(checks,2);assert.deepEqual(animation,{position:{x:-400,y:-400},scale:2});
+animation=undefined;readable=false;await assert.rejects(locateSceneItem(api,'token',guard),/revoked/);assert.equal(queries,1);assert.equal(animation,undefined);
+readable=true;api.scene.items.getItemBounds=async()=>{readable=false;return {min:{x:0,y:0},max:{x:1,y:1}};};await assert.rejects(locateSceneItem(api,'token',guard),/revoked/);assert.equal(animation,undefined);
+readable=true;api.scene.items.getItemBounds=async()=>({min:{x:NaN,y:0},max:{x:1,y:1}});await assert.rejects(locateSceneItem(api,'token',guard),/不可用/);assert.equal(animation,undefined);
+console.log('PASS camera keeps zoom, allows readable bindings, refuses revoked or invalid targets before animation');
