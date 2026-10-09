@@ -142,7 +142,7 @@ export function parseHpNumber(hp: any): number {
   return 0;
 }
 
-function parseMon(m: any): ParsedMonster | null {
+export function parseMon(m: any): ParsedMonster | null {
   try {
     if (!m || !m.name) return null;
     const source = m.source || "?";

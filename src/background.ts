@@ -122,7 +122,7 @@ const BC_CLUSTER_ROW_OPEN = "com.obr-suite/cluster-row-open";
 const ANNOUNCE_MODAL_ID = ANNOUNCEMENT_MODAL_ID;
 const ANNOUNCE_URL = assetUrl("dm-announcement.html");
 const LS_ANNOUNCE_DAILY = ANNOUNCEMENT_DAILY_KEY;
-const maybeShowDailyAnnouncement=dailyAnnouncement({
+const maybeShowDailyAnnouncement=WORKBENCH_DEV?async()=>{}:dailyAnnouncement({
  role:()=>OBR.player.getRole(),
  readDay:()=>localStorage.getItem(LS_ANNOUNCE_DAILY),
  presentation:WORKBENCH_DEV?workbenchStartup:{ready:true,token:0},
@@ -131,7 +131,7 @@ const maybeShowDailyAnnouncement=dailyAnnouncement({
 });
 // No workbench client is a valid ready state. Once a client exists, its real
 // presentation lifecycle (including fade-out) owns automatic host eligibility.
-if(WORKBENCH_DEV)workbenchStartup.subscribe(()=>{void maybeShowDailyAnnouncement();});
+// The workbench owns its announcement; never open an automatic room modal.
 
 // Trigger geometry. Anchored bottom-LEFT so it sits in the lower-left
 // quadrant without competing with the global-search popover (top-right)

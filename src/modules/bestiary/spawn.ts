@@ -55,10 +55,11 @@ const BESTIARY_DATA_KEY = "com.bestiary/monsters";
 // update sees the result of the previous one.
 let writeChain: Promise<void> = Promise.resolve();
 
-async function ensureSharedMonsterData(slug: string, raw: any) {
+async function ensureSharedMonsterData(slug: string, raw: any, assertCurrent?:()=>Promise<void>) {
   if (!raw) return;
   const write = writeChain.catch(()=>{}).then(async () => {
       const meta = await OBR.scene.getMetadata();
+      await assertCurrent?.();
       const table = (meta[BESTIARY_DATA_KEY] as Record<string, any>) || {};
       if (table[slug]) return;
       table[slug] = raw;
@@ -79,13 +80,15 @@ export async function spawnMonster(
    *  When omitted, falls back to the legacy "viewport center + random
    *  jitter" behaviour for the click-to-spawn path. */
   position?: { x: number; y: number },
+  options?: {raw?:any;slug?:string;assertCurrent?:()=>Promise<void>},
 ) {
   const tokenImage = await resolveTokenImage(monster.tokenUrl || "");
   const tokenUrl = tokenImage.url;
-  const slug = makeSlug(monster.source, monster.engName);
-  const raw = getRawMonster(slug) || await loadMonsterBySlug(slug);
+  const slug = options?.slug || makeSlug(monster.source, monster.engName);
+  const raw = options?.raw || getRawMonster(slug) || await loadMonsterBySlug(slug);
   if (!raw) throw new Error("怪物资料尚未载入，请重试放置。");
-  await ensureSharedMonsterData(slug, raw);
+  await options?.assertCurrent?.();
+  await ensureSharedMonsterData(slug, raw, options?.assertCurrent);
 
   let ownerId = "";
   try { ownerId = await OBR.player.getId(); } catch {}
@@ -216,6 +219,7 @@ export async function spawnMonster(
     };
   }
 
+  await options?.assertCurrent?.();
   await OBR.scene.items.addItems([item]);
   if (tokenImage.fallback) {
     void OBR.notification.show("怪物图片暂不可用，已使用占位图；再次放置会重新尝试。", "WARNING").catch(()=>{});

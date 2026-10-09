@@ -1,3 +1,4 @@
+import {locateSceneItem} from '../../workbench/locate';
 import {nativeCardOwners,canReadNativeCard} from "./native-owner";
 import OBR, {type Item} from "@owlbear-rodeo/sdk";
 import { ICONS } from "../../icons";
@@ -771,8 +772,28 @@ function selectResource(slug: string) {
 
 /** Reuse the website's five-page reader without starting its Wiki or editor.
  * Existing service links remain valid; only their data.json is fetched. */
+const LOCATION_CHANNEL='full-suite-card-location/v1';
+function cardLocationAvailable(id:string){const card=cards.find(card=>card.id===id);return !!(panelAlive&&sceneReady===true&&profileReady&&card&&canSeeCard(card,isGM,myPlayerId)&&nativeItems.some(item=>item.metadata['com.character-cards/boundCardId']===id));}
+function notifyCardLocations(){for(const [id,frame] of cardIframes)frame.contentWindow?.postMessage({channel:LOCATION_CHANNEL,available:cardLocationAvailable(id)},location.origin);}
+window.addEventListener('message',event=>{
+ if(event.origin!==location.origin||event.data?.channel!==LOCATION_CHANNEL)return;
+ const frame=[...cardIframes].find(([,iframe])=>iframe.contentWindow===event.source);if(!frame)return;const [cardId,iframe]=frame;
+ const respond=(extra:Record<string,unknown>={})=>iframe.contentWindow?.postMessage({channel:LOCATION_CHANNEL,available:cardLocationAvailable(cardId),...extra},location.origin);
+ if(event.data.type==='status'){respond();return;}
+ if(event.data.type!=='locate'||typeof event.data.requestId!=='string'||event.data.requestId.length>80)return;
+ const requestId=event.data.requestId,epoch=sceneEpoch;
+ void (async()=>{
+  if(!panelAlive||sceneReady!==true||!profileReady)throw Error('场景或身份暂不可用');
+  let itemId:string|undefined;
+  const assertReadable=async()=>{const [items,meta,role,player]=await Promise.all([OBR.scene.items.getItems(),OBR.scene.getMetadata(),OBR.player.getRole(),OBR.player.getId()]);
+   const card=cardList(meta).find(card=>card.id===cardId),item=items.find(item=>item.metadata['com.character-cards/boundCardId']===cardId&&(!itemId||item.id===itemId));
+   if(epoch!==sceneEpoch||!panelAlive||sceneReady!==true||!card||!item||!canReadNativeCard(card,nativeCardOwners(items,cardId),player,role==='GM'))throw Error('角色绑定、场景或查看权限已改变');itemId=item.id;
+  };
+  await assertReadable();await locateSceneItem(OBR,itemId!,assertReadable);respond({requestId});
+ })().catch(error=>respond({requestId,error:String(error)}));
+});
 function buildCardIframeSrc(card: CardEntry, cacheBust = false): string {
-  const params = new URLSearchParams({legacyViewer:"1",lang});
+  const params = new URLSearchParams({legacyViewer:"1",intro:"0",lang});
   const dataUrl = new URL(card.url || `/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(card.id)}/index.html`, "https://obr.dnd.center");
   dataUrl.pathname = dataUrl.pathname.replace(/\/(?:index\.html|data\.json)$/, "/data.json");
   params.set("data_url",dataUrl.href);
@@ -912,6 +933,7 @@ async function moveCardToGroup(card: CardEntry): Promise<void> {
 
 function render() {
   if (!panelAlive) return;
+  notifyCardLocations();
   const activeWrites = [...panelWrites].filter(op => !op.controller.signal.aborted);
   const canWrite = !panelClosing && profileReady && metadataLoaded && sceneReady === true;
   const uploading = activeWrites.some(op => op.kind === "upload");
@@ -1151,7 +1173,7 @@ function timeAgo(isoZ: string): string {
 const PREVIEW_MODAL_ID = "com.obr-suite/cc-preview";
 async function openSamplePreview(): Promise<void> {
   const file = lang === "en" ? "cc-example-card.en.json" : "cc-example-card.json";
-  const params=new URLSearchParams({legacyViewer:"1",lang,data_url:assetUrl(file)});
+  const params=new URLSearchParams({legacyViewer:"1",intro:"0",lang,data_url:assetUrl(file)});
   const url = `${assetUrl("card-viewer/index.html")}?${params}`;
   try {
     await OBR.modal.open({
