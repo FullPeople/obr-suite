@@ -2,24 +2,27 @@ import {validBodyColor} from './player-color.mjs';
 import {validModifier} from './modifier.mjs';
 export const MAX_MESSAGE_BYTES=15000;
 export const CHUNK_BYTES=7000;
+export const FAST_CHUNK_BYTES=10000;
 export const MAX_ROLL_BYTES=24_000_000;
 export const MAX_CHUNKS=Math.ceil(MAX_ROLL_BYTES/CHUNK_BYTES);
 export const hash=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');
 export const b64=bytes=>{let s='';for(let i=0;i<bytes.length;i+=4096)s+=String.fromCharCode(...bytes.subarray(i,i+4096));return btoa(s)};
-export const unb64=s=>{if(typeof s!=='string'||s.length>10000)throw Error('Invalid chunk encoding');return Uint8Array.from(atob(s),c=>c.charCodeAt(0))};
+export const unb64=s=>{if(typeof s!=='string'||s.length>Math.ceil(FAST_CHUNK_BYTES/3)*4)throw Error('Invalid chunk encoding');return Uint8Array.from(atob(s),c=>c.charCodeAt(0))};
 export const sizeOf=x=>new TextEncoder().encode(JSON.stringify(x)).length;
-export function split(bytes) {
+export function split(bytes,chunkBytes=CHUNK_BYTES) {
+  if(chunkBytes!==CHUNK_BYTES&&chunkBytes!==FAST_CHUNK_BYTES)throw Error('Invalid chunk size');
   if(bytes.length<1||bytes.length>MAX_ROLL_BYTES)throw Error('Trajectory exceeds experiment budget');
-  const chunks=[];for(let i=0;i<bytes.length;i+=CHUNK_BYTES)chunks.push(b64(bytes.subarray(i,i+CHUNK_BYTES)));return chunks;
+  const chunks=[];for(let i=0;i<bytes.length;i+=chunkBytes)chunks.push(b64(bytes.subarray(i,i+chunkBytes)));return chunks;
 }
 export class Assembly {
-  constructor(total,bytes,sha) {
-    if(!Number.isInteger(total)||total<1||total>MAX_CHUNKS||!Number.isInteger(bytes)||bytes<1||bytes>MAX_ROLL_BYTES||total!==Math.ceil(bytes/CHUNK_BYTES)||!/^[a-f0-9]{64}$/.test(sha))throw Error('Invalid trajectory manifest');
+  constructor(total,bytes,sha,chunkBytes=CHUNK_BYTES) {
+    if((chunkBytes!==CHUNK_BYTES&&chunkBytes!==FAST_CHUNK_BYTES)||!Number.isInteger(total)||total<1||total>MAX_CHUNKS||!Number.isInteger(bytes)||bytes<1||bytes>MAX_ROLL_BYTES||total!==Math.ceil(bytes/chunkBytes)||!/^[a-f0-9]{64}$/.test(sha))throw Error('Invalid trajectory manifest');
+    this.chunkBytes=chunkBytes;
     this.total=total;this.bytes=bytes;this.sha=sha;this.parts=new Map();
   }
   add(index,data) {
     if(!Number.isInteger(index)||index<0||index>=this.total)throw Error('Invalid chunk index');
-    const bytes=unb64(data), expected=index===this.total-1?this.bytes-CHUNK_BYTES*index:CHUNK_BYTES;
+    const bytes=unb64(data), expected=index===this.total-1?this.bytes-this.chunkBytes*index:this.chunkBytes;
     if(bytes.length!==expected)throw Error('Invalid chunk length');
     if(this.parts.has(index)){if(b64(this.parts.get(index))!==data)throw Error('Conflicting duplicate chunk');return}
     this.parts.set(index,bytes);
@@ -27,7 +30,7 @@ export class Assembly {
   missing(){return Array.from({length:this.total},(_,i)=>i).filter(i=>!this.parts.has(i))}
   async finish(){
     if(this.missing().length)throw Error('Incomplete trajectory');
-    const bytes=new Uint8Array(this.bytes);for(const [index,part] of this.parts)bytes.set(part,index*CHUNK_BYTES);
+    const bytes=new Uint8Array(this.bytes);for(const [index,part] of this.parts)bytes.set(part,index*this.chunkBytes);
     if(await hash(bytes)!==this.sha)throw Error('Trajectory SHA-256 mismatch');return bytes;
   }
 }

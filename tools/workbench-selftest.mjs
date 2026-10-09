@@ -6,6 +6,7 @@ import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {gunzipSync} from 'node:zlib';
+import {workbenchAnnouncement} from './workbench-announcement.mjs';
 const web=process.env.DND_CARD_WEB_ROOT||'D:/Desktop/DND-card-web',out=resolve('workbench-test-output');mkdirSync(out,{recursive:true});
 const {chromium}=createRequire(join(web,'package.json'))('@playwright/test');
 const define={'import.meta.env.BASE_URL':JSON.stringify('/suite-dev/'),'import.meta.env.DEV':'false'};
@@ -35,7 +36,12 @@ const server=createServer(async(req,res)=>{const p=new URL(req.url,'http://local
 });await new Promise(r=>server.listen(5197,'127.0.0.1',r));
 const browser=await chromium.launch({channel:process.env.CI?undefined:'msedge',headless:!process.env.CI}),context=await browser.newContext({viewport:{width:1500,height:1000}}),errors=[];
 context.on('page',p=>p.on('pageerror',e=>errors.push(e.message)));
-await context.addInitScript(version=>{try{localStorage.setItem('dnd-card:announcement-ack:suite',version);localStorage.setItem('dnd-card:rules-setup:v1','done');}catch{}},JSON.parse(readFileSync('package.json','utf8')).version);
+// A Suite-only engine patch need not republish the paired Web announcement.
+// Seed this fixture with the announcement it actually serves, then keep all
+// pointer/character assertions active. Announcement behavior has its own tests.
+const noticeVersion=(await workbenchAnnouncement(web)).match(/^- (\d+\.\d+\.\d+-dev) ·/m)?.[1];
+assert(noticeVersion,'Actual paired announcement version');
+await context.addInitScript(version=>{try{localStorage.setItem('dnd-card:announcement-ack:suite',version);localStorage.setItem('dnd-card:rules-setup:v1','done');}catch{}},noticeVersion);
 const card=name=>({schema_version:'0.3',identity:{character_name:name},meta:{ruleset:'2024'},abilities:Object.fromEntries(['str','dex','con','int','wis','cha'].map(a=>[a,{total:12}])),classes:[{name:'法师',level:2}],core_stats:{hp:{current:20,max:30,temp:2},ac:15},features:{},background:{},inventory:{},defenses:{custom:'preserved'},combat:{weapons:[{name:'保留的武器'}]}});
 let documents={hero:card('阿明'),second:card('贝拉')},saves=0;
 await context.route('https://5e.kiwee.top/**',r=>r.fulfill({json:{},headers:{'access-control-allow-origin':'*'}}));
