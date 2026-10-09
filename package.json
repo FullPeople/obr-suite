@@ -1,6 +1,6 @@
 {
   "name": "obr-suite",
-  "version": "1.0.263-dev",
+  "version": "1.0.264-dev",
   "type": "module",
   "scripts": {
     "dev": "vite",
