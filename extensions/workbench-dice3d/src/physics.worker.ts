@@ -85,7 +85,15 @@ function bodySettings(shape:any,position:number[],rotation:number[],motion:numbe
   const p=rvec(position),q=quat(rotation);try{return new J.BodyCreationSettings(shape,p,q,motion,layer)}finally{J.destroy(p);J.destroy(q)}
 }
 /** Returns one owned shape reference; use the same collider for prediction and authority recovery. */
+const cachedDieShapes=new Map<string,any>();
 function dieShape(kind:Kind,hull:number[][]){
+  const key=kind+':'+JSON.stringify(hull),cached=cachedDieShapes.get(key);
+  if(cached){cached.AddRef();return cached;}
+  const shape=createDieShape(kind,hull);
+  if(cachedDieShapes.size<7){shape.AddRef();cachedDieShapes.set(key,shape);}
+  return shape;
+}
+function createDieShape(kind:Kind,hull:number[][]){
   const parameters=N.PHYSICS[kind];
   if(kind==='d6'){const half=Math.max(...hull.flat().map(Math.abs)),shape=boxShape([half,half,half],parameters.convexRadius);shape.AddRef();return shape}
   const settings=new J.ConvexHullShapeSettings();
@@ -244,29 +252,35 @@ function beginStep(){
 
 interface Resolution{value:number;alignment:number;secondAlignment:number;gap:number;valid:boolean;worldDirection:number[]}
 class InvalidPrediction extends Error{constructor(message:string,readonly dice:number[],readonly positions?:number[][],readonly bounds?:N.Bounds){super(message)}}
-interface DieState{body:any;kind:Kind;edge:N.EntryEdge;hull:number[][];nominal:number;radius:number;previous:number[];previousSpeed:number;settleTicks:number;cockedTicks:number;resolution:Resolution}
+interface DieState{body:any;kind:Kind;edge:N.EntryEdge;hull:number[][];nominal:number;radius:number;previous:number[];previousSpeed:number;surfaceSpeed:number;settleTicks:number;cockedTicks:number;resolution:Resolution}
 const rotateBy=(n:number[],q:number[]):number[]=>{
   const[x,y,z]=n,[qx,qy,qz,qw]=q;
   const tx=2*(qy*z-qz*y),ty=2*(qz*x-qx*z),tz=2*(qx*y-qy*x);
   return[x+qw*tx+(qy*tz-qz*ty),y+qw*ty+(qz*tx-qx*tz),z+qw*tz+(qx*ty-qy*tx)];
 };
+const rotatedY=(n:number[],q:number[])=>{
+  const[x,y,z]=n,[qx,qy,qz,qw]=q;
+  const tx=2*(qy*z-qz*y),ty=2*(qz*x-qx*z),tz=2*(qx*y-qy*x);
+  return y+qw*ty+(qz*tx-qx*tz);
+};
 function resolveFace(outcomes:{value:number;normal:number[]}[],q:number[]):Resolution{
-  let value=0,alignment=-2,second=-2,worldDirection=[0,1,0];
+  let value=0,alignment=-2,second=-2,winner:number[]|undefined;
   for(const outcome of outcomes){
-    const d=rotateBy(outcome.normal,q);
-    if(d[1]>alignment){second=alignment;value=outcome.value;alignment=d[1];worldDirection=d}
-    else if(d[1]>second)second=d[1];
+    const y=rotatedY(outcome.normal,q);
+    if(y>alignment){second=alignment;value=outcome.value;alignment=y;winner=outcome.normal}
+    else if(y>second)second=y;
   }
+  const worldDirection=winner?rotateBy(winner,q):[0,1,0];
   return{value,alignment,secondAlignment:second,gap:alignment-second,valid:true,worldDirection};
 }
 /** The native minimum_surface_height: centre height plus the lowest rotated hull point. */
 function minimumSurfaceHeight(state:Pick<DieState,'hull'>,q:number[],y:number):number{
   let lowest=Infinity;
-  for(const v of state.hull){const world=rotateBy(v,q);if(world[1]<lowest)lowest=world[1]}
+  for(const v of state.hull){const height=rotatedY(v,q);if(height<lowest)lowest=height}
   return y+lowest;
 }
 function lowestSupportVertexCount(state:Pick<DieState,'hull'>,q:number[]):number{
-  const heights=state.hull.map(v=>rotateBy(v,q)[1]);
+  const heights=state.hull.map(v=>rotatedY(v,q));
   const lowest=Math.min(...heights);
   return heights.filter(h=>h-lowest<=N.SUPPORT_PLANE_TOLERANCE).length;
 }
@@ -354,14 +368,16 @@ async function simulate(request:Request,catalog:Catalog,view:Viewport,revisions:
       inverseMassByDie[index]=1/parameters.mass;
       setLinear(body,initial.linear);setAngular(body,initial.angular);
       J.destroy(settings);
+      const initialLinear=metres(bi.GetLinearVelocity(body.GetID())),initialAngular=vec3(bi.GetAngularVelocity(body.GetID()));
       dice.push({body,kind,edge:initial.edge,hull,nominal:parameters.nominal,radius,previous:[...initial.position],previousSpeed:Math.hypot(...initial.linear),settleTicks:0,cockedTicks:0,
+        surfaceSpeed:Math.hypot(...initialLinear)+Math.hypot(...initialAngular)*parameters.nominal*.75,
         resolution:resolveFace(catalog.dice[kind].outcomes,[0,0,0,1])});
     }
     const stressTier=kinds.length>N.NATIVE_BATCH;
     const poses:number[]=[];let steps=0,clearedAll=false,substepsTotal=0;
     const sample=()=>{for(const state of dice){
-      const p=metres(state.body.GetPosition()),q=[state.body.GetRotation().GetX(),state.body.GetRotation().GetY(),state.body.GetRotation().GetZ(),state.body.GetRotation().GetW()];
-      poses.push(p[0]*N.VISUAL_PER_METER,p[1]*N.VISUAL_PER_METER,p[2]*N.VISUAL_PER_METER,q[0],q[1],q[2],q[3]);
+      const p=metres(state.body.GetPosition()),q=state.body.GetRotation();
+      poses.push(p[0]*N.VISUAL_PER_METER,p[1]*N.VISUAL_PER_METER,p[2]*N.VISUAL_PER_METER,q.GetX(),q.GetY(),q.GetZ(),q.GetW());
     }};
     sample();
     const maxSteps=Math.round((stressTier?N.MAX_SIM_SECONDS_STRESS:N.MAX_SIM_SECONDS)/N.FIXED_STEP);
@@ -369,8 +385,7 @@ async function simulate(request:Request,catalog:Catalog,view:Viewport,revisions:
       currentStep=steps;
       let surfaceSpeed=0;
       for(const state of dice){
-        const v=metres(bi.GetLinearVelocity(state.body.GetID())),w=vec3(bi.GetAngularVelocity(state.body.GetID()));
-        surfaceSpeed=Math.max(surfaceSpeed,Math.hypot(v[0],v[1],v[2])+Math.hypot(w[0],w[1],w[2])*state.nominal*0.75);
+        surfaceSpeed=Math.max(surfaceSpeed,state.surfaceSpeed);
       }
       // The native sub-stepping assumes a product batch of at most 20 dice; the web stress tiers
       // cap it so a 100-dice prediction still finishes inside the wall-clock budget.
@@ -399,18 +414,13 @@ async function simulate(request:Request,catalog:Catalog,view:Viewport,revisions:
       for(let index=0;index<dice.length;index++){
         const state=dice[index];
         const p=metres(state.body.GetPosition());
-        const rotation=[state.body.GetRotation().GetX(),state.body.GetRotation().GetY(),state.body.GetRotation().GetZ(),state.body.GetRotation().GetW()];
+        const quaternion=state.body.GetRotation(),rotation=[quaternion.GetX(),quaternion.GetY(),quaternion.GetZ(),quaternion.GetW()];
         const v=metres(bi.GetLinearVelocity(state.body.GetID()));
         const w=vec3(bi.GetAngularVelocity(state.body.GetID()));
-        const resolution=resolveFace(catalog.dice[state.kind].outcomes,rotation);
-        state.resolution=resolution;
+        state.surfaceSpeed=Math.hypot(v[0],v[1],v[2])+Math.hypot(w[0],w[1],w[2])*state.nominal*.75;
         // Never inject a rethrow/continuous angular motor into an already visible trajectory.
         // A piled or jammed prediction is rejected before publication and retried from new initial
         // conditions, not kicked across the table after it appeared to stop.
-        const pointed=N.pointedCockedProfile(state.kind);
-        const faceReadable=resolution.alignment>=N.requiredFaceAlignment(N.SETTLE_ALIGNMENT,state.kind)&&resolution.gap>=N.SETTLE_ALIGNMENT_GAP;
-        const supportVertices=pointed?lowestSupportVertexCount(state,rotation):0;
-        const fullSupport=!pointed||supportVertices>=N.requiredFaceSupportVertices(state.kind);
         const speedSquared=v[0]*v[0]+v[1]*v[1]+v[2]*v[2];
         const spinSquared=w[0]*w[0]+w[1]*w[1]+w[2]*w[2];
         const speed=Math.sqrt(speedSquared),span=Math.max(bounds.maxX-bounds.minX,bounds.maxZ-bounds.minZ),margin=Math.max(.35,span*2.5);
@@ -424,6 +434,12 @@ async function simulate(request:Request,catalog:Catalog,view:Viewport,revisions:
         const lowAngular=spinSquared<=N.SETTLE_ANGULAR*N.SETTLE_ANGULAR;
         allQuiet=allQuiet&&lowLinear&&lowAngular;
         const isSupported=rooted[index]||(bi.IsActive(state.body.GetID())===false&&rootedSeen[index]);
+        if(!isSupported||!lowLinear||!lowAngular){state.cockedTicks=0;state.settleTicks=0;continue;}
+        const resolution=resolveFace(catalog.dice[state.kind].outcomes,rotation);state.resolution=resolution;
+        const pointed=N.pointedCockedProfile(state.kind);
+        const faceReadable=resolution.alignment>=N.requiredFaceAlignment(N.SETTLE_ALIGNMENT,state.kind)&&resolution.gap>=N.SETTLE_ALIGNMENT_GAP;
+        const supportVertices=pointed?lowestSupportVertexCount(state,rotation):0;
+        const fullSupport=!pointed||supportVertices>=N.requiredFaceSupportVertices(state.kind);
         const elevated=isSupported&&minimumSurfaceHeight(state,rotation,p[1])>N.ELEVATED_SUPPORT_LIMIT;
         const illegalRest=isSupported&&lowLinear&&lowAngular&&(!entered[index]||elevated||!faceReadable||!fullSupport);
         state.cockedTicks=illegalRest?state.cockedTicks+1:0;
@@ -445,7 +461,7 @@ async function simulate(request:Request,catalog:Catalog,view:Viewport,revisions:
       const span=(stressTier?N.MAX_SIM_SECONDS_STRESS:N.MAX_SIM_SECONDS);
       const why=dice.map((state,index)=>{
         const p=metres(state.body.GetPosition());
-        const rotation=[state.body.GetRotation().GetX(),state.body.GetRotation().GetY(),state.body.GetRotation().GetZ(),state.body.GetRotation().GetW()];
+        const quaternion=state.body.GetRotation(),rotation=[quaternion.GetX(),quaternion.GetY(),quaternion.GetZ(),quaternion.GetW()];
         const r=resolveFace(catalog.dice[state.kind].outcomes,rotation);
         const v=metres(bi.GetLinearVelocity(state.body.GetID()));
         const w=vec3(bi.GetAngularVelocity(state.body.GetID()));
@@ -654,8 +670,8 @@ async function handle(data:any){
     const began=performance.now();
     try{
       await engine();const engineMs=performance.now()-began;
-      const probe:Request={id:'warmup',source:'warmup',name:'warmup',kind:'d6',count:1,theme:Object.keys(catalog.themes)[0] as Request['theme'],seed:1};
-      await predict(probe,catalog,{w:1920,h:1080});
+      const probe:Request={id:'warmup',source:'warmup',name:'warmup',kind:'mixed',count:KINDS.length,theme:Object.keys(catalog.themes)[0] as Request['theme'],seed:1};
+      await predict(probe,catalog,{w:1920,h:1080},KINDS);
       releaseIncumbent('warmup');
       self.postMessage({type:'warm',engineMs,totalMs:performance.now()-began});
     }catch(error){self.postMessage({type:'warm',error:error instanceof Error?error.message:String(error),engineMs:performance.now()-began})}

@@ -17,7 +17,7 @@ export class DiceAssets {
   async json<T>(path:string):Promise<T>{try{return JSON.parse(new TextDecoder().decode(await this.bytes(path)));}catch(error){throw Error(`E_DICE_JSON ${url(path)}: ${String(error)}`);}}
   private async download(path:string){
     for(let attempt=1;attempt<=3;attempt++){
-      if(this.active>=4)await new Promise<void>(resolve=>this.queue.push(resolve));else this.active++;
+      if(this.active>=6)await new Promise<void>(resolve=>this.queue.push(resolve));else this.active++;
       const abort=new AbortController();let timedOut=false,waiting='响应头',retryable=true;
       const timeout=()=>{timedOut=true;abort.abort();};let timer=setTimeout(timeout,30000);
       try{
