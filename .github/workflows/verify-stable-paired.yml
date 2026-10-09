@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - codex/card-ux260-stable
       - codex/card-ux259-stable
       - codex/palette-258-stable
       - codex/unified-ui-stable-20261008
@@ -25,7 +26,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: bc010449656e8e3af299a25393f6ca15f9d3f5af
+          ref: e3aafedd089e62a0e533ed1ba76e1d6a693d6989
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -47,6 +48,9 @@ jobs:
         run: |
           npm run test:bubbles
           node tools/character-directory259-selftest.mjs
+          node tools/card-sync260-selftest.mjs
+      - name: Readable camera bindings and revocation
+        run: node --experimental-strip-types tools/locate260-selftest.mjs
       - name: Historical controller and current LOCAL connection guards
         run: |
           node tools/three-dragon-stable-recovery-selftest.mjs
@@ -80,7 +84,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: stable-viewer259-evidence
+          name: stable-viewer260-evidence
           include-hidden-files: true
           if-no-files-found: warn
           path: |
@@ -89,6 +93,6 @@ jobs:
             .local-evidence/palette257/settings-palette.png
       - uses: actions/upload-artifact@v4
         with:
-          name: verified-stable-viewer259-build
+          name: verified-stable-viewer260-build
           if-no-files-found: error
           path: dist/

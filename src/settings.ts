@@ -3527,7 +3527,7 @@ const TABS: TabDef[] = [
 // Basic vision/light controls ship in both channels. Only extra opening
 // authoring remains dev-gated. Follow stays hidden pending feasibility work.
 const HIDDEN_TAB_IDS = new Set<string>(["follow"]);
-const VISIBLE_TABS = workbenchSettings ? workbenchTabs(TABS) : TABS.filter((t) => !HIDDEN_TAB_IDS.has(t.id));
+const VISIBLE_TABS = workbenchSettings ? workbenchTabs(TABS) : TABS.filter((t) => t.id!=='fogEditor'&&!HIDDEN_TAB_IDS.has(t.id));
 
 // --- DOM refs ---
 const titleEl = document.getElementById("title") as HTMLHeadingElement;
