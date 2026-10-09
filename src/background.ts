@@ -645,9 +645,9 @@ function syncModules() {
 }
 
 OBR.onReady(async () => {
-  void setupTextEffects().catch(error => console.warn('[text-effects] startup failed', error));
   // Always remove the retired map-editor menu, independent of saved module flags.
   void setupFogEditor();
+  void setupTextEffects().catch(error => console.warn('[text-effects] startup failed', error));
   const workbenchReady=setupWorkbench();
   // Sync state, then open cluster + activate all enabled modules.
   startSceneSync();
