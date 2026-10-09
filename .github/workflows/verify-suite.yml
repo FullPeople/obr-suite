@@ -49,6 +49,7 @@ jobs:
         run: |
           npm run test:bubbles
           node tools/character-directory259-selftest.mjs
+          node tools/card-sync260-selftest.mjs
       - name: Suite regression tests
         id: tests
         run: node tools/verify-suite-candidate.mjs
