@@ -670,8 +670,10 @@ async function handle(data:any){
     const began=performance.now();
     try{
       await engine();const engineMs=performance.now()-began;
-      const probe:Request={id:'warmup',source:'warmup',name:'warmup',kind:'mixed',count:KINDS.length,theme:Object.keys(catalog.themes)[0] as Request['theme'],seed:1};
-      await predict(probe,catalog,{w:1920,h:1080},KINDS);
+      const formula=KINDS.map(kind=>kind==='d_percentile'?'1d100':`1${kind}`).join('+');
+      const probe:Request={id:'warmup',source:'warmup',name:'warmup',kind:'mixed',count:8,theme:Object.keys(catalog.themes)[0] as Request['theme'],seed:1,recipe:true,formula};
+      const warmView=view||{w:1920,h:1080};
+      await predictRecipe(probe,catalog,(r,kinds)=>predict(r,catalog,warmView,kinds),(ids,targets)=>predictHop(ids,targets,catalog),releaseIncumbent,r=>retainSnapshot(r,catalog));
       releaseIncumbent('warmup');
       self.postMessage({type:'warm',engineMs,totalMs:performance.now()-began});
     }catch(error){self.postMessage({type:'warm',error:error instanceof Error?error.message:String(error),engineMs:performance.now()-began})}
