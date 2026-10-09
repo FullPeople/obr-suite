@@ -37,6 +37,7 @@ try{
   await page.evaluate(()=>window.refresh('PLAYER'));await wait(async()=>await button('播放到房间').isDisabled());assert.equal(await button('在枭熊中预览').isEnabled(),true);await page.evaluate(()=>window.scene(false));await wait(async()=>await button('在枭熊中预览').isDisabled());assert.equal(await button('播放预览').isEnabled(),true);await page.evaluate(()=>{window.refresh('GM');window.scene(true);});await wait(async()=>await button('播放到房间').isEnabled());assert.match(await frame().locator('#status').textContent(),/已连接枭熊/);
  });
  await check('320px and 390px layouts keep controls inside the frame',async()=>{
+  await button('应用预设').click();
   for(const width of [390,320]){await page.setViewportSize({width,height:900});const dimensions=await frame().locator('html').evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth}));assert.ok(dimensions.scroll<=dimensions.width+1,JSON.stringify(dimensions));await button('播放到房间').scrollIntoViewIfNeeded();await frame().locator('body').evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:join(out,`text-effects-${width}.png`)});}
  });
  await check('long narration paginates, long titles fit and reduced motion removes decoration',async()=>{
