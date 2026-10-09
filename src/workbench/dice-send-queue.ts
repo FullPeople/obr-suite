@@ -17,7 +17,11 @@ export class DiceSendQueue {
  }
  private async drain(){
   if(this.running)return;this.running=true;
-  try{while(this.jobs.length){const control=this.jobs.findIndex(job=>job.control),normal=this.jobs.findIndex(job=>!job.control);
+  try{while(this.jobs.length){
+   // Choose at the available SDK slot: a roll arriving while a heartbeat waits
+   // must be allowed to take that slot. Retries remain inside execute().
+   const delay=Math.max(0,this.next-this.clock());if(delay)await this.sleep(delay);
+   const control=this.jobs.findIndex(job=>job.control),normal=this.jobs.findIndex(job=>!job.control);
    const index=control>=0&&(this.controls<8||normal<0)?control:normal>=0?normal:0;
    const [job]=this.jobs.splice(index,1);this.controls=job.control?this.controls+1:0;await job.run();
   }}finally{this.running=false;}

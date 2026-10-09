@@ -1,5 +1,5 @@
 import {canSeeDiceHistory,DICE_HISTORY_LIMIT,type DiceHistoryVisibility} from '../../../src/modules/dice/history-policy';
-import {Assembly,split,hash,sizeOf,encodeRoll,decodeRoll,MAX_MESSAGE_BYTES} from './wire.mjs';
+import {Assembly,split,hash,sizeOf,encodeRoll,decodeRoll,MAX_MESSAGE_BYTES,CHUNK_BYTES,FAST_CHUNK_BYTES} from './wire.mjs';
 import {BUILD,CHANNEL,now,url,errorText,type Catalog,type Peer,type Request,type Roll,type EventRecord,type Viewport,KINDS} from './types';
 import {buildCue} from './cue';
 import {makeProjection} from './native';
@@ -19,7 +19,7 @@ export interface ResultRecord{visibility?:DiceHistoryVisibility;id:string;source
 interface Reservation{request:Request;broker:string;at:number;members:string[]}
 interface SecretArchive{request:Request;kinds:Roll['kinds'];commitment:string;details?:SecretDetails;complete:boolean;revealed:boolean}
 interface Received {source:string;assembly:Assembly;at:number;retry:number;processing:boolean;prepared:boolean;readyTimer?:ReturnType<typeof setTimeout>;start?:{hash:string;start:number}}
-interface Outgoing {dispatching?:boolean;uploading:boolean;roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>;repairs?:Map<string,Set<number>>;repairing?:boolean}
+interface Outgoing {chunkBytes?:number;dispatching?:boolean;uploading:boolean;roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>;repairs?:Map<string,Set<number>>;repairing?:boolean}
 export class Controller {
   readonly bus:BroadcastChannel;
   private worker=new Worker(new URL('./physics.worker.ts',import.meta.url),{type:'module'});
@@ -116,7 +116,7 @@ export class Controller {
   log(event:string,detail:any){if(this.disposed)return;this.events.push({at:now(),event,detail});if(this.events.length>2500)this.events.splice(0,500);this.postLocal({type:'log',event,detail});console.info(`[DiceLab] ${event}`,detail)}
   fail(stage:string,error:unknown){if(this.disposed)return;this.error=`${stage}: ${errorText(error)}`;this.failures++;this.log('failure',{stage,error:this.error});this.state()}
   state(){if(this.disposed)return;this.postLocal({type:'state',state:{id:this.transport.id,name:this.transport.name,color:this.transport.color,mode:this.transport.mode,version:BUILD,ready:this.ready,overlay:this.overlayReady,physics:this.physicsReady&&!this.disabled,peers:[...this.peers.values()],queued:this.queue.length,busy:this.pending?.id||'',work:this.waitingForSpace?'桌面空间不足，保留当前骰子，等待演出结束后继续投掷':this.pending?'正在预测物理轨迹…':this.queue.length?'正在按提交顺序准备…':[...this.requests.values()].filter(r=>r.authority!==this.transport.id).map(r=>r.status||'已提交，等待房间计算…')[0]||'',bytesSent:this.bytesSent,bytesReceived:this.bytesReceived,packetsSent:this.packetsSent,packetsReceived:this.packetsReceived,metrics:this.metrics,error:this.error,failures:this.failures,completed:this.completed,receipts:this.receipts.slice(-30),stress:!!this.stress}})}
-  private async send(data:any,stamp?:(packet:any)=>void){this.assertLive();const p={v:1,build:BUILD,from:this.transport.id,...data};if(p.type==='hello'){await this.keys.ready;this.assertLive();p.born=this.born;p.color=this.transport.color;p.role=this.transport.role;p.publicKey=this.keys.publicKey;p.session=this.session}let bytes=0;const beforeDispatch=()=>{this.assertLive();stamp?.(p);bytes=sizeOf(p);if(bytes>MAX_MESSAGE_BYTES)throw Error(`消息超限 ${bytes}`);};if(this.transport.sendTimed)await this.transport.sendTimed(p,beforeDispatch);else{beforeDispatch();await this.transport.send(p);}this.assertLive();this.bytesSent+=bytes;this.packetsSent++}
+  private async send(data:any,stamp?:(packet:any)=>void){this.assertLive();const p={v:1,build:BUILD,from:this.transport.id,...data};if(p.type==='hello'){await this.keys.ready;this.assertLive();p.born=this.born;p.color=this.transport.color;p.role=this.transport.role;p.publicKey=this.keys.publicKey;p.session=this.session;p.tracePacketV1=true}let bytes=0;const beforeDispatch=()=>{this.assertLive();stamp?.(p);bytes=sizeOf(p);if(bytes>MAX_MESSAGE_BYTES)throw Error(`消息超限 ${bytes}`);};if(this.transport.sendTimed)await this.transport.sendTimed(p,beforeDispatch);else{beforeDispatch();await this.transport.send(p);}this.assertLive();this.bytesSent+=bytes;this.packetsSent++}
   private authority(){return [{id:this.transport.id,born:this.born,ready:this.ready},...[...this.peers.values()].filter(p=>now()-p.lastSeen<12000)]
     .filter(p=>p.ready).sort((a,b)=>a.born-b.born||a.id.localeCompare(b.id))[0]?.id||this.transport.id}
   private async ping(id:string){if(this.clocks.get(id)?.some(s=>now()-s.at<4000)||[...this.probes.values()].some(p=>p.to===id&&now()-p.t<2500))return;const nonce=crypto.randomUUID(),probe={to:id,t:now()};this.probes.set(nonce,probe);await this.send({type:'ping',to:id,nonce,t:probe.t},packet=>{packet.t=probe.t=now();})}
@@ -155,7 +155,7 @@ export class Controller {
     }
     if(p?.type==='prepared'){
       const out=this.outgoing.get(p.id);if(out){out.wait.delete(this.transport.id);await this.maybeStart(out)}
-      else {const inbound=this.inbound.get(p.id);if(inbound){inbound.prepared=true;await this.ping(inbound.source);await this.sendReady(p.id,inbound)}}
+      else {const inbound=this.inbound.get(p.id);if(inbound){inbound.prepared=true;void this.ping(inbound.source).catch(e=>this.fail('ready-ping',e));await this.sendReady(p.id,inbound)}}
       return;
     }
     if(p?.type==='command'){
@@ -267,9 +267,18 @@ export class Controller {
       const {poses,contacts,...meta}=roll;
       const bytes=await encodeRoll({...meta,collisions:contacts.length,contacts:contacts.length},poses,contacts);this.assertLive();const sha=await hash(bytes);this.assertLive();const chunks=split(bytes);
       const members=[...this.peers.values()].filter(p=>p.ready&&now()-p.lastSeen<12000&&p.version===BUILD&&(!roll.masked||this.reservations.get(roll.request.id)?.members.includes(p.id))).map(p=>p.id);
+      // Negotiate per room. Old clients keep the exact manifest/chunk protocol.
+      // A packet carries its own manifest so a lost first packet is repairable.
+      let chunkBytes=CHUNK_BYTES;
+      if(members.length&&!this.verifyingPeers&&this.transport.role&&this.session&&roll.kinds.length<=20&&!roll.masked&&!hiddenRequest(roll.request)&&!roll.request.batch&&!roll.request.groupSize&&members.every(id=>{const p=this.peers.get(id)!;return p.tracePacketV1&&p.session&&p.role;})){
+        const fast=split(bytes,FAST_CHUNK_BYTES);
+        if(fast.every((data,index)=>sizeOf({v:1,build:BUILD,from:this.transport.id,type:'trace',id:roll.request.id,total:fast.length,bytes:bytes.length,hash:sha,members,chunkBytes:FAST_CHUNK_BYTES,index,data})<=MAX_MESSAGE_BYTES)){
+          chunkBytes=FAST_CHUNK_BYTES;chunks.splice(0,chunks.length,...fast);
+        }
+      }
       // A 100-dice stress roll takes ~25 s to predict per peer; the product tier needs only seconds.
       const window=Math.max(roll.kinds.length>20?90000:20000,roll.request.batch?15000+roll.request.batch.size*2000:0);
-      const out:Outgoing={uploading:true,roll,chunks,hash:sha,bytes:bytes.length,wait:new Set([this.transport.id,...members]),members,at:now(),started:false,retry:0,acks:new Set(members),lastStartRetry:0,window,viewers:new Set([this.transport.id,...members])};
+      const out:Outgoing={chunkBytes,uploading:true,roll,chunks,hash:sha,bytes:bytes.length,wait:new Set([this.transport.id,...members]),members,at:now(),started:false,retry:0,acks:new Set(members),lastStartRetry:0,window,viewers:new Set([this.transport.id,...members])};
       this.outgoing.set(roll.request.id,out);this.rolls.set(roll.request.id,actual);this.addRecord(actual);
       const tailSignature=this.tailSignature(out),tailGeneration=this.preparationGeneration;
       this.requests.delete(roll.request.id);
@@ -277,8 +286,8 @@ export class Controller {
       this.postLocal({type:'prepare',roll:actual});
       // Keep every trajectory on the established manifest/chunk queue. A peer restart
       // may cancel the roll while a send is awaiting acknowledgement.
-      if(members.length){await this.send(this.offer(out));
-        for(let i=0;i<chunks.length&&this.outgoing.get(roll.request.id)===out;i++){await this.send({type:'chunk',id:roll.request.id,index:i,data:chunks[i]});if(i%8===7)await new Promise(r=>setTimeout(r,8))}
+      if(members.length){if(chunkBytes===CHUNK_BYTES)await this.send(this.offer(out));
+        for(let i=0;i<chunks.length&&this.outgoing.get(roll.request.id)===out;i++){await this.send(chunkBytes===FAST_CHUNK_BYTES?{...this.offer(out),type:'trace',index:i,data:chunks[i]}:{type:'chunk',id:roll.request.id,index:i,data:chunks[i]});if(i%8===7)await new Promise(r=>setTimeout(r,8))}
         if(this.outgoing.get(roll.request.id)===out)await this.sendTail(out,tailSignature,tailGeneration);}
       if(this.outgoing.get(roll.request.id)!==out)return;
       if(!out.started){out.uploading=false;out.at=now();await this.maybeStart(out);}
@@ -297,7 +306,7 @@ export class Controller {
   // slot on start. Keep a generation as well as a signature: ready/role changes
   // that revert before dispatch must still invalidate the earlier preparation.
   private tailSignature(out:Outgoing):string|undefined{
-    if(this.verifyingPeers||!this.transport.sendTimed||!this.ready||this.disabled||!this.transport.role||!this.session||out.roll.kinds.length>=10||out.roll.masked||hiddenRequest(out.roll.request)||out.roll.request.batch||out.roll.request.groupSize||out.roll.request.authority!==this.transport.id||this.authority()!==this.transport.id)return;
+    if(this.verifyingPeers||!this.transport.sendTimed||!this.ready||this.disabled||!this.transport.role||!this.session||(out.chunkBytes===FAST_CHUNK_BYTES?out.roll.kinds.length>20:out.roll.kinds.length>=10)||out.roll.masked||hiddenRequest(out.roll.request)||out.roll.request.batch||out.roll.request.groupSize||out.roll.request.authority!==this.transport.id||this.authority()!==this.transport.id)return;
     const members=[...this.peers.values()].filter(p=>p.ready&&now()-p.lastSeen<12000&&p.version===BUILD);
     if(!members.length||members.length!==out.members.length||members.some(p=>!out.members.includes(p.id)||!p.session||!p.role))return;
     return JSON.stringify([this.session,this.transport.role,this.born,...members.map(p=>[p.id,p.session,p.role,p.born,p.version]).sort((a,b)=>String(a[0]).localeCompare(String(b[0])))]);
@@ -311,7 +320,11 @@ export class Controller {
       return Math.min(1500,Math.max(70,maxRtt*1.5+35));
     });
   }
-  private offer(out:Outgoing,to?:string){return {type:'offer',...(to?{to}:{}),id:out.roll.request.id,total:out.chunks.length,bytes:out.bytes,hash:out.hash,members:out.members};}
+  private offer(out:Outgoing,to?:string){
+    const packet={type:'offer',...(to?{to}:{}),id:out.roll.request.id,total:out.chunks.length,bytes:out.bytes,hash:out.hash,members:out.members,...(out.chunkBytes===FAST_CHUNK_BYTES?{chunkBytes:out.chunkBytes}:{})};
+    if(to&&out.chunkBytes===FAST_CHUNK_BYTES){const trace={...packet,type:'trace',index:0,data:out.chunks[0]};if(sizeOf({v:1,build:BUILD,from:this.transport.id,...trace})<=MAX_MESSAGE_BYTES)return trace;}
+    return packet;
+  }
   private dropInbound(id:string){clearTimeout(this.inbound.get(id)?.readyTimer);this.inbound.delete(id);}
   private async sendReady(id:string,inbound:Received){
     if(this.disposed||this.disabled||this.inbound.get(id)!==inbound||!inbound.prepared)return;
@@ -491,7 +504,7 @@ export class Controller {
         if(role!=='GM'&&role!=='PLAYER')throw Error('无法验证玩家的枭熊角色: '+source);
         if(typeof p.session!=='string'||!/^[0-9a-f-]{36}$/.test(p.session))throw Error('暗骰会话身份不合法');
         restarted=!!existing&&existing.session!==p.session;
-        if(!existing||restarted||existing.ready!==(p.ready===true)||existing.role!==role||existing.born!==p.born)this.preparationGeneration++;
+        if(!existing||restarted||existing.ready!==(p.ready===true)||existing.role!==role||existing.born!==p.born||!!existing.tracePacketV1!==(p.tracePacketV1===true))this.preparationGeneration++;
         await this.keys.remember(source,p.publicKey,restarted);this.assertLive();
         }finally{this.verifyingPeers--;}
         if(restarted){
@@ -509,8 +522,8 @@ export class Controller {
         }
         if(!Number.isSafeInteger(p.born)||p.born<0)throw Error('Invalid authority join order');
         if(!this.ready)this.born=Math.max(this.born,p.born+1);
-        const isNew=!existing;this.peers.set(source,{id:source,session:p.session,name:p.name,color:p.color,role,lastSeen:now(),ready:p.ready===true,rtt:existing?.rtt??-1,offset:existing?.offset??0,version:p.build,born:p.born});
-        if(isNew||restarted){await this.send({type:'hello',ready:this.ready,name:this.transport.name,to:source});this.log('peer-joined',{source,name:p.name})}if(isNew||restarted||!this.clocks.get(source)?.some(s=>now()-s.at<4000))await this.ping(source);this.state();break;
+        const isNew=!existing;this.peers.set(source,{id:source,session:p.session,name:p.name,color:p.color,role,lastSeen:now(),ready:p.ready===true,rtt:existing?.rtt??-1,offset:existing?.offset??0,version:p.build,born:p.born,tracePacketV1:p.tracePacketV1===true});
+        if(isNew||restarted){void this.send({type:'hello',ready:this.ready,name:this.transport.name,to:source}).catch(e=>this.fail('peer-hello',e));this.log('peer-joined',{source,name:p.name})}if(isNew||restarted||!this.clocks.get(source)?.some(s=>now()-s.at<4000))void this.ping(source).catch(e=>this.fail('peer-ping',e));this.state();break;
       }
       case 'secret-request':{
         const r=p.request as Request;
@@ -543,7 +556,9 @@ export class Controller {
       case 'request-ack':{const r=this.requests.get(p.id);if(r?.authority===source){r.status='房间已收到，正在准备…';this.log('request-accepted',{id:p.id,authority:source})}break}
       case 'queue-status':{const r=this.requests.get(p.id);if(r?.authority===source){r.status=p.space?'桌面空间不足，等待前一批演出结束后继续投掷':`等待房间计算，第 ${Number(p.position)||1} 条`;this.state()}break}
       case 'roll-rejected':{const r=this.requests.get(p.id);if(r?.authority===source){this.requests.delete(p.id);this.privateAudiences.delete(p.id);this.fail('authority-rejected',p.reason)}break}
-      case 'ping':await this.send({type:'pong',to:source,nonce:p.nonce,received:receivedAt,remote:now()},packet=>{packet.remote=now();});break;
+      // Clock replies must not hold the serial receive lane behind a queued SDK
+      // acknowledgement. The dispatch stamp still measures the real send time.
+      case 'ping':void this.send({type:'pong',to:source,nonce:p.nonce,received:receivedAt,remote:now()},packet=>{packet.remote=now();}).catch(e=>this.fail('clock-pong',e));break;
       case 'pong':{const probe=this.probes.get(p.nonce);if(!probe||probe.to!==source)break;this.probes.delete(p.nonce);const end=receivedAt,elapsed=end-probe.t;
         // Four timestamps exclude both paced sending and serial-inbox work. Old
         // peers without t2 still use the original estimate; no barrier is bypassed.
@@ -558,14 +573,16 @@ export class Controller {
         // session changes must still be processed while that SDK call is pending.
         for(const [id,inbound]of this.inbound)if(inbound.source===source&&inbound.prepared&&inbound.readyTimer!==undefined)void this.sendReady(id,inbound).catch(e=>this.fail('ready-clock',e));
         break;}
+      case 'trace':
       case 'offer':{
         if(source!==this.authority()&&this.reservations.get(p.id)?.request.source!==source)throw Error('非房间权威或授权暗骰来源发送轨迹');
         if(!this.ready||!Array.isArray(p.members)||!p.members.includes(this.transport.id))break;
+        if((p.type==='trace'||p.chunkBytes!==undefined)&&(!existing?.tracePacketV1||p.chunkBytes!==FAST_CHUNK_BYTES))throw Error('Unnegotiated trajectory packet');
         if(this.started.has(p.id))break;
-        const pending=this.inbound.get(p.id);if(pending){if(pending.source!==source||pending.assembly.sha!==p.hash||pending.assembly.total!==p.total||pending.assembly.bytes!==p.bytes)throw Error('冲突的轨迹清单');if(pending.prepared)await this.sendReady(p.id,pending);break}if(this.inbound.size>=64)throw Error('接收轨迹队列已满');
+        const pending=this.inbound.get(p.id);if(pending){if(pending.source!==source||pending.assembly.sha!==p.hash||pending.assembly.total!==p.total||pending.assembly.bytes!==p.bytes||pending.assembly.chunkBytes!==(p.chunkBytes??CHUNK_BYTES))throw Error('冲突的轨迹清单');if(pending.prepared)await this.sendReady(p.id,pending);if(p.type==='trace')await this.receiveChunk(p,source);break}if(this.inbound.size>=64)throw Error('接收轨迹队列已满');
         if(typeof p.id!=='string'||p.id.length>80)throw Error('Invalid roll id');
-        this.inbound.set(p.id,{source,assembly:new Assembly(p.total,p.bytes,p.hash),at:now(),retry:0,processing:false,prepared:false});
-        await this.ping(source);break;
+        this.inbound.set(p.id,{source,assembly:new Assembly(p.total,p.bytes,p.hash,p.chunkBytes??CHUNK_BYTES),at:now(),retry:0,processing:false,prepared:false});
+        void this.ping(source).catch(e=>this.fail('offer-ping',e));if(p.type==='trace')await this.receiveChunk(p,source);break;
       }
       case 'chunk':await this.receiveChunk(p,source);break;
       case 'chunks-done':{const inbound=this.inbound.get(p.id);if(inbound?.source===source&&!inbound.processing&&inbound.assembly.missing().length){
