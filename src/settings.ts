@@ -46,7 +46,7 @@ import {
   refreshStaleSubscriptions,
   type RemoteSubscription,
 } from "./utils/localContent";
-import { repairLegacyHiddenBubbles } from "./modules/bubbles";
+import { repairLegacyHiddenBubbles, type AnchorMode } from "./modules/bubbles";
 import { repairLegacyBestiaryImages } from "./modules/bestiary/repair-legacy-images";
 import { SettingsContent } from "./utils/settingsContent";
 import { renderSettingsModuleStatus } from "./utils/settingsModuleStatus";
@@ -87,6 +87,10 @@ const GITHUB_URL = "https://github.com/FullPeople/DND-card/issues";
 const BUBBLES_SETTINGS_KEY = "com.obr-suite/bubbles/settings";
 const DEFAULT_BUBBLES_PLAYER_THRESHOLD = 25;
 const DEFAULT_BUBBLES_VERTICAL_OFFSET = -20;
+// 2026-10-08 — "canvas" keeps the pre-existing geometry; a scene that
+// never touches the control renders exactly as it always did. The type
+// lives with the geometry (modules/bubbles) so the two can't drift.
+const DEFAULT_BUBBLES_ANCHOR_MODE: AnchorMode = "canvas";
 
 interface BilingualHtml { zh: string; en: string; }
 export interface TabDef {
@@ -119,6 +123,10 @@ let bubbleAutoScaleText = false;
 let bubbleVerticalOffset = DEFAULT_BUBBLES_VERTICAL_OFFSET;
 let bubbleOffsetByText = false;
 let bubbleOverheadMode = false;
+// 2026-10-08 — which rectangle the bubble cluster is laid out against.
+// "canvas" = the whole PNG (historical), "box" = the token's footprint on
+// the grid. See modules/bubbles/anchor-box.ts.
+let bubbleAnchorMode: AnchorMode = DEFAULT_BUBBLES_ANCHOR_MODE;
 
 // 2026-08-25 — the supporter-rendering subsystem that used to live here
 // (bundled JSON, avatar map, tier/font sizing, supportersHtml and the
@@ -153,6 +161,12 @@ function readBubbleOverheadModeFromMeta(meta: Record<string, unknown>): boolean 
   const settings = meta[BUBBLES_SETTINGS_KEY] as { overheadMode?: unknown } | undefined;
   return !!settings?.overheadMode;
 }
+// 2026-10-08 — anything that isn't exactly "box" reads as "canvas", so a
+// missing field or a hand-edited value can only ever mean "unchanged".
+function readBubbleAnchorModeFromMeta(meta: Record<string, unknown>): AnchorMode {
+  const settings = meta[BUBBLES_SETTINGS_KEY] as { anchorMode?: unknown } | undefined;
+  return settings?.anchorMode === "box" ? "box" : DEFAULT_BUBBLES_ANCHOR_MODE;
+}
 
 async function refreshBubbleSettings(): Promise<void> {
   try {
@@ -163,17 +177,19 @@ async function refreshBubbleSettings(): Promise<void> {
     bubbleVerticalOffset = readBubbleVerticalOffsetFromMeta(m);
     bubbleOffsetByText = readBubbleOffsetByTextFromMeta(m);
     bubbleOverheadMode = readBubbleOverheadModeFromMeta(m);
+    bubbleAnchorMode = readBubbleAnchorModeFromMeta(m);
   } catch {
     bubblePlayerThreshold = DEFAULT_BUBBLES_PLAYER_THRESHOLD;
     bubbleAutoScaleText = false;
     bubbleVerticalOffset = DEFAULT_BUBBLES_VERTICAL_OFFSET;
     bubbleOffsetByText = false;
     bubbleOverheadMode = false;
+    bubbleAnchorMode = DEFAULT_BUBBLES_ANCHOR_MODE;
   }
 }
 
 // Full-object write. OBR's setMetadata REPLACES the whole
-// `BUBBLES_SETTINGS_KEY` value, so every setter has to write all six
+// `BUBBLES_SETTINGS_KEY` value, so every setter has to write all seven
 // fields from the current module vars. Callers mutate the relevant
 // module var first, then call this. GM-only — only the GM has scene
 // write permission; the settings UI also disables these controls for
@@ -187,6 +203,7 @@ async function writeBubbleSettings(): Promise<void> {
       verticalOffset: bubbleVerticalOffset,
       offsetByText: bubbleOffsetByText,
       overheadMode: bubbleOverheadMode,
+      anchorMode: bubbleAnchorMode,
     },
   });
 }
@@ -209,6 +226,13 @@ async function setBubbleOffsetByText(value: boolean): Promise<void> {
 }
 async function setBubbleOverheadMode(value: boolean): Promise<void> {
   bubbleOverheadMode = !!value;
+  await writeBubbleSettings();
+}
+// 2026-10-08 — anchor basis. A mode switch, not a boolean: the two
+// options have names the user can reason about, and "off" would be a
+// meaningless label for either one.
+async function setBubbleAnchorMode(value: AnchorMode): Promise<void> {
+  bubbleAnchorMode = value === "box" ? "box" : DEFAULT_BUBBLES_ANCHOR_MODE;
   await writeBubbleSettings();
 }
 
@@ -2748,6 +2772,13 @@ const TABS: TabDef[] = [
       const overheadDesc = lang === "zh"
         ? `${dmHint}标准模式：血条贴在 token 底部，气泡浮在上方。头顶模式：血条悬浮在 token 头顶一小段距离上方，取消圆角并加上边框，护盾和临时血在血条尽头（最右侧）与血条同平面显示。头顶模式下「按字号上偏移」自动失效。`
         : `${dmHint}Standard: HP bar sits below the token with stat bubbles floating above it. Overhead: bar hovers a short gap above the token's head, sharp corners + border, AC shield (+ Temp HP) appear inline at the bar's right end on the same plane. The 'Offset by font size' toggle is force-disabled in Overhead mode.`;
+      // 2026-10-08 — anchor basis. Same two-position switch idiom as the
+      // HP-bar mode above; these two are independent (anchor basis
+      // applies to both the standard and the overhead placement).
+      const anchorLbl = lang === "zh" ? "血条锚定基准" : "Bar anchor basis";
+      const anchorDesc = lang === "zh"
+        ? `${dmHint}画布：血条按<b>整张 PNG 图片</b>（含透明留白）的底边定位。图片在画布里没居中时（图案上探、自带阴影、大画布小图案），血条会被推到离 token 很远的位置，同一排的两个 token 也对不齐。占格框：改按 token 在<b>格子上的占位</b>定位——摆正时吸附到格线，拖到交点或自由位置后记住它在格子里的位置继续跟随，放大缩小也跟着变宽。`
+        : `${dmHint}Canvas: the bar is anchored to the bottom of the <b>whole PNG</b> (transparent padding included). Art that isn't centred in its canvas — a silhouette reaching upward, a baked-in shadow, a small subject on a large sheet — drops the bar far below the token, and two tokens on the same row end up on different lines. Grid box: anchor to the token's <b>footprint on the grid</b> instead — snapped to the grid lines while the token is lined up, remembered (and followed) after it is dragged onto an intersection or a free position, and widened/shrunk together with the token.`;
       const thresholdLbl = lang === "zh" ? "玩家进度阈值" : "Player threshold";
       const thresholdDesc = lang === "zh"
         ? "DM 同步（全场一致）。上锁角色对玩家显示的血条进度按这个百分比量化。默认 25：玩家只在血量降至 75% / 50% / 25% / 0% 时看到血条变化。设为 0 则连续显示真实比例，100 则始终显示满血（玩家看不到任何进度）。"
@@ -2814,6 +2845,26 @@ const TABS: TabDef[] = [
                     class="${overheadMode ? "on" : ""}"
                     aria-pressed="${overheadMode ? "true" : "false"}"
                     style="background:${overheadMode ? "rgba(93,173,226,0.20)" : "transparent"};color:${overheadMode ? "#7ec8f0" : "#9aa0b3"};border:none;padding:5px 12px;cursor:pointer;font:inherit;font-weight:600;border-left:1px solid rgba(255,255,255,0.12);">${lang === "zh" ? "头顶模式" : "Overhead"}</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="lbl">
+            ${anchorLbl}
+            <div class="desc"><em>${anchorDesc}</em></div>
+          </div>
+          <div class="mode-switch" data-key="bubblesAnchorMode"
+               role="radiogroup"
+               aria-label="${anchorLbl}"
+               title="${!isGM ? (lang === "zh" ? "由 DM 控制" : "Controlled by the DM") : ""}"
+               style="display:inline-flex;border:1px solid rgba(255,255,255,0.18);border-radius:6px;overflow:hidden;font-size:11px;font-weight:600;user-select:none;align-self:center${!isGM ? ";opacity:0.45;pointer-events:none" : ""}">
+            <button type="button" data-mode="canvas"
+                    class="${bubbleAnchorMode === "box" ? "" : "on"}"
+                    aria-pressed="${bubbleAnchorMode === "box" ? "false" : "true"}"
+                    style="background:${bubbleAnchorMode === "box" ? "transparent" : "rgba(93,173,226,0.20)"};color:${bubbleAnchorMode === "box" ? "#9aa0b3" : "#7ec8f0"};border:none;padding:5px 12px;cursor:pointer;font:inherit;font-weight:600;">${lang === "zh" ? "画布" : "Canvas"}</button>
+            <button type="button" data-mode="box"
+                    class="${bubbleAnchorMode === "box" ? "on" : ""}"
+                    aria-pressed="${bubbleAnchorMode === "box" ? "true" : "false"}"
+                    style="background:${bubbleAnchorMode === "box" ? "rgba(93,173,226,0.20)" : "transparent"};color:${bubbleAnchorMode === "box" ? "#7ec8f0" : "#9aa0b3"};border:none;padding:5px 12px;cursor:pointer;font:inherit;font-weight:600;border-left:1px solid rgba(255,255,255,0.12);">${lang === "zh" ? "占格框" : "Grid box"}</button>
           </div>
         </div>
         <div class="row">
@@ -2959,6 +3010,19 @@ const TABS: TabDef[] = [
             if (!isGM) return;
             const overhead = btn.dataset.mode === "overhead";
             await setBubbleOverheadMode(overhead);
+            if (activeTab === "bubbles") renderContent();
+          });
+        });
+      }
+      // 2026-10-08 — anchor basis mode-switch (画布 / 占格框). Bar
+      // geometry is baked when the items are built, so the bubbles
+      // module watches the scene-metadata value and rebuilds.
+      const anchorSwitch = root.querySelector<HTMLElement>('.mode-switch[data-key="bubblesAnchorMode"]');
+      if (anchorSwitch) {
+        anchorSwitch.querySelectorAll<HTMLButtonElement>("button[data-mode]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            if (!isGM) return;
+            await setBubbleAnchorMode(btn.dataset.mode === "box" ? "box" : "canvas");
             if (activeTab === "bubbles") renderContent();
           });
         });
