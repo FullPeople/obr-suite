@@ -44,6 +44,10 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Historical controller and current LOCAL connection guards
         run: |
+          npm run test:bubbles
+          node tools/character-directory259-selftest.mjs
+      - name: Historical controller and current LOCAL connection guards
+        run: |
           node tools/three-dragon-stable-recovery-selftest.mjs
           node tools/three-dragon-local-connection-selftest.mjs
       - name: Preserved stable announcement, inventory and dependency guards

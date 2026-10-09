@@ -44,10 +44,6 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
           node --input-type=module -e "import {chromium} from '@playwright/test'; console.log('CHROMIUM_PATH='+chromium.executablePath())" >> "$GITHUB_ENV"
-      - name: Grid-box anchoring and cross-scene picker regression
-        run: |
-          npm run test:bubbles
-          node tools/character-directory259-selftest.mjs
       - name: Suite regression tests
         id: tests
         run: node tools/verify-suite-candidate.mjs
