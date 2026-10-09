@@ -48,6 +48,7 @@ jobs:
         run: |
           npm run test:bubbles
           node tools/character-directory259-selftest.mjs
+          node tools/card-sync260-selftest.mjs
       - name: Readable camera bindings and revocation
         run: node --experimental-strip-types tools/locate260-selftest.mjs
       - name: Historical controller and current LOCAL connection guards

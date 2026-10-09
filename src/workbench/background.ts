@@ -446,7 +446,7 @@ async function start(){
    const entry={id:record.id,name:m.data.identity.character_name,owner_ids:[playerId],visibility:'public',locked:false};
    const room=await OBR.room.getMetadata();await OBR.room.setMetadata({[DIRECTORY]:[...(Array.isArray(room[DIRECTORY])?room[DIRECTORY] as any[]:[]).filter(c=>c.id!==entry.id),entry]});
    if(await OBR.scene.isReady()){const scene=await OBR.scene.getMetadata();await OBR.scene.setMetadata({[LIST]:[...(Array.isArray(scene[LIST])?scene[LIST] as any[]:[]).filter(c=>c.id!==entry.id),entry]});}
-   cacheDocument(`${OBR.room.id}:card:${record.id}`,m.data);chosen=`card:${record.id}`;
+   cacheDocument(`${OBR.room.id}:card:${record.id}`,m.data);if(m.select!==false)chosen=`card:${record.id}`;
    await OBR.broadcast.sendMessage('com.obr-suite/cc-card-updated',{cardId:record.id},{destination:'ALL'});return {created:entry};
   }
   if(m.type==='rules')return {shared:await shared.write(m),sequence:++sequence};
