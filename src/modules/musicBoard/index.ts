@@ -1,3 +1,4 @@
+import {WORKBENCH_DEV} from '../../workbench/channel';
 import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
 import { assetUrl } from "../../asset-base";
@@ -126,7 +127,7 @@ export async function setupMusicBoard(): Promise<void> {
   registerPanelBbox(PANEL_IDS.musicBoard, async () => panelOpen ? geometry() : null);
   const onStorage = (event: StorageEvent) => { if (event.key === LOCAL_VOLUMES && audio) { audio.volume = volumes(); audio.volumeChanged(); void view(true); } };
   window.addEventListener("storage", onStorage); unsubs.push(() => window.removeEventListener("storage", onStorage));
-  unsubs.push(OBR.broadcast.onMessage(TOGGLE, event => { if (event.connectionId !== room?.connectionId) return; desiredOpen = !desiredOpen; void syncPanel(); }),
+  unsubs.push(OBR.broadcast.onMessage(TOGGLE, event => { if (event.connectionId !== room?.connectionId) return; if(WORKBENCH_DEV){void OBR.broadcast.sendMessage('com.obr-suite/workbench/open-page',{page:'music'},{destination:'LOCAL'});return;} desiredOpen = !desiredOpen; void syncPanel(); }),
     OBR.broadcast.onMessage(MUSIC_READY, event => { if (event.connectionId === room?.connectionId){if((event.data as any)?.workbench)workbenchViewUntil=Date.now()+10000;void view(true);} }),
     OBR.broadcast.onMessage(RESIZE, event => { const value = event.data as { mini?: boolean }; if (event.connectionId !== room?.connectionId || typeof value?.mini !== "boolean") return;
       localStorage.setItem(MINI, value.mini ? "1" : "0"); geometryDirty = true; void syncPanel(); }),

@@ -343,6 +343,7 @@ async function refreshAnnouncementVersion() {
 }
 
 async function onAnnounce() {
+  if(WORKBENCH_DEV){await OBR.broadcast.sendMessage('com.obr-suite/workbench/open-page',{page:'announcement'},{destination:'LOCAL'});return;}
   try {
     await OBR.modal.open({
       id: ANNOUNCEMENT_MODAL_ID,
@@ -357,6 +358,7 @@ async function onAnnounce() {
 }
 
 async function onGear() {
+  if(WORKBENCH_DEV){await OBR.broadcast.sendMessage('com.obr-suite/workbench/open-page',{page:'settings'},{destination:'LOCAL'});return;}
   try {
     const [vw, vh] = await Promise.all([
       OBR.viewport.getWidth(),

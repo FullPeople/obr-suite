@@ -10,3 +10,5 @@ export const loadMonsterBySlug=async(_slug:string)=>getRawMonster();
 export const startSceneSync=()=>{};
 export const readLS=(key:string,fallback:string)=>localStorage.getItem(key)??fallback;
 export const writeLS=(key:string,value:string)=>localStorage.setItem(key,value);
+
+export {parseMon,makeSlug} from "../../src/modules/bestiary/data";

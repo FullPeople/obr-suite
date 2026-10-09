@@ -22,8 +22,9 @@ const server=createServer((req,res)=>{const p=new URL(req.url,'http://local').pa
  const file=p.startsWith('/suite-dev/workbench/')?join(process.env.DND_WEB_DIST||join(web,'dist'),p.slice('/suite-dev/workbench/'.length)):join(out,p.slice(1));
  try{res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');res.end(readFileSync(file));}catch{res.writeHead(404);res.end();}
 });await new Promise(r=>server.listen(5197,'127.0.0.1',r));
-const browser=await chromium.launch({channel:'msedge',headless:true}),context=await browser.newContext({viewport:{width:1500,height:1000}}),errors=[];
+const browser=await chromium.launch({channel:process.env.CI?undefined:'msedge',headless:true}),context=await browser.newContext({viewport:{width:1500,height:1000}}),errors=[];
 context.on('page',p=>p.on('pageerror',e=>errors.push(e.message)));
+await context.addInitScript(version=>{localStorage.setItem('dnd-card:announcement-ack:suite',version);localStorage.setItem('dnd-card:rules-setup:v1','done');},JSON.parse(readFileSync('package.json','utf8')).version);
 const card=name=>({schema_version:'0.3',identity:{character_name:name},meta:{ruleset:'2024'},abilities:Object.fromEntries(['str','dex','con','int','wis','cha'].map(a=>[a,{total:12}])),classes:[{name:'法师',level:2}],core_stats:{hp:{current:20,max:30,temp:2},ac:15},features:{},background:{},inventory:{},defenses:{custom:'preserved'},combat:{weapons:[{name:'保留的武器'}]}});
 let documents={hero:card('阿明'),second:card('贝拉')},saves=0;
 await context.route('https://5e.kiwee.top/**',r=>r.fulfill({json:{},headers:{'access-control-allow-origin':'*'}}));
@@ -38,8 +39,8 @@ try{
   await launcher.getByRole('button',{name:label,exact:true}).click();
   check(await launcher.locator('body').evaluate((el,event)=>window.wbMock.broadcasts.some(b=>b.name===event),event),'action routes '+label+' to the original module');
  }
- await launcher.getByRole('button',{name:'公告',exact:true}).click();check(await launcher.locator('body').evaluate(()=>window.wbMock.effects.some(e=>e.id==='com.obr-suite/dm-announcement')),'action opens announcement');
- await launcher.getByRole('button',{name:'设置',exact:true}).click();check(await launcher.locator('body').evaluate(()=>window.wbMock.popovers.some(e=>e.id==='com.obr-suite/settings')),'action opens settings');
+ await launcher.getByRole('button',{name:'公告',exact:true}).click();check(await launcher.locator('body').evaluate(()=>window.wbMock.broadcasts.some(e=>e.name==='com.obr-suite/workbench/open-page'&&e.data.page==='announcement')),'action routes announcement inside workbench');
+ await launcher.getByRole('button',{name:'设置',exact:true}).click();check(await launcher.locator('body').evaluate(()=>window.wbMock.broadcasts.some(e=>e.name==='com.obr-suite/workbench/open-page'&&e.data.page==='settings')),'action routes settings inside workbench');
  await launcher.locator('body').evaluate(()=>window.wbMock.emit('player',{id:'me',role:'PLAYER'}));
  check(await launcher.locator('#row button').count()===3&&await launcher.getByRole('button',{name:'时停',exact:true}).count()===0,'action hides GM-only controls from players');
  await launcher.locator('body').evaluate(()=>window.wbMock.emit('player',{id:'me',role:'GM'}));
@@ -52,11 +53,14 @@ try{
  const bg=room.frames().find(f=>f.url().endsWith('/background.html'));
  await page.getByRole('navigation',{name:'枭熊工作台'}).waitFor();await page.waitForFunction(()=>document.querySelector('[aria-label="当前角色"]')?.selectedOptions[0]?.text==='阿明');
  await bg.waitForFunction(()=>window.wbMock.actionCloses>0);check(true,'room action closes after the workbench handshake');
+ await page.getByRole('button',{name:'定位到角色',exact:true}).first().click();await bg.waitForFunction(()=>window.wbMock.viewport?.scale===1);check(true,'card locates a readable scene binding without modifying the token');
  await page.getByLabel('当前生命值',{exact:true}).fill('16');await bg.waitForFunction(()=>window.wbMock.items.find(x=>x.id==='one').metadata['com.obr-suite/bubbles/data'].health===16);check(true,'character HP input writes final value');
  await bg.evaluate(()=>{window.wbMock.items[0].metadata['com.obr-suite/bubbles/data'].health=12;window.wbMock.emit('items',window.wbMock.items);});await page.waitForFunction(()=>document.querySelector('[aria-label="当前生命值"]').value==='12');check(true,'scene HP reflects on the complete card');
  check(await page.locator('.paper').count()===1&&await page.getByRole('region',{name:'规则资料',exact:true}).count()===1,'complete A4 card and wiki loaded');
  await bg.evaluate(()=>window.wbMock.select(['goblin']));await page.getByRole('heading',{name:'测试怪物甲',exact:true}).waitFor();check(await page.getByLabel('怪物生命',{exact:true}).inputValue()==='8','selection opens monster with token-specific HP');
  await page.getByLabel('怪物生命',{exact:true}).fill('6');await page.getByRole('heading',{name:'测试怪物甲',exact:true}).click();await bg.waitForFunction(()=>window.wbMock.items.find(x=>x.id==='goblin').metadata['com.obr-suite/bubbles/data'].health===6);check(true,'monster writes back to scene');
+ check(await page.getByRole('tablist',{name:'房间角色卡'}).getByRole('tab',{name:/怪物/}).count()===0&&await page.getByRole('tablist',{name:'场景怪物'}).count()===1,'monster tabs are separate from player names');
+ await page.getByRole('switch',{name:'怪物编辑模式'}).click();await page.getByRole('button',{name:'JSON 模式',exact:true}).click();const monsterJson=page.getByLabel('怪物完整 JSON');const draft=JSON.parse(await monsterJson.inputValue());draft.unknown260={preserved:true};draft.hp.formula='2d8+1';await monsterJson.fill(JSON.stringify(draft));await page.getByRole('button',{name:'完整展示',exact:true}).click();await page.locator('.monster-editor-document').getByRole('button',{name:'修改怪物 HP',exact:true}).click();await page.getByLabel('怪物平均 HP',{exact:true}).fill('13');await page.getByRole('button',{name:'完成修改',exact:true}).click();await page.getByRole('button',{name:'保存资料',exact:true}).click();await bg.waitForFunction(()=>window.wbMock.metadata['com.bestiary/monsters']?.['TEST::Goblin']?.hp.average===13);const savedMonster=await bg.evaluate(()=>window.wbMock.metadata['com.bestiary/monsters']['TEST::Goblin']);check(savedMonster.unknown260.preserved&&savedMonster.hp.formula==='2d8+1','monster document edits preserve JSON extensions and untouched fields');await page.screenshot({path:join(out,'monster-document-edit260.png')});await page.getByRole('switch',{name:'怪物编辑模式'}).click();
  await page.getByLabel('跟随选择').uncheck();await bg.evaluate(()=>window.wbMock.select(['two']));await page.waitForTimeout(100);check(await page.getByRole('heading',{name:'测试怪物甲',exact:true}).count()===1,'pin prevents selection switch');
  await page.getByLabel('跟随选择').check();await page.waitForFunction(()=>document.querySelector('[aria-label="当前角色"]')?.selectedOptions[0]?.text==='贝拉');check(true,'unpin resumes character selection');
  await page.getByRole('button',{name:'投骰',exact:true}).click();await page.getByLabel('骰式',{exact:true}).fill('2d6+3');await page.getByRole('button',{name:'投掷',exact:true}).click();await page.locator('.dice-result').first().waitFor();const total=Number((await page.locator('.dice-total').first().innerText()).replace('=',''));check(total>=5&&total<=15,'real dice engine returns shared result');

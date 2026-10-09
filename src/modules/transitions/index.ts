@@ -86,6 +86,7 @@ async function show(event: TransitionEvent, ownEpoch: number) {
 }
 
 async function openControl() {
+  if(WORKBENCH_DEV){await OBR.broadcast.sendMessage('com.obr-suite/workbench/open-page',{page:'console'},{destination:'LOCAL'});return;}
   const vw = await OBR.viewport.getWidth();
   if (!running) return;
   await OBR.popover.open({ id: CONTROL_ID, url: assetUrl("transition-control.html"),

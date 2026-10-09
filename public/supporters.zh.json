@@ -109,5 +109,6 @@
   { "name": "塔", "amount":26.6 },
   { "name": "小白", "amount":10 },
   { "name": "欧欧", "amount":100 },
-  { "name": "洛伦兹力", "amount":100 }
+  { "name": "洛伦兹力", "amount":100 },
+  {"name": "用短弓磨死欧吕尔的神秘红发女子", "amount": 100}
 ]

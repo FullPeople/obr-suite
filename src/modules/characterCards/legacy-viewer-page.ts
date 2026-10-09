@@ -4,7 +4,7 @@ const query=new URLSearchParams(location.search),room=query.get('room'),card=que
 const language=query.get('lang')==='en'?'en':'zh';
 const target=query.get('data_url')||(room&&card?`https://obr.dnd.center/characters/${encodeURIComponent(room)}/${encodeURIComponent(card)}/data.json`:query.get('preview')==='sample'?assetUrl(language==='en'?'cc-example-card.en.json':'cc-example-card.json'):undefined);
 if(target){
- const params=new URLSearchParams({legacyViewer:'1',lang:language,data_url:target});
+ const params=new URLSearchParams({legacyViewer:'1',intro:'0',lang:language,data_url:target});
  location.replace(`${assetUrl('card-viewer/index.html')}?${params}`);
 }else{
  const app=document.getElementById('app');

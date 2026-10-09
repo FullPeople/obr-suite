@@ -1,3 +1,4 @@
+import {locateSceneItem} from './locate';
 import {workbenchStartup} from './startup-presentation';
 import {nativeCardOwners,ownsNativeToken,canReadNativeCard} from "../modules/characterCards/native-owner";
 import {resourceWidgetPresentation,updateResourceWidgetPresentation,quickbarAttackPresentation,hiddenResourcePresentation} from './resource-presentation';
@@ -93,6 +94,7 @@ async function start(){
   if(route==='relay'||route!=='direct'&&(!child||child.closed||directClientInstance!==warmClientInstance||Date.now()-directPeerSeen>15000)&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).catch(failed);
  };
  OBR.broadcast.onMessage(OPEN_WIKI_CHANNEL,event=>{if(event.connectionId!==playerConnection)return;try{const entry=sharedEntry((event.data as any)?.entry);send('showWiki',{entry,id:crypto.randomUUID()});}catch{}});
+ OBR.broadcast.onMessage('com.obr-suite/workbench/open-page',event=>{if(event.connectionId!==playerConnection)return;const page=(event.data as any)?.page;if(['settings','announcement','features','music','console'].includes(page))send('navigate',{page});});
  const panels=panelBridge(send,relay);
  const bubble=(item:Item|undefined)=>((item?.metadata[HP]??item?.metadata[LEGACY]??{}) as Record<string,any>);
  const documentLocation=(id:string)=>{const value=cardLocations.get(id);if(value instanceof Error)throw value;return value||cardLocation(origin,OBR.room.id||'default',id);};
@@ -586,6 +588,21 @@ async function start(){
    }
    return {historyId:operation.operationId,inventory:await inventories.view(context.definitions,context.gm,context.publicId),sequence:++sequence};
   }
+  if(m.type==='locate'){
+   await observation.refreshAuthority();const a=await access(m.itemId),identity=targetReadIdentity(a),sceneEpoch=observation.sceneEpoch();
+   if(!a.item)throw Error('角色未在当前场景中绑定');
+   await locateSceneItem(OBR,a.item.id,async()=>{await observation.refreshAuthority();const live=await access(m.itemId);if(sceneEpoch!==observation.sceneEpoch()||targetReadIdentity(live)!==identity||live.item?.id!==a.item!.id)throw Error('角色关联、场景或查看权限已改变');});return {located:true};
+  }
+  if(m.type==='spawnMonster'){
+   const settings=getState();if((await OBR.player.getRole())!=='GM'||!settings.enabled.bestiary||!await OBR.scene.isReady())throw Error('仅 DM 可在已加载的场景中添加怪物');
+   const entry=m.entry,raw=entry?.raw;
+   if(entry?.kind!=='monster'||typeof entry.id!=='string'||typeof entry.name!=='string'||!raw||Array.isArray(raw)||JSON.stringify(entry).length>500_000)throw Error('怪物资料无效');
+   const sceneEpoch=observation.sceneEpoch(),assertCurrent=async()=>{if(sceneEpoch!==observation.sceneEpoch()||(await OBR.player.getRole())!=='GM'||!getState().enabled.bestiary||!await OBR.scene.isReady())throw Error('场景或添加怪物权限已改变');};
+   const {parseMon,makeSlug}=await import('../modules/bestiary/data'),{spawnMonster}=await import('../modules/bestiary/spawn');
+   const data={...raw,name:entry.name,ENG_name:entry.english||raw.ENG_name||entry.name,source:entry.source||raw.source||'CUSTOM',entries:entry.entries},monster=parseMon(data);if(!monster)throw Error('怪物资料无法解析');
+   const [width,height,position,scale]=await Promise.all([OBR.viewport.getWidth(),OBR.viewport.getHeight(),OBR.viewport.getPosition(),OBR.viewport.getScale()]);
+   await assertCurrent();await spawnMonster(monster,{x:(-position.x+width/2)/scale,y:(-position.y+height/2)/scale},{raw:data,slug:`wiki:${makeSlug(monster.source,monster.engName)}:${entry.id}`,assertCurrent});return {spawned:true};
+  }
   if(m.type==='createCard'){
    if(!getState().enabled.characterCards)throw Error('角色卡模块已关闭');
    if(m.data?.schema_version!=='0.3'||m.data?.dnd_card_web?.schemaVersion!==1||typeof m.data.identity?.character_name!=='string'||JSON.stringify(m.data).length>3_000_000)throw Error('角色格式无效');
@@ -594,7 +611,7 @@ async function start(){
    const entry={id:record.id,name:m.data.identity.character_name,owner_ids:[playerId],visibility:'public',locked:false};
    const room=await OBR.room.getMetadata();await OBR.room.setMetadata({[DIRECTORY]:[...(Array.isArray(room[DIRECTORY])?room[DIRECTORY] as any[]:[]).filter(c=>c.id!==entry.id),entry]});
    if(await OBR.scene.isReady()){const scene=await OBR.scene.getMetadata();await OBR.scene.setMetadata({[LIST]:[...(Array.isArray(scene[LIST])?scene[LIST] as any[]:[]).filter(c=>c.id!==entry.id),entry]});}
-   cacheDocument(`${OBR.room.id}:card:${record.id}`,m.data);chosen=`card:${record.id}`;
+   cacheDocument(`${OBR.room.id}:card:${record.id}`,m.data);if(m.select!==false)chosen=`card:${record.id}`;
    await OBR.broadcast.sendMessage('com.obr-suite/cc-card-updated',{cardId:record.id},{destination:'ALL'});return {created:entry};
   }
   if(m.type==='rules')return {shared:await shared.write(m),sequence:++sequence};
@@ -602,14 +619,16 @@ async function start(){
   if(m.type==='console'){
    const role=(await observation.read()).role,enabled=getState().enabled as any,key=String(m.action);
    if(role!=='GM')throw Error('仅 DM 可使用控制台');if(!['settings','announcement','playerPermissions','portalEffects'].includes(key)&&!enabled[key])throw Error('该模块已关闭');
-   if(key==='playerPermissions'){if(m.statusOnly)return {seen:hasReadPlayerPermissions()};await OBR.modal.open({id:PLAYER_PERMISSION_MODAL_ID,url:assetUrl('dm-announcement.html')+'?permissions=1',width:560,height:580});return;}
+   if(key==='playerPermissions'){if(m.statusOnly)return {seen:hasReadPlayerPermissions()};if(WORKBENCH_DEV)return {navigate:'permissions'};await OBR.modal.open({id:PLAYER_PERMISSION_MODAL_ID,url:assetUrl('dm-announcement.html')+'?permissions=1',width:560,height:580});return;}
    if(key==='portalEffects'){if(!enabled.portals)throw Error('该模块已关闭');await setState({portalEffects:!!m.value});return {consolePatch:{portalEffects:!!m.value},sequence:++sequence};}
    if(key==='transitions'){
     if(!['short','long','text'].includes(m.kind)||m.kind==='text'&&!String(m.text||'').trim())throw Error('请选择转场内容');
     return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{off();reject(Error('转场未响应'));},6000);const off=OBR.broadcast.onMessage(BC_TRANSITIONS_STATUS,event=>{const data=event.data as any;if(data?.requestId!==m.requestId)return;clearTimeout(timer);off();data.ok?resolve(data):reject(Error('转场未能启动'));});void OBR.broadcast.sendMessage(BC_TRANSITIONS_RUN,{kind:m.kind,text:String(m.text||'').slice(0,120),targets:'all',preview:!!m.preview,requestId:m.requestId,issuedAt:Date.now()},{destination:'LOCAL'}).catch(e=>{clearTimeout(timer);off();reject(e);});});
    }
+   if(WORKBENCH_DEV&&key==='musicBoard')return {navigate:'music'};
    const channels:Record<string,string>={timeStop:'com.obr-suite/timestop-toggle',focus:'com.obr-suite/focus-trigger',musicBoard:'com.obr-suite/music-board:toggle',transitions:'com.obr-suite/transitions/open'};
    if(channels[key])await OBR.broadcast.sendMessage(channels[key],{source:'workbench'},{destination:'LOCAL'});
+   else if(WORKBENCH_DEV&&['announcement','settings'].includes(key))return {navigate:key};
    else if(key==='announcement')await OBR.modal.open({id:ANNOUNCEMENT_MODAL_ID,url:assetUrl('dm-announcement.html'),width:560,height:580});
    else if(key==='settings'){const [width,height]=await Promise.all([OBR.viewport.getWidth(),OBR.viewport.getHeight()]);await OBR.popover.open({id:'com.obr-suite/settings',url:assetUrl('settings.html'),width:640,height:580,anchorReference:'POSITION',anchorPosition:{left:width/2,top:height/2},anchorOrigin:{horizontal:'CENTER',vertical:'CENTER'},transformOrigin:{horizontal:'CENTER',vertical:'CENTER'},hidePaper:true});}
    else throw Error('未知操作');return;
@@ -733,7 +752,7 @@ async function start(){
   if(m.type==='cancel'){if(!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}
   if(m.type==='pin'){follow=!m.pinned;if(!follow)finishMapFollow(false);if(follow)lastSelection='';void refreshSelection();return;}
   if(m.type==='select'){if(Number.isSafeInteger(m.clientSelection)){const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(m.clientSelection<(selectionIntents.get(instance)||0))return;selectionIntents.delete(instance);selectionIntents.set(instance,m.clientSelection);while(selectionIntents.size>8)selectionIntents.delete(selectionIntents.keys().next().value!);clientInstance=instance==='legacy'?'':instance;clientSelection=m.clientSelection;}const generation=++selectionGeneration;finishMapFollow(false);let issuedAccess:ReturnType<typeof cacheAccess>|undefined;const readScene=observation.sceneEpoch();try{const list=await catalog();issuedAccess=publishAccess(list);const a=await access(m.itemId,list);if(generation!==selectionGeneration)return;chosen=a.targetId;const observed=await observation.read();lastSelection=selectionIdentity(observed.selection,observed.items);last='';void refreshSelection();}catch(e){if(generation===selectionGeneration&&readScene===observation.sceneEpoch())selectionFailure(m.itemId,e,issuedAccess);}return;}
-  if(!['groupRoll','assignOwners','readCard','refreshCard','refreshCatalog','showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
+  if(!['locate','spawnMonster','groupRoll','assignOwners','readCard','refreshCard','refreshCatalog','showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
   if(requestRuns.has(m.requestId))return;
   delete m._committed;delete m._partialCommitted;delete m._inventoryCommitted;delete m._beforeMutation;delete m._assertAuthority;
   const targetMutation=['save','stats','statsLock','resource','delete','assignName','lock','monsterSave','condition','inventory'].includes(m.type);
@@ -747,7 +766,7 @@ async function start(){
   const receivedAt=performance.now();
   const run=async()=>{let answer=seen.get(m.requestId);if(!answer){const began=performance.now(),steps:{phase:string;ms:number}[]=[];let phase='authorize',phaseStart=began;
    Object.defineProperty(m,'_phase',{configurable:true,get:()=>phase,set:(next:string)=>{const now=performance.now();steps.push({phase,ms:Math.round((now-phaseStart)*10)/10});phase=next;phaseStart=now;}});
-   const writes=!['readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','showEntry'].includes(m.type);if(writes){mutation++;epoch++;}try{
+   const writes=!['locate','readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','showEntry'].includes(m.type);if(writes){mutation++;epoch++;}try{
    if(cancelledRequests.delete(m.requestId)||typeof m.expiresAt==='number'&&Date.now()>m.expiresAt)throw Error('操作在执行前已取消或过期；未修改数据');
    await beforeMutation();Object.defineProperty(m,'_beforeMutation',{value:beforeMutation,configurable:true});Object.defineProperty(m,'_assertAuthority',{value:assertAuthority,configurable:true});
    activeRequests.add(m.requestId);send('requestPending',{requestId:m.requestId,active:true},route);m._phase='authorize';answer={ok:true,result:await command(m)};
@@ -763,8 +782,8 @@ async function start(){
     try{if(m._committed.kind==='document'||m._committed.kind==='token')result.snapshot=await snapshot(m._committed.id);else{const context=await inventoryContext();result.historyId=m._committed.historyId;result.inventory=await inventories.view(context.definitions,context.gm,context.publicId);result.sequence=++sequence;}}catch{}
     answer={ok:true,result};void hydrate();scheduleInventoryRepair();
    }else if(m._inventoryCommitted){answer.uncertain=true;answer.diagnostic={...answer.diagnostic,code:'PARTIAL_INVENTORY_COMMIT',inventoryCommitted:true};}
-  }finally{activeRequests.delete(m.requestId);if(writes){mutation--;epoch++;}}steps.push({phase,ms:Math.round((performance.now()-phaseStart)*10)/10});answer.timing={transport:route,version:devManifest.version,queueMs:Math.round(began-receivedAt),hostMs:Math.round(performance.now()-began),steps};seen.set(m.requestId,answer);if(seen.size>256)seen.delete(seen.keys().next().value!);}send('ack',{requestId:m.requestId,...answer},route);if(!['readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','showEntry'].includes(m.type)){void refreshSelection();void refresh();}};
-  const task=m.type==='groupRoll'?(groupQueue=groupQueue.then(run).catch(()=>{})):['readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','console','showEntry'].includes(m.type)||m.type==='inventory'&&['silent','containerLock'].includes(m.operation?.action)?run():(queue=queue.then(run).catch(()=>{}));requestRuns.set(m.requestId,task);void task.finally(()=>{requestRuns.delete(m.requestId);cancelledRequests.delete(m.requestId);});
+  }finally{activeRequests.delete(m.requestId);if(writes){mutation--;epoch++;}}steps.push({phase,ms:Math.round((performance.now()-phaseStart)*10)/10});answer.timing={transport:route,version:devManifest.version,queueMs:Math.round(began-receivedAt),hostMs:Math.round(performance.now()-began),steps};seen.set(m.requestId,answer);if(seen.size>256)seen.delete(seen.keys().next().value!);}send('ack',{requestId:m.requestId,...answer},route);if(!['locate','readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','showEntry'].includes(m.type)){void refreshSelection();void refresh();}};
+  const task=m.type==='groupRoll'?(groupQueue=groupQueue.then(run).catch(()=>{})):['locate','readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','console','showEntry'].includes(m.type)||m.type==='inventory'&&['silent','containerLock'].includes(m.operation?.action)?run():(queue=queue.then(run).catch(()=>{}));requestRuns.set(m.requestId,task);void task.finally(()=>{requestRuns.delete(m.requestId);cancelledRequests.delete(m.requestId);});
  }
  window.addEventListener('message',e=>{if(e.origin!==origin||e.data?.protocol!==protocol||!e.source)return;
   if(e.data.type==='discover'){try{const source=e.source as Window;if(source!==window&&source.parent===parent)source.postMessage({protocol,type:'background',nonce:e.data.nonce,session,clientKey:credentials.clientKey},origin);}catch{}return;}
