@@ -25,6 +25,9 @@ template=template.replace('${JSON.stringify(base)}',JSON.stringify(origin+'/suit
 template=template.replace('data={width:1440}','data={width:innerWidth}').replace('data={height:900}','data={height:innerHeight}');
 template=template.replace('window.fixture.sent.push(packet)','window.fixture.sent.push({...packet,at:performance.timeOrigin+performance.now()})');
 template=template.replace('metadata:{},ids:[]','metadata:{"com.obr-suite/dice/3d-theme":'+JSON.stringify(theme)+'},ids:[]');
+template=template.replace("});frame('extensions/workbench-dice3d/sdk-verify.html','background');",`});
+addEventListener('message',async e=>{const m=e.data;if(e.origin!==location.origin||m?.channel!=='workbench-dice-frame/v1'||!m.id||!m.method)return;try{const result=await document.querySelector('#background').contentWindow.suiteHostProbe.diceRpc(m.method,m.args,null,async()=>{});e.source.postMessage({channel:m.channel,id:m.id,result},e.origin);}catch(error){e.source.postMessage({channel:m.channel,id:m.id,error:String(error)},e.origin);}});
+frame('extensions/workbench-dice3d/sdk-verify.html','background');`);
 const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.wasm':'application/wasm','.png':'image/png','.json':'application/json','.svg':'image/svg+xml','.wav':'audio/wav','.ttf':'font/ttf'};
 const server=createServer((req,res)=>{const path=decodeURIComponent(new URL(req.url,origin).pathname);if(path==='/fixture'){res.setHeader('Content-Type','text/html');res.end(template);return;}if(path==='/favicon.ico'){res.writeHead(204);res.end();return;}const file=resolve(root,path.replace(/^\/suite-dev\//,''));if(!file.startsWith(root+sep)){res.writeHead(403);res.end();return;}try{res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');res.end(readFileSync(file));}catch{res.writeHead(404);res.end(path);}});await new Promise(r=>server.listen(port,'127.0.0.1',r));
 let browser,context;const pages=[],errors=[],cases=[],cold=[],independentScenes=[],totals=new Map();let mode='normal',dropped=false,injections={ready:0,offer:0,chunk:0,ack:0,lastChunk:0};
@@ -84,6 +87,21 @@ try{
   await roll('mixed-warm-eight-physical',formula,0);
   await roll('mixed-missing-token',formula,1,{itemId:'removed-token'});
   await roll('mixed-under-twenty','3d6+3d20+3d4+3d8+3d10+2d12+1d100',1);
+  await independent('mixed-panel-no-target');
+  const eventIndex=await frames[1].evaluate(()=>window.suiteHostProbe.events.length);
+  await pages[1].evaluate(()=>{const frame=document.createElement('iframe');frame.id='composer';frame.src='/suite-dev/workbench-dice/index.html';frame.style.cssText='position:fixed;right:0;top:0;width:400px;height:760px;z-index:40';document.body.append(frame);});
+  await pages[1].waitForFunction(()=>document.querySelector('#composer')?.contentDocument?.body?.dataset.bridgeReady==='true',null,{timeout:30000});
+  const composer=pages[1].frames().find(f=>f.url().includes('/workbench-dice/index.html'));
+  await composer.waitForFunction(()=>document.body.dataset.bridgeReady==='true',null,{timeout:30000});
+  await composer.locator('#exprInput').fill(formula);
+  const panelSubmittedAt=await composer.evaluate(()=>performance.timeOrigin+performance.now());
+  await composer.locator('#btnRoll').click();
+  await frames[1].waitForFunction(index=>window.suiteHostProbe.events.slice(index).some(e=>e.event==='roll-submitted'),eventIndex,{timeout:15000});
+  const panelRollId=await frames[1].evaluate(index=>window.suiteHostProbe.events.slice(index).find(e=>e.event==='roll-submitted').detail.id,eventIndex);
+  await finish('mixed-panel-no-target',1,panelSubmittedAt,{rollId:panelRollId});
+  assert.equal(cases.at(-1).clients[1].result.itemId,null,'actual composer may roll without a selected token');
+  assert.equal(cases.at(-1).clients[1].result.dice.length,7,'percentile remains one logical die');
+  await pages[1].evaluate(()=>document.querySelector('#composer').remove());
  }else if(combinedSmoke){
   await roll('combined-first-1d20','1d20',1);
   await roll('combined-warm-9d6','9d6',1);
