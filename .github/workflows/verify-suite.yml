@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [codex/text-effects-20261009, codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
+    branches: [codex/text-effects266-20261010, codex/text-effects-20261009, codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 9875b94c36191ce40473f78f60cb5dcbbfe464fa
+          ref: e75b02c93855b17326f69fcfae4fc43ff96804ce
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -68,6 +68,7 @@ jobs:
           TEXT_EFFECT_PANEL_OUT: ${{ github.workspace }}/dist-workbench-dev/workbench-panels
           PLAYWRIGHT_EXECUTABLE_PATH: ${{ env.CHROMIUM_PATH }}
         run: |
+          node tools/build-text-effects-fixture.mjs
           mkdir -p .local-evidence/text-effects/browser
           node node_modules/vite/bin/vite.js --config tools/text-effects-browser.vite.ts > .local-evidence/text-effects/browser/server.log 2>&1 &
           server_pid=$!
