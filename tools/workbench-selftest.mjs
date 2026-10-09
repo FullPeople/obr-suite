@@ -33,7 +33,7 @@ const server=createServer(async(req,res)=>{const p=new URL(req.url,'http://local
  const file=p.startsWith('/suite-dev/workbench/')?join(process.env.DND_WEB_DIST||join(web,'dist'),p.slice('/suite-dev/workbench/'.length)):join(out,p.slice(1));
  try{res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');res.end(readFileSync(file));}catch{res.writeHead(404);res.end();}
 });await new Promise(r=>server.listen(5197,'127.0.0.1',r));
-const browser=await chromium.launch({channel:process.env.CI?undefined:'msedge',headless:true}),context=await browser.newContext({viewport:{width:1500,height:1000}}),errors=[];
+const browser=await chromium.launch({channel:process.env.CI?undefined:'msedge',headless:!process.env.CI}),context=await browser.newContext({viewport:{width:1500,height:1000}}),errors=[];
 context.on('page',p=>p.on('pageerror',e=>errors.push(e.message)));
 await context.addInitScript(version=>{try{localStorage.setItem('dnd-card:announcement-ack:suite',version);localStorage.setItem('dnd-card:rules-setup:v1','done');}catch{}},JSON.parse(readFileSync('package.json','utf8')).version);
 const card=name=>({schema_version:'0.3',identity:{character_name:name},meta:{ruleset:'2024'},abilities:Object.fromEntries(['str','dex','con','int','wis','cha'].map(a=>[a,{total:12}])),classes:[{name:'法师',level:2}],core_stats:{hp:{current:20,max:30,temp:2},ac:15},features:{},background:{},inventory:{},defenses:{custom:'preserved'},combat:{weapons:[{name:'保留的武器'}]}});

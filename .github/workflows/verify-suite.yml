@@ -61,7 +61,7 @@ jobs:
           npm run build:workbench-dev
           npm run build:three-dragon
       - name: Document editing, separate monster tabs and readable camera bindings
-        run: npm run test:workbench
+        run: xvfb-run -a npm run test:workbench
       - name: Verify built settings palette and browser persistence
         run: |
           mkdir -p .local-evidence/palette257
