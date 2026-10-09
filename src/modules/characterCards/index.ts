@@ -1,4 +1,5 @@
 import {canReadNativePopup} from "./native-owner";
+import {characterDirectory} from './directory';
 import {WORKBENCH_DEV} from '../../workbench/channel';
 import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR, { type Item } from "@owlbear-rodeo/sdk";
@@ -132,6 +133,7 @@ let selectedIds: string[] = [];
 interface CardEntry { id: string; visibility?: string; locked?: boolean; owner_ids?: string[] }
 interface InfoTarget { cardId: string; roomId: string; itemId: string | null }
 let cards = new Map<string, CardEntry>();
+let sceneCardMetadata:Record<string,unknown>={},roomCardMetadata:Record<string,unknown>={};
 const observedItems = new Map<string, Item>();
 let desiredInfo: InfoTarget | null = null, reanchorInfo = false, openedInfoUrl = "";
 let infoQueue: Promise<void> | null = null, infoRequested = false;
@@ -141,9 +143,9 @@ const INFO_READY_MSG = `${PLUGIN_ID}/info-ready`;
 const PIN_CHANGED_MSG = "com.obr-suite/cc-info-pin-changed";
 const current = (run: number, scene: number) => active && sceneReady && generation === run && sceneGeneration === scene;
 const localEvent = (sender: string) => active && !!ccConnectionId && sender === ccConnectionId;
-function setCards(metadata: Record<string, unknown>): void {
-  const list = metadata[SCENE_META_KEY];
-  cards = new Map(Array.isArray(list) ? list.filter((entry: any) => entry && typeof entry.id === "string").map((entry: CardEntry) => [entry.id, entry]) : []);
+function setCards(metadata: Record<string, unknown>,room=false): void {
+  if(room)roomCardMetadata=metadata;else sceneCardMetadata=metadata;
+  cards = new Map(characterDirectory(sceneCardMetadata,roomCardMetadata).map(entry=>[entry.id,entry]));
 }
 function mayShow(item: Item | undefined, cardId: string): boolean {
   const entry = cards.get(cardId);
@@ -475,9 +477,9 @@ async function propagateCardRefresh(cardId: string): Promise<void> {
 async function refreshSceneState(): Promise<void> {
   const run = generation, scene = sceneGeneration, metaVersion = metadataRevision, selectionVersion = selectionGeneration;
   try {
-    const [metadata, selection] = await Promise.all([OBR.scene.getMetadata(), OBR.player.getSelection()]);
+    const [metadata, room, selection] = await Promise.all([OBR.scene.getMetadata(), OBR.room.getMetadata(), OBR.player.getSelection()]);
     if (!current(run, scene)) return;
-    if (metadataRevision === metaVersion) setCards(metadata);
+    if (metadataRevision === metaVersion){setCards(metadata);setCards(room,true);}
     if (selectionGeneration === selectionVersion) await handleSelection(selection);
     else await handleSelection(selectedIds, observedItems.get(selectedIds[0]));
   } catch { /* A later ready/metadata/selection event can retry unavailable state. */ }
@@ -505,7 +507,7 @@ export async function setupCharacterCards(): Promise<void> {
       if (!alive()) return;
       sceneGeneration++; selectionGeneration++; metadataRevision++; sceneReady = ready;
       for (const abort of refreshes.values()) abort.abort();
-      refreshes.clear(); cards.clear(); observedItems.clear();
+      refreshes.clear(); cards.clear();sceneCardMetadata={};roomCardMetadata={}; observedItems.clear();
       void closeInfoPopover(); void closeMainPopover();
       void OBR.modal.close(BIND_MODAL_ID).catch(() => {});
       if (ready) void refreshSceneState();
@@ -514,6 +516,11 @@ export async function setupCharacterCards(): Promise<void> {
       if (!alive() || !sceneReady) return;
       metadataRevision++; setCards(metadata); revokeInvalidInfo();
       void handleSelection(selectedIds, observedItems.get(selectedIds[0])).catch(() => {});
+    }),
+    OBR.room.onMetadataChange(metadata=>{
+      if(!alive()||!sceneReady)return;
+      metadataRevision++;setCards(metadata,true);revokeInvalidInfo();
+      void handleSelection(selectedIds,observedItems.get(selectedIds[0])).catch(()=>{});
     }),
     OBR.scene.items.onChange(items => {
       if (!alive() || !sceneReady) return;

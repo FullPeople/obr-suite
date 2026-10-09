@@ -1,0 +1,53 @@
+name: Dot readonly request
+on:
+  issues:
+    types: [opened]
+  push:
+    paths: ['tools/dot-github/**', '.github/workflows/dot-readonly-request.yml']
+  pull_request:
+    paths: ['tools/dot-github/**', '.github/workflows/dot-readonly-request.yml']
+permissions:
+  contents: read
+concurrency:
+  group: dot-readonly-request-${{ github.repository }}-${{ github.event_name }}
+  cancel-in-progress: false
+jobs:
+  contract:
+    if: >-
+      github.event_name != 'issues' ||
+      (github.event.issue.title == 'dot: readonly request' && github.actor_id == '166210040')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: python3 -I -B -m unittest discover -s tools/dot-github -p test_request.py -v
+  request:
+    needs: contract
+    if: >-
+      github.event_name == 'issues' && github.event.action == 'opened' &&
+      github.event.issue.title == 'dot: readonly request' &&
+      github.actor == 'FullPeople' && github.actor_id == '166210040' &&
+      github.event.issue.user.login == 'FullPeople' && github.event.issue.user.id == 166210040
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Validate fixed request and dispatch own read-only workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I -B tools/dot-github/request.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dot-request-${{ github.run_id }}
+          path: .local-evidence/dot-requests/request.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
