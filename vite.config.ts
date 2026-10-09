@@ -122,6 +122,8 @@ export default defineConfig(({ command }) => ({
         "portal-destination": resolve(__dirname, "portal-destination.html"),
         "portal-blink": resolve(__dirname, "portal-blink.html"),
         "transition-control": resolve(__dirname, "transition-control.html"),
+        "text-effect-control": resolve(__dirname, "text-effect-control.html"),
+        "text-effect-display": resolve(__dirname, "text-effect-display.html"),
         "transition-display": resolve(__dirname, "transition-display.html"),
         "trickster-edit": resolve(__dirname, "trickster-edit.html"),
         "circleimage": resolve(__dirname, "circleimage.html"),

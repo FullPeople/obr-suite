@@ -10,6 +10,7 @@
     "build:viewport-fx": "tsc -p extensions/viewport-fx/tsconfig.json && vite build --config extensions/viewport-fx/vite.config.ts",
     "build:workbench-dev": "node tools/build-workbench-dev.mjs",
     "test:workbench": "node tools/workbench-selftest.mjs",
+    "test:text-effects": "node tools/text-effects-selftest.mjs",
     "test:bubbles": "node src/modules/bubbles/selftest.mjs",
     "build:card-viewer": "node tools/build-legacy-card-viewer.mjs"
   },
