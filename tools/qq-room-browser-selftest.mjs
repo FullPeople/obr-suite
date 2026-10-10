@@ -49,13 +49,18 @@ try{
  await popup.getByRole('button',{name:'连接当前账号'}).click();await expect(host.locator('#cards')).toContainText(card.character.name);await expect(host.locator('#cards')).not.toContainText('他人私有卡');
  host.once('dialog',dialog=>dialog.accept());await host.locator('#cards button').click();await expect(host.locator('#roomCards')).toContainText('解锁给房间成员');
  assert.equal(Object.keys(metadata).length,1);assert(!JSON.stringify(metadata).includes(issued.token),'Website session must never enter room metadata');
+ const ownName=host.frameLocator('#editor').getByRole('textbox',{name:'角色姓名',exact:true});await expect(ownName).toHaveValue('QQ 插件房间验收');await ownName.fill('卡主锁定状态修改');await expect.poll(()=>store.read(card.id,owner).character.name).toBe('卡主锁定状态修改');
  const member=await context();await expect(member.locator('#roomCards button')).toHaveCount(0);
  await host.getByRole('button',{name:'解锁给房间成员'}).click();await expect(host.getByRole('button',{name:'重新锁定'})).toBeVisible();await member.locator('#refresh').click();await expect(member.locator('#roomCards button')).toHaveCount(1);await member.locator('#roomCards button').click();
- const editor=member.frameLocator('#editor'),name=editor.getByRole('textbox',{name:'角色姓名',exact:true});await expect(name).toHaveValue('QQ 插件房间验收');await name.fill('成员自动写回云端原卡');
+ const editor=member.frameLocator('#editor'),name=editor.getByRole('textbox',{name:'角色姓名',exact:true});await expect(name).toHaveValue('卡主锁定状态修改');await name.fill('成员自动写回云端原卡');
  await expect.poll(()=>store.read(card.id,owner).character.name).toBe('成员自动写回云端原卡');
  assert.equal(store.slots(owner).used,1);await host.getByRole('button',{name:'重新锁定'}).click();await expect(host.getByRole('button',{name:'解锁给房间成员'})).toBeVisible();await member.locator('#refresh').click();await expect(member.locator('#roomCards button')).toHaveCount(0);await expect(member.locator('#editor')).toHaveAttribute('src','about:blank');
  await host.getByRole('button',{name:'移出房间'}).click();assert.equal(store.slots(owner).used,1);assert.equal(store.read(card.id,owner).character.name,'成员自动写回云端原卡');
+ host.once('dialog',dialog=>dialog.accept());await host.locator('#cards button').click();await expect(host.getByRole('button',{name:'移出房间'})).toBeVisible();store.db.exec('UPDATE room_cards SET expires=0');
+ await host.getByRole('button',{name:'移出房间'}).click();await expect(host.locator('#roomCards button')).toHaveCount(0);assert.equal(store.slots(owner).used,1);
+ host.once('dialog',dialog=>dialog.accept());await host.locator('#cards button').click();await expect(host.getByRole('button',{name:'移出房间'})).toBeVisible();store.delete(card.id,owner,store.read(card.id,owner).revision);
+ await host.getByRole('button',{name:'移出房间'}).click();await expect(host.locator('#roomCards button')).toHaveCount(0);assert.equal(store.slots(owner).used,0);
  assert.deepEqual(errors,[]);await host.screenshot({path:join(out,'qq-owner.png')});
- const result={synthetic:true,realQQ:false,realRoom:false,checks:['popup-pkce-connection','own-library-only','personal-session-not-in-metadata','loaded-card-default-locked','unlocked-member-five-page-editor','automatic-original-writeback','owner-relock-removes-member-editor','room-remove-retains-original']};
+ const result={synthetic:true,realQQ:false,realRoom:false,checks:['popup-pkce-connection','own-library-only','personal-session-not-in-metadata','loaded-card-default-locked','unlocked-member-five-page-editor','automatic-original-writeback','owner-relock-removes-member-editor','room-remove-retains-original','locked-owner-five-page-edit','expired-room-entry-can-be-removed','deleted-original-room-entry-can-be-removed']};
  writeFileSync(join(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));store.close();}
