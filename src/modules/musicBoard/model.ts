@@ -5,14 +5,17 @@ export const MUSIC_ACK = "com.obr-suite/music-board:ack";
 export const MUSIC_LOCAL = "com.obr-suite/music-board:local";
 export const MUSIC_VIEW = "com.obr-suite/music-board:view";
 export const MUSIC_READY = "com.obr-suite/music-board:ready";
+export const MUSIC_BACKUP = "com.obr-suite/music-board:backup";
 export const LOCAL_VOLUMES = "obr-music-board:local-volumes";
-export const MAX_TRACKS = 32;
-export interface Track { id: string; url: string; name: string; bus: "bgm" | "sfx"; loop: boolean; duration: number }
+export const MAX_TRACKS = 128;
+export const MAX_QUEUE = 32;
+export interface Track { id: string; url: string; name: string; bus: "bgm" | "sfx"; loop: boolean; duration: number;
+  tags?: string[]; group?: string; favorite?: boolean; color?: string; volume?: number }
 export interface Bgm { track: Track; playbackId: string; position: number; startedAt: number; paused: boolean }
 export interface Sfx { id: string; track: Track; at: number; expiresAt: number }
 export interface MusicSession { version: 2; revision: number; playbackSet?: boolean; author: string; allowPlayers: boolean; tracks: Track[]; queue: string[];
-  bgm: Bgm | null; sfx: Sfx[]; bus: { bgm: number; sfx: number }; recent: string[]; ts: number }
-export interface MusicOp { type: string; snapshot?: unknown; track?: unknown; tracks?: unknown[]; id?: string; position?: number; duration?: number; value?: boolean; volume?: number; bus?: "bgm" | "sfx"; playbackId?: string; expectedPlaybackId?: string; paused?: boolean }
+  bgm: Bgm | null; sfx: Sfx[]; bus: { bgm: number; sfx: number }; recent: string[]; ts: number; libraryRevision?: number; history?: Track[] }
+export interface MusicOp { type: string; snapshot?: unknown; track?: unknown; tracks?: unknown[]; id?: string; ids?: string[]; position?: number; target?: number; duration?: number; value?: boolean; volume?: number; bus?: "bgm" | "sfx"; playbackId?: string; expectedPlaybackId?: string; paused?: boolean; expectedLibraryRevision?: number; expectedQueue?: string[] }
 export const finite = (value: unknown, fallback = 0) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
 export const unit = (value: unknown, fallback = 1) => Math.max(0, Math.min(1, finite(value, fallback)));
 export function emptySession(): MusicSession { return { version: 2, revision: 0, playbackSet: false, author: "", allowPlayers: true, tracks: [], queue: [], bgm: null, sfx: [], bus: { bgm: .8, sfx: 1 }, recent: [], ts: 0 }; }
@@ -25,9 +28,15 @@ export function trackFrom(value: unknown): Track | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>, url = safeMediaUrl(raw.url ?? raw.u); if (!url) return null;
   const label = raw.name ?? raw.n;
-  return { id: typeof raw.id === "string" && raw.id.length <= 100 ? raw.id : urlId(url), url,
+  const out: Track = { id: typeof raw.id === "string" && raw.id.trim() && raw.id.length <= 100 ? raw.id : urlId(url), url,
     name: typeof label === "string" ? label.trim().slice(0, 100) : "", bus: (raw.bus ?? raw.b) === "sfx" ? "sfx" : "bgm",
-    loop: (raw.loop ?? raw.l) !== false, duration: Math.max(0, finite(raw.duration ?? raw.d)) };
+    loop: (raw.loop ?? raw.l) === undefined ? (raw.bus ?? raw.b) !== "sfx" : (raw.loop ?? raw.l) !== false, duration: Math.min(604800, Math.max(0, finite(raw.duration ?? raw.d))) };
+  if (Array.isArray(raw.tags)) out.tags = [...new Set(raw.tags.filter((tag): tag is string => typeof tag === "string").map(tag => tag.trim().slice(0, 24)).filter(Boolean))].slice(0, 6);
+  if (typeof raw.group === "string") out.group = raw.group.trim().slice(0, 24);
+  if (typeof raw.favorite === "boolean") out.favorite = raw.favorite;
+  if (typeof raw.color === "string" && /^#[0-9a-f]{6}$/i.test(raw.color)) out.color = raw.color;
+  if (typeof (raw.volume ?? raw.vol) === "number") out.volume = unit(raw.volume ?? raw.vol);
+  return out;
 }
 export function livePosition(bgm: Bgm, now = Date.now()): number {
   const value = Math.max(0, bgm.position + (bgm.paused ? 0 : Math.max(0, now - bgm.startedAt) / 1000));
@@ -39,8 +48,10 @@ export function normaliseSession(value: unknown): MusicSession | null {
   out.revision = Math.max(0, Math.trunc(finite(raw.revision))); out.author = typeof raw.author === "string" ? raw.author : "";
   out.allowPlayers = raw.allowPlayers !== false;
   out.playbackSet = typeof raw.playbackSet === "boolean" ? raw.playbackSet : !!raw.bgm || out.revision > 0;
+  out.libraryRevision = Math.max(0, Math.trunc(finite(raw.libraryRevision, out.revision)));
+  out.history = Array.isArray(raw.history) ? raw.history.map(trackFrom).filter((track): track is Track => !!track).slice(-8) : [];
   out.tracks = Array.isArray(raw.tracks) ? raw.tracks.map(trackFrom).filter((track): track is Track => !!track).slice(0, MAX_TRACKS) : [];
-  out.queue = Array.isArray(raw.queue) ? raw.queue.filter(id => typeof id === "string" && out.tracks.some(track => track.id === id)).slice(0, MAX_TRACKS) : [];
+  out.queue = Array.isArray(raw.queue) ? raw.queue.filter(id => typeof id === "string" && out.tracks.some(track => track.id === id)).slice(0, MAX_QUEUE) : [];
   const track = trackFrom(raw.bgm?.track);
   if (track) out.bgm = { track, playbackId: String(raw.bgm?.playbackId || track.id).slice(0, 100), position: Math.max(0, finite(raw.bgm?.position)), startedAt: finite(raw.bgm?.startedAt), paused: !!raw.bgm?.paused };
   out.sfx = Array.isArray(raw.sfx) ? raw.sfx.map(item => {
@@ -63,10 +74,12 @@ export function migrateLegacy(value: unknown): MusicSession {
 export function reduceMusic(state: MusicSession, op: MusicOp, commandId: string, now = Date.now()): MusicSession {
   if (["pause", "resume", "seek", "loop", "stop"].includes(op.type) && typeof op.expectedPlaybackId === "string"
     && op.expectedPlaybackId !== (state.bgm?.playbackId || "")) throw new Error("stalePlayback");
+  if (["update", "remove", "replace"].includes(op.type) && typeof op.expectedLibraryRevision === "number" && op.expectedLibraryRevision !== (state.libraryRevision ?? state.revision)) throw new Error("staleLibrary");
+  if (op.expectedQueue && JSON.stringify(op.expectedQueue) !== JSON.stringify(state.queue)) throw new Error("staleQueue");
   const next = structuredClone(state);
   next.sfx = next.sfx.filter(sfx => sfx.track.loop || sfx.expiresAt > now);
   const requireTrack = () => { const track = op.track ? trackFrom(op.track) : next.tracks.find(track => track.id === op.id); if (!track) throw new Error("invalidTrack"); return track; };
-  const play = (track: Track) => { next.playbackSet=true; next.bgm = { track: { ...track, bus: "bgm" }, playbackId: commandId, position: Math.max(0, finite(op.position)), startedAt: now, paused: op.paused === true }; };
+  const play = (track: Track, remember = true) => { if (remember && next.bgm && next.bgm.track.id !== track.id) next.history = [...(next.history || []), next.bgm.track].slice(-8); next.playbackSet=true; next.bgm = { track: { ...track, bus: "bgm" }, playbackId: commandId, position: Math.max(0, finite(op.position)), startedAt: now, paused: op.paused === true }; };
   switch (op.type) {
     case "studio-load": {
       // Fresh pairing adopts one coherent snapshot. No successful volume write
@@ -85,9 +98,27 @@ export function reduceMusic(state: MusicSession, op: MusicOp, commandId: string,
       const tracks = (op.tracks || [op.track]).map(trackFrom); if (tracks.some(track => !track)) throw new Error("invalidTrack");
       for (const track of tracks as Track[]) { if (next.tracks.some(t => t.url === track.url)) continue; if (next.tracks.some(t => t.id === track.id)) throw new Error("invalidTrack"); if (next.tracks.length >= MAX_TRACKS) throw new Error("libraryFull"); next.tracks.push(track); } break;
     }
+    case "replace": {
+      if (!Array.isArray(op.tracks) || op.tracks.length > MAX_TRACKS) throw new Error("invalidTrack");
+      const tracks = op.tracks.map(trackFrom); if (tracks.some(track => !track) || new Set(tracks.map(track => track!.id)).size !== tracks.length || new Set(tracks.map(track => track!.url)).size !== tracks.length) throw new Error("invalidTrack");
+      next.tracks = tracks as Track[]; next.queue = next.queue.filter(id => next.tracks.some(track => track.id === id)); break;
+    }
+    case "update": {
+      const index = next.tracks.findIndex(track => track.id === op.id), track = trackFrom(op.track);
+      if (index < 0 || !track || track.id !== op.id || next.tracks.some((item, i) => i !== index && item.url === track.url)) throw new Error("invalidTrack");
+      next.tracks[index] = track; if (track.bus === "sfx") next.queue = next.queue.filter(id => id !== track.id); break;
+    }
     case "remove": next.tracks = next.tracks.filter(track => track.id !== op.id); next.queue = next.queue.filter(id => id !== op.id); break;
-    case "queue": { const track = requireTrack(); if (track.bus !== "bgm") throw new Error("invalidTrack"); if (next.queue.length >= MAX_TRACKS) throw new Error("queueFull"); next.queue.push(track.id); break; }
+    case "queue": { const track = requireTrack(); if (track.bus !== "bgm") throw new Error("invalidTrack"); if (next.queue.length >= MAX_QUEUE) throw new Error("queueFull"); next.queue.push(track.id); break; }
+    case "queue-many": {
+      if (!Array.isArray(op.ids) || !op.ids.length || next.queue.length + op.ids.length > MAX_QUEUE) throw new Error("queueFull");
+      if (op.ids.some(id => !next.tracks.some(track => track.id === id && track.bus === "bgm"))) throw new Error("invalidTrack");
+      next.queue.push(...op.ids); break;
+    }
     case "queue-remove": { const index = Math.trunc(finite(op.position, -1)); if (index >= 0) next.queue.splice(index, 1); break; }
+    case "queue-move": { const from = Math.trunc(finite(op.position, -1)), to = Math.trunc(finite(op.target, -1)); if (from < 0 || to < 0 || from >= next.queue.length || to >= next.queue.length) throw new Error("invalidCommand"); const [id] = next.queue.splice(from, 1); next.queue.splice(to, 0, id); break; }
+    case "queue-clear": next.queue = []; break;
+    case "previous": { const track = next.history?.pop(); if (!track) return state; play(track, false); break; }
     case "play": play(requireTrack()); break;
     case "duration": {
       const duration = finite(op.duration);
@@ -112,16 +143,24 @@ export function reduceMusic(state: MusicSession, op: MusicOp, commandId: string,
     case "allowPlayers": next.allowPlayers = !!op.value; break;
     default: throw new Error("invalidCommand");
   }
+  if (["add", "remove", "replace", "update"].includes(op.type)) next.libraryRevision = (state.libraryRevision ?? state.revision) + 1;
   next.recent = [...next.recent, commandId].slice(-36); next.revision++; next.ts = now; return next;
 }
 /** `bus` applies to bare direct links only — a Studio share code carries its own
  *  per-track bus and loop flag. A link imported as SFX is a one-shot, so it must
  *  not inherit the BGM default of `loop: true`. */
 export function decodeTracks(text: string, bus: "bgm" | "sfx" = "bgm"): Track[] {
+  if (text.length > 262144) throw new Error("invalidTrack");
   let values: unknown[];
   if (text.trim().startsWith("obrm1:")) {
     const code = text.trim().slice(6).replace(/-/g, "+").replace(/_/g, "/");
     const bytes = Uint8Array.from(atob(code), char => char.charCodeAt(0)); const raw = JSON.parse(new TextDecoder().decode(bytes)); values = Array.isArray(raw) ? raw : [raw];
-  } else values = text.trim().split(/\s+/).filter(Boolean).map(url => ({ url, name: "", bus, loop: bus === "bgm" }));
-  const tracks = values.map(trackFrom); if (tracks.length === 0 || tracks.length > MAX_TRACKS || tracks.some(track => !track)) throw new Error("invalidTrack"); return tracks as Track[];
+  } else if (/^[\[{]/.test(text.trim())) {
+    const raw = JSON.parse(text); if (!Array.isArray(raw) && !Array.isArray(raw?.tracks) && !raw?.url && !raw?.u) throw new Error("invalidTrack"); values = Array.isArray(raw) ? raw : Array.isArray(raw?.tracks) ? raw.tracks : [raw];
+    if (raw?.format && (raw.format !== "obr-music-library" || raw.version !== 1)) throw new Error("invalidTrack");
+  } else values = text.trim().split(/\r?\n/).flatMap(line => {
+    const [name, url] = line.split(/\t/); return url ? [{url: url.trim(), name: name.trim(), bus, loop: bus === "bgm"}] : line.trim().split(/\s+/).filter(Boolean).map(url => ({url, name:"", bus, loop:bus === "bgm"}));
+  });
+  const tracks = values.map(trackFrom); if (tracks.length === 0 && !/^[\[{]/.test(text.trim()) || tracks.length > MAX_TRACKS || tracks.some(track => !track)) throw new Error("invalidTrack"); return tracks as Track[];
 }
+export function encodeLibrary(tracks: Track[]): string { return JSON.stringify({format:"obr-music-library", version:1, tracks}, null, 2); }

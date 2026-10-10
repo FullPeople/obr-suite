@@ -10,7 +10,7 @@ import type {Roll, Theme} from './types';
 import * as N from './native';
 import {hiddenRequest} from './hidden-roll';
 
-export const POST_SETTLE_PAUSE=2.00;
+export const POST_SETTLE_PAUSE=4/3;
 export const FIRST_BEAM_STAGGER=0.50,MINIMUM_BEAM_STAGGER=0.24,BEAM_STAGGER_ACCELERATION=0.025;
 export const FIRST_BEAM_TRAVEL=0.42,MINIMUM_BEAM_TRAVEL=0.22,BEAM_TRAVEL_ACCELERATION=0.015;
 export const BEAM_RECOIL=0.16,BEAM_AFTERGLOW=0.72,POST_BEAM_DICE_HOLD=1.00;

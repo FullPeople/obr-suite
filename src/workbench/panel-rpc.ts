@@ -22,7 +22,7 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
  };
  return async function request(panel:string,instance:string,method:string,args:any[]){
   if(typeof instance!=='string'||!/^[a-zA-Z0-9-]{1,80}$/.test(instance))throw Error('无效窗口');
-  if(!['settings','music','studio','table','notes','permissions','textEffects'].includes(panel))throw Error('无效功能页');
+  if(!['settings','music','table','notes','permissions','textEffects'].includes(panel))throw Error('无效功能页');
   if(panel==='textEffects'&&method!=='dispose'){
    if(method==='broadcast.sendMessage'){
     if(args.length!==3||args[0]!==TEXT_EFFECT_REQUEST||args[2]?.destination!=='LOCAL')throw Error('无效文字演出操作');
@@ -38,7 +38,7 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
    if(!['init','player.getRole','subscribe','permissions.acknowledge'].includes(method)||method==='subscribe'&&(args[0]!=='player'||args[1]!==undefined))throw Error('无效权限说明操作');
    if(method==='permissions.acknowledge'){if(args.length)throw Error('无效权限确认');markPlayerPermissionsRead();return {seen:true};}
   }
-  if(['music','studio'].includes(panel)&&getState().enabled.musicBoard===false)throw Error('音乐模块未开启');
+  if(panel==='music'&&getState().enabled.musicBoard===false)throw Error('音乐模块未开启');
   if(method==='init'){
    const [playerId,role,sceneReady,scene,room]=await Promise.all([OBR.player.getId(),OBR.player.getRole(),OBR.scene.isReady(),panel==='settings'?OBR.scene.getMetadata():Promise.resolve({}),panel==='settings'?OBR.room.getMetadata():Promise.resolve({})]);
    // Settings only need these variables at boot, never the full room card registry.
@@ -49,12 +49,11 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
   if(method==='preferences.write'){const [key,value]=args;if(panel!=='settings'||!personalKeys.has(key)||value!==null&&(typeof value!=='string'||value.length>1000))throw Error('无效偏好');if(value===null)localStorage.removeItem(key);else localStorage.setItem(key,value);window.dispatchEvent(new StorageEvent('storage',{key,newValue:value,storageArea:localStorage}));return;}
   if(panel==='table'&&getState().enabled.threeDragonAnte===false&&method!=='dispose')throw Error('三龙牌未开启');
   if(method==='dispose'){if(panel==='table')await table(instance,method,args);for(const [key,off] of subscriptions)if(key.startsWith(`${panel}:${instance}:`)){off();subscriptions.delete(key);}return;}
-  if(panel==='studio'&&['studio.read','studio.command'].includes(method)){const {workbenchStudio}=await import('../modules/musicBoard');return method==='studio.read'?workbenchStudio():workbenchStudio(args[0],String(args[1]).slice(0,100));}
   if(method==='subscribe'){
    const [event,name]=args,key=`${panel}:${instance}:${event}:${name||''}`;
    if(subscriptions.has(key))return;
    const emit=(data:any)=>send('panelEvent',{panel,instance,event,name,data});
-   if(event==='broadcast'&&typeof name==='string'&&name.startsWith('com.')&&name.length<160){if(['music','studio'].includes(panel)&&!name.startsWith(musicPrefix))throw Error('无效音乐订阅');if(panel==='table'&&!name.startsWith('com.fullpeople/three-dragon-ante/')&&!name.startsWith('com.obr-suite/three-dragon-ante/'))throw Error('无效牌桌订阅');subscriptions.set(key,OBR.broadcast.onMessage(name,emit));}
+   if(event==='broadcast'&&typeof name==='string'&&name.startsWith('com.')&&name.length<160){if(panel==='music'&&!name.startsWith(musicPrefix))throw Error('无效音乐订阅');if(panel==='table'&&!name.startsWith('com.fullpeople/three-dragon-ante/')&&!name.startsWith('com.obr-suite/three-dragon-ante/'))throw Error('无效牌桌订阅');subscriptions.set(key,OBR.broadcast.onMessage(name,emit));}
    else if(Object.prototype.hasOwnProperty.call(events,event))subscriptions.set(key,events[event](emit));else throw Error('无效订阅');return;
   }
   if(method==='broadcast.sendMessage'){
@@ -65,8 +64,8 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
     if(name===SERVER_WINDOW&&options.destination==='LOCAL'&&['close','display'].includes(data?.command?.type))return true;
     if(options.destination!=='LOCAL')throw Error('牌桌消息必须经游戏控制器处理');return table(instance,method,args);
    }
-   if(['music','studio'].includes(panel)){
-    if(![musicPrefix+'command',musicPrefix+'local',musicPrefix+'ready'].includes(name))throw Error('无效音乐操作');
+   if(panel==='music'){
+    if(![musicPrefix+'command',musicPrefix+'command:part',musicPrefix+'local',musicPrefix+'ready'].includes(name))throw Error('无效音乐操作');
     // Shared music commands still go through RoomMusic's writer and fresh role/allowPlayers check.
    }else if(!gm&&!safeLocal.has(name))throw Error('此设置仅 DM 可以调整');
    return OBR.broadcast.sendMessage(name,data,options);
