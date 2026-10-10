@@ -7,6 +7,7 @@ import {cpus,availableParallelism,totalmem,release} from 'node:os';
 import assert from 'node:assert/strict';
 import {waitForIndependentScene} from './dice-independent-scene.mjs';
 import {tailEvent,validateTailCase} from './dice-tail-trace.mjs';
+import {installNumberFlightProbe,validateNumberFlights} from './dice-number-flight-probe.mjs';
 const tail=process.env.DICE_LATENCY_TAIL==='1',tailSourceMode=process.env.DICE_TAIL_SOURCE_MODE||'baseline';
 assert(['baseline','candidate'].includes(tailSourceMode),'known tail source mode');
 const root=resolve(process.env.DND_DICE_LATENCY_BUILD||'.local-evidence/dice-latency/runtime'),out=resolve(process.env.DND_DICE_EVIDENCE||'.local-evidence/dice-latency/browser'),port=Number(process.env.DICE_LATENCY_PORT||5236),origin='http://127.0.0.1:'+port;
@@ -24,6 +25,9 @@ template=template.replace('${JSON.stringify(base)}',JSON.stringify(origin+'/suit
 template=template.replace('data={width:1440}','data={width:innerWidth}').replace('data={height:900}','data={height:innerHeight}');
 template=template.replace('window.fixture.sent.push(packet)','window.fixture.sent.push({...packet,at:performance.timeOrigin+performance.now()})');
 template=template.replace('metadata:{},ids:[]','metadata:{"com.obr-suite/dice/3d-theme":'+JSON.stringify(theme)+'},ids:[]');
+template=template.replace("});frame('extensions/workbench-dice3d/sdk-verify.html','background');",`});
+addEventListener('message',async e=>{const m=e.data;if(e.origin!==location.origin||m?.channel!=='workbench-dice-frame/v1'||!m.id||!m.method)return;try{const result=await document.querySelector('#background').contentWindow.suiteHostProbe.diceRpc(m.method,m.args,null,async()=>{});e.source.postMessage({channel:m.channel,id:m.id,result},e.origin);}catch(error){e.source.postMessage({channel:m.channel,id:m.id,error:String(error)},e.origin);}});
+frame('extensions/workbench-dice3d/sdk-verify.html','background');`);
 const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.wasm':'application/wasm','.png':'image/png','.json':'application/json','.svg':'image/svg+xml','.wav':'audio/wav','.ttf':'font/ttf'};
 const server=createServer((req,res)=>{const path=decodeURIComponent(new URL(req.url,origin).pathname);if(path==='/fixture'){res.setHeader('Content-Type','text/html');res.end(template);return;}if(path==='/favicon.ico'){res.writeHead(204);res.end();return;}const file=resolve(root,path.replace(/^\/suite-dev\//,''));if(!file.startsWith(root+sep)){res.writeHead(403);res.end();return;}try{res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');res.end(readFileSync(file));}catch{res.writeHead(404);res.end(path);}});await new Promise(r=>server.listen(port,'127.0.0.1',r));
 let browser,context;const pages=[],errors=[],cases=[],cold=[],independentScenes=[],totals=new Map();let mode='normal',dropped=false,injections={ready:0,offer:0,chunk:0,ack:0,lastChunk:0};
@@ -43,9 +47,11 @@ try{
  };
  }
  };await context.addInitScript(installProbe,pixelEvidence);
+ if(process.env.DICE_LATENCY_MIXED==='1')await context.addInitScript(installNumberFlightProbe,pixelEvidence);
  for(const name of ['Host','Player']){
   const clientContext=process.env.DICE_LATENCY_SEPARATE_WINDOWS==='1'&&name==='Player'?await browser.newContext({viewport,deviceScaleFactor:pixelRatio}):context;if(clientContext!==context)await clientContext.addInitScript(installProbe,pixelEvidence);const page=await clientContext.newPage();pages.push(page);page.on('pageerror',e=>errors.push(e.message));
   await page.exposeBinding('sendRemote',async({page},packet)=>{if(['offer','trace'].includes(packet.data?.type))totals.set(packet.data.id,packet.data.total);for(const other of pages)if(other!==page){const type=packet.data?.type;if(mode==='lost-last-chunk'&&['chunk','trace'].includes(type)&&!packet.data.to&&!dropped&&packet.data.index===totals.get(packet.data.id)-1){dropped=true;injections.lastChunk++;continue;}if(page===pages[1]&&mode==='no-ready'&&type==='ready'){injections.ready++;continue;}if(page===pages[0]&&mode==='lost-offer'&&(type==='offer'||type==='trace'&&packet.data.index===0)&&!dropped){dropped=true;injections.offer++;continue;}const delayed=page===pages[0]&&mode==='late-chunks'&&['chunk','trace'].includes(type);if(delayed)injections.chunk++;setTimeout(()=>{void other.evaluate(p=>window.deliver?.(p),packet).catch(e=>errors.push('fixture delivery: '+e));},delayed?4500:10);}if(mode==='slow-ack'&&packet.data?.type==='start'){injections.ack++;await new Promise(r=>setTimeout(r,400));}});
+  if(clientContext!==context&&process.env.DICE_LATENCY_MIXED==='1')await clientContext.addInitScript(installNumberFlightProbe,pixelEvidence);
   const began=Date.now();await page.goto(origin+'/fixture?name='+name);await page.waitForFunction(()=>document.querySelector('#background')?.contentWindow?.suiteHostProbe,null,{timeout:120000,polling:100});const frame=page.frames().find(f=>f.url().includes('sdk-verify'));await frame.waitForFunction(()=>window.suiteHostProbe.events.filter(e=>e.type==='state').at(-1)?.state.ready,null,{timeout:120000,polling:100});
   cold.push({name,cache:name==='Host'||process.env.DICE_LATENCY_SEPARATE_WINDOWS==='1'?'fresh-context':'shared-context-warm',readyMs:Date.now()-began,renderer:await frame.evaluate(()=>window.suiteHostProbe.events.find(e=>e.event==='renderer-ready')?.detail),resources:await Promise.all(page.frames().map(f=>f.evaluate(()=>({url:location.href,resources:performance.getEntriesByType('resource').map(e=>({name:e.name,duration:e.duration,bytes:e.transferSize}))}))))});
  }
@@ -62,11 +68,43 @@ try{
    const ambiguousVisibility=perf.ambiguousRollIds.some(id=>id.startsWith(rollId));if(pixelEvidence){const visible=perf.visibleEvidence.filter(t=>t.id.startsWith(rollId));assert(visible.length>=2,'two visible moving WebGL frames required');assert(visible.every(s=>s.visibleDice>0&&s.opaquePixels>0&&s.glError===0));assert(new Set(visible.map(s=>s.hash)).size>1,'readback pixels must change with moving dice');}
    const tailEvents=tail?(await Promise.all(pages[i].frames().map(f=>f.evaluate(id=>(globalThis.__diceTailTrace||[]).filter(e=>e.id===id||e.id.startsWith(id+':')),rollId)))).flat().sort((a,b)=>a.at-b.at):undefined;
    const traffic=await pages[i].evaluate(({since,until})=>window.fixture.sent.filter(p=>p.at>=since&&p.at<=until).map(p=>({type:p.data?.type||p.channel,id:p.data?.id||p.data?.request?.id,ms:p.at-since})),{since:submittedAt,until:release.actual});clients.push({traffic,index:i,tailEvents,visibleAttribution:ambiguousVisibility?'whole-scene-only; per-roll first-visible metric suppressed':'single-active-roll',firstVisibleReadbackMs:pixelEvidence&&!ambiguousVisibility?perf.visibleEvidence.filter(t=>t.id.startsWith(rollId))[0]?.completedAt-submittedAt:null,visibleEvidence:perf.visibleEvidence,releaseCommandMs:release.actual-submittedAt,firstSubmittedFrameMs:perf.submitted[0]-submittedAt,lateMs:release.lateMs,frameP50Ms:percentile(intervals,.5),frameP95Ms:percentile(intervals,.95),maxFrameMs:Math.max(0,...intervals),longTasks:perf.longTasks,renderCosts:perf.renderCosts,frameSamples:{rAF:perf.frames,renderSubmitted:perf.submitted},events:data.events,result:data.result,metrics:data.state.metrics});
+   if(process.env.DICE_LATENCY_MIXED==='1'){
+    const samples=await render.evaluate(({since,until})=>(window.__diceNumberFlights||[]).filter(s=>s.at>=since&&s.at<=until),{since:release.actual,until:completedAt});
+    clients.at(-1).numberFlight=validateNumberFlights(samples,{required:process.env.DICE_FLIGHT_BASELINE!=='1',pixels:pixelEvidence});
+    const queued=data.events.find(e=>e.event==='render-queued'),settled=data.events.find(e=>e.event==='render-settled');
+    clients.at(-1).numberFlight.afterSettleMs=samples[0]?.at-settled?.observedAt;
+    clients.at(-1).numberFlight.plannedPauseMs=(queued.detail.audio.hits[0].t-.16-.42-queued.detail.audio.stingerAt)*1000;
+    clients.at(-1).numberFlight.samples=samples;
+    assert(!data.events.some(e=>['render-frame-retry','render-cancelled','error'].includes(e.event)),'no lost visual frames or cancellation');
+   }
   }
   if(privateResult)assert.equal(clients[1-source].result,undefined);else{assert.equal(clients[0].result.total,clients[1].result.total);assert.deepEqual(clients[0].result.dice,clients[1].result.dice);}if(result.total!==undefined)assert.equal(clients[source].result.total,result.total);cases.push({name,rollId,submittedAt,total:clients[source].result.total,clients,...(tail?{injections:{...injections}}:{})});if(tail)cases.at(-1).tail=validateTailCase(cases.at(-1),{sourceMode:tailSourceMode});
  };
  const roll=async(name,expression,source=0,extra={})=>{await independent(name);const {submittedAt,result}=await frames[source].evaluate(async req=>{const submittedAt=performance.timeOrigin+performance.now();return{submittedAt,result:await window.suiteHostProbe.submitDice3d(req)};},{expression,itemId:null,...extra});await finish(name,source,submittedAt,result,extra.visibility==='self');};
- if(combinedSmoke){
+ if(process.env.DICE_LATENCY_MIXED==='1'){
+  const formula='1d6 + 1d20 + 1d4 + 1d8 + 1d10 + 1d12 + 1d100';
+  await roll('mixed-first-eight-physical',formula,1);
+  await roll('mixed-warm-eight-physical',formula,0);
+  await roll('mixed-missing-token',formula,1,{itemId:'removed-token'});
+  await roll('mixed-under-twenty','3d6+3d20+3d4+3d8+3d10+2d12+1d100',1);
+  await independent('mixed-panel-no-target');
+  const eventIndex=await frames[1].evaluate(()=>window.suiteHostProbe.events.length);
+  await pages[1].evaluate(()=>{const frame=document.createElement('iframe');frame.id='composer';frame.src='/suite-dev/workbench-dice/index.html';frame.style.cssText='position:fixed;right:0;top:0;width:400px;height:760px;z-index:40';document.body.append(frame);});
+  await pages[1].waitForFunction(()=>document.querySelector('#composer')?.contentDocument?.body?.dataset.bridgeReady==='true',null,{timeout:30000});
+  const composer=pages[1].frames().find(f=>f.url().includes('/workbench-dice/index.html'));
+  await composer.waitForFunction(()=>document.body.dataset.bridgeReady==='true',null,{timeout:30000});
+  await composer.locator('#exprInput').fill(formula);
+  await composer.evaluate(()=>{window.__diceComposerClickAt=undefined;document.querySelector('#btnRoll').addEventListener('click',()=>{window.__diceComposerClickAt=performance.timeOrigin+performance.now();},{once:true,capture:true});});
+  await composer.locator('#btnRoll').click();
+  const panelSubmittedAt=await composer.evaluate(()=>window.__diceComposerClickAt);
+  assert(Number.isFinite(panelSubmittedAt),'measure the actual DOM click, excluding automation actionability waiting');
+  await frames[1].waitForFunction(index=>window.suiteHostProbe.events.slice(index).some(e=>e.event==='roll-submitted'),eventIndex,{timeout:15000});
+  const panelRollId=await frames[1].evaluate(index=>window.suiteHostProbe.events.slice(index).find(e=>e.event==='roll-submitted').detail.id,eventIndex);
+  await finish('mixed-panel-no-target',1,panelSubmittedAt,{rollId:panelRollId});
+  assert.equal(cases.at(-1).clients[1].result.itemId,null,'actual composer may roll without a selected token');
+  assert.equal(cases.at(-1).clients[1].result.dice.length,7,'percentile remains one logical die');
+  await pages[1].evaluate(()=>document.querySelector('#composer').remove());
+ }else if(combinedSmoke){
   await roll('combined-first-1d20','1d20',1);
   await roll('combined-warm-9d6','9d6',1);
   await roll('combined-private-self','1d6',1,{visibility:'self'});

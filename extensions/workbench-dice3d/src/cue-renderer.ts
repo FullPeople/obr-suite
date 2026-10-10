@@ -35,13 +35,14 @@ function noise(seed:bigint,index:number):number{
 }
 interface Particle{spawn:number;life:number;lateral:number;size:number}
 const PARTICLES_PER_BEAM=72;
-const BEAM_WIDTHS=[30,11,3.8],BEAM_ALPHAS=[0.11,0.42,0.98],BEAM_SEGMENTS=30;
+const BEAM_WIDTHS=[30,11,3.8],BEAM_ALPHAS=[0.11,0.42,0.98],BEAM_SEGMENTS=15;
 const IMPACT_ANGLES=[-0.78,-0.22,0.31,0.86];
 
 export class CueRenderer{
   private canvas:HTMLCanvasElement;
   private ctx:CanvasRenderingContext2D;private releaseCanvas:()=>void;
   private particles=new Map<number,Particle[]>();
+  private particleSprites=new Map<string,HTMLCanvasElement>();
   private seed:bigint;
   private targetSlot:[number,number]=[0,0];
   private currentSlot:[number,number]=[0,0];
@@ -58,6 +59,7 @@ export class CueRenderer{
   }
   setSlotOffset(x:number,y=0,width?:number,height?:number,snap=false){this.targetSlot=[x,y];this.slotSize=width!==undefined&&height!==undefined?[width,height]:undefined;if(snap)this.currentSlot=[x,y];}
   slotPosition(){return [...this.currentSlot]}
+  prepareCue(cue:Cue){for(const beam of cue.beams){this.beamParticles(beam);this.particleSprite(beam.color);}if(cue.modifier)this.particleSprite(cue.modifier.color);}
   destroy(){this.releaseCanvas()}
   private size(){
     const ratio=Math.min(2,window.devicePixelRatio||1);
@@ -81,6 +83,15 @@ export class CueRenderer{
     this.particles.set(beam.dieIndex,list);
     return list;
   }
+  private particleSprite(color:[number,number,number]){
+    const key=color.join(','),cached=this.particleSprites.get(key);if(cached)return cached;
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=64;
+    const ctx=canvas.getContext('2d')!;
+    ctx.fillStyle=rgba(color,.28);ctx.beginPath();ctx.arc(32,32,14.4,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=rgba(whiten(color,.62),1);ctx.lineWidth=4;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(23.2,32);ctx.lineTo(36.8,32);ctx.stroke();
+    this.particleSprites.set(key,canvas);return canvas;
+  }
   /** Draws one frame of the show. `appear` is the layer opacity the native ties to card life. */
   draw(elapsed:number,cue:Cue,appear:number){
     const {w,h}=this.size();
@@ -92,7 +103,9 @@ export class CueRenderer{
     for(let axis=0;axis<2;axis++)this.currentSlot[axis]+=(this.targetSlot[axis]-this.currentSlot[axis])*approach;
     if(elapsed<cue.settled||appear<=0)return;
     // Concurrent rolls get the native's equal horizontal slots so their totals never stack.
-    const point=this.anchor?.();if(this.anchor&&!point)return;
+    const candidate=this.anchor?.();
+    const point=candidate&&Number.isFinite(candidate.x)&&Number.isFinite(candidate.y)?candidate:undefined;
+    const anchored=!!point;
     const placement=cuePlacement(w,h,this.currentSlot[0],this.currentSlot[1],this.slotSize?.[0],this.slotSize?.[1],!!cue.modifier);
     const anchoredInside=point&&point.x>=0&&point.x<=w&&point.y>=0&&point.y<=h;
     let anchorWidth:number|undefined;
@@ -109,11 +122,11 @@ export class CueRenderer{
     // stays offscreen; do not pull its result into the map or change any die source.
     const centerX=anchorWidth!==undefined?Math.max(8+anchorWidth*.5,Math.min(w-8-anchorWidth*.5,point!.x)):point?.x??placement.x;
     const anchorBottom=cue.modifier?166:64;
-    const centerY=anchorWidth!==undefined?Math.max(44,Math.min(h-anchorBottom,point!.y)):point?.y??placement.y,layoutScale=this.anchor?1:placement.scale;
+    const centerY=anchorWidth!==undefined?Math.max(44,Math.min(h-anchorBottom,point!.y)):point?.y??placement.y,layoutScale=anchored?1:placement.scale;
     const centerAge=elapsed-cue.firstBeam;
     const centerOpacity=appear*smoothstep(Math.max(0,centerAge)/0.18)*(1-smoothstep(Math.max(0,(elapsed-cue.finalBeamEnd))/0.28));
     // Nameplate is behind the flying modifier, never an occluder over its launch point.
-    if(centerOpacity>0.01&&!this.anchor){
+    if(centerOpacity>0.01&&!anchored){
       const pendingModifier=cue.modifier&&elapsed<cue.modifier.start;
       ctx.save();ctx.translate(centerX,centerY);ctx.scale(layoutScale,layoutScale);ctx.translate(-centerX,-centerY);
       ctx.fillStyle=rgba([8/255,10/255,13/255],centerOpacity*0.76);
@@ -135,7 +148,7 @@ export class CueRenderer{
       if(elapsed<beam.start||elapsed>window)continue;
       const sourceAge=elapsed-beam.start;
       const flightPhase=Math.max(0,Math.min(1,(sourceAge-beam.recoil)/beam.travel));
-      const progress=Math.pow(flightPhase,3.45);
+      const progress=smoothstep(flightPhase);
       const dx=centerX-beam.sourceX,dy=centerY-beam.sourceY;
       const length=Math.hypot(dx,dy)||1;
       const recoilDistance=beam.maximumFace?42:31;
@@ -193,27 +206,23 @@ export class CueRenderer{
         ctx.restore();
       }
       // 72 particles with independent spawn times, lifetimes, drift and decay.
+      const sprite=this.particleSprite(beam.color);
+      ctx.save();ctx.translate(launchX,launchY);ctx.rotate(Math.atan2(dy,dx));
       for(const particle of this.beamParticles(beam)){
         const spawnTime=beam.start+beam.recoil+particle.spawn*beam.travel*0.88;
         const age=elapsed-spawnTime;
         if(age<0||age>particle.life)continue;
         const lifePhase=age/particle.life;
         const along=Math.max(0,Math.min(1,particle.spawn+age/beam.travel*0.46));
-        const [px,py]=linePoint(launchX,launchY,centerX,centerY,along);
         const lateral=particle.lateral*30*smoothstep(lifePhase);
         const forward=10*lifePhase;
-        const axisX=dx/length,axisY=dy/length;
-        const x=px-axisY*lateral+axisX*forward,y=py+axisX*lateral+axisY*forward;
+        const x=along*length+forward,y=lateral;
         const alpha=appear*Math.sin(Math.min(1,lifePhase*2.4)*Math.PI/2)*(1-smoothstep(lifePhase))*0.86;
         if(alpha<=0.01)continue;
-        ctx.save();
-        ctx.fillStyle=rgba(beam.color,alpha*0.28);
-        ctx.beginPath();ctx.arc(x,y,particle.size*3.6,0,Math.PI*2);ctx.fill();
-        ctx.strokeStyle=rgba(whiten(beam.color,0.62),alpha);ctx.lineWidth=particle.size;ctx.lineCap='round';
-        ctx.beginPath();ctx.moveTo(x-axisX*particle.size*2.2,y-axisY*particle.size*2.2);
-        ctx.lineTo(x+axisX*particle.size*1.2,y+axisY*particle.size*1.2);ctx.stroke();
-        ctx.restore();
+        ctx.globalAlpha=alpha;const half=particle.size*8;
+        ctx.drawImage(sprite,x-half,y-half,half*2,half*2);
       }
+      ctx.restore();
       // The die's own number rides the projectile head.
       if(sourceAge<=beam.recoil+beam.travel){
         ctx.save();
@@ -249,19 +258,19 @@ export class CueRenderer{
       const color:[number,number,number]=this.playerColor?[1,3,5].map(i=>parseInt(this.playerColor!.slice(i,i+2),16)/255) as [number,number,number]:[0.92,0.84,0.62];
       ctx.save();
       ctx.translate(centerX,centerY);ctx.scale(centerScale,centerScale);ctx.translate(-centerX,-centerY);
-      ctx.font=this.anchor?'700 30px CinzelVariable,Georgia,serif':'600 92px CinzelVariable,Georgia,serif';
+      ctx.font=anchored?'700 30px CinzelVariable,Georgia,serif':'600 92px CinzelVariable,Georgia,serif';
       ctx.textAlign='center';ctx.textBaseline='middle';
       ctx.fillStyle=rgba([0,0,0],centerOpacity*0.58);
       // Canvas maxWidth fits long/negative formula totals while retaining every digit and
       // the existing pulse. Reserve the stroke and shadow inside this roll's own cell.
-      const totalWidth=this.anchor?(anchorWidth===undefined?undefined:Math.max(1,anchorWidth/centerScale-12)):Math.max(1,placement.textWidth/centerScale-12);
+      const totalWidth=anchored?(anchorWidth===undefined?undefined:Math.max(1,anchorWidth/centerScale-12)):Math.max(1,placement.textWidth/centerScale-12);
       fittedText(ctx,'fillText',String(shown),centerX+4,centerY+4,totalWidth);
       const graphic=cue.inkStyle==='sketch'||cue.inkStyle==='comic';
       ctx.lineWidth=graphic?4:3;ctx.strokeStyle=rgba(keyline(color),centerOpacity*.96);
       fittedText(ctx,'strokeText',String(shown),centerX,centerY,totalWidth);
       ctx.fillStyle=rgba(color,centerOpacity);
       fittedText(ctx,'fillText',String(shown),centerX,centerY,totalWidth);
-      if(this.anchor){ctx.font='600 13px "Microsoft YaHei",sans-serif';ctx.lineWidth=3;fittedText(ctx,'strokeText',this.anchorLabel,centerX,centerY+25,totalWidth);fittedText(ctx,'fillText',this.anchorLabel,centerX,centerY+25,totalWidth);}
+      if(anchored){ctx.font='600 13px "Microsoft YaHei",sans-serif';ctx.lineWidth=3;fittedText(ctx,'strokeText',this.anchorLabel,centerX,centerY+25,totalWidth);fittedText(ctx,'fillText',this.anchorLabel,centerX,centerY+25,totalWidth);}
       ctx.restore();
     }
     // Hit-stop dressing: a brief tint plus directional impact lines, never a pause in physics.

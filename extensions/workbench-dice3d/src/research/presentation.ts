@@ -39,8 +39,10 @@ export class FormulaShow extends CueRenderer{
   private fx:HTMLCanvasElement;private context:CanvasRenderingContext2D;private chips=new Map<string,HTMLElement>();private total:HTMLElement;
   private releaseFx:()=>void;
   private latest=-1;private finished=false;
-  constructor(private stage:HTMLElement,roll:Roll,private ids:string[],private row:FormulaRow,private card:HTMLElement,private projection:()=>Projection,private timeline?:RuleTimeline){
+  private historyAttached:boolean;
+  constructor(private stage:HTMLElement,roll:Roll,private ids:string[],private row:FormulaRow,private card:HTMLElement,private projection:()=>Projection,private timeline?:RuleTimeline,updateHistory=true){
     super(stage,roll.request.id,roll.request.name,roll.request.bodyColor);
+    this.historyAttached=updateHistory;
     const layer=acquireOverlayCanvas(stage,'research-effects');this.fx=layer.canvas;this.context=layer.context;this.releaseFx=layer.release;
     const caption=document.createElement('div');caption.className='formula-caption';caption.textContent=row.formula.replaceAll('*','×');card.append(caption);
     const inline=document.createElement('div');inline.className='formula-inline';
@@ -62,13 +64,14 @@ export class FormulaShow extends CueRenderer{
     const decisionAt=this.timeline?.decisionAt??cue.settled+DECISION_DELAY,fade=decisionProgress(age,decisionAt),landed=age>=decisionAt,phase=Math.max(0,age-decisionAt),arrived=new Set(cue.beams.filter(b=>age>=b.reveal).map(b=>this.ids[b.dieIndex]));
     const eventStart=(event:FormulaRow['events'][number])=>event.kind==='max'||event.kind==='min'?this.timeline?.clamps.find(c=>c.kind===event.kind&&c.id===event.dice[0]&&c.label===event.label)?.start??decisionAt:decisionAt;
     const visibleEvents=this.row.events.filter(e=>age>eventStart(e));
-    this.card.querySelector('.rule-note')!.textContent=visibleEvents.map(e=>e.label+(e.physicalNote?`（${e.physicalNote}）`:'')).join(' · ')||(landed?'真实落地 → 数字汇集 → 加值到账':'等待真实落地');
+    const history=this.historyAttached;
+    if(history){const note=visibleEvents.map(e=>e.label+(e.physicalNote?`（${e.physicalNote}）`:'')).join(' · ')||(landed?'真实落地 → 数字汇集 → 加值到账':'等待真实落地');const node=this.card.querySelector('.rule-note')!;if(node.textContent!==note)node.textContent=note;}
     const point=(id:string)=>{const index=this.ids.indexOf(id),o=((this.roll.frames-1)*this.ids.length+index)*7;return projectVisual(p,this.roll.poses[o],this.roll.poses[o+1],this.roll.poses[o+2]);};
     const alpha=fade*Math.max(0,1-(age-cue.finalReveal)/.8);
     for(const d of this.row.dice){const chip=this.chips.get(d.id)!;
-      chip.classList.toggle('discarded',fade>0&&!d.kept);chip.classList.toggle('same',landed&&d.flags.includes('同值'));chip.classList.toggle('arrived',arrived.has(d.id));
+      if(history){chip.classList.toggle('discarded',fade>0&&!d.kept);chip.classList.toggle('same',landed&&d.flags.includes('同值'));chip.classList.toggle('arrived',arrived.has(d.id));
       const label=chip.querySelector('b')!;label.textContent=!landed?'·':!d.kept?String(d.raw):arrived.has(d.id)?`${d.sign<0?'−':''}${d.value}`:'·';
-      if(d.raw!==d.value)chip.title=`实骰 ${d.raw} → 按规则 ${d.value}`;
+      if(d.raw!==d.value)chip.title=`实骰 ${d.raw} → 按规则 ${d.value}`;}
       if(!alpha)continue;const [x,y]=point(d.id);
       if(!d.kept){ctx.save();ctx.globalAlpha=alpha;ctx.font='600 15px "Microsoft YaHei",sans-serif';ctx.textAlign='center';ctx.lineWidth=4;ctx.strokeStyle='#101920';ctx.fillStyle='#a5afba';ctx.strokeText('舍弃',x,y+42);ctx.fillText('舍弃',x,y+42);ctx.restore();}
     }
@@ -85,8 +88,8 @@ export class FormulaShow extends CueRenderer{
         const [x,y]=points[0];ctx.strokeText(event.label,x,y-55);ctx.fillText(event.label,x,y-55);}
       ctx.restore();
     }
-    const total=totalAt(cue,age);if(total!==this.latest){this.latest=total;this.total.textContent=String(total);this.total.animate([{transform:'scale(1.23)'},{transform:'scale(1)'}],{duration:280,easing:'ease-out'});}
-    if(!this.finished&&age>=cue.finalReveal){this.finished=true;this.card.classList.add('complete');this.card.animate([{boxShadow:'inset 0 0 0 2px #6faf9180'},{boxShadow:'inset 0 0 0 2px #6faf9100'}],{duration:500});}
+    if(history){const total=totalAt(cue,age);if(total!==this.latest){this.latest=total;this.total.textContent=String(total);this.total.animate([{transform:'scale(1.23)'},{transform:'scale(1)'}],{duration:280,easing:'ease-out'});}
+    if(!this.finished&&age>=cue.finalReveal){this.finished=true;this.card.classList.add('complete');this.card.animate([{boxShadow:'inset 0 0 0 2px #6faf9180'},{boxShadow:'inset 0 0 0 2px #6faf9100'}],{duration:500});}}
   }
   override destroy(){super.destroy();this.releaseFx();}
 }
