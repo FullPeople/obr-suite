@@ -1,0 +1,109 @@
+name: Research same-version single-thread Jolt SIMD
+on:
+  push:
+    branches: [codex/jolt-simd-research-20261010]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jolt-engine-research-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked research harness dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Check out exact official compiler and engine sources
+        run: |
+          set -euo pipefail
+          mkdir -p ../evidence/build ../variants/original .jolt-src
+          git clone --depth 1 --branch 6.0.2 https://github.com/emscripten-core/emsdk.git .jolt-src/emsdk
+          git clone --depth 1 --branch 1.1.0 https://github.com/jrouwe/JoltPhysics.js.git .jolt-src/wrapper
+          git clone --depth 1 --branch v5.6.0 https://github.com/jrouwe/JoltPhysics.git .jolt-src/core
+          test "$(git -C .jolt-src/emsdk rev-parse HEAD)" = ca38f487f28b7c3c16f8f70cd0e012099ac4b7e2
+          test "$(git -C .jolt-src/wrapper rev-parse HEAD)" = c9c122bcd48e92885fbee7d267c928c3781d581c
+          test "$(git -C .jolt-src/core rev-parse HEAD)" = e77f175595e64cb44218cc9d9d56fc365ad0e36a
+          cp extensions/workbench-dice3d/public/vendor/jolt-physics.wasm.js ../variants/original/
+          cp extensions/workbench-dice3d/public/vendor/jolt-physics.wasm.wasm ../variants/original/
+          cp ../variants/original/jolt-physics.wasm.js ../variants/original/jolt-physics.wasm.mjs
+      - name: Install exact Emscripten 6.0.2
+        working-directory: .jolt-src/emsdk
+        run: |
+          set -euo pipefail
+          ./emsdk install 6.0.2 2>&1 | tee ../../../evidence/build/sdk-install.log
+          ./emsdk activate 6.0.2 2>&1 | tee ../../../evidence/build/sdk-activate.log
+      - name: Build matched scalar and SIMD variants sequentially
+        run: |
+          set -euo pipefail
+          source .jolt-src/emsdk/emsdk_env.sh
+          root="$PWD"
+          emcc --version | tee ../evidence/build/compiler.txt
+          for variant in scalar simd; do
+            cp -a .jolt-src/wrapper ".jolt-src/$variant"
+            cd ".jolt-src/$variant"
+            npm ci --no-audit --no-fund
+            mkdir -p dist
+            simd=OFF
+            if test "$variant" = simd; then simd=ON; fi
+            cmake -S . -B Build/Research -G Ninja \
+              -DCMAKE_BUILD_TYPE=Distribution \
+              -DENABLE_MULTI_THREADING=OFF \
+              -DENABLE_SIMD="$simd" \
+              -DBUILD_WASM_COMPAT_ONLY=OFF \
+              -DDOUBLE_PRECISION=OFF \
+              -DALLOW_MEMORY_GROWTH=OFF \
+              -DCROSS_PLATFORM_DETERMINISTIC=OFF \
+              -DFETCHCONTENT_SOURCE_DIR_JOLTPHYSICS="$root/.jolt-src/core" \
+              2>&1 | tee "$root/../evidence/build/$variant-configure.log"
+            cmake --build Build/Research --target jolt-wasm --parallel 2 \
+              2>&1 | tee "$root/../evidence/build/$variant-build.log"
+            mkdir -p "$root/../variants/$variant"
+            cp dist/jolt-physics.wasm.js dist/jolt-physics.wasm.wasm "$root/../variants/$variant/"
+            cp dist/jolt-physics.wasm.js "$root/../variants/$variant/jolt-physics.wasm.mjs"
+            cp Build/Research/CMakeCache.txt "$root/../evidence/build/$variant-CMakeCache.txt"
+            cd "$root"
+          done
+      - name: Decode real WebAssembly instructions and preserve feature proof
+        run: |
+          set -euo pipefail
+          for variant in original scalar simd; do
+            .jolt-src/emsdk/upstream/bin/wasm-dis "../variants/$variant/jolt-physics.wasm.wasm" -o "../evidence/build/$variant.wat"
+          done
+          python3 - <<'PY'
+          import re,json,pathlib,platform
+          root=pathlib.Path('../evidence/build')
+          proof={}
+          for variant in ['original','scalar','simd']:
+              text=(root/(variant+'.wat')).read_text()
+              proof[variant]={'vectorInstructions':len(re.findall(r'\((?:v128|f32x4|f64x2|i8x16|i16x8|i32x4|i64x2)\.',text)),
+                  'memory':re.findall(r'\(memory[^\n]+',text),'sharedMemory':any('shared' in m for m in re.findall(r'\(memory[^\n]+',text)),
+                  'imports':re.findall(r'\(import[^\n]+',text)}
+          assert proof['original']['vectorInstructions']==0
+          assert proof['scalar']['vectorInstructions']==0
+          assert proof['simd']['vectorInstructions']>0
+          (root/'feature-proof.json').write_text(json.dumps(proof,indent=2)+'\n')
+          print(json.dumps(proof,indent=2))
+          PY
+      - name: Full trajectory, physical rules and serial balanced timing comparison
+        run: node tools/dice-jolt-engine-research.mjs
+      - name: Preserve candidate engines and auditable research evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jolt-simd-research-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ../variants/
+            ../evidence/engine/
+            ../evidence/build/*.json
+            ../evidence/build/*.log
+            ../evidence/build/*.txt
