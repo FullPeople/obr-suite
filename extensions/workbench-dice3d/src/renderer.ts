@@ -93,7 +93,7 @@ export class DiceRenderer {
     const loader=new GLTFLoader();
     const kinds=Object.keys(this.catalog.dice) as Kind[];
     // 31 assets; a sequential walk made the ready wait several round trips longer than needed.
-    await Promise.all(kinds.map(async kind=>{
+    const geometryReady=Promise.all(kinds.map(async kind=>{
       const path=this.catalog.dice[kind].model;
       const gltf=await loader.parseAsync(await this.assets.bytes(path),url('')).catch(error=>{throw Error(`模型解析 ${url(path)}: ${String(error)}`);});
       const mesh=gltf.scene.getObjectByName('RenderMesh') as T.Mesh;
@@ -103,10 +103,11 @@ export class DiceRenderer {
     const loadMask=createVerifiedTextureLoader(this.assets,async bytes=>{const mask=await decodeGlyphTexture(bytes);
       mask.needsUpdate=true;
       mask.flipY=false;mask.anisotropy=Math.min(8,this.gl.capabilities.getMaxAnisotropy());return mask;});
-    await Promise.all(Object.values(this.catalog.themes).flatMap(theme=>kinds.map(async kind=>{
+    const materialsReady=Promise.all(Object.values(this.catalog.themes).flatMap(theme=>kinds.map(async kind=>{
       const path=theme.masks[kind],mask=await loadMask(path).catch(error=>{throw Error(`贴图解码 ${url(path)}: ${String(error)}`);});
       this.materials.set(`${theme.id}:${kind}`,createDiceMaterial(theme,mask));
     })));
+    await Promise.all([geometryReady,materialsReady]);
     for(const kind of kinds){const mask=questionMask(kind);mask.anisotropy=Math.min(8,this.gl.capabilities.getMaxAnisotropy());
       for(const theme of Object.values(this.catalog.themes))this.materials.set(`${theme.id}:${kind}:hidden`,createDiceMaterial(theme,mask));}
     // Compile every shader variant while the layer is transparent, before ready ACK.
@@ -169,6 +170,7 @@ export class DiceRenderer {
     const theme=this.catalog.themes[roll.request.theme];
     const cue=presentation?.cue??buildCue(roll,this.projection,presentationTheme(theme,roll.request.bodyColor));
     const show=presentation?.show??new CueRenderer(this.container,roll.request.id,roll.request.name,roll.request.bodyColor);
+    show.prepareCue(cue);
     const meshes=roll.kinds.map((kind,index)=>{
       const base=this.materials.get(`${roll.request.theme}:${kind}${roll.masked?':hidden':''}`),geometry=this.geometry.get(kind);
       if(!base||!geometry)throw Error('来源皮肤/几何不可用');

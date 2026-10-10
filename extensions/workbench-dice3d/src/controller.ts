@@ -265,12 +265,18 @@ export class Controller {
       }
       this.privateAudiences.delete(actual.request.id);
       const {poses,contacts,...meta}=roll;
-      const bytes=await encodeRoll({...meta,collisions:contacts.length,contacts:contacts.length},poses,contacts);this.assertLive();const sha=await hash(bytes);this.assertLive();const chunks=split(bytes);
-      const members=[...this.peers.values()].filter(p=>p.ready&&now()-p.lastSeen<12000&&p.version===BUILD&&(!roll.masked||this.reservations.get(roll.request.id)?.members.includes(p.id))).map(p=>p.id);
+      const activeMembers=()=>[...this.peers.values()].filter(p=>p.ready&&now()-p.lastSeen<12000&&p.version===BUILD&&(!roll.masked||this.reservations.get(roll.request.id)?.members.includes(p.id))).map(p=>p.id);
+      const fastCompatible=(members:string[])=>members.length&&!this.verifyingPeers&&this.transport.role&&this.session&&roll.kinds.length<=20&&!roll.masked&&!hiddenRequest(roll.request)&&!roll.request.batch&&!roll.request.groupSize&&members.every(id=>{const p=this.peers.get(id);return p?.tracePacketV1&&p.ready&&p.session&&p.role;});
+      const compact=!!fastCompatible(activeMembers());
+      let bytes=await encodeRoll({...meta,collisions:contacts.length,contacts:contacts.length},poses,contacts,compact);this.assertLive();
+      const members=activeMembers();
+      // A peer changing capabilities during compression retains the legacy wire.
+      if(compact&&!fastCompatible(members)){bytes=await encodeRoll({...meta,collisions:contacts.length,contacts:contacts.length},poses,contacts);this.assertLive();}
+      const sha=await hash(bytes);this.assertLive();const chunks=split(bytes);
       // Negotiate per room. Old clients keep the exact manifest/chunk protocol.
       // A packet carries its own manifest so a lost first packet is repairable.
       let chunkBytes=CHUNK_BYTES;
-      if(members.length&&!this.verifyingPeers&&this.transport.role&&this.session&&roll.kinds.length<=20&&!roll.masked&&!hiddenRequest(roll.request)&&!roll.request.batch&&!roll.request.groupSize&&members.every(id=>{const p=this.peers.get(id)!;return p.tracePacketV1&&p.session&&p.role;})){
+      if(fastCompatible(members)){
         const fast=split(bytes,FAST_CHUNK_BYTES);
         if(fast.every((data,index)=>sizeOf({v:1,build:BUILD,from:this.transport.id,type:'trace',id:roll.request.id,total:fast.length,bytes:bytes.length,hash:sha,members,chunkBytes:FAST_CHUNK_BYTES,index,data})<=MAX_MESSAGE_BYTES)){
           chunkBytes=FAST_CHUNK_BYTES;chunks.splice(0,chunks.length,...fast);
