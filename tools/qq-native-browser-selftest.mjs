@@ -69,7 +69,7 @@ async function createContext(role='PLAYER',websiteLogin=false){
 }
 try{
  const ownerView=await createContext('PLAYER',true),page=ownerView.page;
- await expect(page.getByRole('button',{name:'上锁角色卡',exact:true})).toBeVisible();checks.push('ordinary-card-lock-before-login');
+ await page.getByRole('tab',{name:'普通房间角色',exact:true}).click();await expect(page.getByRole('button',{name:'上锁角色卡',exact:true})).toBeVisible();checks.push('ordinary-card-lock-before-login');
  const entry=page.getByRole('button',{name:/^QQ (?:登录|账号)与卡库$/});await expect(entry).toBeVisible();await expect(entry.locator('img')).toHaveAttribute('src','https://dnd.center/card/qq-login-170x32.png');
  const popupEvent=ownerView.context.waitForEvent('page');await entry.click();const popup=await popupEvent;await popup.getByRole('button',{name:'连接当前账号'}).click();
  const dialog=page.getByRole('dialog',{name:'QQ 账号与卡库'}),library=dialog.frameLocator('iframe');await expect(dialog).toBeVisible();await expect(entry).toHaveAttribute('aria-label','QQ 账号与卡库');await expect(entry).toContainText('枭熊卡主测试');await expect(entry.locator('img')).toHaveAttribute('src','https://qlogo.cn/qq-owner-test.png');await expect(entry.locator('picture')).toHaveCount(0);checks.push('signed-in-account-replaces-login-button');await expect(library.locator('#cards')).toContainText(card.character.name);await expect(library.locator('#cards')).not.toContainText('他人的私有角色');assert.equal(await library.locator('#editor').count(),0);checks.push('standard-QQ-button-popup-login','own-library-only','secondary-dialog','no-nested-card-browser');
