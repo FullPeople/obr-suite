@@ -1,4 +1,5 @@
 import {locateSceneItem} from './locate';
+import {QQ_CARDS,qqSession,qqRequest} from '../modules/characterCards/qq-account';
 import {workbenchStartup} from './startup-presentation';
 import {nativeCardOwners,ownsNativeToken,canReadNativeCard} from "../modules/characterCards/native-owner";
 import {resourceWidgetPresentation,updateResourceWidgetPresentation,quickbarAttackPresentation,hiddenResourcePresentation} from './resource-presentation';
@@ -100,7 +101,15 @@ async function start(){
  const documentLocation=(id:string)=>{const value=cardLocations.get(id);if(value instanceof Error)throw value;return value||cardLocation(origin,OBR.room.id||'default',id);};
  const definitionsFor=(scene:Record<string,unknown>)=>[...DEFAULT_BUFFS,...(Array.isArray(scene[SHARED_BUFFS])?scene[SHARED_BUFFS] as any[]:[])];
  async function loadCard(cardId:string,key:string,fresh=false){
-  const cached=documents.get(key);if(!fresh&&cached&&documentTimes.has(key))return cached;
+  const cached=documents.get(key),qqEntries=(await observation.read()).room[QQ_CARDS];
+  const cloud=Array.isArray(qqEntries)?qqEntries.find((row:any)=>row.id===cardId):undefined;
+  if(cloud?.qqRoom){
+   if(!fresh&&cached&&Date.now()-(documentTimes.get(key)||0)<2000)return cached;
+   const flight=cardReads.get(key);if(flight)return flight;
+   const task=(async()=>{const result=await qqRequest('room-cards/'+cloud.qqRoom.id,'GET',undefined,cloud.qqRoom),latest=documents.get(key);if(latest&&documentRevision(latest)>result.revision)return latest;cacheDocument(key,result.document);documentTimes.set(key,Date.now());return result.document;})();
+   cardReads.set(key,task);try{return await task;}finally{if(cardReads.get(key)===task)cardReads.delete(key);}
+  }
+  if(!fresh&&cached&&documentTimes.has(key))return cached;
   // Reuse an in-flight read. Ten observers must not fetch ten copies of the portrait.
   const flight=cardReads.get(key);if(flight)return flight;
   // A stable HTTP failure is not dirtiness. Only an explicit retry, location
@@ -146,7 +155,7 @@ async function start(){
    // Clearing a token state also retires the matching inventory grant before any
    // pending repair can reapply it. No ordinary runtime state becomes stock.
    let guard: {key:string;revision:number}|undefined;
-   if(doc.dnd_card_web&&!sameValue(documentRuntime(doc,defs).conditions,runtime.conditions)){const synced=await inventories.syncNative(`card:${cardId}`,doc.dnd_card_web,next.dnd_card_web,entry=>conditionIdentity(entry,defs),requestGuard);if(synced.ledgerRevision!==undefined)guard={key:inventories.key,revision:synced.ledgerRevision};}
+   if(!(await access(`card:${cardId}`)).card?.qqRoom&&doc.dnd_card_web&&!sameValue(documentRuntime(doc,defs).conditions,runtime.conditions)){const synced=await inventories.syncNative(`card:${cardId}`,doc.dnd_card_web,next.dnd_card_web,entry=>conditionIdentity(entry,defs),requestGuard);if(synced.ledgerRevision!==undefined)guard={key:inventories.key,revision:synced.ledgerRevision};}
    const liveObservation=await observation.read(),liveTokens=liveObservation.items.filter(i=>i.metadata[BIND]===cardId&&(liveObservation.role==='GM'||ownsNativeToken(i,playerId)));
    const tokenObservation=(rows:Item[])=>rows.map(i=>({id:i.id,runtime:tokenRuntime(i.metadata,documentRuntime(doc,defs)),baseline:i.metadata[RUNTIME_BASELINE]}));
    if(!sameValue(tokenObservation(tokens),tokenObservation(liveTokens)))return doc;
@@ -193,7 +202,7 @@ async function start(){
  async function catalog(){
   const {ready,scene,room,items,role,party,player}=await observation.read();
   if(player.id!==playerId||player.connectionId&&player.connectionId!==playerConnection)throw Object.assign(Error('账号或枭熊连接已改变；请从当前房间重新打开工作台'),{status:403});
-  const signature=`${observation.version()}:${documentCacheVersion}:${getState().allowPlayerMonsters}:${getState().enabled.bestiary}:${getState().enabled.hpBar}`;
+  const signature=`${observation.version()}:${qqSession()?.accountId||''}:${documentCacheVersion}:${getState().allowPlayerMonsters}:${getState().enabled.bestiary}:${getState().enabled.hpBar}`;
   // Movement does not rebuild the sheet projection, but callers such as dice
   // initialization still need the newest complete SDK item objects.
   if(catalogCache?.signature===signature)return {...catalogCache.value,items} as CatalogValue;
@@ -207,7 +216,7 @@ async function start(){
   // initializes. Recover that binding without depending on the old plugin to
   // populate the list, and default its visibility to owner/GM until known.
   const bound=items.filter(i=>typeof i.metadata[BIND]==='string'&&/^[a-zA-Z0-9_-]+$/.test(String(i.metadata[BIND]))).map(i=>({id:String(i.metadata[BIND]),name:i.name,owner_ids:[i.createdUserId],visibility:'owners',locked:true}));
-  const entries=new Map<string,any>();for(const c of [...bound,...directory,...roomList,...sceneList])if(typeof c?.id==='string'&&!deleted.includes(c.id))entries.set(c.id,{...entries.get(c.id),...c,...(c.visibility&&!Object.prototype.hasOwnProperty.call(c,'locked')?{locked:undefined}:{})});
+  const entries=new Map<string,any>();for(const c of [...bound,...directory,...roomList,...sceneList,...(Array.isArray(room[QQ_CARDS])?room[QQ_CARDS] as any[]:[])])if(typeof c?.id==='string'&&!deleted.includes(c.id))entries.set(c.id,{...entries.get(c.id),...c,...(c.visibility&&!Object.prototype.hasOwnProperty.call(c,'locked')?{locked:undefined}:{})});
   const all=[...entries.values()];
   // Retain a room directory independently of scene tokens, including inferred legacy ownership.
   for(const c of all){c.name=c.name||c.title||items.find(i=>i.metadata[BIND]===c.id)?.name||c.id;if(!Array.isArray(c.owner_ids)||!c.owner_ids.length){const owners=[...new Set(items.filter(i=>i.metadata[BIND]===c.id).map(i=>i.createdUserId))];if(owners.length)c.owner_ids=owners;}}
@@ -223,19 +232,19 @@ async function start(){
   // Recovery may fill missing directory entries, but an old scene snapshot
   // must not overwrite an existing room entry on every room-change event.
   // Rename/lock/import commands update the directory explicitly.
-  const compact=all.map(c=>({...c,...directory.find(row=>row.id===c.id)})).map(({id,name,owner_ids,locked,visibility,url})=>({id,name,owner_ids,locked,visibility,url}));
+  const compact=all.filter(c=>!c.qqRoom).map(c=>({...c,...directory.find(row=>row.id===c.id)})).map(({id,name,owner_ids,locked,visibility,url})=>({id,name,owner_ids,locked,visibility,url}));
   if(role==='GM'&&!directoryWrite&&!sameValue(directory,compact)){directoryWrite=true;void OBR.room.setMetadata({[DIRECTORY]:compact}).catch(error=>console.warn('[workbench] directory recovery pending',error)).finally(()=>{directoryWrite=false;});}
   const cards=all.map(c=>{const tokens=items.filter(i=>i.metadata[BIND]===c.id);
    // Native Set Owner is authoritative. Do not revive stale importer/editor
    // grants when ownership changes or when a token leaves the scene.
-   const owner_ids=nativeCardOwners(tokens,c.id);
+   const owner_ids=c.qqRoom?(c.owner_ids||[]):nativeCardOwners(tokens,c.id);
    // The card tab targets this item. Prefer the current player's own binding
    // so another owner's earlier token cannot make their own card read-only.
    const primaryToken=tokens.find(token=>ownsNativeToken(token,playerId))||tokens[0];
-   const own=!!playerId&&owner_ids.includes(playerId),locked=c.locked??!!(c.visibility&&c.visibility!=='public');
+   const own=c.qqRoom?qqSession()?.accountId===c.qqOwner:!!playerId&&owner_ids.includes(playerId),locked=c.locked??!!(c.visibility&&c.visibility!=='public');
    const projectedRevision=Math.max(0,...tokens.map(token=>{const baseline=token.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined;return baseline&&baseline.cardId===c.id?baseline.revision:0;}));if(projectedRevision>documentRevision(documents.get(`${OBR.room.id}:card:${c.id}`)))invalidateCard(c.id,projectedRevision);
-   return {...c,owner_ids,name:c.name||c.title||primaryToken?.name||c.id,own,write:role==='GM'||own,locked,inScene:tokens.length>0,itemId:primaryToken?.id||`card:${c.id}`,classSummary:undefined as ReturnType<typeof classSummary>|undefined,resourceWidgets:undefined as ReturnType<typeof resourceWidgetPresentation>|undefined,resourceAttacks:undefined as ReturnType<typeof quickbarAttackPresentation>,resourceHidden:[] as string[],documentRevision:0,passive:undefined as number|undefined,coins:{} as Record<string,number>,player:party.filter(p=>owner_ids.includes(p.id)).map(p=>p.name).join('、'),conditions:conditionRows({item:primaryToken,scene},undefined),resources:primaryToken?.metadata[RES]||[],stats:bubble(primaryToken)};
-  }).filter(c=>canReadNativeCard(c,c.owner_ids,playerId,role==='GM')).sort((a,b)=>Number(b.write)-Number(a.write)||Number(b.inScene)-Number(a.inScene)||String(a.name).localeCompare(String(b.name),'zh'));
+   return {...c,cloudRoom:!!c.qqRoom,owner_ids,name:c.name||c.title||primaryToken?.name||c.id,own,write:c.qqRoom?own||!locked:role==='GM'||own,locked,inScene:tokens.length>0,itemId:primaryToken?.id||`card:${c.id}`,classSummary:undefined as ReturnType<typeof classSummary>|undefined,resourceWidgets:undefined as ReturnType<typeof resourceWidgetPresentation>|undefined,resourceAttacks:undefined as ReturnType<typeof quickbarAttackPresentation>,resourceHidden:[] as string[],documentRevision:0,passive:undefined as number|undefined,coins:{} as Record<string,number>,player:party.filter(p=>owner_ids.includes(p.id)).map(p=>p.name).join('、'),conditions:conditionRows({item:primaryToken,scene},undefined),resources:primaryToken?.metadata[RES]||[],stats:bubble(primaryToken)};
+  }).filter(c=>c.qqRoom?c.own||!c.locked:canReadNativeCard(c,c.owner_ids,playerId,role==='GM')).sort((a,b)=>Number(b.write)-Number(a.write)||Number(b.inScene)-Number(a.inScene)||String(a.name).localeCompare(String(b.name),'zh'));
   for(const c of cards){const doc=documents.get(`${OBR.room.id}:card:${c.id}`);if(!doc)continue;const canonical=documentRuntime(doc,definitionsFor(scene));c.classSummary=classSummary(doc);c.documentRevision=documentRevision(doc);c.passive=doc.core_stats?.passive_perception;c.coins=documentCoins(doc);const defs=definitionsFor(scene);c.conditions=conditionRows({cardId:c.id,scene} as any,doc);(c as any).player=doc.dnd_card_web?.player||doc.identity?.player_name||party.filter(p=>c.owner_ids?.includes(p.id)).map(p=>p.name).join('、');c.stats={...c.stats,...canonical.stats};c.resources=Object.values(canonical.resources);c.resourceWidgets=resourceWidgetPresentation(doc,c.resources);c.resourceAttacks=quickbarAttackPresentation(doc);c.resourceHidden=hiddenResourcePresentation(doc,c.resources);}
   const ownerRolesKey='com.obr-suite/workbench/owner-roles',ownerRoles={...room[ownerRolesKey] as Record<string,string>,[playerId]:role};for(const p of party)ownerRoles[p.id]=p.role;if(role==='GM'&&!sameValue(ownerRoles,room[ownerRolesKey]))void OBR.room.setMetadata({[ownerRolesKey]:ownerRoles});
   const monsters=items.filter(item=>ownerRoles[item.createdUserId]==='PLAYER'&&hasMonsterComponent(item)&&(role==='GM'||item.createdUserId===playerId||getState().allowPlayerMonsters&&item.metadata['com.obr-suite/workbench/locked']!==true)).map(item=>{
@@ -257,7 +266,7 @@ async function start(){
  function publishAccess(list:CatalogValue){const access=cacheAccess(list);for(const id of warmCards)if(!(id.startsWith('card:')?access.cards.some(card=>id===`card:${card.id}`):access.monsters.some(card=>id===card.itemId||id===card.targetId)||access.cards.some(card=>card.itemIds.includes(id)))){warmCards.delete(id);warmSnapshots.delete(id);}if(access.epoch!==lastAccessEpoch){lastAccessEpoch=access.epoch;send('access',{access});}
   // Card tabs and permissions must not wait for the shared rules or inventory
   // ledger. The full catalog supplies those independent sections afterwards.
-  const directory={cards:list.cards.map(({id,name,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})=>({id,name,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})),monsters:list.monsters,role:list.role,enabled:access.enabled};
+  const directory={cards:list.cards.map(({id,name,cloudRoom,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})=>({id,name,cloudRoom,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})),monsters:list.monsters,role:list.role,enabled:access.enabled};
   const signature=JSON.stringify(directory);if(signature!==lastDirectory){lastDirectory=signature;send('directory',{sequence:++sequence,access,...directory});}return access;}
  function warmCard(id:string){warmCards.delete(id);warmCards.add(id);while(warmCards.size>24){const old=warmCards.values().next().value!;warmCards.delete(old);warmSnapshots.delete(old);}}
  // While following a multi-bound card, retain the selected native token.
@@ -309,7 +318,7 @@ async function start(){
  async function snapshot(id:string,existing?:Awaited<ReturnType<typeof catalog>>){
   let a=await access(id,existing);const sceneEpoch=observation.sceneEpoch(),identity=targetReadIdentity(a),doc=await read(a);a=await access(id);if(targetReadIdentity(a)!==identity||sceneEpoch!==observation.sceneEpoch())throw Error('角色关联或场景已改变');
   const b=bubble(a.item),canonical=a.cardId?documentRuntime(doc,definitionsFor(a.scene)):undefined;
-  return {sequence:++sequence,clientInstance,clientSelection,access:publishAccess(a),state:{key:a.key,targetId:a.targetId,itemId:a.item?.id||`card:${a.cardId}`,name:doc?.identity?.character_name||doc?.name||a.card?.name||a.item?.name,cardId:a.cardId,slug:a.slug,kind:a.cardId?'character':a.slug?'monster':'token',documentRevision:a.cardId?documentRevision(doc):undefined,projectionPending:!!a.cardId&&a.items.some(item=>item.metadata[BIND]===a.cardId&&(item.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined)?.revision!==documentRevision(doc)),stats:canonical?{...a.card?.stats,...canonical.stats}:Object.fromEntries(fields.filter(k=>typeof b[k]==='number').map(k=>[k,b[k]])),write:a.write,role:a.role,pinned:!follow,tokenPortrait:tokenPortrait(a.item),locked:a.card?.locked??a.item?.metadata['com.obr-suite/workbench/locked']===true,statsLocked:b.locked!==false,...live(a),conditions:conditionRows(a,doc),resources:canonical?Object.values(canonical.resources):live(a).resources},document:doc};
+  return {sequence:++sequence,clientInstance,clientSelection,access:publishAccess(a),state:{key:a.key,targetId:a.targetId,itemId:a.item?.id||`card:${a.cardId}`,name:doc?.identity?.character_name||doc?.name||a.card?.name||a.item?.name,cardId:a.cardId,slug:a.slug,kind:a.cardId?'character':a.slug?'monster':'token',cloudRoom:!!a.card?.qqRoom,documentRevision:a.cardId?documentRevision(doc):undefined,projectionPending:!!a.cardId&&a.items.some(item=>item.metadata[BIND]===a.cardId&&(item.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined)?.revision!==documentRevision(doc)),stats:canonical?{...a.card?.stats,...canonical.stats}:Object.fromEntries(fields.filter(k=>typeof b[k]==='number').map(k=>[k,b[k]])),write:a.write,role:a.role,pinned:!follow,tokenPortrait:tokenPortrait(a.item),locked:a.card?.locked??a.item?.metadata['com.obr-suite/workbench/locked']===true,statsLocked:b.locked!==false,...live(a),conditions:conditionRows(a,doc),resources:canonical?Object.values(canonical.resources):live(a).resources},document:doc};
  }
  async function persistDocument(a:Awaited<ReturnType<typeof access>>,existing:any,data:any,inventoryGuard?:{key:string;revision:number},conditionGrant=false,requestGuard?:()=>void|Promise<void>){
   await requestGuard?.();await observation.refreshAuthority();
@@ -320,6 +329,14 @@ async function start(){
   const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(existing))),expected=[...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('');
   const location=documentLocation(a.cardId);
   const beforeSend=async()=>{await requestGuard?.();await observation.refreshAuthority();const live=await access(`card:${a.cardId}`);if(sceneEpoch!==observation.sceneEpoch()||authorityVersion!==observation.authorityVersion('card:'+a.cardId)||live.key!==a.key||(!live.write&&!(conditionGrant&&live.card&&!live.card.locked)))throw Object.assign(Error('角色修改权限已改变'),{status:403});};
+  if(permission.card?.qqRoom){
+    await beforeSend();
+    try{const result=await qqRequest('room-cards/'+permission.card.qqRoom.id,'PUT',{document:data,revision:documentRevision(existing)},permission.card.qqRoom);cardCommitted(a,result.document);return;}
+    catch(error){const failure=error as any;if(failure.status&&failure.status<500)throw error;documentTimes.delete(a.key);
+     try{const confirmed=await qqRequest('room-cards/'+permission.card.qqRoom.id,'GET',undefined,permission.card.qqRoom);if(confirmed.revision===documentRevision(existing)+1&&sameValue(confirmed.character,data.dnd_card_web)){cardCommitted(a,confirmed.document);return;}}catch{}
+     throw Object.assign(Error('云端原卡写回结果暂时无法确认，本机草稿保留。请核对云端版本后再操作。'),{uncertain:true,diagnostic:{code:'ROOM_WRITE_UNKNOWN'}});
+    }
+  }
   try{await relay.send({saveCard:{room:location.room,card:location.card,logicalCard:a.cardId,inventoryRoom:(OBR.room.id||'default').replace(/[^a-zA-Z0-9_-]/g,'_'),expected,changes:documentChanges(existing,data).map(({path,after,remove})=>({path,after,remove})),inventoryGuard}},beforeSend);}
   catch(error){documentTimes.delete(a.key);const e=error as any;if(e.notSent||e.status&&e.status<500)throw error;
    // A lost HTTP response is not evidence of a failed write. Read back once;
@@ -344,14 +361,14 @@ async function start(){
   const ledger=await inventories.read();
   // Never seed a legacy backpack before its document has arrived. It can be added
   // to the ledger after hydration without holding up selection or other cards.
-  const definitions:InventoryDefinition[]=[{id:publicId,name:'公共仓库',kind:'public',write:data.role==='GM'||!ledger.data.containers[publicId]?.locked},...data.cards.filter(c=>ledger.data.containers[`card:${c.id}`]||documents.has(`${OBR.room.id}:card:${c.id}`)).map(c=>({id:`card:${c.id}`,name:c.name,kind:'card' as const,write:c.write,document:documents.get(`${OBR.room.id}:card:${c.id}`)}))];
+  const definitions:InventoryDefinition[]=[{id:publicId,name:'公共仓库',kind:'public',write:data.role==='GM'||!ledger.data.containers[publicId]?.locked},...data.cards.filter(c=>!c.qqRoom).filter(c=>ledger.data.containers[`card:${c.id}`]||documents.has(`${OBR.room.id}:card:${c.id}`)).map(c=>({id:`card:${c.id}`,name:c.name,kind:'card' as const,write:c.write,document:documents.get(`${OBR.room.id}:card:${c.id}`)}))];
   for(const item of data.items.filter(i=>hasMonsterComponent(i)&&(data.role==='GM'||i.createdUserId===playerId)))definitions.push({id:`monster:${item.id}`,name:item.name,kind:'monster',write:true});
   return {definitions,publicId,gm:data.role==='GM',authority:{gm:data.role==='GM',read:new Set(definitions.map(d=>d.id)),write:new Set(definitions.filter(d=>d.write).map(d=>d.id)),give:new Set(definitions.filter(d=>d.kind!=='monster'||d.write).map(d=>d.id))}};
  }
  async function inventoryMirror(id:string,container:any,conditionIds:string[]=[],conditionEntries:any[]=[]){
   if(!id.startsWith('card:')&&!id.startsWith('monster:'))return;
   const current=await inventories.read(true),pending=current.data.projections?.[id];if(!pending)return;container=current.data.containers[id];conditionIds=pending.conditions;conditionEntries=pending.entries||[];
-  const a=await access(id),oldConditions=a.cardId?(await read(a,true))?.dnd_card_web?.selections?.filter((s:any)=>s.entry.kind==='condition')||[]:[];
+  const a=await access(id);if(a.card?.qqRoom)return;const oldConditions=a.cardId?(await read(a,true))?.dnd_card_web?.selections?.filter((s:any)=>s.entry.kind==='condition')||[]:[];
   const custom=Array.isArray(a.scene[SHARED_BUFFS])?a.scene[SHARED_BUFFS] as any[]:[],defs=[...DEFAULT_BUFFS,...custom],identify=(entry:any)=>conditionIdentity(entry,defs);
   if(a.cardId){const existing=await read(a,true),doc=inventoryProjection(existing,container,conditionIds,conditionEntries,identify);if(JSON.stringify(doc)!==JSON.stringify(existing))await persistDocument(a,existing,doc,{key:inventories.key,revision:current.revision});}
   if(!conditionIds.length)return;
@@ -440,7 +457,7 @@ async function start(){
  async function refresh(){if(!relayActive&&(!child||child.closed))return;if(refreshing){again=true;return;}refreshing=true;
   try{
    const observedVersion=observation.version(),startedEpoch=epoch;
-   const list=await catalog();const access=publishAccess(list);const [rules,observed,inventoryContextNow]=await Promise.all([shared.read(),observation.read(),inventoryContext(list)]),inventory=await inventories.view(inventoryContextNow.definitions,inventoryContextNow.gm,inventoryContextNow.publicId);for(const card of list.cards){const container=inventory.containers[`card:${card.id}`];if(container)card.coins=Object.fromEntries(container.items.filter(row=>row.kind==='currency').map(row=>[row.coin!,row.quantity]));}const data={cards:list.cards.map(({id,name,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})=>({id,name,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})),monsters:list.monsters,role:list.role,shared:rules,inventory,settings:getState(),enabled:getState().enabled,visibility:{wiki:getState().enabled.search!==false&&(list.role==='GM'||!getState().searchGmOnly),monsters:getState().enabled.bestiary!==false&&(list.role==='GM'||getState().allowPlayerMonsters)},console:{timeStop:readTimeStop(list.scene[TIME_STOP_META]).active,portalEffects:getState().portalEffects!==false,players:[observed.player,...observed.party.filter(p=>p.id!==observed.player.id)]}};
+   const list=await catalog();const access=publishAccess(list);const [rules,observed,inventoryContextNow]=await Promise.all([shared.read(),observation.read(),inventoryContext(list)]),inventory=await inventories.view(inventoryContextNow.definitions,inventoryContextNow.gm,inventoryContextNow.publicId);for(const card of list.cards){const container=inventory.containers[`card:${card.id}`];if(container)card.coins=Object.fromEntries(container.items.filter(row=>row.kind==='currency').map(row=>[row.coin!,row.quantity]));}const data={cards:list.cards.map(({id,name,cloudRoom,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})=>({id,name,cloudRoom,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})),monsters:list.monsters,role:list.role,shared:rules,inventory,settings:getState(),enabled:getState().enabled,visibility:{wiki:getState().enabled.search!==false&&(list.role==='GM'||!getState().searchGmOnly),monsters:getState().enabled.bestiary!==false&&(list.role==='GM'||getState().allowPlayerMonsters)},console:{timeStop:readTimeStop(list.scene[TIME_STOP_META]).active,portalEffects:getState().portalEffects!==false,players:[observed.player,...observed.party.filter(p=>p.id!==observed.player.id)]}};
    if(observation.version()!==observedVersion||epoch!==startedEpoch){again=true;return;}
    const signature=JSON.stringify(data);if(signature!==lastCatalog){lastCatalog=signature;send('catalog',{sequence:++sequence,access,...data});}
   }catch(error){console.warn('[workbench] catalog refresh',error);}finally{refreshing=false;if(again){again=false;void refresh();}}
@@ -514,7 +531,7 @@ async function start(){
    if(!sameValue(current,change.before))throw Error('状态已被其他操作修改，请重试');
    const next=[...rows.filter(row=>row.id!==change.conditionId),...(change.after?[change.after]:[])],defs=definitionsFor(a.scene);
    const nativeRows=(values:ConditionRow[])=>({selections:values.map(row=>({id:'suite-status:'+row.id,entry:row.entry,level:row.level||1,quantity:1}))});
-   const sync=await inventories.syncNative(a.cardId?`card:${a.cardId}`:`monster:${a.item!.id}`,nativeRows(rows),nativeRows(next),entry=>conditionIdentity(entry,defs),requestGuard);
+   const sync=a.card?.qqRoom?{ledgerRevision:undefined,ledgerCommitted:false}:await inventories.syncNative(a.cardId?`card:${a.cardId}`:`monster:${a.item!.id}`,nativeRows(rows),nativeRows(next),entry=>conditionIdentity(entry,defs),requestGuard);
    if(change.after&&!defs.some(def=>def.id===change.after!.id))defs.push({id:change.after.id,name:change.after.name,entry:change.after.entry,color:'#777777'});
    if(a.cardId){
     const updated=writeRuntime(doc,{...documentRuntime(doc,defs),conditions:next.map(row=>row.id)},defs);
@@ -545,6 +562,7 @@ async function start(){
   }
  });
  async function command(m:any){
+  if(m.type==='qqLibrary'){await OBR.modal.open({id:'com.obr-suite/qq-card-library',url:assetUrl('cc-qq.html'),width:1280,height:850});return;}
   if(m.type==='groupRoll'){const result=await groups.handle(m);if(m.action==='close')finishMapFollow();return result;}
   if(m.type==='refreshCatalog'){await observation.refreshCatalog();const list=await catalog();return {catalog:{cards:list.cards,monsters:list.monsters,sequence:++sequence},access:publishAccess(list)};}
   if(m.type==='readCard'){const a=await access(m.itemId),sceneEpoch=observation.sceneEpoch(),identity=targetReadIdentity(a),document=await read(a),latest=await access(m.itemId);if(targetReadIdentity(latest)!==identity||sceneEpoch!==observation.sceneEpoch())throw Error('角色关联或权限已改变');return {document};}
@@ -660,6 +678,11 @@ async function start(){
    await m._beforeMutation?.();await OBR.scene.items.updateItems(targets.filter(i=>i.type==='IMAGE'&&(a.role==='GM'||ownsNativeToken(i,playerId))).map(i=>i.id),drafts=>{m._assertAuthority?.();for(const item of drafts){if(observation.peek().role!=='GM'&&!ownsNativeToken(item,playerId)||a.cardId&&item.metadata[BIND]!==a.cardId)continue;const image=item as any;image.text={...image.text,type:image.text?.type||'PLAIN',plainText:String(image.text?.plainText||'').trim()===name?'':name};}});return;
   }
   if(m.type==='delete'){
+   if(a.card?.qqRoom){
+    await m._beforeMutation?.();await qqRequest('room-cards/'+a.card.qqRoom.id,'DELETE',{},a.card.qqRoom);
+    const room=await OBR.room.getMetadata();await OBR.room.setMetadata({[QQ_CARDS]:(room[QQ_CARDS] as any[]).filter(c=>c.id!==a.cardId)});
+    documents.delete(a.key);documentCacheVersion++;return {deleted:a.cardId};
+   }
    if(!a.cardId)throw Error('没有角色卡');if(a.role!=='GM'&&a.items.some(item=>item.metadata[BIND]===a.cardId&&!ownsNativeToken(item,playerId)))throw Error('此卡还绑定其他所属玩家的棋子，仅 DM 可删除');const location=documentLocation(a.cardId);
    try{await relay.send({deleteCard:{room:location.room,card:location.card}},m._beforeMutation);}catch(error){const e=error as any;if(e?.notSent||e?.status&&e.status<500)throw error;throw Object.assign(Error('删除结果尚未确认；请先刷新目录并核对，勿重复提交'),{uncertain:true,status:e?.status,diagnostic:{code:'DELETE_RESULT_UNKNOWN',operation:'delete',phase:'delete-document'}});}
    // The durable delete (including idempotent storage 404) has completed.
@@ -688,6 +711,11 @@ async function start(){
    for(const [key,r] of Object.entries(resources) as [string,any][]){if(key.startsWith('spell-slot:')&&doc.spellcasting?.spell_slots)doc.spellcasting.spell_slots[key.split(':')[1]]={max:r.max,used:r.max-r.current,current:r.current};}
    if(doc.core_stats?.hit_dice)doc.core_stats.hit_dice.current=Object.entries(resources).filter(([id])=>id.startsWith('hit-die:')).reduce((n,[,r]:any)=>n+r.current,0);
    if(a.cardId){await persistDocument(a,existing,doc,undefined,false,m._beforeMutation);m._committed={kind:'document',id:`card:${a.cardId}`};await resourceNotices(a,beforeResources,resources);}m._phase='sync-token';await setTokens(a,{resources:Object.entries(resources).map(([id,r]:[string,any])=>({...r,id}))},a.cardId?undefined:m._beforeMutation,a.cardId?undefined:m._assertAuthority);if(!a.cardId){m._committed={kind:'token',id:a.targetId};await resourceNotices(a,beforeResources,resources);}return {snapshot:await snapshot(a.targetId)};
+  }
+  if(m.type==='lock'&&a.card?.qqRoom){
+    await m._beforeMutation?.();const result=await qqRequest('room-cards/'+a.card.qqRoom.id+'/lock','PUT',{locked:!!m.locked},a.card.qqRoom);
+    const room=await OBR.room.getMetadata();await OBR.room.setMetadata({[QQ_CARDS]:(room[QQ_CARDS] as any[]).map(c=>c.id===a.cardId?{...c,locked:result.locked,visibility:result.locked?'owners':'public'}:c)});
+    return {snapshot:await snapshot('card:'+a.cardId)};
   }
   if(m.type==='lock'){
    if(!a.cardId){if(!a.item)throw Error('没有怪物卡');await m._beforeMutation?.();await OBR.scene.items.updateItems([a.item.id],rows=>{m._assertAuthority?.();for(const row of rows){assertMonsterWrite(a,row);row.metadata['com.obr-suite/workbench/locked']=!!m.locked;}});return {snapshot:await snapshot(a.targetId)};}const locked=!!m.locked,update=(list:any[])=>list.map(c=>c.id===a.cardId?{...c,locked,visibility:locked?'owners':'public'}:c);
@@ -728,8 +756,8 @@ async function start(){
   const resources=Object.entries(native.runtime.resources||{}).filter(([,r])=>r&&typeof r==='object').map(([id,value]:[string,any])=>({id,name:value.name||id,type:value.type||'count',icon:value.icon||'circle',...value}));
   merged.web_resources=structuredClone(native.runtime.resources);
   m._phase='sync-inventory';
-  if(nativeInventoryChanged(m.previous||base,native,identify))await inventories.ensure([{id:`card:${a.cardId}`,name:a.card!.name,kind:'card',write:a.write,document:existing}],m._beforeMutation);
-  const inventorySync=await inventories.syncNative(`card:${a.cardId}`,m.previous||base,native,identify,m._beforeMutation);m._inventoryCommitted=inventorySync.ledgerCommitted===true;
+  if(!a.card?.qqRoom&&nativeInventoryChanged(m.previous||base,native,identify))await inventories.ensure([{id:`card:${a.cardId}`,name:a.card!.name,kind:'card',write:a.write,document:existing}],m._beforeMutation);
+  const inventorySync=a.card?.qqRoom?{ledgerRevision:undefined,ledgerCommitted:false,container:undefined,projection:undefined}:await inventories.syncNative(`card:${a.cardId}`,m.previous||base,native,identify,m._beforeMutation);m._inventoryCommitted=inventorySync.ledgerCommitted===true;
   m._phase='save-document';await persistDocument(a,existing,merged,inventorySync.ledgerRevision===undefined?undefined:{key:inventories.key,revision:inventorySync.ledgerRevision},false,m._beforeMutation);m._committed={kind:'document',id:`card:${a.cardId}`};
   if(conditionsChanged)publishStatusDefinitions(additions);
   if(resourcesChanged)await resourceNotices(a,base.runtime?.resources||{},native.runtime.resources||{});
