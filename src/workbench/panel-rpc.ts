@@ -44,7 +44,7 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
    if(method==='room.getMetadata')return select(await OBR.room.getMetadata());
    if(method==='room.setMetadata'){
     const update=args[0],rows=update?.[QQ_CARDS];
-    if(args.length!==1||!update||Object.keys(update).length!==1||!Array.isArray(rows)||rows.length>1000||JSON.stringify(rows).length>1000000||rows.some(row=>!row||typeof row.id!=='string'||typeof row.name!=='string'||typeof row.qqOwner!=='string'||typeof row.locked!=='boolean'||!['owners','public'].includes(row.visibility)||!Array.isArray(row.owner_ids)||row.owner_ids.some((id:unknown)=>typeof id!=='string')||row.qqRoom?.id!==row.id||typeof row.qqRoom?.capability!=='string'))throw Error('无效 QQ 房间卡资料');
+    if(args.length!==1||!update||Object.keys(update).length!==1||!Array.isArray(rows)||rows.length>1000||JSON.stringify(rows).length>1000000||rows.some(row=>!row||typeof row.id!=='string'||typeof row.name!=='string'||typeof row.qqOwner!=='string'||typeof row.locked!=='boolean'||!['owners','public'].includes(row.visibility)||!Array.isArray(row.owner_ids)||row.owner_ids.some((id:unknown)=>typeof id!=='string')||typeof row.qqRoom?.id!=='string'||!/^[a-f0-9-]{36}$/.test(row.qqRoom.id)||typeof row.qqRoom?.capability!=='string'))throw Error('无效 QQ 房间卡资料');
     return OBR.room.setMetadata({[QQ_CARDS]:rows});
    }
    if(method==='subscribe'&&args[0]==='roomMetadata'&&args[1]==null){

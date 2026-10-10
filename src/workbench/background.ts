@@ -1,5 +1,6 @@
 import {locateSceneItem} from './locate';
 import {QQ_CARDS,qqSession,qqRequest} from '../modules/characterCards/qq-account';
+import {uploadRoomCard,cloudRevisionOffset,roomCloudDocument} from './cloud-upload';
 import {workbenchStartup} from './startup-presentation';
 import {nativeCardOwners,ownsNativeToken,canReadNativeCard} from "../modules/characterCards/native-owner";
 import {resourceWidgetPresentation,updateResourceWidgetPresentation,quickbarAttackPresentation,hiddenResourcePresentation} from './resource-presentation';
@@ -112,7 +113,7 @@ async function start(){
    if(!fresh&&cached&&Date.now()-(documentTimes.get(key)||0)<5000)return cached;
    const flight=cardReads.get(key);if(flight)return flight;
    const scope=cloudPermissionScope(cloud);
-   const task=(async()=>{const result=await qqRequest('room-cards/'+cloud.qqRoom.id+(cached?'?since='+documentRevision(cached):''),'GET',undefined,cloud.qqRoom),latest=documents.get(key);rememberCloudPermission(cloud,result,scope);if(result.unchanged&&cached){documentTimes.set(key,Date.now());return cached;}if(latest&&documentRevision(latest)>result.revision)return latest;cacheDocument(key,result.document);documentTimes.set(key,Date.now());return result.document;})();
+   const task=(async()=>{const result=await qqRequest('room-cards/'+cloud.qqRoom.id+(cached?'?since='+(documentRevision(cached)-cloudRevisionOffset(cloud)):''),'GET',undefined,cloud.qqRoom),latest=documents.get(key);rememberCloudPermission(cloud,result,scope);if(result.unchanged&&cached){documentTimes.set(key,Date.now());return cached;}const document=roomCloudDocument(result.document,cloud);if(latest&&documentRevision(latest)>documentRevision(document))return latest;cacheDocument(key,document);documentTimes.set(key,Date.now());return document;})();
    cardReads.set(key,task);try{return await task;}finally{if(cardReads.get(key)===task)cardReads.delete(key);}
   }
   if(!fresh&&cached&&documentTimes.has(key))return cached;
@@ -301,8 +302,8 @@ async function start(){
   if(meta['com.obr-suite/hp-bar/enabled']===true)return true;
   const stats=bubble(item);return fields.some(field=>typeof stats[field]==='number'&&Number.isFinite(stats[field]));
  }
- function targetReadIdentity(a:{key:string;cardId:string;item?:Item;scene:Record<string,unknown>}){
-  if(a.cardId)return a.key;
+ function targetReadIdentity(a:{key:string;cardId:string;card?:{qqRoom?:{id:string};qqCardId?:string;qqRevisionOffset?:number};item?:Item;scene:Record<string,unknown>}){
+  if(a.cardId)return a.card?.qqRoom?JSON.stringify([a.key,a.card.qqRoom.id,a.card.qqCardId,cloudRevisionOffset(a.card)]):a.key;
   const meta=a.item?.metadata;return JSON.stringify([a.key,meta?.[BIND],meta?.[MONSTER],meta?.['com.obr-suite/hp-bar/enabled'],a.item?.createdUserId,meta?.['com.obr-suite/workbench/locked'],meta?.[SLUG]?(a.scene['com.bestiary/monsters'] as any)?.[String(meta[SLUG])]:undefined]);
  }
  async function access(id:string,existing?:Awaited<ReturnType<typeof catalog>>){
@@ -341,9 +342,9 @@ async function start(){
     await beforeSend();
     const cloudDocument=structuredClone(data);if(cloudDocument.dnd_card_web)cloudDocument.dnd_card_web.id=existing.dnd_card_web.id;
     const scope=cloudPermissionScope(permission.card);
-    try{const result=await qqRequest('room-cards/'+permission.card.qqRoom.id,'PUT',{document:cloudDocument,revision:documentRevision(existing)},permission.card.qqRoom);rememberCloudPermission(permission.card,result,scope);cardCommitted(a,result.document);return;}
+    try{const result=await qqRequest('room-cards/'+permission.card.qqRoom.id,'PUT',{document:cloudDocument,revision:documentRevision(existing)-cloudRevisionOffset(permission.card)},permission.card.qqRoom);rememberCloudPermission(permission.card,result,scope);cardCommitted(a,roomCloudDocument(result.document,permission.card));return;}
     catch(error){const failure=error as any;if(failure.status&&failure.status<500)throw error;documentTimes.delete(a.key);
-     try{const confirmed=await qqRequest('room-cards/'+permission.card.qqRoom.id,'GET',undefined,permission.card.qqRoom);if(confirmed.revision===documentRevision(existing)+1&&sameValue(confirmed.character,cloudDocument.dnd_card_web)){cardCommitted(a,confirmed.document);return;}}catch{}
+     try{const confirmed=await qqRequest('room-cards/'+permission.card.qqRoom.id,'GET',undefined,permission.card.qqRoom);if(confirmed.revision+cloudRevisionOffset(permission.card)===documentRevision(existing)+1&&sameValue(confirmed.character,cloudDocument.dnd_card_web)){cardCommitted(a,roomCloudDocument(confirmed.document,permission.card));return;}}catch{}
      throw Object.assign(Error('云端原卡写回结果暂时无法确认，本机草稿保留。请核对云端版本后再操作。'),{uncertain:true,diagnostic:{code:'ROOM_WRITE_UNKNOWN'}});
     }
   }
@@ -584,6 +585,16 @@ async function start(){
    if(m.condition?.entry){const a=await access(m.itemId);m.condition={...m.condition,id:conditionIdentity(m.condition.entry,definitionsFor(a.scene)),level:Math.max(1,Math.min(6,Number(m.condition.level)||1))};}
    return changeCondition(m,m._beforeMutation);
   }
+  if(m.type==='cloudUpload'){
+   const a=await access(m.itemId),roomId=OBR.room.id,sceneEpoch=observation.sceneEpoch();
+   if(m.accountId!==qqSession()?.accountId)throw Error('QQ 账号已改变，请重新打开云端设置。');
+   if(!a.cardId||!a.card||!a.write)throw Error('只有有编辑权限的角色卡可以上传云端。');
+   if(a.card.qqRoom)return {snapshot:await snapshot(m.itemId)};
+   const guard=async()=>{await m._beforeMutation?.();const current=await access(m.itemId);if(OBR.room.id!==roomId||observation.sceneEpoch()!==sceneEpoch||current.key!==a.key||!current.write||current.card?.qqRoom)throw Error('房间、角色关联或上传权限已改变，请重新读取。');};
+   const result=await uploadRoomCard({roomId,cardId:a.cardId,playerId,native:m.native,read:()=>read(a,true),guard,session:qqSession,request:qqRequest,storage:localStorage,getMetadata:()=>OBR.room.getMetadata(),setMetadata:update=>OBR.room.setMetadata(update),registryKey:QQ_CARDS});
+   m._committed={kind:'document',id:a.targetId};catalogCache=undefined;cardCommitted(a,result.document);
+   return {snapshot:await snapshot(m.itemId)};
+  }
   if(m.type==='cloudInfo'||m.type==='cloudEditors'){
    const a=await access(m.itemId);if(!a.card?.qqRoom)throw Error('当前卡不是云端卡');const actor=qqSession()?.accountId,roomId=OBR.room.id,scope=cloudPermissionScope(a.card);
    let info=await qqRequest('room-cards/'+a.card.qqRoom.id,'GET',undefined,a.card.qqRoom);
@@ -699,7 +710,7 @@ async function start(){
   if(m.type==='delete'){
    if(a.card?.qqRoom){
     await m._beforeMutation?.();await qqRequest('room-cards/'+a.card.qqRoom.id,'DELETE',{},a.card.qqRoom);
-    const room=await OBR.room.getMetadata();await OBR.room.setMetadata({[QQ_CARDS]:(room[QQ_CARDS] as any[]).filter(c=>c.id!==a.cardId)});
+    const room=await OBR.room.getMetadata();await OBR.room.setMetadata({[QQ_CARDS]:(room[QQ_CARDS] as any[]).filter(c=>c.id!==a.cardId),...(Object.hasOwn(a.card,'qqRevisionOffset')?{[DELETED]:[...new Set([...(Array.isArray(room[DELETED])?room[DELETED] as string[]:[]),a.cardId])]}:{})});
     documents.delete(a.key);documentCacheVersion++;return {deleted:a.cardId};
    }
    if(!a.cardId)throw Error('没有角色卡');if(a.role!=='GM'&&a.items.some(item=>item.metadata[BIND]===a.cardId&&!ownsNativeToken(item,playerId)))throw Error('此卡还绑定其他所属玩家的棋子，仅 DM 可删除');const location=documentLocation(a.cardId);
@@ -799,10 +810,10 @@ async function start(){
   if(m.type==='cancel'){if(!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}
   if(m.type==='pin'){follow=!m.pinned;if(!follow){finishMapFollow(false);if(typeof m.itemId==='string'&&m.itemId.length<=200){chosen=m.itemId;selectionGeneration++;last='';}}if(follow)lastSelection='';void refreshSelection();return;}
   if(m.type==='select'){if(Number.isSafeInteger(m.clientSelection)){const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(m.clientSelection<(selectionIntents.get(instance)||0))return;selectionIntents.delete(instance);selectionIntents.set(instance,m.clientSelection);while(selectionIntents.size>8)selectionIntents.delete(selectionIntents.keys().next().value!);clientInstance=instance==='legacy'?'':instance;clientSelection=m.clientSelection;}const generation=++selectionGeneration;finishMapFollow(false);let issuedAccess:ReturnType<typeof cacheAccess>|undefined;const readScene=observation.sceneEpoch();try{const list=await catalog();issuedAccess=publishAccess(list);const a=await access(m.itemId,list);if(generation!==selectionGeneration)return;chosen=a.targetId;const observed=await observation.read();lastSelection=selectionIdentity(observed.selection,observed.items);last='';void refreshSelection();}catch(e){if(generation===selectionGeneration&&readScene===observation.sceneEpoch())selectionFailure(m.itemId,e,issuedAccess);}return;}
-  if(!['locate','spawnMonster','groupRoll','assignOwners','readCard','refreshCard','refreshCatalog','showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','cloudInfo','cloudEditors','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
+  if(!['locate','spawnMonster','groupRoll','assignOwners','readCard','refreshCard','refreshCatalog','showEntry','stats','statsLock','save','roll','lock','console','diceRpc','delete','resource','rules','assignName','createCard','panelRpc','cloudInfo','cloudEditors','cloudUpload','monsterSave','inventory','condition'].includes(m.type)||typeof m.requestId!=='string'||m.requestId.length>100)return;
   if(requestRuns.has(m.requestId))return;
   delete m._committed;delete m._partialCommitted;delete m._inventoryCommitted;delete m._beforeMutation;delete m._assertAuthority;
-  const targetMutation=['save','stats','statsLock','resource','delete','assignName','lock','cloudEditors','monsterSave','condition','inventory'].includes(m.type);
+  const targetMutation=['save','stats','statsLock','resource','delete','assignName','lock','cloudEditors','cloudUpload','monsterSave','condition','inventory'].includes(m.type);
   const commandTargets=[...new Set((m.type==='inventory'?[m.operation?.container,m.operation?.from,m.operation?.to,...(m.operation?.action==='history'?stockHistory.get(m.operation.reference)?.changes.map(change=>change.id)||[]:[])]:m.type==='condition'?changeCondition.targets(m):[typeof m.key==='string'&&m.key.startsWith(`${OBR.room.id}:card:`)?`card:${m.key.slice(`${OBR.room.id}:card:`.length)}`:m.itemId]).filter((id):id is string=>typeof id==='string'&&!id.startsWith('public:')))];
   const receivedAuthority=commandTargets.map(id=>observation.authorityVersion(id)),receivedScene=observation.sceneEpoch(),receivedRole=observation.peek().role;
   const grantFor=(access:any,id:string)=>access.cards.find((card:any)=>id===`card:${card.id}`||card.itemIds.includes(id))||access.monsters.find((item:any)=>id===item.itemId||id===item.targetId);

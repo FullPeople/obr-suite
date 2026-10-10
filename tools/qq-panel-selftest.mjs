@@ -13,7 +13,7 @@ const request=(method,args=[])=>context.bridge('qq','qq-window',method,args),pla
 let count=0;async function check(name,fn){await fn();console.log('PASS',++count,name);}
 await check('Player can initialize the visible QQ workspace without receiving host preferences',async()=>assert.deepEqual(plain(await request('init')),{roomId:'room',playerId:'player',preferences:{}}));
 await check('Only QQ room cards can be read',async()=>assert.deepEqual(plain(await request('room.getMetadata')),{[QQ_CARDS]:[]}));
-const entry={id:'card',name:'fixture',qqOwner:'owner',locked:true,visibility:'owners',owner_ids:['player'],qqRoom:{id:'card',capability:'synthetic-capability'}};
+const entry={id:'card',name:'fixture',qqOwner:'owner',locked:true,visibility:'owners',owner_ids:['player'],qqRoom:{id:'00000000-0000-0000-0000-000000000001',capability:'synthetic-capability'}};
 await check('QQ cards are written while unrelated metadata survives',async()=>{await request('room.setMetadata',[{[QQ_CARDS]:[entry]}]);assert.equal(metadata.secret,'unrelated-room-state');assert.equal(writes.length,1);});
 await check('Unrelated metadata and malformed card writes are rejected',async()=>{for(const update of [{secret:'overwrite'},{[QQ_CARDS]:[],secret:'overwrite'},{[QQ_CARDS]:[{}]},{[QQ_CARDS]:[{...entry,qqRoom:{id:'other',capability:'cap'}}]}])await assert.rejects(()=>request('room.setMetadata',[update]),/无效 QQ/);assert.equal(writes.length,1);});
 await check('Room events expose only the QQ registry',async()=>{await request('subscribe',['roomMetadata']);await request('subscribe',JSON.parse(JSON.stringify(['roomMetadata',undefined])));assert.equal(listeners.size,1);listeners.get('room')(metadata);assert.deepEqual(plain(events.at(-1)[1].data),{[QQ_CARDS]:[entry]});});
