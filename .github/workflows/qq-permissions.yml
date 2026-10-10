@@ -1,7 +1,7 @@
 name: Verify QQ account and room permissions
 on:
   push:
-    branches: [codex/qq-account-permissions-dev-20261010, codex/qq-account-permissions-stable-20261010]
+    branches: [main, codex/qq-account-permissions-dev-20261010, codex/qq-account-permissions-stable-20261010]
   pull_request:
     paths: ['.github/workflows/qq-permissions.yml', 'cc-qq.html', 'src/modules/characterCards/**', 'src/workbench/background.ts', 'tools/qq-room-browser-selftest.mjs', 'tools/build-workbench-dev.mjs', 'tools/native-owner-selftest.mjs', 'tools/workbench-read-recovery-selftest.mjs', 'vite.config.ts']
   workflow_dispatch:
@@ -61,6 +61,9 @@ jobs:
         if: always()
         with:
           name: qq-permissions-${{ github.sha }}
+          include-hidden-files: true
           path: |
             .local-evidence/qq-room/result.json
             .local-evidence/qq-room/qq-owner.png
+            dist/
+            dist-workbench-dev/
