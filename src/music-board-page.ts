@@ -21,6 +21,7 @@ const pending = new Map<string,Pending>(), unsubs:Array<()=>void> = [];
 const palette: Array<[string,MusicTextKey]> = [["#50525b","gray"],["#58796a","green"],["#627caa","blue"],["#8b709e","purple"],["#ae8550","amber"],["#ac687c","rose"]];
 const mini = new URLSearchParams(location.search).get("mini") === "1";
 document.body.classList.toggle("mini", mini);
+if(new URLSearchParams(location.search).has("instance")){el("mini").hidden=true;el("drag").hidden=true;}
 try { document.documentElement.dataset.suiteNight = localStorage.getItem("full-suite/ui-night") === "1" ? "true" : "false"; const tone = localStorage.getItem("full-suite/ui-tone"); if (tone && /^#[0-9a-f]{6}$/i.test(tone)) document.documentElement.style.setProperty("--suite-tone",tone); } catch {}
 
 function feedback(value:string):void { el("feedback").textContent = value; }
