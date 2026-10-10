@@ -25,7 +25,8 @@ async function performQQRequest<T=any>(path:string,method='GET',data?:unknown,ro
   if(method==='GET'||method==='HEAD')data=undefined;
   let session=qqSession();
   if(method!=='GET'&&session&&!['plugin/start','plugin/poll','plugin/logout'].includes(path)){
-    const fresh=await qqRequest('session');if(!fresh.authenticated||fresh.account.id!==session.accountId)throw Error('QQ 账号已改变，请重新连接。');
+    let fresh;try{fresh=await qqRequest('session');}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}
+    if(!fresh.authenticated||fresh.account.id!==session.accountId||qqSession()?.token!==session.token)throw Object.assign(Error('QQ 账号已改变，请重新连接。'),{status:403,notSent:true});
     session={...session,csrf:fresh.csrf};
   }
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);

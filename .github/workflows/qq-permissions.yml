@@ -1,9 +1,9 @@
 name: Verify QQ account and room permissions
 on:
   push:
-    branches: [codex/qq-account-button-280-20261010, codex/cloud-card-native-20261010, dev, codex/qq-library-entry-dev-20261010, codex/qq-account-permissions-dev-20261010, codex/qq-account-permissions-stable-20261010]
+    branches: [codex/qq-room-cloud-button-281-20261011, codex/qq-account-button-280-20261010, codex/cloud-card-native-20261010, dev, codex/qq-library-entry-dev-20261010, codex/qq-account-permissions-dev-20261010, codex/qq-account-permissions-stable-20261010]
   pull_request:
-    paths: ['.github/workflows/qq-permissions.yml', 'cc-qq.html', 'src/modules/characterCards/**', 'src/workbench/background.ts', 'src/workbench/panel-rpc.ts', 'src/workbench/qq-account-adapter.ts', 'tools/build-workbench-panels.mjs', 'tools/qq-account-session-selftest.mjs', 'tools/qq-panel-selftest.mjs', 'tools/qq-room-browser-selftest.mjs', 'tools/build-workbench-dev.mjs', 'tools/native-owner-selftest.mjs', 'tools/workbench-read-recovery-selftest.mjs', 'vite.config.ts']
+    paths: ['src/workbench/cloud-upload.ts', 'tools/cloud-upload-selftest.mjs', 'tools/qq-native-browser-selftest.mjs', '.github/workflows/qq-permissions.yml', 'cc-qq.html', 'src/modules/characterCards/**', 'src/workbench/background.ts', 'src/workbench/panel-rpc.ts', 'src/workbench/qq-account-adapter.ts', 'tools/build-workbench-panels.mjs', 'tools/qq-account-session-selftest.mjs', 'tools/qq-panel-selftest.mjs', 'tools/qq-room-browser-selftest.mjs', 'tools/build-workbench-dev.mjs', 'tools/native-owner-selftest.mjs', 'tools/workbench-read-recovery-selftest.mjs', 'vite.config.ts']
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 3952a89a36f0f3d6ab260910d1f57ddc2ab7e54f
+          ref: 98e81482b2cfeac231823fdc8800b677118c657a
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -49,7 +49,7 @@ jobs:
           node node_modules/vite/bin/vite.js build
           node tools/build-legacy-card-viewer.mjs --web-built
       - name: Build complete dev workbench and check authority
-        if: github.ref_name == 'codex/qq-account-button-280-20261010' || github.head_ref == 'codex/qq-account-button-280-20261010' || github.ref_name == 'codex/cloud-card-native-20261010' || github.head_ref == 'codex/cloud-card-native-20261010' || github.ref_name == 'dev' || github.ref_name == 'codex/qq-library-entry-dev-20261010' || github.head_ref == 'codex/qq-library-entry-dev-20261010' || github.ref_name == 'codex/qq-account-permissions-dev-20261010' || github.head_ref == 'codex/qq-account-permissions-dev-20261010'
+        if: github.ref_name == 'codex/qq-room-cloud-button-281-20261011' || github.head_ref == 'codex/qq-room-cloud-button-281-20261011' || github.ref_name == 'codex/qq-account-button-280-20261010' || github.head_ref == 'codex/qq-account-button-280-20261010' || github.ref_name == 'codex/cloud-card-native-20261010' || github.head_ref == 'codex/cloud-card-native-20261010' || github.ref_name == 'dev' || github.ref_name == 'codex/qq-library-entry-dev-20261010' || github.head_ref == 'codex/qq-library-entry-dev-20261010' || github.ref_name == 'codex/qq-account-permissions-dev-20261010' || github.head_ref == 'codex/qq-account-permissions-dev-20261010'
         run: |
           node tools/qq-panel-selftest.mjs
           node tools/qq-account-session-selftest.mjs
@@ -68,5 +68,7 @@ jobs:
             .local-evidence/qq-room/result.json
             .local-evidence/qq-room/qq-owner.png
             .local-evidence/qq-room/qq-workbench.png
+            .local-evidence/qq-room/qq-ordinary-cloud-settings.png
+            .local-evidence/qq-room/qq-converted-cloud-settings.png
             dist/
             dist-workbench-dev/
