@@ -68,5 +68,7 @@ jobs:
             .local-evidence/qq-room/result.json
             .local-evidence/qq-room/qq-owner.png
             .local-evidence/qq-room/qq-workbench.png
+            .local-evidence/qq-room/qq-ordinary-cloud-settings.png
+            .local-evidence/qq-room/qq-converted-cloud-settings.png
             dist/
             dist-workbench-dev/
