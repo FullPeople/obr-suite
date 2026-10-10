@@ -94,8 +94,10 @@ try{
   const composer=pages[1].frames().find(f=>f.url().includes('/workbench-dice/index.html'));
   await composer.waitForFunction(()=>document.body.dataset.bridgeReady==='true',null,{timeout:30000});
   await composer.locator('#exprInput').fill(formula);
-  const panelSubmittedAt=await composer.evaluate(()=>performance.timeOrigin+performance.now());
+  await composer.evaluate(()=>{window.__diceComposerClickAt=undefined;document.querySelector('#btnRoll').addEventListener('click',()=>{window.__diceComposerClickAt=performance.timeOrigin+performance.now();},{once:true,capture:true});});
   await composer.locator('#btnRoll').click();
+  const panelSubmittedAt=await composer.evaluate(()=>window.__diceComposerClickAt);
+  assert(Number.isFinite(panelSubmittedAt),'measure the actual DOM click, excluding automation actionability waiting');
   await frames[1].waitForFunction(index=>window.suiteHostProbe.events.slice(index).some(e=>e.event==='roll-submitted'),eventIndex,{timeout:15000});
   const panelRollId=await frames[1].evaluate(index=>window.suiteHostProbe.events.slice(index).find(e=>e.event==='roll-submitted').detail.id,eventIndex);
   await finish('mixed-panel-no-target',1,panelSubmittedAt,{rollId:panelRollId});
