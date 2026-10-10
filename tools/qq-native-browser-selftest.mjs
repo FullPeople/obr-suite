@@ -11,6 +11,7 @@ const root=resolve(import.meta.dirname,'..'),web=resolve(process.env.DND_CARD_WE
 assert(process.env.DND_CARD_WEB_ROOT&&existsSync(join(root,'dist-workbench-dev/workbench/index.html')),'Build the exact paired native workbench first');
 const {CloudStore,createCloudServer}=await import(pathToFileURL(join(web,'dist-cloud-server/server.mjs'))),store=new CloudStore(':memory:');
 const owner=store.provisionVerifiedAccount('fixture:qq-owner'),other=store.provisionVerifiedAccount('fixture:other'),issued=store.issueVerifiedSession(owner.id);
+store.saveQQProfile(owner.id,'枭熊卡主测试','https://qlogo.cn/qq-owner-test.png');
 await build({input:join(web,'src/core/model.ts'),output:{file:join(out,'model.mjs'),format:'esm',codeSplitting:false}});
 await build({input:join(root,'src/workbench/document-delta.ts'),output:{file:join(out,'delta.mjs'),format:'esm',codeSplitting:false}});
 const {expandChanges}=await import(pathToFileURL(join(out,'delta.mjs')));
@@ -32,7 +33,7 @@ async function createContext(role='PLAYER',websiteLogin=false){
  async function wire(){
   const session=host.privateSession(),cards=(metadata[QQ_CARDS]||[]).map(row=>({id:row.id,name:row.name,cloudRoom:true,write:session?.accountId===row.qqOwner||!row.locked||!!session?.accountId&&(row.qqEditors||[]).includes(session.accountId),locked:row.locked,inScene:false,itemId:'card:'+row.id,resources:[],stats:{}}));
   const row=entry();if(row&&!document)document=(await info()).document;
-  return {catalog:{sequence:++sequence,cards,monsters:[],role,enabled:{characterCards:true},qqAccount:session?{id:session.accountId,nickname:session.nickname}:null},snapshot:row?{sequence:++sequence,state:{key:'synthetic-qq-room:card:'+row.id,targetId:'card:'+row.id,itemId:'card:'+row.id,cardId:row.id,name:row.name,kind:'character',cloudRoom:true,locked:row.locked,write:cards.find(card=>card.id===row.id).write,role,pinned:true,stats:{},resources:[],documentRevision:document?._suiteRevision},document}:undefined};
+  return {catalog:{sequence:++sequence,cards,monsters:[],role,enabled:{characterCards:true},qqAccount:session?{id:session.accountId,nickname:session.nickname,avatar:session.avatar}:null},snapshot:row?{sequence:++sequence,state:{key:'synthetic-qq-room:card:'+row.id,targetId:'card:'+row.id,itemId:'card:'+row.id,cardId:row.id,name:row.name,kind:'character',cloudRoom:true,locked:row.locked,write:cards.find(card=>card.id===row.id).write,role,pinned:true,stats:{},resources:[],documentRevision:document?._suiteRevision},document}:undefined};
  }
  await context.exposeBinding('qqFixture',async(_source,operation,m)=>{
   if(operation==='wire')return wire();
@@ -58,16 +59,16 @@ async function createContext(role='PLAYER',websiteLogin=false){
   await route.fulfill(existsSync(file)?{contentType:mime[extname(file)]||'application/octet-stream',body:readFileSync(file)}:{status:404,body:'Fixture asset missing'});
  });
  await context.route(/https:\/\/(?:5e|homebrew)\.kiwee\.top\//,route=>route.fulfill({json:{},headers:{'access-control-allow-origin':'*'}}));
- await context.addInitScript(()=>{if(location.protocol!=='https:')return;localStorage.setItem('dnd-card:rules-setup:v1','done');localStorage.setItem('dnd-card:editing','true');localStorage.setItem('dnd-card:announcement-ack','0.1.59');localStorage.setItem('dnd-card:announcement-ack:suite','1.0.279-dev');});
+ await context.addInitScript(()=>{if(location.protocol!=='https:')return;localStorage.setItem('dnd-card:rules-setup:v1','done');localStorage.setItem('dnd-card:editing','true');localStorage.setItem('dnd-card:announcement-ack','0.1.60');localStorage.setItem('dnd-card:announcement-ack:suite','1.0.280-dev');});
  context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)));
  const room=await context.newPage();await room.goto('https://obr.dnd.center/qq-native-host/');const popup=context.waitForEvent('page');await room.locator('#open').click();const page=await popup;
  return {context,room,page,host};
 }
 try{
  const ownerView=await createContext('PLAYER',true),page=ownerView.page;
- const entry=page.getByRole('button',{name:'QQ 登录与卡库'});await expect(entry).toBeVisible();await expect(entry.locator('img')).toHaveAttribute('src','https://dnd.center/card/qq-login-170x32.png');
+ const entry=page.getByRole('button',{name:/^QQ (?:登录|账号)与卡库$/});await expect(entry).toBeVisible();await expect(entry.locator('img')).toHaveAttribute('src','https://dnd.center/card/qq-login-170x32.png');
  const popupEvent=ownerView.context.waitForEvent('page');await entry.click();const popup=await popupEvent;await popup.getByRole('button',{name:'连接当前账号'}).click();
- const dialog=page.getByRole('dialog',{name:'QQ 账号与卡库'}),library=dialog.frameLocator('iframe');await expect(dialog).toBeVisible();await expect(library.locator('#cards')).toContainText(card.character.name);await expect(library.locator('#cards')).not.toContainText('他人的私有角色');assert.equal(await library.locator('#editor').count(),0);checks.push('standard-QQ-button-popup-login','own-library-only','secondary-dialog','no-nested-card-browser');
+ const dialog=page.getByRole('dialog',{name:'QQ 账号与卡库'}),library=dialog.frameLocator('iframe');await expect(dialog).toBeVisible();await expect(entry).toHaveAttribute('aria-label','QQ 账号与卡库');await expect(entry).toContainText('枭熊卡主测试');await expect(entry.locator('img')).toHaveAttribute('src','https://qlogo.cn/qq-owner-test.png');await expect(entry.locator('picture')).toHaveCount(0);checks.push('signed-in-account-replaces-login-button');await expect(library.locator('#cards')).toContainText(card.character.name);await expect(library.locator('#cards')).not.toContainText('他人的私有角色');assert.equal(await library.locator('#editor').count(),0);checks.push('standard-QQ-button-popup-login','own-library-only','secondary-dialog','no-nested-card-browser');
  page.once('dialog',dialog=>dialog.accept());await library.locator('#cards button').click();await expect(dialog).toHaveCount(0);
  const tab=page.getByRole('tab',{name:/QQ 原工作台导入验收/});await expect(tab).toBeVisible();await expect(tab.getByRole('img',{name:'云端同步卡'})).toBeVisible();await expect(page.getByRole('button',{name:'云端卡设置'})).toBeVisible();await expect(page.getByRole('button',{name:'上锁角色卡',exact:true})).toHaveCount(0);checks.push('import-into-native-character-book','cloud-icon-in-name','cloud-control-replaces-lock');
  await page.getByRole('button',{name:'云端卡设置'}).click();const cloud=page.getByRole('dialog',{name:'云端卡设置'});await expect(cloud.getByText('你是这张卡的拥有者。',{exact:true})).toBeVisible();await cloud.getByRole('button',{name:'关闭',exact:true}).click();

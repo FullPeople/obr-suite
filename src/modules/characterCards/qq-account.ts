@@ -1,5 +1,5 @@
 export const QQ_ORIGIN='https://dnd.center',QQ_STORAGE='dnd-qq-plugin',QQ_CARDS='com.obr-suite/qq-cards';
-export type QQSession={token:string;expiresAt:number;accountId?:string;csrf?:string;nickname?:string};
+export type QQSession={token:string;expiresAt:number;accountId?:string;csrf?:string;nickname?:string;avatar?:string};
 export type QQRoom={id:string;capability:string};
 export async function selectQQCard(id:string){const OBR=(await import('@owlbear-rodeo/sdk')).default;await OBR.broadcast.sendMessage('com.obr-suite/workbench/open-cloud-card',{id},{destination:'LOCAL'});await OBR.modal.close('com.obr-suite/qq-card-library');}
 export async function acceptQQSession(candidate:unknown):Promise<void>{
@@ -10,7 +10,7 @@ export async function acceptQQSession(candidate:unknown):Promise<void>{
     const response=await fetch(QQ_ORIGIN+'/api/session',{headers:{Authorization:'Bearer '+value.token},credentials:'omit',cache:'no-store',signal:controller.signal});
     const profile=await response.json();
     if(!response.ok||!profile.authenticated||typeof profile.account?.id!=='string'||value.accountId!==undefined&&profile.account.id!==value.accountId)throw Error('QQ 账号连接已失效，请重新登录。');
-    localStorage.setItem(QQ_STORAGE,JSON.stringify({token:value.token,expiresAt:value.expiresAt,accountId:profile.account.id,csrf:profile.csrf,nickname:profile.account.nickname}));
+    localStorage.setItem(QQ_STORAGE,JSON.stringify({token:value.token,expiresAt:value.expiresAt,accountId:profile.account.id,csrf:profile.csrf,nickname:profile.account.nickname,avatar:profile.account.avatar}));
     window.dispatchEvent(new Event('qq-account-changed'));
   }finally{clearTimeout(timer);}
 }
@@ -47,7 +47,7 @@ export async function connectQQ(){
     const value=await qqRequest('plugin/poll','POST',{connection,verifier});
     if(!value.pending){
       localStorage.setItem(QQ_STORAGE,JSON.stringify(value));
-      try{const profile=await qqRequest('session');if(!profile.authenticated)throw Error('插件登录未完成。');localStorage.setItem(QQ_STORAGE,JSON.stringify({...value,accountId:profile.account.id,csrf:profile.csrf,nickname:profile.account.nickname}));}
+      try{const profile=await qqRequest('session');if(!profile.authenticated)throw Error('插件登录未完成。');localStorage.setItem(QQ_STORAGE,JSON.stringify({...value,accountId:profile.account.id,csrf:profile.csrf,nickname:profile.account.nickname,avatar:profile.account.avatar}));}
       catch(error){localStorage.removeItem(QQ_STORAGE);throw error;}
       popup.close();window.dispatchEvent(new Event('qq-account-changed'));return;
     }
