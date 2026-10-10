@@ -2,6 +2,7 @@ name: Research same-version single-thread Jolt SIMD
 on:
   push:
     branches: [codex/jolt-simd-research-20261010]
+    paths: ['.github/workflows/jolt-simd-research.yml', 'tools/dice-jolt-engine-research.mjs']
   workflow_dispatch:
 permissions:
   contents: read
@@ -86,7 +87,7 @@ jobs:
           for variant in ['original','scalar','simd']:
               text=(root/(variant+'.wat')).read_text()
               proof[variant]={'vectorInstructions':len(re.findall(r'\((?:v128|f32x4|f64x2|i8x16|i16x8|i32x4|i64x2)\.',text)),
-                  'memory':re.findall(r'\(memory[^\n]+',text),'sharedMemory':any('shared' in m for m in re.findall(r'\(memory[^\n]+',text)),
+                  'memory':re.findall(r'(?m)^\s*\(memory\s+\$[^\n]+',text),'sharedMemory':any('shared' in m for m in re.findall(r'(?m)^\s*\(memory\s+\$[^\n]+',text)),
                   'imports':re.findall(r'\(import[^\n]+',text)}
           assert proof['original']['vectorInstructions']==0
           assert proof['scalar']['vectorInstructions']==0

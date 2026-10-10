@@ -9,7 +9,7 @@ import {dirname,resolve,sep} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 
 const script=fileURLToPath(import.meta.url),root=resolve(dirname(script),'..');
-const research=resolve(root,'..'),out=resolve(research,'evidence/engine');
+const research=resolve(root,'..'),out=resolve(process.env.DND_JOLT_ENGINE_EVIDENCE||resolve(research,'evidence/engine'));
 const src=resolve(root,'extensions/workbench-dice3d/src');
 const assets=resolve(root,'extensions/workbench-dice3d/public');
 const mixed='1d6+1d20+1d4+1d8+1d10+1d12+1d100';
