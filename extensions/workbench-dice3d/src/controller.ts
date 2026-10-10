@@ -266,7 +266,7 @@ export class Controller {
       this.privateAudiences.delete(actual.request.id);
       const {poses,contacts,...meta}=roll;
       const activeMembers=()=>[...this.peers.values()].filter(p=>p.ready&&now()-p.lastSeen<12000&&p.version===BUILD&&(!roll.masked||this.reservations.get(roll.request.id)?.members.includes(p.id))).map(p=>p.id);
-      const fastCompatible=(members:string[])=>members.length&&!this.verifyingPeers&&this.transport.role&&this.session&&roll.kinds.length<=20&&!roll.masked&&!hiddenRequest(roll.request)&&!roll.request.batch&&!roll.request.groupSize&&members.every(id=>{const p=this.peers.get(id)!;return p.tracePacketV1&&p.session&&p.role;});
+      const fastCompatible=(members:string[])=>members.length&&!this.verifyingPeers&&this.transport.role&&this.session&&roll.kinds.length<=20&&!roll.masked&&!hiddenRequest(roll.request)&&!roll.request.batch&&!roll.request.groupSize&&members.every(id=>{const p=this.peers.get(id);return p?.tracePacketV1&&p.ready&&p.session&&p.role;});
       const compact=!!fastCompatible(activeMembers());
       let bytes=await encodeRoll({...meta,collisions:contacts.length,contacts:contacts.length},poses,contacts,compact);this.assertLive();
       const members=activeMembers();
