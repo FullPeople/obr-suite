@@ -36,6 +36,13 @@ await check('all original presets validate and unsafe CSS/NaN/oversized text are
  for(const bad of [{color:'url(https://example.test)'},{size:NaN},{enter:-1},{hold:20001},{title:'x'.repeat(161)},{body:'x'.repeat(1801)},{font:'external'},{background:'<script>'}])assert.equal(gm.model.parseConfig({...config,...bad}),null);
  const normalized=gm.model.parseConfig({...config,secret:'not sent'});assert.equal('secret'in normalized,false);
 });
+await check('flat default follows the reference and old atmospheric drafts retain text without glow',async()=>{
+ const c=gm.model.DEFAULT_CONFIG;assert.equal(c.title,'战斗开始');assert.equal(c.subtitle,'BATTLE START');assert.equal(c.color,'#ffffff');assert.equal(c.decoration,'frame');assert.equal(c.background,'transparent');assert.equal(c.entry,'drop');assert.equal(c.leave,'through');assert.equal(c.glow,0);assert.equal(c.outline,0);assert.equal(gm.model.PRESETS.length,1);
+ for(const decoration of ['rays','mist','sparks','rings']){const migrated=gm.model.parseConfig({...config,title:'自定义标题',decoration,glow:50,idle:'glow'});assert.ok(migrated);assert.equal(migrated.title,'自定义标题');assert.equal(migrated.decoration,'none');assert.equal(migrated.glow,0);assert.equal(migrated.idle,'none');}
+ const times=gm.model.presentationTimes(c);assert.ok(times.lead>0);assert.ok(times.subtitleStart>times.lead);assert.equal(gm.model.entryTime(c),times.arrival);
+ assert.equal(gm.model.duration(c),4225);
+ const customized=gm.model.initialEditorConfig({...config,title:'战斗开始',subtitle:'命运已掷下骰子',decoration:'rays',color:'#335577',hold:6500});assert.equal(customized.color,'#335577');assert.equal(customized.hold,6500);assert.equal(customized.subtitle,'命运已掷下骰子');
+});
 await check('preview opens only the requesting client and does not create scene metadata',async()=>{
  const before=packets.length,others=player.opens.length;await request(gm,{preview:true});assert.equal(packets.length,before);assert.equal(player.opens.length,others);assert.deepEqual(metadata,{});assert.equal(gm.live.size,1);
 });

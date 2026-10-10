@@ -1,5 +1,5 @@
 import OBR from '@owlbear-rodeo/sdk';
-import { DEFAULT_CONFIG, PRESETS, parseConfig, duration, entryTime, narrationTime, hasContent, type TextEffectConfig } from './model';
+import { DEFAULT_CONFIG, PRESETS, parseConfig, initialEditorConfig, duration, entryTime, narrationTime, hasContent, type TextEffectConfig } from './model';
 import { STYLE_PRESETS } from './catalog';
 import { editorHTML, factor } from './editor-view';
 import { REQUEST, STATUS, identifier } from './protocol';
@@ -17,7 +17,7 @@ let deleted:{preset:{name:string;config:TextEffectConfig};index:number}|undefine
 let presentation:ReturnType<typeof renderEffect>|undefined,stopTarget:{id:string;preview:boolean;expiresAt:number}|undefined;
 const pending=new Map<string,{resolve:(value:any)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
 function showError(message=''){error.textContent=message;error.hidden=!message;}
-try{const stored=JSON.parse(localStorage.getItem(STORAGE)||'null');config=parseConfig(stored?.draft)||config;if(Array.isArray(stored?.presets))for(const preset of stored.presets.slice(0,20)){const parsed=parseConfig(preset?.config);if(parsed&&typeof preset.name==='string'&&preset.name.trim()&&preset.name.length<=48)saved.push({name:preset.name,config:parsed});}}catch{showError('已保存的预设未能读取，本次配置仍可使用。');}
+try{const stored=JSON.parse(localStorage.getItem(STORAGE)||'null');config=initialEditorConfig(stored?.draft)||config;if(Array.isArray(stored?.presets))for(const preset of stored.presets.slice(0,20)){const parsed=parseConfig(preset?.config);if(parsed&&typeof preset.name==='string'&&preset.name.trim()&&preset.name.length<=48)saved.push({name:preset.name,config:parsed});}}catch{showError('已保存的预设未能读取，本次配置仍可使用。');}
 function persist(){try{localStorage.setItem(STORAGE,JSON.stringify({draft:config,presets:saved}));return true;}catch{showError('浏览器未能保存配置；本次预览和播放仍可使用。');return false;}}
 function listPresets(next=selected){
  selected=next;
