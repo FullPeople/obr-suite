@@ -45,7 +45,11 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
    if(method==='room.setMetadata'){
     const update=args[0],rows=update?.[QQ_CARDS];
     if(args.length!==1||!update||Object.keys(update).length!==1||!Array.isArray(rows)||rows.length>1000||JSON.stringify(rows).length>1000000||rows.some(row=>!row||typeof row.id!=='string'||typeof row.name!=='string'||typeof row.qqOwner!=='string'||typeof row.locked!=='boolean'||!['owners','public'].includes(row.visibility)||!Array.isArray(row.owner_ids)||row.owner_ids.some((id:unknown)=>typeof id!=='string')||typeof row.qqRoom?.id!=='string'||!/^[a-f0-9-]{36}$/.test(row.qqRoom.id)||typeof row.qqRoom?.capability!=='string'))throw Error('无效 QQ 房间卡资料');
-    return OBR.room.setMetadata({[QQ_CARDS]:rows});
+    const actor=qqSession(),metadata=await OBR.room.getMetadata(),previous=Array.isArray(metadata[QQ_CARDS])?metadata[QQ_CARDS] as any[]:[],before=new Map<string,any>(previous.map(row=>[row.id,row])),after=new Map<string,any>(rows.map(row=>[row.id,row]));
+    const changed=[...new Set([...before.keys(),...after.keys()])].filter(id=>JSON.stringify(before.get(id))!==JSON.stringify(after.get(id)));
+    if(!actor?.accountId||qqSession()?.token!==actor.token||changed.some(id=>before.has(id)&&before.get(id).qqOwner!==actor.accountId||after.has(id)&&after.get(id).qqOwner!==actor.accountId))throw Error('只有 QQ 卡主可以修改自己的房间卡关联。');
+    const removed=previous.filter(row=>!after.has(row.id)).map(row=>row.id),deleted='com.obr-suite/workbench/deleted-cards';
+    return OBR.room.setMetadata({[QQ_CARDS]:rows,...(removed.length?{[deleted]:[...new Set([...(Array.isArray(metadata[deleted])?metadata[deleted] as string[]:[]),...removed])]}:{})});
    }
    if(method==='subscribe'&&args[0]==='roomMetadata'&&args[1]==null){
     const key=`${panel}:${instance}:roomMetadata:`;

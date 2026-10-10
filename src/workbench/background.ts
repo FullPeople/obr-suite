@@ -710,7 +710,7 @@ async function start(){
   if(m.type==='delete'){
    if(a.card?.qqRoom){
     await m._beforeMutation?.();await qqRequest('room-cards/'+a.card.qqRoom.id,'DELETE',{},a.card.qqRoom);
-    const room=await OBR.room.getMetadata();await OBR.room.setMetadata({[QQ_CARDS]:(room[QQ_CARDS] as any[]).filter(c=>c.id!==a.cardId),...(Object.hasOwn(a.card,'qqRevisionOffset')?{[DELETED]:[...new Set([...(Array.isArray(room[DELETED])?room[DELETED] as string[]:[]),a.cardId])]}:{})});
+    const room=await OBR.room.getMetadata();await OBR.room.setMetadata({[QQ_CARDS]:(room[QQ_CARDS] as any[]).filter(c=>c.id!==a.cardId),[DELETED]:[...new Set([...(Array.isArray(room[DELETED])?room[DELETED] as string[]:[]),a.cardId])]});
     documents.delete(a.key);documentCacheVersion++;return {deleted:a.cardId};
    }
    if(!a.cardId)throw Error('没有角色卡');if(a.role!=='GM'&&a.items.some(item=>item.metadata[BIND]===a.cardId&&!ownsNativeToken(item,playerId)))throw Error('此卡还绑定其他所属玩家的棋子，仅 DM 可删除');const location=documentLocation(a.cardId);
