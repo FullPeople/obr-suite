@@ -1,0 +1,84 @@
+// Production Web/panel bundles and real HTTP; SDK transport and accounts are synthetic.
+import assert from 'node:assert/strict';
+import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
+import {resolve,join,extname} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {createRequire} from 'node:module';
+import vm from 'node:vm';
+import ts from 'typescript';
+import {build} from 'rolldown';
+const root=resolve(import.meta.dirname,'..'),web=resolve(process.env.DND_CARD_WEB_ROOT||''),out=join(root,'.local-evidence/qq-room');mkdirSync(out,{recursive:true});
+assert(process.env.DND_CARD_WEB_ROOT&&existsSync(join(root,'dist-workbench-dev/workbench/index.html')),'Build the exact paired native workbench first');
+const {CloudStore,createCloudServer}=await import(pathToFileURL(join(web,'dist-cloud-server/server.mjs'))),store=new CloudStore(':memory:');
+const owner=store.provisionVerifiedAccount('fixture:qq-owner'),other=store.provisionVerifiedAccount('fixture:other'),issued=store.issueVerifiedSession(owner.id);
+await build({input:join(web,'src/core/model.ts'),output:{file:join(out,'model.mjs'),format:'esm',codeSplitting:false}});
+const {newCharacter}=await import(pathToFileURL(join(out,'model.mjs'))),character=newCharacter();
+const card=store.create(owner,{...character,id:crypto.randomUUID(),name:'QQ 原工作台导入验收'});store.create(other,{...character,id:crypto.randomUUID(),name:'他人的私有角色'});
+const server=createCloudServer(store,'https://dnd.center');await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const api='http://127.0.0.1:'+server.address().port;
+const {chromium,expect}=createRequire(join(web,'package.json'))('@playwright/test'),browser=await chromium.launch({channel:process.env.CI?undefined:'msedge'}),contexts=[],errors=[],checks=[];
+let metadata={},sequence=0;
+const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp'};
+async function createContext(role='PLAYER',websiteLogin=false){
+ const context=await browser.newContext({viewport:{width:1440,height:960}});contexts.push(context);
+ const storage=new Map(),QQ_CARDS='com.obr-suite/qq-cards';let selected,document;
+ const account=readFileSync(join(root,'src/modules/characterCards/qq-account.ts'),'utf8').replace(/^export /gm,'');
+ const panel=readFileSync(join(root,'src/workbench/panel-rpc.ts'),'utf8').replace(/^import .*;\r?\n/gm,'').replace('export function panelBridge','function panelBridge');
+ const host=vm.createContext({setTimeout,clearTimeout,AbortController,Event,window:{dispatchEvent(){}},fetch:(url,options)=>fetch(api+new URL(url).pathname+new URL(url).search,{...options,headers:{...options?.headers,Origin:'https://obr.dnd.center'}}),localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},setupServerAdmission(){},tableWorkbench:()=>async()=>{},OBR:{room:{id:'synthetic-qq-room',getMetadata:async()=>structuredClone(metadata),setMetadata:async update=>{metadata={...metadata,...update};},onMetadataChange:()=>()=>{}},player:{getId:async()=>role==='GM'?'dm':'player',getRole:async()=>role}},onSelect:async(id,cached)=>{selected=id;document=cached;}});
+ vm.runInContext(ts.transpileModule(account+'\n'+panel+'\nglobalThis.bridge=panelBridge(()=>{},undefined,onSelect);globalThis.privateSession=()=>qqSession();globalThis.request=qqRequest;',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,host);
+ const entry=()=>metadata[QQ_CARDS]?.find(row=>row.id===selected);
+ async function info(){const row=entry();assert(row);return host.request('room-cards/'+row.id,'GET',undefined,row.qqRoom);}
+ async function wire(){
+  const session=host.privateSession(),cards=(metadata[QQ_CARDS]||[]).map(row=>({id:row.id,name:row.name,cloudRoom:true,write:session?.accountId===row.qqOwner||!row.locked||!!session?.accountId&&(row.qqEditors||[]).includes(session.accountId),locked:row.locked,inScene:false,itemId:'card:'+row.id,resources:[],stats:{}}));
+  const row=entry();if(row&&!document)document=(await info()).document;
+  return {catalog:{sequence:++sequence,cards,monsters:[],role,enabled:{characterCards:true},qqAccount:session?{id:session.accountId,nickname:session.nickname}:null},snapshot:row?{sequence:++sequence,state:{key:'synthetic-qq-room:card:'+row.id,targetId:'card:'+row.id,itemId:'card:'+row.id,cardId:row.id,name:row.name,kind:'character',cloudRoom:true,locked:row.locked,write:cards.find(card=>card.id===row.id).write,role,pinned:true,stats:{},resources:[],documentRevision:document?._suiteRevision},document}:undefined};
+ }
+ await context.exposeBinding('qqFixture',async(_source,operation,m)=>{
+  if(operation==='wire')return wire();
+  if(operation==='select'){selected=m;document=undefined;return;}
+  if(m.type==='panelRpc')return host.bridge(m.panel,m.instance,m.method,JSON.parse(JSON.stringify(m.args||[])));
+  if(m.type==='cloudInfo')return info();
+  if(m.type==='cloudEditors'){const current=await info();assert(current.owner);await host.request('cards/'+current.cardId+'/editors'+(m.remove?'/'+m.accountId:''),m.remove?'DELETE':'POST',m.remove?{}:{accountId:m.accountId});const updated=await info();metadata[QQ_CARDS]=metadata[QQ_CARDS].map(row=>row.id===selected?{...row,qqEditors:updated.editors}:row);return updated;}
+  if(m.type==='lock'){const result=await host.request('room-cards/'+selected+'/lock','PUT',{locked:m.locked},entry().qqRoom);metadata[QQ_CARDS]=metadata[QQ_CARDS].map(row=>row.id===selected?{...row,locked:result.locked}:row);return {snapshot:(await wire()).snapshot};}
+  if(m.type==='save'){const before=await info(),native=structuredClone(m.native||m.data?.dnd_card_web);assert(native);native.id=before.character.id;const result=await host.request('room-cards/'+selected,'PUT',{character:native,revision:before.revision},entry().qqRoom);document=result.document;metadata[QQ_CARDS]=metadata[QQ_CARDS].map(row=>row.id===selected?{...row,name:result.character.name}:row);return {snapshot:(await wire()).snapshot};}
+  if(m.type==='readCard'||m.type==='refreshCard'){document=(await info()).document;return m.type==='readCard'?{document}:{snapshot:(await wire()).snapshot};}
+  if(m.type==='refreshCatalog')return {catalog:(await wire()).catalog};
+  return {};
+ });
+ if(websiteLogin)await context.addCookies([{name:'dnd_cloud',value:(websiteLogin===true?issued:websiteLogin).token,url:'https://dnd.center/api/',secure:true,httpOnly:true,sameSite:'Strict'}]);
+ await context.route('https://dnd.center/api/**',async route=>{const request=route.request(),url=new URL(request.url()),response=await context.request.fetch(api+url.pathname+url.search,{method:request.method(),headers:await request.allHeaders(),data:request.postData()||undefined});await route.fulfill({response});});
+ await context.route(/https:\/\/(?:obr\.)?dnd\.center\/(?!api\/).*/,async route=>{
+  const path=new URL(route.request().url()).pathname;
+  if(path==='/qq-native-host/'){
+   const url='https://obr.dnd.center/suite-dev/workbench/index.html#suite=qq-native-fixture&bridge=https%3A%2F%2Fobr.dnd.center';
+   await route.fulfill({contentType:'text/html',body:`<!doctype html><a id="open" href="${url}" target="qq-native-fixture">Open workbench</a><script>const protocol='full-suite-workbench/v1',session='qq-native-fixture';let peer;const send=(type,data={})=>peer.postMessage({protocol,session,hostStarted:1,type,...data},location.origin);window.updateQQ=async()=>{const data=await qqFixture('wire');send('catalog',data.catalog);if(data.snapshot)send('selection',data.snapshot);};addEventListener('message',async event=>{if(event.origin!==location.origin||event.data?.protocol!==protocol||event.data.session!==session)return;peer=event.source;const m=event.data;if(m.type==='hello'){send('ready',{rolls:[]});await updateQQ();}else if(m.type==='ping')send('pong');else if(m.type==='select'){await qqFixture('select',m.itemId.replace('card:',''));await updateQQ();}else if(m.requestId){try{const result=await qqFixture('command',m);send('ack',{requestId:m.requestId,ok:true,result});await updateQQ();if(m.type==='panelRpc'&&m.method==='card.select')send('navigate',{page:'sheet'});}catch(error){send('ack',{requestId:m.requestId,ok:false,message:error.message});}}});</script>`});return;
+  }
+  const file=path.startsWith('/suite-dev/')?resolve(root,'dist-workbench-dev',path.slice('/suite-dev/'.length)+(path.endsWith('/')?'index.html':'')):resolve(web,'dist-cloud',path.slice(1)+(path.endsWith('/')?'index.html':''));
+  await route.fulfill(existsSync(file)?{contentType:mime[extname(file)]||'application/octet-stream',body:readFileSync(file)}:{status:404,body:'Fixture asset missing'});
+ });
+ await context.route(/https:\/\/(?:5e|homebrew)\.kiwee\.top\//,route=>route.fulfill({json:{},headers:{'access-control-allow-origin':'*'}}));
+ await context.addInitScript(()=>{localStorage.setItem('dnd-card:rules-setup:v1','done');localStorage.setItem('dnd-card:editing','true');localStorage.setItem('dnd-card:announcement-ack','0.1.59');localStorage.setItem('dnd-card:announcement-ack:suite','1.0.279-dev');});
+ context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)));
+ const room=await context.newPage();await room.goto('https://obr.dnd.center/qq-native-host/');const popup=context.waitForEvent('page');await room.locator('#open').click();const page=await popup;
+ return {context,room,page,host};
+}
+try{
+ const ownerView=await createContext('PLAYER',true),page=ownerView.page;
+ const entry=page.getByRole('button',{name:'QQ 登录与卡库'});await expect(entry).toBeVisible();await expect(entry.locator('img')).toHaveAttribute('src','https://dnd.center/card/qq-login-170x32.png');
+ const popupEvent=ownerView.context.waitForEvent('page');await entry.click();const popup=await popupEvent;await popup.getByRole('button',{name:'连接当前账号'}).click();
+ const dialog=page.getByRole('dialog',{name:'QQ 账号与卡库'}),library=dialog.frameLocator('iframe');await expect(dialog).toBeVisible();await expect(library.locator('#cards')).toContainText(card.character.name);await expect(library.locator('#cards')).not.toContainText('他人的私有角色');assert.equal(await library.locator('#editor').count(),0);checks.push('standard-QQ-button-popup-login','own-library-only','secondary-dialog','no-nested-card-browser');
+ page.once('dialog',dialog=>dialog.accept());await library.locator('#cards button').click();await expect(dialog).toHaveCount(0);
+ const tab=page.getByRole('tab',{name:/QQ 原工作台导入验收/});await expect(tab).toBeVisible();await expect(tab.getByRole('img',{name:'云端同步卡'})).toBeVisible();await expect(page.getByRole('button',{name:'云端卡设置'})).toBeVisible();await expect(page.getByRole('button',{name:'上锁角色卡',exact:true})).toHaveCount(0);checks.push('import-into-native-character-book','cloud-icon-in-name','cloud-control-replaces-lock');
+ await page.getByRole('button',{name:'云端卡设置'}).click();const cloud=page.getByRole('dialog',{name:'云端卡设置'});await expect(cloud.getByText('你是这张卡的拥有者。',{exact:true})).toBeVisible();await cloud.getByRole('button',{name:'关闭',exact:true}).click();
+ const name=page.getByRole('textbox',{name:'角色姓名',exact:true});await expect(name).toHaveValue(card.character.name);await name.fill('原工作台自动写回云端');await expect.poll(()=>store.read(card.id,owner).character.name).toBe('原工作台自动写回云端');assert.equal(store.read(card.id,owner).character.id,card.character.id);assert.equal(store.slots(owner).used,1);checks.push('native-five-page-editor','automatic-original-writeback','original-identity-preserved','no-duplicate-card');
+ for(const title of ['主要','特性','背景','法术','背包']){await page.getByRole('tab',{name:title,exact:true}).click();await expect(page.getByRole('tabpanel',{name:title,exact:true})).toBeVisible();}await page.getByRole('tab',{name:'主要',exact:true}).click();
+ const dm=await createContext('GM');await expect(dm.page.getByRole('tab',{name:/原工作台自动写回云端/})).toBeVisible();await dm.page.getByRole('tab',{name:/原工作台自动写回云端/}).click();await expect(dm.page.getByRole('switch',{name:'编辑模式',exact:true})).toBeDisabled();await expect(dm.page.locator('.card-permission-banner')).toContainText('DM 同样需要授权');await dm.page.getByRole('button',{name:'云端卡设置'}).click();const readonly=dm.page.getByRole('dialog',{name:'云端卡设置'});await expect(readonly.getByRole('button',{name:'移出房间'})).toHaveCount(0);await expect(readonly.getByRole('checkbox')).toHaveCount(0);await readonly.getByRole('button',{name:'关闭',exact:true}).click();checks.push('ungranted-DM-readonly','compact-yellow-permission-reason','readonly-cloud-information');
+ const bannerStyle=await dm.page.locator('.card-permission-banner').evaluate(element=>{const css=getComputedStyle(element);return {height:element.getBoundingClientRect().height,border:css.borderTopWidth,padding:css.paddingTop,shadow:css.boxShadow};});assert.equal(bannerStyle.border,'0px');assert.equal(bannerStyle.shadow,'none');assert.equal(bannerStyle.padding,'4px');assert(bannerStyle.height<30,'Permission banner must stay compact');
+ await page.getByRole('button',{name:'云端卡设置'}).click();await cloud.getByRole('checkbox',{name:'允许当前房间所有成员编辑'}).check();await cloud.getByRole('button',{name:'关闭',exact:true}).click();await dm.room.evaluate(()=>window.updateQQ());await expect(dm.page.getByRole('switch',{name:'编辑模式',exact:true})).toBeEnabled();await expect(dm.page.locator('.card-permission-banner')).toHaveCount(0);checks.push('owner-room-grant-enables-DM');
+ await page.getByRole('button',{name:'云端卡设置'}).click();await cloud.getByRole('checkbox',{name:'允许当前房间所有成员编辑'}).uncheck();await cloud.getByRole('button',{name:'关闭',exact:true}).click();await dm.room.evaluate(()=>window.updateQQ());await expect(dm.page.getByRole('switch',{name:'编辑模式',exact:true})).toBeDisabled();checks.push('relock-revokes-DM');
+ await page.getByRole('button',{name:'云端卡设置'}).click();await cloud.getByRole('textbox',{name:'编辑者账号 ID'}).fill(other.id);await cloud.getByRole('button',{name:'授予编辑权限'}).click();await expect(cloud.getByRole('button',{name:'撤销授权'})).toBeVisible();await cloud.getByRole('button',{name:'关闭',exact:true}).click();
+ const editor=await createContext('PLAYER',store.issueVerifiedSession(other.id)),editorPopupEvent=editor.context.waitForEvent('page');await editor.page.getByRole('button',{name:'QQ 登录与卡库'}).click();const editorPopup=await editorPopupEvent;await editorPopup.getByRole('button',{name:'连接当前账号'}).click();const editorAccount=editor.page.getByRole('dialog',{name:'QQ 账号与卡库'});await expect(editorAccount).toBeVisible();await editorAccount.frameLocator('iframe').locator('#close').click();await editor.page.getByRole('tab',{name:/原工作台自动写回云端/}).click();await expect(editor.page.getByRole('switch',{name:'编辑模式',exact:true})).toBeEnabled();await editor.page.getByRole('button',{name:'云端卡设置'}).click();const editorCloud=editor.page.getByRole('dialog',{name:'云端卡设置'});await expect(editorCloud).toContainText('卡主已授权你的 QQ 账号编辑这张卡');await expect(editorCloud.getByRole('checkbox')).toHaveCount(0);await expect(editorCloud.getByRole('button',{name:'移出房间'})).toHaveCount(0);await editorCloud.getByRole('button',{name:'关闭',exact:true}).click();await editor.page.getByRole('textbox',{name:'角色姓名',exact:true}).fill('指定编辑者自动写回');await expect.poll(()=>store.read(card.id,owner).character.name).toBe('指定编辑者自动写回');checks.push('named-QQ-editor-permission-and-explanation','named-editor-original-writeback','permission-management-owner-only');
+ await page.getByRole('button',{name:'云端卡设置'}).click();await cloud.getByRole('button',{name:'撤销授权'}).click();await expect(cloud.getByRole('button',{name:'撤销授权'})).toHaveCount(0);await cloud.getByRole('button',{name:'关闭',exact:true}).click();await editor.room.evaluate(()=>window.updateQQ());await expect(editor.page.getByRole('switch',{name:'编辑模式',exact:true})).toBeDisabled();await expect(editor.page.locator('.card-permission-banner')).toBeVisible();checks.push('named-editor-revocation-disables-editor');
+ await entry.click();await expect(dialog).toBeVisible();await library.locator('#logout').click();await expect(library.locator('#login')).toBeVisible();await library.locator('#close').click();await expect(page.getByRole('switch',{name:'编辑模式',exact:true})).toBeDisabled();await expect(page.locator('.card-permission-banner')).toBeVisible();checks.push('logout-in-secondary-dialog-revokes-personal-authority');
+ assert.deepEqual(errors,[]);await page.screenshot({path:join(out,'qq-owner.png')});await dm.page.screenshot({path:join(out,'qq-workbench.png')});assert(!JSON.stringify(metadata).includes('"token"'));checks.push('personal-token-not-in-room');
+ const result={synthetic:true,realQQ:false,realRoom:false,checks};writeFileSync(join(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
+}finally{await browser.close();await new Promise(resolve=>server.close(resolve));store.close();}

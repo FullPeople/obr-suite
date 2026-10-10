@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {acceptQQSession,clearQQSession,qqSession,QQ_STORAGE} from '../src/modules/characterCards/qq-account.ts';
+import {acceptQQSession,clearQQSession,qqSession,qqRequest,QQ_STORAGE} from '../src/modules/characterCards/qq-account.ts';
 const storage=new Map(),events=[];globalThis.localStorage={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};globalThis.window={dispatchEvent:event=>events.push(event.type)};
 const token='synthetic-personal-token-0123456789',candidate={token,expiresAt:Date.now()+60000,accountId:'owner',nickname:'unverified-name',csrf:'unverified-csrf'};
 let profile={authenticated:true,account:{id:'owner',nickname:'verified-name'},csrf:'verified-csrf'},status=200,calls=0;
@@ -10,5 +10,12 @@ await check('The server verifies identity before the private host stores a sessi
 const original=storage.get(QQ_STORAGE);
 await check('A different account cannot replace an existing session',async()=>{await assert.rejects(()=>acceptQQSession({...candidate,accountId:'other'}),/已失效/);assert.equal(storage.get(QQ_STORAGE),original);});
 await check('Expired server authority or an HTTP failure leaves the old session intact',async()=>{profile={authenticated:false};await assert.rejects(()=>acceptQQSession(candidate),/已失效/);status=503;await assert.rejects(()=>acceptQQSession(candidate),/已失效/);assert.equal(storage.get(QQ_STORAGE),original);});
+await check('Concurrent reads share one request; a different account never receives that account response',async()=>{
+ const flights=[];globalThis.fetch=(url,options)=>new Promise(resolve=>flights.push({url,options,resolve}));
+ const first=qqRequest('cards'),duplicate=qqRequest('cards');assert.equal(first,duplicate);assert.equal(flights.length,1);
+ localStorage.setItem(QQ_STORAGE,JSON.stringify({...candidate,token:token+'-other',accountId:'other'}));const second=qqRequest('cards');assert.notEqual(first,second);assert.equal(flights.length,2);
+ flights[0].resolve(new Response(JSON.stringify({cards:['owner']})));flights[1].resolve(new Response(JSON.stringify({cards:['other']})));assert.deepEqual(await first,{cards:['owner']});assert.deepEqual(await second,{cards:['other']});
+ localStorage.setItem(QQ_STORAGE,original);const next=qqRequest('cards');assert.equal(flights.length,3);flights[2].resolve(new Response(JSON.stringify({cards:['fresh']})));assert.deepEqual(await next,{cards:['fresh']});
+});
 await check('Logout clears only the matching personal host session',async()=>{clearQQSession('another-token');assert.equal(storage.get(QQ_STORAGE),original);clearQQSession(token);assert.equal(qqSession(),undefined);assert.deepEqual(events,['qq-account-changed','qq-account-changed']);});
 console.log(`QQ personal host connection: ${count} scenarios passed.`);

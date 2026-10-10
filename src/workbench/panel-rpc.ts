@@ -1,4 +1,4 @@
-import {QQ_CARDS,acceptQQSession,clearQQSession} from '../modules/characterCards/qq-account';
+import {QQ_CARDS,acceptQQSession,clearQQSession,qqSession,qqRequest,disconnectQQ} from '../modules/characterCards/qq-account';
 import {markPlayerPermissionsRead} from '../player-permission-notice';
 import { requestTextEffect } from '../modules/textEffects';
 import { REQUEST as TEXT_EFFECT_REQUEST, STATUS as TEXT_EFFECT_STATUS } from '../modules/textEffects/protocol';
@@ -13,10 +13,11 @@ import type {Relay} from './relay';
 const personalKeys=new Set(['obr-suite/lang','obr-suite/sfx-dice','obr-suite/sfx-initiative','obr-suite/sfx-on','com.obr-suite/bubbles/scale','obr-suite/boss-bar/preferences','obr-suite/dice/view-mode']);
 const musicPrefix='com.obr-suite/music-board:';
 const safeLocal=new Set(['com.obr-suite/state-changed','com.obr-suite/local-content-changed','com.obr-suite/lang-changed','com.obr-suite/module-status/query','com.obr-suite/panel-side-hint','com.obr-suite/boss-bar/preferences-changed','com.obr-suite/settings-closed']);
-export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void,relay?:Pick<Relay,'send'>){
+export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void,relay?:Pick<Relay,'send'>,selectQQCard?:(id:string,document?:unknown)=>Promise<void>){
  setupServerAdmission();
  const notes=relay?roomNotes(relay,async()=>privateNotesCapability(OBR.room.id||'default',await OBR.player.getId()),()=>OBR.player.getRole()):undefined;
  const subscriptions=new Map<string,()=>void>();
+ const imported=new Map<string,any>();
  const table=tableWorkbench((instance,event,name,data)=>send('panelEvent',{panel:'table',instance,event,name,data}));
  const events:Record<string,(fn:(data:any)=>void)=>()=>void>={
   'player':fn=>OBR.player.onChange(fn),'party':fn=>OBR.party.onChange(fn),'sceneReady':fn=>OBR.scene.onReadyChange(fn),'sceneMetadata':fn=>OBR.scene.onMetadataChange(fn),'roomMetadata':fn=>OBR.room.onMetadataChange(fn),'items':fn=>OBR.scene.items.onChange(fn),'grid':fn=>OBR.scene.grid.onChange(fn),'fog':fn=>OBR.scene.fog.onChange(fn)
@@ -27,6 +28,15 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
   if(panel==='qq'){
    if(method==='account.attach'&&args.length===1)return acceptQQSession(args[0]);
    if(method==='account.clear'&&args.length===1)return clearQQSession(args[0]);
+   if(method==='account.status'&&!args.length){const session=qqSession();return session?{authenticated:true,account:{id:session.accountId,nickname:session.nickname}}:{authenticated:false};}
+   if(method==='account.logout'&&!args.length)return disconnectQQ();
+   if(method==='account.request'){
+    const [path,verb='GET',data,capability]=args;
+    if(typeof path!=='string'||!(verb==='GET'&&['session','cards'].includes(path)||verb==='POST'&&/^cards\/(?:[A-Z]{6}|[a-f0-9-]{36})\/rooms$/.test(path)||['PUT','DELETE'].includes(verb)&&/^room-cards\/[a-f0-9-]{36}(?:\/lock)?$/.test(path)))throw Error('无效 QQ 卡库请求');
+    if(verb==='POST'&&data?.room!==OBR.room.id)throw Error('房间已改变，请重新打开卡库');
+    const result=await qqRequest(path,verb,data,capability);if(verb==='POST'){imported.set(result.id,result.document);while(imported.size>32)imported.delete(imported.keys().next().value!);}return result;
+   }
+   if(method==='card.select'&&args.length===1&&typeof args[0]==='string'&&selectQQCard){await selectQQCard(args[0],imported.get(args[0]));imported.delete(args[0]);return;}
    // Personal sessions stay with this player's host. Room APIs expose only the QQ registry.
    const select=(metadata:Record<string,unknown>)=>({[QQ_CARDS]:metadata[QQ_CARDS]??[]});
    if(method==='init')return {roomId:OBR.room.id,playerId:await OBR.player.getId(),preferences:{}};
@@ -37,7 +47,7 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
     if(args.length!==1||!update||Object.keys(update).length!==1||!Array.isArray(rows)||rows.length>1000||JSON.stringify(rows).length>1000000||rows.some(row=>!row||typeof row.id!=='string'||typeof row.name!=='string'||typeof row.qqOwner!=='string'||typeof row.locked!=='boolean'||!['owners','public'].includes(row.visibility)||!Array.isArray(row.owner_ids)||row.owner_ids.some((id:unknown)=>typeof id!=='string')||row.qqRoom?.id!==row.id||typeof row.qqRoom?.capability!=='string'))throw Error('无效 QQ 房间卡资料');
     return OBR.room.setMetadata({[QQ_CARDS]:rows});
    }
-   if(method==='subscribe'&&args[0]==='roomMetadata'&&args[1]===undefined){
+   if(method==='subscribe'&&args[0]==='roomMetadata'&&args[1]==null){
     const key=`${panel}:${instance}:roomMetadata:`;
     if(!subscriptions.has(key))subscriptions.set(key,OBR.room.onMetadataChange(metadata=>send('panelEvent',{panel,instance,event:'roomMetadata',data:select(metadata)})));
     return;
