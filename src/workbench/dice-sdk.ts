@@ -4,6 +4,7 @@ import {readFixedRoll,disarmFixedRoll} from '../modules/dice/fixed-roll';
 import {diceLoadingUi} from './dice-loading-ui';
 import {STYLE_CHOICES} from '../../extensions/workbench-dice3d/src/material-styles';
 import {BUILD} from '../../extensions/workbench-dice3d/src/types';
+import {readDiceViewMode} from './dice-view-mode';
 // SDK facade for the original dice pages embedded in the external workbench.
 // Only the dedicated dice allowlist is forwarded by the authenticated host.
 import type OBRType from '@owlbear-rodeo/sdk';
@@ -22,6 +23,7 @@ let watching=false;
 async function watchLoading(){if(watching)return;watching=true;while(document.body.isConnected){await new Promise(resolve=>setTimeout(resolve,500));try{loading.update(await rpc('dice3d.status'));}catch(error){loading.update({ready:false,error:String(error)});}}}
 function install3dChoices(){
  const skinPane=document.querySelector<HTMLElement>('.tabPane[data-tab="skins"]');if(!skinPane)return;
+ if(readDiceViewMode()==='2d'){document.querySelectorAll<HTMLElement>('[data-tab="skins"]').forEach(el=>el.remove());return;}
  const material=document.createElement('div');material.id='dice3d-material';material.setAttribute('role','group');material.setAttribute('aria-label','3D 骰子材质');
  const preview=document.createElement('iframe');preview.title='当前七骰样式的 3D 展示';preview.className='dice3d-skin-preview';
  let selected=String(reads['player.getMetadata']?.['com.obr-suite/dice/3d-theme']||'ink_sketch'),started=false;

@@ -55,7 +55,7 @@ async function refresh(){
   for(const item of data.items||[]){if(!ids.has(item.id)||data.role!=='GM'&&!item.visible)continue;const image=item as any,half=image.image?.height&&image.grid?.dpi?Math.abs(image.image.height/image.grid.dpi*dpi*(image.scale?.y??1))/2:dpi/2;
    anchors[item.id]={x:item.position.x*scale+position.x,y:(item.position.y-half)*scale+position.y-40};}
   const history=[...groups].find(([id,g])=>id.startsWith('history:')&&g.visible);
-  bus.postMessage({type:'token-results',anchors,groups:(history?[history]:[...groups]).map(([id,g])=>({id,visible:g.visible,rows:g.rows.filter(row=>anchors[row.itemId])}))});
+  bus.postMessage({type:'token-results',anchors,scale,groups:(history?[history]:[...groups]).map(([id,g])=>({id,visible:g.visible,rows:g.rows.filter(row=>anchors[row.itemId])}))});
  }catch(error){console.warn('[dice] token anchor update failed',error);}
  finally{if(flight===ownGeneration)flight=-1;if(bus===current&&generation===ownGeneration){if(own!==serial)queueMicrotask(()=>void refresh());else if(groups.size||tracked.size)timer=setTimeout(()=>void refresh(),100);}}
 }

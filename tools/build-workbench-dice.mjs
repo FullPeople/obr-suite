@@ -17,6 +17,7 @@ async function performPhysicalPanelRoll(expr,label,hidden,clearInput){
  catch(error){if(clearInput&&!expression.trim())setExpression(expr);await OBR.notification.show(String(error),'ERROR');}
  return true;
 }
+
 `;
 const plugins=[{name:'workbench-sdk',resolveId(id){if(id==='@owlbear-rodeo/sdk')return join(root,'src/workbench/dice-sdk.ts');},transform(code,id){
  if(id.replaceAll('\\','/').endsWith('/modules/dice/panel-page.ts')){
@@ -38,4 +39,27 @@ for(const [source,name] of [['dice-panel.html','index'],['dice-quick-popup.html'
  if(name==='quick')html=html.replace(/<button[^>]*id="closeBtn"[^>]*>[\s\S]*?<\/button>/,'').replace('</style>','html,body{background:transparent}.popup{box-shadow:none}</style>');
  html=html.replace('</head>',`<style>${readFileSync(join(root,'src/workbench/dice-theme.css'),'utf8')}</style></head>`);
  writeFileSync(join(output,`${name}.html`),html);unlinkSync(temp);
+}
+
+// Reuse the approved legacy effect with a strictly local SDK facade. Remove
+// skin parsing and rendering from this separate entry rather than reading metadata.
+{
+ let html=readFileSync(join(root,'dice-effect.html'),'utf8');
+ const script=html.match(/<script type="module"(?: src="([^"]+)")?>([\s\S]*?)<\/script>/);
+ const effectPlugins=[{name:'plain-2d-effect',resolveId(id){if(id==='@owlbear-rodeo/sdk')return join(root,'src/workbench/dice-effect2d-sdk.ts');},transform(code,id){
+   if(id.replaceAll('\\','/').endsWith('/modules/dice/effect-page.ts')){
+     code=code.replace('new URLSearchParams(location.search)','new URLSearchParams(location.hash.slice(1))');
+     code=code.replace(/^import .*from "\.\/dice-skins";\r?\n/m,'');
+     const parseStart=code.indexOf('function parseSkins()'),parseEnd=code.indexOf('const skins = parseSkins();')+'const skins = parseSkins();'.length;
+     const artStart=code.indexOf('  const skin = skins['),artBody=code.indexOf('    const url = assetUrl(',artStart),artEnd=code.indexOf('\n  const num = document.createElement',artBody);
+     if(parseStart<0||parseEnd<parseStart||artStart<0||artBody<artStart||artEnd<artBody)throw Error('Legacy 2D effect adapter no longer matches');
+     code=code.slice(0,artStart)+code.slice(artBody,artEnd).replace(/\n  }\s*$/,'\n')+code.slice(artEnd);
+     code=code.slice(0,parseStart)+code.slice(parseEnd);
+   }
+   return code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/suite-dev/')).replaceAll('import.meta.env.DEV','false');
+ }}];
+ await build({input:join(root,script[1]),plugins:effectPlugins,output:{file:join(output,'effect2d.js'),format:'esm'}});
+ const digest=createHash('sha256').update(readFileSync(join(output,'effect2d.js'))).digest('hex').slice(0,12);
+ html=html.replace(script[0],`<script type="module" src="./effect2d.js?v=${digest}"></script>`);
+ writeFileSync(join(output,'effect2d.html'),html);
 }

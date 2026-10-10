@@ -1,4 +1,5 @@
 import {workbenchSettings,featureSettings,workbenchTabs} from './workbench/settings-catalog';
+import {readDiceViewMode,saveDiceViewMode} from './workbench/dice-view-mode';
 import { mountPortalDefault } from "./modules/portals/default-image";
 import OBR from "@owlbear-rodeo/sdk";
 import {
@@ -2512,10 +2513,21 @@ const TABS: TabDef[] = [
           </div>
           <button class="tog ${sfxOn ? "on" : ""}" data-key="sfxDice" type="button" aria-pressed="${sfxOn}"></button>
         </div>
+        <div class="row"><div class="lbl">${lang === 'zh' ? '骰子显示' : 'Dice display'}
+          <div class="desc"><em>${lang === 'zh' ? '2D 使用旧版平面骰子，不加载皮肤；3D 保留当前效果。只影响你自己，刷新枭熊房间后生效。' : '2D uses the original flat dice without skins; 3D keeps the current effects. Local preference; refresh the Owlbear room to apply.'}</em></div>
+          <div data-key="diceViewNotice" role="status"></div>
+        </div><select data-key="diceViewMode" aria-label="${lang === 'zh' ? '骰子显示模式' : 'Dice display mode'}"><option value="2d" ${readDiceViewMode()==='2d'?'selected':''}>2D</option><option value="3d" ${readDiceViewMode()==='3d'?'selected':''}>3D</option></select></div>
         ${DICE_DESC[lang]}
       `;
     },
     afterRender: (root) => {
+      root.querySelector<HTMLSelectElement>('[data-key="diceViewMode"]')?.addEventListener('change', e => {
+        const value=(e.currentTarget as HTMLSelectElement).value;
+        if(value!=='2d'&&value!=='3d')return;
+        const notice=root.querySelector<HTMLElement>('[data-key="diceViewNotice"]');
+        try{saveDiceViewMode(value);if(notice)notice.textContent=getLocalLang()==='en'?'Saved. Refresh the Owlbear room to apply.':'已保存。刷新枭熊房间后生效。';}
+        catch{if(notice)notice.textContent=getLocalLang()==='en'?'Could not save the preference. Check browser storage access.':'未能保存，请检查浏览器是否允许本机存储。';}
+      });
       root.querySelector<HTMLButtonElement>('.tog[data-key="sfxDice"]')
         ?.addEventListener("click", (e) => {
           const btn = e.currentTarget as HTMLButtonElement;

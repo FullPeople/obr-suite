@@ -8,6 +8,7 @@ import {parseFormula,initialPhysicalCount} from '../../extensions/workbench-dice
 import {STYLE_CHOICES,RETIRED_STYLES} from '../../extensions/workbench-dice3d/src/material-styles';
 import type {QuickRollRequest,DiceRollPayload} from '../modules/dice';
 import {workbenchObservation} from './observation';
+import {readDiceViewMode} from './dice-view-mode';
 import type {DiceLoadingState} from './dice-loading-ui';
 import type {LoadProgress} from '../../extensions/workbench-dice3d/src/asset-loading';
 const MODAL=CHANNEL+'/overlay',RESULT='com.obr-suite/dice-roll',THEME='com.obr-suite/dice/3d-theme';
@@ -35,7 +36,8 @@ export async function setupDice3d(){
    await OBR.notification.show(`已移除材质 ${removed}，后续骰子已改为卡通涂鸦，可在皮肤页重新选择。`,'INFO');
   }
   if(own!==generation)return;bus=new BroadcastChannel(`${CHANNEL}:local:${connection}`);
-  bus.onmessage=e=>{if(own!==generation)return;const m=e.data;if(m.type==='load-progress'){if(m.engine)engineProgress=m.progress;else renderProgress=m.progress;updateLoadProgress();}
+  bus.onmessage=e=>{if(own!==generation)return;const m=e.data;if(m.type==='legacy-sfx'){if(['parabola','scalePunch','numFly','numLand','flashCrit','flashFail','spin','burst','same'].includes(m.name))void sendDiceMessage('com.obr-suite/sfx',{name:m.name},{destination:'LOCAL'}).catch(error=>console.warn('[dice] 2D sound failed',error));}
+   else if(m.type==='load-progress'){if(m.engine)engineProgress=m.progress;else renderProgress=m.progress;updateLoadProgress();}
    else if(m.type==='state'){ready=m.state.ready;const error=m.state.error||'';loadState={...loadState,ready,physics:m.state.physics,overlay:m.state.overlay,error:ready?'':error};if(error&&error!==lastError){void OBR.notification.show('3D 骰子：'+error,'ERROR');for(const [id,w] of waiters){clearTimeout(w.timer);waiters.delete(id);w.reject(Error(error));}}lastError=error;}
    else if(m.type==='history'){const snapshot=(m.records as ResultRecord[]).slice(0,DICE_HISTORY_LIMIT);const ids=new Set(snapshot.map(r=>r.id));for(const id of records.keys())if(!ids.has(id))records.delete(id);for(const r of snapshot){const previous=records.get(r.id);records.set(r.id,r);if(!r.formulaData||!visibleRecord(r))continue;const data=payload(r);
     // Early prediction resolves only the submit RPC, never visible/stored history.
@@ -47,7 +49,7 @@ export async function setupDice3d(){
   core=new Controller({id:p.connectionId,name:p.name,color:p.color,role:observed.role,resolveRole:async id=>(await workbenchObservation().read()).party.find(p=>p.connectionId===id)?.role,mode:'Full Suite 新版 3D',send:data=>sendDiceMessage(CHANNEL,data,{destination:'REMOTE'},()=>own===generation),sendTimed:(data,beforeDispatch)=>sendDiceMessage(CHANNEL,data,{destination:'REMOTE'},()=>own===generation,beforeDispatch),reserveNormalWindow:(maxMs,valid)=>reserveDiceNormalWindow(maxMs,()=>own===generation&&valid()),listen:fn=>OBR.broadcast.onMessage(CHANNEL,event=>fn(event.data,event.connectionId))});
   historyStop=OBR.broadcast.onMessage('com.obr-suite/dice3d-history-request',event=>{if(event.connectionId===connection)void dice3dRpc('history',[]).catch(error=>core?.fail('history-snapshot',error));});
   profileStop=workbenchObservation().onChange(()=>{const p=workbenchObservation().peek().player;if(p)void core?.setProfile(p.name,p.color,p.role).catch(e=>core?.fail('profile',e));});
-  await core.init();if(own!==generation)return;const url=`/suite-dev/dice3d/overlay.html?client=${encodeURIComponent(connection)}&v=${BUILD}`;
+  await core.init();if(own!==generation)return;const page=readDiceViewMode()==='2d'?'overlay2d.html':'overlay.html',url=`/suite-dev/dice3d/${page}?client=${encodeURIComponent(connection)}&v=${BUILD}`;
   const work=modalLane.then(async()=>{if(own===generation)await OBR.modal.open({id:MODAL,url,fullScreen:true,hideBackdrop:true,hidePaper:true,disablePointerEvents:true});});modalLane=work.catch(()=>{});await work;
  })().catch(error=>{if(own!==generation)return;teardownDice3d();loadState={...loadState,error:String(error)};throw error});return start;
 }

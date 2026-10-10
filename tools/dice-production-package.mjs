@@ -23,12 +23,12 @@ export function inventory(root){
  walk(root);return Object.fromEntries(Object.entries(files).sort(([a],[b])=>a.localeCompare(b)));
 }
 export function productionHostFiles(root){
- const names=['background.html','manifest-dev.json',...readdirSync(join(root,'assets')).filter(name=>/\.(js|css)$/.test(name)).map(name=>'assets/'+name)];
+ const names=['background.html','manifest-dev.json','workbench-dice/effect2d.html','workbench-dice/effect2d.js',...['d4','d6','d8','d10','d12','d20','d100'].map(kind=>kind+'.png'),...readdirSync(join(root,'assets')).filter(name=>/\.(js|css)$/.test(name)).map(name=>'assets/'+name)];
  return Object.fromEntries(names.sort().map(name=>[name,digest(readFileSync(join(root,name)))]));
 }
 export function verifyProductionDice(root,{sourceCommit,webCommit}={}){
  root=resolve(root);
- for(const file of ['overlay.html','skin-preview.html',manifestName,'asset-hashes.json','vendor/lock.json'])
+ for(const file of ['overlay.html','overlay2d.html','skin-preview.html',manifestName,'asset-hashes.json','vendor/lock.json'])
   assert(statSync(join(root,file)).isFile(),'Missing production dice file: '+file);
  const manifest=JSON.parse(readFileSync(join(root,manifestName),'utf8'));
  assert.equal(manifest.production,true);assert.equal(manifest.instrumented,false);
@@ -43,7 +43,7 @@ export function verifyProductionDice(root,{sourceCommit,webCommit}={}){
  assert.deepEqual(productionHostFiles(host),manifest.hostFiles,'Incomplete or changed production host dependencies');
  assert(Object.keys(manifest.hostFiles).some(name=>/^assets\/physics\.worker-.+\.js$/.test(name)),'Missing production host physics worker');
  assert.equal(JSON.parse(readFileSync(join(host,'manifest-dev.json'),'utf8')).version,manifest.hostVersion);
- for(const entry of ['overlay.html','skin-preview.html']){
+ for(const entry of ['overlay.html','overlay2d.html','skin-preview.html']){
   const html=readFileSync(join(root,entry),'utf8');
   const refs=[...html.matchAll(/(?:src|href)="(\/suite-dev\/dice3d\/[^"?#]+)(?:[?#][^"]*)?"/g)].map(m=>m[1].slice('/suite-dev/dice3d/'.length));
   assert(refs.some(name=>name.endsWith('.js')),'Missing production entry script: '+entry);
