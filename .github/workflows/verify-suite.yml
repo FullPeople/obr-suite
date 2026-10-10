@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [codex/dice-mixed269, codex/text-effects266-20261010, codex/text-effects-20261009, codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
+    branches: [codex/dice-research270, codex/dice-mixed269, codex/text-effects266-20261010, codex/text-effects-20261009, codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
   workflow_dispatch:
 permissions:
   contents: read
@@ -51,6 +51,10 @@ jobs:
           node tools/character-directory259-selftest.mjs
           node tools/card-sync260-selftest.mjs
           node tools/dice-mixed269-selftest.mjs
+          node tools/dice-delta270-selftest.mjs
+          node tools/dice-fast-tail270-selftest.mjs
+          node tools/dice-physics270-selftest.mjs
+          node tools/dice-render-resource-selftest.mjs
       - name: Suite regression tests
         id: tests
         run: node tools/verify-suite-candidate.mjs

@@ -38,9 +38,12 @@ export class Assembly {
 export const CONTACT_FLOATS = 10;
 // Rearrange exact float bits by coordinate and byte lane after a frame XOR.
 // This changes compression only; all 120 Hz samples remain bit-for-bit intact.
-function packPoses(bytes,frames,stride) {
+function packPoses(bytes,frames,stride,packing) {
   const words=new Uint32Array(bytes.slice().buffer);
-  for(let i=words.length-1;i>=stride;i--)words[i]^=words[i-stride];
+  if(packing==='delta2-shuffle-v1'){
+    // Unsigned integer arithmetic, not float subtraction: every source bit survives.
+    for(let pass=0;pass<2;pass++)for(let i=words.length-1;i>=stride;i--)words[i]-=words[i-stride];
+  }else for(let i=words.length-1;i>=stride;i--)words[i]^=words[i-stride];
   const raw=new Uint8Array(words.buffer),packed=new Uint8Array(raw.length);
   for(let channel=0;channel<stride;channel++)for(let frame=0;frame<frames;frame++){
     const word=frame*stride+channel,at=channel*frames+frame;
@@ -48,20 +51,24 @@ function packPoses(bytes,frames,stride) {
   }
   return packed;
 }
-function unpackPoses(bytes,frames,stride) {
+function unpackPoses(bytes,frames,stride,packing) {
   const raw=new Uint8Array(bytes.length),count=bytes.length/4;
   for(let channel=0;channel<stride;channel++)for(let frame=0;frame<frames;frame++){
     const word=frame*stride+channel,at=channel*frames+frame;
     for(let lane=0;lane<4;lane++)raw[word*4+lane]=bytes[lane*count+at];
   }
   const words=new Uint32Array(raw.buffer);
-  for(let i=stride;i<words.length;i++)words[i]^=words[i-stride];
+  if(packing==='delta2-shuffle-v1'){
+    for(let pass=0;pass<2;pass++)for(let i=stride;i<words.length;i++)words[i]+=words[i-stride];
+  }else for(let i=stride;i<words.length;i++)words[i]^=words[i-stride];
   return raw;
 }
+/** @param {boolean|'delta2-shuffle-v1'} [compact] */
 export async function encodeRoll(meta,poses,contacts,compact=false) {
+  if(compact!==false&&compact!==true&&compact!=='delta2-shuffle-v1')throw Error('Invalid pose packing');
   if(compact){
     if(poses.length!==meta.frames*meta.kinds.length*7)throw Error('Pose count mismatch');
-    meta={...meta,posePacking:'xor-shuffle-v1'};
+    meta={...meta,posePacking:compact===true?'xor-shuffle-v1':compact};
   }
   const header=new TextEncoder().encode(JSON.stringify(meta));
   const poseBytes=poses.byteLength,contactBytes=contacts.length*CONTACT_FLOATS*4;
@@ -69,7 +76,7 @@ export async function encodeRoll(meta,poses,contacts,compact=false) {
   const view=new DataView(plain.buffer);
   view.setUint32(0,header.length,true);plain.set(header,4);
   const poseData=new Uint8Array(poses.buffer,poses.byteOffset,poses.byteLength);
-  plain.set(compact?packPoses(poseData,meta.frames,meta.kinds.length*7):poseData,4+header.length);
+  plain.set(compact?packPoses(poseData,meta.frames,meta.kinds.length*7,meta.posePacking):poseData,4+header.length);
   let offset=4+header.length+poseBytes;
   for(const c of contacts){
     view.setFloat32(offset,c.t,true);view.setFloat32(offset+4,c.kind,true);
@@ -88,7 +95,7 @@ export async function decodeRoll(bytes) {
   if(plain.length<4)throw Error('Missing trajectory header');
   const n=new DataView(plain.buffer).getUint32(0,true);if(n<1||n>64000||n+4>plain.length)throw Error('Invalid header size');
   const meta=JSON.parse(new TextDecoder().decode(plain.subarray(4,n+4)));
-  if(meta.posePacking!==undefined&&meta.posePacking!=='xor-shuffle-v1')throw Error('Invalid pose packing');
+  if(meta.posePacking!==undefined&&meta.posePacking!=='xor-shuffle-v1'&&meta.posePacking!=='delta2-shuffle-v1')throw Error('Invalid pose packing');
   if(meta.version!==2||meta.fps!==120||!Array.isArray(meta.kinds)||meta.kinds.length<1||meta.kinds.length>100||!Number.isInteger(meta.frames)||meta.frames<2||meta.frames>14401||!Array.isArray(meta.results)||meta.results.length!==meta.kinds.length||!meta.request||meta.request.count!==meta.kinds.length)throw Error('Invalid roll header');
   const maximumDuration=120.001;
   if(meta.bounds){const b=meta.bounds;if(!['minX','maxX','minZ','maxZ'].every(k=>Number.isFinite(b[k])&&Math.abs(b[k])<=4)||b.minX>=b.maxX||b.minZ>=b.maxZ)throw Error('Invalid physics table bounds')}
@@ -102,7 +109,7 @@ export async function decodeRoll(bytes) {
   if(meta.masked&&(!['self','gm','players'].includes(meta.request.visibility)||meta.request.seed!==0||meta.request.modifier!==0||!meta.results.every(v=>v===0)||meta.diagnostics||meta.formulaData||meta.request.formula||meta.request.preset||!meta.secret))throw Error('Private roll was not redacted');
   const poseBytes=meta.frames*meta.kinds.length*7*4,contactBytes=meta.collisions*CONTACT_FLOATS*4;
   const body=plain.slice(n+4);if(body.length!==poseBytes+contactBytes)throw Error('Pose/contact count mismatch');
-  const poseData=meta.posePacking?unpackPoses(body.subarray(0,poseBytes),meta.frames,meta.kinds.length*7):body.slice(0,poseBytes);
+  const poseData=meta.posePacking?unpackPoses(body.subarray(0,poseBytes),meta.frames,meta.kinds.length*7,meta.posePacking):body.slice(0,poseBytes);
   delete meta.posePacking;
   const poses=new Float32Array(poseData.buffer);if(poses.some(x=>!Number.isFinite(x)||Math.abs(x)>1000))throw Error('Invalid pose');
   const view=new DataView(body.buffer,poseBytes,contactBytes),contacts=[];

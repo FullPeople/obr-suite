@@ -41,7 +41,7 @@ const IMPACT_ANGLES=[-0.78,-0.22,0.31,0.86];
 export class CueRenderer{
   private canvas:HTMLCanvasElement;
   private ctx:CanvasRenderingContext2D;private releaseCanvas:()=>void;
-  private particles=new Map<number,Particle[]>();
+  private particles?:Particle[];
   private particleSprites=new Map<string,HTMLCanvasElement>();
   private seed:bigint;
   private targetSlot:[number,number]=[0,0];
@@ -59,7 +59,7 @@ export class CueRenderer{
   }
   setSlotOffset(x:number,y=0,width?:number,height?:number,snap=false){this.targetSlot=[x,y];this.slotSize=width!==undefined&&height!==undefined?[width,height]:undefined;if(snap)this.currentSlot=[x,y];}
   slotPosition(){return [...this.currentSlot]}
-  prepareCue(cue:Cue){for(const beam of cue.beams){this.beamParticles(beam);this.particleSprite(beam.color);}if(cue.modifier)this.particleSprite(cue.modifier.color);}
+  prepareCue(cue:Cue){for(const beam of cue.beams){this.beamParticles();this.particleSprite(beam.color);}if(cue.modifier)this.particleSprite(cue.modifier.color);}
   destroy(){this.releaseCanvas()}
   private size(){
     const ratio=Math.min(2,window.devicePixelRatio||1);
@@ -71,16 +71,17 @@ export class CueRenderer{
     this.ctx.setTransform(ratio,0,0,ratio,0,0);
     return{w,h};
   }
-  private beamParticles(beam:CueBeam):Particle[]{
-    const cached=this.particles.get(beam.dieIndex);
-    if(cached)return cached;
+  private beamParticles():Particle[]{
+    // The established noise depends on this roll's seed, never on the die index.
+    // Reuse identical parameters; each beam still draws all 72 particles.
+    if(this.particles)return this.particles;
     const list:Particle[]=[];
     for(let i=0;i<PARTICLES_PER_BEAM;i++){
       const spawn=Math.max(0,Math.min(1,(i+0.5+noise(this.seed,i*3)*0.38/2)/PARTICLES_PER_BEAM));
       const unit=(noise(this.seed,i*3+1)+1)/2;
       list.push({spawn,life:0.42+0.40*unit,lateral:noise(this.seed,i*3+2),size:2.6+4.2*unit});
     }
-    this.particles.set(beam.dieIndex,list);
+    this.particles=list;
     return list;
   }
   private particleSprite(color:[number,number,number]){
@@ -208,7 +209,7 @@ export class CueRenderer{
       // 72 particles with independent spawn times, lifetimes, drift and decay.
       const sprite=this.particleSprite(beam.color);
       ctx.save();ctx.translate(launchX,launchY);ctx.rotate(Math.atan2(dy,dx));
-      for(const particle of this.beamParticles(beam)){
+      for(const particle of this.beamParticles()){
         const spawnTime=beam.start+beam.recoil+particle.spawn*beam.travel*0.88;
         const age=elapsed-spawnTime;
         if(age<0||age>particle.life)continue;

@@ -72,7 +72,7 @@ function engine():Promise<any>{
 }
 /** The binding hands back a shared temporary for these reads: copy the components at once. */
 const vec3=(v:any):number[]=>[v.GetX(),v.GetY(),v.GetZ()];
-const metres=(v:any):number[]=>vec3(v).map(x=>x/ENGINE_SCALE);
+const metres=(v:any):number[]=>[v.GetX()/ENGINE_SCALE,v.GetY()/ENGINE_SCALE,v.GetZ()/ENGINE_SCALE];
 const vec=(v:number[])=>new J.Vec3(v[0],v[1],v[2]);
 const rvec=(v:number[])=>new J.RVec3(v[0]*ENGINE_SCALE,v[1]*ENGINE_SCALE,v[2]*ENGINE_SCALE);
 const quat=(q:number[])=>new J.Quat(q[0],q[1],q[2],q[3]);
@@ -375,6 +375,7 @@ async function simulate(request:Request,catalog:Catalog,view:Viewport,revisions:
     }
     const stressTier=kinds.length>N.NATIVE_BATCH;
     const poses:number[]=[];let steps=0,clearedAll=false,substepsTotal=0;
+    const span=Math.max(bounds.maxX-bounds.minX,bounds.maxZ-bounds.minZ),margin=Math.max(.35,span*2.5);
     const sample=()=>{for(const state of dice){
       const p=metres(state.body.GetPosition()),q=state.body.GetRotation();
       poses.push(p[0]*N.VISUAL_PER_METER,p[1]*N.VISUAL_PER_METER,p[2]*N.VISUAL_PER_METER,q.GetX(),q.GetY(),q.GetZ(),q.GetW());
@@ -395,7 +396,6 @@ async function simulate(request:Request,catalog:Catalog,view:Viewport,revisions:
       const updateError=world.Step(N.FIXED_STEP,substeps);
       if(typeof updateError==='number'&&updateError!==0)throw Error(`Jolt update failed: ${updateError}`);
       commitSupportGraph();
-      if(steps%SAMPLE_EVERY===0)sample();
       if(!clearedAll){
         dice.forEach((state,index)=>{
           if(entered[index])return;
@@ -415,6 +415,7 @@ async function simulate(request:Request,catalog:Catalog,view:Viewport,revisions:
         const state=dice[index];
         const p=metres(state.body.GetPosition());
         const quaternion=state.body.GetRotation(),rotation=[quaternion.GetX(),quaternion.GetY(),quaternion.GetZ(),quaternion.GetW()];
+        if(steps%SAMPLE_EVERY===0)poses.push(p[0]*N.VISUAL_PER_METER,p[1]*N.VISUAL_PER_METER,p[2]*N.VISUAL_PER_METER,rotation[0],rotation[1],rotation[2],rotation[3]);
         const v=metres(bi.GetLinearVelocity(state.body.GetID()));
         const w=vec3(bi.GetAngularVelocity(state.body.GetID()));
         state.surfaceSpeed=Math.hypot(v[0],v[1],v[2])+Math.hypot(w[0],w[1],w[2])*state.nominal*.75;
@@ -423,11 +424,11 @@ async function simulate(request:Request,catalog:Catalog,view:Viewport,revisions:
         // conditions, not kicked across the table after it appeared to stop.
         const speedSquared=v[0]*v[0]+v[1]*v[1]+v[2]*v[2];
         const spinSquared=w[0]*w[0]+w[1]*w[1]+w[2]*w[2];
-        const speed=Math.sqrt(speedSquared),span=Math.max(bounds.maxX-bounds.minX,bounds.maxZ-bounds.minZ),margin=Math.max(.35,span*2.5);
-        if(![...p,...rotation,...v,...w].every(Number.isFinite)||speed>5||spinSquared>40000||p[1]<-.25||p[1]>Math.max(1.5,span*4)||
+        const speed=Math.sqrt(speedSquared);
+        if(!(Number.isFinite(p[0])&&Number.isFinite(p[1])&&Number.isFinite(p[2])&&Number.isFinite(rotation[0])&&Number.isFinite(rotation[1])&&Number.isFinite(rotation[2])&&Number.isFinite(rotation[3])&&Number.isFinite(v[0])&&Number.isFinite(v[1])&&Number.isFinite(v[2])&&Number.isFinite(w[0])&&Number.isFinite(w[1])&&Number.isFinite(w[2]))||speed>5||spinSquared>40000||p[1]<-.25||p[1]>Math.max(1.5,span*4)||
           p[0]<bounds.minX-margin||p[0]>bounds.maxX+margin||p[2]<bounds.minZ-margin||p[2]>bounds.maxZ+margin)
           throw new InvalidPrediction(`非物理飞射被拒绝: ${kindLabel(state,index)} step=${steps}`,[index]);
-        if(Math.hypot(...p.map((x,i)=>x-state.previous[i]))>Math.max(speed,state.previousSpeed)*N.FIXED_STEP+.0015)
+        if(Math.hypot(p[0]-state.previous[0],p[1]-state.previous[1],p[2]-state.previous[2])>Math.max(speed,state.previousSpeed)*N.FIXED_STEP+.0015)
           throw new InvalidPrediction(`轨迹不连续被拒绝: ${kindLabel(state,index)} step=${steps}`,[index]);
         state.previous=p;state.previousSpeed=speed;
         const lowLinear=speedSquared<=N.SETTLE_LINEAR*N.SETTLE_LINEAR;
