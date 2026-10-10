@@ -91,7 +91,8 @@ if(process.argv[2]==='--sample'){
     if(id.replaceAll('\\','/')!==resolve(root,workerPath).replaceAll('\\','/'))return;
     const marker="new URL(url('vendor/jolt-physics.wasm.js'),self.location.origin).href";
     assert(worker.includes(marker),'Verified vendor loading hook changed');
-    return worker.replace(marker,JSON.stringify(pathToFileURL(resolve(assets,'vendor/jolt-physics.wasm.js')).href));
+    return worker.replace(marker,JSON.stringify(pathToFileURL(resolve(assets,'vendor/jolt-physics.wasm.js')).href))
+      .replace('new URL(url(path),self.location.origin).href',`new URL(path,${JSON.stringify(pathToFileURL(assets+'/').href)}).href`);
    },
   }],output:{file:bundle,format:'esm',codeSplitting:false}});
   reports[label]=await sample(bundle);

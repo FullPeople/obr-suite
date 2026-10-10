@@ -1,9 +1,9 @@
 import {verifyDiceAssets} from './dice-pinned-assets.mjs';
-import {mkdirSync,readFileSync,writeFileSync,copyFileSync} from 'node:fs';
+import {mkdirSync,readFileSync,writeFileSync,copyFileSync,cpSync} from 'node:fs';
 import assert from 'node:assert/strict';
 const out='.cache/edge220/pinned-fixture';mkdirSync(out+'/vendor',{recursive:true});writeFileSync(out+'/asset-hashes.json','{}');
-for(const name of ['lock.json','jolt-physics.wasm.js','jolt-physics.wasm.wasm','Jolt-LICENSE'])copyFileSync('extensions/workbench-dice3d/public/vendor/'+name,out+'/vendor/'+name);
-assert.equal(verifyDiceAssets(out).verified,3);
+cpSync('extensions/workbench-dice3d/public/vendor',out+'/vendor',{recursive:true});
+assert.equal(verifyDiceAssets(out).verified,5);
 const script=out+'/vendor/jolt-physics.wasm.js',original=readFileSync(script);
 writeFileSync(script,original.toString('utf8').replaceAll('\n','\r\n'));
 assert.throws(()=>verifyDiceAssets(out),/mismatch/);

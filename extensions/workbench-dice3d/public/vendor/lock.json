@@ -5,6 +5,26 @@
   "files": {
     "jolt-physics.wasm.js": "bcebc61c2a5db94f1b155b2ce1902667f952d9d63baa003b654e9e5d1ff20eb4",
     "jolt-physics.wasm.wasm": "65f044b2ec57be2bbf0f84828f3948d6f3f9e17942ad80aa98923b94dd292f90",
-    "Jolt-LICENSE": "9907e3cd4976e88e7b4d8aee1a035ffa7d3ebe84993d00b6b273f716c74b794c"
+    "Jolt-LICENSE": "9907e3cd4976e88e7b4d8aee1a035ffa7d3ebe84993d00b6b273f716c74b794c",
+    "simd-1.1.0-deb7d04efa2b/jolt-physics.wasm.js": "0c96580c54ac044a2d2d038f54a04e6a0b7d0e5a5aaef9a3aa9aa308965aa4d6",
+    "simd-1.1.0-deb7d04efa2b/jolt-physics.wasm.wasm": "deb7d04efa2b841a9e7b9a595214da6072cadc07802e52735e7fda69d130c245"
+  },
+  "builds": {
+    "scalar": {
+      "module": "vendor/jolt-physics.wasm.js",
+      "binary": "vendor/jolt-physics.wasm.wasm"
+    },
+    "simd": {
+      "module": "vendor/simd-1.1.0-deb7d04efa2b/jolt-physics.wasm.js",
+      "binary": "vendor/simd-1.1.0-deb7d04efa2b/jolt-physics.wasm.wasm"
+    }
+  },
+  "simdProvenance": {
+    "wrapperCommit": "c9c122bcd48e92885fbee7d267c928c3781d581c",
+    "coreCommit": "e77f175595e64cb44218cc9d9d56fc365ad0e36a",
+    "emscripten": "6.0.2",
+    "configuration": "Distribution; single thread; fixed 128 MiB; SIMD on; LTO, double precision, memory growth and cross-platform deterministic off",
+    "researchCI": 38029396926,
+    "originalScalarByteIdentical": true
   }
 }
