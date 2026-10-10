@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [codex/jolt-simd274, codex/qq-account-permissions-dev-20261010, codex/excel-sync-20261010, codex/dice-research270, codex/dice-mixed269, codex/music-board267-20261010, codex/text-effects266-20261010, codex/text-effects-20261009, codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004, fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003, codex/import-entry273-20261010]
+    branches: [codex/number-flight276-20261010,codex/jolt-simd274, codex/qq-account-permissions-dev-20261010, codex/excel-sync-20261010, codex/dice-research270, codex/dice-mixed269, codex/music-board267-20261010, codex/text-effects266-20261010, codex/text-effects-20261009, codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004, fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003, codex/import-entry273-20261010]
   workflow_dispatch:
 permissions:
   contents: read
@@ -121,8 +121,13 @@ jobs:
           DICE_LATENCY_VIDEO: '0'
           DICE_LATENCY_SCREENSHOTS: '0'
           DICE_LATENCY_MIXED: '1'
+          DICE_CUE_STALLS: '1'
           DND_DICE_EVIDENCE: .local-evidence/dice-mixed269/browser
         run: node tools/dice-latency-browser.mjs
+      - name: Retained numeric cue pixels and bounded frame recovery
+        env:
+          PLAYWRIGHT_EXECUTABLE_PATH: ${{ env.CHROMIUM_PATH }}
+        run: node tools/dice-cue276-browser.mjs
       - name: Verify public-link source archive is reproducible
         shell: bash
         run: |
@@ -170,6 +175,10 @@ jobs:
             .local-evidence/permission-notice/
             .local-evidence/verification/*.log
             .local-evidence/verification/results.json
+            .local-evidence/cue276/result.json
+            .local-evidence/cue276-unit/result.json
+            .local-evidence/dice-mixed269/browser/result.json
+            .local-evidence/dice-mixed269/browser/failure.json
             .local-evidence/text-effects/browser/
             .local-evidence/native-owner/results.json
             .local-evidence/production-dice/package/result.json

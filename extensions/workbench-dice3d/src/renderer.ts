@@ -1,6 +1,6 @@
 import {DiceRenderRegion,withRenderRegion} from './render-region';
 import {beginOverlayFrame} from './shared-overlay-canvas';
-import {recoverPlaybackStart} from './playback-clock';
+import {recoverCuePlaybackStart} from './playback-clock';
 import * as T from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
@@ -271,7 +271,7 @@ export class DiceRenderer {
     finally{if(this.active.length&&!this.contextLost&&!document.hidden)this.frameHandle=requestAnimationFrame(()=>this.frame());}
   }
   private drawFrame(){
-    const time=now();for(const a of this.active){const start=recoverPlaybackStart(a.start,this.last,time);if(start!==a.start){a.start=start;this.emit('render-retimed',{roll:a.roll.request.id,start});}}
+    const time=now();for(const a of this.active){const start=recoverCuePlaybackStart(a.start,this.last,time,a.cue.firstBeam,a.cue.finalReveal);if(start!==a.start){a.start=start;this.emit('render-retimed',{roll:a.roll.request.id,start});}}
     const dt=this.last?Math.min(.05,(time-this.last)/1000):1/60;if(this.last)this.frames.push(time-this.last);this.last=time;if(this.frames.length>1200)this.frames.splice(0,this.frames.length-1200);
     this.animateProjection(dt);beginOverlayFrame(this.container);
     for(const a of [...this.active]){
