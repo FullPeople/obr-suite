@@ -1,0 +1,66 @@
+// Actual QQ UI, HTTP permissions and built five-page editor; synthetic SDK/accounts.
+import assert from 'node:assert/strict';
+import {build} from 'rolldown';
+import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
+import {resolve,join,extname} from 'node:path';
+import {createRequire} from 'node:module';
+import {pathToFileURL} from 'node:url';
+const root=resolve(import.meta.dirname,'..'),web=resolve(process.env.DND_CARD_WEB_ROOT||'');
+assert(process.env.DND_CARD_WEB_ROOT&&existsSync(join(web,'dist-cloud-server/server.mjs')),'Build the exact paired Web cloud package first');
+const {CloudStore,createCloudServer}=await import(pathToFileURL(join(web,'dist-cloud-server/server.mjs')));
+const {chromium}=createRequire(join(web,'package.json'))('@playwright/test');
+const {ANNOUNCEMENT_KEY,APP_VERSION,announcementVersionFor}=await import(pathToFileURL(join(web,'src/platform/announcement.ts')));
+const out=join(root,'.local-evidence/qq-room');mkdirSync(out,{recursive:true});
+const sdk=join(out,'sdk.ts');
+writeFileSync(sdk,`const handlers=new Set<()=>void>();(window as any).qqMetadataChanged=()=>handlers.forEach(fn=>fn());
+export default {onReady:(fn:()=>void)=>queueMicrotask(fn),room:{id:'synthetic-qq-room',getMetadata:()=>((window as any).qqFixture('read')),setMetadata:(update:unknown)=>(window as any).qqFixture('write',update),onMetadataChange:(fn:()=>void)=>{handlers.add(fn);return()=>handlers.delete(fn);}},player:{getId:async()=>'synthetic-player'},modal:{close:async()=>{}}};`);
+await build({input:join(root,'src/modules/characterCards/qq-page.ts'),plugins:[{name:'synthetic-sdk',resolveId:id=>id==='@owlbear-rodeo/sdk'?sdk:undefined,transform:code=>code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/suite-dev/'))}],output:{file:join(out,'page.js'),format:'esm',codeSplitting:false}});
+const store=new CloudStore(':memory:'),owner=store.provisionVerifiedAccount('fixture:qq-owner'),other=store.provisionVerifiedAccount('fixture:qq-other'),issued=store.issueVerifiedSession(owner.id);
+await build({input:join(web,'src/core/model.ts'),output:{file:join(out,'model.mjs'),format:'esm',codeSplitting:false}});
+const {newCharacter}=await import(pathToFileURL(join(out,'model.mjs'))),source=newCharacter();
+const card=store.create(owner,{...source,id:crypto.randomUUID(),name:'QQ 插件房间验收'});store.create(other,{...source,id:crypto.randomUUID(),name:'他人私有卡应不可见'});
+const server=createCloudServer(store,'https://dnd.center');await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const api='http://127.0.0.1:'+server.address().port;
+const browser=await chromium.launch({channel:process.env.CI?undefined:'msedge'}),contexts=[],pages=[],errors=[];let metadata={};
+const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.webp':'image/webp'};
+async function context(authenticated=false){
+ const context=await browser.newContext({viewport:{width:1440,height:960}});contexts.push(context);
+ await context.exposeBinding('qqFixture',async(_source,operation,update)=>{if(operation==='write'){metadata={...metadata,...update};return;}return structuredClone(metadata);});
+ if(authenticated)await context.addCookies([{name:'dnd_cloud',value:issued.token,url:'https://dnd.center/api/',secure:true,httpOnly:true,sameSite:'Strict'}]);
+ await context.route('https://dnd.center/api/**',async route=>{const request=route.request(),url=new URL(request.url()),response=await context.request.fetch(api+url.pathname+url.search,{method:request.method(),headers:await request.allHeaders(),data:request.postData()||undefined});await route.fulfill({response});});
+ await context.route(/https:\/\/(?:obr\.)?dnd\.center\/(?!api\/).*/,async route=>{
+  const pathname=new URL(route.request().url()).pathname;
+  if(pathname==='/qq-fixture/'){await route.fulfill({contentType:'text/html',body:readFileSync(join(root,'cc-qq.html'),'utf8').replace('/src/modules/characterCards/qq-page.ts','/qq-fixture/page.js')});return;}
+  if(pathname==='/qq-fixture/page.js'){await route.fulfill({contentType:'text/javascript',body:readFileSync(join(out,'page.js'),'utf8')});return;}
+  const relative=pathname.startsWith('/suite-dev/card-viewer/')?'dist/'+pathname.slice('/suite-dev/card-viewer/'.length):'dist-cloud/'+pathname.slice(1);
+  const file=resolve(web,relative+(pathname.endsWith('/')?'index.html':''));
+  if(!file.startsWith(web+String.fromCharCode(92))&&!file.startsWith(web+'/'))throw Error('Fixture path escaped');
+  await route.fulfill(existsSync(file)?{contentType:mime[extname(file)]||'application/octet-stream',body:readFileSync(file)}:{status:404,body:'Fixture asset missing'});
+ });
+ await context.route(/https:\/\/(?:5e|homebrew)\.kiwee\.top\//,route=>route.fulfill({json:{},headers:{'access-control-allow-origin':'*'}}));
+ await context.addInitScript(([key,standalone,suite])=>{try{localStorage.setItem('dnd-card:rules-setup:v1','done');localStorage.setItem('dnd-card:editing','true');localStorage.setItem(key,standalone);localStorage.setItem(key+':suite',suite);}catch{/* Blank frames have no storage origin. */}},[ANNOUNCEMENT_KEY,APP_VERSION,announcementVersionFor('suite')]);
+ context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)));
+ const page=await context.newPage();pages.push(page);await page.goto('https://obr.dnd.center/qq-fixture/');return page;
+}
+const {expect}=createRequire(join(web,'package.json'))('@playwright/test');
+try{
+ const host=await context(true);await expect(host.locator('#cards')).toContainText('登录后读取自己的卡库');
+ const popupEvent=host.context().waitForEvent('page');await host.locator('#login').click();const popup=await popupEvent;
+ await popup.getByRole('button',{name:'连接当前账号'}).click();await expect(host.locator('#cards')).toContainText(card.character.name);await expect(host.locator('#cards')).not.toContainText('他人私有卡');
+ host.once('dialog',dialog=>dialog.accept());await host.locator('#cards button').click();await expect(host.locator('#roomCards')).toContainText('解锁给房间成员');
+ assert.equal(Object.keys(metadata).length,1);assert(!JSON.stringify(metadata).includes(issued.token),'Website session must never enter room metadata');
+ const ownName=host.frameLocator('#editor').getByRole('textbox',{name:'角色姓名',exact:true});await expect(ownName).toHaveValue('QQ 插件房间验收');await ownName.fill('卡主锁定状态修改');await expect.poll(()=>store.read(card.id,owner).character.name).toBe('卡主锁定状态修改');
+ const member=await context();await expect(member.locator('#roomCards button')).toHaveCount(0);
+ await host.getByRole('button',{name:'解锁给房间成员'}).click();await expect(host.getByRole('button',{name:'重新锁定'})).toBeVisible();await member.locator('#refresh').click();await expect(member.locator('#roomCards button')).toHaveCount(1);await member.locator('#roomCards button').click();
+ const editor=member.frameLocator('#editor'),name=editor.getByRole('textbox',{name:'角色姓名',exact:true});await expect(name).toHaveValue('卡主锁定状态修改');await name.fill('成员自动写回云端原卡');
+ await expect.poll(()=>store.read(card.id,owner).character.name).toBe('成员自动写回云端原卡');
+ assert.equal(store.slots(owner).used,1);await host.getByRole('button',{name:'重新锁定'}).click();await expect(host.getByRole('button',{name:'解锁给房间成员'})).toBeVisible();await member.locator('#refresh').click();await expect(member.locator('#roomCards button')).toHaveCount(0);await expect(member.locator('#editor')).toHaveAttribute('src','about:blank');
+ await host.getByRole('button',{name:'移出房间'}).click();assert.equal(store.slots(owner).used,1);assert.equal(store.read(card.id,owner).character.name,'成员自动写回云端原卡');
+ host.once('dialog',dialog=>dialog.accept());await host.locator('#cards button').click();await expect(host.getByRole('button',{name:'移出房间'})).toBeVisible();store.db.exec('UPDATE room_cards SET expires=0');
+ await host.getByRole('button',{name:'移出房间'}).click();await expect(host.locator('#roomCards button')).toHaveCount(0);assert.equal(store.slots(owner).used,1);
+ host.once('dialog',dialog=>dialog.accept());await host.locator('#cards button').click();await expect(host.getByRole('button',{name:'移出房间'})).toBeVisible();store.delete(card.id,owner,store.read(card.id,owner).revision);
+ await host.getByRole('button',{name:'移出房间'}).click();await expect(host.locator('#roomCards button')).toHaveCount(0);assert.equal(store.slots(owner).used,0);
+ assert.deepEqual(errors,[]);await host.screenshot({path:join(out,'qq-owner.png')});
+ const result={synthetic:true,realQQ:false,realRoom:false,checks:['popup-pkce-connection','own-library-only','personal-session-not-in-metadata','loaded-card-default-locked','unlocked-member-five-page-editor','automatic-original-writeback','owner-relock-removes-member-editor','room-remove-retains-original','locked-owner-five-page-edit','expired-room-entry-can-be-removed','deleted-original-room-entry-can-be-removed']};
+ writeFileSync(join(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
+}finally{await browser.close();await new Promise(resolve=>server.close(resolve));store.close();}
