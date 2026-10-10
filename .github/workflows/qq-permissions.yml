@@ -3,7 +3,7 @@ on:
   push:
     branches: [dev, codex/qq-library-entry-dev-20261010, codex/qq-account-permissions-dev-20261010, codex/qq-account-permissions-stable-20261010]
   pull_request:
-    paths: ['.github/workflows/qq-permissions.yml', 'cc-qq.html', 'src/modules/characterCards/**', 'src/workbench/background.ts', 'src/workbench/panel-rpc.ts', 'tools/build-workbench-panels.mjs', 'tools/qq-panel-selftest.mjs', 'tools/qq-room-browser-selftest.mjs', 'tools/build-workbench-dev.mjs', 'tools/native-owner-selftest.mjs', 'tools/workbench-read-recovery-selftest.mjs', 'vite.config.ts']
+    paths: ['.github/workflows/qq-permissions.yml', 'cc-qq.html', 'src/modules/characterCards/**', 'src/workbench/background.ts', 'src/workbench/panel-rpc.ts', 'src/workbench/qq-account-adapter.ts', 'tools/build-workbench-panels.mjs', 'tools/qq-account-session-selftest.mjs', 'tools/qq-panel-selftest.mjs', 'tools/qq-room-browser-selftest.mjs', 'tools/build-workbench-dev.mjs', 'tools/native-owner-selftest.mjs', 'tools/workbench-read-recovery-selftest.mjs', 'vite.config.ts']
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 87e3a3fa9263ee1364c98f5360ed843c62c1ab1e
+          ref: 7eb09ac90f3d99ee2ee8e9df7d35723a40a0bbb9
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
