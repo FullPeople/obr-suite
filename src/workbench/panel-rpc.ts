@@ -1,3 +1,4 @@
+import {QQ_CARDS} from '../modules/characterCards/qq-account';
 import {markPlayerPermissionsRead} from '../player-permission-notice';
 import { requestTextEffect } from '../modules/textEffects';
 import { REQUEST as TEXT_EFFECT_REQUEST, STATUS as TEXT_EFFECT_STATUS } from '../modules/textEffects/protocol';
@@ -22,7 +23,26 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
  };
  return async function request(panel:string,instance:string,method:string,args:any[]){
   if(typeof instance!=='string'||!/^[a-zA-Z0-9-]{1,80}$/.test(instance))throw Error('无效窗口');
-  if(!['settings','music','table','notes','permissions','textEffects'].includes(panel))throw Error('无效功能页');
+  if(!['settings','music','table','notes','permissions','textEffects','qq'].includes(panel))throw Error('无效功能页');
+  if(panel==='qq'){
+   // QQ credentials stay in this browser. The panel bridge exposes only its room registry.
+   const select=(metadata:Record<string,unknown>)=>({[QQ_CARDS]:metadata[QQ_CARDS]??[]});
+   if(method==='init')return {roomId:OBR.room.id,playerId:await OBR.player.getId(),preferences:{}};
+   if(method==='player.getId')return OBR.player.getId();
+   if(method==='room.getMetadata')return select(await OBR.room.getMetadata());
+   if(method==='room.setMetadata'){
+    const update=args[0],rows=update?.[QQ_CARDS];
+    if(args.length!==1||!update||Object.keys(update).length!==1||!Array.isArray(rows)||rows.length>1000||JSON.stringify(rows).length>1000000||rows.some(row=>!row||typeof row.id!=='string'||typeof row.name!=='string'||typeof row.qqOwner!=='string'||typeof row.locked!=='boolean'||!['owners','public'].includes(row.visibility)||!Array.isArray(row.owner_ids)||row.owner_ids.some((id:unknown)=>typeof id!=='string')||row.qqRoom?.id!==row.id||typeof row.qqRoom?.capability!=='string'))throw Error('无效 QQ 房间卡资料');
+    return OBR.room.setMetadata({[QQ_CARDS]:rows});
+   }
+   if(method==='subscribe'&&args[0]==='roomMetadata'&&args[1]===undefined){
+    const key=`${panel}:${instance}:roomMetadata:`;
+    if(!subscriptions.has(key))subscriptions.set(key,OBR.room.onMetadataChange(metadata=>send('panelEvent',{panel,instance,event:'roomMetadata',data:select(metadata)})));
+    return;
+   }
+   if(method==='dispose'){for(const [key,off] of subscriptions)if(key.startsWith(`${panel}:${instance}:`)){off();subscriptions.delete(key);}return;}
+   throw Error('不支持的 QQ 卡库操作');
+  }
   if(panel==='textEffects'&&method!=='dispose'){
    if(method==='broadcast.sendMessage'){
     if(args.length!==3||args[0]!==TEXT_EFFECT_REQUEST||args[2]?.destination!=='LOCAL')throw Error('无效文字演出操作');
