@@ -19,7 +19,7 @@ import type {PhysicalHop} from './physical-hop';
 import {physicalRuleFace,ruleFlipLaunch,FLIP_DAMPING} from './rule-flip-launch';
 import {predictRecipe} from './suite-formula';
 import {DiceAssets} from './asset-loading';
-import {VENDOR_LOCK} from './asset-manifest';
+import {initializeJolt,type JoltBuild} from './jolt-engine';
 
 /** User data round-trips through a 32-bit int in this binding, so the tags stay small. */
 const FLOOR_TAG=1000000,WALL_TAG=1000001,INCUMBENT_TAG=1000002,ENTRY_TAG=1000003;
@@ -29,6 +29,7 @@ const MAX_RETAINED=8,WALL_BASE=900000,SAMPLE_EVERY=2;
 const ENGINE_SCALE=40;
 
 let J:any,loading:Promise<any>|null=null,world:any,bi:any,listener:any=null;
+let engineBuild:JoltBuild|undefined,engineFallback:string|null=null;
 /** Retained dice from earlier rolls: static colliders that later rolls really hit. */
 const incumbents=new Map<string,any[]>();
 const incumbentBounds=new Map<string,N.Bounds>();
@@ -55,17 +56,11 @@ function engine():Promise<any>{
     const moduleURL=new URL(url('vendor/jolt-physics.wasm.js'),self.location.origin).href;
     loading=(async()=>{
       const assets=new DiceAssets(progress=>self.postMessage({type:'load-progress',progress}));
-      if(VENDOR_LOCK.version!=='1.1.0')throw Error('Jolt 版本不符合锁定合同: '+VENDOR_LOCK.version);
-      assets.plan(['vendor/jolt-physics.wasm.js','vendor/jolt-physics.wasm.wasm']);
-      const [,binary]=await Promise.all([assets.bytes('vendor/jolt-physics.wasm.js'),assets.bytes('vendor/jolt-physics.wasm.wasm')]);
-      const module=await import(/* @vite-ignore */ moduleURL).catch(error=>{throw Error(`Jolt 模块 ${moduleURL}: ${String(error)}`);});
-      assets.stage('初始化物理引擎');
-      // This pinned Jolt build does not support wasmBinary. Its instantiateWasm
-      // hook consumes our verified bytes and avoids a second, unversioned fetch.
-      const compiled=await WebAssembly.compile(binary);
-      J=await module.default({instantiateWasm:(imports:WebAssembly.Imports,receive:(instance:WebAssembly.Instance)=>void)=>{
-        const instance=new WebAssembly.Instance(compiled,imports);receive(instance);return instance.exports;
-      }});return J;
+      const result=await initializeJolt(assets,async path=>{
+        const selected=path==='vendor/jolt-physics.wasm.js'?moduleURL:new URL(url(path),self.location.origin).href;
+        return import(/* @vite-ignore */ selected).catch(error=>{throw Error(`Jolt 模块 ${selected}: ${String(error)}`);});
+      });
+      J=result.engine;engineBuild=result.build;engineFallback=result.fallbackReason;return J;
     })().catch(error=>{loading=null;throw error;});
   }
   return loading;
@@ -676,7 +671,7 @@ async function handle(data:any){
       const warmView=view||{w:1920,h:1080};
       await predictRecipe(probe,catalog,(r,kinds)=>predict(r,catalog,warmView,kinds),(ids,targets)=>predictHop(ids,targets,catalog),releaseIncumbent,r=>retainSnapshot(r,catalog));
       releaseIncumbent('warmup');
-      self.postMessage({type:'warm',engineMs,totalMs:performance.now()-began});
+      self.postMessage({type:'warm',engineMs,totalMs:performance.now()-began,engineBuild,engineFallback});
     }catch(error){self.postMessage({type:'warm',error:error instanceof Error?error.message:String(error),engineMs:performance.now()-began})}
     return;
   }
