@@ -42,7 +42,16 @@ export class RollAudioMixer{
   }
   private stopIdleTimer(){if(this.timer&&![...this.tracks.values()].some(t=>t.started)){clearInterval(this.timer);this.timer=0}}
   pause(id:string){const t=this.tracks.get(id);if(t){t.releaseGeneration++;t.started=false;t.engine.stop('presentation-pause');this.stopIdleTimer();}}
-  async retime(id:string,at:number){const t=this.tracks.get(id);if(!t||!t.at||(t.started&&t.at===at))return;const elapsed=(now()-at)/1000;t.hit=t.plan.hits.findIndex(hit=>hit.t>=elapsed);if(t.hit<0)t.hit=t.plan.hits.length;const rules=t.plan.rules||[];t.rule=rules.findIndex(rule=>rule.t>=elapsed);if(t.rule<0)t.rule=rules.length;await this.release(id,at);}
+  async retime(id:string,at:number){
+    const t=this.tracks.get(id);if(!t||!t.at||(t.started&&t.at===at))return;
+    const wall=now(),elapsed=(wall-at)/1000,previousElapsed=(wall-t.at)/1000;
+    // Web Audio keeps playing during a blocked visual frame. Restart only cancelled future
+    // reservations; a sound already dispatched and due on the old clock must not play twice.
+    const pending=(time:number,index:number,cursor:number)=>time>=elapsed&&(!t.started||index>=cursor||time>previousElapsed);
+    t.hit=t.plan.hits.findIndex((hit,index)=>pending(hit.t,index,t.hit));if(t.hit<0)t.hit=t.plan.hits.length;
+    const rules=t.plan.rules||[];t.rule=rules.findIndex((rule,index)=>pending(rule.t,index,t.rule));if(t.rule<0)t.rule=rules.length;
+    await this.release(id,at);
+  }
   stop(id:string){const t=this.tracks.get(id);if(!t)return;this.finishedPlayed+=t.engine.played;this.finishedDropped+=t.engine.dropped;
     t.engine.dispose();this.tracks.delete(id);this.report('audio-roll-stop',{roll:id,remaining:this.tracks.size});
     this.stopIdleTimer();}
