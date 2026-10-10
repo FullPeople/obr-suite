@@ -1,3 +1,4 @@
+import {sendMusicMessage} from './transport';
 import {WORKBENCH_DEV} from '../../workbench/channel';
 import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
@@ -6,33 +7,43 @@ import { PANEL_IDS, getPanelOffset, registerPanelBbox, BC_PANEL_DRAG_END, BC_PAN
 import { onViewportResize } from "../../utils/viewportAnchor";
 import { MusicAudio, type LocalVolume } from "./audio";
 import { RoomMusic } from "./room";
-import { StudioPeer, studioOperation } from "./peer";
-import { LOCAL_VOLUMES, MUSIC_LOCAL, MUSIC_READY, MUSIC_VIEW, livePosition, unit, type MusicOp } from "./model";
+import { LOCAL_VOLUMES, MUSIC_LOCAL, MUSIC_READY, MUSIC_VIEW, MUSIC_BACKUP, livePosition, unit, type MusicOp, type MusicSession, type Track } from "./model";
 import { musicError } from "./text";
 
 const PANEL = "com.obr-suite/music-board/popover";
 const TOGGLE = "com.obr-suite/music-board:toggle", ACTIVE = "com.obr-suite/music-board:state-active", RESIZE = "com.obr-suite/music-board:resize";
-const MINI = "obr-music-board:minimized", PAIR = "obr-music-board:last-pair-code", INTENT = "obr-music-board:conn-intent";
+const MINI = "obr-music-board:minimized";
 let workbenchViewUntil=0;
 let active = false, epoch = 0, panelOpen = false, desiredOpen = false, geometryDirty = false;
 let syncing: Promise<void> | null = null, panelRequested = false, lastViewAt = 0;
-let audio: MusicAudio | null = null, room: RoomMusic | null = null, peer: StudioPeer | null = null;
+let audio: MusicAudio | null = null, room: RoomMusic | null = null;
+let runtimeReady = false, backupFailed = false, backupSignature = "";
+let lastViewState:MusicSession | null = null;
+interface LibraryBackup { current: {tracks: Track[]; at: number}; previous?: {tracks: Track[]; at: number} }
+function backupKey(): string { return `obr-music-board:library-backup:${OBR.room.id}`; }
+function readBackup(): LibraryBackup | null { try { const raw = JSON.parse(stored(backupKey()) || "null"); return raw?.version === 1 && Array.isArray(raw.current?.tracks) ? raw : null; } catch { return null; } }
+function saveBackup(state: MusicSession): void {
+  if (!runtimeReady) return;
+  const signature = JSON.stringify(state.tracks); if (signature === backupSignature) return;
+  try {
+    const old = readBackup(); if (old && JSON.stringify(old.current.tracks) === signature) { backupSignature = signature; return; }
+    localStorage.setItem(backupKey(), JSON.stringify({version:1, current:{tracks:state.tracks, at:Date.now()}, ...(old ? {previous:old.current} : {})}));
+    backupSignature = signature; backupFailed = false;
+  } catch { backupFailed = true; }
+}
 let resizeOff: (() => void) | null = null;
 let nextTimer: ReturnType<typeof setTimeout> | null = null, durationReported = "";
 let sfxTimer: ReturnType<typeof setTimeout> | null = null;
 const unsubs: Array<() => void> = [];
 function stored(key: string): string { try { return localStorage.getItem(key) || ""; } catch { return ""; } }
-export async function workbenchStudio(command?:unknown,requestId?:string){
- if(!active||!room)throw Error('音乐模块未连接');
- if(command!==undefined){if(!room.canControl)throw Error('permission');const op=studioOperation(command);if(!op)throw Error('无效音乐操作');if(typeof (command as any)?.expectedPlaybackId==='string')op.expectedPlaybackId=(command as any).expectedPlaybackId;await submit(op,requestId);}
- return {state:room.state,canControl:room.canControl};
-}
 function volumes(): LocalVolume { try { const value = JSON.parse(stored(LOCAL_VOLUMES) || "{}"); return { bgm: unit(value.bgm, .8), sfx: unit(value.sfx, 1), mute: value.mute === true }; } catch { return { bgm: .8, sfx: 1, mute: false }; } }
 async function view(force = false): Promise<void> {
   if (!active || !room || !audio || (!force && ((!panelOpen&&Date.now()>workbenchViewUntil) || Date.now() - lastViewAt < 400))) return;
   lastViewAt = Date.now();
-  try { await OBR.broadcast.sendMessage(MUSIC_VIEW, { state: room.state, writer: room.writer, canControl: room.canControl, gm: room.isGM, pair: peer?.status || "disconnected",
-    sound: audio.status, localVolume: audio.volume, progress: audio.progress(), pairCode: stored(PAIR) }, { destination: "LOCAL" }); }
+  const storedBackup = readBackup(), recoverable = storedBackup?.previous || storedBackup?.current;
+  const state=room.state;
+  try { await sendMusicMessage(MUSIC_VIEW, { ...(force||state!==lastViewState?{state}:{}), writer: room.writer, canControl: room.canControl, gm: room.isGM, roomId: OBR.room.id,
+    sound: audio.status, localVolume: audio.volume, progress: audio.progress(), backup: {available:!!recoverable, count:recoverable?.tracks.length || 0, at:recoverable?.at || 0, failed:backupFailed} }, { destination: "LOCAL" }); lastViewState=state; }
   catch (error) { console.warn("[music-board] panel status failed", error); }
 }
 function command(op: MusicOp): void {
@@ -118,12 +129,8 @@ export async function setupMusicBoard(): Promise<void> {
   audio = new MusicAudio(() => { reportDuration(); void view(); }, playbackId => { if (room && room.writer === room.connectionId) command({ type: "ended", playbackId }); },
     id => { if (room && room.writer === room.connectionId) command({ type: "sfx-stop", id }); });
   audio.volume = volumes();
-  room = new RoomMusic(state => { audio?.apply(state); peer?.publish(state); scheduleAdvance(); scheduleSfxSweep(); reportDuration(); if (room && !room.canControl && peer?.status !== "disconnected") peer?.disconnect(); void view(true); });
-  // A remembered pairing that finally fails must stop dialing by itself: an
-  // endless restore against a dead Studio registration is exactly what made a
-  // normal window unable to connect while a fresh profile could. The code stays
-  // in the field so the user can press 连接 again deliberately.
-  peer = new StudioPeer(submit, () => { if (peer?.status === "error" && stored(INTENT) === "1") localStorage.setItem(INTENT, "0"); void view(true); });
+  runtimeReady = false; backupSignature = ""; backupFailed = false;
+  room = new RoomMusic(state => { saveBackup(state); audio?.apply(state); scheduleAdvance(); scheduleSfxSweep(); reportDuration(); void view(true); });
   registerPanelBbox(PANEL_IDS.musicBoard, async () => panelOpen ? geometry() : null);
   const onStorage = (event: StorageEvent) => { if (event.key === LOCAL_VOLUMES && audio) { audio.volume = volumes(); audio.volumeChanged(); void view(true); } };
   window.addEventListener("storage", onStorage); unsubs.push(() => window.removeEventListener("storage", onStorage));
@@ -135,24 +142,22 @@ export async function setupMusicBoard(): Promise<void> {
     OBR.broadcast.onMessage(BC_PANEL_RESET, () => { geometryDirty = true; void syncPanel(); }),
     OBR.broadcast.onMessage(MUSIC_LOCAL, event => {
       if (!active || event.connectionId !== room?.connectionId) return;
-      const message = event.data as { type?: string; value?: Partial<LocalVolume>; code?: string };
+      const message = event.data as { type?: string; value?: Partial<LocalVolume>; requestId?: string };
       if (message.type === "enable") audio?.unlock();
       else if (message.type === "close") { desiredOpen = false; void syncPanel(); }
       else if (message.type === "volume" && audio && message.value) {
         const next = { ...audio.volume, ...message.value }; audio.volume = { bgm: unit(next.bgm), sfx: unit(next.sfx), mute: !!next.mute };
         localStorage.setItem(LOCAL_VOLUMES, JSON.stringify(audio.volume)); audio.volumeChanged(); void view(true);
-      } else if (message.type === "pair" && room.canControl && message.code) {
-        localStorage.setItem(PAIR, message.code.trim().toUpperCase()); localStorage.setItem(INTENT, "1"); void peer?.connect(message.code);
-      } else if (message.type === "unpair") { localStorage.setItem(INTENT, "0"); peer?.disconnect(); }
-      else if (message.type === "adopt" && room.canControl) peer?.adopt();
+      } else if (message.type === "backup-read" && typeof message.requestId === "string" && message.requestId.length <= 100) {
+        const backup = readBackup(); void sendMusicMessage(MUSIC_BACKUP, {requestId:message.requestId, backup:backup?.previous || backup?.current || null}, {destination:"LOCAL"});
+      }
     }));
   try {
     await room.start();
     if (!active || generation !== epoch) return;
-    peer.publish(room.state);
+    runtimeReady = true; saveBackup(room.state);
     scheduleAdvance(); scheduleSfxSweep(); reportDuration();
-    // Reconnect transport without adopting the Studio's unversioned bootstrap.
-    if (stored(INTENT) === "1" && stored(PAIR) && room.canControl) void peer.connect(stored(PAIR), true);
+    await view(true);
   } catch (error) { if (generation === epoch) await teardownMusicBoard(); throw error; }
 }
 export async function teardownMusicBoard(): Promise<void> {
@@ -160,7 +165,7 @@ export async function teardownMusicBoard(): Promise<void> {
   if (nextTimer !== null) clearTimeout(nextTimer); nextTimer = null; durationReported = "";
   if (sfxTimer !== null) clearTimeout(sfxTimer); sfxTimer = null;
   for (const off of unsubs.splice(0)) off(); resizeOff?.(); resizeOff = null;
-  peer?.disconnect(false); peer = null; audio?.dispose(); audio = null;
+  runtimeReady = false; lastViewState=null; audio?.dispose(); audio = null;
   const oldRoom = room; room = null; await oldRoom?.stop(); await syncPanel();
   // No open flag, playlist, room session or legacy scene metadata is cleared.
 }

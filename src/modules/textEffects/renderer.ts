@@ -1,6 +1,7 @@
-import { FONTS, duration, entryTime, narrationTime, type TextEffectConfig } from './model';
+import { FONTS, duration, entryTime, presentationTimes, narrationTime, type TextEffectConfig } from './model';
 import { BLOCK_EFFECTS, clamp, entrance, departure, holding, neutral, noise, stagger, type Pose, type MotionContext } from './motion';
 import './renderer.css';
+import './fonts.css';
 const element = (tag:string, classes:string, text?:string) => { const node=document.createElement(tag);node.className=classes;if(text!==undefined)node.textContent=text;return node; };
 const rgba=(hex:string,a:number)=>`rgba(${parseInt(hex.slice(1,3),16)},${parseInt(hex.slice(3,5),16)},${parseInt(hex.slice(5,7),16)},${a})`;
 const splitter = new Intl.Segmenter(undefined,{granularity:'grapheme'});
@@ -12,7 +13,8 @@ export function renderEffect(root:HTMLElement,c:TextEffectConfig,options:RenderO
  root.replaceChildren();
  const stage=element('div',`te-stage te-${c.background}`),background=element('div','te-background'),ornament=element('div',`te-ornament te-${options.reduced?'none':c.decoration}`),motion=element('div','te-motion'),title=element('div','te-title'),subtitle=element('div','te-subtitle'),bodyWindow=element('div','te-body-window'),body=element('div','te-body'),solo=element('div','te-solo'),cursor=element('i','te-cursor');
  solo.setAttribute('aria-hidden','true');cursor.setAttribute('aria-hidden','true');bodyWindow.append(body);motion.append(title,subtitle,bodyWindow);stage.append(background,ornament,motion,solo,cursor);root.append(stage);
- const vars:Record<string,string>={color:c.color,accent:c.accent,bg:c.backgroundColor,font:FONTS[c.font],outline:`${c.outline}px`, 'outline-color':c.outlineColor,'outer-outline':`${c.outline+c.outerOutline*2}px`,'outer-color':c.outerOutlineColor,glow:`${c.glow}px`,'glow-color':c.glowColor,'glow-strength':String(c.glowStrength),'fill-opacity':String(c.fillOpacity),'glitch-one':c.glitchColor,'glitch-two':c.glitchColor2,'shadow':c.shadow?`${c.shadowX}px ${c.shadowY}px ${c.shadowBlur}px ${rgba(c.shadowColor,c.shadowOpacity)}`:'0 0 0 transparent','deco-fill':c.decorationColor,'deco-line':c.decorationLineColor,'deco-width':`${c.decorationThickness}px`,'deco-radius':`${c.decorationRadius}em`,'tape-color':c.decorationLineColor,'tape-stripe':c.tapeStripe};
+ const timings=presentationTimes(c);
+ const vars:Record<string,string>={color:c.color,accent:c.accent,bg:c.backgroundColor,font:FONTS[c.font],outline:`${c.outline}px`, 'outline-color':c.outlineColor,'outer-outline':`${c.outline+c.outerOutline*2}px`,'outer-color':c.outerOutlineColor,glow:'0px','glow-color':c.glowColor,'glow-strength':String(c.glowStrength),'fill-opacity':String(c.fillOpacity),'glitch-one':c.glitchColor,'glitch-two':c.glitchColor2,'shadow':c.shadow?`${c.shadowX}px ${c.shadowY}px ${c.shadowBlur}px ${rgba(c.shadowColor,c.shadowOpacity)}`:'0 0 0 transparent','deco-fill':rgba(c.decorationColor,c.decorationOpacity),'deco-line':c.decorationLineColor,'deco-width':`${c.decorationThickness}px`,'deco-radius':`${c.decorationRadius}em`,'tape-color':c.decorationLineColor,'tape-stripe':c.tapeStripe};
  vars.color=rgba(c.color,c.fillOpacity);
  for(const[key,value]of Object.entries(vars))stage.style.setProperty('--te-'+key,value);
  stage.style.setProperty('--te-outer-opacity',c.outerOutline?'1':'0');
@@ -24,7 +26,7 @@ export function renderEffect(root:HTMLElement,c:TextEffectConfig,options:RenderO
  subtitle.style.order=c.subtitlePosition==='above'?'-1':'0';body.style.lineHeight=String(c.lineHeight);cursor.style.background=c.cursorColor;
  const gradients=[c.color,c.color2,...(c.thirdColor?[c.color3]:[])].map(color=>rgba(color,c.fillOpacity)).join(',');
  const groups:Group[]=[{root:title,glyphs:[],kind:'title',size:0,lines:0,seed:311},{root:subtitle,glyphs:[],kind:'subtitle',size:0,lines:0,seed:701},{root:body,glyphs:[],kind:'body',size:0,lines:0,seed:1103}];
- const particles=c.decoration==='sparks'?Array.from({length:20},(_,i)=>{const dot=element('i','te-particle');dot.style.left=`${noise(i+63)*100}%`;dot.style.top=`${noise(i+227)*100}%`;ornament.append(dot);return dot;}):[];
+
  if(['tape','corners'].includes(c.decoration))for(let i=0;i<(c.decoration==='corners'?4:2);i++)ornament.append(element('i',`te-deco-part te-part-${i}`));
  let frame=0,disposed=false,pages=[c.body],pageWeights=[1],currentPage=-1,lastTime=0,stageWidth=0,stageHeight=0,availableHeight=0,availableWidth=0,bodySchedule:number[]=[],scheduleTotal=0,scrolling=false;
  let snapshot=options.time===undefined&&options.startsAt===undefined;
@@ -38,6 +40,7 @@ export function renderEffect(root:HTMLElement,c:TextEffectConfig,options:RenderO
   const[v,h]=c.anchor.split('-');stage.style.alignItems=v==='top'?'flex-start':v==='bottom'?'flex-end':'center';stage.style.justifyContent=h==='left'?'flex-start':h==='right'?'flex-end':'center';
   motion.style.transform='none';motion.style.filter='none';motion.style.clipPath='none';motion.style.maxHeight=`${Math.max(16,stageHeight-my*2)}px`;motion.style.maxWidth=`${Math.max(16,stageWidth-mx*2)}px`;
   stage.style.setProperty('--te-offset-x',`${stageWidth*c.offsetX/100}px`);stage.style.setProperty('--te-offset-y',`${stageHeight*c.offsetY/100}px`);
+  const graphicScale=stageWidth/1280;stage.style.setProperty('--te-outline',`${c.outline*graphicScale}px`);stage.style.setProperty('--te-outer-outline',`${(c.outline+c.outerOutline*2)*graphicScale}px`);stage.style.setProperty('--te-deco-width',`${c.decorationThickness*graphicScale}px`);stage.style.setProperty('--te-shadow',c.shadow?`${c.shadowX*graphicScale}px ${c.shadowY*graphicScale}px ${c.shadowBlur*graphicScale}px ${rgba(c.shadowColor,c.shadowOpacity)}`:'0 0 0 transparent');
   groups[0].size=stageWidth*c.size/100;groups[1].size=groups[0].size*c.subtitleSize;groups[2].size=stageWidth*c.bodySize/100;
   title.textContent=c.title;subtitle.textContent=c.subtitle;body.textContent=c.body?'中':'';bodyWindow.style.height='auto';bodyWindow.style.maxHeight='none';
   body.style.fontSize=`${groups[2].size}px`;body.style.maxWidth=c.writing==='horizontal'&&c.wrapChars?`${c.wrapChars}em`:'none';body.style.maxHeight=c.writing==='vertical'&&c.wrapChars?`${c.wrapChars}em`:'none';
@@ -54,10 +57,10 @@ export function renderEffect(root:HTMLElement,c:TextEffectConfig,options:RenderO
   bodyWindow.style.maskImage=scrolling&&c.scrollFade?`linear-gradient(${vertical?'to right,':''}transparent,#000 12%,#000 88%,transparent)`:'none';
   build(groups[0],c.title);build(groups[1],c.subtitle);geometry(groups[0]);geometry(groups[1]);currentPage=-1;setPage(0);
   const bounds=motion.getBoundingClientRect(),stageRect=stage.getBoundingClientRect();let left=Infinity,right=-Infinity,top=Infinity,bottom=-Infinity;
-  for(const group of groups){if(group.root.hidden||group.kind==='body'&&(!c.body||scrolling))continue;for(const glyph of group.glyphs){const box=glyph.el.getBoundingClientRect();left=Math.min(left,box.left);right=Math.max(right,box.right);top=Math.min(top,box.top);bottom=Math.max(bottom,box.bottom);}}
+  for(const group of groups){if(group.root.hidden||c.decoration==='frame'&&!title.hidden&&group.kind!=='title'||group.kind==='body'&&(!c.body||scrolling))continue;for(const glyph of group.glyphs){const box=(c.decoration==='frame'?glyph.ink:glyph.el).getBoundingClientRect();left=Math.min(left,box.left);right=Math.max(right,box.right);top=Math.min(top,box.top);bottom=Math.max(bottom,box.bottom);}}
   if(!Number.isFinite(left)){left=bounds.left;right=bounds.right;top=bounds.top;bottom=bounds.bottom;}
   const pad=groups[0].size*c.decorationPadding,extension=groups[0].size*c.decorationExtend;
-  if(!['none','rays','mist','sparks','rings'].includes(c.decoration)){ornament.style.inset='auto';ornament.style.left=`Math.max(0,left-stageRect.left-pad-(c.decoration==='frame'?extension:0))}px`;ornament.style.top=`Math.max(0,top-stageRect.top-pad)}px`;ornament.style.width=`${Math.min(stageWidth,right-left+2*pad+(c.decoration==='frame'?2*extension:0))}px`;ornament.style.height=`${bottom-top+2*pad}px`;ornament.style.fontSize=`${groups[0].size}px`;ornament.style.setProperty('--te-deco-extend',`${extension}px`);}
+  if(c.decoration!=='none'){ornament.style.inset='auto';ornament.style.left=`${Math.max(c.decoration==='frame'?mx/2:0,left-stageRect.left-pad-(c.decoration==='frame'?extension:0))}px`;ornament.style.top=`${Math.max(0,top-stageRect.top-pad)}px`;ornament.style.width=`${Math.min(stageWidth-(c.decoration==='frame'?mx:0),right-left+2*pad+(c.decoration==='frame'?2*extension:0))}px`;ornament.style.height=`${bottom-top+2*pad}px`;ornament.style.fontSize=`${groups[0].size}px`;ornament.style.setProperty('--te-deco-extend',`${extension}px`);}
   ornament.style.setProperty('--te-tape-size',`${c.tapeWidth*stageWidth/640}px`);ornament.style.setProperty('--te-deco-soft',`${c.decorationSoftness*groups[0].size*.3}px`);ornament.style.setProperty('--te-deco-fade',`${c.decorationFade*50}%`);
   if(c.decorationOutline)ornament.style.filter=`drop-shadow(0 0 ${c.outline+c.outerOutline}px ${c.outlineColor})`;
   draw(lastTime);
@@ -78,17 +81,19 @@ export function renderEffect(root:HTMLElement,c:TextEffectConfig,options:RenderO
   setPage(pageIndex);const localTime=Math.max(0,sectionTime-segmentStart),slot=segmentLength*pageWeights[pageIndex],revealSlot=revealTime*pageWeights[pageIndex],bodyProgress=snapshot?1:revealSlot?clamp(localTime/revealSlot):1,gap=Math.min(c.pageGap,Math.max(0,(slot-revealSlot)*.4));
   const entryEffect=options.reduced?'fade':c.entry,exitEffect=options.reduced?'fade':c.leave,idleEffect=options.reduced?'none':c.idle;
   let block=neutral();const blockContext={...context(groups[0]),power:c.entryPower,direction:c.entryDirection,ease:c.entryEase};
-  if(t<c.enter&&BLOCK_EFFECTS.has(entryEffect))block=entrance(entryEffect,enterProgress,blockContext);
+  if(t<timings.lead+timings.main&&BLOCK_EFFECTS.has(entryEffect))block=entrance(entryEffect,c.sequence==='staged'?clamp((t-timings.lead)/Math.max(1,timings.main)):enterProgress,blockContext);
   else if(lastTime>=exitAt&&BLOCK_EFFECTS.has(exitEffect))block=departure(exitEffect,exitProgress,{...blockContext,power:c.exitPower,direction:c.exitDirection,ease:c.exitEase});
   else if(t>=arrive&&lastTime<exitAt&&!['wave','shake','glow'].includes(idleEffect))block=holding(idleEffect,t-arrive,{...blockContext,power:c.idlePower});
   block.x+=stageWidth*c.offsetX/100;block.y+=stageHeight*c.offsetY/100;paint(motion,block);
   let lastVisible:Glyph|undefined;
   for(const group of groups){if(group.root.hidden)continue;const effect=group.kind==='subtitle'&&c.subtitleEffect!=='same'&&!options.reduced?c.subtitleEffect:entryEffect;
-   const p=c.enter?clamp((t-(group.kind==='subtitle'?Math.max(-c.startDelay,c.subtitleDelay):0))/c.enter):1;
+   const staged=c.sequence==='staged',sub=group.kind==='subtitle',partStart=sub?timings.subtitleStart:timings.lead,partTime=sub?timings.subtitle:timings.main;
+   const p=staged?clamp((t-partStart)/Math.max(1,partTime)):c.enter?clamp((t-(sub?Math.max(-c.startDelay,c.subtitleDelay):0))/c.enter):1;
+   const letterStagger=staged?(sub?timings.subtitleDelay:timings.mainDelay)/Math.max(1,partTime):c.entryStagger;
    for(const glyph of group.glyphs){
     const ctx={...context(group,glyph.index),x:glyph.x,y:glyph.y,power:c.entryPower,direction:c.writing==='vertical'&&effect==='tracking'?'vertical':c.entryDirection,ease:c.entryEase};let pose=neutral();
     if(group.kind==='body'&&scrolling){if(glyph.cache!=='scroll-static'){paint(glyph.el,neutral(),glyph);for(const key of ['--te-glitch','--te-glitch-shift','--te-pulse-glow'])glyph.el.style.setProperty(key,'inherit');glyph.cache='scroll-static';}continue;}
-    if(p<1&&!BLOCK_EFFECTS.has(effect))pose=entrance(effect,stagger(p,glyph.index,group.glyphs.length,c.entryOrder,effect==='typewriter'?Math.max(.8,c.entryStagger):c.entryStagger),ctx);
+    if(p<1&&!BLOCK_EFFECTS.has(effect))pose=entrance(effect,stagger(p,glyph.index,group.glyphs.length,c.entryOrder,effect==='typewriter'?Math.max(.8,letterStagger):letterStagger),ctx);
     else if(lastTime>=exitAt&&!BLOCK_EFFECTS.has(exitEffect))pose=departure(exitEffect,stagger(exitProgress,glyph.index,group.glyphs.length,c.exitOrder,exitEffect==='erase'?Math.max(.8,c.exitStagger):c.exitStagger),{...ctx,power:c.exitPower,direction:c.writing==='vertical'&&exitEffect==='tracking'?'vertical':c.exitDirection,ease:c.exitEase});
     else if(t>=arrive&&lastTime<exitAt&&['wave','shake','glow'].includes(idleEffect))pose=holding(idleEffect,t-arrive,{...ctx,power:c.idlePower});
     if(group.kind==='body'&&!scrolling){
@@ -111,18 +116,15 @@ export function renderEffect(root:HTMLElement,c:TextEffectConfig,options:RenderO
   if(!solo.hidden){const glyphs=groups[2].glyphs,index=Math.min(glyphs.length-1,Math.floor(soloClock/1000*c.cps));solo.textContent=glyphs[index]?.ink.textContent||'';solo.style.fontSize=`${Math.min(stageWidth,stageHeight)*c.soloSize}px`;solo.style.transform=`scale(${1+(1-(bodyProgress*glyphs.length)%1)*.12*c.soloImpact})`;}
   cursor.hidden=!c.cursor||flow!=='char'||bodyProgress>=1||!lastVisible||options.reduced===true;
   if(!cursor.hidden&&lastVisible){const box=lastVisible.el.getBoundingClientRect(),stageRect=stage.getBoundingClientRect();cursor.style.left=`${box.right-stageRect.left+2}px`;cursor.style.top=`${box.top-stageRect.top}px`;cursor.style.height=`${box.height}px`;cursor.style.opacity=Math.floor(lastTime/400)%2?'0':'1';}
-  const decoEntry=options.reduced?clamp(t/Math.max(1,c.enter)):c.decorationAnimation==='none'?1:clamp(t/c.decorationTime),decoFade=c.decorationAnimation==='fade'?decoEntry:1;ornament.style.opacity=String(c.decorationOpacity*(lastTime>=exitAt?1-exitProgress:1)*decoFade);let decorTransform='none';
-  if(c.decorationAnimation==='grow'&&!options.reduced)decorTransform=`scaleX(${decoEntry})`;
-  if(c.decoration==='rays'&&!options.reduced)decorTransform=`rotate(${lastTime*.002}deg) scale(${.9+clamp(t/total)*.2})`;
-  if(c.decoration==='mist'&&!options.reduced)decorTransform=`translate(${Math.sin(lastTime/2400)*3}%,${Math.cos(lastTime/2900)*2}%)`;
-  if(c.decoration==='rings'&&!options.reduced)decorTransform=`scale(${1+Math.sin(lastTime/1200)*.035})`;
+  const decoEntry=options.reduced?clamp(t/Math.max(1,c.enter)):c.decorationAnimation==='none'?1:clamp(t/c.decorationTime),decoFade=c.decorationAnimation==='fade'?decoEntry:1,decoExit=c.sequence==='staged'&&!options.reduced&&c.decorationAnimation!=='none'?clamp((lastTime-exitAt-c.exit*.35)/c.decorationTime):exitProgress;ornament.style.opacity=String((lastTime>=exitAt?1-decoExit:1)*decoFade);let decorTransform='none';
+  if(c.decorationAnimation==='grow'&&!options.reduced)decorTransform=`scaleX(${lastTime>=exitAt?1-decoExit:decoEntry})`;
   ornament.style.transform=decorTransform;
-  if(c.decoration==='tape'){ornament.style.setProperty('--te-tape-offset',`${options.reduced?0:lastTime/1000*c.tapeSpeed*stageWidth/640}px`);if(c.tapeBlink&&!options.reduced)ornament.style.opacity=String(c.decorationOpacity*(lastTime>=exitAt?1-exitProgress:1)*(1-c.tapeBlink*.5*(1+Math.sin(lastTime/130))));}
-  for(const[i,dot]of particles.entries()){dot.style.transform=`translateY(${options.reduced?0:-lastTime/1000*(4+noise(i+8)*12)}px)`;dot.style.opacity=String(.25+noise(i+41,Math.floor(lastTime/250))*.75);}
+  if(c.decoration==='tape'){ornament.style.setProperty('--te-tape-offset',`${options.reduced?0:lastTime/1000*c.tapeSpeed*stageWidth/640}px`);if(c.tapeBlink&&!options.reduced)ornament.style.opacity=String((lastTime>=exitAt?1-exitProgress:1)*(1-c.tapeBlink*.5*(1+Math.sin(lastTime/130))));}
+
   options.onFrame?.(lastTime,total);
  }
  const easingSpread=(p:number)=>p*p*(3-2*p);
- lastTime=options.time??c.startDelay+arrive+revealTime;layout();const resize=new ResizeObserver(layout);resize.observe(stage);
+ lastTime=options.time??c.startDelay+arrive+revealTime;layout();void document.fonts.ready.then(()=>{if(!disposed)layout();});const resize=new ResizeObserver(layout);resize.observe(stage);
  const dispose=()=>{if(disposed)return;disposed=true;resize.disconnect();cancelAnimationFrame(frame);if(stage.parentElement===root)stage.remove();};
  if(options.startsAt!==undefined){const tick=()=>{if(disposed)return;const elapsed=Date.now()-options.startsAt!;draw(elapsed);if(elapsed>=total){dispose();options.onComplete?.();}else frame=requestAnimationFrame(tick);};tick();}
  return {dispose,seek:(time:number)=>{snapshot=false;draw(time);}};

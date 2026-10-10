@@ -1,6 +1,6 @@
 {
   "name": "obr-suite",
-  "version": "1.0.269-dev",
+  "version": "1.0.270-dev",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,8 @@
     "test:workbench": "node tools/workbench-selftest.mjs",
     "test:text-effects": "node tools/text-effects-selftest.mjs",
     "test:bubbles": "node src/modules/bubbles/selftest.mjs",
-    "build:card-viewer": "node tools/build-legacy-card-viewer.mjs"
+    "build:card-viewer": "node tools/build-legacy-card-viewer.mjs",
+    "test:music": "node tools/music-library-selftest.mjs && node src/modules/musicBoard/selftest.mjs && node src/modules/musicBoard/browser-selftest.mjs"
   },
   "dependencies": {
     "@owlbear-rodeo/sdk": "^3.1.0",

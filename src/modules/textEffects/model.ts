@@ -1,29 +1,30 @@
 import { ENTRY_EFFECTS, EXIT_EFFECTS, HOLD_EFFECTS, ORNAMENTS, FLOWS, EASINGS, ORDERS, DIRECTIONS, SUB_EFFECTS } from './catalog';
-export const FONTS = { sans: '"Microsoft YaHei", "PingFang SC", sans-serif', serif: '"Noto Serif SC", "Songti SC", SimSun, serif', mono: 'Consolas, "Microsoft YaHei", monospace', kai: 'KaiTi, STKaiti, "Songti SC", serif', rounded: 'YouYuan, "Yuanti SC", "Microsoft YaHei", sans-serif', song: 'SimSun, "Songti SC", serif' } as const;
+import { BLOCK_EFFECTS } from './motion';
+export const FONTS = { sans: '"Microsoft YaHei", "PingFang SC", sans-serif', serif: '"Full Text Serif", "Noto Serif SC", "Songti SC", SimSun, serif', mono: 'Consolas, "Microsoft YaHei", monospace', kai: 'KaiTi, STKaiti, "Songti SC", serif', rounded: 'YouYuan, "Yuanti SC", "Microsoft YaHei", sans-serif', song: 'SimSun, "Songti SC", serif', roman: '"Full Text Roman", "Palatino Linotype", "Book Antiqua", Georgia, serif' } as const;
 export const MOTIONS = ['fade', 'rise', 'left', 'right', 'zoom', 'typewriter'] as const;
 export const DECORATIONS = ORNAMENTS.map(item => item.id);
 export const DEFAULT_CONFIG = {
-  version: 1 as const, title: '战斗开始', subtitle: '命运已掷下骰子', body: '', font: 'serif' as keyof typeof FONTS, size: 7,
-  color: '#fff2d5', accent: '#e5a45b', outline: 1, outlineColor: '#241a19', glow: 22, spacing: 6,
-  align: 'center' as 'left'|'center'|'right', position: 'center' as 'top'|'center'|'bottom', motion: 'zoom' as typeof MOTIONS[number], decoration: 'rays', background: 'band', backgroundColor: '#161522',
-  opacity: .75, enter: 900, hold: 2400, exit: 700, entry: 'shrink', leave: 'fade', idle: 'none',
+  version: 1 as const, title: '战斗开始', subtitle: 'BATTLE START', body: '', font: 'serif' as keyof typeof FONTS, size: 9.6875,
+  color: '#ffffff', accent: '#ffffff', outline: 0, outlineColor: '#241a19', glow: 0, spacing: 12,
+  align: 'center' as 'left'|'center'|'right', position: 'center' as 'top'|'center'|'bottom', motion: 'fade' as typeof MOTIONS[number], decoration: 'frame', background: 'transparent', backgroundColor: '#161522',
+  opacity: .45, enter: 550, hold: 1400, exit: 500, entry: 'drop', leave: 'through', idle: 'none',
   entryDirection: 'left', exitDirection: 'right', entryOrder: 'forward', exitOrder: 'forward', entryEase: 'auto', exitEase: 'auto',
-  entryPower: 1, exitPower: 1, idlePower: 1, entryStagger: 0, exitStagger: 0,
+  entryPower: 1.1, exitPower: 1, idlePower: 1, entryStagger: .1, sequence: 'staged' as 'staged'|'parallel', exitStagger: 0,
   flow: 'all', cps: 18, lineInterval: 650, sweepTime: 900, punctPause: 180, linePause: 350,
   spreadHold: 350, spreadTime: 900, soloSize: .48, soloPause: 250, soloImpact: 1,
   scrollSpeed: 80, scrollFade: true, cursor: false, cursorColor: '#fff2d5', pageSplit: true, pageGap: 300, wrapChars: 0,
   fill: 'solid' as 'solid'|'gradient', color2: '#bc7838', color3: '#ffffff', thirdColor: false, gradientDirection: 'vertical', fillOpacity: 1,
-  weight: 700, italic: false, writing: 'horizontal' as 'horizontal'|'vertical', lineHeight: 1.6, bodySize: 3.2,
-  subtitleFont: 'same', subtitleWeight: 400, subtitleItalic: false, subtitleSize: .36, subtitleSpacing: 12,
-  subtitleGap: .6, subtitlePosition: 'below', subtitleColor: '#e5a45b', subtitleEffect: 'same', subtitleDelay: 0,
-  outerOutline: 0, outerOutlineColor: '#ffffff', shadow: true, shadowColor: '#000000', shadowOpacity: .7,
-  shadowBlur: 8, shadowX: 0, shadowY: 2, glowColor: '#e5a45b', glowStrength: 1,
-  glitchColor: '#ff4365', glitchColor2: '#44dce7', decorationColor: '#161522', decorationLineColor: '#e5a45b',
-  decorationOpacity: .7, decorationThickness: 2, decorationPadding: .55, decorationExtend: 1,
+  weight: 800, italic: false, writing: 'horizontal' as 'horizontal'|'vertical', lineHeight: 1.5, bodySize: 3.2,
+  subtitleFont: 'roman', subtitleWeight: 700, subtitleItalic: false, subtitleSize: .2, subtitleSpacing: 60,
+  subtitleGap: .62, subtitlePosition: 'below', subtitleColor: '#ffffff', subtitleEffect: 'fade', subtitleDelay: -100,
+  outerOutline: 0, outerOutlineColor: '#ffffff', shadow: true, shadowColor: '#000000', shadowOpacity: .35,
+  shadowBlur: 10, shadowX: 0, shadowY: 3, glowColor: '#ffffff', glowStrength: 1,
+  glitchColor: '#ff4365', glitchColor2: '#44dce7', decorationColor: '#161522', decorationLineColor: '#ffffff',
+  decorationOpacity: 0, decorationThickness: 3, decorationPadding: .28, decorationExtend: 12,
   decorationRadius: .12, decorationSoftness: .2, decorationFade: .25, decorationOutline: false,
-  decorationAnimation: 'grow', decorationTime: 700, tapeStripe: '#17191f', tapeWidth: 26, tapeSpeed: 80, tapeBlink: 0,
-  anchor: 'center-center', marginX: 6, marginY: 6, offsetX: 0, offsetY: 0,
-  backgroundSync: true, startDelay: 0, endDelay: 0,
+  decorationAnimation: 'grow', decorationTime: 600, tapeStripe: '#17191f', tapeWidth: 26, tapeSpeed: 80, tapeBlink: 0,
+  anchor: 'center-center', marginX: 5, marginY: 7.7778, offsetX: 0, offsetY: 0,
+  backgroundSync: true, startDelay: 100, endDelay: 300,
 };
 export type TextEffectConfig = typeof DEFAULT_CONFIG;
 const member = (value: unknown, values: readonly string[]) => typeof value === 'string' && values.includes(value);
@@ -45,7 +46,7 @@ export const BOUNDS: Partial<Record<keyof TextEffectConfig, [number, number]>> =
 };
 const ids = (values: {id:string}[]) => values.map(value => value.id);
 const enums: Partial<Record<keyof TextEffectConfig, string[]>> = {
-  font: Object.keys(FONTS), motion: [...MOTIONS], decoration: DECORATIONS, align: ['left','center','right'], position: ['top','center','bottom'],
+  sequence:['staged','parallel'], font: Object.keys(FONTS), motion: [...MOTIONS], decoration: DECORATIONS, align: ['left','center','right'], position: ['top','center','bottom'],
   background: ['transparent','band','dim','solid','vignette','bottom','top'], entry: ids(ENTRY_EFFECTS), leave: ids(EXIT_EFFECTS), idle: ids(HOLD_EFFECTS), flow: ids(FLOWS),
   entryDirection: ids(DIRECTIONS), exitDirection: ids(DIRECTIONS), entryOrder: ids(ORDERS), exitOrder: ids(ORDERS), entryEase: ids(EASINGS), exitEase: ids(EASINGS),
   fill: ['solid','gradient'], gradientDirection: ['vertical','horizontal','diagonal'], writing: ['horizontal','vertical'],
@@ -58,7 +59,10 @@ export function parseConfig(value: unknown): TextEffectConfig|null {
   const source = value as Record<string,unknown>;
   if (legacy.some(key => !Object.hasOwn(source,key))) return null;
   const v = {...DEFAULT_CONFIG,...source} as TextEffectConfig;
+  if(!Object.hasOwn(source,'sequence'))v.sequence='parallel';
   if (v.version !== 1 || typeof v.title !== 'string' || v.title.length > 160 || typeof v.subtitle !== 'string' || v.subtitle.length > 240 || typeof v.body !== 'string' || v.body.length > 1800) return null;
+  if (['rays','mist','sparks','rings'].includes(v.decoration)) v.decoration='none';
+  if(v.idle==='glow')v.idle='none';
   for (const [key,range] of Object.entries(BOUNDS)) if (!number(v[key as keyof TextEffectConfig], ...range!)) return null;
   for (const [key,values] of Object.entries(enums)) if (!member(v[key as keyof TextEffectConfig],values!)) return null;
   for (const [key,fallback] of Object.entries(DEFAULT_CONFIG)) {
@@ -70,6 +74,7 @@ export function parseConfig(value: unknown): TextEffectConfig|null {
   if (!Object.hasOwn(source,'subtitleColor')) v.subtitleColor = v.accent;
   if (!Object.hasOwn(source,'glowColor')) v.glowColor = v.accent;
   if (!Object.hasOwn(source,'decorationLineColor')) v.decorationLineColor = v.accent;
+  v.glow=0;v.glowStrength=1;
   return Object.fromEntries(Object.keys(DEFAULT_CONFIG).map(key => [key,v[key as keyof TextEffectConfig]])) as TextEffectConfig;
 }
 export function narrationTime(c:TextEffectConfig) {
@@ -81,16 +86,26 @@ export function narrationTime(c:TextEffectConfig) {
   if (c.flow === 'scroll') return (lines*640*c.bodySize/100*c.lineHeight+360)/c.scrollSpeed*1000;
   return Math.max(1,lines)*c.lineInterval+(c.flow === 'sweep' ? c.sweepTime : c.enter);
 }
-export const entryTime = (c:TextEffectConfig) => c.enter+(c.subtitle?Math.max(0,c.subtitleDelay):0);
-export const duration = (c:TextEffectConfig) => Math.round(c.startDelay+entryTime(c)+narrationTime(c)+c.hold+c.exit+c.endDelay);
+export function presentationTimes(c:TextEffectConfig) {
+ const glyphs=(text:string)=>Array.from(new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(text)).filter(g=>g.segment.trim()).length;
+ const staged=c.sequence==='staged',lead=staged&&['band','tape','frame','box'].includes(c.decoration)&&c.decorationAnimation!=='none'?Math.min(300,c.decorationTime*.6):0;
+ const mainDelay=staged&&!BLOCK_EFFECTS.has(c.entry)?Math.min(3000,Math.max(0,glyphs(c.title)-1)*c.entryStagger*1000):0,main=c.enter+mainDelay;
+ const subtitleDelay=staged&&c.subtitleEffect!=='fade'?Math.min(3000,Math.max(0,glyphs(c.subtitle)-1)*(c.subtitleEffect==='same'?Math.min(.05,c.entryStagger):.035)*1000):0;
+ const subtitleStart=staged?Math.max(lead,lead+main+c.subtitleDelay):Math.max(0,c.subtitleDelay),subtitle=(staged&&c.subtitleEffect==='fade'?600:c.enter)+subtitleDelay;
+ return {lead,main,mainDelay,subtitleStart,subtitle,subtitleDelay,arrival:Math.max(lead+main,c.subtitle?subtitleStart+subtitle:0)};
+}
+export const entryTime = (c:TextEffectConfig) => presentationTimes(c).arrival;
+export const exitTime = (c:TextEffectConfig) => c.sequence==='staged'&&c.decoration!=='none'&&c.decorationAnimation!=='none'?Math.max(c.exit,c.exit*.35+c.decorationTime):c.exit;
+export const duration = (c:TextEffectConfig) => Math.round(c.startDelay+entryTime(c)+narrationTime(c)+c.hold+exitTime(c)+c.endDelay);
 export const hasContent = (c:TextEffectConfig) => !!(c.title.trim()||c.subtitle.trim()||c.body.trim()||c.decoration!=='none'||c.background!=='transparent'&&c.opacity>0);
-export const PRESETS: {name:string;config:TextEffectConfig}[] = [
-  {name:'战斗宣告',config:{...DEFAULT_CONFIG}},
-  {name:'暗处低语',config:{...DEFAULT_CONFIG,title:'有人在暗处',subtitle:'你听见了什么？',color:'#dadce6',accent:'#8498b8',glowColor:'#8498b8',subtitleColor:'#8498b8',entry:'blur',idle:'float',motion:'fade',decoration:'mist',background:'dim',opacity:.45,glow:12,spacing:8,hold:3200}},
-  {name:'地点字幕',config:{...DEFAULT_CONFIG,title:'雾港',subtitle:'第三日 · 黄昏',size:5,anchor:'bottom-center',position:'bottom',entry:'rise',motion:'rise',decoration:'lines',background:'bottom',spacing:4,hold:4000}},
-  {name:'旁白',config:{...DEFAULT_CONFIG,title:'',subtitle:'',body:'雨停了。\n远处的钟声，终于传来。',font:'serif',size:5,entry:'fade',flow:'char',cursor:true,motion:'fade',decoration:'none',background:'dim',opacity:.65,hold:3500}},
-  {name:'发现线索',config:{...DEFAULT_CONFIG,title:'新的线索',subtitle:'一些碎片，开始连在一起',color:'#e5f4ff',accent:'#83cfea',glowColor:'#83cfea',subtitleColor:'#83cfea',entry:'typewriter',leave:'tracking',motion:'typewriter',decoration:'sparks',background:'transparent',spacing:3,hold:3000}},
-  {name:'警报',config:{...DEFAULT_CONFIG,title:'危险迫近',subtitle:'退路正在消失',color:'#fff3bd',accent:'#edc35d',decorationLineColor:'#edc35d',subtitleColor:'#edc35d',entry:'slam',idle:'pulse',leave:'glitch',decoration:'tape',background:'dim',glow:8,hold:2600}},
-  {name:'信号中断',config:{...DEFAULT_CONFIG,title:'信号中断',subtitle:'连接另一端的人，已经离开',font:'mono',color:'#e5fbf8',accent:'#7ce8d6',subtitleColor:'#7ce8d6',entry:'glitch',idle:'glitch',leave:'glitch',decoration:'corners',background:'transparent',glow:4}},
-  {name:'章节标题',config:{...DEFAULT_CONFIG,title:'第四章',subtitle:'风暴来临之前',entry:'tracking',leave:'wipe',fill:'gradient',decoration:'frame',background:'transparent',hold:3500}},
-];
+export const PRESETS: {name:string;config:TextEffectConfig}[] = [{name:'默认演出',config:{...DEFAULT_CONFIG}}];
+export function initialEditorConfig(value:unknown):TextEffectConfig|null {
+ const parsed=parseConfig(value);if(!parsed)return null;
+ const source=value as Record<string,unknown>,previous={...DEFAULT_CONFIG,
+  subtitle:'命运已掷下骰子',size:7,color:'#fff2d5',accent:'#e5a45b',outline:1,glow:22,spacing:6,motion:'zoom',decoration:'rays',background:'band',opacity:.75,
+  enter:900,hold:2400,exit:700,entry:'shrink',leave:'fade',entryPower:1,entryStagger:0,lineHeight:1.6,weight:700,
+  subtitleFont:'same',subtitleWeight:400,subtitleSize:.36,subtitleSpacing:12,subtitleGap:.6,subtitleColor:'#e5a45b',subtitleEffect:'same',subtitleDelay:0,
+  shadowOpacity:.7,shadowBlur:8,shadowY:2,glowColor:'#e5a45b',decorationLineColor:'#e5a45b',decorationOpacity:.7,decorationThickness:2,decorationPadding:.55,decorationExtend:1,decorationTime:700,
+  marginX:6,marginY:6,startDelay:0,endDelay:0};
+ return Object.entries(previous).every(([key,defaultValue])=>!Object.hasOwn(source,key)||source[key]===defaultValue)?{...DEFAULT_CONFIG}:parsed;
+}
