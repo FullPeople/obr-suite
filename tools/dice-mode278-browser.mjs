@@ -5,15 +5,16 @@ import {resolve,join,extname,sep} from 'node:path';
 import {chromium} from '@playwright/test';
 const root=resolve(process.env.DICE_MODE278_ROOT||'dist-workbench-dev'),overlay=resolve(process.env.DICE_MODE278_OVERLAY||join(root,'dice3d'));
 const out=resolve(process.env.DICE_MODE278_EVIDENCE||'.local-evidence/dice-mode278');mkdirSync(out,{recursive:true});
-const remote=process.env.DICE_MODE278_PUBLIC,checks=[],errors=[],requests=[];
+const remote=process.env.DICE_MODE278_PUBLIC,checks=[],errors=[],requests=[],hostPreferences={};
 const check=(value,name)=>{assert(value,name);checks.push(name);console.log('PASS',name);};
 const harness=`<!doctype html><html><body style="margin:0;background:#333"><iframe style="border:0;width:100vw;height:100vh" src="/suite-dev/workbench-panels/settings.html?workbench=1&section=dice"></iframe><script>
-addEventListener('message',e=>{const m=e.data;if(m.channel!=='workbench-panel-frame/v1'||!m.method)return;let result=true;if(m.method==='init')result={roomId:'fixture',playerId:'fixture',preferences:{},reads:{'player.getRole':'GM','scene.isReady':true,'scene.getMetadata':{'com.obr-suite/state':{enabled:{dice:true},crossSceneSyncSettings:false}},'room.getMetadata':{}}};e.source.postMessage({channel:m.channel,id:m.id,result},location.origin);});
+window.confirmed=[];addEventListener('message',async e=>{const m=e.data;if(m.channel!=='workbench-panel-frame/v1'||!m.method)return;let result=true;if(m.method==='init')result={roomId:'fixture',playerId:'fixture',preferences:await(await fetch('/prefs')).json(),reads:{'player.getRole':'GM','scene.isReady':true,'scene.getMetadata':{'com.obr-suite/state':{enabled:{dice:true},crossSceneSyncSettings:false}},'room.getMetadata':{}}};if(m.method==='preferences.write'){await fetch('/prefs',{method:'POST',body:JSON.stringify(m.args)});confirmed.push(m.args);}e.source.postMessage({channel:m.channel,id:m.id,result},location.origin);});
 </script></body></html>`;
 const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.json':'application/json','.svg':'image/svg+xml'};
 const server=remote?null:createServer((req,res)=>{
  const path=new URL(req.url,'http://localhost').pathname;
  if(path==='/harness'){res.setHeader('Content-Type','text/html');res.end(harness);return;}
+ if(path==='/prefs'){res.setHeader('Content-Type','application/json');if(req.method==='POST'){let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{const [key,value]=JSON.parse(body);hostPreferences[key]=value;res.end('{}');});}else res.end(JSON.stringify(hostPreferences));return;}
  if(path==='/favicon.ico'){res.writeHead(204);res.end();return;}
  const directory=path.startsWith('/suite-dev/dice3d/')?overlay:root;
  const relative=path.startsWith('/suite-dev/dice3d/')?path.slice('/suite-dev/dice3d/'.length):path.replace(/^\/suite-dev\//,'');
@@ -33,9 +34,12 @@ try{
   check(await settings.locator('[data-key="diceViewMode"]').inputValue()==='3d','default keeps current 3D');
   await settings.locator('[data-key="diceViewMode"]').selectOption('2d');
   check(await page.evaluate(()=>localStorage.getItem('obr-suite/dice/view-mode'))==='2d','2D preference is saved in browser');
+  await page.waitForFunction(()=>confirmed.some(([key,value])=>key==='obr-suite/dice/view-mode'&&value==='2d'));
+  check(hostPreferences['obr-suite/dice/view-mode']==='2d','settings forward the mode to the separate Owlbear host preference');
   check((await settings.locator('[data-key="diceViewNotice"]').innerText()).includes('刷新'),'settings explicitly tell the user to refresh the room');
-  await page.reload();await settings.locator('body[data-bridge-ready=true]').waitFor();await settings.locator('#tabs [data-tab="dice"]').click();check(await settings.locator('[data-key="diceViewMode"]').inputValue()==='2d','2D selection survives reopening settings');
-  await settings.locator('[data-key="diceViewMode"]').selectOption('3d');await page.reload();await settings.locator('body[data-bridge-ready=true]').waitFor();await settings.locator('#tabs [data-tab="dice"]').click();
+  await page.evaluate(()=>localStorage.removeItem('obr-suite/dice/view-mode'));
+  await page.reload();await settings.locator('body[data-bridge-ready=true]').waitFor();await settings.locator('#tabs [data-tab="dice"]').click();check(await settings.locator('[data-key="diceViewMode"]').inputValue()==='2d','host mode restores after the workbench storage has been cleared');
+  await settings.locator('[data-key="diceViewMode"]').selectOption('3d');await page.waitForFunction(()=>confirmed.some(([key,value])=>key==='obr-suite/dice/view-mode'&&value==='3d'));await page.reload();await settings.locator('body[data-bridge-ready=true]').waitFor();await settings.locator('#tabs [data-tab="dice"]').click();
   check(await settings.locator('[data-key="diceViewMode"]').inputValue()==='3d','3D can be restored and persists');
   await page.screenshot({path:join(out,'settings.png')});
  }
