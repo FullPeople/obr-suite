@@ -6,7 +6,8 @@ const QQ_CARDS='com.obr-suite/qq-cards',events=[],listeners=new Map(),writes=[];
 let metadata={[QQ_CARDS]:[],secret:'unrelated-room-state'};
 const source=readFileSync(new URL('../src/workbench/panel-rpc.ts',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace('export function panelBridge','function panelBridge');
 const OBR={room:{id:'room',getMetadata:async()=>structuredClone(metadata),setMetadata:async value=>{writes.push(value);metadata={...metadata,...value};},onMetadataChange:fn=>{listeners.set('room',fn);return()=>listeners.delete('room');}},player:{getId:async()=>'player',getRole:async()=>'PLAYER'}};
-const context=vm.createContext({OBR,QQ_CARDS,setupServerAdmission(){},tableWorkbench:()=>async()=>{},events});
+const accounts=[];
+const context=vm.createContext({OBR,QQ_CARDS,acceptQQSession:async value=>accounts.push(['attach',value]),clearQQSession:value=>accounts.push(['clear',value]),setupServerAdmission(){},tableWorkbench:()=>async()=>{},events});
 vm.runInContext(ts.transpileModule(source+'\nglobalThis.bridge=panelBridge((...args)=>events.push(args));',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,context);
 const request=(method,args=[])=>context.bridge('qq','qq-window',method,args),plain=value=>JSON.parse(JSON.stringify(value));
 let count=0;async function check(name,fn){await fn();console.log('PASS',++count,name);}
@@ -18,4 +19,5 @@ await check('Unrelated metadata and malformed card writes are rejected',async()=
 await check('Room events expose only the QQ registry',async()=>{await request('subscribe',['roomMetadata']);await request('subscribe',['roomMetadata']);assert.equal(listeners.size,1);listeners.get('room')(metadata);assert.deepEqual(plain(events.at(-1)[1].data),{[QQ_CARDS]:[entry]});});
 await check('Scene, player preferences, broadcasts and other subscriptions stay unavailable',async()=>{for(const method of ['scene.getMetadata','scene.setMetadata','player.setMetadata','preferences.write','broadcast.sendMessage','modal.open','popover.open'])await assert.rejects(()=>request(method,[{}]),/不支持/);for(const event of ['sceneMetadata','player','broadcast'])await assert.rejects(()=>request('subscribe',[event]),/不支持/);});
 await check('Disposal releases the QQ room subscription',async()=>{await request('dispose');assert.equal(listeners.size,0);});
+await check('Personal host connection stays separate from room metadata',async()=>{await request('account.attach',[{synthetic:true}]);await request('account.clear',['synthetic-token']);assert.equal(accounts.length,2);assert.equal(writes.length,1);assert(!JSON.stringify(metadata).includes('synthetic-token'));await assert.rejects(()=>request('account.attach',[]),/不支持/);});
 console.log(`QQ panel: ${count} scenarios passed.`);

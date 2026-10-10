@@ -52,6 +52,7 @@ jobs:
         if: github.ref_name == 'dev' || github.ref_name == 'codex/qq-library-entry-dev-20261010' || github.head_ref == 'codex/qq-library-entry-dev-20261010' || github.ref_name == 'codex/qq-account-permissions-dev-20261010' || github.head_ref == 'codex/qq-account-permissions-dev-20261010'
         run: |
           node tools/qq-panel-selftest.mjs
+          node tools/qq-account-session-selftest.mjs
           node tools/native-owner-selftest.mjs
           node tools/workbench-read-recovery-selftest.mjs
           npm run build:workbench-dev

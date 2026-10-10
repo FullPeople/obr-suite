@@ -1,6 +1,19 @@
 export const QQ_ORIGIN='https://dnd.center',QQ_STORAGE='dnd-qq-plugin',QQ_CARDS='com.obr-suite/qq-cards';
 export type QQSession={token:string;expiresAt:number;accountId?:string;csrf?:string;nickname?:string};
 export type QQRoom={id:string;capability:string};
+export async function acceptQQSession(candidate:unknown):Promise<void>{
+  const value=candidate as QQSession|undefined;
+  if(!value||typeof value.token!=='string'||value.token.length<24||value.token.length>256||!Number.isFinite(value.expiresAt)||value.expiresAt<=Date.now()||typeof value.accountId!=='string'||value.accountId.length>256)throw Error('无效 QQ 账号连接');
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+  try{
+    const response=await fetch(QQ_ORIGIN+'/api/session',{headers:{Authorization:'Bearer '+value.token},credentials:'omit',cache:'no-store',signal:controller.signal});
+    const profile=await response.json();
+    if(!response.ok||!profile.authenticated||profile.account?.id!==value.accountId)throw Error('QQ 账号连接已失效，请重新登录。');
+    localStorage.setItem(QQ_STORAGE,JSON.stringify({token:value.token,expiresAt:value.expiresAt,accountId:profile.account.id,csrf:profile.csrf,nickname:profile.account.nickname}));
+    window.dispatchEvent(new Event('qq-account-changed'));
+  }finally{clearTimeout(timer);}
+}
+export function clearQQSession(token:unknown):void{if(typeof token==='string'&&qqSession()?.token===token){localStorage.removeItem(QQ_STORAGE);window.dispatchEvent(new Event('qq-account-changed'));}}
 export function qqSession():QQSession|undefined{try{const value=JSON.parse(localStorage.getItem(QQ_STORAGE)||'null');return value?.expiresAt>Date.now()?value:undefined;}catch{return;}}
 export function qqHeaders(room?:QQRoom){const session=qqSession();return {...session?{Authorization:'Bearer '+session.token}:{},...room?{'X-Room-Capability':room.capability}:{}};}
 export async function qqRequest<T=any>(path:string,method='GET',data?:unknown,room?:QQRoom):Promise<T>{

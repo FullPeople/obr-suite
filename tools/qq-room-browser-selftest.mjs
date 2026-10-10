@@ -28,10 +28,12 @@ const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json
 async function context(authenticated=false){
  const context=await browser.newContext({viewport:{width:1440,height:960}});contexts.push(context);
  const QQ_CARDS='com.obr-suite/qq-cards';
+ const hostStorage=new Map();
+ const accountSource=readFileSync(join(root,'src/modules/characterCards/qq-account.ts'),'utf8').replace(/^export /gm,'');
  const rpcSource=readFileSync(join(root,'src/workbench/panel-rpc.ts'),'utf8').replace(/^import .*;\r?\n/gm,'').replace('export function panelBridge','function panelBridge');
- const rpcContext=vm.createContext({QQ_CARDS,setupServerAdmission(){},tableWorkbench:()=>async()=>{},OBR:{room:{id:'synthetic-qq-room',getMetadata:async()=>structuredClone(metadata),setMetadata:async update=>{metadata={...metadata,...update};},onMetadataChange:()=>()=>{}},player:{getId:async()=>'synthetic-player'}}});
- vm.runInContext(ts.transpileModule(rpcSource+'\nglobalThis.bridge=panelBridge(()=>{});',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,rpcContext);
- await context.exposeBinding('qqFixture',async(_source,operation,update)=>{if(operation==='panel')return rpcContext.bridge(update.panel,update.instance,update.method,update.args);if(operation==='write'){metadata={...metadata,...update};return;}return structuredClone(metadata);});
+ const rpcContext=vm.createContext({AbortController,setTimeout,clearTimeout,Event,window:{dispatchEvent(){}},fetch:(url,options)=>fetch(api+new URL(url).pathname,options),localStorage:{getItem:key=>hostStorage.get(key)||null,setItem:(key,value)=>hostStorage.set(key,value),removeItem:key=>hostStorage.delete(key)},setupServerAdmission(){},tableWorkbench:()=>async()=>{},OBR:{room:{id:'synthetic-qq-room',getMetadata:async()=>structuredClone(metadata),setMetadata:async update=>{metadata={...metadata,...update};},onMetadataChange:()=>()=>{}},player:{getId:async()=>'synthetic-player'}}});
+ vm.runInContext(ts.transpileModule(accountSource+'\n'+rpcSource+'\nglobalThis.bridge=panelBridge(()=>{});globalThis.account=()=>qqSession()?.accountId;',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,rpcContext);
+ await context.exposeBinding('qqFixture',async(_source,operation,update)=>{if(operation==='account')return rpcContext.account();if(operation==='panel')return rpcContext.bridge(update.panel,update.instance,update.method,update.args);if(operation==='write'){metadata={...metadata,...update};return;}return structuredClone(metadata);});
  if(authenticated)await context.addCookies([{name:'dnd_cloud',value:issued.token,url:'https://dnd.center/api/',secure:true,httpOnly:true,sameSite:'Strict'}]);
  await context.route('https://dnd.center/api/**',async route=>{const request=route.request(),url=new URL(request.url()),response=await context.request.fetch(api+url.pathname+url.search,{method:request.method(),headers:await request.allHeaders(),data:request.postData()||undefined});await route.fulfill({response});});
  await context.route(/https:\/\/(?:obr\.)?dnd\.center\/(?!api\/).*/,async route=>{
@@ -77,6 +79,7 @@ try{
   await frame.locator('#logout').click();await expect(frame.locator('#login')).toBeVisible();
   const loginEvent=host.context().waitForEvent('page');await frame.locator('#login').click();const loginPage=await loginEvent;
   await loginPage.getByRole('button',{name:'连接当前账号'}).click();await expect(frame.locator('#cards')).toContainText(card.character.name);
+  assert.equal(await room.evaluate(()=>qqFixture('account')),owner.id,'The separate host storage must recognize the connected owner');
   workspace.once('dialog',dialog=>dialog.accept());await frame.locator('#cards button').click();await expect(frame.getByRole('button',{name:'解锁给房间成员'})).toBeVisible();
   await expect(frame.frameLocator('#editor').getByRole('textbox',{name:'角色姓名',exact:true})).toHaveValue(card.character.name);
   await frame.getByRole('button',{name:'移出房间'}).click();await expect(frame.locator('#roomCards button')).toHaveCount(0);
@@ -84,8 +87,9 @@ try{
   await entry.click();await expect(workspace.locator('iframe[title="Full Suite 我的 QQ 卡库"]')).toHaveCount(0);
   await entry.click();await expect(frame.locator('#cards')).toContainText(card.character.name);
   await frame.locator('#close').click();await expect(workspace.locator('iframe[title="Full Suite 我的 QQ 卡库"]')).toHaveCount(0);
-  workbenchChecks.push('actual-workbench-button-shows-library-in-active-tab','workbench-login-popup-connects-account','workbench-owner-only-library','workbench-load-opens-five-page-editor','workbench-toggle-and-close-restore-previous-page');
+  workbenchChecks.push('actual-workbench-button-shows-library-in-active-tab','workbench-login-popup-connects-account','workbench-session-reaches-private-host-storage','workbench-owner-only-library','workbench-load-opens-five-page-editor','workbench-toggle-and-close-restore-previous-page');
   await workspace.close();await room.close();
+  await host.locator('#refresh').click();await expect(host.locator('#cards')).toContainText(card.character.name);
  }
  host.once('dialog',dialog=>dialog.accept());await host.locator('#cards button').click();await expect(host.locator('#roomCards')).toContainText('解锁给房间成员');
  assert.equal(Object.keys(metadata).length,1);assert(!JSON.stringify(metadata).includes(issued.token),'Website session must never enter room metadata');

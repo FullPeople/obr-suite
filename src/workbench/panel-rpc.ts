@@ -1,4 +1,4 @@
-import {QQ_CARDS} from '../modules/characterCards/qq-account';
+import {QQ_CARDS,acceptQQSession,clearQQSession} from '../modules/characterCards/qq-account';
 import {markPlayerPermissionsRead} from '../player-permission-notice';
 import { requestTextEffect } from '../modules/textEffects';
 import { REQUEST as TEXT_EFFECT_REQUEST, STATUS as TEXT_EFFECT_STATUS } from '../modules/textEffects/protocol';
@@ -25,7 +25,9 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
   if(typeof instance!=='string'||!/^[a-zA-Z0-9-]{1,80}$/.test(instance))throw Error('无效窗口');
   if(!['settings','music','table','notes','permissions','textEffects','qq'].includes(panel))throw Error('无效功能页');
   if(panel==='qq'){
-   // QQ credentials stay in this browser. The panel bridge exposes only its room registry.
+   if(method==='account.attach'&&args.length===1)return acceptQQSession(args[0]);
+   if(method==='account.clear'&&args.length===1)return clearQQSession(args[0]);
+   // Personal sessions stay with this player's host. Room APIs expose only the QQ registry.
    const select=(metadata:Record<string,unknown>)=>({[QQ_CARDS]:metadata[QQ_CARDS]??[]});
    if(method==='init')return {roomId:OBR.room.id,playerId:await OBR.player.getId(),preferences:{}};
    if(method==='player.getId')return OBR.player.getId();
