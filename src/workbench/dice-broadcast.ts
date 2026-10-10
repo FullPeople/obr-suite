@@ -1,6 +1,7 @@
 import OBR from '@owlbear-rodeo/sdk';
 import {DiceSendQueue} from './dice-send-queue';
 const queue=new DiceSendQueue();
+export const reserveDiceNormalWindow=(maxMs:number,valid=()=>true)=>queue.reserveNormalWindow(maxMs,valid);
 // Control packets must not sit behind hundreds of trajectory repair fragments.
 // Both priorities still share the same SDK rate budget and bounded retry policy.
 const controlTypes=new Set(['ready','start','start-group','start-ack','offer','trace','roll-request','chunks-done','abort','secret-failed','request-ack','roll-rejected']);
