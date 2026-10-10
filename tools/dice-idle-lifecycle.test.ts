@@ -28,6 +28,23 @@ async function sweep(h:any){for(const out of h.outgoing.values())out.at=now()-60
 const peers=(h:any)=>{for(const [id,role]of [['gm','GM'],['player','PLAYER']])h.peers.set(id,{id,name:id,role,ready:true,lastSeen:now(),rtt:1,offset:0,version:BUILD,born:1});};
 await check('audio warmup and completed roll leave no interval',async()=>{const m=mixer();await m.warmup();assert.equal(intervals.size,0);await audioStart(m,'normal');assert.equal(intervals.size,1);m.tracks.get('normal').at=now()-2000;for(const {fn}of [...intervals.values()])fn();assert.equal(m.snapshot().active.length,0);assert.equal(intervals.size,0);});
 await check('one paused track does not stop another playing track',async()=>{const m=mixer();await audioStart(m,'a');await audioStart(m,'b');m.pause('a');assert.equal(intervals.size,1);assert.equal(m.tracks.get('a').started,false);assert.equal(m.tracks.get('b').started,true);});
+await check('stalled flight retiming does not replay due audio but reschedules future reservations',async()=>{
+ const m=mixer(),hits=[2.95,3.1,3.4].map((t,ordinal)=>({t,ordinal,maximumFace:false})),rules=hits.map(({t})=>({t,kind:'max',pan:0}));
+ m.prepare('stall','ink_sketch',{...audioPlan,duration:4,hits,rules});await m.release('stall',now()-3000);
+ const track=m.tracks.get('stall');track.hit=2;track.rule=2;await m.retime('stall',now()-2800);
+ assert.equal(track.hit,1,'already due audio is not repeated; cancelled future audio is requeued');assert.equal(track.rule,1);assert.equal(track.engine.starts,2);
+ m.stop('stall');
+});
+await check('paused presentation resumes its saved audio without using time spent paused',async()=>{
+ const m=mixer(),hits=[2.95,3.1].map((t,ordinal)=>({t,ordinal,maximumFace:false}));
+ m.prepare('paused','ink_sketch',{...audioPlan,duration:4,hits});await m.release('paused',now()-3000);m.pause('paused');await m.retime('paused',now()-2800);
+ assert.equal(m.tracks.get('paused').hit,0);m.stop('paused');
+});
+await check('retiming keeps due sounds which were never dispatched',async()=>{
+ const m=mixer(),hits=[2.95,3.1].map((t,ordinal)=>({t,ordinal,maximumFace:false}));
+ m.prepare('undispatched','ink_sketch',{...audioPlan,duration:4,hits});await m.release('undispatched',now()-3000);await m.retime('undispatched',now()-2800);
+ assert.equal(m.tracks.get('undispatched').hit,0);m.stop('undispatched');
+});
 await check('all paused tracks stop ticking and resume once with preserved tracks',async()=>{const m=mixer();await audioStart(m,'a');await audioStart(m,'b');const a=m.tracks.get('a'),b=m.tracks.get('b');m.pause('a');m.pause('b');assert.equal(intervals.size,0);assert.equal(m.snapshot().active.length,2);await m.retime('a',now());await m.retime('b',now());assert.equal(intervals.size,1);assert.equal(m.tracks.get('a'),a);assert.equal(m.tracks.get('b'),b);assert.equal(a.engine.starts,2);assert.equal(b.engine.starts,2);m.stop('a');m.stop('b');assert.equal(intervals.size,0);});
 await check('stopping last playing track also stops timer when paused tracks remain',async()=>{const m=mixer();await audioStart(m,'paused');await audioStart(m,'active');m.pause('paused');m.stop('active');assert.equal(intervals.size,0);assert.equal(m.snapshot().active.length,1);});
 await check('25 successful public groups release every per-target audience snapshot',async()=>{const {h,errors}=host();for(let i=0;i<25;i++){const id='group-'+i,request=await submit(h,id,['all','all']);await h.onWorker({id,roll:prediction(request)});await finish(h,[id+'.g0',id+'.g1']);await sweep(h);assert.equal(h.privateAudiences.size,0);assert.equal(h.requests.size,0);assert.equal(h.outgoing.size,0);assert.equal(h.reservations.size,0);}assert.equal(errors.length,0);assert.equal(h.records.size,50);});
