@@ -43,6 +43,7 @@ export class CueRenderer{
   private ctx:CanvasRenderingContext2D;private releaseCanvas:()=>void;
   private particles?:Particle[];
   private particleSprites=new Map<string,HTMLCanvasElement>();
+  private trailSprites=new Map<string,{canvas:HTMLCanvasElement;length:number}>();
   private seed:bigint;
   private targetSlot:[number,number]=[0,0];
   private currentSlot:[number,number]=[0,0];
@@ -59,8 +60,14 @@ export class CueRenderer{
   }
   setSlotOffset(x:number,y=0,width?:number,height?:number,snap=false){this.targetSlot=[x,y];this.slotSize=width!==undefined&&height!==undefined?[width,height]:undefined;if(snap)this.currentSlot=[x,y];}
   slotPosition(){return [...this.currentSlot]}
-  prepareCue(cue:Cue){for(const beam of cue.beams){this.beamParticles();this.particleSprite(beam.color);}if(cue.modifier)this.particleSprite(cue.modifier.color);}
-  destroy(){this.releaseCanvas()}
+  prepareCue(cue:Cue){
+    const w=this.container.clientWidth,h=this.container.clientHeight;
+    const placement=cuePlacement(w,h,this.targetSlot[0],this.targetSlot[1],this.slotSize?.[0],this.slotSize?.[1],!!cue.modifier);
+    const anchor=this.anchor?.(),x=anchor&&Number.isFinite(anchor.x)?anchor.x:placement.x,y=anchor&&Number.isFinite(anchor.y)?anchor.y:placement.y;
+    for(const beam of cue.beams){this.beamParticles();this.particleSprite(beam.color);this.prepareTrail(beam.color,Math.hypot(x-beam.sourceX,y-beam.sourceY)+(beam.maximumFace?42:31));}
+    if(cue.modifier){this.particleSprite(cue.modifier.color);this.prepareTrail(cue.modifier.color,98*(anchor?1:placement.scale)+31);}
+  }
+  destroy(){for(const trail of this.trailSprites.values())trail.canvas.width=trail.canvas.height=0;this.trailSprites.clear();this.particleSprites.clear();this.releaseCanvas()}
   private size(){
     const ratio=Math.min(2,window.devicePixelRatio||1);
     const w=this.container.clientWidth,h=this.container.clientHeight;
@@ -93,6 +100,27 @@ export class CueRenderer{
     ctx.beginPath();ctx.moveTo(23.2,32);ctx.lineTo(36.8,32);ctx.stroke();
     this.particleSprites.set(key,canvas);return canvas;
   }
+  private trailSprite(color:[number,number,number],length:number){
+    const key=color.join(',')+':'+length.toFixed(1),cached=this.trailSprites.get(key);if(cached)return cached;
+    // Above 26% flight progress the original fifteen tapered segments have
+    // identical relative opacity/width every frame. Bake those exact strokes;
+    // retain their three layers, overlap, rounded caps and colors.
+    const canvas=document.createElement('canvas'),ratio=2,pad=17;
+    canvas.width=Math.max(1,Math.ceil((length+pad*2)*ratio));canvas.height=pad*2*ratio;
+    const ctx=canvas.getContext('2d')!;ctx.setTransform(ratio,0,0,ratio,pad*ratio,pad*ratio);ctx.lineCap='round';
+    for(let layer=0;layer<3;layer++){
+      ctx.strokeStyle=rgba(whiten(color,layer===2?0.72:0),BEAM_ALPHAS[layer]);ctx.lineWidth=BEAM_WIDTHS[layer];
+      for(let segment=0;segment<BEAM_SEGMENTS;segment++){
+        ctx.globalAlpha=smoothstep(segment/BEAM_SEGMENTS)*smoothstep(Math.min(1,.26*(1-segment/BEAM_SEGMENTS)*7+.32));
+        ctx.beginPath();ctx.moveTo(length*segment/BEAM_SEGMENTS,0);ctx.lineTo(length*(segment+1)/BEAM_SEGMENTS,0);ctx.stroke();
+      }
+    }
+    // Moving token anchors/viewport changes may need new lengths. Bound every
+    // roll's cache; never create one full-viewport bitmap per die or per frame.
+    if(this.trailSprites.size>=128){const oldest=this.trailSprites.keys().next().value!;const old=this.trailSprites.get(oldest)!;this.trailSprites.delete(oldest);old.canvas.width=old.canvas.height=0;}
+    const trail={canvas,length};this.trailSprites.set(key,trail);return trail;
+  }
+  private prepareTrail(color:[number,number,number],distance:number){const length=distance*.26;if(Number.isFinite(length)&&length<=1800)this.trailSprite(color,length);}
   /** Draws one frame of the show. `appear` is the layer opacity the native ties to card life. */
   draw(elapsed:number,cue:Cue,appear:number){
     const {w,h}=this.size();
@@ -180,6 +208,13 @@ export class CueRenderer{
       // Three-layer soft energy body, drawn as tapered segments between the tail and the head.
       const tailStart=Math.max(0,progress-0.26);
       if(progress>0.001&&(progress<1||decay>0.02)){
+        const trailLength=Math.hypot(centerX-launchX,centerY-launchY)*.26;
+        if(progress>=.26&&Number.isFinite(trailLength)&&trailLength<=1800){
+          const trail=this.trailSprite(beam.color,trailLength);
+          const [tx,ty]=linePoint(launchX,launchY,centerX,centerY,tailStart);
+          ctx.save();ctx.translate(tx,ty);ctx.rotate(Math.atan2(centerY-launchY,centerX-launchX));ctx.globalAlpha=appear*decay;
+          ctx.drawImage(trail.canvas,-17,-17,trail.canvas.width/2,trail.canvas.height/2);ctx.restore();
+        }else{
         for(let layer=0;layer<3;layer++){
           ctx.save();
           ctx.lineCap='round';
@@ -189,13 +224,13 @@ export class CueRenderer{
             const t0=tailStart+(progress-tailStart)*(segment/BEAM_SEGMENTS);
             const t1=tailStart+(progress-tailStart)*((segment+1)/BEAM_SEGMENTS);
             const taper=smoothstep(segment/BEAM_SEGMENTS)*smoothstep(Math.min(1,(progress-t0)*7+0.32));
-            ctx.globalAlpha=appear*BEAM_ALPHAS[layer]/BEAM_ALPHAS[layer]*taper*decay;
             ctx.globalAlpha=appear*taper*decay;
             const [x0,y0]=linePoint(launchX,launchY,centerX,centerY,t0);
             const [x1,y1]=linePoint(launchX,launchY,centerX,centerY,t1);
             if(t0<progress){ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke()}
           }
           ctx.restore();
+        }
         }
         // Head flare.
         ctx.save();ctx.lineCap='round';

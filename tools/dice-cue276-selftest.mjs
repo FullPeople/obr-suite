@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import {build} from 'rolldown';
+import {mkdirSync,writeFileSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const out=resolve('.local-evidence/cue276-unit');mkdirSync(out,{recursive:true});
+writeFileSync(out+'/entry.ts',`export * from ${JSON.stringify(resolve('extensions/workbench-dice3d/src/playback-clock.ts'))};export * from ${JSON.stringify(resolve('extensions/workbench-dice3d/src/cue.ts'))};export {CueRenderer} from ${JSON.stringify(resolve('extensions/workbench-dice3d/src/cue-renderer.ts'))};`);
+await build({input:out+'/entry.ts',platform:'node',output:{file:out+'/test.mjs',format:'esm'}});
+const {recoverCuePlaybackStart,recoverPlaybackStart,CueRenderer,totalAt}=await import(pathToFileURL(out+'/test.mjs').href);
+const checks=[];const check=(name,fn)=>{fn();checks.push(name);};
+check('normal 60, 30 and 20 fps keep the authoritative presentation clock',()=>{for(const gap of [8.33,16.67,33.33,50])assert.equal(recoverCuePlaybackStart(1000,2600,2600+gap,1.3,4),1000);});
+check('future release barrier and physics act retain the prior policy',()=>{assert.equal(recoverCuePlaybackStart(5000,2000,2600,1.3,4),5000);for(const gap of [70,200])assert.equal(recoverCuePlaybackStart(1000,1100,1100+gap,1.3,4),recoverPlaybackStart(1000,1100,1100+gap));});
+check('75, 95, 240 and 1000 ms flight stalls advance only one visible frame',()=>{for(const gap of [75,95,240,1000]){const start=recoverCuePlaybackStart(1000,2600,2600+gap,1.3,4);assert(Math.abs((2600+gap-start)-(2600-1000)-1000/60)<1e-9);}});
+check('a stall crossing the beginning preserves the unplayed flight',()=>{const start=recoverCuePlaybackStart(1000,2290,3000,1.3,4);assert((3000-start)/1000<1.31);});
+check('a stall approaching arrival neither credits early nor drops the remaining travel',()=>{const cue={reveals:[1.8,2.4],displayedTotals:[6,26]};let start=1000,previous=2780;start=recoverCuePlaybackStart(start,previous,previous+240,1.3,2.4);assert.equal(totalAt(cue,(previous+240-start)/1000),0);assert.equal(totalAt(cue,(previous+240-recoverPlaybackStart(1000,previous,previous+240))/1000),6,'the prior policy crosses arrival under this same blocked frame');assert.equal(totalAt(cue,(previous+240+17-start)/1000),6);assert.equal(totalAt(cue,2.4),26);});
+check('final hold resumes the old 100 ms gap policy',()=>{assert.equal(recoverCuePlaybackStart(1000,5100,6100,1.3,4),1900);});
+let strokes=0,canvases=0;
+globalThis.document={createElement:()=>{canvases++;return{width:0,height:0,getContext:()=>new Proxy({stroke:()=>strokes++},{get:(o,k)=>o[k]??(()=>{})})};}};
+check('steady tapered trail is reused and bounded; disposing releases its images',()=>{
+ const show=Object.assign(Object.create(CueRenderer.prototype),{trailSprites:new Map(),particleSprites:new Map(),releaseCanvas:()=>{}}),color=[.9,.7,.4];
+ const first=show.trailSprite(color,120);assert.equal(strokes,45);assert.equal(show.trailSprite(color,120.01),first);assert.equal(strokes,45);
+ for(let i=0;i<160;i++)show.trailSprite(color,200+i);assert.equal(show.trailSprites.size,128);assert.equal(first.canvas.width,0);
+ const retained=[...show.trailSprites.values()].map(t=>t.canvas);show.destroy();show.destroy();assert(retained.every(c=>c.width===0&&c.height===0));assert.equal(show.trailSprites.size,0);
+});
+check('extreme offscreen anchors do not allocate unbounded bitmaps',()=>{const show=Object.assign(Object.create(CueRenderer.prototype),{trailSprites:new Map()}),before=canvases;for(const distance of [1e9,Infinity,NaN])show.prepareTrail([1,1,1],distance);assert.equal(canvases,before);});
+const result={passed:true,checks,realRoomVerified:false};writeFileSync(out+'/result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
