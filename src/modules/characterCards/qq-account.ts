@@ -22,6 +22,7 @@ export function qqRequest<T=any>(path:string,method='GET',data?:unknown,room?:QQ
  const actor=qqSession()?.token||'',key=JSON.stringify([actor,path,room?.id,room?.capability]);if(method!=='GET')return performQQRequest<T>(path,method,data,room);const pending=qqReads.get(key);if(pending)return pending;const task=performQQRequest<T>(path,method,data,room).finally(()=>{if(qqReads.get(key)===task)qqReads.delete(key);});qqReads.set(key,task);return task;
 }
 async function performQQRequest<T=any>(path:string,method='GET',data?:unknown,room?:QQRoom):Promise<T>{
+  if(method==='GET'||method==='HEAD')data=undefined;
   let session=qqSession();
   if(method!=='GET'&&session&&!['plugin/start','plugin/poll','plugin/logout'].includes(path)){
     const fresh=await qqRequest('session');if(!fresh.authenticated||fresh.account.id!==session.accountId)throw Error('QQ 账号已改变，请重新连接。');

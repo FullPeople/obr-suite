@@ -18,4 +18,5 @@ await check('Concurrent reads share one request; a different account never recei
  localStorage.setItem(QQ_STORAGE,original);const next=qqRequest('cards');assert.equal(flights.length,3);flights[2].resolve(new Response(JSON.stringify({cards:['fresh']})));assert.deepEqual(await next,{cards:['fresh']});
 });
 await check('Logout clears only the matching personal host session',async()=>{clearQQSession('another-token');assert.equal(storage.get(QQ_STORAGE),original);clearQQSession(token);assert.equal(qqSession(),undefined);assert.deepEqual(events,['qq-account-changed','qq-account-changed']);});
+await check('JSON transport null never adds a body to a read request',async()=>{globalThis.fetch=async(url,options)=>{assert.equal(options.method,'GET');assert.equal(options.body,undefined);assert.equal(options.headers['Content-Type'],undefined);return new Response(JSON.stringify({cards:[]}));};assert.deepEqual(await qqRequest('cards','GET',null),{cards:[]});});
 console.log(`QQ personal host connection: ${count} scenarios passed.`);
