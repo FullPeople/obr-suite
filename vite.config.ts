@@ -106,6 +106,7 @@ export default defineConfig(({ command }) => ({
           "bestiary-group-resolve.html"
         ),
         "cc-panel": resolve(__dirname, "cc-panel.html"),
+        "cc-qq": resolve(__dirname, "cc-qq.html"),
         "cc-info": resolve(__dirname, "cc-info.html"),
         "cc-bind": resolve(__dirname, "cc-bind.html"),
         "cc-fullscreen": resolve(__dirname, "cc-fullscreen.html"),
