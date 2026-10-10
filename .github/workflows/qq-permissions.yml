@@ -1,0 +1,66 @@
+name: Verify QQ account and room permissions
+on:
+  push:
+    branches: [codex/qq-account-permissions-dev-20261010, codex/qq-account-permissions-stable-20261010]
+  pull_request:
+    paths: ['.github/workflows/qq-permissions.yml', 'cc-qq.html', 'src/modules/characterCards/**', 'src/workbench/background.ts', 'tools/qq-room-browser-selftest.mjs', 'tools/build-workbench-dev.mjs', 'tools/native-owner-selftest.mjs', 'tools/workbench-read-recovery-selftest.mjs', 'vite.config.ts']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: qq-permissions-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 4f999ed4a0ef9a120cd5116f6a603e0e7574bd1f
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.9.0'
+      - run: npm ci
+      - run: npm ci
+        working-directory: .paired-web
+      - name: Verify actual pinned rule evidence
+        working-directory: .paired-web
+        run: |
+          npm run verify:automation-source
+          npm run verify:automation-runtime
+          npm run verify:automation-progress
+      - name: Build paired cloud and five-page editor
+        working-directory: .paired-web
+        run: |
+          npm run build:cloud
+          node node_modules/vite/bin/vite.js build
+      - name: Build host and included QQ editor
+        run: |
+          node node_modules/typescript/bin/tsc
+          node node_modules/vite/bin/vite.js build
+          node tools/build-legacy-card-viewer.mjs --web-built
+      - name: Build complete dev workbench and check authority
+        if: github.ref_name == 'codex/qq-account-permissions-dev-20261010' || github.head_ref == 'codex/qq-account-permissions-dev-20261010'
+        run: |
+          node tools/native-owner-selftest.mjs
+          node tools/workbench-read-recovery-selftest.mjs
+          npm run build:workbench-dev
+      - run: npx playwright install --with-deps chromium
+      - name: Connect real page and HTTP permissions with synthetic accounts
+        run: node tools/qq-room-browser-selftest.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qq-permissions-${{ github.sha }}
+          path: |
+            .local-evidence/qq-room/result.json
+            .local-evidence/qq-room/qq-owner.png
