@@ -16,10 +16,9 @@ export const EXIT_EFFECTS = list([
   ['shutter','收起','遮罩'], ['glitch','故障','特殊'],
 ]);
 export const HOLD_EFFECTS = list([['none','静止'], ['float','轻轻飘浮'], ['wave','波浪'], ['pulse','心跳'],
-  ['shake','颤抖'], ['glow','光晕明灭'], ['flicker','忽明忽暗'], ['blink','闪烁'], ['glitch','间歇故障']]);
+  ['shake','颤抖'], ['flicker','忽明忽暗'], ['blink','闪烁'], ['glitch','间歇故障']]);
 export const ORNAMENTS = list([['none','无'], ['band','色带'], ['tape','警戒胶带'], ['box','方框'], ['frame','标题框'],
-  ['lines','上下线'], ['underline','下划线'], ['sides','两侧线'], ['bar','强调条'], ['corners','角框'],
-  ['rays','光芒'], ['mist','雾气'], ['sparks','光点'], ['rings','光环']]);
+  ['lines','上下线'], ['underline','下划线'], ['sides','两侧线'], ['bar','强调条'], ['corners','角框']]);
 export const FLOWS = list([['all','整体显示'], ['char','逐字'], ['solo','中央逐字'], ['spread','中央展开'],
   ['line','逐行'], ['sweep','流畅扫过'], ['scroll','滚动']]);
 export const EASINGS = list([['auto','自动'], ['out','减速'], ['strong','强减速'], ['smooth','平滑'], ['back','超出回弹'],
@@ -28,10 +27,10 @@ export const ORDERS = list([['forward','从开头'], ['reverse','从末尾'], ['
 export const DIRECTIONS = list([['left','左'], ['right','右'], ['up','上'], ['down','下'], ['center','中央'], ['vertical','上下'], ['horizontal','左右']]);
 export const SUB_EFFECTS = [{ id: 'same', label: '跟随标题' }, ...ENTRY_EFFECTS.filter(effect => ['fade','rise','blur','tracking','typewriter','slide'].includes(effect.id))];
 export const STYLE_PRESETS = [
-  { name:'暖金',color:'#fff2d5',color2:'#bc7838',accent:'#e5a45b',fill:'gradient',outlineColor:'#31211d',glow:18 },
-  { name:'银白',color:'#ffffff',color2:'#a4b1c8',accent:'#c6d5ee',fill:'gradient',outlineColor:'#28313e',glow:12 },
-  { name:'朱红',color:'#fff1e2',color2:'#d0313f',accent:'#ee4652',fill:'gradient',outlineColor:'#421c24',glow:18 },
-  { name:'冰蓝',color:'#eefbff',color2:'#55a9e0',accent:'#7dd3ef',fill:'gradient',outlineColor:'#163849',glow:16 },
-  { name:'幽紫',color:'#eee4ff',color2:'#9370db',accent:'#b995ef',fill:'gradient',outlineColor:'#30213e',glow:22 },
-  { name:'墨色',color:'#25272e',color2:'#25272e',accent:'#50525b',fill:'solid',outlineColor:'#ffffff',glow:0 },
+  {name:'纯白',color:'#ffffff',color2:'#ffffff',accent:'#ffffff',fill:'solid',outlineColor:'#202125',glow:0},
+  {name:'墨黑',color:'#202125',color2:'#202125',accent:'#202125',fill:'solid',outlineColor:'#ffffff',glow:0},
+  {name:'朱红',color:'#b94b4b',color2:'#b94b4b',accent:'#b94b4b',fill:'solid',outlineColor:'#ffffff',glow:0},
+  {name:'靛蓝',color:'#466c9a',color2:'#466c9a',accent:'#466c9a',fill:'solid',outlineColor:'#ffffff',glow:0},
+  {name:'苔绿',color:'#587969',color2:'#587969',accent:'#587969',fill:'solid',outlineColor:'#ffffff',glow:0},
+  {name:'暖灰',color:'#b8b3aa',color2:'#b8b3aa',accent:'#b8b3aa',fill:'solid',outlineColor:'#202125',glow:0},
 ] as const;

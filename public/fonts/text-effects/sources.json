@@ -1,0 +1,22 @@
+[
+  {
+    "font": "Noto Serif SC",
+    "weight": 800,
+    "sample": "战斗开始",
+    "sourceCSS": "https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@800&text=%E6%88%98%E6%96%97%E5%BC%80%E5%A7%8B",
+    "fontSource": "https://fonts.gstatic.com/l/font?kit=H4cyBXePl9DZ0Xe7gG9cyOj7uK2-n-D2rd4FY7QCrCWv64YM0qZm_cYsCMMtQ3A&skey=37fe335b8fd815cc&v=v36",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/notoserifsc/OFL.txt",
+    "bytes": 2784,
+    "sha256": "778eae5dc398ac73f22ebb8935a5c8dc13338d6db5c547e7bdfcf11b3110fbca"
+  },
+  {
+    "font": "Cinzel",
+    "weight": 700,
+    "sample": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,!?-:;",
+    "sourceCSS": "https://fonts.googleapis.com/css2?family=Cinzel:wght@700&text=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789%20.%2C%21%3F-%3A%3B",
+    "fontSource": "https://fonts.gstatic.com/l/font?kit=8vIU7ww63mVu7gtR-kwKxNvkNOjw-jHgTYr3TmZ5Qon7YnkhzkuorUrpImO9k7LMrmZjbIyD_w0zzJkjNW_L4oSA0GDuwf4gDIRmDbUstwUV_2MHYOblio97yy0eUuVnFnU&skey=f319ae43d1034808&v=v26",
+    "license": "https://raw.githubusercontent.com/google/fonts/main/ofl/cinzel/OFL.txt",
+    "bytes": 17856,
+    "sha256": "1285e8f7680522e3f30c36c567e262a99b1bacb3da71e2084aba70d1a3abe505"
+  }
+]
