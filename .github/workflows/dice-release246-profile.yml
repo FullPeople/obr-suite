@@ -163,6 +163,11 @@ jobs:
           retention-days: 7
 
   pixels_and_viewports:
+    # Compare the new release to the actual deployed 279 renderer. Historical
+    # timing/resource baselines remain unchanged in the other jobs.
+    env:
+      BASELINE_REF: a4eedb8c6ae798bd072ca0bade8e366db59132c6
+      DICE_PRESERVATION_BASELINE_MASKS: '7'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
