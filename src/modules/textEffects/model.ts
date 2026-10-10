@@ -99,3 +99,13 @@ export const exitTime = (c:TextEffectConfig) => c.sequence==='staged'&&c.decorat
 export const duration = (c:TextEffectConfig) => Math.round(c.startDelay+entryTime(c)+narrationTime(c)+c.hold+exitTime(c)+c.endDelay);
 export const hasContent = (c:TextEffectConfig) => !!(c.title.trim()||c.subtitle.trim()||c.body.trim()||c.decoration!=='none'||c.background!=='transparent'&&c.opacity>0);
 export const PRESETS: {name:string;config:TextEffectConfig}[] = [{name:'默认演出',config:{...DEFAULT_CONFIG}}];
+export function initialEditorConfig(value:unknown):TextEffectConfig|null {
+ const parsed=parseConfig(value);if(!parsed)return null;
+ const source=value as Record<string,unknown>,previous={...DEFAULT_CONFIG,
+  subtitle:'命运已掷下骰子',size:7,color:'#fff2d5',accent:'#e5a45b',outline:1,glow:22,spacing:6,motion:'zoom',decoration:'rays',background:'band',opacity:.75,
+  enter:900,hold:2400,exit:700,entry:'shrink',leave:'fade',entryPower:1,entryStagger:0,lineHeight:1.6,weight:700,
+  subtitleFont:'same',subtitleWeight:400,subtitleSize:.36,subtitleSpacing:12,subtitleGap:.6,subtitleColor:'#e5a45b',subtitleEffect:'same',subtitleDelay:0,
+  shadowOpacity:.7,shadowBlur:8,shadowY:2,glowColor:'#e5a45b',decorationLineColor:'#e5a45b',decorationOpacity:.7,decorationThickness:2,decorationPadding:.55,decorationExtend:1,decorationTime:700,
+  marginX:6,marginY:6,startDelay:0,endDelay:0};
+ return Object.entries(previous).every(([key,defaultValue])=>!Object.hasOwn(source,key)||source[key]===defaultValue)?{...DEFAULT_CONFIG}:parsed;
+}
