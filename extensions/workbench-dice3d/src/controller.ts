@@ -240,7 +240,7 @@ export class Controller {
     if(data?.type==='retained'){if(data.error){this.disabled=true;this.fail('authority-takeover',data.error);this.refreshReady()}else this.log('authority-retained',{count:data.count});return}
     if(data?.type==='warm'){
       if(data.error){this.disabled=true;this.fail('physics-warmup',data.error);this.refreshReady();return}
-      this.physicsReady=true;this.log('physics-warm',{engineMs:Math.round(data.engineMs),totalMs:Math.round(data.totalMs)});this.refreshReady();return;
+      this.physicsReady=true;this.log('physics-warm',{engineMs:Math.round(data.engineMs),totalMs:Math.round(data.totalMs),build:data.engineBuild,fallback:data.engineFallback});this.refreshReady();return;
     }
     if(!this.pending||this.pending.id!==data.id)throw Error('Unexpected physics response');
     const pending=this.pending;clearTimeout(this.pendingTimer);this.pending=undefined;

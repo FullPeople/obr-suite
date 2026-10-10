@@ -1,2 +1,3 @@
 extensions/workbench-dice3d/public/vendor/jolt-physics.wasm.js text eol=lf
+extensions/workbench-dice3d/public/vendor/*/jolt-physics.wasm.js text eol=lf
 extensions/workbench-dice3d/public/vendor/Jolt-LICENSE text eol=lf

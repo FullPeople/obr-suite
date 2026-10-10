@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [codex/import-entry273-20261010, codex/excel-sync-20261010, codex/dice-research270, codex/dice-mixed269, codex/music-board267-20261010, codex/text-effects266-20261010, codex/text-effects-20261009, codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
+    branches: [codex/jolt-simd274,codex/import-entry273-20261010, codex/excel-sync-20261010, codex/dice-research270, codex/dice-mixed269, codex/music-board267-20261010, codex/text-effects266-20261010, codex/text-effects-20261009, codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
   workflow_dispatch:
 permissions:
   contents: read
@@ -66,6 +66,10 @@ jobs:
         run: node tools/verify-suite-candidate.mjs
       - name: Retired fog context menu
         run: FOG_MENU_EVIDENCE=.local-evidence/fog-menu node tools/fog-menu-retirement-selftest.mjs
+      - name: SIMD feature selection, verified fallback and frozen 47-case parity
+        run: |
+          node tools/dice-jolt-simd-selftest.mjs
+          node tools/dice-jolt-parity274.mjs
       - name: Typecheck and build stable host with paired card viewer
         run: npm run build
       - name: Build dev host and retained historical Three Dragon fixture
@@ -170,6 +174,8 @@ jobs:
             .local-evidence/permission-notice/
             .local-evidence/verification/*.log
             .local-evidence/verification/results.json
+            .local-evidence/jolt-simd/loader-result.json
+            .local-evidence/jolt-simd/parity/*.json
             .local-evidence/text-effects/browser/
             .local-evidence/native-owner/results.json
             .local-evidence/production-dice/package/result.json
