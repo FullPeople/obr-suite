@@ -21,12 +21,14 @@ const core=[
  {name:'twenty-d6-seed-97',formula:'20d6',count:20,seed:97},
 ];
 const fixtures=[...core,
+ ...Array.from({length:24},(_,i)=>({name:'fixed-seed-'+i,formula:i%3===0?'20d6':i%3===1?core[2].formula:mixed,
+  count:i%3===0?20:i%3===1?19:8,seed:Math.imul(i+1,0x9e3779b9)>>>0})),
  ...[4,6,8,10,12,20,100].map(s=>({name:'family-d'+s,formula:`${s===100?10:20}d${s}`,count:20,seed:0x1234abcd})),
  {name:'mixed-landscape',formula:mixed,count:8,seed:0xffffffff,view:{w:1920,h:1080}},
  {name:'mixed-portrait',formula:mixed,count:8,seed:42,view:{w:390,h:844}},
  {name:'advantage-three',formula:'adv(1d20,2)',count:3,seed:7},
  {name:'disadvantage-two',formula:'dis(1d20)',count:2,seed:1},
- {name:'physical-minimum-hop',formula:'max(2d6,4)',count:2,seed:97},
+ {name:'physical-minimum-hop',formula:'max(2d6,6)',count:2,seed:97},
  {name:'physical-maximum-hop',formula:'min(2d20,10)',count:2,seed:97},
  {name:'forced-reroll',formula:'resetmin(2d6,6)',count:4,seed:7},
  {name:'burst-rule',formula:'burst(1d4)',seed:123456},
@@ -117,7 +119,9 @@ if(process.argv[2]==='--sample'){
  for(const variant of variants){parity[variant]=await sample(variant,'parity',0);await writeFile(resolve(out,'parity-'+variant+'.json'),JSON.stringify(parity[variant],null,2)+'\n');console.log(JSON.stringify({stage:'parity',variant,cases:parity[variant].rolls.length,errors:parity[variant].rolls.filter(r=>r.error)}));}
  // Balanced, predetermined order; no engine is always timed first or last.
  const orders=[['original','scalar','simd'],['scalar','simd','original'],['simd','original','scalar'],['original','simd','scalar'],['simd','scalar','original'],['scalar','original','simd'],['original','scalar','simd']];
- for(const [round,order] of (process.env.DICE_JOLT_PARITY_ONLY==='1'?[]:orders).entries())for(const variant of order.filter(v=>variants.includes(v))){const trial=await sample(variant,'timing',round);trials.push(trial);await writeFile(resolve(out,'trials.json'),JSON.stringify(trials,null,2)+'\n');console.log(JSON.stringify({stage:'timing',round,variant,startupMs:trial.startupMs,physicsMs:trial.rolls.map(r=>r.physicsMs)}));}
+ for(const [round,order] of (process.env.DICE_JOLT_PARITY_ONLY==='1'?[]:orders).entries())for(const variant of order.filter(v=>variants.includes(v))){const trial=await sample(variant,'timing',round);
+  for(const roll of trial.rolls){const expected=parity[variant].rolls.find(r=>r.name===roll.name);assert(!roll.error,roll.error);assert.equal(roll.poseSha256,expected.poseSha256,'Repeated trajectory changed');assert.equal(roll.metadataSha256,expected.metadataSha256,'Repeated metadata changed');}
+  trials.push(trial);await writeFile(resolve(out,'trials.json'),JSON.stringify(trials,null,2)+'\n');console.log(JSON.stringify({stage:'timing',round,variant,startupMs:trial.startupMs,physicsMs:trial.rolls.map(r=>r.physicsMs)}));}
  const comparisons=[];
  for(const [a,b] of [['original','scalar'],['scalar','simd'],['original','simd']].filter(([a,b])=>variants.includes(a)&&variants.includes(b)))for(const fixture of fixtures){
   const left=parity[a].rolls.find(r=>r.name===fixture.name),right=parity[b].rolls.find(r=>r.name===fixture.name);
@@ -132,5 +136,5 @@ if(process.argv[2]==='--sample'){
  const result={createdAt:new Date().toISOString(),suiteBaseline:'0d9cc2aec992066f810af9501fe432427b95f8cb',workerSha256:digest(workerSource),
   hardware:{platform:platform(),arch:arch(),node:process.version,cpu:cpus()[0]?.model,logicalCpus:cpus().length,availableParallelism:availableParallelism(),totalMemory:totalmem()},
   boundary:'Real pinned production Jolt worker and asset verification, synthetic fixtures in Node. No browser/network/Owlbear/mobile acceptance. All measurements serial after compilation.',manifest,comparisons,timing};
- await writeFile(resolve(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({result:resolve(out,'result.json'),timing,comparisonSummary:variants.flatMap((a,i)=>variants.slice(i+1).map(b=>{const c=comparisons.filter(r=>r.a===a&&r.b===b);return{a,b,cases:c.length,identical:c.filter(r=>r.poseBitsEqual&&r.metadataEqual).length,resultsEqual:c.filter(r=>r.resultsEqual).length,errors:c.filter(r=>r.errors.length).length};}))},null,2));
+ await writeFile(resolve(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({result:resolve(out,'result.json'),timing:timing.map(({cases,...summary})=>({...summary,cases:cases.map(({results,...timing})=>timing)})),comparisonSummary:variants.flatMap((a,i)=>variants.slice(i+1).map(b=>{const c=comparisons.filter(r=>r.a===a&&r.b===b);return{a,b,cases:c.length,identical:c.filter(r=>r.poseBitsEqual&&r.metadataEqual).length,resultsEqual:c.filter(r=>r.resultsEqual).length,errors:c.filter(r=>r.errors.length).length};}))},null,2));
 }

@@ -34,6 +34,7 @@ jobs:
           cp extensions/workbench-dice3d/public/vendor/jolt-physics.wasm.js ../variants/original/
           cp extensions/workbench-dice3d/public/vendor/jolt-physics.wasm.wasm ../variants/original/
           cp ../variants/original/jolt-physics.wasm.js ../variants/original/jolt-physics.wasm.mjs
+          cp extensions/workbench-dice3d/public/vendor/Jolt-LICENSE ../variants/original/
       - name: Install exact Emscripten 6.0.2
         working-directory: .jolt-src/emsdk
         run: |
@@ -68,6 +69,7 @@ jobs:
             mkdir -p "$root/../variants/$variant"
             cp dist/jolt-physics.wasm.js dist/jolt-physics.wasm.wasm "$root/../variants/$variant/"
             cp dist/jolt-physics.wasm.js "$root/../variants/$variant/jolt-physics.wasm.mjs"
+            cp LICENSE "$root/../variants/$variant/Jolt-LICENSE"
             cp Build/Research/CMakeCache.txt "$root/../evidence/build/$variant-CMakeCache.txt"
             cd "$root"
           done
@@ -94,6 +96,11 @@ jobs:
           PY
       - name: Full trajectory, physical rules and serial balanced timing comparison
         run: node tools/dice-jolt-engine-research.mjs
+      - name: Stage research artifacts inside the checkout
+        if: always()
+        run: |
+          mkdir -p research-artifact
+          cp -a ../variants ../evidence research-artifact/
       - name: Preserve candidate engines and auditable research evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -101,9 +108,4 @@ jobs:
           name: jolt-simd-research-${{ github.sha }}
           retention-days: 7
           if-no-files-found: error
-          path: |
-            ../variants/
-            ../evidence/engine/
-            ../evidence/build/*.json
-            ../evidence/build/*.log
-            ../evidence/build/*.txt
+          path: research-artifact/
