@@ -47,9 +47,10 @@ export class DiceRenderer {
   projection={width:0,height:0,pixelsPerDie:120};
   private geometry=new Map<Kind,T.BufferGeometry>();
   private materials=new Map<string,T.MeshPhysicalMaterial>();
+  private readonly warmPrograms=new T.Group();
   private active:Active[]=[];
   private ready=false;
-  private frameHandle=0;private contextLost=false;private suspendedAt=0;private contextTimer:ReturnType<typeof setTimeout>|undefined;private frameFailures=0;
+  private frameHandle=0;private contextLost=false;private contextGeneration=0;private suspendedAt=0;private contextTimer:ReturnType<typeof setTimeout>|undefined;private frameFailures=0;
   private last=0;
   private targetPixelsPerDie=120;
   private readonly rendererSize=new T.Vector2();
@@ -72,8 +73,8 @@ export class DiceRenderer {
     const pause=()=>{if(this.suspendedAt)return;this.suspendedAt=now();if(this.frameHandle)cancelAnimationFrame(this.frameHandle);this.frameHandle=0;for(const a of this.active)this.emit('render-paused',{roll:a.roll.request.id});};
     const resume=()=>{if(this.contextLost||document.hidden)return;const time=now();if(this.suspendedAt){for(const a of this.active){a.start+=Math.max(0,time-Math.max(this.suspendedAt,a.start));this.emit('render-retimed',{roll:a.roll.request.id,start:a.start});}this.suspendedAt=0;}this.last=time;this.wake();};
     document.addEventListener('visibilitychange',()=>document.hidden?pause():resume());
-    this.gl.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();this.contextLost=true;pause();this.emit('render-context-lost',{active:this.active.length});clearTimeout(this.contextTimer);this.contextTimer=setTimeout(()=>{if(this.contextLost)this.emit('error',{message:'图形上下文尚未恢复，投骰动画暂停；已生成结果保留。请恢复浏览器窗口，必要时刷新。'});},10000);});
-    this.gl.domElement.addEventListener('webglcontextrestored',()=>{clearTimeout(this.contextTimer);this.contextLost=false;void this.gl.compileAsync(this.scene,this.camera).then(()=>{this.emit('render-context-restored',{active:this.active.length});resume();}).catch(error=>this.emit('error',{message:'骰子渲染恢复失败：'+String(error)}));});
+    this.gl.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();this.contextGeneration++;this.contextLost=true;pause();this.emit('render-context-lost',{active:this.active.length});clearTimeout(this.contextTimer);this.contextTimer=setTimeout(()=>{if(this.contextLost)this.emit('error',{message:'图形上下文尚未恢复，投骰动画暂停；已生成结果保留。请恢复浏览器窗口，必要时刷新。'});},10000);});
+    this.gl.domElement.addEventListener('webglcontextrestored',()=>{void this.restoreContext(resume);});
     this.camera.up.set(0,1,0);
     this.camera.position.set(0,COS_TILT*CAM_DISTANCE,-SIN_TILT*CAM_DISTANCE);
     this.camera.lookAt(0,0,0);
@@ -113,13 +114,41 @@ export class DiceRenderer {
     // Compile every shader variant while the layer is transparent, before ready ACK.
     this.assets.stage('正在首次编译渲染');
     const warm:T.Mesh[]=[];for(const [key,material] of this.materials){const [id,kind]=key.split(':') as [ThemeID,Kind];const geometry=this.geometry.get(kind)!;const m=new T.Mesh(geometry,material);m.castShadow=true;m.receiveShadow=true;if(this.catalog.themes[id].style==='sketch')addSketchOutline(m,geometry);else addDynamicOutline(m,geometry,this.catalog.themes[id].style!);warm.push(m);this.diceSpace.add(m)}
-    await this.gl.compileAsync(this.scene,this.camera);this.gl.render(this.scene,this.camera);this.gl.getContext().finish();for(const m of warm){disposeDiceDecorations(m);this.diceSpace.remove(m)}
+    await this.gl.compileAsync(this.scene,this.camera);this.gl.render(this.scene,this.camera);this.gl.getContext().finish();this.retainWarmPrograms(warm);
     if(this.contextLost||this.gl.getContext().isContextLost())throw Error('骰子图形初始化中断，无法分配图形资源，请关闭不用的浏览器窗口后重试');
     this.ready=true;this.gl.render(this.scene,this.camera);this.gl.getContext().finish();this.gl.domElement.style.opacity='1';
     const gl=this.gl.getContext(),debug=gl.getExtension('WEBGL_debug_renderer_info');
     this.emit('renderer-ready',{renderer:debug?gl.getParameter(debug.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER),maxTextureSize:this.gl.capabilities.maxTextureSize,
       view:{w:this.projection.width,h:this.projection.height,pixelsPerDie:this.projection.pixelsPerDie}});
     this.resetMetrics();
+  }
+  private retainWarmPrograms(warm:T.Mesh[]){
+    // Releasing the last outline material also deletes its compiled GL program.
+    // Keep only the fixed catalog warmup objects, detached from the visible scene.
+    // Every actual die still owns its mutable uniforms and normal disposal path.
+    for(const mesh of warm){
+      this.warmPrograms.add(mesh);
+      const owner=mesh.material as T.Material;
+      const release=()=>{disposeDiceDecorations(mesh);mesh.removeFromParent();owner.removeEventListener('dispose',release);};
+      owner.addEventListener('dispose',release);
+    }
+  }
+  private async compileRestoredPrograms(){
+    // Three accepts a detached object plus the real lighting/environment scene.
+    // Restore the retained references without ever drawing warmup dice in a room.
+    await this.gl.compileAsync(this.warmPrograms,this.camera,this.scene);
+    await this.gl.compileAsync(this.scene,this.camera);
+  }
+  private restoreContext(resume:()=>void){
+    clearTimeout(this.contextTimer);this.contextLost=false;
+    const generation=this.contextGeneration;
+    const current=()=>generation===this.contextGeneration&&!this.contextLost&&!this.gl.getContext().isContextLost();
+    // Another loss can invalidate an asynchronous compile while it is pending.
+    // Only the latest live context may publish readiness or resume its timeline.
+    return this.compileRestoredPrograms().then(()=>{
+      if(!current())return;
+      this.emit('render-context-restored',{active:this.active.length});resume();
+    }).catch(error=>{if(current())this.emit('error',{message:'骰子渲染恢复失败：'+String(error)});});
   }
   /** The native desktop projection: one die is `pixels_per_die` px and the ground origin sits at
    *  62% of the height. Keeping top+bottom = 2*halfH preserves that px-per-unit scale exactly. */

@@ -14,12 +14,12 @@ import {formulaCue} from './research/presentation';
 import {packReveal,unpackReveal} from './suite-reveal';
 import {diceCatalog} from './asset-catalog';
 import {splitGroupRoll} from './group-batch';
-export interface Transport {id:string;name:string;color?:string;role?:Role;resolveRole?:(id:string)=>Promise<Role|undefined>;mode:string;send:(data:any)=>Promise<void>;sendTimed?:(data:any,beforeDispatch:()=>void)=>Promise<void>;listen:(fn:(data:any,source:string)=>void)=>()=>void}
+export interface Transport {id:string;name:string;color?:string;role?:Role;resolveRole?:(id:string)=>Promise<Role|undefined>;mode:string;send:(data:any)=>Promise<void>;sendTimed?:(data:any,beforeDispatch:()=>void)=>Promise<void>;reserveNormalWindow?:(maxMs:number,valid:()=>boolean)=>()=>void;listen:(fn:(data:any,source:string)=>void)=>()=>void}
 export interface ResultRecord{visibility?:DiceHistoryVisibility;id:string;source:string;name:string;color?:string;kinds:Roll['kinds'];results:number[];modifier:number;total:number;secret:boolean;revealed:boolean;complete:boolean;at:number;canReveal:boolean;formulaData?:Roll['formulaData']}
 interface Reservation{request:Request;broker:string;at:number;members:string[]}
 interface SecretArchive{request:Request;kinds:Roll['kinds'];commitment:string;details?:SecretDetails;complete:boolean;revealed:boolean}
 interface Received {source:string;assembly:Assembly;at:number;retry:number;processing:boolean;prepared:boolean;readyTimer?:ReturnType<typeof setTimeout>;start?:{hash:string;start:number}}
-interface Outgoing {chunkBytes?:number;dispatching?:boolean;uploading:boolean;roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>;repairs?:Map<string,Set<number>>;repairing?:boolean}
+interface Outgoing {chunkBytes?:number;dispatching?:boolean;uploading:boolean;roll:Roll;chunks:string[];hash:string;bytes:number;wait:Set<string>;members:string[];at:number;started:boolean;retry:number;start?:number;acks:Set<string>;lastStartRetry:number;window:number;viewers:Set<string>;repairs?:Map<string,Set<number>>;repairing?:boolean;tailWake?:()=>void;tailRelease?:()=>void}
 export class Controller {
   readonly bus:BroadcastChannel;
   private worker=new Worker(new URL('./physics.worker.ts',import.meta.url),{type:'module'});
@@ -75,6 +75,7 @@ export class Controller {
   // Disposal is a generation boundary. Async work already in flight may finish,
   // but it must not publish into a closed local channel or a terminated worker.
   private assertLive(){if(this.disposed)throw Error('Dice controller disposed')}
+  private invalidatePreparation(){this.preparationGeneration++;for(const out of this.outgoing.values())out.tailRelease?.();}
   private postLocal(packet:any){if(!this.disposed)this.bus.postMessage(packet)}
   private postWorker(packet:any){if(!this.disposed)this.worker.postMessage(packet)}
   private releasePhysics(id:string){if(this.disposed)return;this.retainedUntil.delete(id);this.settledAt.delete(id);this.heldRolls.delete(id);this.postWorker({type:'release',id})}
@@ -95,7 +96,7 @@ export class Controller {
     this.worker.onmessage=e=>{void this.onWorker(e.data).catch(e=>this.fail('physics-result',e))};
     this.interval=setInterval(()=>{if(this.ticking)return;this.ticking=true;void this.tick().catch(e=>this.fail('maintenance',e)).finally(()=>{this.ticking=false;})},500);
   }
-  dispose(){if(this.disposed)return;this.disposed=true;this.disabled=true;for(const inbound of this.inbound.values())clearTimeout(inbound.readyTimer);for(const timer of this.retirementTimers)clearTimeout(timer);this.retirementTimers.clear();clearInterval(this.interval);clearInterval(this.stress);clearTimeout(this.pendingTimer);this.stopTransport();this.worker.terminate();this.bus.close();}
+  dispose(){if(this.disposed)return;this.disposed=true;this.disabled=true;for(const out of this.outgoing.values()){out.tailRelease?.();out.tailWake?.();}for(const inbound of this.inbound.values())clearTimeout(inbound.readyTimer);for(const timer of this.retirementTimers)clearTimeout(timer);this.retirementTimers.clear();clearInterval(this.interval);clearInterval(this.stress);clearTimeout(this.pendingTimer);this.stopTransport();this.worker.terminate();this.bus.close();}
   async init(){
     await this.keys.ready;if(this.disposed)return;
     this.catalog=diceCatalog();this.log('controller-ready',{mode:this.transport.mode,build:BUILD});
@@ -106,17 +107,17 @@ export class Controller {
   async setProfile(name:string,color?:string,role?:Role){this.assertLive();if(!name.trim()||name.length>100)throw Error('玩家名字须为 1–100 字符');
     const normalized=color===undefined?undefined:normalizePlayerColor(color);
     if(name===this.transport.name&&normalized===this.transport.color&&(!role||role===this.transport.role))return;
-    if(role&&role!==this.transport.role)this.preparationGeneration++;
+    if(role&&role!==this.transport.role)this.invalidatePreparation();
     this.transport.name=name;this.transport.color=normalized;if(role)this.transport.role=role;this.state();this.sendRecords();
     await this.send({type:'hello',ready:this.ready,name});}
   private refreshReady(){
     const next=!this.disabled&&this.overlayReady&&this.physicsReady;
-    if(next!==this.ready){this.preparationGeneration++;this.ready=next;if(next)this.log('layer-ready',{});this.state();void this.send({type:'hello',ready:next,name:this.transport.name}).catch(e=>this.fail('presence-ready',e))}
+    if(next!==this.ready){this.invalidatePreparation();this.ready=next;if(next)this.log('layer-ready',{});this.state();void this.send({type:'hello',ready:next,name:this.transport.name}).catch(e=>this.fail('presence-ready',e))}
   }
   log(event:string,detail:any){if(this.disposed)return;this.events.push({at:now(),event,detail});if(this.events.length>2500)this.events.splice(0,500);this.postLocal({type:'log',event,detail});console.info(`[DiceLab] ${event}`,detail)}
   fail(stage:string,error:unknown){if(this.disposed)return;this.error=`${stage}: ${errorText(error)}`;this.failures++;this.log('failure',{stage,error:this.error});this.state()}
   state(){if(this.disposed)return;this.postLocal({type:'state',state:{id:this.transport.id,name:this.transport.name,color:this.transport.color,mode:this.transport.mode,version:BUILD,ready:this.ready,overlay:this.overlayReady,physics:this.physicsReady&&!this.disabled,peers:[...this.peers.values()],queued:this.queue.length,busy:this.pending?.id||'',work:this.waitingForSpace?'桌面空间不足，保留当前骰子，等待演出结束后继续投掷':this.pending?'正在预测物理轨迹…':this.queue.length?'正在按提交顺序准备…':[...this.requests.values()].filter(r=>r.authority!==this.transport.id).map(r=>r.status||'已提交，等待房间计算…')[0]||'',bytesSent:this.bytesSent,bytesReceived:this.bytesReceived,packetsSent:this.packetsSent,packetsReceived:this.packetsReceived,metrics:this.metrics,error:this.error,failures:this.failures,completed:this.completed,receipts:this.receipts.slice(-30),stress:!!this.stress}})}
-  private async send(data:any,stamp?:(packet:any)=>void){this.assertLive();const p={v:1,build:BUILD,from:this.transport.id,...data};if(p.type==='hello'){await this.keys.ready;this.assertLive();p.born=this.born;p.color=this.transport.color;p.role=this.transport.role;p.publicKey=this.keys.publicKey;p.session=this.session;p.tracePacketV1=true}let bytes=0;const beforeDispatch=()=>{this.assertLive();stamp?.(p);bytes=sizeOf(p);if(bytes>MAX_MESSAGE_BYTES)throw Error(`消息超限 ${bytes}`);};if(this.transport.sendTimed)await this.transport.sendTimed(p,beforeDispatch);else{beforeDispatch();await this.transport.send(p);}this.assertLive();this.bytesSent+=bytes;this.packetsSent++}
+  private async send(data:any,stamp?:(packet:any)=>void){this.assertLive();const p={v:1,build:BUILD,from:this.transport.id,...data};if(p.type==='hello'){await this.keys.ready;this.assertLive();p.born=this.born;p.color=this.transport.color;p.role=this.transport.role;p.publicKey=this.keys.publicKey;p.session=this.session;p.tracePacketV1=true;p.poseDeltaV1=true}let bytes=0;const beforeDispatch=()=>{this.assertLive();stamp?.(p);bytes=sizeOf(p);if(bytes>MAX_MESSAGE_BYTES)throw Error(`消息超限 ${bytes}`);};if(this.transport.sendTimed)await this.transport.sendTimed(p,beforeDispatch);else{beforeDispatch();await this.transport.send(p);}this.assertLive();this.bytesSent+=bytes;this.packetsSent++}
   private authority(){return [{id:this.transport.id,born:this.born,ready:this.ready},...[...this.peers.values()].filter(p=>now()-p.lastSeen<12000)]
     .filter(p=>p.ready).sort((a,b)=>a.born-b.born||a.id.localeCompare(b.id))[0]?.id||this.transport.id}
   private async ping(id:string){if(this.clocks.get(id)?.some(s=>now()-s.at<4000)||[...this.probes.values()].some(p=>p.to===id&&now()-p.t<2500))return;const nonce=crypto.randomUUID(),probe={to:id,t:now()};this.probes.set(nonce,probe);await this.send({type:'ping',to:id,nonce,t:probe.t},packet=>{packet.t=probe.t=now();})}
@@ -154,7 +155,7 @@ export class Controller {
       this.state();return;
     }
     if(p?.type==='prepared'){
-      const out=this.outgoing.get(p.id);if(out){out.wait.delete(this.transport.id);await this.maybeStart(out)}
+      const out=this.outgoing.get(p.id);if(out){out.wait.delete(this.transport.id);if(!out.wait.size)out.tailWake?.();await this.maybeStart(out)}
       else {const inbound=this.inbound.get(p.id);if(inbound){inbound.prepared=true;void this.ping(inbound.source).catch(e=>this.fail('ready-ping',e));await this.sendReady(p.id,inbound)}}
       return;
     }
@@ -267,12 +268,19 @@ export class Controller {
       const {poses,contacts,...meta}=roll;
       const activeMembers=()=>[...this.peers.values()].filter(p=>p.ready&&now()-p.lastSeen<12000&&p.version===BUILD&&(!roll.masked||this.reservations.get(roll.request.id)?.members.includes(p.id))).map(p=>p.id);
       const fastCompatible=(members:string[])=>members.length&&!this.verifyingPeers&&this.transport.role&&this.session&&roll.kinds.length<=20&&!roll.masked&&!hiddenRequest(roll.request)&&!roll.request.batch&&!roll.request.groupSize&&members.every(id=>{const p=this.peers.get(id);return p?.tracePacketV1&&p.ready&&p.session&&p.role;});
-      const compact=!!fastCompatible(activeMembers());
-      let bytes=await encodeRoll({...meta,collisions:contacts.length,contacts:contacts.length},poses,contacts,compact);this.assertLive();
-      const members=activeMembers();
-      // A peer changing capabilities during compression retains the legacy wire.
-      if(compact&&!fastCompatible(members)){bytes=await encodeRoll({...meta,collisions:contacts.length,contacts:contacts.length},poses,contacts);this.assertLive();}
-      const sha=await hash(bytes);this.assertLive();const chunks=split(bytes);
+      const initialMembers=activeMembers(),compact=!!fastCompatible(initialMembers);
+      const delta=compact&&initialMembers.every(id=>this.peers.get(id)?.poseDeltaV1===true);
+      let bytes=await encodeRoll({...meta,collisions:contacts.length,contacts:contacts.length},poses,contacts,delta?'delta2-shuffle-v1':compact);this.assertLive();
+      let sha=await hash(bytes);this.assertLive();
+      let members=activeMembers();
+      // Recheck after both async compression and hashing. A changed audience
+      // gets universally understood legacy bytes; a second async change cannot
+      // turn that fallback into an unsupported encoding.
+      if(compact&&(!fastCompatible(members)||delta&&!members.every(id=>this.peers.get(id)?.poseDeltaV1===true))){
+        bytes=await encodeRoll({...meta,collisions:contacts.length,contacts:contacts.length},poses,contacts);this.assertLive();
+        sha=await hash(bytes);this.assertLive();members=activeMembers();
+      }
+      const chunks=split(bytes);
       // Negotiate per room. Old clients keep the exact manifest/chunk protocol.
       // A packet carries its own manifest so a lost first packet is repairable.
       let chunkBytes=CHUNK_BYTES;
@@ -294,7 +302,14 @@ export class Controller {
       // may cancel the roll while a send is awaiting acknowledgement.
       if(members.length){if(chunkBytes===CHUNK_BYTES)await this.send(this.offer(out));
         for(let i=0;i<chunks.length&&this.outgoing.get(roll.request.id)===out;i++){await this.send(chunkBytes===FAST_CHUNK_BYTES?{...this.offer(out),type:'trace',index:i,data:chunks[i]}:{type:'chunk',id:roll.request.id,index:i,data:chunks[i]});if(i%8===7)await new Promise(r=>setTimeout(r,8))}
-        if(this.outgoing.get(roll.request.id)===out)await this.sendTail(out,tailSignature,tailGeneration);}
+        if(this.outgoing.get(roll.request.id)===out){
+          const release=out.wait.size&&this.currentFastTail(out,tailSignature,tailGeneration)?this.transport.reserveNormalWindow?.(250,()=>this.currentFastTail(out,tailSignature,tailGeneration)):undefined;
+          out.tailRelease=release;
+          try{
+            await this.waitForFastTail(out,tailSignature,tailGeneration);
+            if(!this.disposed&&this.outgoing.get(roll.request.id)===out)await this.sendTail(out,tailSignature,tailGeneration);
+          }finally{release?.();if(out.tailRelease===release)delete out.tailRelease;}
+        }}
       if(this.outgoing.get(roll.request.id)!==out)return;
       if(!out.started){out.uploading=false;out.at=now();await this.maybeStart(out);}
       }
@@ -316,6 +331,20 @@ export class Controller {
     const members=[...this.peers.values()].filter(p=>p.ready&&now()-p.lastSeen<12000&&p.version===BUILD);
     if(!members.length||members.length!==out.members.length||members.some(p=>!out.members.includes(p.id)||!p.session||!p.role))return;
     return JSON.stringify([this.session,this.transport.role,this.born,...members.map(p=>[p.id,p.session,p.role,p.born,p.version]).sort((a,b)=>String(a[0]).localeCompare(String(b[0])))]);
+  }
+  private currentFastTail(out:Outgoing,signature:string|undefined,generation:number){
+    return !this.disposed&&this.outgoing.get(out.roll.request.id)===out&&out.uploading&&!out.started&&out.chunkBytes===FAST_CHUNK_BYTES&&signature!==undefined&&generation===this.preparationGeneration&&signature===this.tailSignature(out);
+  }
+  private async waitForFastTail(out:Outgoing,signature:string|undefined,generation:number){
+    if(!out.wait.size||!this.currentFastTail(out,signature,generation))return;
+    // A complete fast trace prepares without a trailer. Do not spend the next
+    // 100 ms SDK slot on chunks-done just before its ready reply arrives. Give
+    // two paced slots plus delivery/prepare slack (250 ms maximum), then keep
+    // the original trailer/NACK path. Upload and every start guard stay intact.
+    await new Promise<void>(resolve=>{
+      const finish=()=>{clearTimeout(timer);this.retirementTimers.delete(timer);if(out.tailWake===finish)delete out.tailWake;resolve();};
+      const timer=setTimeout(finish,250);this.retirementTimers.add(timer);out.tailWake=finish;
+    });
   }
   private async sendTail(out:Outgoing,signature:string|undefined,generation:number){
     const packet={type:'chunks-done',id:out.roll.request.id};
@@ -439,7 +468,7 @@ export class Controller {
     // One failed preparation aborts the entire unstarted barrier. Leaving its
     // siblings/reservation alive would hold the next group until lease timeout.
     for(const key of ids){this.finishReservation(key);this.reservations.delete(key);this.requests.delete(key);this.privateRunning.delete(key);this.privateAudiences.delete(key);this.queue=this.queue.filter(r=>r.id!==key);
-      if(!this.started.has(key)&&!this.outgoing.get(key)?.started){this.outgoing.delete(key);this.dropInbound(key);this.rolls.delete(key);this.records.delete(key);this.secrets.delete(key);this.releasePhysics(key);this.postLocal({type:'discard',id:key});}}
+      if(!this.started.has(key)&&!this.outgoing.get(key)?.started){this.outgoing.get(key)?.tailRelease?.();this.outgoing.get(key)?.tailWake?.();this.outgoing.delete(key);this.dropInbound(key);this.rolls.delete(key);this.records.delete(key);this.secrets.delete(key);this.releasePhysics(key);this.postLocal({type:'discard',id:key});}}
     this.sendRecords();this.next();
   }
   private rememberSecret(roll:Roll,details?:SecretDetails){
@@ -510,7 +539,7 @@ export class Controller {
         if(role!=='GM'&&role!=='PLAYER')throw Error('无法验证玩家的枭熊角色: '+source);
         if(typeof p.session!=='string'||!/^[0-9a-f-]{36}$/.test(p.session))throw Error('暗骰会话身份不合法');
         restarted=!!existing&&existing.session!==p.session;
-        if(!existing||restarted||existing.ready!==(p.ready===true)||existing.role!==role||existing.born!==p.born||!!existing.tracePacketV1!==(p.tracePacketV1===true))this.preparationGeneration++;
+        if(!existing||restarted||existing.ready!==(p.ready===true)||existing.role!==role||existing.born!==p.born||!!existing.tracePacketV1!==(p.tracePacketV1===true)||!!existing.poseDeltaV1!==(p.poseDeltaV1===true))this.invalidatePreparation();
         await this.keys.remember(source,p.publicKey,restarted);this.assertLive();
         }finally{this.verifyingPeers--;}
         if(restarted){
@@ -522,13 +551,13 @@ export class Controller {
           const cancelled=[...this.outgoing].filter(([,out])=>(!out.started||out.dispatching)&&out.members.includes(source));
           // Revoke the whole queued group before any abort ACK can suspend cleanup
           // or a cancelled start can release its siblings' dispatching locks.
-          for(const [id]of cancelled){this.outgoing.delete(id);this.postLocal({type:'discard',id});this.rolls.delete(id);this.records.delete(id);this.releasePhysics(id);this.cancelSecret(id);}
+          for(const [id,out]of cancelled){out.tailRelease?.();out.tailWake?.();this.outgoing.delete(id);this.postLocal({type:'discard',id});this.rolls.delete(id);this.records.delete(id);this.releasePhysics(id);this.cancelSecret(id);}
           for(const [id]of cancelled){await this.send({type:'abort',id,reason:'玩家刷新，旧会话准备已失效，请重新投掷'});this.fail('peer-restarted',id);}
           this.sendRecords();
         }
         if(!Number.isSafeInteger(p.born)||p.born<0)throw Error('Invalid authority join order');
         if(!this.ready)this.born=Math.max(this.born,p.born+1);
-        const isNew=!existing;this.peers.set(source,{id:source,session:p.session,name:p.name,color:p.color,role,lastSeen:now(),ready:p.ready===true,rtt:existing?.rtt??-1,offset:existing?.offset??0,version:p.build,born:p.born,tracePacketV1:p.tracePacketV1===true});
+        const isNew=!existing;this.peers.set(source,{id:source,session:p.session,name:p.name,color:p.color,role,lastSeen:now(),ready:p.ready===true,rtt:existing?.rtt??-1,offset:existing?.offset??0,version:p.build,born:p.born,tracePacketV1:p.tracePacketV1===true,poseDeltaV1:p.poseDeltaV1===true});
         if(isNew||restarted){void this.send({type:'hello',ready:this.ready,name:this.transport.name,to:source}).catch(e=>this.fail('peer-hello',e));this.log('peer-joined',{source,name:p.name})}if(isNew||restarted||!this.clocks.get(source)?.some(s=>now()-s.at<4000))void this.ping(source).catch(e=>this.fail('peer-ping',e));this.state();break;
       }
       case 'secret-request':{
@@ -600,7 +629,7 @@ export class Controller {
         // The receive lane must remain free for pong/ready/start-ack while paced
         // repair packets are sent. Duplicate NACKs coalesce into the same pump.
         void this.repair(out);break;}
-      case 'ready':{const out=this.outgoing.get(p.id);if(!out||out.hash!==p.hash||!out.members.includes(source))break;out.wait.delete(source);this.log('peer-prepared',{id:p.id,source,hash:p.hash});await this.maybeStart(out);break;}
+      case 'ready':{const out=this.outgoing.get(p.id);if(!out||out.hash!==p.hash||!out.members.includes(source))break;out.wait.delete(source);if(!out.wait.size)out.tailWake?.();this.log('peer-prepared',{id:p.id,source,hash:p.hash});await this.maybeStart(out);break;}
       case 'group-parts':{this.registerGroupParts(p.id,p.parts,source);break;}
       case 'start-group':{
         const lease=this.reservations.get(p.id);if(!lease||lease.request.source!==source||!Array.isArray(p.entries)||p.entries.length!==lease.request.groupSize||p.entries.some((entry:any,i:number)=>entry.id!==`${p.id}.g${i}`))throw Error('非法群体起播屏障');
@@ -632,7 +661,7 @@ export class Controller {
     if(this.catalog&&t-this.lastPresence>4000){this.lastPresence=t;await this.send({type:'hello',ready:this.ready,name:this.transport.name});
       if(this.authority()===this.transport.id)for(const [index,r] of this.queue.entries())if(r.source!==this.transport.id)
         await this.send({type:'queue-status',to:r.source,id:r.id,position:index+1,space:!!this.waitingForSpace});}
-    for(const [id,peer] of this.peers)if(t-peer.lastSeen>15000){this.preparationGeneration++;this.peers.delete(id);this.keys.forget(id);this.clocks.delete(id);this.log('peer-left',{id,name:peer.name})}
+    for(const [id,peer] of this.peers)if(t-peer.lastSeen>15000){this.invalidatePreparation();this.peers.delete(id);this.keys.forget(id);this.clocks.delete(id);this.log('peer-left',{id,name:peer.name})}
     if(this.reservation){const lease=this.reservation;if((lease.request.source!==this.transport.id&&!this.peers.has(lease.request.source))||t-lease.at>240000){await this.send({type:'secret-failed',id:lease.request.id,reason:'暗骰来源离线或预约超时'});this.cancelSecret(lease.request.id)}
       else if(Math.floor((t-lease.at)/500)%5===0)await this.send({type:'secret-grant',request:lease.request,members:lease.members});}
     for(const [id,lease] of this.reservations)if(t-lease.at>300000){this.reservations.delete(id);this.privateRunning.delete(id);}
@@ -655,8 +684,8 @@ export class Controller {
       if(!out.started&&t-out.at>(out.retry+1)*2500&&out.retry<out.window/2500){out.retry++;if(out.wait.has(this.transport.id))this.postLocal({type:'prepare',roll:this.rolls.get(id)||out.roll});for(const member of out.wait)if(member!==this.transport.id)await this.send(this.offer(out,member))}
       if(out.started&&out.acks.size&&t-out.lastStartRetry>1000){out.lastStartRetry=t;if(t-out.start!>20000){this.log('spectator-start-unconfirmed',{id,members:[...out.acks]});out.acks.clear();}
         else for(const member of out.acks){await this.send(this.offer(out,member));await this.send({type:'start',to:member,id,start:out.start,hash:out.hash});}}
-      if(!out.started&&t-out.at>out.window){await this.send({type:'abort',id,reason:`等待播放器准备超时（${out.window/1000} 秒）`});this.postLocal({type:'discard',id});this.outgoing.delete(id);this.rolls.delete(id);this.releasePhysics(id);this.cancelSecret(id);this.fail('prepare-timeout',`${id} 等待 ${[...out.wait].join(',')}`)}
-      else if(out.started&&t-out.at>60000)this.outgoing.delete(id);
+      if(!out.started&&t-out.at>out.window){await this.send({type:'abort',id,reason:`等待播放器准备超时（${out.window/1000} 秒）`});this.postLocal({type:'discard',id});out.tailRelease?.();out.tailWake?.();this.outgoing.delete(id);this.rolls.delete(id);this.releasePhysics(id);this.cancelSecret(id);this.fail('prepare-timeout',`${id} 等待 ${[...out.wait].join(',')}`)}
+      else if(out.started&&t-out.at>60000){out.tailRelease?.();this.outgoing.delete(id);}
     }
     this.next();
   }

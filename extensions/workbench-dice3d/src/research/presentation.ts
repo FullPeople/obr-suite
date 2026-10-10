@@ -36,14 +36,19 @@ export function dimDiscarded(ids:string[],row:FormulaRow,decisionAt:number){
 }
 /** Research visual phases and compact 2D-style history, wrapped around the exact same number rush. */
 export class FormulaShow extends CueRenderer{
-  private fx:HTMLCanvasElement;private context:CanvasRenderingContext2D;private chips=new Map<string,HTMLElement>();private total:HTMLElement;
-  private releaseFx:()=>void;
+  private fx?:HTMLCanvasElement;private context?:CanvasRenderingContext2D;private chips=new Map<string,HTMLElement>();private total!:HTMLElement;
+  private releaseFx?:()=>void;
   private latest=-1;private finished=false;
   private historyAttached:boolean;
   constructor(private stage:HTMLElement,roll:Roll,private ids:string[],private row:FormulaRow,private card:HTMLElement,private projection:()=>Projection,private timeline?:RuleTimeline,updateHistory=true){
     super(stage,roll.request.id,roll.request.name,roll.request.bodyColor);
     this.historyAttached=updateHistory;
-    const layer=acquireOverlayCanvas(stage,'research-effects');this.fx=layer.canvas;this.context=layer.context;this.releaseFx=layer.release;
+    // Ordinary kept dice have no research annotations to draw. Do not allocate
+    // and clear a full-viewport surface for an explicitly empty effect list.
+    if(row.events.length||row.dice.some(d=>!d.kept)){
+      const layer=acquireOverlayCanvas(stage,'research-effects');this.fx=layer.canvas;this.context=layer.context;this.releaseFx=layer.release;
+    }
+    if(updateHistory){
     const caption=document.createElement('div');caption.className='formula-caption';caption.textContent=row.formula.replaceAll('*','×');card.append(caption);
     const inline=document.createElement('div');inline.className='formula-inline';
     for(const d of row.dice){const chip=document.createElement('span');chip.className='die-chip';chip.title=`${d.kind} · ${d.flags.join(' / ')||'计入'}`;
@@ -53,18 +58,22 @@ export class FormulaShow extends CueRenderer{
     operator.textContent=row.operation||(delta?`${delta>0?'+':''}${delta}`:'');inline.append(operator);
     const equal=document.createElement('span');equal.className='equals';equal.textContent='=';this.total=document.createElement('strong');this.total.className='inline-total';this.total.textContent='0';inline.append(equal,this.total);card.append(inline);
     const note=document.createElement('small');note.className='rule-note';note.textContent='等待真实落地';card.append(note);
+    }
     this.roll=roll;
   }
   private roll:Roll;
   override draw(age:number,cue:Cue,appear:number){
     super.draw(age,cue,appear);
-    const p=this.projection(),ctx=this.context,ratio=Math.min(devicePixelRatio,1.5);
-    if(this.fx.width!==Math.round(p.width*ratio)||this.fx.height!==Math.round(p.height*ratio)){this.fx.width=Math.round(p.width*ratio);this.fx.height=Math.round(p.height*ratio)}
-    ctx.setTransform(ratio,0,0,ratio,0,0);
+    const ctx=this.context,history=this.historyAttached;
+    if(!ctx&&!history)return;
+    const p=this.projection(),ratio=Math.min(devicePixelRatio,1.5);
+    if(ctx&&this.fx){
+      if(this.fx.width!==Math.round(p.width*ratio)||this.fx.height!==Math.round(p.height*ratio)){this.fx.width=Math.round(p.width*ratio);this.fx.height=Math.round(p.height*ratio)}
+      ctx.setTransform(ratio,0,0,ratio,0,0);
+    }
     const decisionAt=this.timeline?.decisionAt??cue.settled+DECISION_DELAY,fade=decisionProgress(age,decisionAt),landed=age>=decisionAt,phase=Math.max(0,age-decisionAt),arrived=new Set(cue.beams.filter(b=>age>=b.reveal).map(b=>this.ids[b.dieIndex]));
     const eventStart=(event:FormulaRow['events'][number])=>event.kind==='max'||event.kind==='min'?this.timeline?.clamps.find(c=>c.kind===event.kind&&c.id===event.dice[0]&&c.label===event.label)?.start??decisionAt:decisionAt;
     const visibleEvents=this.row.events.filter(e=>age>eventStart(e));
-    const history=this.historyAttached;
     if(history){const note=visibleEvents.map(e=>e.label+(e.physicalNote?`（${e.physicalNote}）`:'')).join(' · ')||(landed?'真实落地 → 数字汇集 → 加值到账':'等待真实落地');const node=this.card.querySelector('.rule-note')!;if(node.textContent!==note)node.textContent=note;}
     const point=(id:string)=>{const index=this.ids.indexOf(id),o=((this.roll.frames-1)*this.ids.length+index)*7;return projectVisual(p,this.roll.poses[o],this.roll.poses[o+1],this.roll.poses[o+2]);};
     const alpha=fade*Math.max(0,1-(age-cue.finalReveal)/.8);
@@ -72,10 +81,10 @@ export class FormulaShow extends CueRenderer{
       if(history){chip.classList.toggle('discarded',fade>0&&!d.kept);chip.classList.toggle('same',landed&&d.flags.includes('同值'));chip.classList.toggle('arrived',arrived.has(d.id));
       const label=chip.querySelector('b')!;label.textContent=!landed?'·':!d.kept?String(d.raw):arrived.has(d.id)?`${d.sign<0?'−':''}${d.value}`:'·';
       if(d.raw!==d.value)chip.title=`实骰 ${d.raw} → 按规则 ${d.value}`;}
-      if(!alpha)continue;const [x,y]=point(d.id);
+      if(!ctx||!alpha)continue;const [x,y]=point(d.id);
       if(!d.kept){ctx.save();ctx.globalAlpha=alpha;ctx.font='600 15px "Microsoft YaHei",sans-serif';ctx.textAlign='center';ctx.lineWidth=4;ctx.strokeStyle='#101920';ctx.fillStyle='#a5afba';ctx.strokeText('舍弃',x,y+42);ctx.fillText('舍弃',x,y+42);ctx.restore();}
     }
-    for(const event of this.row.events){const eventAge=age-eventStart(event),eventAlpha=decisionProgress(age,eventStart(event))*Math.max(0,1-(age-cue.finalReveal)/.8);if(!eventAlpha)continue;
+    for(const event of this.row.events){if(!ctx)continue;const eventAge=age-eventStart(event),eventAlpha=decisionProgress(age,eventStart(event))*Math.max(0,1-(age-cue.finalReveal)/.8);if(!eventAlpha)continue;
       const color=event.kind==='burst'?'#ffc773':event.kind==='reroll'?'#cda7ff':event.kind==='dis'?'#ec9d91':'#9bead3',points=event.dice.map(point);
       ctx.save();ctx.globalAlpha=eventAlpha*.85;ctx.strokeStyle=color;ctx.shadowColor=color;ctx.shadowBlur=12;ctx.lineWidth=2;
       if(event.kind!=='max'&&event.kind!=='min')for(const [i,[x,y]] of points.entries()){const radius=45+Math.sin(phase*5+i)*4;ctx.beginPath();ctx.ellipse(x,y,radius,radius*.64,phase*.22,phase*1.6,phase*1.6+Math.PI*1.7);ctx.stroke();}
@@ -91,5 +100,5 @@ export class FormulaShow extends CueRenderer{
     if(history){const total=totalAt(cue,age);if(total!==this.latest){this.latest=total;this.total.textContent=String(total);this.total.animate([{transform:'scale(1.23)'},{transform:'scale(1)'}],{duration:280,easing:'ease-out'});}
     if(!this.finished&&age>=cue.finalReveal){this.finished=true;this.card.classList.add('complete');this.card.animate([{boxShadow:'inset 0 0 0 2px #6faf9180'},{boxShadow:'inset 0 0 0 2px #6faf9100'}],{duration:500});}}
   }
-  override destroy(){super.destroy();this.releaseFx();}
+  override destroy(){super.destroy();this.releaseFx?.();}
 }
