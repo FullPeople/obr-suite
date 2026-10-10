@@ -1,7 +1,7 @@
 name: Verify Suite candidate
 on:
   push:
-    branches: [codex/text-effects266-20261010, codex/text-effects-20261009, codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
+    branches: [codex/music-board267-20261010, codex/text-effects266-20261010, codex/text-effects-20261009, codex/inline-choices264, codex/dice-instant263, codex/card-ux260-dev, codex/card-ux259-dev, codex/palette-258-dev, codex/unified-ui-dev-20261008, codex/card-links-dev-20261008, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/dice-tail247-20261005, codex/resource-repair246-20261005, fix/dice-safe-resources-20261004, fix/dice-small-resource-combined-20261004, codex/card-suite-combined-20261004,fix/dice-latency-recovered-20261004, fix/workbench-recovery-online-safe-20261004, fix/owner-startup-243-20261003, codex/owner-sync243-20261004, codex/owner-sync242-20261004, dev, fix/owner-sync-20261003, codex/intro-three-dragon-20261003, codex/suite-host-repair-20261001, codex/card-presentation-235, codex/merge-eight236-suite-20261003, codex/monster-card-lifecycle-20261003, codex/merge-monster237-suite-20261003]
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 8a328c4d643b8ac94d87d59d376e2532736079e3
+          ref: 541213a9b1e39c9835d8248d503f9052f0513fa2
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -45,6 +45,12 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
           node --input-type=module -e "import {chromium} from '@playwright/test'; console.log('CHROMIUM_PATH='+chromium.executablePath())" >> "$GITHUB_ENV"
+      - name: Native music collection, permissions, persistence and playback lifecycle
+        env:
+          PLAYWRIGHT_EXECUTABLE_PATH: ${{ env.CHROMIUM_PATH }}
+        run: |
+          node src/modules/musicBoard/selftest.mjs
+          node src/modules/musicBoard/browser-selftest.mjs
       - name: Grid-box anchoring and cross-scene picker regression
         run: |
           npm run test:bubbles
@@ -61,6 +67,8 @@ jobs:
         run: |
           npm run build:workbench-dev
           npm run build:three-dragon
+      - name: Verify native music panel ships without the retired website panel
+        run: node --input-type=module -e "import assert from 'node:assert/strict';import {existsSync} from 'node:fs';assert(existsSync('dist-workbench-dev/workbench-panels/music.html'));assert(!existsSync('dist-workbench-dev/workbench-panels/studio.html'));"
       - name: Document editing, separate monster tabs and readable camera bindings
         run: xvfb-run -a npm run test:workbench
       - name: Text presentation navigation, presets, native display and narrow layouts
@@ -135,6 +143,7 @@ jobs:
           if-no-files-found: warn
           include-hidden-files: true
           path: |
+            .local-evidence/music-board/
             .local-evidence/palette257/results.json
             .local-evidence/palette257/settings-palette.png
             .local-evidence/three-dragon-website-entry/

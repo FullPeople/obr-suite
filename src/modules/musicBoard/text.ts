@@ -1,30 +1,20 @@
 import { getLocalLang } from "../../state";
 const strings = {
-  title: ["音乐板", "Music"], noTrack: ["还没有播放的曲目", "Nothing playing"], paused: ["已暂停", "Paused"], playing: ["房间播放中", "Playing in room"],
-  enable: ["启用声音", "Enable sound"], blocked: ["声音被浏览器拦截。允许此网站播放声音后重试。", "Sound is blocked. Allow sound for this site, then retry."],
-  audioError: ["音源无法播放，请检查链接或换一首。", "This source cannot play. Check the link or choose another track."],
-  play: ["播放", "Play"], pause: ["暂停", "Pause"], next: ["下一首", "Next"], stop: ["停止", "Stop"], loop: ["循环", "Loop"],
-  localVolume: ["我的音量", "My volume"], mute: ["仅我静音", "Mute for me"], queue: ["接下来", "Up next"], noQueue: ["队列为空", "Queue is empty"],
-  library: ["曲库与音效", "Library & sounds"], import: ["导入", "Import"], input: ["粘贴直链或音乐台分享码", "Paste direct links or a Studio share code"],
-  defaults: ["浏览默认曲库", "Browse default library"], search: ["搜索曲名", "Search tracks"], add: ["加入曲库", "Add to library"],
-  importBus: ["导入为", "Import as"], busBgm: ["背景音乐 BGM", "Background music"], busSfx: ["音效 SFX", "Sound effect"],
-  importSfxHint: ["直链导入为音效会作为一次性音效播放，播放完毕自动从列表移除。", "A direct link imported as a sound effect plays once and is removed from the list when it ends."],
-  enqueue: ["加入队列", "Add to queue"], remove: ["移除", "Remove"], sounds: ["正在播放的音效", "Active sounds"], clearSfx: ["停止全部音效", "Stop all sounds"],
-  studio: ["网页音乐台", "Music Studio"], openStudio: ["打开完整音乐台", "Open full Studio"], pairCode: ["6 位配对码", "6-character pairing code"],
-  connect: ["连接", "Connect"], disconnect: ["断开", "Disconnect"], adopt: ["采用网页当前播放", "Use Studio playback"],
-  disconnected: ["未连接", "Disconnected"], connecting: ["正在连接", "Connecting"], connected: ["已连接", "Connected"], reconnecting: ["正在重连，房间继续播放", "Reconnecting; room keeps playing"],
-  restored: ["连接已恢复，已保留房间播放", "Reconnected; room playback preserved"], error: ["连接失败", "Connection failed"],
-  studioHint: ["保留曲库、压缩、剪辑和配对。仅直链音源可共享；本地文件仍需先上传取得直链。关闭本面板不会停止后台音乐。", "Keeps the Studio library, encoding, trimming and pairing. Shared playback needs direct URLs; local files still need uploading first. Closing this panel keeps background music playing."],
-  allow: ["允许所有玩家控制音乐", "Let all players control music"], readOnly: ["DM 已关闭玩家控制；我的音量仍可调整。", "The GM disabled player controls. Your own volume remains available."],
-  close: ["关闭面板，继续播放", "Close panel; keep playing"], minimize: ["收起", "Minimize"], expand: ["展开音乐板", "Expand music"], drag: ["拖动音乐板", "Move music panel"],
-  loading: ["正在读取…", "Loading…"], failed: ["操作失败，请重试。", "Operation failed. Please retry."], unavailable: ["音乐后台尚未就绪。", "Music background is not ready."],
-  noWriter: ["控制请求未获确认，请稍后重试。", "Control request was not acknowledged. Retry shortly."], permission: ["你当前没有共享音乐控制权限。", "You do not currently have shared music control permission."],
-  stalePlayback: ["房间已切换曲目，请对当前曲目重试。", "The room track changed. Retry on the current track."],
-  invalidTrack: ["需要有效直链或音乐台分享码；本地文件地址不能共享。", "Use a valid direct URL or Studio share code; local file URLs cannot be shared."],
-  invalidCommand: ["此操作不可用。", "This action is unavailable."], libraryFull: ["房间曲库最多 32 首，或导入内容过大。请分批导入。", "Room library allows 32 tracks; this import may also be too large. Import fewer tracks."],
-  queueFull: ["队列最多 32 首。", "Queue allows up to 32 tracks."], roomFull: ["房间存储空间不足；现有曲库未改动。", "Room storage is full; the existing library was kept."],
-  sceneUnavailable: ["场景正在切换或尚未打开，请在场景就绪后重试。", "The scene is changing or not open. Retry once it is ready."],
-  sourceLimit: ["默认曲库仅在此浏览；点击曲目加入房间，不会一次写入所有曲目。", "Browse defaults here and add individual tracks to the room."],
+  title:["音乐板","Music"], noTrack:["选择一首音乐开始播放","Choose a track to begin"], paused:["已暂停","Paused"], playing:["房间播放中","Playing in room"], loading:["正在读取……","Loading…"],
+  enable:["启用声音","Enable sound"], blocked:["声音被浏览器拦截，请允许播放声音后重试。","Sound is blocked. Allow sound, then retry."], audioError:["音源无法播放，请检查直链或换一首。","This source cannot play. Check the direct URL or choose another track."],
+  play:["播放","Play"], pause:["暂停","Pause"], previous:["上一首","Previous"], next:["下一首","Next"], stop:["停止","Stop"], loop:["循环","Loop"], once:["一次","Once"],
+  volume:["音量","Volume"], localVolume:["我的音量","My volume"], roomVolume:["房间混音","Room mix"], mute:["仅我静音","Mute for me"],
+  library:["曲库","Library"], queue:["接下来","Up next"], noQueue:["把背景音乐加入队列，播完后自动接续。","Add background music to the queue for automatic playback."], noTracks:["还没有曲目，添加外链或导入曲库。","Add a direct URL or import a library to begin."], noMatches:["没有匹配的曲目","No matching tracks"],
+  busBgm:["背景音乐","Music"], busSfx:["音效","Sounds"], busBgmShort:["背景","Music"], busSfxShort:["音效","Sounds"], all:["全部","All"], favorites:["收藏","Favorites"], favorite:["收藏","Favorite"], unfavorite:["取消收藏","Unfavorite"], search:["搜索曲名、分组或标签","Search name, group or tags"],
+  addTrack:["添加外链","Add URL"], edit:["编辑","Edit"], trackName:["曲名","Name"], trackUrl:["音频直链","Direct audio URL"], group:["分组","Group"], tags:["标签","Tags"], tagsHint:["战斗，紧张，Boss","Battle, tense, boss"], trackVolume:["曲目音量","Track volume"], saveTrack:["保存曲目","Save track"], remove:["移除","Remove"], cancel:["关闭","Close"],
+  import:["导入","Import"], export:["导出","Export"], input:["粘贴音频直链、JSON 曲库或旧分享码；也支持每行“曲名 + Tab + 直链”。","Paste direct URLs, a JSON library or an older share code. Name + Tab + URL lines also work."], readFile:["选择文件","Choose file"], previewImport:["预览导入","Preview import"], merge:["合并曲库","Merge"], replace:["替换曲库","Replace"], applyImport:["导入到房间","Import into room"], replaceHint:["替换会移除不在新曲库中的队列项；当前播放继续。本机保留更改前的备份。","Replacing removes queue entries absent from the new library. Current playback continues; a local backup is retained."], importCount:["{count} 首曲目 · {new} 首新增 · {duplicate} 首重复","{count} tracks · {new} new · {duplicate} duplicate"],
+  backup:["恢复备份","Restore backup"], backupUnavailable:["尚无本机备份。曲库仍保存在房间中。","No local backup yet. The room library is still saved."], backupFailed:["房间已保存，本机备份不可用。可导出曲库留存。","Saved in room; local backup unavailable. Export the library to keep a copy."], saved:["随房间保存","Saved with room"], saving:["正在保存……","Saving…"], completed:["已保存到房间","Saved in room"], draftFailed:["草稿无法保存在本机。","The draft could not be saved locally."],
+  defaults:["默认曲库","Default library"], add:["加入曲库","Add to library"], sourceLimit:["选择曲目加入房间，音频仍从外链播放。","Choose tracks to add to the room. Audio plays from direct URLs."], enqueue:["加入队列","Queue"], enqueueVisible:["列表入队","Queue list"], clearQueue:["清空队列","Clear queue"], moveUp:["上移","Move up"], moveDown:["下移","Move down"], sounds:["正在播放的音效","Active sounds"], clearSfx:["全部停止","Stop all"],
+  allow:["玩家可控制","Player controls"], readOnly:["DM 已关闭玩家控制；仍可导出曲库、调整自己的音量。","The GM disabled shared controls. You can still export and adjust your own volume."], close:["关闭音乐板，继续播放","Close music; keep playing"], minimize:["收起","Minimize"], expand:["展开音乐板","Expand music"], drag:["拖动音乐板","Move music panel"],
+  failed:["操作失败，请重试。","Operation failed. Please retry."], unavailable:["音乐后台尚未就绪。","Music background is not ready."], noWriter:["请求未获确认，请稍后核对房间状态。","Request was not acknowledged. Check the room state shortly."], permission:["当前没有房间音乐控制权限。","You do not have shared music control permission."], stalePlayback:["房间已切换曲目，请对当前曲目重试。","The room track changed. Retry on the current track."], staleLibrary:["曲库已被更新，请重新打开编辑或导入预览。","The library changed. Reopen the editor or import preview."], staleQueue:["队列已更新，请重新操作。","The queue changed. Retry on the current queue."],
+  invalidTrack:["需要有效的 HTTP 或 HTTPS 音频直链；本地文件地址和普通播放网页不能作为音源。","Use an HTTP or HTTPS direct audio URL. Local file URLs and ordinary player pages are not sources."], invalidImport:["导入内容无法读取，请检查直链、JSON 或分享码。","Could not read this import. Check the URLs, JSON or share code."], invalidCommand:["此操作不可用。","This action is unavailable."], libraryFull:["曲库最多 128 首，或内容超过房间存储容量；原曲库未改动。","The library allows 128 tracks and must fit room storage. The existing library was kept."], queueFull:["队列最多 32 首，当前队列未改动。","The queue allows 32 tracks. The existing queue was kept."], roomFull:["房间存储空间不足，曲库未改动。请减少曲目或缩短链接。","Room storage is full. The library was kept. Use fewer tracks or shorter URLs."], sceneUnavailable:["场景尚未就绪，请稍后重试。","The scene is not ready. Retry shortly."], fileTooLarge:["导入文件过大，请选择不超过 256 KB 的曲库文件。","Choose a library file no larger than 256 KB."],
+  gray:["灰色","Gray"], green:["绿色","Green"], blue:["蓝色","Blue"], purple:["紫色","Purple"], amber:["琥珀色","Amber"], rose:["玫红色","Rose"],
 } as const;
-export function mt(key: keyof typeof strings): string { return strings[key][getLocalLang() === "en" ? 1 : 0]; }
-export function musicError(error: unknown): string { const key = error instanceof Error ? error.message : String(error); return key in strings ? mt(key as keyof typeof strings) : mt("failed"); }
+export type MusicTextKey = keyof typeof strings;
+export function mt(key: MusicTextKey): string { return strings[key][getLocalLang() === "en" ? 1 : 0]; }
+export function musicError(error: unknown): string { const key = error instanceof Error ? error.message : String(error); return key in strings ? mt(key as MusicTextKey) : mt("failed"); }

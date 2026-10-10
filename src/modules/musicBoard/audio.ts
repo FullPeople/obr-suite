@@ -98,7 +98,8 @@ export class MusicAudio {
   private gain(voice: Voice): void {
     if (voice.retiring) return;
     const activeSfx = [...this.sfx.values()].some(v => !v.audio.paused);
-    const target = unit(this.volume[voice.bus]) * unit(this.state.bus[voice.bus]) * (this.volume.mute ? 0 : 1) * (voice.bus === "bgm" && activeSfx ? .4 : 1);
+    const track = voice.bus === "bgm" ? this.state.bgm?.track : this.state.sfx.find(sound => sound.id === voice.key)?.track;
+    const target = unit(track?.volume) * unit(this.volume[voice.bus]) * unit(this.state.bus[voice.bus]) * (this.volume.mute ? 0 : 1) * (voice.bus === "bgm" && activeSfx ? .4 : 1);
     if (voice.gain && this.ctx) {
       const now = this.ctx.currentTime; voice.gain.gain.cancelScheduledValues(now); voice.gain.gain.setValueAtTime(voice.gain.gain.value, now); voice.gain.gain.linearRampToValueAtTime(target, now + .12);
     } else voice.audio.volume = target;

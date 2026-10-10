@@ -1,3 +1,4 @@
+import {sendMusicMessage,onMusicMessage} from './transport';
 import OBR, { type Player } from "@owlbear-rodeo/sdk";
 import { MUSIC_ACK, MUSIC_COMMAND, MUSIC_LEGACY_KEY, MUSIC_ROOM_KEY, emptySession, migrateLegacy, normaliseSession, reduceMusic, type MusicOp, type MusicSession } from "./model";
 export function electedWriter(players: Array<Pick<Player, "connectionId" | "role">>): string {
@@ -81,7 +82,7 @@ export class RoomMusic {
         const next = normaliseSession(metadata[this.sceneKey]); this.sceneState = next;
         this.consider(next, true);
       }),
-      OBR.broadcast.onMessage(MUSIC_COMMAND, event => {
+      onMusicMessage(MUSIC_COMMAND, event => {
         const data = event.data as Request;
         if (!data || typeof data.requestId !== "string" || data.requestId.length > 100 || !data.op || typeof data.op.type !== "string") return;
         if (!this.active || this.writer !== this.connectionId) return;
@@ -115,11 +116,11 @@ export class RoomMusic {
   private accept(state: MusicSession): void { if (JSON.stringify(this.state) === JSON.stringify(state)) return; this.state = state; this.changed(state); }
   async submit(op: MusicOp, requestId: string = crypto.randomUUID()): Promise<void> {
     if (!this.active) throw new Error("unavailable");
-    if (new TextEncoder().encode(JSON.stringify({ requestId, op })).length > 14000) throw new Error("libraryFull");
+    if (new TextEncoder().encode(JSON.stringify({ requestId, op })).length > 64000) throw new Error("libraryFull");
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => { this.pending.delete(requestId); reject(new Error("noWriter")); }, 7000);
       this.pending.set(requestId, { resolve, reject, timeout });
-      void OBR.broadcast.sendMessage(MUSIC_COMMAND, { requestId, op }, { destination: "ALL" }).catch(error => { clearTimeout(timeout); this.pending.delete(requestId); reject(error); });
+      void sendMusicMessage(MUSIC_COMMAND, { requestId, op }, { destination: "ALL" }).catch(error => { clearTimeout(timeout); this.pending.delete(requestId); reject(error); });
     });
   }
   private async execute(request: Request, senderId: string): Promise<void> {
