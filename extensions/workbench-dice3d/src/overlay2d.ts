@@ -80,8 +80,8 @@ export async function mountOverlay2d(container: HTMLElement, client: string) {
         const label = document.createElement('div'); label.className = 'dice2d-result'; label.style.left = anchor.x + 'px'; label.style.top = anchor.y + 'px';
         label.style.color = /^#[0-9a-f]{6}$/i.test(row.color) ? row.color : '#fff'; label.textContent = row.total + ' · ' + row.text; labels.append(label);
       }
-    } else if (p.type === 'clear') {for (const id of [...active.keys()]) finish(id, true);}
-    else if (p.type === 'discard') {if (!active.get(p.id)?.started) finish(p.id, true);}
+    } else if (p.type === 'clear') {for (const [id, entry] of [...active]) if (entry.started) finish(id, true);}
+    else if (p.type === 'discard') {const entry=active.get(p.id); if (entry&&!entry.started) {clearTimeout(entry.timer);entry.frame?.remove();entry.placeholder?.remove();active.delete(p.id);prepared.delete(p.id);track();}}
     else if (p.type === 'suite-unmask-archive') {const roll = archive.get(p.id); if (roll?.masked) archive.set(p.id, unmaskRoll(roll, p.details, diceCatalog()));}
     else if (p.type === 'suite-replay') {for (const id of p.ids) {const roll = archive.get(id); if (!roll) throw Error('该投骰已超出最近 20 条回放范围'); if (!active.has(id)) makeFrame(roll, true);}}
     else if (p.type === 'result-bubble' && p.highlight) bus.postMessage({type: 'suite-reveal-highlight', id: p.record.id});

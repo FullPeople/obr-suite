@@ -50,6 +50,8 @@ try{
  const done=async id=>page.waitForFunction(id=>signals.some(p=>p.event==='render-complete'&&p.detail.roll===id),id,{timeout:20000});
  await prepare(make('single'));check(await page.locator('iframe').evaluate(el=>getComputedStyle(el).visibility)==='hidden','prepared dice are hidden before shared start');
  check(!await page.evaluate(()=>signals.some(p=>p.event==='render-complete')),'preparing never completes history early');
+ await page.evaluate(()=>testBus.postMessage({type:'clear'}));
+ check(await page.locator('iframe').count()===1,'clear keeps a prepared roll awaiting its shared start barrier');
  await start('single');await page.frameLocator('iframe').locator('.dice').waitFor();
  check(await page.frameLocator('iframe').locator('.art-fg').count()===1,'original grayscale die art is present');
  check(await page.frameLocator('iframe').locator('video,.art-custom').count()===0,'2D never creates custom skin or video');
@@ -57,6 +59,8 @@ try{
  check(await page.locator('iframe').count()===0,'legacy animation completes and releases its frame');
  await page.evaluate(()=>testBus.postMessage({type:'suite-replay',ids:['single']}));await page.locator('iframe').waitFor();await page.waitForFunction(()=>signals.filter(p=>p.event==='render-complete'&&p.detail.roll==='single').length===2,undefined,{timeout:20000});
  check(true,'history replay runs the original result without rerolling');
+ await prepare(make('retracted'));await page.evaluate(()=>testBus.postMessage({type:'discard',id:'retracted'}));await page.waitForFunction(()=>!document.querySelector('iframe'));
+ check(!await page.evaluate(()=>signals.some(p=>['render-complete','render-cancelled'].includes(p.event)&&p.detail.roll==='retracted')),'discarding an unstarted preparation never reports a completed or cancelled performance');
  await prepare(make('mixed',['d4','d6','d8','d10','d12','d20','d_percentile']));await start('mixed');
  check(await page.frameLocator('iframe').locator('.dice').count()===7,'all seven logical dice appear for the mixed formula');
  check(await page.frameLocator('iframe').locator('.dice[data-type=d100]').count()===1,'percentile uses original d100 art');
