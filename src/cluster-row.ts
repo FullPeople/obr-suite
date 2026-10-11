@@ -321,7 +321,7 @@ async function fetchAnnouncementVersion(): Promise<string | null> {
     const res = await fetch(ANNOUNCEMENT_MD_URL, { cache: "no-cache" });
     if (!res.ok) return null;
     const text = await res.text();
-    const m = text.match(/^\s*-\s*(\d+\.\d+\.\d+(?:[-.][\w]+)*)\s*[·\-—]/m);
+    const m = text.match(/^##\s+(\d+\.\d+\.\d+(?:[-.][\w]+)*)\s+[^\n]*\[release\]\s*$/m) || text.match(/^\s*-\s*(\d+\.\d+\.\d+(?:[-.][\w]+)*)\s*[·\-—]/m);
     return m ? m[1] : null;
   } catch {
     return null;
