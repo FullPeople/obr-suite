@@ -24,7 +24,7 @@ export function suiteUiTags(){return [
 ];}
 /** @returns {import('vite').Plugin} */
 export function suiteUiPlugin(){
- return {name:'suite-ui',transformIndexHtml:{order:'pre',handler(html){if(html.includes('data-suite-ui'))return html;return {html,tags:suiteUiTags()};}},
+ return {name:'suite-ui',transformIndexHtml:{order:'pre',handler(html,context){if(context.filename?.replaceAll(String.fromCharCode(92),'/').endsWith('/three-dragon-ante.html')||html.includes('data-suite-ui'))return html;return {html,tags:suiteUiTags()};}},
   // Dev server: a stylesheet edit reloads every open popover.
   configureServer(server){server.watcher.add(SUITE_UI_CSS_PATH);server.watcher.on('change',file=>{if(resolve(file)===SUITE_UI_CSS_PATH)server.ws.send({type:'full-reload'});});}};
 }
