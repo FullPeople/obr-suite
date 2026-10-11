@@ -11,7 +11,7 @@ await build({input:entry,plugins:[{name:'boundary',resolveId(id){if(id==='@owlbe
 const html=readFileSync(join(root,'workbench-launcher.html'),'utf8').replace('/src/workbench/launcher.ts','/app.js');const server=createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/app.js'?'text/javascript':'text/html');res.end(req.url==='/app.js'?readFileSync(join(out,'app.js')):html);});await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;const results=[],contexts=[];let failure;
 try{browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
 for(const width of [210,180]){const context=await browser.newContext({viewport:{width,height:540}});const record={context,width,active:true};contexts.push(record);await context.tracing.start({screenshots:true,snapshots:true,sources:true});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(String(e)));await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForFunction(()=>window.appliedWidth===210);
-assert.equal(await page.evaluate(()=>getComputedStyle(document.body).backgroundColor),'rgb(55, 57, 66)');
+assert.equal(await page.evaluate(()=>getComputedStyle(document.body).backgroundColor),'rgb(41, 45, 60)');
 assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
 assert.ok(await page.locator('#action-home').evaluate(el=>el.scrollHeight>el.clientHeight&&getComputedStyle(el).overflowY==='auto'));
 assert.equal(await page.locator('#action-home').evaluate(el=>getComputedStyle(el).scrollbarWidth),'none');
