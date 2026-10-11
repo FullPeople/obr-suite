@@ -7,6 +7,7 @@ import { MUSIC_ACK, MUSIC_COMMAND, MUSIC_LOCAL, MUSIC_READY, MUSIC_VIEW, MUSIC_B
 import type { LocalVolume, SoundStatus } from "./modules/musicBoard/audio";
 import { mt, musicError, type MusicTextKey } from "./modules/musicBoard/text";
 import "./modules/musicBoard/style.css";
+import { ICONS } from "./icons";
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 interface View { state: MusicSession; canControl: boolean; gm: boolean; writer: string; sound: SoundStatus; roomId: string;
@@ -67,7 +68,7 @@ function renderLibrary():void {
     const actions=document.createElement("div"); actions.className="track-actions";
     if(track.bus==="bgm") { const queue=button(mt("enqueue"),()=>void command({type:"queue",id:track.id})); queue.dataset.focus="queue:"+track.id; actions.append(queue); }
     const edit=button(mt("edit"),()=>openTrack(track)); edit.dataset.focus="edit:"+track.id; actions.append(edit);
-    const favorite=button(track.favorite?"★":"☆",()=>void command({type:"update",id:track.id,track:{...track,favorite:!track.favorite},expectedLibraryRevision:current!.state.libraryRevision})); favorite.className="favorite-button"; favorite.dataset.focus="favorite:"+track.id; favorite.setAttribute("aria-label",`${mt(track.favorite?"unfavorite":"favorite")} ${label(track)}`); favorite.setAttribute("aria-pressed",String(!!track.favorite)); actions.append(favorite); card.append(actions); container.append(card);
+    const favorite=button("",()=>void command({type:"update",id:track.id,track:{...track,favorite:!track.favorite},expectedLibraryRevision:current!.state.libraryRevision})); favorite.className="favorite-button";favorite.innerHTML=track.favorite?ICONS.star.replace('fill="none"','fill="currentColor"'):ICONS.star; favorite.dataset.focus="favorite:"+track.id; favorite.setAttribute("aria-label",`${mt(track.favorite?"unfavorite":"favorite")} ${label(track)}`); favorite.setAttribute("aria-pressed",String(!!track.favorite)); actions.append(favorite); card.append(actions); container.append(card);
   }
   if(!tracks.length) { const empty=document.createElement("div"); empty.className="empty"; empty.textContent=mt(state.tracks.length?"noMatches":"noTracks"); container.append(empty); }
   if(focus) for(const node of container.querySelectorAll<HTMLElement>("[data-focus]")) if(node.dataset.focus===focus) node.focus({preventScroll:true});
@@ -150,7 +151,7 @@ function renderCatalog():void {
 }
 
 for(const [color,key] of palette) { const swatch=button("",()=>{formColor=color;renderFormChoices();saveDraft();},false); swatch.dataset.color=color; swatch.style.setProperty("--swatch",color); swatch.setAttribute("aria-label",mt(key)); el("trackColor").append(swatch); }
-el("mini").textContent=mini?"↗":"−";
+el("mini").innerHTML=mini?ICONS.fit:ICONS.minus;
 el("enable").addEventListener("click",()=>local("enable")); el("close").addEventListener("click",()=>local("close"));
 el("mini").addEventListener("click",()=>void OBR.broadcast.sendMessage("com.obr-suite/music-board:resize",{mini:!mini},{destination:"LOCAL"}));
 el("play").addEventListener("click",()=>void command({type:!current?.state.bgm?"next":current.state.bgm.paused?"resume":"pause"}));

@@ -6,10 +6,10 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#292d3c;--bg-strong:#1f2230;--bg-card:#323748;
-  --border:rgba(255,255,255,0.24);--border-strong:rgba(255,255,255,0.36);
-  --text:#e6e8ee;--text-dim:#aab0c2;
-  --accent:#a06bd9;--accent-warm:#f5a623;--accent-red:#e74c3c;--accent-green:#2ecc71;
+  --bg:var(--suite-bg,#292d3c);--bg-strong:var(--suite-bg-strong,#1f2230);--bg-card:var(--suite-bg-card,#323748);
+  --border:var(--suite-border,rgba(255,255,255,0.24));--border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --text:var(--suite-text,#e6e8ee);--text-dim:var(--suite-text-dim,#aab0c2);
+  --accent:var(--suite-accent,#5dade2);--accent-warm:var(--warn);--accent-red:var(--danger);--accent-green:var(--success);
 }
 html,body{
   height:100%;overflow:hidden;
@@ -23,7 +23,7 @@ html,body{
   background:var(--bg);
   border:1px solid var(--border-strong);
   border-radius:10px;
-  box-shadow:0 12px 36px rgba(0,0,0,0.55);
+  box-shadow:0 12px 36px var(--shadow);
   pointer-events:auto;
   display:flex;flex-direction:column;
   padding:14px 16px;
@@ -39,7 +39,7 @@ html,body{
 .hdr .ttl{font-size:14px;font-weight:700;flex:1;letter-spacing:0.2px}
 .hdr .fired-badge{
   font-size:10.5px;color:var(--accent-red);
-  border:1px solid rgba(231,76,60,.5);
+  border:1px solid var(--danger-line);
   border-radius:4px;padding:1px 6px;
   letter-spacing:.4px;text-transform:uppercase;
 }
@@ -51,7 +51,7 @@ html,body{
 
 .body{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;overflow-y:auto}
 .body::-webkit-scrollbar{width:6px}
-.body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
+.body::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 
 .row{flex-shrink:0}
 .row .lbl{
@@ -123,7 +123,7 @@ html,body{
   background:var(--bg-card);
   border:1px solid var(--border);
   border-radius:11px;
-  font-size:11px;color:#cdd1de;
+  font-size:11px;color:var(--text);
   user-select:none;
 }
 .chip .del{
@@ -133,7 +133,7 @@ html,body{
   border-radius:4px;font-family:inherit;
   transition:color .12s, background .12s;
 }
-.chip .del:hover{color:var(--accent-red);background:rgba(231,76,60,.18)}
+.chip .del:hover{color:var(--accent-red);background:var(--danger-soft)}
 .empty-hint{font-size:11px;color:var(--text-dim);font-style:italic}
 
 .btn-row{
@@ -151,17 +151,17 @@ html,body{
 .btn:hover{background:rgba(160,107,217,0.15);border-color:rgba(160,107,217,0.35);color:#c39be8}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.primary:hover{background:#8c54c8;border-color:#8c54c8;color:#fff}
-.btn.danger:hover{background:rgba(231,76,60,.18);border-color:rgba(231,76,60,.5);color:#ff7a6b}
-.btn.warm:hover{background:rgba(245,166,35,.18);border-color:rgba(245,166,35,.5);color:#ffba5d}
+.btn.danger:hover{background:var(--danger-soft);border-color:var(--danger-line);color:var(--danger)}
+.btn.warm:hover{background:var(--warn-soft);border-color:var(--warn-line);color:#ffba5d}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="hdr">
-    <span class="ic"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5 a2.5 2.5 0 1 1 3.5 2.3 c-0.8 0.4 -1 0.9 -1 1.7"/><circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none"/></svg></span>
+    <span class="ic"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></span>
     <span class="ttl">捣蛋鬼在哪？</span>
     <span class="fired-badge" id="firedBadge" style="display:none">已触发</span>
-    <button class="x" id="btnClose" type="button" aria-label="关闭"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
+    <button class="x" id="btnClose" type="button" aria-label="关闭"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
   </div>
   <div class="body">
     <div class="row">

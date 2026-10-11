@@ -10,36 +10,36 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* === Owl Suite signature palette ===
    Matches the rest of the suite UI (cluster, settings, dice panel,
    etc.) — dark cool navy charcoal canvas, suite signature amber
-   #f5a623 for character names + section headers, warm gold #f5d76e
+   var(--warn) for character names + section headers, warm gold var(--warn)
    (suite TimeStop yellow) for stat values, soft red for HP, muted
-   teal for saves, sky blue accent #5dade2 reserved for clickable
+   teal for saves, sky blue accent var(--accent) reserved for clickable
    affordances (subtle, not dominant). Borders + surfaces all reuse
    the same rgba whites that the rest of the suite uses, so this
    panel reads as "more of the same suite" rather than "third-party
    parchment notebook". */
 :root{
-  --bg:           #1c2030;       /* suite signature dark navy */
+  --bg:var(--suite-bg,#292d3c);       /* suite signature dark navy */
   --bg-soft:      #1f2230;
   --surface:      #262a3a;       /* card bg, matches cluster */
   --surface-2:    #2d3144;
   --surface-3:    #353a52;
-  --ink:          #e6e8ee;
+  --ink:          var(--text);
   --ink-strong:   #fff;
-  --ink-dim:      #aab0c2;
+  --ink-dim:      var(--text-dim);
   --ink-mute:     #8c92a2;
-  --amber:        #f5a623;       /* signature suite warm orange — character names, h-titles */
+  --amber:        var(--warn);       /* signature suite warm orange — character names, h-titles */
   --amber-soft:   #c7811a;
-  --gold:         #f5d76e;       /* suite TimeStop yellow — stat values + highlights */
+  --gold:         var(--warn);       /* suite TimeStop yellow — stat values + highlights */
   --gold-soft:    #c7a847;
   --ember:        #e8675e;       /* HP/damage — softened red so it doesn't clash with amber */
   --ember-soft:   #b34a42;
   --teal:         #6dac8a;       /* save profs / success — muted teal sage */
   --teal-soft:    #4d7a64;
   --bronze:       #d4a056;       /* AC shield (between gold + amber) */
-  --azure:        #5dade2;       /* clickable affordance — used sparingly */
+  --azure:        var(--accent);       /* clickable affordance — used sparingly */
   --azure-soft:   #4884b3;
-  --border:rgba(255,255,255,0.24);
-  --border-strong:rgba(255,255,255,0.36);
+  --border:var(--suite-border,rgba(255,255,255,0.24));
+  --border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
   --shadow:       0 2px 6px rgba(0,0,0,0.45);
   --shadow-lg:    0 8px 28px rgba(0,0,0,0.5);
 }
@@ -142,10 +142,10 @@ body{
    reserved for DATA values; chrome controls stay in the white/ink
    range so the panel reads as "枭熊 suite" not "amber notebook". */
 .cc-btn.primary{
-  background:rgba(255,255,255,0.12);
+  background:var(--border);
   border-color:var(--ink-dim);color:var(--ink-strong);
 }
-.cc-btn.primary:hover{background:rgba(255,255,255,0.2);border-color:var(--ink);color:#fff}
+.cc-btn.primary:hover{background:var(--border);border-color:var(--ink);color:#fff}
 .cc-btn.danger:hover{border-color:var(--ember);color:#ffa093;background:rgba(232,103,94,0.18)}
 .cc-btn .ic{font-size:14px;line-height:1;display:inline-flex;align-items:center}
 .cc-btn .ic svg{display:block}
@@ -341,11 +341,11 @@ body{
     letter-spacing:0.3px;
     transition:color .12s, background .12s, border-color .12s;
   }
-  .cc-tab-side:hover{color:var(--ink);background:rgba(255,255,255,0.03)}
+  .cc-tab-side:hover{color:var(--ink);background:var(--tint)}
   .cc-tab-side.is-on{
     color:var(--gold);
     border-left-color:var(--gold);
-    background:rgba(245,166,35,0.10);
+    background:var(--warn-soft);
     font-weight:600;
   }
 }
@@ -526,7 +526,7 @@ body{
   font-size:10px;color:var(--teal);background:var(--teal-soft);
   padding:1px 6px;border-radius:2px;font-weight:500;
 }
-.weap-prof.is-off{color:var(--ink-dim);background:rgba(255,255,255,0.06)}
+.weap-prof.is-off{color:var(--ink-dim);background:var(--tint)}
 .weap-atk{
   font-family:inherit;font-weight:600;color:var(--gold);
   cursor:pointer;font-size:14px;
@@ -542,7 +542,7 @@ body{
   background:transparent;
   font-variant-numeric:tabular-nums;
 }
-.weap-dmg:hover{background:rgba(192,57,43,0.18)}
+.weap-dmg:hover{background:var(--danger-soft)}
 .weap-props{
   grid-column:1/-1;font-size:11.5px;color:var(--ink-mute);
   font-style:normal;line-height:1.5;
@@ -571,7 +571,7 @@ body{
   border-radius:5px;
   padding:5px 4px;
 }
-.slot.has-slots{border-color:var(--gold-soft);background:rgba(245,215,110,0.07)}
+.slot.has-slots{border-color:var(--gold-soft);background:var(--warn-soft)}
 .slot-lv{font-size:9.5px;color:var(--ink-dim);font-weight:700;letter-spacing:0.5px}
 .slot-cur{
   font-family:Georgia,serif;font-weight:700;color:var(--gold);
@@ -616,8 +616,8 @@ body{
   transition:background .12s, color .12s;
 }
 .srch-name:hover{
-  background:rgba(93,173,226,0.18);
-  color:#7ec8f0;
+  background:var(--accent-soft);
+  color:var(--accent);
 }
 
 .spell-detail{
@@ -653,7 +653,7 @@ body{
   display:inline-block;
   margin-left:6px;padding:0 5px;
   font-size:9.5px;color:var(--gold-soft);
-  background:rgba(245,215,110,0.10);border:1px solid var(--gold-soft);
+  background:var(--warn-soft);border:1px solid var(--gold-soft);
   border-radius:99px;font-weight:700;
 }
 .feat-toggle{
@@ -703,8 +703,8 @@ body{
 .coin-name{font-size:9.5px;color:var(--ink-mute);font-weight:700;letter-spacing:0.5px}
 .coin-val{font-family:Georgia,serif;font-weight:700;font-size:14px;color:var(--gold);margin-top:1px}
 .coin.gp .coin-val{color:#e6c07a}
-.coin.pp .coin-val{color:#cdd9ec}
-.coin.ep .coin-val{color:#a8e9c2}
+.coin.pp .coin-val{color:var(--text)}
+.coin.ep .coin-val{color:var(--success)}
 .coin.sp .coin-val{color:#cdd9d9}
 .coin.cp .coin-val{color:#c9947b}
 
@@ -797,35 +797,35 @@ body{
 .cc-add-tag{
   display:inline-flex;align-items:center;justify-content:center;
   height:22px;padding:0 10px;
-  background:rgba(255,255,255,0.06);
-  border:1px solid var(--border-strong, rgba(255,255,255,0.18));
+  background:var(--tint);
+  border:1px solid var(--border-strong, var(--border));
   border-radius:3px;
-  color:var(--ink, #e6e8ee);
+  color:var(--ink, var(--text));
   font-size:12px;font-weight:500;line-height:1;
   cursor:pointer;
   transition:background .12s,color .12s,border-color .12s;
   font-family:inherit;
 }
 .cc-add-tag:hover{
-  background:rgba(255,255,255,0.14);
-  border-color:var(--ink-dim, #9aa0b3);
+  background:var(--border);
+  border-color:var(--ink-dim, var(--text-dim));
   color:var(--ink-strong, #fff);
 }
 
 /* === 2026-05-14 (#14 f2) — SpellPickModal =========================== */
 .cc-modal-backdrop{
   position:fixed;inset:0;z-index:9999;
-  background:rgba(0,0,0,0.55);
+  background:var(--bg-strong);
   display:flex;align-items:center;justify-content:center;
   padding:40px;
 }
 .cc-modal{
   width:min(460px,92vw);max-height:78vh;
   display:flex;flex-direction:column;
-  background:var(--surface,#262a3a);
-  border:1px solid var(--border-strong,rgba(255,255,255,0.18));
+  background:var(--surface,var(--bg-card));
+  border:1px solid var(--border-strong,var(--border));
   border-radius:5px;
-  box-shadow:var(--shadow-lg,0 8px 28px rgba(0,0,0,0.5));
+  box-shadow:var(--shadow-lg,0 8px 28px var(--shadow));
   padding:16px 16px 14px;
 }
 .cc-modal-h{
@@ -839,9 +839,9 @@ body{
 .cc-modal-list{
   flex:1;min-height:0;overflow-y:auto;
   display:flex;flex-direction:column;gap:2px;
-  border:1px solid var(--border,rgba(255,255,255,0.10));
+  border:1px solid var(--border,var(--border));
   border-radius:3px;padding:4px;
-  background:var(--bg,#1c2030);
+  background:var(--bg,var(--bg));
 }
 .cc-modal-list::-webkit-scrollbar{width:7px}
 .cc-modal-list::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px}
@@ -849,12 +849,12 @@ body{
   text-align:left;
   padding:7px 10px;
   background:transparent;border:0;border-radius:3px;
-  color:var(--ink,#e6e8ee);font-family:inherit;font-size:13px;
+  color:var(--ink,var(--text));font-family:inherit;font-size:13px;
   cursor:pointer;
   transition:background .1s;
   display:flex;align-items:baseline;gap:8px;
 }
-.cc-modal-row:hover{background:rgba(255,255,255,0.08)}
+.cc-modal-row:hover{background:var(--tint)}
 /* English sub-name shown dim to the right of the Chinese label. */
 .cc-modal-row-en{
   font-size:11px;color:var(--ink-mute,#6b7080);

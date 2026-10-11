@@ -13,7 +13,7 @@ const IMPORTANT_NOTES: Record<"zh" | "en", string> = {
       <li><span class="benefit-tag">改值</span>编辑自己角色的<b>先攻值</b>和<b>加值</b></li>
       <li><span class="benefit-tag">回合</span>轮到自己时，点角色卡下方<b>绿色「结束回合」</b>按钮</li>
     </ul>
-    <p style="font-size:11.5px;color:#9aa0b3">不设置也能玩，由 DM 一手操作即可。但开放后玩家可以更自主地推进自己的回合。</p>
+    <p style="font-size:11.5px;color:var(--text-dim)">不设置也能玩，由 DM 一手操作即可。但开放后玩家可以更自主地推进自己的回合。</p>
 
     <div class="step">
       <div class="step-title">第 1 步：开启 Character「Owner Only」权限</div>
@@ -43,7 +43,7 @@ const IMPORTANT_NOTES: Record<"zh" | "en", string> = {
       <li><span class="benefit-tag">Edit</span>Edit their character's <b>initiative</b> and <b>modifier</b></li>
       <li><span class="benefit-tag">End Turn</span>Click the <b>green "End Turn"</b> button under their card when it's their turn</li>
     </ul>
-    <p style="font-size:11.5px;color:#9aa0b3">Optional — you can also run everything DM-side. But owner-delegation lets players drive their own turns.</p>
+    <p style="font-size:11.5px;color:var(--text-dim)">Optional — you can also run everything DM-side. But owner-delegation lets players drive their own turns.</p>
 
     <div class="step">
       <div class="step-title">Step 1: Enable Character "Owner Only" permission</div>

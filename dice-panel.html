@@ -10,23 +10,23 @@ html,body{
   overflow:hidden;
   background:transparent;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  color:#e6e8ee;
+  color:var(--text);
   font-size:13px;
 }
 
 :root{
-  --bg:#1f2230;
-  --bg-soft:rgba(31,34,48,0.95);
-  --bg-strong:#2c3044;
-  --bg-card:#262a3a;
-  --border:rgba(255,255,255,0.24);
-  --border-strong:rgba(255,255,255,0.36);
-  --text:#e6e8ee;
-  --text-dim:#a3a8b8;
-  --accent:#5dade2;
-  --accent-on:#7fc3eb;
-  --good:#2ecc71;
-  --bad:#e74c3c;
+  --bg:var(--suite-bg,#292d3c);
+  --bg-soft:var(--overlay);
+  --bg-strong:var(--suite-bg-strong,#1f2230);
+  --bg-card:var(--suite-bg-card,#323748);
+  --border:var(--suite-border,rgba(255,255,255,0.24));
+  --border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --text:var(--suite-text,#e6e8ee);
+  --text-dim:var(--suite-text-dim,#aab0c2);
+  --accent:var(--suite-accent,#5dade2);
+  --accent-on:var(--accent);
+  --good:var(--success);
+  --bad:var(--danger);
 }
 
 .panel{
@@ -115,7 +115,7 @@ html,body{
   color:#fff;font-size:10px;font-weight:800;
   display:none;align-items:center;justify-content:center;
   line-height:1;
-  box-shadow:0 1px 3px rgba(0,0,0,0.5);
+  box-shadow:0 1px 3px var(--shadow);
   pointer-events:none;
 }
 .dice-btn[data-count]:not([data-count="0"]) .badge{display:flex}
@@ -151,24 +151,24 @@ html,body{
   transition:background .12s, color .12s, border-color .12s;
 }
 .d20-box .advdis-stack .ad-btn.adv{
-  color:#7be0a0;
-  border-color:rgba(46,204,113,0.65);
+  color:var(--success);
+  border-color:var(--success);
 }
 .d20-box .advdis-stack .ad-btn.adv:hover{
-  background:rgba(46,204,113,0.14);
-  border-color:rgba(46,204,113,0.55);
+  background:var(--success-soft);
+  border-color:var(--success-line);
 }
 .d20-box .advdis-stack .ad-btn.dis{
-  color:#ff8b7a;
-  border-color:rgba(231,76,60,0.65);
+  color:var(--danger);
+  border-color:var(--danger);
 }
 .d20-box .advdis-stack .ad-btn.dis:hover{
-  background:rgba(231,76,60,0.14);
-  border-color:rgba(231,76,60,0.55);
+  background:var(--danger-soft);
+  border-color:var(--danger-line);
 }
 .d20-box .advdis-stack .ad-btn.crit{
-  color:#ffb74d;
-  border-color:rgba(255,167,38,0.65);
+  color:var(--warn);
+  border-color:var(--warn);
 }
 .d20-box .advdis-stack .ad-btn.crit:hover{
   background:rgba(255,167,38,0.16);
@@ -227,8 +227,8 @@ html,body{
   display:inline-flex;align-items:center;justify-content:center;
   user-select:none;-webkit-user-select:none;
 }
-.expr-mod button:hover{background:rgba(93,173,226,0.20);color:#7ec8f0}
-.expr-mod button:active{background:rgba(93,173,226,0.30)}
+.expr-mod button:hover{background:var(--accent-soft);color:var(--accent)}
+.expr-mod button:active{background:var(--accent-line)}
 .expr-mod button + button{border-left:1px solid var(--border)}
 
 .label-input{
@@ -245,33 +245,17 @@ html,body{
 
 /* === Action buttons === */
 .actions{display:flex;gap:6px;flex-wrap:wrap}.actions .btn{min-width:72px}
-.btn{
-  flex:1;
-  background:var(--bg-strong);
-  border:1px solid var(--border-strong);
-  color:var(--text);
-  padding:9px 10px;
-  border-radius:0;
-  font-size:13px;font-weight:600;
-  font-family:inherit;cursor:pointer;
-  transition:background .12s, transform .08s, color .12s, border-color .12s;
-}
-.btn:hover{background:rgba(255,255,255,0.10)}
+.btn{flex:1;min-height:34px;padding:0 10px;font-size:13px}
 .btn:active{transform:scale(0.98)}
-.btn.primary{color:#0b1320;
-  background:linear-gradient(180deg, #5dade2, #4a90c2);
-  border-color:#5dade2;
-  color:#fff;font-weight:700;
-}
-.btn.primary:hover{background:linear-gradient(180deg, #6bb6e6, #5499c8)}
+.btn.primary{font-weight:700}
 /* === Clear-mode primary button: same gradient family as 投掷 but
    wrapped in a slow-pulse dashed amber/red ring so it stands out as
    "click to clear the dice on the canvas". The dash-pulse uses
    background-image (a gradient outline) so it doesn't fight the inset
    border. Applied via JS by toggling `clearing` on btnRoll/btnDarkRoll. */
 .btn.primary.clearing{
-  background:linear-gradient(180deg, #c0392b, #962d22);
-  border-color:#e74c3c;
+  background:linear-gradient(180deg, var(--danger), #962d22);
+  border-color:var(--danger);
   box-shadow:0 0 0 0 rgba(231,76,60,0);
   animation: clearRing 1.4s ease-in-out infinite;
 }
@@ -281,9 +265,9 @@ html,body{
   animation: clearRing 1.4s ease-in-out infinite;
 }
 @keyframes clearRing{
-  0%   { box-shadow: 0 0 0 0 rgba(231,76,60, 0.55), 0 0 0 1px rgba(255,180,180,0.25) inset }
-  60%  { box-shadow: 0 0 0 8px rgba(231,76,60, 0.0), 0 0 0 1px rgba(255,200,200,0.5) inset }
-  100% { box-shadow: 0 0 0 0 rgba(231,76,60, 0.0), 0 0 0 1px rgba(255,180,180,0.25) inset }
+  0%   { box-shadow: 0 0 0 0 var(--danger-line), 0 0 0 1px rgba(255,180,180,0.25) inset }
+  60%  { box-shadow: 0 0 0 8px var(--danger-soft), 0 0 0 1px rgba(255,200,200,0.5) inset }
+  100% { box-shadow: 0 0 0 0 var(--danger-soft), 0 0 0 1px rgba(255,180,180,0.25) inset }
 }
 
 /* === Auxiliary buttons (上一次 / 保存组合 / 清空) get distinctive but
@@ -294,37 +278,13 @@ html,body{
    - clear (清空):   wine-red       — "destructive but quiet"
    All three keep the dark-card base; the accent shows through the
    border + label color. */
-.btn.danger{
-  color:#ffb0a8;
-  background:linear-gradient(180deg, rgba(120,40,40,0.45), rgba(70,20,20,0.55));
-  border-color:rgba(231,76,60,0.65);
-  font-weight:700;
-}
-.btn.danger:hover{
-  background:linear-gradient(180deg, rgba(140,50,50,0.55), rgba(85,25,25,0.7));
-  color:#ffd0c8;
-}
-.btn.compact{flex:0 0 auto;padding:9px 14px}
-.btn.save{
-  flex:0 0 auto;padding:9px 14px;
-  background:linear-gradient(180deg, rgba(120,90,40,0.45), rgba(70,55,20,0.55));
-  border-color:rgba(204,160,74,0.65);
-  color:#e9c987;font-weight:700;
-}
-.btn.save:hover{
-  background:linear-gradient(180deg, rgba(140,105,45,0.55), rgba(85,65,25,0.7));
-  color:#f5dfae;
-}
-.btn.last{
-  flex:0 0 auto;padding:9px 12px;font-weight:700;
-  background:linear-gradient(180deg, rgba(50,70,110,0.5), rgba(30,45,75,0.6));
-  border-color:rgba(108,148,200,0.65);
-  color:#a9c1e1;
-}
-.btn.last:hover{
-  background:linear-gradient(180deg, rgba(60,85,130,0.6), rgba(38,55,90,0.7));
-  color:#cee1ff;
-}
+.btn.danger{color:var(--danger);background:var(--danger-soft);border-color:var(--danger-line);font-weight:700}
+.btn.danger:hover{background:var(--danger);color:#fff}
+.btn.compact{flex:0 0 auto;padding:0 14px}
+.btn.save{flex:0 0 auto;padding:0 14px;background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn);font-weight:700}
+.btn.save:hover{background:var(--warn-line);color:var(--text)}
+.btn.last{flex:0 0 auto;padding:0 12px;font-weight:700;background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
+.btn.last:hover{background:var(--accent-line);color:var(--text)}
 .btn.last:disabled{opacity:0.4;cursor:not-allowed}
 
 /* Red shake when locked / invalid. The class forces a red gradient
@@ -333,8 +293,8 @@ html,body{
    and combo buttons alike. */
 .btn.shake-red{
   animation: rollShake 0.6s ease-out;
-  background: linear-gradient(180deg, #e74c3c, #b9382d) !important;
-  border-color: #e74c3c !important;
+  background: linear-gradient(180deg, var(--danger), #b9382d) !important;
+  border-color: var(--danger) !important;
   color: #fff !important;
   font-weight: 700 !important;
   letter-spacing: 0.2px;
@@ -357,8 +317,8 @@ html,body{
 .btn.dark-roll{
   width:100%;
   background:linear-gradient(180deg, rgba(80,40,120,0.45), rgba(50,25,80,0.55));
-  border-color:rgba(155,89,182,0.65);
-  color:#cda9e8;
+  border-color:#9b6fd0;
+  color:var(--text);
   font-weight:700;
   letter-spacing:0.4px;
 }
@@ -376,8 +336,8 @@ html,body{
   flex:1 1 0;
   width:auto;
   background:linear-gradient(180deg, rgba(80,40,120,0.18), rgba(50,25,80,0.28));
-  border:1px dashed rgba(155,89,182,0.55);
-  color:#b89ad0;
+  border:1px dashed #9b6fd0;
+  color:var(--text-dim);
   font-weight:600;
   letter-spacing:0.3px;
   font-size:12px;
@@ -411,14 +371,14 @@ html,body{
   display:none;
   width:100%;
   background:transparent;
-  border:1px dashed rgba(231,76,60,0.5);
-  color:rgba(231,76,60,0.85);
+  border:1px dashed var(--danger-line);
+  color:var(--danger-line);
   font-weight:600;
   font-size:11.5px;letter-spacing:0.4px;
   padding:6px 8px;
 }
 .btn.force-clr.on{display:block}
-.btn.force-clr:hover{background:rgba(231,76,60,0.1);color:#fff}
+.btn.force-clr:hover{background:var(--danger-soft);color:#fff}
 
 /* === Saved combos === */
 .combo-list{display:flex;flex-direction:column;gap:8px}
@@ -434,12 +394,12 @@ html,body{
 }
 .combo-toolbar .btn.small{
   padding:3px 8px;font-size:11px;
-  background:rgba(93,173,226,0.16);
-  border:1px solid rgba(93,173,226,0.65);
+  background:var(--accent-soft);
+  border:1px solid var(--accent-line);
   color:var(--accent);font-weight:700;
 }
 .combo-toolbar .btn.small:hover{
-  background:rgba(93,173,226,0.26);
+  background:var(--accent-soft);
 }
 /* Category section — collapsible-looking header + body. The body is
    the drop target; sections highlight when a card is being dragged
@@ -448,16 +408,16 @@ html,body{
   border:1px solid var(--border);
   border-radius:0;
   overflow:hidden;
-  background:rgba(255,255,255,0.015);
+  background:var(--tint);
 }
 .combo-section.drop-target{
-  border-color:rgba(93,173,226,0.55);
-  background:rgba(93,173,226,0.06);
+  border-color:var(--accent-line);
+  background:var(--accent-soft);
 }
 .combo-section-head{
   display:flex;align-items:center;gap:6px;
   padding:5px 10px;
-  background:rgba(0,0,0,0.18);
+  background:var(--bg-strong);
   border-bottom:1px solid var(--border);
   font-size:11.5px;
 }
@@ -467,7 +427,7 @@ html,body{
 .combo-section-count{
   color:var(--text-dim);font-size:10.5px;
   padding:1px 6px;border-radius:0;
-  background:rgba(255,255,255,0.06);
+  background:var(--tint);
   font-family:ui-monospace,monospace;
 }
 .combo-section .cat-act{
@@ -477,7 +437,7 @@ html,body{
   font-family:inherit;
   transition:background .12s,color .12s;
 }
-.combo-section .cat-act:hover{background:rgba(255,255,255,0.08);color:var(--text)}
+.combo-section .cat-act:hover{background:var(--tint);color:var(--text)}
 .combo-section-body{
   display:flex;flex-direction:column;gap:6px;
   padding:6px;
@@ -497,7 +457,7 @@ html,body{
   transition:transform .08s,opacity .08s,box-shadow .12s;
 }
 .combo-card.drop-before{
-  box-shadow:0 -2px 0 var(--accent) inset, 0 0 0 1px rgba(93,173,226,0.45);
+  box-shadow:0 -2px 0 var(--accent) inset, 0 0 0 1px var(--accent-line);
 }
 .combo-card.dragging{
   opacity:0.4;transform:scale(0.98);
@@ -526,7 +486,7 @@ html,body{
   flex:1;
   background:linear-gradient(180deg, rgba(80,40,120,0.45), rgba(50,25,80,0.55));
   border-color:rgba(155,89,182,0.45);
-  color:#cda9e8;font-weight:700;letter-spacing:0.3px;
+  color:var(--text);font-weight:700;letter-spacing:0.3px;
 }
 .combo-actions .combo-dark:hover{
   background:linear-gradient(180deg, rgba(95,50,140,0.6), rgba(60,30,95,0.7));
@@ -539,7 +499,7 @@ html,body{
   flex:1;
   background:linear-gradient(180deg, rgba(255,167,38,0.20), rgba(180,110,20,0.30));
   border-color:rgba(255,167,38,0.45);
-  color:#ffb74d;font-weight:700;letter-spacing:0.3px;
+  color:var(--warn);font-weight:700;letter-spacing:0.3px;
 }
 .combo-actions .combo-crit:hover{
   background:linear-gradient(180deg, rgba(255,167,38,0.32), rgba(180,110,20,0.42));
@@ -581,7 +541,7 @@ html,body{
   width:16px; height:16px;
   padding:0; line-height:1;
   background:transparent; border:none;
-  color:var(--text-dim, #9aa0b3);
+  color:var(--text-dim, var(--text-dim));
   font-size:14px; font-weight:700;
   cursor:pointer; border-radius:0;
   opacity:0;
@@ -590,15 +550,15 @@ html,body{
   z-index:2;
 }
 .entry:hover .entry-del{ opacity:0.55 }
-.entry .entry-del:hover{ opacity:1; color:#ff6b6b; background:rgba(255,107,107,0.10) }
+.entry .entry-del:hover{ opacity:1; color:var(--danger); background:rgba(255,107,107,0.10) }
 .entry .entry-del:active{ transform:scale(0.92) }
 .entry:hover{
-  background:rgba(93,173,226,0.08);
-  border-color:rgba(93,173,226,0.32);
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
 }
 .entry:active{transform:scale(0.99)}
 .entry.crit{border-left-color:#ffcc33}
-.entry.fail{border-left-color:#ff6b6b}
+.entry.fail{border-left-color:var(--danger)}
 .entry.hidden-roll{
   background:linear-gradient(180deg, rgba(110,55,160,0.30), rgba(60,30,95,0.45));
   border-left-color:rgba(180,110,225,0.85);
@@ -606,12 +566,12 @@ html,body{
 /* Active replay → glow with the roller's color so the source of the
    on-canvas overlay is unmistakable. Same row click toggles it off. */
 .entry.replay-on{
-  border-color:var(--player-color, #5dade2);
-  box-shadow:0 0 0 1px var(--player-color, #5dade2), 0 0 12px rgba(93,173,226,0.35);
-  background:linear-gradient(180deg, rgba(93,173,226,0.10), var(--bg-card));
+  border-color:var(--player-color, var(--accent));
+  box-shadow:0 0 0 1px var(--player-color, var(--accent)), 0 0 12px var(--accent-line);
+  background:linear-gradient(180deg, var(--accent-soft), var(--bg-card));
 }
 .coll-entry{
-  border-left-color:rgba(46,204,113,0.55);
+  border-left-color:var(--success-line);
 }
 
 .entry .body{
@@ -646,7 +606,7 @@ html,body{
 .entry .coll-tag{
   flex-shrink:0;display:inline-block;
   padding:1px 5px;
-  background:rgba(46,204,113,0.55);
+  background:var(--success-line);
   border-radius:0;
   font-size:9px;font-weight:800;
   color:#fff;letter-spacing:0.4px;
@@ -668,7 +628,7 @@ html,body{
   display:inline-flex;align-items:center;gap:2px;
   padding:0 4px 0 2px;
   border-radius:0;
-  background:rgba(255,255,255,0.06);
+  background:var(--tint);
   font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
   font-weight:700;color:var(--text);
   font-size:10.5px;
@@ -676,7 +636,7 @@ html,body{
 }
 .die-chip img{width:12px;height:12px;display:block;-webkit-user-drag:none}
 .die-chip.crit{color:#ffd34d;background:rgba(255,200,0,0.16);box-shadow:0 0 6px rgba(255,200,0,0.45)}
-.die-chip.fail{color:#ff8a7a;background:rgba(231,76,60,0.18)}
+.die-chip.fail{color:#ff8a7a;background:var(--danger-soft)}
 .die-chip.loser{opacity:0.4;text-decoration:line-through}
 .die-chip.subtract{opacity:0.55}
 
@@ -709,23 +669,23 @@ html,body{
   gap:3px;
   padding:1px 7px 1px 4px;
   border-radius:0;
-  background:rgba(255,255,255,0.05);
-  border:1px solid rgba(255,255,255,0.10);
+  background:var(--tint);
+  border:1px solid var(--border);
   white-space:nowrap;flex-shrink:0;
   font-size:13.5px;
   transition:background .12s, border-color .12s;
 }
 .member-card:hover{
-  background:rgba(93,173,226,0.14);
-  border-color:rgba(93,173,226,0.32);
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
 }
 .member-card.crit{
   background:rgba(255,200,0,0.14);
   border-color:rgba(255,200,0,0.42);
 }
 .member-card.fail{
-  background:rgba(231,76,60,0.14);
-  border-color:rgba(231,76,60,0.40);
+  background:var(--danger-soft);
+  border-color:var(--danger-line);
 }
 .member-card.hidden-roll{
   background:rgba(155,89,182,0.18);
@@ -779,14 +739,14 @@ html,body{
   border-radius:0;cursor:pointer;
   transition:background .12s, color .12s;
 }
-.seg-btn:hover{color:var(--text);background:rgba(255,255,255,0.05)}
-.seg-btn.on{background:var(--bg-strong);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,0.3)}
+.seg-btn:hover{color:var(--text);background:var(--tint)}
+.seg-btn.on{background:var(--bg-strong);color:var(--text);box-shadow:0 1px 2px var(--shadow)}
 
 /* === Roll-rule hints === */
 .rules-hint{
   margin-top:6px;
   padding:8px 10px;
-  background:rgba(0,0,0,0.18);
+  background:var(--bg-strong);
   border:1px solid var(--border);
   border-radius:0;
   color:var(--text-dim);
@@ -800,7 +760,8 @@ html,body{
 .rules-hint code{
   font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
   font-size:11px;
-  background:rgba(255,255,255,0.06);
+  background:var(--bg-card);
+  border:1px solid var(--border);
   padding:1px 5px;border-radius:0;
   color:var(--accent-on);
 }
@@ -813,7 +774,7 @@ html,body{
 .examples{
   margin-top:8px;
   padding:8px 10px;
-  background:rgba(0,0,0,0.18);
+  background:var(--bg-strong);
   border:1px solid var(--border-strong);
   border-radius:0;
 }
@@ -827,9 +788,9 @@ html,body{
   display:flex;flex-direction:column;align-items:flex-start;gap:1px;
   padding:6px 10px;
   background:linear-gradient(180deg, rgba(70,80,110,0.4), rgba(40,50,75,0.55));
-  border:1px solid rgba(108,148,200,0.65);
+  border:1px solid #5b7fb0;
   border-radius:0;
-  color:#cdd9ec;font-family:inherit;cursor:pointer;
+  color:var(--text);font-family:inherit;cursor:pointer;
   text-align:left;
   transition:background .12s, border-color .12s, transform .08s;
 }
@@ -853,7 +814,7 @@ html,body{
 .skin-intro{
   font-size:11px;color:var(--text-dim);line-height:1.55;
   padding:8px 10px;
-  background:rgba(0,0,0,0.18);
+  background:var(--bg-strong);
   border:1px solid var(--border);border-radius:0;
 }
 .skin-intro b{color:var(--accent-on)}
@@ -868,7 +829,7 @@ html,body{
 .skin-thumb{
   width:42px;height:42px;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;
-  background:rgba(0,0,0,0.28);
+  background:var(--bg-strong);
   border-radius:0;overflow:hidden;
 }
 .skin-thumb img,.skin-thumb video{
@@ -884,21 +845,21 @@ html,body{
 .skin-status{
   font-size:9.5px;font-weight:700;letter-spacing:0.3px;
   padding:1px 6px;border-radius:0;
-  background:rgba(255,255,255,0.06);color:var(--text-dim);
+  background:var(--tint);color:var(--text-dim);
 }
 .skin-status.custom{
-  background:rgba(93,173,226,0.18);color:var(--accent-on);
+  background:var(--accent-soft);color:var(--accent-on);
 }
 .skin-reset{
   margin-left:auto;
   background:transparent;
-  border:1px solid rgba(231,76,60,0.4);
+  border:1px solid var(--danger-line);
   color:#ffb0a8;
   font-size:10.5px;font-weight:700;font-family:inherit;
   padding:2px 8px;border-radius:0;cursor:pointer;
   transition:background .12s,color .12s;
 }
-.skin-reset:hover{background:rgba(231,76,60,0.14);color:#ffd0c8}
+.skin-reset:hover{background:var(--danger-soft);color:#ffd0c8}
 .skin-url-row{display:flex;gap:5px}
 .skin-url-input{
   flex:1;min-width:0;height:26px;
@@ -923,7 +884,7 @@ html,body{
   border-radius:0;cursor:pointer;
   transition:background .12s;
 }
-.skin-url-set:hover{background:rgba(93,173,226,0.18)}
+.skin-url-set:hover{background:var(--accent-soft)}
 
 /* === Skins tab — 2026-05-15 extension. Library / sets / random pool /
    upload hint. Square corners and stacked card layout, mirroring the
@@ -931,8 +892,8 @@ html,body{
 .skin-hint{
   font-size:11px;color:#cfd5e3;line-height:1.55;
   padding:9px 10px;
-  background:linear-gradient(180deg, rgba(245,166,35,0.10), rgba(190,128,30,0.06));
-  border:1px solid rgba(245,166,35,0.32);
+  background:linear-gradient(180deg, var(--warn-soft), rgba(190,128,30,0.06));
+  border:1px solid var(--warn-line);
   border-radius:0;
   margin-bottom:6px;
 }
@@ -941,7 +902,7 @@ html,body{
 .skin-sets{
   display:flex;flex-direction:column;gap:5px;
   padding:8px 10px;
-  background:rgba(0,0,0,0.18);
+  background:var(--bg-strong);
   border:1px solid var(--border);
   border-radius:0;
   margin-bottom:8px;
@@ -956,13 +917,13 @@ html,body{
 }
 .skin-sets .btn.small.skin-set-save{
   padding:3px 8px;font-size:11px;
-  background:rgba(93,173,226,0.16);
-  border:1px solid rgba(93,173,226,0.65);
+  background:var(--accent-soft);
+  border:1px solid var(--accent-line);
   color:var(--accent);font-weight:700;
   border-radius:0;
 }
 .skin-sets .btn.small.skin-set-save:hover{
-  background:rgba(93,173,226,0.26);
+  background:var(--accent-soft);
 }
 .skin-sets-empty{
   font-size:10.5px;color:var(--text-dim);padding:3px 0;
@@ -974,20 +935,20 @@ html,body{
   background:var(--bg-card);
   border:1px solid var(--border);
   border-radius:0;
-  font-size:11px;color:#cdd1de;
+  font-size:11px;color:var(--text);
   cursor:pointer;user-select:none;
   transition:background .12s, border-color .12s, color .12s;
 }
 .skin-set-chip:hover{
-  background:rgba(93,173,226,0.15);
-  border-color:rgba(93,173,226,0.45);
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
   color:var(--text);
 }
 .skin-set-chip .skin-set-name{font-weight:700}
 .skin-set-chip .skin-set-count{
   font-size:9.5px;color:var(--text-dim);
   font-family:ui-monospace,monospace;
-  padding:1px 5px;background:rgba(255,255,255,0.06);
+  padding:1px 5px;background:var(--tint);
   border-radius:0;
 }
 .skin-set-chip .skin-set-del{
@@ -1012,13 +973,13 @@ html,body{
   font-size:10.5px;color:var(--text-dim);
   cursor:pointer;user-select:none;
   padding:2px 8px;
-  background:rgba(255,255,255,0.04);
+  background:var(--tint);
   border:1px solid var(--border);
   border-radius:0;
   transition:background .12s, color .12s, border-color .12s;
 }
 .skin-random:hover{
-  background:rgba(255,255,255,0.08);color:var(--text);
+  background:var(--tint);color:var(--text);
 }
 .skin-random input{
   accent-color:var(--accent);margin:0;
@@ -1028,7 +989,7 @@ html,body{
 .skin-lib-strip{
   display:flex;flex-wrap:wrap;gap:4px;
   padding:5px;
-  background:rgba(0,0,0,0.20);
+  background:var(--bg-strong);
   border:1px solid var(--border);
   border-radius:0;
   min-height:42px;
@@ -1042,7 +1003,7 @@ html,body{
   position:relative;
   width:34px;height:34px;
   display:inline-flex;align-items:center;justify-content:center;
-  background:rgba(0,0,0,0.30);
+  background:var(--bg-strong);
   border:1px solid var(--border);
   border-radius:0;
   cursor:pointer;
@@ -1055,16 +1016,16 @@ html,body{
 }
 .skin-lib-chip:hover{
   border-color:var(--accent);
-  background:rgba(93,173,226,0.12);
+  background:var(--accent-soft);
 }
 .skin-lib-chip.on{
   border-color:var(--accent);
-  box-shadow:0 0 0 2px rgba(93,173,226,0.42) inset;
+  box-shadow:0 0 0 2px var(--accent-line) inset;
 }
 /* Default-skin chip — visually distinguished by a tiny corner dot so
    the user can spot "back to default" at a glance without reading. */
 .skin-lib-chip.default-chip{
-  background:rgba(255,255,255,0.04);
+  background:var(--tint);
 }
 .skin-lib-chip.default-chip::after{
   content:"";
@@ -1089,7 +1050,7 @@ html,body{
    square; if extraction fails, a 🎞 fallback marker is shown. */
 .skin-lib-thumb .webm-poster-pending{
   width:24px;height:24px;
-  background:rgba(255,255,255,0.06);
+  background:var(--tint);
   border-radius:3px;
 }
 .skin-lib-thumb .webm-fallback{
@@ -1097,7 +1058,7 @@ html,body{
   color:var(--text-dim);
   display:inline-flex;align-items:center;justify-content:center;
   width:24px;height:24px;
-  background:rgba(255,255,255,0.06);
+  background:var(--tint);
   border-radius:3px;
   user-select:none;
 }
@@ -1125,7 +1086,7 @@ html,body{
   color:#0b1320;font-weight:700;
 }
 .skin-url-set.primary:hover{
-  background:#7ec8f0;border-color:#7ec8f0;
+  background:var(--accent);border-color:var(--accent);
 }
 </style>
 </head>

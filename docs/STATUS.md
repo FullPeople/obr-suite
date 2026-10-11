@@ -1,3 +1,9 @@
+# 2026-10-11 · 开发版分支候选：全部弹窗统一样式、配色方案与 Lucide 图标（未部署）
+
+基于 `dev`。新增共享样式表 `src/styles/suite-ui.css` 与主题脚本，构建时注入每个弹窗页面：按钮一律居中、不再被裁切；卡片、列表行、页头、片、空状态统一；四套配色方案（夜航默认 / 石墨 / 羊皮纸 / 青瓷）在设置「界面」页选择，所有弹窗实时换色。图标全部改为 Lucide（`src/icons.ts` 由网站仓库脚本生成，静态页面内嵌副本同步替换，许可见 `THIRD-PARTY-NOTICES.md`，设置页脚标注）。重排：绑定角色卡、QQ 卡库、角色卡面板、棋子信息、设置、工作台入口、DM 公告与权限说明、资源追踪与编辑、骰子面板与历史、搜索、状态追踪、音乐板、图鉴与先攻。
+
+验证：`tsc`、`vite build`、`build-workbench-panels`、工作台 dev 包构建；自检 relay 19 / native-owner 27 / read-recovery 25 / monster-lifecycle 28 / permission-notice 16 / permission-panel 7 / qq-account-session 9 / qq-panel 10 / cloud-upload 9 / music 8 / bubbles 41；Playwright 在模拟宿主内对主要弹窗按夜航与羊皮纸两套方案截图核对。真实枭熊房间未现场验收。
+
 # 2026-10-11 · 开发版分支候选：对比度、按钮组、中继推送与两项修复（未部署）
 
 基于 `dev`（线上 1.0.282-dev 的源码线）。弹窗次要文字与描边加深到文字 4.5:1、组件边界 3:1（含 dev 新音乐板、公告与工作台入口），表情与零散符号统一为 `src/icons.ts` 的线性 SVG，多处下拉改为按钮组（`data-segmented`），设置页窄于 560px 时标签压缩；骰子、特效、气泡、设置页去掉串行 SDK 往返；工作台中继新增后台 WebSocket 推送，长轮询照常，升级被拒自动退回（`tools/deploy-workbench-relay-ws.py` 开启 nginx 升级）。

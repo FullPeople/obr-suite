@@ -10,7 +10,7 @@ html,body{
   overflow:hidden;
   background:transparent;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  color:#e6e8ee;
+  color:var(--text);
 }
 
 /* Fullscreen blocker — captures pointer events so the user can't
@@ -41,19 +41,19 @@ html,body{
   width:100%;height:100%;
   object-fit:contain;
   border-radius:50%;
-  border:2px solid rgba(93,173,226,0.95);
+  border:2px solid var(--accent-line);
   box-shadow:0 0 0 1px rgba(7,19,32,0.45),
-             0 0 22px rgba(93,173,226,0.55);
+             0 0 22px var(--accent-line);
   background:rgba(7,19,32,0.4);
 }
 .ghost-label{
   position:absolute;left:50%;top:100%;transform:translateX(-50%);
   margin-top:6px;
   background:rgba(7,19,32,0.78);
-  border:1px solid rgba(93,173,226,0.4);
+  border:1px solid var(--accent-line);
   border-radius:14px;
   padding:3px 9px;
-  font-size:10.5px;font-weight:700;color:#bfe2f5;
+  font-size:10.5px;font-weight:700;color:var(--accent);
   letter-spacing:0.4px;
   white-space:nowrap;
   text-shadow:0 1px 2px rgba(0,0,0,0.6);

@@ -1080,21 +1080,21 @@ function ensureStyles(): void {
   if (stylesInjected) return;
   stylesInjected = true;
   const css = `
-    .rt-empty, .rt-empty-msg { font-size:11.5px; color:#9aa0b3; padding:10px 6px; text-align:center }
+    .rt-empty, .rt-empty-msg { font-size:11.5px; color:var(--text-dim); padding:10px 6px; text-align:center }
     .rt-empty-state { display:flex; flex-direction:column; align-items:center; gap:8px; padding:14px 6px }
     .rt-add, .rt-add-first {
       height:28px; padding:0 14px; border-radius:6px;
-      background:rgba(46,204,113,0.18);
-      border:1px solid rgba(46,204,113,0.5);
-      color:#7eecaf; font-size:12px; cursor:pointer;
+      background:var(--success-soft);
+      border:1px solid var(--success-line);
+      color:var(--success); font-size:12px; cursor:pointer;
       font-family:inherit; font-weight:600;
     }
-    .rt-add:hover, .rt-add-first:hover { background:rgba(46,204,113,0.3); border-color:rgba(46,204,113,0.7) }
+    .rt-add:hover, .rt-add-first:hover { background:var(--success-line); border-color:var(--success-line) }
     .rt-add { display:block; margin:8px auto 0 }
     .rt-list { display:flex; flex-direction:column; gap:8px }
     .rt-row {
-      background:rgba(255,255,255,0.04);
-      border:1px solid rgba(255,255,255,0.08);
+      background:var(--tint);
+      border:1px solid var(--tint);
       border-radius:6px;
       padding:8px 10px;
       transition:background .12s, border-color .12s, transform .12s, opacity .12s;
@@ -1102,18 +1102,18 @@ function ensureStyles(): void {
     /* 2026-05-14 — drag-reorder visual feedback. */
     .rt-row.rt-dragging {
       opacity:0.35;
-      background:rgba(93,173,226,0.08);
-      border-color:rgba(93,173,226,0.45);
+      background:var(--accent-soft);
+      border-color:var(--accent-line);
     }
     .rt-row.rt-drop-above {
-      box-shadow:0 -3px 0 0 #5dade2 inset;
+      box-shadow:0 -3px 0 0 var(--accent) inset;
     }
     .rt-row.rt-drop-below {
-      box-shadow:0 3px 0 0 #5dade2 inset;
+      box-shadow:0 3px 0 0 var(--accent) inset;
     }
     .rt-row-grip {
       cursor:grab;
-      color:#9aa0b3;
+      color:var(--text-dim);
       font-size:14px;
       line-height:1;
       padding:2px 4px;
@@ -1121,17 +1121,17 @@ function ensureStyles(): void {
       user-select:none;
       transition:background .12s, color .12s;
     }
-    .rt-row-grip:hover { background:rgba(255,255,255,0.08); color:#e6e8ee }
+    .rt-row-grip:hover { background:var(--tint); color:var(--text) }
     .rt-row-grip:active { cursor:grabbing }
     .rt-row-head { display:flex; align-items:center; gap:8px; margin-bottom:6px }
-    .rt-row-name { flex:1; font-size:12px; font-weight:600; color:#e6e8ee; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
-    .rt-row-meta { font-size:11px; color:#9aa0b3; font-variant-numeric:tabular-nums; transition:color .18s }
+    .rt-row-name { flex:1; font-size:12px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+    .rt-row-meta { font-size:11px; color:var(--text-dim); font-variant-numeric:tabular-nums; transition:color .18s }
     .rt-row-edit {
-      background:none; border:none; cursor:pointer; color:#9aa0b3;
+      background:none; border:none; cursor:pointer; color:var(--text-dim);
       font-size:14px; padding:2px 4px; border-radius:4px;
       transition:background .12s, color .12s;
     }
-    .rt-row-edit:hover { background:rgba(255,255,255,0.08); color:#e6e8ee }
+    .rt-row-edit:hover { background:var(--tint); color:var(--text) }
     .rt-pills { display:flex; flex-wrap:wrap; gap:5px; align-items:center }
     .rt-pill-icon {
       display:inline-flex; align-items:center; justify-content:center;
@@ -1156,12 +1156,12 @@ function ensureStyles(): void {
       40%  { transform:scale(1.45); }
       100% { transform:scale(1); }
     }
-    .rt-pill-empty { font-size:11px; color:#9aa0b3; font-style:italic }
+    .rt-pill-empty { font-size:11px; color:var(--text-dim); font-style:italic }
 
     /* ===== 进度 (bar) — number-prefix label + draggable thumb ====== */
     .rt-bar-num {
       flex:0 0 auto;
-      font-size:11px; font-weight:700; color:#e6e8ee;
+      font-size:11px; font-weight:700; color:var(--text);
       font-variant-numeric:tabular-nums;
       letter-spacing:0.3px;
       padding:2px 6px;
@@ -1172,7 +1172,7 @@ function ensureStyles(): void {
       transition:background .12s, color .12s;
     }
     /* 2026-05-14 — click-to-edit hover state for bar number. */
-    .rt-bar-num:hover { background:rgba(93,173,226,0.15); color:#a3d1ec }
+    .rt-bar-num:hover { background:var(--accent-soft); color:var(--accent) }
     /* Inline expression input — replaces the static number when
        clicked. Sized to roughly the same width so the bar doesn't
        jump in layout. */
@@ -1181,8 +1181,8 @@ function ensureStyles(): void {
       min-width:64px;
       box-sizing:border-box;
       background:#1a1c24;
-      color:#e6e8ee;
-      border:1px solid #5dade2;
+      color:var(--text);
+      border:1px solid var(--accent);
       border-radius:4px;
       padding:2px 4px;
       font-family:inherit;
@@ -1191,12 +1191,12 @@ function ensureStyles(): void {
       text-align:center;
       outline:none;
     }
-    .rt-value-input:focus { border-color:#7ec8f0; box-shadow:0 0 0 1px rgba(126,200,240,0.4) }
+    .rt-value-input:focus { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent-line) }
     .rt-bar {
       flex:1; min-width:80px;
       height:22px;
-      background:rgba(255,255,255,0.06);
-      border:1px solid rgba(255,255,255,0.10);
+      background:var(--tint);
+      border:1px solid var(--border);
       border-radius:11px; position:relative;
       cursor:grab; user-select:none;
       touch-action:none;
@@ -1205,7 +1205,7 @@ function ensureStyles(): void {
     .rt-bar-fill {
       position:absolute; inset:0 auto 0 0;
       border-radius:11px 0 0 11px;
-      background:linear-gradient(90deg, #16a34a, #4ade80);
+      background:linear-gradient(90deg, var(--success), var(--success));
       pointer-events:none;
     }
     .rt-bar-thumb {
@@ -1213,11 +1213,11 @@ function ensureStyles(): void {
       width:26px; height:26px;
       transform:translate(-50%, -50%);
       display:inline-flex; align-items:center; justify-content:center;
-      background:#1f2230;
-      border:2px solid #4ade80;
+      background:var(--bg);
+      border:2px solid var(--success);
       border-radius:50%;
-      box-shadow:0 2px 6px rgba(0,0,0,0.4);
-      color:#e6e8ee;
+      box-shadow:0 2px 6px var(--shadow);
+      color:var(--text);
       pointer-events:none;
       z-index:1;
     }
@@ -1245,10 +1245,10 @@ function ensureStyles(): void {
        (min) or max on click. */
     .rt-num-end {
       min-width:28px; height:24px;
-      background:rgba(255,255,255,0.04);
-      border:1px solid rgba(255,255,255,0.10);
+      background:var(--tint);
+      border:1px solid var(--border);
       border-radius:6px;
-      color:#cbd5e1;
+      color:var(--text);
       font-size:11px; font-weight:700;
       font-family:inherit;
       font-variant-numeric:tabular-nums;
@@ -1258,24 +1258,24 @@ function ensureStyles(): void {
       transition:background .12s, border-color .12s, color .12s, transform .12s;
     }
     .rt-num-end:hover {
-      background:rgba(93,173,226,0.15);
-      border-color:rgba(93,173,226,0.45);
-      color:#7ec8f0;
+      background:var(--accent-soft);
+      border-color:var(--accent-line);
+      color:var(--accent);
     }
     .rt-num-end:active { transform:scale(0.94) }
     .rt-num-step {
       width:24px; height:24px;
-      background:rgba(255,255,255,0.06);
-      border:1px solid rgba(255,255,255,0.12);
+      background:var(--tint);
+      border:1px solid var(--border);
       border-radius:6px;
-      color:#e6e8ee;
+      color:var(--text);
       font-size:14px; font-weight:800; line-height:1;
       font-family:inherit;
       cursor:pointer;
       display:flex; align-items:center; justify-content:center;
       transition:background .12s, border-color .12s, transform .12s;
     }
-    .rt-num-step:hover { background:rgba(93,173,226,0.15); border-color:rgba(93,173,226,0.45); color:#7ec8f0 }
+    .rt-num-step:hover { background:var(--accent-soft); border-color:var(--accent-line); color:var(--accent) }
     .rt-num-step:active { transform:scale(0.94) }
     .rt-num-step.rt-pulse { animation: rt-pulse 0.22s ease-out }
     /* 2026-05-12 — orb redesign per user feedback. The previous round
@@ -1298,7 +1298,7 @@ function ensureStyles(): void {
     .rt-num-orb-icon {
       position:absolute; inset:0;
       display:flex; align-items:center; justify-content:center;
-      color:#cbd5e1;
+      color:var(--text);
     }
     .rt-num-orb-icon svg { width:38px; height:38px; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.65)) }
     /* Number overlay — pure layered-shadow stroke. Eight 1-px solid

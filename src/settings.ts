@@ -27,7 +27,8 @@ import { applyLangAttr } from "./i18n";
 // settings for any other reason.
 import type { ExportProgress } from "./modules/worldPack/exporter";
 import type { ImportProgress } from "./modules/worldPack/importer";
-import { ICONS } from "./icons";
+import { ICONS, ICON_CREDIT } from "./icons";
+import { renderThemePicker, bindThemePicker } from "./utils/suiteTheme";
 import { assetUrl } from "./asset-base";
 import { STABLE_HIDES } from "./feature-flags";
 import {
@@ -248,13 +249,13 @@ const SUPPORT: BilingualHtml = {
         <img class="qr-thumb" src="${assetUrl("zfb.jpg")}" alt="支付宝" loading="lazy">
       </span>
     </div>
-    <p style="font-size:11px;color:#9aa0b3;margin-top:-2px">赞助过的朋友请把你们的 cn + 头像/立绘发送到我的邮箱 <a href="mailto:${EMAIL}">${EMAIL}</a>，会更新到弹幕之中！</p>
+    <p style="font-size:11px;color:var(--text-dim);margin-top:-2px">赞助过的朋友请把你们的 cn + 头像/立绘发送到我的邮箱 <a href="mailto:${EMAIL}">${EMAIL}</a>，会更新到弹幕之中！</p>
     <h3>${ICONS.heart} 鸣谢</h3>
     <div class="thanks-call-to-action">
       <p><b>朋友们！感谢支持。</b> 套件现在已经是一套相当完整的工具了 —— 骰子、先攻、怪物图鉴、人物卡、动态迷雾、传送门、状态追踪…… 枭熊原生能力允许的范围，基本都做进来了，并且仍在持续打磨和修复。</p>
       <p>你们的名字正在窗外飘动 —— 想让自己的<b>头像 / 角色立绘 / 方头立绘</b>挂在名字前面吗？请把图片发到我邮箱：</p>
       <p style="margin-top:6px"><a href="mailto:${EMAIL}"><code>${EMAIL}</code></a></p>
-      <p style="font-size:11px;color:#9aa0b3;margin-top:6px">我会不定期统一收集并合入名字前。无所谓尺寸，PNG / JPG / SVG 都可以，请使用透明背景方形或圆形立绘。如果可以请尽可能避免 AI 创作。</p>
+      <p style="font-size:11px;color:var(--text-dim);margin-top:6px">我会不定期统一收集并合入名字前。无所谓尺寸，PNG / JPG / SVG 都可以，请使用透明背景方形或圆形立绘。如果可以请尽可能避免 AI 创作。</p>
     </div>
     <h3>${ICONS.mail} 反馈</h3>
     <div class="contact-box">
@@ -275,13 +276,13 @@ const SUPPORT: BilingualHtml = {
         <img class="qr-thumb" src="${assetUrl("zfb.jpg")}" alt="Alipay" loading="lazy">
       </span>
     </div>
-    <p style="font-size:11px;color:#9aa0b3;margin-top:-2px">WeChat / Alipay also works for CN supporters — leave a nickname in the tip note to get listed in the wall behind this panel.</p>
+    <p style="font-size:11px;color:var(--text-dim);margin-top:-2px">WeChat / Alipay also works for CN supporters — leave a nickname in the tip note to get listed in the wall behind this panel.</p>
     <h3>${ICONS.heart} Thanks</h3>
     <div class="thanks-call-to-action">
       <p>The suite is a fairly complete toolkit at this point — dice, initiative, bestiary, character cards, dynamic fog, portals, status tracking — just about everything Owlbear's own plugin surface allows, and still being polished.</p>
-      <p><b>Everyone who chipped in ❤</b> your names are drifting around behind this panel. Want your <b>avatar / character portrait / square headshot</b> shown beside your name? Email me a picture:</p>
+      <p><b>Everyone who chipped in ${ICONS.heart}</b> your names are drifting around behind this panel. Want your <b>avatar / character portrait / square headshot</b> shown beside your name? Email me a picture:</p>
       <p style="margin-top:6px"><a href="mailto:${EMAIL}"><code>${EMAIL}</code></a></p>
-      <p style="font-size:11px;color:#9aa0b3;margin-top:6px">I batch them in from time to time. Any size, PNG / JPG / SVG works — square transparent backgrounds or vertical portraits look best.</p>
+      <p style="font-size:11px;color:var(--text-dim);margin-top:6px">I batch them in from time to time. Any size, PNG / JPG / SVG works — square transparent backgrounds or vertical portraits look best.</p>
     </div>
     <h3>${ICONS.mail} Feedback</h3>
     <div class="contact-box">
@@ -349,8 +350,8 @@ const BESTIARY_DESC: BilingualHtml = {
 </ul>`,
 };
 const CHARCARD_DESC: BilingualHtml = {
-  zh: `<p>在车卡网站编辑角色，导出<b>完整 JSON 备份</b>，再上传到插件。网站与枭熊共用一种 JSON，旧枭熊 JSON 仍可导入。</p><ul><li>通过「角色卡界面」或 CapsLock 打开五页阅读器。</li><li>拖入 JSON / XLSX 或点击上传；卡旁 ↻ 可用新文件更新。</li><li>旧插件提供角色阅读与棋子绑定；编辑角色请前往车卡网站。</li><li>暂时恢复原 2014 / 2024 悲灵角色卡 XLSX 导入；不支持 .xls。</li></ul>`,
-  en: `<p>Create and edit a character on the website, then upload its <b>complete JSON backup</b>. The website and Owlbear share one format; legacy Owlbear JSON is still accepted.</p><ul><li>Open the five-page reader from Character Cards or CapsLock.</li><li>Drop or upload JSON / XLSX; use ↻ to update it from a new file.</li><li>Edit characters on the website. XLSX import is temporarily restored for the supported 2014 / 2024 Chinese sheet templates; .xls is not supported.</li></ul>`,
+  zh: `<p>在车卡网站编辑角色，导出<b>完整 JSON 备份</b>，再上传到插件。网站与枭熊共用一种 JSON，旧枭熊 JSON 仍可导入。</p><ul><li>通过「角色卡界面」或 CapsLock 打开五页阅读器。</li><li>拖入 JSON / XLSX 或点击上传；卡旁的「刷新」可用新文件更新。</li><li>旧插件提供角色阅读与棋子绑定；编辑角色请前往车卡网站。</li><li>暂时恢复原 2014 / 2024 悲灵角色卡 XLSX 导入；不支持 .xls。</li></ul>`,
+  en: `<p>Create and edit a character on the website, then upload its <b>complete JSON backup</b>. The website and Owlbear share one format; legacy Owlbear JSON is still accepted.</p><ul><li>Open the five-page reader from Character Cards or CapsLock.</li><li>Drop or upload JSON / XLSX; use the Refresh button to update it from a new file.</li><li>Edit characters on the website. XLSX import is temporarily restored for the supported 2014 / 2024 Chinese sheet templates; .xls is not supported.</li></ul>`,
 };
 const INITIATIVE_DESC: BilingualHtml = {
   zh: `<p>顶部居中的横向先攻条，覆盖完整 D&amp;D 战斗流程。</p>
@@ -426,8 +427,8 @@ const DICE_DESC: BilingualHtml = {
 
 <p><b>音效</b>：用 Web Audio API 实时合成（无需下载素材）。 抛物线 / 缩放冲击 / 数字飞行 / 旋转 / 爆炸 / 同值钟铃 / 大成功大失败闪光 / 同步视野 / 切换回合"登"声。可在 <b>基础设置</b> 里关闭，本地保存（每个玩家独立）。</p>
 
-<p style="font-size:11px;color:#9aa0b3;margin-top:10px">骰子图标来源：<a href="https://www.flaticon.com/" target="_blank" rel="noopener">flaticon</a> · 作者 <a href="https://www.flaticon.com/authors/freepik" target="_blank" rel="noopener">Freepik</a></p>
-<p style="font-size:11px;color:#9aa0b3;margin-top:4px">骰子音效：Sound Effect by <a href="https://pixabay.com/users/freesound_community-46691455/" target="_blank" rel="noopener">freesound_community</a> and ksjsbwuil from <a href="https://pixabay.com/" target="_blank" rel="noopener">Pixabay</a></p>`,
+<p style="font-size:11px;color:var(--text-dim);margin-top:10px">骰子图标来源：<a href="https://www.flaticon.com/" target="_blank" rel="noopener">flaticon</a> · 作者 <a href="https://www.flaticon.com/authors/freepik" target="_blank" rel="noopener">Freepik</a></p>
+<p style="font-size:11px;color:var(--text-dim);margin-top:4px">骰子音效：Sound Effect by <a href="https://pixabay.com/users/freesound_community-46691455/" target="_blank" rel="noopener">freesound_community</a> and ksjsbwuil from <a href="https://pixabay.com/" target="_blank" rel="noopener">Pixabay</a></p>`,
   en: `<p>Full tactical-dice system: expressions / multi-target / history / replay / SFX. Click the OBR action button at the top-left (<b>d20 icon</b>) to open the main panel.</p>
 
 <details class="rules-collapse">
@@ -481,8 +482,8 @@ const DICE_DESC: BilingualHtml = {
 
 <p><b>Sound effects</b>: synthesized live via Web Audio API (no asset downloads). Parabola / scale punch / number fly / spin / burst / same chime / crit-fail flashes / sync-viewport / next-turn 登. Toggle in <b>Basics</b> tab; saved locally (per-player).</p>
 
-<p style="font-size:11px;color:#9aa0b3;margin-top:10px">Dice icon: <a href="https://www.flaticon.com/" target="_blank" rel="noopener">flaticon</a> · by <a href="https://www.flaticon.com/authors/freepik" target="_blank" rel="noopener">Freepik</a></p>
-<p style="font-size:11px;color:#9aa0b3;margin-top:4px">Dice SFX: Sound Effect by <a href="https://pixabay.com/users/freesound_community-46691455/" target="_blank" rel="noopener">freesound_community</a> and ksjsbwuil from <a href="https://pixabay.com/" target="_blank" rel="noopener">Pixabay</a></p>`,
+<p style="font-size:11px;color:var(--text-dim);margin-top:10px">Dice icon: <a href="https://www.flaticon.com/" target="_blank" rel="noopener">flaticon</a> · by <a href="https://www.flaticon.com/authors/freepik" target="_blank" rel="noopener">Freepik</a></p>
+<p style="font-size:11px;color:var(--text-dim);margin-top:4px">Dice SFX: Sound Effect by <a href="https://pixabay.com/users/freesound_community-46691455/" target="_blank" rel="noopener">freesound_community</a> and ksjsbwuil from <a href="https://pixabay.com/" target="_blank" rel="noopener">Pixabay</a></p>`,
 };
 const CIRCLEIMAGE_DESC: BilingualHtml = {
   zh: `<p>左侧 tool 栏的「<b>圆形图片 / 去底</b>」是个<b>本地图片处理 + 上传到 OBR 资源库</b>的小工具，做<b>圆形头像 / 临时 token / 去白底立绘</b>等场景标记很方便。</p>
@@ -493,7 +494,7 @@ const CIRCLEIMAGE_DESC: BilingualHtml = {
 </ul>
 <p><b>导入</b>：弹窗里 <b>拖图 / 点击选择 / Ctrl+V 粘贴</b>，支持 JPG / PNG / WebP / SVG，最大 10 MB。</p>
 <p><b>用法</b>：调好后点底部绿色「<b>添加到资源库</b>」按钮 → 图片自动上传到你的 OBR 资源库 → 之后从 OBR 自带的资源库面板<b>拖到场景</b>使用（跟你导入任何其他图片到 OBR 是同一个流程）。<b>不会出现在玩家的资源库里</b>——是你账号下的私人资源。</p>
-<p style="font-size:11px;color:#9aa0b3;margin-top:8px"><em>为什么不直接拖到场景？因为 OBR 的 Image item 不收 data URL，本地图片只能走 OBR 资源库这一条路。如果以后 OBR 开放直拖 API 了，会改回原来的"拖到指定位置"的体验。</em></p>`,
+<p style="font-size:11px;color:var(--text-dim);margin-top:8px"><em>为什么不直接拖到场景？因为 OBR 的 Image item 不收 data URL，本地图片只能走 OBR 资源库这一条路。如果以后 OBR 开放直拖 API 了，会改回原来的"拖到指定位置"的体验。</em></p>`,
   en: `<p>The <b>Circle Image / BG Remove</b> tool on the left rail is a tiny <b>local image processor that uploads to your OBR asset library</b>. Useful for making circular avatars, ad-hoc tokens, or stripping white backgrounds off character portraits.</p>
 <p><b>Two modes</b> (switch via the tabs at the top):</p>
 <ul>
@@ -502,7 +503,7 @@ const CIRCLEIMAGE_DESC: BilingualHtml = {
 </ul>
 <p><b>Import</b>: in the popover, <b>drop / click / paste</b> (Ctrl+V) an image. JPG / PNG / WebP / SVG up to 10 MB.</p>
 <p><b>Use</b>: click the green <b>"Add to Library"</b> button at the bottom → the image uploads to your OBR asset library → drag from there to your scene with OBR's normal library-drag gesture (same flow as importing any other image to OBR). The asset is private to your account, not visible to players' libraries.</p>
-<p style="font-size:11px;color:#9aa0b3;margin-top:8px"><em>Why not drop straight onto the canvas? OBR's Image items don't accept data URLs in <code>image.url</code>; locally-generated images have to go through the asset library. If OBR ever exposes a direct-blob spawn API we'll restore the original drag-to-position UX.</em></p>`,
+<p style="font-size:11px;color:var(--text-dim);margin-top:8px"><em>Why not drop straight onto the canvas? OBR's Image items don't accept data URLs in <code>image.url</code>; locally-generated images have to go through the asset library. If OBR ever exposes a direct-blob spawn API we'll restore the original drag-to-position UX.</em></p>`,
 };
 const FOLLOW_DESC: BilingualHtml = {
   zh: `<p>左侧 tool 栏的「<b>跟随</b>」工具用来给一个 token 绑定<b>自动跟随</b>另一个 token 的关系。<b>DM 限定</b>。</p>
@@ -1748,9 +1749,9 @@ function wireLibrariesBody(root: HTMLElement): void {
       try {
         navigator.clipboard.writeText(ta.value).catch(() => document.execCommand("copy"));
       } catch { document.execCommand("copy"); }
-      const old = btn.textContent;
-      btn.textContent = getLocalLang() === "zh" ? "已复制 ✓" : "Copied ✓";
-      setTimeout(() => { btn.textContent = old; }, 1200);
+      const old = btn.innerHTML;
+      btn.innerHTML = `${ICONS.check} ${getLocalLang() === "zh" ? "已复制" : "Copied"}`;
+      setTimeout(() => { btn.innerHTML = old; }, 1200);
     });
   };
   wirePromptCopy(".lib-prompt-copy", ".lib-prompt");
@@ -1850,7 +1851,7 @@ function wireLibrariesBody(root: HTMLElement): void {
         if (!r.sub) {
           window.alert(`${getLocalLang() === "zh" ? "订阅失败：" : "Subscribe failed: "}${r.error}`);
         } else {
-          window.alert(`${getLocalLang() === "zh" ? "首次拉取失败（已加入订阅，稍后可点 🔄 重试）：" : "First fetch failed (subscription saved — click 🔄 to retry): "}${r.error}`);
+          window.alert(`${getLocalLang() === "zh" ? "首次拉取失败（已加入订阅，稍后可点「刷新」重试）：" : "First fetch failed (subscription saved — click Refresh to retry): "}${r.error}`);
         }
       } else {
         subInput.value = "";
@@ -1993,6 +1994,27 @@ function wireLibrariesBody(root: HTMLElement): void {
       renderContent();
     });
   });
+}
+
+// 界面 tab — colour presets are per-client (localStorage), never scene data.
+function renderAppearanceBody(lang: Language): string {
+  const zh = lang === "zh";
+  return `
+    <div class="panel-section">
+      <h3>${ICONS.palette} ${zh ? "配色方案" : "Colour scheme"}</h3>
+      <p class="section-hint">${zh
+        ? "点一张卡片即可切换。插件的所有弹窗、面板和设置页会立刻换色；只影响你自己的浏览器，不会同步给其他玩家。"
+        : "Click a card to switch. Every popover, panel and settings page recolours at once; stored in this browser only, other players keep their own choice."}</p>
+      ${renderThemePicker(lang)}
+    </div>
+    <div class="panel-section">
+      <h3>${ICONS.sparkles} ${zh ? "界面约定" : "Interface conventions"}</h3>
+      <ul class="plain-list">
+        <li>${zh ? "填色按钮是主要操作；红色描边按钮会删除或解绑，并与其他按钮分开放置。" : "Filled buttons are the main action; red-outlined buttons delete or unbind and sit apart from the rest."}</li>
+        <li>${zh ? "空列表会直接写明下一步该做什么。" : "Empty lists say what to do next."}</li>
+      </ul>
+    </div>
+    <p class="settings-credit">${ICON_CREDIT}</p>`;
 }
 
 const TABS: TabDef[] = [
@@ -2251,6 +2273,13 @@ const TABS: TabDef[] = [
           }
         });
     },
+  },
+  {
+    id: "appearance",
+    zh: `${ICONS.palette} 界面`,
+    en: `${ICONS.palette} Appearance`,
+    dynamicBody: (lang) => renderAppearanceBody(lang),
+    afterRender: (root) => bindThemePicker(root),
   },
   {
     id: "libraries",
@@ -2814,7 +2843,7 @@ const TABS: TabDef[] = [
           <input type="range" min="0.5" max="2" step="0.05" value="${bubbleScale}"
                  data-key="bubblesScale"
                  style="flex:1 1 auto;align-self:center;max-width:160px"/>
-          <span data-key="bubblesScaleVal" style="flex:0 0 50px;text-align:right;color:#9aa0b3;font-size:11px;font-variant-numeric:tabular-nums">${bubbleScale.toFixed(2)}×</span>
+          <span data-key="bubblesScaleVal" style="flex:0 0 50px;text-align:right;color:var(--text-dim);font-size:11px;font-variant-numeric:tabular-nums">${bubbleScale.toFixed(2)}×</span>
         </div>
         <div class="row" data-settings-line>
           <div class="lbl">
@@ -2825,7 +2854,7 @@ const TABS: TabDef[] = [
                  data-key="bubblesVerticalOffset" data-settings-draft="bubblesVerticalOffset"
                  ${(offsetByText || !isGM) ? "disabled" : ""}
                  style="flex:0 0 80px;align-self:center;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:3px 6px;color:#fff;font:inherit;text-align:right${(offsetByText || !isGM) ? ";opacity:0.45" : ""}"/>
-          <span style="flex:0 0 28px;text-align:right;color:#9aa0b3;font-size:11px">px</span>
+          <span style="flex:0 0 28px;text-align:right;color:var(--text-dim);font-size:11px">px</span>
         </div>
         <div class="row">
           <div class="lbl">
@@ -2900,7 +2929,7 @@ const TABS: TabDef[] = [
                  data-key="bubblesPlayerThreshold" data-settings-draft="bubblesPlayerThreshold"
                  ${isGM ? "" : "disabled"}
                  style="flex:0 0 80px;align-self:center;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:3px 6px;color:#fff;font:inherit;text-align:right"/>
-          <span style="flex:0 0 28px;text-align:right;color:#9aa0b3;font-size:11px">%</span>
+          <span style="flex:0 0 28px;text-align:right;color:var(--text-dim);font-size:11px">%</span>
         </div>
         ${isGM ? `
         <h3 style="margin-top:14px">${lang === "zh" ? "维护" : "Maintenance"}</h3>
@@ -3337,24 +3366,24 @@ const TABS: TabDef[] = [
                     border:1px solid rgba(231,76,60,0.55);
                     font-size:12.5px;line-height:1.7">
           ${isZh
-            ? `<div style="color:#e74c3c;font-weight:700;font-size:13px;margin-bottom:4px">⚠️ 关键提示：图片为<u>直接引用</u>，不复制</div>
+            ? `<div style="color:var(--danger);font-weight:700;font-size:13px;margin-bottom:4px">${ICONS.warning} 关键提示：图片为<u>直接引用</u>，不复制</div>
                <div style="color:var(--text)">
-                 .fobr 里所有图片（地图 / token / 立绘）都是 <b style="color:#f5a623">直接引用世界包制作者的 OBR 图床 URL</b>，<b style="color:#f5a623">不会复制图片本身</b>。这意味着：
+                 .fobr 里所有图片（地图 / token / 立绘）都是 <b style="color:var(--warn)">直接引用世界包制作者的 OBR 图床 URL</b>，<b style="color:var(--warn)">不会复制图片本身</b>。这意味着：
                  <ul style="margin:6px 0 0 22px">
-                   <li><b style="color:#e74c3c">高度绑定</b>：玩家加载这个 .fobr 时，浏览器会去抓<b>制作者的 OBR 图片库</b>。</li>
-                   <li><b style="color:#e74c3c">不可替代</b>：制作者一旦在自己 OBR 库里<b>删掉、替换、改名</b>这些图片，所有人导入时<b>对应物体的图片就会缺失（404 / 占位）</b>。</li>
-                   <li><b style="color:#f5a623">建议</b>：作为世界包制作者，请把这个 .fobr 用到的所有图片<b>单独存一份"不可改动"的资源</b>在你的 OBR 库里。</li>
-                   <li><b style="color:#f5a623">建议</b>：作为玩家，请<b>先确认从可信来源拿到的 .fobr</b>，再导入。</li>
+                   <li><b style="color:var(--danger)">高度绑定</b>：玩家加载这个 .fobr 时，浏览器会去抓<b>制作者的 OBR 图片库</b>。</li>
+                   <li><b style="color:var(--danger)">不可替代</b>：制作者一旦在自己 OBR 库里<b>删掉、替换、改名</b>这些图片，所有人导入时<b>对应物体的图片就会缺失（404 / 占位）</b>。</li>
+                   <li><b style="color:var(--warn)">建议</b>：作为世界包制作者，请把这个 .fobr 用到的所有图片<b>单独存一份"不可改动"的资源</b>在你的 OBR 库里。</li>
+                   <li><b style="color:var(--warn)">建议</b>：作为玩家，请<b>先确认从可信来源拿到的 .fobr</b>，再导入。</li>
                  </ul>
                </div>`
-            : `<div style="color:#e74c3c;font-weight:700;font-size:13px;margin-bottom:4px">⚠️ Critical: images are <u>referenced</u>, not copied</div>
+            : `<div style="color:var(--danger);font-weight:700;font-size:13px;margin-bottom:4px">${ICONS.warning} Critical: images are <u>referenced</u>, not copied</div>
                <div style="color:var(--text)">
-                 Every image in a .fobr (maps / tokens / portraits) is a <b style="color:#f5a623">direct URL reference into the creator's OBR asset library</b>; the bytes are <b style="color:#f5a623">never copied</b>. This means:
+                 Every image in a .fobr (maps / tokens / portraits) is a <b style="color:var(--warn)">direct URL reference into the creator's OBR asset library</b>; the bytes are <b style="color:var(--warn)">never copied</b>. This means:
                  <ul style="margin:6px 0 0 22px">
-                   <li><b style="color:#e74c3c">Tight binding</b>: when a player loads the .fobr, their browser fetches images straight from the <b>creator's OBR library</b>.</li>
-                   <li><b style="color:#e74c3c">Irreplaceable</b>: if the creator <b>deletes, replaces or renames</b> any of those images, every imported scene loses the corresponding asset (404 / fallback).</li>
-                   <li><b style="color:#f5a623">For creators</b>: keep an "untouchable" copy of every asset used by your .fobr in your OBR library.</li>
-                   <li><b style="color:#f5a623">For players</b>: only import .fobr files from sources you trust.</li>
+                   <li><b style="color:var(--danger)">Tight binding</b>: when a player loads the .fobr, their browser fetches images straight from the <b>creator's OBR library</b>.</li>
+                   <li><b style="color:var(--danger)">Irreplaceable</b>: if the creator <b>deletes, replaces or renames</b> any of those images, every imported scene loses the corresponding asset (404 / fallback).</li>
+                   <li><b style="color:var(--warn)">For creators</b>: keep an "untouchable" copy of every asset used by your .fobr in your OBR library.</li>
+                   <li><b style="color:var(--warn)">For players</b>: only import .fobr files from sources you trust.</li>
                  </ul>
                </div>`}
         </div>`;
@@ -3402,8 +3431,8 @@ const TABS: TabDef[] = [
             <div class="lbl">
               ${isZh ? "同时应用房间元数据" : "Also apply room metadata"}
               <div class="desc">${isZh
-                ? "仅当 .fobr 含房间元数据时有效。开启会写回<b>跨 scene 的房间数据</b>（人物卡列表、套件设置等），<b style=\"color:#f5a623\">可能覆盖你当前房间的偏好</b>，不确定就别开。"
-                : "Only effective when the .fobr contains room metadata. When ON, writes the <b>cross-scene room data</b> back (character-card list, suite settings…); <b style=\"color:#f5a623\">may overwrite your current room preferences</b>, keep OFF if unsure."}</div>
+                ? "仅当 .fobr 含房间元数据时有效。开启会写回<b>跨 scene 的房间数据</b>（人物卡列表、套件设置等），<b style=\"color:var(--warn)\">可能覆盖你当前房间的偏好</b>，不确定就别开。"
+                : "Only effective when the .fobr contains room metadata. When ON, writes the <b>cross-scene room data</b> back (character-card list, suite settings…); <b style=\"color:var(--warn)\">may overwrite your current room preferences</b>, keep OFF if unsure."}</div>
             </div>
             <button class="tog" id="wp-import-room" type="button" aria-pressed="false"></button>
           </div>
@@ -3445,7 +3474,7 @@ const TABS: TabDef[] = [
       });
 
       const progEl = root.querySelector("#wp-progress") as HTMLDivElement | null;
-      const writeProg = (msg: string) => { if (progEl) progEl.textContent = msg; };
+      const writeProg = (msg: string, icon?: string) => { if (!progEl) return; progEl.textContent = msg; if (icon) progEl.insertAdjacentHTML("afterbegin", icon + " "); };
 
       const exportBtn = root.querySelector<HTMLButtonElement>("#wp-btn-export");
       exportBtn?.addEventListener("click", async () => {
@@ -3477,18 +3506,19 @@ const TABS: TabDef[] = [
           downloadBlob(result.blob, result.filename);
           const sizeMb = (result.blob.size / 1024 / 1024).toFixed(2);
           writeProg(
-            `✅ 已下载 ${result.filename}（${sizeMb} MB · ${result.manifest.meta.stats.items} items · ${result.manifest.meta.stats.embeddedImages} 张图嵌入）`,
+            `已下载 ${result.filename}（${sizeMb} MB · ${result.manifest.meta.stats.items} items · ${result.manifest.meta.stats.embeddedImages} 张图嵌入）`,
+            ICONS.checkCircle,
           );
         } catch (e) {
           console.error("[worldPack] export failed", e);
-          writeProg("❌ 导出失败 — 详见控制台");
+          writeProg("导出失败 — 详见控制台", ICONS.xCircle);
         } finally {
           exportBtn.disabled = false;
         }
       });
 
       const impProgEl = root.querySelector("#wp-import-progress") as HTMLDivElement | null;
-      const writeImpProg = (msg: string) => { if (impProgEl) impProgEl.textContent = msg; };
+      const writeImpProg = (msg: string, icon?: string) => { if (!impProgEl) return; impProgEl.textContent = msg; if (icon) impProgEl.insertAdjacentHTML("afterbegin", icon + " "); };
 
       const fileInput = root.querySelector<HTMLInputElement>("#wp-file");
       const importBtn = root.querySelector<HTMLButtonElement>("#wp-btn-import");
@@ -3519,11 +3549,12 @@ const TABS: TabDef[] = [
             },
           });
           writeImpProg(
-            `✅ 已导入 ${result.applied} 个 item（场景：${result.manifest.meta.sceneName ?? "(无名)"}，导出于 ${new Date(result.manifest.meta.exportedAt).toLocaleString()})`,
+            `已导入 ${result.applied} 个 item（场景：${result.manifest.meta.sceneName ?? "(无名)"}，导出于 ${new Date(result.manifest.meta.exportedAt).toLocaleString()})`,
+            ICONS.checkCircle,
           );
         } catch (e) {
           console.error("[worldPack] import failed", e);
-          writeImpProg(`❌ 导入失败：${(e as Error).message}`);
+          writeImpProg(`导入失败：${(e as Error).message}`, ICONS.xCircle);
         } finally {
           importBtn!.disabled = false;
           fileInput.value = ""; // allow re-picking same file

@@ -6,15 +6,15 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:rgba(31,34,48,0.95);
+  --bg:var(--suite-bg,#292d3c);
   --bg-soft:rgba(38,42,58,0.95);
-  --border:rgba(255,255,255,0.24);
-  --border-strong:rgba(255,255,255,0.36);
-  --text:#e6e8ee;
-  --text-dim:#aab0c2;
-  --accent:#5dade2;
-  --accent-on:#7ec8f0;
-  --green:#7be0a0;
+  --border:var(--suite-border,rgba(255,255,255,0.24));
+  --border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --text:var(--suite-text,#e6e8ee);
+  --text-dim:var(--suite-text-dim,#aab0c2);
+  --accent:var(--suite-accent,#5dade2);
+  --accent-on:var(--accent);
+  --green:var(--success);
 }
 html,body{
   height:100%;width:100%;overflow:hidden;
@@ -31,7 +31,7 @@ html,body{
   background:var(--bg);
   border:1px solid var(--border-strong);
   border-radius:16px;
-  box-shadow:0 8px 24px rgba(0,0,0,0.55);
+  box-shadow:0 8px 24px var(--shadow);
   display:flex;flex-direction:column;
   overflow:hidden;
 }
@@ -83,8 +83,8 @@ html,body{
   -webkit-touch-callout:none;
 }
 .btn:hover{
-  background:rgba(93,173,226,0.18);
-  border-color:rgba(93,173,226,0.45);
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
 }
 .btn:active{transform:scale(0.96)}
 .btn .ab{
@@ -103,21 +103,21 @@ html,body{
    landed (the actual dice play out on canvas, but the popover stays
    open and we want a tiny ack here too). */
 .btn.flash{
-  background:rgba(46,204,113,0.30);
-  border-color:rgba(46,204,113,0.65);
+  background:var(--success-line);
+  border-color:var(--success-line);
 }
 /* Initiative-variant buttons get adv-green / dis-red accents so they
    read as "advantage" / "disadvantage" without needing extra
    wording. Normal stays neutral. */
-.btn.init-btn.adv .ab{color:#7be0a0}
+.btn.init-btn.adv .ab{color:var(--success)}
 .btn.init-btn.adv:hover{
-  background:rgba(46,204,113,0.16);
-  border-color:rgba(46,204,113,0.45);
+  background:var(--success-soft);
+  border-color:var(--success-line);
 }
-.btn.init-btn.dis .ab{color:#ff8b7a}
+.btn.init-btn.dis .ab{color:var(--danger)}
 .btn.init-btn.dis:hover{
-  background:rgba(231,76,60,0.16);
-  border-color:rgba(231,76,60,0.45);
+  background:var(--danger-soft);
+  border-color:var(--danger-line);
 }
 
 /* HP edit row — sits below the save row in `save` mode. Input takes
@@ -130,7 +130,7 @@ html,body{
 }
 .row-hp .hp-field{
   flex:0 0 74px;
-  background:rgba(0,0,0,0.32);
+  background:var(--bg-strong);
   border:1px solid var(--border);
   border-radius:8px;
   color:var(--text);
@@ -140,7 +140,7 @@ html,body{
 }
 .row-hp .hp-input{
   flex:0 0 56px;
-  background:rgba(0,0,0,0.32);
+  background:var(--bg-strong);
   border:1px solid var(--border);
   border-radius:8px;
   color:var(--text);
@@ -164,15 +164,15 @@ html,body{
   user-select:none;
 }
 .row-hp .hp-btn:active{transform:scale(0.96)}
-.row-hp .hp-btn.dmg{color:#ff8b7a}
-.row-hp .hp-btn.dmg:hover{background:rgba(231,76,60,0.16);border-color:rgba(231,76,60,0.45)}
-.row-hp .hp-btn.heal{color:#7be0a0}
-.row-hp .hp-btn.heal:hover{background:rgba(46,204,113,0.16);border-color:rgba(46,204,113,0.45)}
-.row-hp .hp-btn.set{color:#9ad9ff}
-.row-hp .hp-btn.set:hover{background:rgba(93,173,226,0.18);border-color:rgba(93,173,226,0.45)}
+.row-hp .hp-btn.dmg{color:var(--danger)}
+.row-hp .hp-btn.dmg:hover{background:var(--danger-soft);border-color:var(--danger-line)}
+.row-hp .hp-btn.heal{color:var(--success)}
+.row-hp .hp-btn.heal:hover{background:var(--success-soft);border-color:var(--success-line)}
+.row-hp .hp-btn.set{color:var(--accent)}
+.row-hp .hp-btn.set:hover{background:var(--accent-soft);border-color:var(--accent-line)}
 .row-hp .hp-btn.flash{
-  background:rgba(46,204,113,0.30);
-  border-color:rgba(46,204,113,0.65);
+  background:var(--success-line);
+  border-color:var(--success-line);
 }
 </style>
 </head>

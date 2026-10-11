@@ -27,8 +27,8 @@ html,body{
   transform:translateY(calc(-100% + var(--phase, 0%)));
   /* Soft inner shadow gives the lid edge depth + lash hint. */
   box-shadow:
-    inset 0 -3px 0 rgba(255,255,255,0.04),
-    0 4px 18px rgba(0,0,0,0.6),
+    inset 0 -3px 0 var(--tint),
+    0 4px 18px var(--shadow),
     0 0 26px rgba(167,139,250,0.18);
   background:linear-gradient(to bottom, #000 0%, #000 80%, #06030f 100%);
   transition:transform var(--blink-dur, 480ms) cubic-bezier(.55,.05,.45,1);
@@ -38,8 +38,8 @@ html,body{
   height:50%;
   transform:translateY(calc(100% - var(--phase, 0%)));
   box-shadow:
-    inset 0 3px 0 rgba(255,255,255,0.04),
-    0 -4px 18px rgba(0,0,0,0.6),
+    inset 0 3px 0 var(--tint),
+    0 -4px 18px var(--shadow),
     0 0 26px rgba(167,139,250,0.18);
   background:linear-gradient(to top, #000 0%, #000 80%, #06030f 100%);
   transition:transform var(--blink-dur, 480ms) cubic-bezier(.55,.05,.45,1);

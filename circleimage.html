@@ -6,10 +6,10 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#292d3c;--bg-strong:#1f2230;--bg-card:#323748;
-  --border:rgba(255,255,255,0.24);--border-strong:rgba(255,255,255,0.36);
-  --text:#e6e8ee;--text-dim:#aab0c2;
-  --accent:#5dade2;--accent-warm:#f5a623;--accent-red:#e74c3c;--accent-green:#2ecc71;
+  --bg:var(--suite-bg,#292d3c);--bg-strong:var(--suite-bg-strong,#1f2230);--bg-card:var(--suite-bg-card,#323748);
+  --border:var(--suite-border,rgba(255,255,255,0.24));--border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --text:var(--suite-text,#e6e8ee);--text-dim:var(--suite-text-dim,#aab0c2);
+  --accent:var(--suite-accent,#5dade2);--accent-warm:var(--warn);--accent-red:var(--danger);--accent-green:var(--success);
 }
 html,body{
   height:100%;overflow:hidden;
@@ -23,7 +23,7 @@ html,body{
   background:var(--bg);
   border:1px solid var(--border-strong);
   border-radius:10px;
-  box-shadow:0 12px 36px rgba(0,0,0,0.55);
+  box-shadow:0 12px 36px var(--shadow);
   pointer-events:auto;
   display:flex;flex-direction:column;
   padding:14px 16px;
@@ -58,7 +58,7 @@ html,body{
 }
 #drop-zone:hover, #drop-zone.dragover{
   border-color:var(--accent);
-  background:rgba(93,173,226,0.07);
+  background:var(--accent-soft);
 }
 #drop-zone .big{font-size:30px;color:var(--text-dim);line-height:1}
 #drop-zone .lbl{font-size:13px;color:var(--text);text-align:center;max-width:100%;padding:0 8px}
@@ -124,34 +124,34 @@ html,body{
   transition:background .12s, border-color .12s, color .12s;
   user-select:none;
 }
-.btn:hover{background:rgba(93,173,226,0.15);border-color:rgba(93,173,226,0.35);color:#7ec8f0}
+.btn:hover{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.primary:hover{background:#4a99ce;border-color:#4a99ce}
-.btn.warm:hover{background:rgba(245,166,35,.18);border-color:rgba(245,166,35,.5);color:#ffba5d}
-.btn.danger:hover{background:rgba(231,76,60,.18);border-color:rgba(231,76,60,.5);color:#ff7a6b}
+.btn.warm:hover{background:var(--warn-soft);border-color:var(--warn-line);color:#ffba5d}
+.btn.danger:hover{background:var(--danger-soft);border-color:var(--danger-line);color:var(--danger)}
 
 /* "添加到资源库" call-to-action — green so users see it as the
    "commit" action even though it's now a regular click button. */
 .btn.drag-handle{
   min-width:0;flex:1;height:40px;white-space:normal;padding:5px 9px;
-  background:rgba(46,204,113,0.18);
-  border:1px solid rgba(46,204,113,0.5);
+  background:var(--success-soft);
+  border:1px solid var(--success-line);
   color:#7eecaf;
 }
 .btn.drag-handle:hover{
-  background:rgba(46,204,113,0.28);
-  border-color:rgba(46,204,113,0.7);
+  background:var(--success-soft);
+  border-color:var(--success-line);
   color:#a4f5c8;
 }
 .btn.drag-handle.uploading{
-  background:rgba(255,255,255,0.06);
-  border-color:rgba(255,255,255,0.15);
+  background:var(--tint);
+  border-color:var(--text-dim);
   color:var(--text-dim);
   cursor:wait;
 }
 .btn.drag-handle.ok{
-  background:rgba(46,204,113,0.42);
-  border-color:rgba(46,204,113,0.8);
+  background:var(--success-line);
+  border-color:var(--success-line);
   color:#fff;
 }
 
@@ -190,10 +190,10 @@ html,body{
    transparent. Toggled via a body-level data-mode attribute below. */
 #canvas-wrap{
   background-image:
-    linear-gradient(45deg, rgba(255,255,255,.06) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(255,255,255,.06) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(255,255,255,.06) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(255,255,255,.06) 75%);
+    linear-gradient(45deg, var(--tint) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--tint) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--tint) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--tint) 75%);
   background-size:14px 14px;
   background-position:0 0, 0 7px, 7px -7px, -7px 0;
 }
@@ -220,7 +220,7 @@ html,body{
   <div class="hdr">
     <span class="ic">⊙</span>
     <span class="ttl" data-image-text="title">图片处理</span>
-    <button class="x" id="btnClose" type="button" data-image-title="close" data-image-aria="close"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
+    <button class="x" id="btnClose" type="button" data-image-title="close" data-image-aria="close"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
   </div>
   <div class="body">
     <!-- Mode tabs — switch between circle-crop and background-removal -->

@@ -6,18 +6,18 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box;transition:none!important;animation:none!important}
 :root{
-  --bg:rgba(20,24,38,0.97);
-  --bg-strong:#2c3044;
-  --bg-card:#262a3a;
-  --border:rgba(255,255,255,0.24);
-  --border-strong:rgba(255,255,255,0.36);
-  --text:#e6e8ee;
-  --text-dim:#aab0c2;
-  --accent:#5dade2;
-  --good:#7be0a0;
-  --bad:#ff8b7a;
+  --bg:var(--suite-bg,#292d3c);
+  --bg-strong:var(--suite-bg-strong,#1f2230);
+  --bg-card:var(--suite-bg-card,#323748);
+  --border:var(--suite-border,rgba(255,255,255,0.24));
+  --border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --text:var(--suite-text,#e6e8ee);
+  --text-dim:var(--suite-text-dim,#aab0c2);
+  --accent:var(--suite-accent,#5dade2);
+  --good:var(--success);
+  --bad:var(--danger);
   --warn:#ffb74d;
-  --gold:#f5a623;
+  --gold:var(--warn);
 }
 html,body{
   height:100%;width:100%;overflow:hidden;background:transparent;
@@ -31,7 +31,7 @@ html,body{
   position:absolute;inset:0;
   display:flex;align-items:center;justify-content:center;
   padding:24px;
-  background:rgba(0,0,0,0.45);
+  background:var(--bg-strong);
 }
 .card{
   width:min(100%, 460px);
@@ -40,7 +40,7 @@ html,body{
   background:var(--bg);
   border:1px solid var(--border-strong);
   border-radius:12px;
-  box-shadow:0 14px 38px rgba(0,0,0,0.6);
+  box-shadow:0 14px 38px var(--shadow);
   overflow:hidden;
 }
 .head{
@@ -71,7 +71,7 @@ html,body{
   padding:8px 10px;
   border:1px solid var(--border);
   border-radius:8px;
-  background:rgba(0,0,0,0.18);
+  background:var(--bg-strong);
 }
 .results .empty{
   width:100%;text-align:center;
@@ -95,10 +95,10 @@ html,body{
   font-weight:800;font-size:12px;
   font-variant-numeric:tabular-nums;
   padding:0 6px;border-radius:4px;
-  background:rgba(255,255,255,0.06);
+  background:var(--tint);
 }
-.results .chip.fail .total{background:rgba(231,76,60,0.22);color:var(--bad)}
-.results .chip.pass .total{background:rgba(46,204,113,0.22);color:var(--good)}
+.results .chip.fail .total{background:var(--danger-soft);color:var(--bad)}
+.results .chip.pass .total{background:var(--success-soft);color:var(--good)}
 
 /* Single-line input row: DC + 字段下拉 + 数值, all inline. */
 .input-row{
@@ -154,12 +154,12 @@ html,body{
   padding:0 8px;
   line-height:1.1;
 }
-.btn-act.dmg{color:var(--bad);border-color:rgba(231,76,60,0.40)}
-.btn-act.dmg:hover{background:rgba(231,76,60,0.18);border-color:rgba(231,76,60,0.65)}
-.btn-act.heal{color:var(--good);border-color:rgba(46,204,113,0.40)}
-.btn-act.heal:hover{background:rgba(46,204,113,0.18);border-color:rgba(46,204,113,0.65)}
-.btn-act.set{color:var(--accent);border-color:rgba(93,173,226,0.40)}
-.btn-act.set:hover{background:rgba(93,173,226,0.18);border-color:rgba(93,173,226,0.65)}
+.btn-act.dmg{color:var(--bad);border-color:var(--danger-line)}
+.btn-act.dmg:hover{background:var(--danger-soft);border-color:var(--danger-line)}
+.btn-act.heal{color:var(--good);border-color:var(--success-line)}
+.btn-act.heal:hover{background:var(--success-soft);border-color:var(--success-line)}
+.btn-act.set{color:var(--accent);border-color:var(--accent-line)}
+.btn-act.set:hover{background:var(--accent-soft);border-color:var(--accent-line)}
 
 .foot{
   padding:10px 16px 14px;
@@ -189,7 +189,7 @@ html,body{
 }
 .hint code{
   font-family:ui-monospace,Consolas,monospace;
-  background:rgba(255,255,255,0.06);
+  background:var(--tint);
   padding:0 4px;border-radius:3px;
   color:var(--text);
 }
@@ -199,7 +199,7 @@ html,body{
 <div class="shell">
   <div class="card">
     <div class="head">
-      <div class="ttl"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 3 v18 M5 21 h14 M4 7 h16"/><path d="M7 7 l-3.5 7 a3.5 2.5 0 0 0 7 0 Z M17 7 l-3.5 7 a3.5 2.5 0 0 0 7 0 Z"/></svg> 群体豁免结算 <span id="abilityLbl" style="color:var(--text-dim);font-weight:600;font-size:12px"></span></div>
+      <div class="ttl"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg> 群体豁免结算 <span id="abilityLbl" style="color:var(--text-dim);font-weight:600;font-size:12px"></span></div>
     </div>
 
     <div class="body">

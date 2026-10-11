@@ -1063,7 +1063,7 @@ function openDoorContextMenu(door: EditorDoor, screenX: number, screenY: number)
     door.open = !door.open;
     scheduleRedraw();
   }));
-  menu.appendChild(makeItem(en ? "🗑 Delete door" : "🗑 删除门", () => {
+  menu.appendChild(makeItem(en ? "Delete door" : "删除门", () => {
     doors = doors.filter((d) => d.id !== door.id);
     if (selectedDoorId === door.id) selectedDoorId = null;
     scheduleRedraw();
@@ -2241,8 +2241,8 @@ async function save(bindToMap: boolean = true): Promise<void> {
           : ` · 门窗标记保留 ${reattachedOpenings}/${preservedOpenings.length}${lostOpenings > 0 ? `（${lostOpenings} 个因墙体位置变化过大被丢弃）` : ""}`)
       : "";
     stInfo.textContent = en
-      ? `✅ Saved [${modeTag}] ${processed.length} segments, ${totalPts} points${adaptiveNote} (${sharedItems.length} shared Path${doorSuffix} · ${(t1 - t0).toFixed(0)}ms)${openingSuffix}`
-      : `✅ 保存了 [${modeTag}] ${processed.length} 段 ${totalPts} 个点${adaptiveNote}（${sharedItems.length} 共享 Path${doorSuffix} · ${(t1 - t0).toFixed(0)}ms）${openingSuffix}`;
+      ? `Saved [${modeTag}] ${processed.length} segments, ${totalPts} points${adaptiveNote} (${sharedItems.length} shared Path${doorSuffix} · ${(t1 - t0).toFixed(0)}ms)${openingSuffix}`
+      : `保存了 [${modeTag}] ${processed.length} 段 ${totalPts} 个点${adaptiveNote}（${sharedItems.length} 共享 Path${doorSuffix} · ${(t1 - t0).toFixed(0)}ms）${openingSuffix}`;
     setTimeout(() => { void OBR.modal.close(MODAL_ID).catch(() => {}); }, 700);
   } catch (e) {
     // OBR rejects with a plain object whose `.message` is undefined.
@@ -2258,7 +2258,7 @@ async function save(bindToMap: boolean = true): Promise<void> {
         ?? String(e);
     } catch { detail = String(e); }
     console.error("[fullFog] save failed", e, "shared:", sharedItems, "local:", localItems);
-    stInfo.textContent = (en ? "❌ Save failed: " : "❌ 保存失败：") + detail;
+    stInfo.textContent = (en ? "Save failed: " : "保存失败：") + detail;
   }
 }
 
@@ -2375,7 +2375,7 @@ function importMaskJSON(): void {
       stInfo.textContent = (en ? "Imported mask (" : "已导入 mask（") + file.name + (en ? ")" : "）");
     } catch (e) {
       console.error("[fullFog] import failed", e);
-      stInfo.textContent = (en ? "❌ Import failed: " : "❌ 导入失败：") + (e as Error).message;
+      stInfo.textContent = (en ? "Import failed: " : "导入失败：") + (e as Error).message;
     }
   };
   input.click();

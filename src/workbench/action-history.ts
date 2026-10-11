@@ -10,18 +10,18 @@ export function mountActionHistory(){
  document.body.dataset.actionHistory='true';
  const template=new DOMParser().parseFromString(historyMarkup,'text/html');
  const style=document.createElement('style');style.textContent=[...template.querySelectorAll('style')].map(s=>s.textContent).join('\n')+`
- html{zoom:1!important}html,body{height:100%;width:100%;margin:0;overflow:hidden;background:#373942;color:#eee;font:14px system-ui}
- body{display:flex;flex-direction:column}#action-tabs{display:flex;gap:4px;flex:none;padding:6px;border-bottom:1px solid #737580;background:#373942}
- #action-tabs button{flex:1;min-width:0;min-height:34px;border:1px solid #aaa;background:#45474f;color:#eee;cursor:pointer;font:inherit;padding:6px}
- #action-tabs button[aria-selected=true]{background:#50535e;box-shadow:inset 0 -3px #d9c887}#action-tabs button:hover{background:#50535e}
- #action-tabs button:focus-visible{outline:2px solid #d9c887;outline-offset:1px}
- #action-home{flex:1;min-height:0;overflow:auto;padding:10px;overflow-wrap:anywhere}#action-history{flex:1;min-height:0;position:relative;background:#373942;color:#eee}
+ html{zoom:1!important}html,body{height:100%;width:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--text);font:13px var(--font,system-ui)}
+ body{display:flex;flex-direction:column}#action-tabs{display:flex;gap:4px;flex:none;padding:6px;border-bottom:1px solid var(--border);background:var(--bg-strong)}
+ #action-tabs button{flex:1;min-width:0;min-height:32px;border:1px solid var(--border-strong);border-radius:var(--radius,6px);background:var(--bg-card);color:var(--text);cursor:pointer;font:inherit;font-weight:600;padding:4px 6px}
+ #action-tabs button[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}#action-tabs button:hover{border-color:var(--accent)}
+ #action-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+ #action-home{flex:1;min-height:0;overflow:auto;padding:10px;overflow-wrap:anywhere}#action-history{flex:1;min-height:0;position:relative;background:var(--bg);color:var(--text)}
  /* Keep wheel/keyboard scrolling without drawing a scrollbar in the narrow
     action surface. The history list already applies this to its own rows. */
  #action-home{scrollbar-width:none;-ms-overflow-style:none}
  #action-home::-webkit-scrollbar{width:0;height:0;display:none}
  [hidden]{display:none!important}#action-history .box{position:absolute;inset:0}#action-history .foot-drag{display:none}
- #action-history .foot,#action-history .detail{background:#373942}
+ #action-history .foot,#action-history .detail{background:var(--bg)}
  /* The action is 210px wide. Wrap actual content rather than clipping it or
     scaling the whole document, and keep the existing vertical history flow. */
  #action-tabs button{white-space:normal;overflow-wrap:anywhere}

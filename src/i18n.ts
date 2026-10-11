@@ -287,6 +287,22 @@ const TR: Dict = {
     en: "Pick a card to bind. The info popup opens when the token is selected.",
   },
   ccBindCurrent: { zh: "当前", en: "Current" },
+  ccBindTokenLoading: { zh: "正在读取令牌…", en: "Reading token…" },
+  ccBindTokenLabel: { zh: "令牌：{name}", en: "Token: {name}" },
+  ccBindExplain: {
+    zh: "选一张卡绑定到这个令牌。绑定后，令牌会读取这张卡的生命值、AC、先攻加值和资源；单选令牌时自动弹出角色信息。",
+    en: "Pick a card for this token. Once bound, the token reads the card's HP, AC, initiative bonus and resources, and the info popup opens when the token is selected.",
+  },
+  ccBindSearchPh: { zh: "按名称筛选角色卡", en: "Filter cards by name" },
+  ccBindNoMatch: { zh: "没有名称匹配的角色卡。", en: "No card matches that name." },
+  ccBindCount: { zh: "{n} 张卡", en: "{n} cards" },
+  ccBindUnbindTitle: { zh: "解除绑定后，令牌不再读取角色卡；已有的生命值和资源保留。", en: "Unbinding stops the token reading the card; current HP and resources stay." },
+  ccBindRowHint: { zh: "点击绑定", en: "Click to bind" },
+  ccBindUploaded: { zh: "上传于 {date}", en: "Uploaded {date}" },
+  ccBindNoCardsHint: {
+    zh: "打开右下角的角色卡面板，拖入 JSON / XLSX 角色卡，或从 QQ 卡库加载云端卡，然后回到这里绑定。",
+    en: "Open the character-card panel in the bottom-right, drop in a JSON / XLSX card or load a cloud card from the QQ library, then come back here to bind.",
+  },
   ccBindCardDeleted: { zh: "(卡已删除)", en: "(card deleted)" },
   ccBindCloud: { zh: "云端卡", en: "Cloud card" },
   ccBindNoCards: {
@@ -374,8 +390,8 @@ const TR: Dict = {
     en: "No preview payload found — go back to the character card panel and click 'View Example' or 'Paste JSON' again.",
   },
   ccPanelRefreshHint: {
-    zh: "每张卡片旁的刷新按钮可重新选择 JSON / XLSX 覆盖更新",
-    en: "Click the refresh button next to a card to re-pick JSON / XLSX and overwrite",
+    zh: "把鼠标移到卡片上，点「刷新」可重新选择 JSON / XLSX 覆盖更新",
+    en: "Hover a card and click Refresh to re-pick a JSON / XLSX and overwrite it",
   },
   ccPanelEmpty: { zh: "从右侧选择一张角色卡", en: "Select a character card from the right" },
   ccPanelEmpty2: { zh: "拖拽 JSON / XLSX 到右侧栏上传", en: "Drag JSON / XLSX onto the right rail to upload" },
@@ -400,8 +416,8 @@ const TR: Dict = {
   // file. {ok} / {fail} are replaced at the call site.
   ccPanelUploadResult: { zh: "上传完成：{ok} 个成功，{fail} 个失败", en: "Upload finished: {ok} succeeded, {fail} failed" },
   ccPanelRenderWarn: {
-    zh: "⚠ 卡片已保存，但旧版 HTML 渲染失败（在面板内查看不受影响）",
-    en: "⚠ Card saved, but the legacy HTML render failed (in-panel viewing is unaffected)",
+    zh: "卡片已保存，但旧版 HTML 渲染失败（在面板内查看不受影响）",
+    en: "Card saved, but the legacy HTML render failed (in-panel viewing is unaffected)",
   },
   ccPanelGroupUngrouped: { zh: "未分组", en: "Ungrouped" },
   ccPanelGroupMove: { zh: "移动到分组…", en: "Move to group…" },
@@ -545,6 +561,7 @@ const TR: Dict = {
 
   // Resource edit modal + resource panel component.
   reEditTitle: { zh: "编辑资源", en: "Edit Resource" },
+  reEditSub: { zh: "名字、类型和上限保存到这个令牌；预设可以在其他角色上复用。", en: "Name, type and max are saved on this token; presets can be reused on other characters." },
   reNewTitle: { zh: "新建资源", en: "New Resource" },
   reDefaultName: { zh: "自定义", en: "Custom" },
   rePresetsEmpty: { zh: "没有预设。改完后点右上角「+ 保存当前为预设」即可加进来。", en: "No presets. Tweak the form, then click \"+ Save current as preset\" to add one." },
@@ -560,7 +577,7 @@ const TR: Dict = {
   rpAdd: { zh: "＋ 新增资源", en: "＋ Add resource" },
   rpReorder: { zh: "拖动以重新排序", en: "Drag to reorder" },
   rpEdit: { zh: "编辑", en: "Edit" },
-  rpMaxZero: { zh: "最大值为 0（点 ⚙ 设置）", en: "Max is 0 (click ⚙ to set)" },
+  rpMaxZero: { zh: "最大值为 0（点「编辑」设置）", en: "Max is 0 (click Edit to set)" },
   rpEditExpr: { zh: "点击编辑：可输入数字 / +5 -3 / current+5 / max-2 等表达式", en: "Click to edit: a number, +5 / -3, current+5, max-2, …" },
   rpPipTitle: { zh: "{name} · 第 {i} 格 · 点击赋值 {i}（已为 {i} 时减 1）· 右键归满", en: "{name} · pip {i} · click = set to {i} (−1 if already {i}) · right-click = fill" },
   rpBarTitle: { zh: "{name} · 左键拖动设置进度，右键 +1 / 归满", en: "{name} · drag = set progress, right-click = +1 / fill" },
@@ -725,7 +742,7 @@ const TR: Dict = {
   ccImportJson: { zh: "导入 JSON", en: "Import JSON" },
   ccPasteTitle: { zh: "仅粘贴：弹窗输入 JSON 文本，识别后应用为当前角色卡数据", en: "Paste only: enter JSON text in a dialog, apply it as the card data" },
   // paste-JSON modal
-  ccPasteEmpty: { zh: "✕ 文本框为空，请粘贴角色卡 JSON", en: "✕ Text box is empty — paste the card JSON" },
+  ccPasteEmpty: { zh: "文本框为空，请粘贴角色卡 JSON", en: "Text box is empty — paste the card JSON" },
   ccPasteModalTitle: { zh: "粘贴角色卡 JSON", en: "Paste character card JSON" },
   ccPasteKbdHint: { zh: "Ctrl+Enter 应用 · Esc 取消", en: "Ctrl+Enter apply · Esc cancel" },
   ccPastePlaceholder: { zh: '直接粘贴 JSON 文本，例如 {"identity": {...}, "abilities": {...}, "core_stats": {...}}', en: 'Paste JSON text directly, e.g. {"identity": {...}, "abilities": {...}, "core_stats": {...}}' },
@@ -890,7 +907,7 @@ const TR: Dict = {
   ccImportResultNote: { zh: "（其他客户端会自动刷新已存在的卡片；新建的卡片需要他们刷新一下面板列表。）", en: "(Other clients auto-refresh existing cards; for newly created cards they need to refresh their panel list.)" },
   ccLoadingCard: { zh: "加载角色卡…", en: "Loading character card…" },
   ccSavedEdit: { zh: "已保存的编辑", en: "saved edits" },
-  ccJsonParseFailColon: { zh: "✕ JSON 解析失败：{err}", en: "✕ JSON parse failed: {err}" },
+  ccJsonParseFailColon: { zh: "JSON 解析失败：{err}", en: "JSON parse failed: {err}" },
   ccPasteSource: { zh: "粘贴文本", en: "pasted text" },
 };
 

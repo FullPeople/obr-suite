@@ -5,14 +5,14 @@
 <title>Owl Suite Cluster Row</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#eee}
+html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--text)}
 
 :root{
-  --border:rgba(255,255,255,0.24);
-  --border-strong:rgba(255,255,255,0.36);
-  --text: #e6e8ee;
-  --text-dim:#aab0c2;
-  --accent: #5dade2;
+  --border:var(--suite-border,rgba(255,255,255,0.24));
+  --border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --text:var(--suite-text,#e6e8ee);
+  --text-dim:var(--suite-text-dim,#aab0c2);
+  --accent:var(--suite-accent,#5dade2);
 }
 
 /* Row popover floats above the trigger. Background of the popover frame
@@ -39,12 +39,12 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   width:max-content;
   flex-shrink:1;min-width:0;max-width:100%;
   overflow-x:auto;overflow-y:hidden;
-  scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.35) transparent;
+  scrollbar-width:thin;scrollbar-color:var(--text-dim) transparent;
 }
 .row > *{pointer-events:auto;flex-shrink:0}
 .row.is-overflowing{pointer-events:auto}
 .row::-webkit-scrollbar{height:5px}
-.row::-webkit-scrollbar-thumb{background:rgba(255,255,255,.35);border-radius:3px}
+.row::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:3px}
 .row:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
 
 /* ===== Popup-toggle group =====
@@ -54,7 +54,7 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   height:40px;
   border:1px solid var(--border-strong);
   border-radius:8px;
-  background:rgba(0,0,0,0.32);
+  background:var(--bg-strong);
   padding:3px 4px 3px 0;
   gap:3px;
   backdrop-filter:blur(8px);
@@ -64,7 +64,7 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   font-size:8.5px;color:var(--text-dim);
   padding:0 5px;letter-spacing:0;
   font-weight:700;line-height:1.05;
-  background:rgba(255,255,255,0.04);
+  background:var(--tint);
   border-radius:5px 0 0 5px;
   margin-right:2px;
   align-self:stretch;
@@ -93,7 +93,7 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   gap:4px;
   position:relative;
   backdrop-filter:blur(8px);
-  box-shadow:0 2px 8px rgba(0,0,0,0.35);
+  box-shadow:0 2px 8px var(--shadow);
 }
 .btn:hover{background:rgba(60,65,85,0.95);border-color:var(--border-strong)}
 .btn:active{background:rgba(75,80,100,0.98);transform:scale(0.97)}
@@ -101,14 +101,14 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
 /* Toggles inside .group keep flatter look (group provides the frame). */
 .group .btn{
   height:32px;min-width:32px;padding:0 10px;
-  background:rgba(255,255,255,0.05);
+  background:var(--tint);
   border:1px solid var(--border);
   font-size:11.5px;
   box-shadow:none;
   backdrop-filter:none;
 }
 .group .btn.toggle.on{
-  background:rgba(255,255,255,0.05);
+  background:var(--tint);
   border:1px solid var(--border);
   color:var(--text);
 }
@@ -122,25 +122,25 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
 }
 
 /* Time stop active state */
-.btn.timestop-active{background:rgba(245,166,35,0.22);border-color:rgba(245,166,35,0.55);color:#f5d76e}
+.btn.timestop-active{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
 
 .btn .gear{width:18px;height:18px;display:inline-block;color:currentColor}
 
 .btn#btnAnnounce svg{width:18px;height:18px;display:block;color:currentColor}
 .btn#btnAnnounce.blink{
-  color:#f5d76e;
-  border-color:rgba(245,166,35,0.65);
-  background:rgba(245,166,35,0.18);
+  color:var(--warn);
+  border-color:var(--warn-line);
+  background:var(--warn-soft);
   animation:announce-blink 1.2s ease-in-out infinite;
 }
 @keyframes announce-blink{
   0%, 100%{
-    box-shadow:0 0 0 0 rgba(245,166,35,0), 0 2px 8px rgba(0,0,0,0.35);
-    background:rgba(245,166,35,0.18);
+    box-shadow:0 0 0 0 rgba(245,166,35,0), 0 2px 8px var(--shadow);
+    background:var(--warn-soft);
   }
   50%{
-    box-shadow:0 0 12px 2px rgba(245,166,35,0.55), 0 2px 8px rgba(0,0,0,0.35);
-    background:rgba(245,166,35,0.30);
+    box-shadow:0 0 12px 2px var(--warn-line), 0 2px 8px var(--shadow);
+    background:var(--warn-line);
   }
 }
 
@@ -164,16 +164,16 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;font-fam
   width:14px;height:32px;
   margin:0 4px;
   background:rgba(31,34,48,0.65);
-  border:1px solid rgba(255,255,255,0.16);
+  border:1px solid var(--border);
   border-radius:5px;
-  color:rgba(255,255,255,0.55);
+  color:var(--text-dim);
   cursor:grab;
   touch-action:none;user-select:none;
   flex-shrink:0;
   transition:color .12s, background .12s;
 }
 .row-drag-handle:hover{color:#fff;background:rgba(50,55,75,0.92)}
-.row-drag-handle.is-dragging{cursor:grabbing;color:#5dade2}
+.row-drag-handle.is-dragging{cursor:grabbing;color:var(--accent)}
 .row-drag-handle svg{width:8px;height:14px;display:block;pointer-events:none}
 </style>
 </head>

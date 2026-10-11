@@ -31,7 +31,7 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;pointer-
 /* Subtle drop-shadow so the mark stays readable over both bright
    battlemap art and dark void scenes. */
 .crosshair line{
-  stroke:#5dade2;
+  stroke:var(--accent);
   stroke-width:1.5;
   stroke-linecap:round;
   filter:drop-shadow(0 0 2px rgba(0,0,0,0.65));
@@ -39,7 +39,7 @@ html,body{height:100%;width:100%;overflow:hidden;background:transparent;pointer-
 }
 .crosshair circle{
   fill:none;
-  stroke:#5dade2;
+  stroke:var(--accent);
   stroke-width:1.2;
   filter:drop-shadow(0 0 2px rgba(0,0,0,0.65));
   opacity:0.55;

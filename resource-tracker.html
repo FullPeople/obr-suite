@@ -6,14 +6,14 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#14182a; --bg2:#1c2238; --bg3:#262d4a;
-  --border:rgba(255,255,255,0.24); --border-strong:rgba(255,255,255,0.36);
-  --text:#e6e8ee; --text-dim:#aab0c2; --text-mute:#8a90a6;
-  --accent:#5dade2; --accent-dim:#7ec8f0; --green:#2ecc71; --red:#e74c3c; --gold:#f5a623;
+  --bg:var(--suite-bg,#292d3c); --bg2:var(--bg-card); --bg3:var(--bg-strong);
+  --border:var(--suite-border,rgba(255,255,255,0.24)); --border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --text:var(--suite-text,#e6e8ee); --text-dim:var(--suite-text-dim,#aab0c2); --text-mute:var(--text-dim);
+  --accent:var(--suite-accent,#5dade2); --accent-dim:var(--accent); --green:var(--success); --red:var(--danger); --gold:var(--warn);
 }
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--text)}
 html{background:transparent}
-body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+body{background:var(--overlay);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 
 .rt-panel{display:flex;flex-direction:column;height:100%}
 
@@ -25,15 +25,14 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
   border-bottom:1px solid var(--border);
   flex-shrink:0;
 }
-.rt-title{font-size:15px;font-weight:800;letter-spacing:0.3px;flex-shrink:0}
-.rt-sub{font-size:11.5px;color:var(--text-mute);flex:1;min-width:0}
-.rt-close{
-  width:30px;height:30px;flex-shrink:0;
-  background:transparent;border:1px solid var(--border-strong);
-  color:var(--text-dim);border-radius:6px;cursor:pointer;
-  font-size:18px;line-height:1;font-family:inherit;
-}
-.rt-close:hover{background:rgba(231,76,60,0.18);border-color:var(--red);color:#fff}
+.rt-head>.ui-ico{--icon:18px;color:var(--accent);flex:none}
+.rt-head-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.rt-title{font-size:14px;font-weight:700;letter-spacing:0.3px;line-height:1.3}
+.rt-sub{font-size:11.5px;color:var(--text-mute);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rt-sub:empty::before{content:"查看全员生命值和资源；拖动预设到角色卡上即可套用"}
+html[lang="en"] .rt-sub:empty::before{content:"HP and resources for everyone; drag a preset onto a card to apply it"}
+.rt-close{width:30px;min-width:30px;padding:0;color:var(--text-dim)}
+.rt-close:hover{background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
 
 /* ===== Body — the single scroll region ===== */
 /* 2026-05-21 — MASONRY via CSS multi-column. The old grid forced every
@@ -68,12 +67,12 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
   transition:background .12s,color .12s;
 }
 .rt-tab + .rt-tab{border-left:1px solid var(--border-strong)}
-.rt-tab:hover{background:rgba(255,255,255,0.06);color:var(--text)}
-.rt-tab.on[data-tab="player"]{background:rgba(245,166,35,0.18);color:var(--gold)}
-.rt-tab.on[data-tab="monster"]{background:rgba(93,173,226,0.18);color:var(--accent-dim)}
+.rt-tab:hover{background:var(--tint);color:var(--text)}
+.rt-tab.on[data-tab="player"]{background:var(--warn-soft);color:var(--gold)}
+.rt-tab.on[data-tab="monster"]{background:var(--accent-soft);color:var(--accent-dim)}
 .rt-tab-n{
   font-family:ui-monospace,Consolas,monospace;font-size:10px;
-  padding:1px 6px;border-radius:999px;background:rgba(255,255,255,0.08);color:inherit;
+  padding:1px 6px;border-radius:999px;background:var(--tint);color:inherit;
 }
 
 /* 2026-05-16 — section divider between player + monster groups.
@@ -122,8 +121,8 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
 .rt-char-name{font-size:14px;font-weight:700;color:var(--gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
 .rt-char-owner{
   font-size:10px;color:var(--accent-dim);
-  background:rgba(93,173,226,0.14);
-  border:1px solid rgba(93,173,226,0.3);
+  background:var(--accent-soft);
+  border:1px solid var(--accent-line);
   border-radius:999px;padding:2px 8px;flex-shrink:0;
   white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;
 }
@@ -141,7 +140,7 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
 .rt-presets-bar{
   display:flex;flex-wrap:wrap;align-items:center;gap:5px;
   padding:7px 18px;
-  background:rgba(0,0,0,0.18);
+  background:var(--bg-strong);
   border-bottom:1px solid var(--border);
   flex-shrink:0;
   position:relative;
@@ -158,44 +157,27 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
   padding:3px 5px 3px 9px;
   background:var(--bg2);
   border:1px solid var(--border);
-  border-radius:0;
+  border-radius:var(--radius);
   font-size:11px;color:var(--text);font-family:inherit;
   cursor:pointer;user-select:none;
   transition:background .12s,border-color .12s,color .12s;
 }
 .rt-preset-chip:hover{
-  background:rgba(93,173,226,0.16);
-  border-color:rgba(93,173,226,0.42);
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
 }
 .rt-preset-chip .pre-count{
   font-size:9.5px;color:var(--text-dim);
   font-family:ui-monospace,Consolas,monospace;
-  padding:0 4px;background:rgba(255,255,255,0.06);
+  padding:0 4px;background:var(--tint);
 }
 .rt-preset-actions{margin-left:auto;display:flex;gap:5px}
-.rt-preset-actions button{
-  background:rgba(46,204,113,0.16);
-  border:1px solid rgba(46,204,113,0.40);
-  color:#7be0a0;font-size:10.5px;font-family:inherit;font-weight:700;
-  padding:3px 9px;cursor:pointer;border-radius:0;
-  transition:background .12s,color .12s;
-}
-.rt-preset-actions button:hover{
-  background:rgba(46,204,113,0.28);color:#a8efb8;
-}
-.rt-preset-actions button.io{
-  background:transparent;
-  border:1px solid var(--border-strong);
-  color:var(--text-dim);
-}
-.rt-preset-actions button.io:hover{
-  background:rgba(255,255,255,0.06);color:var(--text);
-}
+.rt-preset-actions button{font-size:11px;min-height:26px;padding:0 9px}
 .rt-preset-menu{
   position:absolute;z-index:30;
   background:var(--bg2);
   border:1px solid var(--border-strong);
-  box-shadow:0 8px 24px rgba(0,0,0,0.55);
+  box-shadow:0 8px 24px var(--shadow);
   display:flex;flex-direction:column;
   min-width:200px;
   font-size:11.5px;
@@ -208,30 +190,31 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
   transition:background .12s,color .12s;
 }
 .rt-preset-menu button:last-child{border-bottom:none}
-.rt-preset-menu button:hover{background:rgba(93,173,226,0.20);color:var(--accent-dim)}
-.rt-preset-menu button.danger:hover{background:rgba(231,76,60,.20);color:#ff7a6b}
+.rt-preset-menu button:hover{background:var(--accent-soft);color:var(--accent-dim)}
+.rt-preset-menu button.danger:hover{background:var(--danger-soft);color:var(--danger)}
 
 /* Per-card "save as preset" button — shows in each character card's
    head row, only visible on hover so it doesn't clutter the panel. */
 .rt-char-save-preset{
   flex-shrink:0;font-size:10px;color:var(--text-dim);
   background:transparent;border:1px solid transparent;
-  border-radius:0;padding:2px 7px;cursor:pointer;
+  border-radius:var(--radius);padding:2px 7px;cursor:pointer;
   font-family:inherit;
   opacity:0;transition:opacity .12s, background .12s, color .12s, border-color .12s;
 }
 .rt-char:hover .rt-char-save-preset{opacity:1}
+.rt-char-save-preset{display:inline-flex;align-items:center;gap:4px;min-height:24px}
 .rt-char-save-preset:hover{
-  background:rgba(46,204,113,0.18);
-  border-color:rgba(46,204,113,0.45);
-  color:#7be0a0;
+  background:var(--success-soft);
+  border-color:var(--success-line);
+  color:var(--success);
 }
 
 /* Drop-target highlight while a preset chip is being dragged over
    a character card. */
 .rt-char.drop-target{
   border-color:var(--green);
-  box-shadow:0 0 0 1px var(--green), 0 0 12px rgba(46,204,113,0.35);
+  box-shadow:0 0 0 1px var(--green), 0 0 12px var(--success-line);
 }
 
 /* Hidden file input for JSON import. */
@@ -241,26 +224,21 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
 <body>
 <div class="rt-panel">
   <header class="rt-head">
-    <span class="rt-title">
-      <svg viewBox="0 0 16 16" width="15" height="15" style="vertical-align:-3px;margin-right:6px" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="2" y="2" width="12" height="12" rx="1.5"/>
-        <path d="M5 11L5 7M8 11L8 4M11 11L11 9"/>
-      </svg><span data-i18n="rtTitle">资源追踪</span>
-    </span>
-    <span class="rt-sub" id="rtSub"></span>
+    <svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+    <div class="rt-head-text"><span class="rt-title" data-i18n="rtTitle">资源追踪</span><span class="rt-sub" id="rtSub"></span></div>
     <div class="rt-tabs" id="rtTabs">
       <button class="rt-tab on" data-tab="player" id="rtTabPlayer" type="button"><span data-i18n="rtTabPlayers">玩家</span> <span class="rt-tab-n" id="rtTabPlayerN">0</span></button>
       <button class="rt-tab" data-tab="monster" id="rtTabMonster" type="button"><span data-i18n="rtTabMonsters">怪物</span> <span class="rt-tab-n" id="rtTabMonsterN">0</span></button>
     </div>
-    <button class="rt-close" id="rtClose" type="button" title="关闭"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
+    <button class="rt-close btn btn-ghost" id="rtClose" type="button" title="关闭" aria-label="关闭"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
   </header>
   <div class="rt-presets-bar" id="rtPresetsBar">
     <span class="rt-presets-lbl" data-i18n="rtPresetsLbl">预设</span>
     <span class="rt-presets-empty" id="rtPresetsEmpty" data-i18n-html="rtPresetsEmpty">还没有预设。鼠标移到某张角色卡上点「+ 存为预设」可保存其当前资源；保存后这里出现的 chip：<b>点击</b>=覆盖/叠加给全员、<b>拖到角色卡上</b>=只给那一张。</span>
     <span id="rtPresetsList" style="display:inline-flex;flex-wrap:wrap;gap:4px"></span>
     <span class="rt-preset-actions">
-      <button class="io" id="rtPresetExport" type="button" data-i18n="rtExport">导出</button>
-      <button class="io" id="rtPresetImport" type="button" data-i18n="rtImport">导入</button>
+      <button class="io btn btn-sm" id="rtPresetExport" type="button" data-i18n="rtExport"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>导出</button>
+      <button class="io btn btn-sm" id="rtPresetImport" type="button" data-i18n="rtImport"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12"/><path d="M17 8l-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>导入</button>
       <input type="file" id="rtPresetFile" class="rt-file-import" accept=".json,application/json">
     </span>
   </div>

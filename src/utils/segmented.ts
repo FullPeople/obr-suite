@@ -11,9 +11,9 @@ export interface SegmentedOptions {
 const STYLE_ID = "seg-select-style";
 const CSS =
   `.seg-select{display:inline-flex;flex-wrap:wrap;align-items:stretch;gap:0;border:1px solid var(--border-strong,rgba(255,255,255,.36));border-radius:6px;overflow:hidden;background:var(--bg-card,var(--bg-strong,rgba(255,255,255,.04)));max-width:100%}` +
-  `.seg-select>button{appearance:none;flex:1 1 auto;min-height:26px;padding:4px 10px;border:0;border-radius:0;background:transparent;color:var(--text,inherit);font:inherit;font-size:12px;line-height:1.2;cursor:pointer;white-space:nowrap}` +
+  `.seg-select>button{appearance:none;display:inline-flex;align-items:center;justify-content:center;flex:1 1 auto;min-height:28px;padding:4px 10px;border:0;border-radius:0;background:transparent;color:var(--text,inherit);font:inherit;font-size:12px;line-height:1.2;cursor:pointer;white-space:nowrap}` +
   `.seg-select>button+button{border-left:1px solid var(--border-strong,rgba(255,255,255,.36))}` +
-  `.seg-select>button:hover{background:rgba(255,255,255,.08)}` +
+  `.seg-select>button:hover{background:var(--bg-strong,rgba(128,128,128,.16))}` +
   `.seg-select>button[aria-pressed=true]{background:var(--accent,#5dade2);color:var(--accent-ink,#0b1320);font-weight:700}` +
   `.seg-select>button:focus-visible{outline:2px solid var(--accent,#5dade2);outline-offset:-2px}` +
   `.seg-select>button:disabled{opacity:.5;cursor:not-allowed}`;
