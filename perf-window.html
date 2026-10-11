@@ -13,7 +13,7 @@ html,body{
   margin:0;padding:0;
   overflow:hidden;background:transparent;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  color:#e6e8ee;
+  color:var(--text);
   user-select:none;
 }
 /* 2026-05-16 — `--panel-zoom` set live by perf-window-page.ts
@@ -29,7 +29,7 @@ html{zoom:var(--panel-zoom, 1)}
 .box{
   position:absolute;inset:0;
   background:rgba(15,17,28,0.92);
-  border:1px solid rgba(93,173,226,0.45);
+  border:1px solid var(--accent-line);
   border-radius:8px;
   display:flex;flex-direction:column;
   overflow:hidden;
@@ -40,21 +40,21 @@ html{zoom:var(--panel-zoom, 1)}
   flex-shrink:0;
   display:flex;align-items:center;justify-content:space-between;
   padding:3px 6px;
-  background:rgba(93,173,226,0.15);
-  border-bottom:1px solid rgba(93,173,226,0.30);
+  background:var(--accent-soft);
+  border-bottom:1px solid var(--accent-line);
   cursor:grab;
   touch-action:none;
 }
 .head.is-dragging{cursor:grabbing}
 .head .grip{
   display:inline-flex;align-items:center;justify-content:center;
-  color:rgba(255,255,255,0.55);
+  color:var(--text-dim);
   width:14px;height:10px;
 }
 .head .grip svg{width:10px;height:8px;display:block}
 .head .ttl{
   font-size:10px;font-weight:700;letter-spacing:0.4px;
-  color:#7ec8f0;text-transform:uppercase;
+  color:var(--accent);text-transform:uppercase;
 }
 .body{
   flex:1;
@@ -66,16 +66,16 @@ html{zoom:var(--panel-zoom, 1)}
   display:flex;flex-direction:column;align-items:flex-start;gap:1px;
 }
 .metric .lbl{
-  font-size:8.5px;color:#9aa0b3;font-weight:700;
+  font-size:8.5px;color:var(--text-dim);font-weight:700;
   letter-spacing:0.5px;text-transform:uppercase;
 }
 .metric .val{
-  font-size:18px;font-weight:900;color:#e6e8ee;
+  font-size:18px;font-weight:900;color:var(--text);
   font-variant-numeric:tabular-nums;
   line-height:1;
 }
 .metric .val.warn{color:#f0a96a}
-.metric .val.bad{color:#ff8b7a}
+.metric .val.bad{color:var(--danger)}
 </style>
 </head>
 <body>

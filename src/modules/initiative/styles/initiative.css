@@ -7,15 +7,15 @@ body {
 }
 
 :root {
-  --bg-primary: #1a1a2e;
-  --bg-secondary: #16213e;
-  --bg-card: #0f3460;
-  --accent: #e94560;
+  --bg-primary: var(--suite-bg,#1a1a2e);
+  --bg-secondary: var(--suite-bg-card,#16213e);
+  --bg-card:var(--suite-bg-card,#323748);
+  --accent:var(--suite-accent,#5dade2);
   --accent-glow: rgba(233, 69, 96, 0.4);
-  --text-primary: #eee;
-  --text-secondary:#b4b8c2;
-  --border: rgba(255, 255, 255, 0.12);
-  --gold: #f5a623;
+  --text-primary: var(--text);
+  --text-secondary:var(--suite-text-dim,#b4b8c2);
+  --border:var(--suite-border,rgba(255,255,255,0.24));
+  --gold: var(--warn);
 }
 
 html, body, #root { height: 100%; background: transparent; }
@@ -61,16 +61,16 @@ html, body, #root { height: 100%; background: transparent; }
   align-items: center;
   justify-content: center;
   cursor: grab;
-  color: rgba(255, 255, 255, 0.65);
+  color:var(--text-dim);
   background: rgba(31, 34, 48, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--border);
   border-radius: 5px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 4px var(--shadow);
   transition: filter 0.12s, color 0.12s, border-color 0.12s;
   touch-action: none;
   user-select: none;
 }
-.drag-handle:hover { color: #fff; filter: brightness(1.18); border-color: rgba(255, 255, 255, 0.28); }
+.drag-handle:hover { color: #fff; filter: brightness(1.18); border-color:var(--text-dim); }
 .drag-handle.is-dragging { cursor: grabbing; color: var(--accent); border-color: var(--accent); }
 .drag-handle svg { width: 10px; height: 16px; display: block; pointer-events: none; }
 /* Collapsed-pill variant: pair the grip with the round pill-btn
@@ -173,7 +173,7 @@ html, body, #root { height: 100%; background: transparent; }
   overflow: visible;                 /* so mod overlay + below-card buttons escape */
   cursor: pointer;
   background: rgba(22, 33, 62, 0.9);
-  border: 2px solid rgba(255, 255, 255, 0.08);
+  border: 2px solid var(--tint);
   /* Establish a stacking context so the roll-buttons inside can use
      z-index:-1 to slip BEHIND the slot's content (image + count
      footer) without going behind the slot's BACKGROUND. Without
@@ -186,7 +186,7 @@ html, body, #root { height: 100%; background: transparent; }
 }
 
 .initiative-item:hover {
-  border-color: rgba(255, 255, 255, 0.25);
+  border-color:var(--text-dim);
 }
 
 /* 2026-05-10: per-owner colour reverted per user request — colour
@@ -206,7 +206,7 @@ html, body, #root { height: 100%; background: transparent; }
 
 .initiative-item.preparing.active {
   border-color: var(--gold);
-  box-shadow: 0 3px 10px rgba(245, 166, 35, 0.4);
+  box-shadow: 0 3px 10px var(--warn-line);
 }
 
 /* 2026-05-10: invisible / stealth marker for DM view. The slot is
@@ -275,7 +275,7 @@ html, body, #root { height: 100%; background: transparent; }
   position: absolute;
   left: 0; right: 0; bottom: 0;
   height: 30%;
-  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.55));
+  background: linear-gradient(to bottom, transparent, var(--bg-strong));
   pointer-events: none;
 }
 
@@ -291,7 +291,7 @@ html, body, #root { height: 100%; background: transparent; }
   justify-content: center;
   background: rgba(15, 52, 96, 0.92);
   border-radius: 0 0 4px 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--tint);
 }
 
 /* "Final" display mode — count+modifier shown big with a small
@@ -321,13 +321,13 @@ html, body, #root { height: 100%; background: transparent; }
      visible. The footer height was bumped to 24% to make room for
      this without clipping. */
   font-size: 8px;
-  color: rgba(255, 255, 255, 0.85);
+  color:var(--text-dim);
   line-height: 1.15;
   margin-top: 0;
   letter-spacing: 0.2px;
 }
 .initiative-item.active .item-count .count-formula {
-  color: rgba(255, 255, 255, 0.92);
+  color:var(--text-dim);
 }
 
 /* HP progress strip — sits at the very bottom of the image area,
@@ -346,16 +346,16 @@ html, body, #root { height: 100%; background: transparent; }
   right: 0;
   bottom: 24%;                       /* lifted ABOVE the count footer */
   height: 4px;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--bg-strong);
   border-radius: 0;
   overflow: hidden;
   pointer-events: none;
   z-index: 2;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 1px var(--shadow);
 }
 .item-hp-fill {
   height: 100%;
-  background: linear-gradient(90deg, #c0392b, #e74c3c);
+  background: linear-gradient(90deg, var(--danger), var(--danger));
   border-radius: 0;
   transition: width 0.18s ease-out;
 }
@@ -369,7 +369,7 @@ html, body, #root { height: 100%; background: transparent; }
 }
 
 .initiative-item.preparing.active .item-count {
-  background: rgba(245, 166, 35, 0.85);
+  background: var(--warn-line);
   color: #1a1a2e;
 }
 
@@ -395,20 +395,20 @@ html, body, #root { height: 100%; background: transparent; }
   white-space: nowrap;
   background: rgba(15, 52, 96, 0.92);            /* var(--bg-card) opacified */
   color: var(--text-primary);
-  border: 1px solid rgba(93, 173, 226, 0.30);    /* suite-blue rim */
+  border: 1px solid var(--accent-line);    /* suite-blue rim */
   border-radius: 10px;
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
   user-select: none;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 3px var(--shadow);
 }
 .display-mode-toggle:hover {
   background: rgba(22, 33, 62, 0.95);
-  border-color: rgba(93, 173, 226, 0.55);
+  border-color: var(--accent-line);
 }
 .display-mode-toggle.on {
   background: var(--accent);
-  color: #fff;
+  color: var(--suite-accent-ink,#fff);
   border-color: var(--accent);
   box-shadow: 0 1px 4px rgba(233, 69, 96, 0.45);
 }
@@ -421,7 +421,7 @@ html, body, #root { height: 100%; background: transparent; }
 }
 
 .initiative-item.active .count-display {
-  color: #fff;
+  color: var(--text);
 }
 
 .item-count.locked { cursor: default; }
@@ -430,7 +430,7 @@ html, body, #root { height: 100%; background: transparent; }
 .count-input {
   width: 80%;
   height: 90%;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--bg-strong);
   border: 1px solid var(--gold);
   border-radius: 3px;
   color: var(--gold);
@@ -449,7 +449,7 @@ html, body, #root { height: 100%; background: transparent; }
   top: 2px;
   left: 2px;
   background: rgba(0, 0, 0, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 1px 4px;
   font-size: 10px;
@@ -519,7 +519,7 @@ html, body, #root { height: 100%; background: transparent; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 2px 4px var(--shadow);
   transition: filter 0.12s, transform 0.08s;
 }
 .roll-btn:disabled { opacity: 0.32; cursor: not-allowed; }
@@ -531,14 +531,14 @@ html, body, #root { height: 100%; background: transparent; }
    adv  = forest green, healthy and clearly positive
    Picked to be readable even at 8px height with no text/icon. */
 .roll-dis {
-  background: linear-gradient(180deg, #c0392b, #8e2419);
+  background: linear-gradient(180deg, var(--danger), #8e2419);
   border-bottom-left-radius: 4px;
 }
 .roll-normal {
   background: linear-gradient(180deg, #5a6076, #3a4054);
 }
 .roll-adv {
-  background: linear-gradient(180deg, #2ecc71, #1e8449);
+  background: linear-gradient(180deg, var(--success), #1e8449);
   border-bottom-right-radius: 4px;
 }
 
@@ -557,7 +557,7 @@ html, body, #root { height: 100%; background: transparent; }
   height: 18px;
   border: 1px solid rgba(39, 174, 96, 1);
   border-radius: 3px;
-  background: linear-gradient(135deg, #2ecc71, #27ae60);
+  background: linear-gradient(135deg, var(--success), var(--success));
   color: #fff;
   font-size: 10px;
   font-weight: 700;
@@ -566,7 +566,7 @@ html, body, #root { height: 100%; background: transparent; }
   z-index: 4;
   padding: 0;
   letter-spacing: 0.3px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 3px var(--shadow);
 }
 .end-turn-btn:hover {
   background: linear-gradient(135deg, #3fdb82, #30c070);
@@ -590,9 +590,9 @@ html, body, #root { height: 100%; background: transparent; }
   flex-shrink: 0;
 }
 .collapse-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.3);
+  background: var(--border);
+  color: var(--text);
+  border-color:var(--text-dim);
 }
 
 .state-text {
@@ -617,7 +617,7 @@ html, body, #root { height: 100%; background: transparent; }
   height: 24px;
   padding: 0 8px;
   background: var(--accent);
-  color: #fff;
+  color: var(--suite-accent-ink,#fff);
   font-size: 12px;
   font-weight: 700;
   border-radius: 12px;
@@ -695,14 +695,14 @@ html, body, #root { height: 100%; background: transparent; }
 .btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .btn-prepare {
-  background: linear-gradient(135deg, #f5a623, #e08e0b);
+  background: linear-gradient(135deg, var(--warn), #e08e0b);
 }
 .btn-prepare:hover:not(:disabled) {
-  box-shadow: 0 2px 8px rgba(245, 166, 35, 0.4);
+  box-shadow: 0 2px 8px var(--warn-line);
 }
 
 .btn-ambush {
-  background: linear-gradient(135deg, #e94560, #c0392b);
+  background: linear-gradient(135deg, var(--danger), var(--danger));
 }
 .btn-ambush:hover:not(:disabled) {
   box-shadow: 0 2px 8px rgba(233, 69, 96, 0.4);
@@ -710,13 +710,13 @@ html, body, #root { height: 100%; background: transparent; }
 
 .btn-cancel {
   background: rgba(90, 95, 110, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid var(--border);
   color: #fff;
 }
 .btn-cancel:hover { background: rgba(110, 115, 130, 0.95); }
 
 .btn-start {
-  background: linear-gradient(135deg, #e94560, #c0392b);
+  background: linear-gradient(135deg, var(--danger), var(--danger));
 }
 .btn-start:hover:not(:disabled) {
   box-shadow: 0 2px 8px rgba(233, 69, 96, 0.4);
@@ -729,11 +729,11 @@ html, body, #root { height: 100%; background: transparent; }
 .btn-prev:hover, .btn-next:hover { border-color: var(--accent); }
 
 .btn-end {
-  background: rgba(192, 57, 43, 0.9);
-  border: 1px solid rgba(231, 76, 60, 0.9);
+  background: var(--danger-line);
+  border: 1px solid var(--danger-line);
   color: #fff;
 }
-.btn-end:hover { background: rgba(231, 76, 60, 0.95); }
+.btn-end:hover { background: var(--danger-line); }
 
 /* 2026-05-16 — "一键清空" two-click button. Idle = subdued, armed =
    bright red + outlined pulse so the second-click hot state is
@@ -747,7 +747,7 @@ html, body, #root { height: 100%; background: transparent; }
   letter-spacing: 0.2px;
   border-radius: 13px;
   background: rgba(120, 40, 40, 0.55);
-  border: 1px solid rgba(231, 76, 60, 0.5);
+  border: 1px solid var(--danger-line);
   color: #f5d0c8;
   cursor: pointer;
   transition: background .14s, color .14s, border-color .14s, box-shadow .14s;
@@ -755,13 +755,13 @@ html, body, #root { height: 100%; background: transparent; }
 .btn-clear-all:hover {
   background: rgba(160, 50, 50, 0.7);
   color: #fff;
-  border-color: rgba(231, 76, 60, 0.85);
+  border-color: var(--danger-line);
 }
 .btn-clear-all.armed {
-  background: rgba(231, 76, 60, 0.95);
+  background: var(--danger-line);
   border-color: rgba(255, 90, 75, 1);
   color: #fff;
-  box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.35);
+  box-shadow: 0 0 0 2px var(--danger-line);
 }
 
 .btn-icon { font-size: 13px; }
@@ -784,24 +784,24 @@ html, body, #root { height: 100%; background: transparent; }
   transition: filter 0.12s, border-color 0.12s;
 }
 .btn-drag-in-auto.on {
-  background: linear-gradient(135deg, #27ae60, #1e8449);
-  border-color: rgba(46, 204, 113, 0.7);
+  background: linear-gradient(135deg, var(--success), #1e8449);
+  border-color: var(--success-line);
 }
 .btn-drag-in-auto.on:hover {
   filter: brightness(1.12);
-  border-color: rgba(46, 204, 113, 0.95);
+  border-color: var(--success-line);
 }
 .btn-drag-in-auto.off {
   background: rgba(90, 95, 110, 0.95);
-  border-color: rgba(255, 255, 255, 0.25);
-  color: rgba(255, 255, 255, 0.65);
+  border-color:var(--text-dim);
+  color:var(--text-dim);
   text-decoration: line-through;
-  text-decoration-color: #e74c3c;
+  text-decoration-color: var(--danger);
   text-decoration-thickness: 2px;
 }
 .btn-drag-in-auto.off:hover {
   background: rgba(110, 115, 130, 1);
-  border-color: rgba(255, 255, 255, 0.4);
+  border-color:var(--text-dim);
 }
 
 /* 2026-05-14 (#5) — 更改排序 toggle. Same chrome as btn-drag-in-auto.
@@ -823,16 +823,16 @@ html, body, #root { height: 100%; background: transparent; }
 }
 .btn-reorder.off {
   background: rgba(90, 95, 110, 0.95);
-  border-color: rgba(255, 255, 255, 0.25);
-  color: rgba(255, 255, 255, 0.8);
+  border-color:var(--text-dim);
+  color:var(--text-dim);
 }
 .btn-reorder.off:hover {
   background: rgba(110, 115, 130, 1);
-  border-color: rgba(255, 255, 255, 0.4);
+  border-color:var(--text-dim);
 }
 .btn-reorder.on {
   background: linear-gradient(135deg, #e0a52a, #c27d12);
-  border-color: rgba(245, 215, 110, 0.85);
+  border-color: var(--warn-line);
 }
 .btn-reorder.on:hover {
   filter: brightness(1.12);
@@ -860,12 +860,12 @@ html, body, #root { height: 100%; background: transparent; }
   transition: background 0.12s;
 }
 .reorder-catch:hover {
-  background: rgba(245, 215, 110, 0.10);
+  background: var(--warn-soft);
 }
 .reorder-wrap.picked .reorder-catch,
 .reorder-wrap.picked {
   /* picked card: amber dashed ring + slight lift */
-  outline: 2px dashed var(--accent, #f5d76e);
+  outline: 2px dashed var(--accent, var(--warn));
   outline-offset: -2px;
 }
 .reorder-wrap.picked {
@@ -883,12 +883,12 @@ html, body, #root { height: 100%; background: transparent; }
   transition: background 0.12s, flex-basis 0.12s;
 }
 .reorder-slot.active {
-  background: rgba(245, 215, 110, 0.28);
+  background: var(--warn-soft);
   cursor: pointer;
 }
 .reorder-slot.active:hover {
   flex-basis: 18px;
-  background: rgba(245, 215, 110, 0.7);
+  background: var(--warn-line);
 }
 /* Floating arrow that tracks the cursor while a card is "in hand".
    Anchored at the cursor tip (translate up-left a touch so the arrow
@@ -897,7 +897,7 @@ html, body, #root { height: 100%; background: transparent; }
   position: fixed;
   z-index: 9999;
   pointer-events: none;
-  color: var(--accent, #f5d76e);
+  color: var(--accent, var(--warn));
   transform: translate(-4px, -4px);
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
   animation: reorder-arrow-bob 0.9s ease-in-out infinite;
@@ -955,12 +955,12 @@ html, body, #root { height: 100%; background: transparent; }
   background: rgba(22, 33, 62, 0.9);
   border: 1px solid var(--border);
   border-radius: 16px;
-  color: #fff;
+  color: var(--text);
   font-family: inherit;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 8px var(--shadow);
 }
 .pill-btn:hover { border-color: var(--accent); }
 

@@ -10,7 +10,7 @@ html,body{
   overflow:hidden;
   background:transparent;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Roboto,sans-serif;
-  color:#e6e8ee;
+  color:var(--text);
   user-select:none;
 }
 
@@ -31,14 +31,14 @@ html,body{
   display:flex;align-items:center;gap:10px;
   padding:8px 14px;
   background:rgba(15,20,40,0.95);
-  border:1px solid rgba(255,255,255,0.18);
+  border:1px solid var(--border);
   border-radius:14px;
-  box-shadow:0 6px 22px rgba(0,0,0,0.55);
+  box-shadow:0 6px 22px var(--shadow);
   z-index:50;
 }
 .toolbar .title{
   font-size:13px;font-weight:700;
-  color:#bfe2f5;
+  color:var(--accent);
   letter-spacing:0.4px;
 }
 .toolbar .hint{
@@ -50,18 +50,18 @@ html,body{
   font-family:inherit;font-size:11.5px;font-weight:600;
   cursor:pointer;
   color:#fff;
-  border:1px solid rgba(255,255,255,0.25);
-  background:rgba(255,255,255,0.06);
+  border:1px solid var(--border);
+  background:var(--tint);
   transition:filter .12s, background .12s;
 }
-.toolbar button:hover{background:rgba(255,255,255,0.12)}
+.toolbar button:hover{background:var(--border)}
 .toolbar button.btn-reset{
-  background:rgba(192,57,43,0.85);
-  border-color:rgba(231,76,60,0.7);
+  background:var(--danger-line);
+  border-color:var(--danger-line);
 }
 .toolbar button.btn-done{
-  background:linear-gradient(135deg,#27ae60,#1e8449);
-  border-color:rgba(46,204,113,0.7);
+  background:linear-gradient(135deg,var(--success),#1e8449);
+  border-color:var(--success-line);
 }
 
 /* Per-panel proxy — a translucent rectangle drawn at the panel's
@@ -70,44 +70,44 @@ html,body{
    moving even when the underlying popover isn't open. */
 .proxy{
   position:absolute;
-  border:2px solid rgba(93,173,226,0.95);
+  border:2px solid var(--accent-line);
   border-radius:10px;
-  background:rgba(93,173,226,0.14);
+  background:var(--accent-soft);
   cursor:grab;
   display:flex;align-items:center;justify-content:center;
   flex-direction:column;gap:2px;
-  font-size:12px;font-weight:700;color:#bfe2f5;
+  font-size:12px;font-weight:700;color:var(--accent);
   letter-spacing:0.4px;
   text-shadow:0 1px 2px rgba(0,0,0,0.6);
   box-shadow:
     0 0 0 1px rgba(7,19,32,0.55),
-    0 0 18px rgba(93,173,226,0.35),
-    inset 0 0 14px rgba(93,173,226,0.10);
+    0 0 18px var(--accent-line),
+    inset 0 0 14px var(--accent-soft);
   transition:box-shadow .12s;
 }
 /* Closed-state proxies: dimmer + dashed border so the user knows
    "this is where this panel WOULD land if opened". */
 .proxy.is-closed{
   border-style:dashed;
-  background:rgba(93,173,226,0.06);
+  background:var(--accent-soft);
   opacity:0.78;
 }
 .proxy.is-dragging{
   cursor:grabbing;
   box-shadow:
     0 0 0 1px rgba(7,19,32,0.65),
-    0 0 26px rgba(93,173,226,0.55),
-    inset 0 0 14px rgba(93,173,226,0.18);
-  border-color:rgba(245,166,35,0.95);
+    0 0 26px var(--accent-line),
+    inset 0 0 14px var(--accent-soft);
+  border-color:var(--warn-line);
 }
 .proxy .pname{
   background:rgba(7,19,32,0.78);
   padding:2px 9px;border-radius:10px;
   font-size:10.5px;font-weight:700;
-  border:1px solid rgba(93,173,226,0.4);
+  border:1px solid var(--accent-line);
 }
 .proxy .psize{
-  font-size:9px;color:#7aa;
+  font-size:9px;color:var(--text-dim);
   font-family:ui-monospace,Consolas,monospace;
   font-weight:500;
 }
@@ -122,13 +122,13 @@ html,body{
   right:-2px;bottom:-2px;
   width:18px;height:18px;
   cursor:nwse-resize;
-  background:linear-gradient(135deg,transparent 50%,rgba(245,166,35,0.95) 50%);
+  background:linear-gradient(135deg,transparent 50%,var(--warn-line) 50%);
   border-bottom-right-radius:10px;
-  border-right:2px solid rgba(245,166,35,0.95);
-  border-bottom:2px solid rgba(245,166,35,0.95);
+  border-right:2px solid var(--warn-line);
+  border-bottom:2px solid var(--warn-line);
 }
 .proxy.is-resizing .resize-handle{
-  background:linear-gradient(135deg,transparent 50%,#f5d76e 50%);
+  background:linear-gradient(135deg,transparent 50%,var(--warn) 50%);
 }
 .proxy.is-resizing{cursor:nwse-resize}
 </style>

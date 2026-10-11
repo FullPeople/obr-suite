@@ -6,11 +6,11 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#0a0c14; --bg-1:#11141d; --bg-2:#181c27; --bg-3:#1f2433;
-  --line:rgba(255,255,255,0.08); --line-2:rgba(255,255,255,0.16);
-  --text:#eaeef5; --text-2:#adb3c1; --text-3:#6e7588;
-  --accent:#b07cff; --accent-2:#c79bff;
-  --green:#5cd97c; --red:#ff6b6b; --yellow:#ffd66b;
+  --bg:var(--suite-bg,#292d3c); --bg-1:#11141d; --bg-2:#181c27; --bg-3:#1f2433;
+  --line:var(--tint); --line-2:var(--border);
+  --text:var(--suite-text,#e6e8ee); --text-2:#adb3c1; --text-3:#6e7588;
+  --accent:var(--suite-accent,#5dade2); --accent-2:#c79bff;
+  --green:#5cd97c; --red:var(--danger); --yellow:var(--warn);
 }
 html,body{
   margin:0;height:100%;background:transparent;color:var(--text);
@@ -87,7 +87,7 @@ input[type=text]:focus{outline:none;border-color:var(--accent)}
   <div class="head">
     <span class="vinyl"></span>
     <span class="title" data-en="Transform">变身</span>
-    <button class="icon-btn" id="closeBtn" title="取消" data-en-title="Cancel"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
+    <button class="icon-btn" id="closeBtn" title="取消" data-en-title="Cancel"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
   </div>
 
   <div class="section">

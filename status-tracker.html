@@ -18,19 +18,19 @@
    tokens — solid colors only, no gradients, dark navy + accent
    blue). */
 :root{
-  --bg:#1a1a2e;
-  --bg-card:#16213e;
-  --bg-strong:#0f1830;
-  --border:rgba(255,255,255,0.24);
-  --border-strong:rgba(255,255,255,0.36);
-  --text:#e6e8ee;
-  --text-dim:#aab0c2;
-  --text-mute:#8a90a0;
-  --accent:#5dade2;
-  --accent-dim:#7ec8f0;
-  --warn:#c89251;
-  --red:#c0392b;
-  --green:#2ecc71;
+  --bg:var(--suite-bg,#292d3c);
+  --bg-card:var(--suite-bg-card,#323748);
+  --bg-strong:var(--suite-bg-strong,#1f2230);
+  --border:var(--suite-border,rgba(255,255,255,0.24));
+  --border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --text:var(--suite-text,#e6e8ee);
+  --text-dim:var(--suite-text-dim,#aab0c2);
+  --text-mute:var(--text-dim);
+  --accent:var(--suite-accent,#5dade2);
+  --accent-dim:var(--accent);
+  --warn:var(--suite-warn,#f5a623);
+  --red:var(--danger);
+  --green:var(--success);
 }
 
 html,body{
@@ -55,7 +55,7 @@ html{zoom:var(--panel-zoom, 1)}
   border:1px solid var(--border-strong);
   border-radius:10px;
   display:flex;flex-direction:column;
-  box-shadow:0 8px 24px rgba(0,0,0,0.45);
+  box-shadow:0 8px 24px var(--shadow);
   overflow:hidden;
 }
 
@@ -130,17 +130,17 @@ html{zoom:var(--panel-zoom, 1)}
 .toolbar button:hover,
 .toolbar a.tb-link:hover{
   color:var(--text);
-  background:rgba(255,255,255,0.06);
+  background:var(--tint);
 }
 .toolbar button.on{
   color:var(--accent-dim);
-  background:rgba(93,173,226,0.18);
+  background:var(--accent-soft);
 }
 /* Optional inner separator line between toolbar groups (legacy
    .tb-sp behaviour preserved by spreading with margin-left auto). */
 .toolbar .tb-sp{
   flex:0 0 1px;
-  background:rgba(255,255,255,0.06);
+  background:var(--tint);
   align-self:stretch;
   margin:4px 0;
 }
@@ -150,7 +150,7 @@ html{zoom:var(--panel-zoom, 1)}
    border shifts to the warn-orange accent and pulses softly. */
 .toolbar #btnEdit.on{
   animation: edit-btn-pulse 1.6s ease-in-out infinite;
-  background:rgba(93,173,226,0.16);
+  background:var(--accent-soft);
 }
 .toolbar #btnEdit.on::after{
   content:"…";
@@ -160,10 +160,10 @@ html{zoom:var(--panel-zoom, 1)}
 }
 @keyframes edit-btn-pulse{
   0%,100%{
-    box-shadow:0 0 0 0 rgba(93,173,226,0.55), inset 0 0 0 0 rgba(93,173,226,0);
+    box-shadow:0 0 0 0 var(--accent-line), inset 0 0 0 0 rgba(93,173,226,0);
   }
   50%{
-    box-shadow:0 0 0 4px rgba(93,173,226,0), inset 0 0 8px 0 rgba(93,173,226,0.30);
+    box-shadow:0 0 0 4px rgba(93,173,226,0), inset 0 0 8px 0 var(--accent-line);
   }
 }
 @keyframes edit-btn-dots{
@@ -181,8 +181,8 @@ body.edit-mode .card{
   animation: edit-card-glow 2.4s ease-in-out infinite;
 }
 @keyframes edit-card-glow{
-  0%,100%{ box-shadow:0 8px 24px rgba(0,0,0,0.45), 0 0 0 0 rgba(200,146,81,0.55); }
-  50%   { box-shadow:0 8px 24px rgba(0,0,0,0.45), 0 0 18px 2px rgba(200,146,81,0.45); }
+  0%,100%{ box-shadow:0 8px 24px var(--shadow), 0 0 0 0 rgba(200,146,81,0.55); }
+  50%   { box-shadow:0 8px 24px var(--shadow), 0 0 18px 2px rgba(200,146,81,0.45); }
 }
 body.edit-mode .toolbar{
   position:relative;
@@ -233,7 +233,7 @@ body.edit-mode .head .ttl::after{
 .presets-bar{
   display:flex;flex-wrap:wrap;align-items:center;gap:4px;
   padding:5px 8px;
-  background:rgba(0,0,0,0.20);
+  background:var(--bg-strong);
   border-bottom:1px solid var(--border);
   flex-shrink:0;
   min-height:30px;
@@ -259,32 +259,32 @@ body.edit-mode .head .ttl::after{
   transition:background .12s,border-color .12s;
 }
 .presets-bar .preset-chip:hover{
-  background:rgba(93,173,226,0.16);
-  border-color:rgba(93,173,226,0.42);
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
 }
 .presets-bar .preset-chip .pre-count{
   font-size:9.5px;color:var(--text-dim);
   font-family:ui-monospace,Consolas,monospace;
   padding:0 4px;
-  background:rgba(255,255,255,0.06);
+  background:var(--tint);
   margin-left:2px;
 }
 .presets-bar .preset-save{
   margin-left:auto;
-  background:rgba(46,204,113,0.18);
-  border:1px solid rgba(46,204,113,0.45);
-  color:#7be0a0;font-size:11px;font-family:inherit;font-weight:700;
+  background:var(--success-soft);
+  border:1px solid var(--success-line);
+  color:var(--success);font-size:11px;font-family:inherit;font-weight:700;
   padding:3px 9px;cursor:pointer;
   transition:background .12s,color .12s;
 }
 .presets-bar .preset-save:hover{
-  background:rgba(46,204,113,0.30);color:#a8efb8;
+  background:var(--success-line);color:var(--success);
 }
 .preset-menu{
   position:absolute;z-index:30;
   background:var(--bg);
   border:1px solid var(--border-strong);
-  box-shadow:0 8px 24px rgba(0,0,0,0.55);
+  box-shadow:0 8px 24px var(--shadow);
   display:flex;flex-direction:column;
   min-width:170px;
   font-size:11.5px;
@@ -297,8 +297,8 @@ body.edit-mode .head .ttl::after{
   transition:background .12s,color .12s;
 }
 .preset-menu button:last-child{border-bottom:none}
-.preset-menu button:hover{background:rgba(93,173,226,0.20);color:#7ec8f0}
-.preset-menu button.danger:hover{background:rgba(231,76,60,.20);color:#ff7a6b}
+.preset-menu button:hover{background:var(--accent-soft);color:var(--accent)}
+.preset-menu button.danger:hover{background:var(--danger-soft);color:var(--danger)}
 
 /* ====================================================================
    FILTERS (apply-mode = category filter row; edit-mode = editable
@@ -330,10 +330,10 @@ body.edit-mode .head .ttl::after{
 }
 .cat-btn:hover:not(.on){
   color:var(--text);
-  background:rgba(255,255,255,0.04);
+  background:var(--tint);
 }
 .cat-btn.on{
-  background:rgba(93,173,226,0.14);
+  background:var(--accent-soft);
   color:var(--accent-dim);
 }
 .cat-btn.on::after{
@@ -431,7 +431,7 @@ body.edit-mode .cat-btn.drop-target{
 .bubble:hover{opacity:0.86}
 .bubble:active{opacity:0.74}
 .bubble.selected{
-  outline:2px solid rgba(255,255,255,0.78);
+  outline:2px solid var(--text-dim);
   outline-offset:-2px;
   opacity:1;
 }
@@ -463,10 +463,10 @@ body.edit-mode .bubble.editable:hover{
 }
 body.edit-mode .bubble.dragging{opacity:0.4}
 body.edit-mode .bubble.drop-before{
-  box-shadow:-3px 0 0 0 var(--accent),0 1px 2px rgba(0,0,0,0.30);
+  box-shadow:-3px 0 0 0 var(--accent),0 1px 2px var(--shadow);
 }
 body.edit-mode .bubble.drop-after{
-  box-shadow:3px 0 0 0 var(--accent),0 1px 2px rgba(0,0,0,0.30);
+  box-shadow:3px 0 0 0 var(--accent),0 1px 2px var(--shadow);
 }
 .bubble.add-pill{
   background:transparent!important;
@@ -497,7 +497,7 @@ body.edit-mode .bubble.drop-after{
   display:none;
   flex-direction:column;
   gap:6px;
-  box-shadow:0 6px 18px rgba(0,0,0,0.55);
+  box-shadow:0 6px 18px var(--shadow);
   min-width:240px;
   max-width:300px;
 }
@@ -640,11 +640,11 @@ body.edit-mode .bubble.drop-after{
   height:24px;padding:0 10px;border-radius:4px;
   cursor:pointer;
 }
-.pop-save{color:var(--green);border-color:rgba(46,204,113,0.45)}
+.pop-save{color:var(--green);border-color:var(--success-line)}
 .pop-save:hover{color:#fff;background:var(--green);border-color:var(--green)}
 .pop-cancel{color:var(--text-dim)}
 .pop-cancel:hover{color:var(--text);border-color:var(--border-strong)}
-.pop-del{color:var(--red);border-color:rgba(192,57,43,0.45)}
+.pop-del{color:var(--red);border-color:var(--danger-line)}
 .pop-del:hover{color:#fff;background:var(--red);border-color:var(--red)}
 
 /* 2026-05-18 — hover-preview pane. Sits between the buff grid and
@@ -655,7 +655,7 @@ body.edit-mode .bubble.drop-after{
   flex-shrink:0;
   overflow:hidden;
   border-top:1px solid var(--border);
-  background:rgba(0,0,0,0.18);
+  background:var(--bg-strong);
   /* 2026-05-18 — instant size transitions while the pane is
      ARMED (.is-active); fade-only when it's DISARMING so the
      content doesn't jump to height:0 mid-paint. */
@@ -676,10 +676,10 @@ body.edit-mode .bubble.drop-after{
   /* Checkerboard so alpha buffs read clearly against either light
      OR dark frames of the webm. */
   background-image:
-    linear-gradient(45deg, rgba(255,255,255,0.07) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(255,255,255,0.07) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.07) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.07) 75%);
+    linear-gradient(45deg, var(--tint) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--tint) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--tint) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--tint) 75%);
   background-size:16px 16px;
   background-position:0 0, 0 8px, 8px -8px, -8px 0;
   display:flex;align-items:center;justify-content:center;
@@ -742,7 +742,7 @@ body.edit-mode .bubble.drop-after{
          in localStorage), so each player can pick their own preference. -->
     <button class="x" id="btnRenderMode" type="button" data-i18n-title="stRenderModeTitle" title="渲染模式：循环 自动 → 特效 → 文字 → 自动 …"
             style="width:auto;padding:0 8px;font-size:11px;letter-spacing:0.5px">自动</button>
-    <button class="x" id="btnClose" type="button" data-i18n-title="stCloseTitle" title="关闭 (])"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
+    <button class="x" id="btnClose" type="button" data-i18n-title="stCloseTitle" title="关闭 (])"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
   </div>
   <div class="toolbar">
     <!-- Edit toggle. SVG = pencil icon, follows currentColor for the

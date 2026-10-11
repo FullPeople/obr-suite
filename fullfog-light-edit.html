@@ -22,7 +22,7 @@
       * { box-sizing: border-box; }
       html, body {
         margin: 0; padding: 10px 14px 12px;
-        background: #1c1f27; color: #e6e8ee;
+        background: #1c1f27; color: var(--text);
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
                      "Microsoft YaHei", Roboto, sans-serif;
         font-size: 13px;
@@ -47,7 +47,7 @@
       }
       .seg button:hover { background: #2e3340; }
       .seg button[aria-pressed="true"] {
-        background: #3a3320; border-color: #f5a623; color: #f5a623;
+        background: #3a3320; border-color: var(--warn); color: var(--warn);
       }
       .seg svg { width: 18px; height: 18px; display: block; }
       .num {
@@ -58,14 +58,14 @@
       .num input {
         flex: 1; min-width: 0; width: 100%;
         background: transparent; border: 0; outline: none;
-        color: #e6e8ee; font: inherit; font-variant-numeric: tabular-nums;
+        color: var(--text); font: inherit; font-variant-numeric: tabular-nums;
       }
       .num .unit { font-size: 11px; color: #7d8494; flex: none; }
       .actions { display: flex; gap: 8px; margin-top: 10px; }
       .actions button {
         flex: 1; height: 30px;
         display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-        background: #252934; color: #e6e8ee;
+        background: #252934; color: var(--text);
         border: 1px solid #3b4150; border-radius: 4px;
         cursor: pointer; font-size: 12px; font-family: inherit;
       }

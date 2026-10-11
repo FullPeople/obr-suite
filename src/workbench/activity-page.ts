@@ -25,19 +25,19 @@ export function setupActivityPage(){
  const notices=document.createElement('div');notices.id='activity-notices';flow.append(rows,notices);
  document.documentElement.classList.add('unified-activity');
  const style=document.createElement('style');style.textContent=`
- .unified-activity{--bg-card:rgba(53,55,63,.96);--border:#737580;--fg:#f5f5f6}
+ .unified-activity{--bg-card:var(--suite-bg-card,rgba(53,55,63,.96));--border:var(--suite-border-strong,var(--border-strong));--fg:var(--suite-text,var(--text))}
  .activity-flow{flex:1;min-height:0;overflow:auto;scrollbar-width:none;display:flex;flex-direction:column;padding:6px;gap:4px}
  .activity-flow>#rows{flex:0 0 auto;overflow:visible;padding:0;margin-top:auto}
  #activity-notices{display:flex;flex-direction:column;gap:4px;flex-shrink:0}
  .activity-notice{position:relative;flex-shrink:0;padding:7px 9px 9px;background:var(--bg-card);color:var(--fg);border:1px solid var(--border);border-radius:7px;cursor:pointer;overflow:hidden;outline-offset:-2px}
- .activity-notice:hover,.activity-notice:focus-visible{border-color:#d8c68e;background:#50525b}
+ .activity-notice:hover,.activity-notice:focus-visible{border-color:var(--warn);background:#50525b}
  .activity-line{display:flex;align-items:baseline;gap:5px;line-height:1.35;flex-wrap:wrap}
- .activity-line strong{font-size:12.5px}.activity-who{font-size:11px;color:#d0d0d4}
- .activity-value{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}.activity-delta{font-weight:700;color:#e6c995}
+ .activity-line strong{font-size:12.5px}.activity-who{font-size:11px;color:var(--text)}
+ .activity-value{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}.activity-delta{font-weight:700;color:var(--warn)}
  .activity-entry{margin:4px 0 0;white-space:pre-wrap;font-size:12px;line-height:1.4;max-height:min(45vh,320px);overflow:auto;scrollbar-width:thin}
- .activity-facts{display:block;margin-top:3px;font-size:11px;line-height:1.4;color:#c9cbd2;overflow-wrap:anywhere}
- .unified-activity .dismiss-btn{background:#50525b;border-color:#97999f;color:#fff}
- .activity-countdown{position:absolute;bottom:0;left:0;height:2px;width:100%;background:#e0cd90;transform-origin:left;pointer-events:none}
+ .activity-facts{display:block;margin-top:3px;font-size:11px;line-height:1.4;color:var(--text);overflow-wrap:anywhere}
+ .unified-activity .dismiss-btn{background:#50525b;border-color:var(--text-dim);color:#fff}
+ .activity-countdown{position:absolute;bottom:0;left:0;height:2px;width:100%;background:var(--warn);transform-origin:left;pointer-events:none}
  `;document.head.append(style);
  let connection='',instance='',role='PLAYER',player='',identityChanged=false,timer:ReturnType<typeof setTimeout>|undefined;
  const seenKey=PREFIX+'seen:'+OBR.room.id,activeKey=PREFIX+'active:'+OBR.room.id;
@@ -55,7 +55,7 @@ export function setupActivityPage(){
  rows.addEventListener('contextmenu',event=>{
   const row=(event.target as HTMLElement).closest<HTMLElement>('.row.hidden-roll');if(!row)return;
   if(row.dataset.rollerid!==player||!row.dataset.cid)return;event.preventDefault();
-  document.querySelector('.dice3d-context')?.remove();const menu=document.createElement('button');menu.className='dice3d-context';menu.textContent='公开暗骰并醒目';menu.style.cssText=`position:fixed;z-index:1000;left:${Math.min(event.clientX,innerWidth-140)}px;top:${Math.min(event.clientY,innerHeight-36)}px;border-radius:8px;padding:8px;background:#43464e;color:#fff;border:1px solid #8d9099;box-shadow:0 4px 14px #0007`;
+  document.querySelector('.dice3d-context')?.remove();const menu=document.createElement('button');menu.className='dice3d-context';menu.textContent='公开暗骰并醒目';menu.style.cssText=`position:fixed;z-index:1000;left:${Math.min(event.clientX,innerWidth-140)}px;top:${Math.min(event.clientY,innerHeight-36)}px;border-radius:8px;padding:8px;background:var(--bg-strong);color:#fff;border:1px solid var(--text-dim);box-shadow:0 4px 14px #0007`;
   menu.onclick=()=>{menu.remove();void OBR.broadcast.sendMessage('com.obr-suite/dice3d-reveal',{rollId:row.dataset.cid},{destination:'LOCAL'});};document.body.append(menu);setTimeout(()=>document.addEventListener('pointerdown',e=>{if(!menu.contains(e.target as Node))menu.remove();},{once:true}),0);
  });
  OBR.broadcast.onMessage('com.obr-suite/dice3d-highlight',event=>{if(event.connectionId!==connection)return;const cid=(event.data as any)?.cid;if(typeof cid!=='string')return;setTimeout(()=>{for(const row of rows.querySelectorAll<HTMLElement>('.row'))if(row.dataset.cid===cid)row.animate([{transform:'scale(1)',filter:'brightness(1)'},{transform:'scale(1.035)',filter:'brightness(1.6)'},{transform:'scale(1)',filter:'brightness(1)'}],{duration:700,easing:'ease-out'});},100);});

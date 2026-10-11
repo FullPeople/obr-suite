@@ -109,6 +109,8 @@ async function start(){
  OBR.broadcast.onMessage('com.obr-suite/workbench/catalog-request',event=>{if(event.connectionId!==playerConnection)return;const nonce=(event.data as any)?.nonce;if(typeof nonce!=='string'||!nonce||nonce.length>80)return;void (async()=>{let payload:Record<string,unknown>;try{const list=await catalog();payload={nonce,cards:list.cards.slice(0,150).map((c:any)=>({id:c.id,name:String(c.name||c.id).slice(0,80),cloud:!!c.cloudRoom,locked:!!c.locked,inScene:!!c.inScene}))};}catch(error){payload={nonce,error:String(error)};}await OBR.broadcast.sendMessage('com.obr-suite/workbench/catalog-reply',payload,{destination:'LOCAL'}).catch(()=>{});})();});
  const bubble=(item:Item|undefined)=>((item?.metadata[HP]??item?.metadata[LEGACY]??{}) as Record<string,any>);
  const documentCharacterName=(doc:any)=>{for(const value of [doc?.identity?.character_name,doc?.dnd_card_web?.name])if(typeof value==='string'&&value.trim())return value.trim().slice(0,160);return '';};
+/** Token metadata chooses a monster's override document; only `monster_<room>_<token>` keys for this token qualify. */
+ const monsterDocumentKey=(key:unknown,itemId:string)=>typeof key==='string'&&/^monster_[a-zA-Z0-9_-]{1,160}$/.test(key)&&key.endsWith('_'+itemId.replace(/[^a-zA-Z0-9_-]/g,'_'));
  const documentLocation=(id:string)=>{const value=cardLocations.get(id);if(value instanceof Error)throw value;return value||cardLocation(origin,OBR.room.id||'default',id);};
  const definitionsFor=(scene:Record<string,unknown>)=>[...DEFAULT_BUFFS,...(Array.isArray(scene[SHARED_BUFFS])?scene[SHARED_BUFFS] as any[]:[])];
  async function loadCard(cardId:string,key:string,fresh=false){
@@ -332,7 +334,7 @@ async function start(){
   return {...data,item:token,cardId,card,slug,targetId:cardId?`card:${cardId}`:`monster:${token!.id}`,write:card?card.write&&(!!card.qqRoom||!item||data.role==='GM'||ownsNativeToken(item,playerId)):(data.role==='GM'||ownsNativeToken(token,playerId)),key:cardId?`${OBR.room.id}:card:${cardId}`:`${OBR.room.id}:token:${token!.id}:${slug}`};
  }
  async function read(a:Awaited<ReturnType<typeof access>>,fresh=false){
-  const key=a.key;if(a.cardId)return loadCard(a.cardId,key,fresh);const override=(a.slug?a.item?.metadata[MONSTER]:undefined) as {key:string;revision:number}|undefined;if(override?.key){let cached=monsterOverrides.get(override.key);if(fresh||!cached||cached.revision<override.revision){cached=await relay.send({sharedDocument:{key:override.key,operation:'read'}});monsterOverrides.set(override.key,cached!);}if(cached?.data){monsterSceneDocuments.delete(key);cacheDocument(key,cached.data);return cached.data;}}
+  const key=a.key;if(a.cardId)return loadCard(a.cardId,key,fresh);const override=(a.slug?a.item?.metadata[MONSTER]:undefined) as {key:string;revision:number}|undefined;if(override?.key&&a.item&&monsterDocumentKey(override.key,a.item.id)){let cached=monsterOverrides.get(override.key);if(fresh||!cached||cached.revision<override.revision){cached=await relay.send({sharedDocument:{key:override.key,operation:'read'}});monsterOverrides.set(override.key,cached!);}if(cached?.data){monsterSceneDocuments.delete(key);cacheDocument(key,cached.data);return cached.data;}}
   // A scene-owned definition can arrive or be replaced after the library read.
   // Cache against its observed identity; a removed override must not stay alive.
   const sceneDocument=a.slug?(a.scene['com.bestiary/monsters'] as any)?.[a.slug]:undefined;
@@ -606,6 +608,7 @@ async function start(){
    const a=await access(m.itemId),roomId=OBR.room.id,sceneEpoch=observation.sceneEpoch();
    if(m.accountId!==qqSession()?.accountId)throw Error('QQ 账号已改变，请重新打开云端设置。');
    if(!a.cardId||!a.card||!a.write)throw Error('只有有编辑权限的角色卡可以上传云端。');
+   if(a.role!=='GM'&&a.items.some(item=>item.metadata[BIND]===a.cardId&&!ownsNativeToken(item,playerId)))throw Error('此卡还绑定其他玩家的棋子，仅 DM 可以上传云端。');
    if(a.card.qqRoom)return {snapshot:await snapshot(m.itemId)};
    const guard=async()=>{await m._beforeMutation?.();const current=await access(m.itemId);if(OBR.room.id!==roomId||observation.sceneEpoch()!==sceneEpoch||current.key!==a.key||!current.write||current.card?.qqRoom)throw Error('房间、角色关联或上传权限已改变，请重新读取。');};
    const result=await uploadRoomCard({roomId,cardId:a.cardId,playerId,native:m.native,read:()=>read(a,true),guard,session:qqSession,request:qqRequest,storage:localStorage,getMetadata:()=>OBR.room.getMetadata(),setMetadata:update=>OBR.room.setMetadata(update),registryKey:QQ_CARDS});
@@ -708,6 +711,7 @@ async function start(){
    const data=m.data;if(!data||typeof data.name!=='string'||!data.name.trim()||JSON.stringify(data).length>500_000)throw Error('怪物资料无效');
    const identity=targetReadIdentity(a),sceneEpoch=observation.sceneEpoch(),previous=await read(a);if(JSON.stringify(previous)!==JSON.stringify(m.expected))throw Error('怪物资料已经更新，请重新打开编辑');
    const index=a.item.metadata[MONSTER] as {key:string;revision:number}|undefined;
+   if(index&&!monsterDocumentKey(index.key,a.item.id))throw Error('怪物资料地址异常，请重新打开编辑');
    const key=index?.key||`monster_${(OBR.room.id||'default').replace(/[^a-zA-Z0-9_-]/g,'_')}_${a.item.id.replace(/[^a-zA-Z0-9_-]/g,'_')}`;
    const latest=await relay.send({sharedDocument:{key,operation:'read'}});if(index&&latest.revision!==index.revision&&JSON.stringify(latest.data)!==JSON.stringify(m.expected))throw Error('怪物资料已经更新，请重新打开编辑');
    const permission=await access(a.targetId);if(!permission.write||targetReadIdentity(permission)!==identity||sceneEpoch!==observation.sceneEpoch())throw Error('怪物关联或权限已改变');
@@ -765,7 +769,11 @@ async function start(){
     return {snapshot:await snapshot('card:'+a.cardId)};
   }
   if(m.type==='lock'){
-   if(!a.cardId){if(!a.item)throw Error('没有怪物卡');await m._beforeMutation?.();await OBR.scene.items.updateItems([a.item.id],rows=>{m._assertAuthority?.();for(const row of rows){assertMonsterWrite(a,row);row.metadata['com.obr-suite/workbench/locked']=!!m.locked;}});return {snapshot:await snapshot(a.targetId)};}const locked=!!m.locked,update=(list:any[])=>list.map(c=>c.id===a.cardId?{...c,locked,visibility:locked?'owners':'public'}:c);
+   if(!a.cardId){if(!a.item)throw Error('没有怪物卡');await m._beforeMutation?.();await OBR.scene.items.updateItems([a.item.id],rows=>{m._assertAuthority?.();for(const row of rows){assertMonsterWrite(a,row);row.metadata['com.obr-suite/workbench/locked']=!!m.locked;}});return {snapshot:await snapshot(a.targetId)};}const locked=!!m.locked,gm=a.role==='GM';
+   // A GM sets visibility with the lock. An owner only locks or unlocks: locking
+   // hides a public card, unlocking re-publishes a card the owner hid, and a
+   // GM's `dm` hide is never undone by the owner.
+   const update=(list:any[])=>list.map(c=>{if(c.id!==a.cardId)return c;const visibility=gm?(locked?'owners':'public'):locked?(c.visibility===undefined||c.visibility==='public'?'owners':c.visibility):(c.visibility==='owners'?'public':c.visibility);return {...c,locked,visibility};});
    const scene=await OBR.scene.getMetadata();await observation.refreshAuthority();m._assertAuthority?.();
    if(Array.isArray(scene[LIST])){await OBR.scene.setMetadata({[LIST]:update(scene[LIST] as any[])});m._committed={kind:'document',id:`card:${a.cardId}`};}
    const room=await OBR.room.getMetadata();await observation.refreshAuthority();m._assertAuthority?.();

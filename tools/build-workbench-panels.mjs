@@ -3,6 +3,7 @@ import {readFileSync,writeFileSync,mkdirSync,readdirSync,copyFileSync,unlinkSync
 import {resolve,join,dirname,sep} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
+import {suiteUiHead} from './suite-ui.mjs';
 const root=resolve(import.meta.dirname,'..'),out=resolve(process.env.WORKBENCH_PANEL_OUT||join(root,'dist-workbench-dev/workbench-panels'));mkdirSync(out,{recursive:true});
 const pairedVersion=JSON.parse(readFileSync(join(root,'public/manifest-dev.json'),'utf8')).version;
 const sdkRoot=join(root,'node_modules/@owlbear-rodeo/sdk/lib');
@@ -21,7 +22,7 @@ for(const [name,file,entry] of [...(historical?[['historical-table','tools/fixtu
  // Deliver the embedded theme in HTML before first paint. The old popover's
  // dark defaults must never appear while the settings bundle/bridge loads.
  const themeFile=name==='permissions'?'src/workbench/permission-theme.css':name==='historical-table'?'src/workbench/table-theme.css':'src/workbench/panel-theme.css';
- const bootTheme=`<style data-workbench-theme>${readFileSync(join(root,themeFile),'utf8')}</style><script>try{var t=localStorage.getItem('full-suite/ui-tone');if(/^#[0-9a-f]{6}$/i.test(t||''))document.documentElement.style.setProperty('--suite-tone',t);document.documentElement.dataset.suiteNight=localStorage.getItem('full-suite/ui-night')==='1'?'true':'false';}catch(e){}</script>`;
+ const bootTheme=suiteUiHead()+`<style data-workbench-theme>${readFileSync(join(root,themeFile),'utf8')}</style><script>try{var t=localStorage.getItem('full-suite/ui-tone');if(/^#[0-9a-f]{6}$/i.test(t||''))document.documentElement.style.setProperty('--suite-tone',t);document.documentElement.dataset.suiteNight=localStorage.getItem('full-suite/ui-night')==='1'?'true':'false';}catch(e){}</script>`;
  const html=readFileSync(join(root,file),'utf8').replace(/<script type="module" src="[^"]+"><\/script>/,`<script type="module" src="./${main}"></script>`).replace('</head>',bootTheme+'</head>');
  writeFileSync(join(out,name+'.html'),html);unlinkSync(temp);
 }
