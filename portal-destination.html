@@ -7,10 +7,10 @@
 /* Suite palette — mirrors cluster.html / settings.html */
 :root{
   --bg-soft: rgba(31,34,48,0.92);
-  --border: rgba(255,255,255,0.18);
+  --border:rgba(255,255,255,0.24);
   --border-strong: rgba(93,173,226,0.40);
   --text: #e6e8ee;
-  --text-dim: #9aa0b3;
+  --text-dim:#aab0c2;
   --accent: #5dade2;
   --accent-dim: #7ec8f0;
 }
@@ -103,7 +103,7 @@ body.below .tail{
   <div class="head">
     <span class="ico">◐</span>
     <span class="nm" id="entry-name"></span>
-    <span class="x" id="btn-close" title="关闭">×</span>
+    <span class="x" id="btn-close" title="关闭" role="button" tabindex="0" aria-label="关闭"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></span>
   </div>
   <div class="sub" id="sub"></div>
   <div class="list" id="list"></div>

@@ -447,12 +447,16 @@ export async function closeReplay(): Promise<void> {
 
 async function tokenTopWorld(itemId: string): Promise<{ x: number; y: number } | null> {
   try {
-    const items = await OBR.scene.items.getItems([itemId]);
+    // The grid dpi does not depend on the item lookup; read both at once.
+    const [items, dpiResult] = await Promise.all([
+      OBR.scene.items.getItems([itemId]),
+      OBR.scene.grid.getDpi().then((dpi) => ({ dpi }), () => ({ dpi: undefined as number | undefined })),
+    ]);
     if (!items.length) return null;
     const item = items[0] as any;
     let halfHeight = 75;
     try {
-      const sceneDpi = await OBR.scene.grid.getDpi();
+      const sceneDpi = dpiResult.dpi;
       const img = item.image;
       const itemGridDpi = item.grid?.dpi;
       const scaleY = item.scale?.y ?? 1;
@@ -557,9 +561,10 @@ export async function showDiceEffect(p: DiceRollPayload): Promise<void> {
     skinsParam;
 
   try {
-    // Workbench de-duplicates rollId before rendering. There cannot be a prior
-    // modal to close here; an empty close added another SDK round trip per roll.
-    if(!WORKBENCH_DEV)try { await OBR.modal.close(modalId); } catch {}
+    // Every caller de-duplicates rollId before rendering (seenRollsModuleScope
+    // here, the rolls list in the workbench), and a rollId is unique per roll,
+    // so there is never a prior modal to close. The old unconditional close was
+    // one wasted SDK round trip on the roll's critical path.
     await OBR.modal.open({
       id: modalId,
       url,
@@ -1424,13 +1429,15 @@ export async function broadcastDiceRoll(opts: {
 
   let rollerColor = opts.rollerColor || "#5dade2";
   let rollerName = opts.rollerName ?? "";
+  // Both identity reads are independent host round trips; issue them together
+  // instead of waiting for the colour before asking for the name.
   try {
-    const c = opts.rollerColor ?? await OBR.player.getColor();
+    const [c, n] = await Promise.all([
+      opts.rollerColor ?? OBR.player.getColor(),
+      rollerName ? rollerName : OBR.player.getName(),
+    ]);
     if (typeof c === "string" && c) rollerColor = c;
-    if (!rollerName) {
-      const n = await OBR.player.getName();
-      if (n) rollerName = n;
-    }
+    if (!rollerName && n) rollerName = n;
   } catch {}
   if (!rollerName) rollerName = "投骰人";
 

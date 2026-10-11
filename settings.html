@@ -7,8 +7,8 @@
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
   --bg:#292d3c;--bg-strong:#1f2230;--bg-card:#323748;
-  --border:rgba(255,255,255,0.12);--border-strong:rgba(255,255,255,0.20);
-  --text:#e6e8ee;--text-dim:#9aa0b3;
+  --border:rgba(255,255,255,0.24);--border-strong:rgba(255,255,255,0.36);
+  --text:#e6e8ee;--text-dim:#aab0c2;
   --accent:#5dade2;--accent-warm:#f5a623;--accent-red:#e74c3c;--accent-green:#2ecc71;
   --kofi:#ff5e5b;
 }
@@ -169,7 +169,7 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
 }
 .rules-collapse > summary::-webkit-details-marker{display:none}
 .rules-collapse > summary::before{
-  content:"▶";
+  content:"";width:6px;height:6px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(-45deg);
   display:inline-block;
   margin-right:6px;
   font-size:10px;
@@ -844,7 +844,7 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
   user-select:none;
 }
 .lib-tut > summary::before{
-  content:"▶";
+  content:"";width:6px;height:6px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(-45deg);
   display:inline-block;
   margin-right:6px;
   font-size:10px;color:#7aa2c4;
@@ -899,6 +899,8 @@ body{display:flex;flex-direction:column;border:1px solid var(--border-strong);bo
   transition:background .12s;
 }
 .lib-prompt-copy:hover{background:rgba(46,204,113,0.30)}
+/* Narrow popovers and phones: a slimmer tab rail, no horizontal overflow. */
+@media(max-width:560px){.tabs{width:108px;min-width:96px}.tab{font-size:11px;padding:8px 8px}.content{padding:10px}.head{padding:9px 10px}}
 </style>
 </head>
 <body>

@@ -707,6 +707,8 @@ function getAlpha(elapsedMs: number): number {
 // --- Viewport tracking ---
 let trackingActive = true;
 let updateInFlight = false;
+// Scene grid dpi, read once per effect page; see readPosOnce.
+let cachedSceneDpi: number | null = null;
 // Slot index the flash should anchor to. Defaults to winnerIdx; the
 // punch-time setTimeout may override this for panel rolls that crit
 // on a non-winner d20.
@@ -722,32 +724,31 @@ async function readPosOnce(): Promise<void> {
     // (per spec: dynamic follow, not snap-after-stop). The token-top
     // resolution itself is cheap; getItems is throttled by
     // updateInFlight so we won't pile up calls.
-    if (itemIdParam) {
-      try {
-        const items = await OBR.scene.items.getItems([itemIdParam]);
-        if (items.length) {
-          const item = items[0] as any;
-          let halfHeight = 75;
-          try {
-            const sceneDpi = await OBR.scene.grid.getDpi();
-            const img = item.image;
-            const itemGridDpi = item.grid?.dpi;
-            const scaleY = item.scale?.y ?? 1;
-            if (img?.height && itemGridDpi && sceneDpi) {
-              halfHeight = (img.height / itemGridDpi) * sceneDpi * scaleY / 2;
-            } else if (sceneDpi) {
-              halfHeight = sceneDpi / 2;
-            }
-          } catch {}
-          worldX = item.position.x;
-          worldY = item.position.y - halfHeight;
-        }
-      } catch {}
-    }
-    const [vp, scale] = await Promise.all([
+    // One concurrent batch instead of three sequential host round trips
+    // (items → dpi → viewport). The grid dpi is read once and reused: it
+    // cannot change while a roll is in flight.
+    const [itemsResult, dpiResult, vp, scale] = await Promise.all([
+      itemIdParam ? OBR.scene.items.getItems([itemIdParam]).catch(() => []) : Promise.resolve([]),
+      cachedSceneDpi !== null ? Promise.resolve(cachedSceneDpi) : OBR.scene.grid.getDpi().catch(() => null),
       OBR.viewport.getPosition(),
       OBR.viewport.getScale(),
     ]);
+    if (typeof dpiResult === "number") cachedSceneDpi = dpiResult;
+    if (itemIdParam && itemsResult.length) {
+      const item = itemsResult[0] as any;
+      let halfHeight = 75;
+      const sceneDpi = cachedSceneDpi ?? undefined;
+      const img = item.image;
+      const itemGridDpi = item.grid?.dpi;
+      const scaleY = item.scale?.y ?? 1;
+      if (img?.height && itemGridDpi && sceneDpi) {
+        halfHeight = (img.height / itemGridDpi) * sceneDpi * scaleY / 2;
+      } else if (sceneDpi) {
+        halfHeight = sceneDpi / 2;
+      }
+      worldX = item.position.x;
+      worldY = item.position.y - halfHeight;
+    }
     lastVpScale = scale;
     const sxScreen = worldX * scale + vp.x;
     const syScreen = worldY * scale + vp.y;
@@ -821,9 +822,14 @@ function getPunchScale(elapsedSincePunchMs: number): number {
   return 1.18 - 0.18 * easeOutCubic((t - peak) / (1 - peak));
 }
 
+// Token/viewport tracking polls the host over postMessage. 20 Hz keeps the
+// dice glued to a dragged token while leaving the SDK channel free for the
+// roll's own broadcasts instead of saturating it at the display refresh rate.
+const POS_POLL_MS = 50;
+let lastPosPoll = -Infinity;
 function frame(now: number): void {
   if (animStart === null) animStart = now;
-  readPosOnce();
+  if (now - lastPosPoll >= POS_POLL_MS) { lastPosPoll = now; readPosOnce(); }
   const elapsed = now - animStart;
 
   // Effective punch target — the index that should zoom in the simple

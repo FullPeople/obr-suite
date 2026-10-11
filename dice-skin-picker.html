@@ -7,8 +7,8 @@
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
   --bg:#292d3c;--bg-strong:#1f2230;--bg-card:#323748;
-  --border:rgba(255,255,255,0.12);--border-strong:rgba(255,255,255,0.22);
-  --text:#e6e8ee;--text-dim:#9aa0b3;--accent:#5dade2;
+  --border:rgba(255,255,255,0.24);--border-strong:rgba(255,255,255,0.36);
+  --text:#e6e8ee;--text-dim:#aab0c2;--accent:#5dade2;
 }
 html,body{
   height:100%;width:100%;
@@ -66,7 +66,7 @@ html,body{
   display:flex;flex-direction:column;align-items:center;gap:4px;
   padding:10px 4px 8px;
   background:var(--bg-card);
-  border:1px solid var(--border);border-radius:8px;
+  border:1px solid var(--border-strong);border-radius:8px;
   cursor:pointer;color:var(--text);font-family:inherit;
   transition:background .12s,border-color .12s,transform .08s;
 }
@@ -88,7 +88,7 @@ html,body{
 .btn{
   flex:1;height:32px;border-radius:6px;
   background:var(--bg-card);color:var(--text);
-  border:1px solid var(--border);font-size:12.5px;cursor:pointer;
+  border:1px solid var(--border-strong);font-size:12.5px;cursor:pointer;
   font-family:inherit;font-weight:600;transition:background .12s;
 }
 .btn:hover{background:rgba(255,255,255,0.08)}
@@ -98,7 +98,7 @@ html,body{
 <div class="card">
   <div class="hdr">
     <span class="ttl">设为我的骰子皮肤</span>
-    <button class="x" id="btnX" type="button">×</button>
+    <button class="x" id="btnX" type="button" aria-label="关闭"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
   </div>
   <div class="body">
     <div class="preview" id="preview"></div>

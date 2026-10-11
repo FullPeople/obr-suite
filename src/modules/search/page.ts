@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { ICONS } from "../../icons";
 import * as en from "./locale";
 const tr = (zh: string, english: string) => getLocalLang() === "en" ? english : zh;
 const comma = () => tr("，", ", ");
@@ -1635,7 +1636,7 @@ async function sendMissingReport(
       body: JSON.stringify(payload),
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    btn.innerHTML = `<span style="color:#7be0a0">${tr("✓ 已汇报，谢谢", "✓ Report sent, thank you")}</span>`;
+    btn.innerHTML = `<span style="color:#7be0a0">${ICONS.check} ${tr("已汇报，谢谢", "Report sent, thank you")}</span>`;
     // Restore after a moment so the user can resubmit if needed
     setTimeout(() => { btn.innerHTML = originalLabel; btn.disabled = false; }, 2400);
   } catch (e) {

@@ -1,6 +1,7 @@
 import {sendMusicMessage,onMusicMessage} from './modules/musicBoard/transport';
 // Audio and durable room writes stay in the background when this view closes.
 import OBR from "@owlbear-rodeo/sdk";
+import { enhanceSegmentedSelects } from "./utils/segmented";
 import { bindPanelDrag } from "./utils/panelDrag";
 import { getLocalLang, onLangChange } from "./state";
 import { MUSIC_ACK, MUSIC_COMMAND, MUSIC_LOCAL, MUSIC_READY, MUSIC_VIEW, MUSIC_BACKUP, MAX_TRACKS, MAX_QUEUE, decodeTracks, encodeLibrary, trackFrom, type MusicSession, type MusicOp, type Track } from "./modules/musicBoard/model";

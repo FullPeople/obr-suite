@@ -5,7 +5,7 @@ import {workbenchObservation} from './observation';
 const KEY='com.obr-suite/workbench/shared',CHANGED='com.obr-suite/workbench/shared-changed';
 export const defaultRules=()=>({edition:'2024',sourceMode:'both',profile:{enabledSources:['PHB','XPHB'],autoSourceDefaults:['PHB','XPHB'],optional:{feats:true,multiclass:false,legacy:false},exceptions:{}},packs:[],customEntries:[]});
 export function sharedDocuments(relay:Relay){
- let cache:{key:string;revision:number;data:any}|undefined;
+ let cache:{key:string;revision:number;data:any}|undefined,reading:{key:string;task:Promise<any>}|undefined;
  const room=(OBR.room.id||'default').replace(/[^a-zA-Z0-9_-]/g,'_');
  async function scope(){
   const global=getState().crossSceneSyncSettings,api=global?OBR.room:OBR.scene;
@@ -22,7 +22,10 @@ export function sharedDocuments(relay:Relay){
  async function read(force=false){
   const current=await scope();if(!current?.key)return {key:'',revision:0,scope:current?.scope||'scene',rules:defaultRules()};
   if(force||!cache||cache.key!==current.key||cache.revision<(current.index?.revision||0)){
-   const result=await relay.send({sharedDocument:{key:current.key,operation:'read'}});cache={key:current.key,...result};
+   // The catalog refresh and the inventory context both read the rules at the
+   // same moment; one relay request answers both instead of two in flight.
+   if(!reading||reading.key!==current.key){const key=current.key,task=relay.send({sharedDocument:{key,operation:'read'}}).finally(()=>{if(reading?.task===task)reading=undefined;});reading={key,task};}
+   const result=await reading.task;if(!cache||cache.key!==current.key||result.revision>=cache.revision)cache={key:current.key,...result};
   }
   return {key:current.key,scope:current.scope,revision:cache!.revision,rules:cache!.data?.rules||defaultRules()};
  }

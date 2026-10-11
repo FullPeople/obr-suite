@@ -1,4 +1,5 @@
 import OBR from '@owlbear-rodeo/sdk';
+import {ICONS} from '../../icons';
 import {QQ_CARDS,qqSession,qqRequest,connectQQ,disconnectQQ,selectQQCard,type QQRoom} from './qq-account';
 type Entry={qqCardId?:string;qqEditors?:string[];id:string;name:string;qqRoom:QQRoom;qqOwner:string;locked:boolean;visibility:string;owner_ids:string[]};
 const el=(id:string)=>document.getElementById(id)!;
@@ -30,7 +31,7 @@ async function refreshRoom(){
   const current=entries.find(entry=>entry.id===active);if(active&&(!current||current.locked&&qqSession()?.accountId!==current.qqOwner)){active=undefined;}
   for(const entry of entries){
     const own=qqSession()?.accountId===entry.qqOwner;
-    const row=document.createElement('div'),button=document.createElement('button');button.textContent=(entry.locked?'🔒 ':'')+entry.name;button.onclick=()=>open(entry);row.append(button);
+    const row=document.createElement('div'),button=document.createElement('button');button.textContent=entry.name;if(entry.locked){const mark=document.createElement('span');mark.innerHTML=ICONS.lock;button.prepend(mark,' ');}button.onclick=()=>open(entry);row.append(button);
     if(own){const lock=document.createElement('button');lock.disabled=busy;lock.textContent=entry.locked?'解锁给房间成员':'重新锁定';lock.onclick=()=>void act(async()=>{
       const result=await qqRequest('room-cards/'+entry.qqRoom.id+'/lock','PUT',{locked:!entry.locked},entry.qqRoom);
       const fresh=await OBR.room.getMetadata();if(OBR.room.id!==room||qqSession()?.accountId!==entry.qqOwner)throw Error('账号或房间已改变，请重新打开卡库。');await OBR.room.setMetadata({[QQ_CARDS]:(fresh[QQ_CARDS] as Entry[]).map(item=>item.id===entry.id?{...item,locked:result.locked,visibility:result.locked?'owners':'public'}:item)});await refresh();

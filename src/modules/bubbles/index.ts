@@ -1796,21 +1796,28 @@ async function syncBubbles(): Promise<void> {
       return;
     }
 
+    // Items, grid dpi and scene metadata are three independent host reads.
+    // They used to run in sequence on every sync, so a remote HP change
+    // waited three round trips before the bubble could redraw; now it waits
+    // for the slowest one. cachedSceneDpi is still refreshed opportunistically
+    // every sync (a non-default grid can change it) and the bounds-poll reads
+    // it without awaiting, so this keeps it warm.
     let allItems: Item[];
-    try { allItems = await OBR.scene.items.getItems(); }
+    let dpiRead: number | undefined;
+    let metaRead: Record<string, unknown> | undefined;
+    try {
+      const [items, dpiResult, metaResult] = await Promise.all([
+        OBR.scene.items.getItems(),
+        OBR.scene.grid.getDpi().then((v) => v, () => undefined),
+        OBR.scene.getMetadata().then((v) => v as Record<string, unknown>, () => undefined),
+      ]);
+      allItems = items;
+      dpiRead = dpiResult;
+      metaRead = metaResult;
+    }
     catch { return; }
     if (!current()) return;
-
-    // Refresh cachedSceneDpi opportunistically every sync — most of the
-    // time the value is stable, but a scene with a non-default grid
-    // can change it. The bounds-poll reads from `cachedSceneDpi`
-    // without awaiting, so this keeps it warm.
-    try {
-      const dpi = await OBR.scene.grid.getDpi();
-      if (!current()) return;
-      cachedSceneDpi = dpi;
-    } catch {}
-    if (!current()) return;
+    if (typeof dpiRead === "number") cachedSceneDpi = dpiRead;
     const sceneDpi = cachedSceneDpi;
 
     const userScale = readUserScale();
@@ -1825,11 +1832,7 @@ async function syncBubbles(): Promise<void> {
     // Refresh the cached combat-active flag at sync time so a player
     // who joins during combat picks up the right view mode without
     // waiting for the next metadata-change event.
-    try {
-      const meta = await OBR.scene.getMetadata();
-      if (!current()) return;
-      cachedCombatActive = readCombatActive(meta);
-    } catch {}
+    if (metaRead) cachedCombatActive = readCombatActive(metaRead);
     if (!current()) return;
     const isGM = role === "GM";
 

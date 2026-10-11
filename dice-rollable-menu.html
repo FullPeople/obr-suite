@@ -7,8 +7,8 @@
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
   --bg:rgba(31,34,48,0.97);
-  --border:rgba(255,255,255,0.16);
-  --text:#e6e8ee;--text-dim:#9aa0b3;
+  --border:rgba(255,255,255,0.24);
+  --text:#e6e8ee;--text-dim:#aab0c2;
   --accent:#7aa2c4;--green:#7be0a0;--red:#ff8b7a;--yellow:#f5d76e;
   --purple:#bb87dd;
 }
@@ -52,13 +52,13 @@ html,body{
 </head>
 <body>
 <div class="menu">
-  <button class="item" data-act="roll"><span class="ico">⚀</span><span data-l="roll">投掷</span></button>
-  <button class="item dark" data-act="dark"><span class="ico">●</span><span data-l="dark">暗骰</span></button>
-  <button class="item adv" data-act="adv"><span class="ico">▲</span><span data-l="adv">优势</span></button>
-  <button class="item dis" data-act="dis"><span class="ico">▼</span><span data-l="dis">劣势</span></button>
-  <button class="item crit" data-act="crit"><span class="ico">✦</span><span data-l="crit">重击</span></button>
+  <button class="item" data-act="roll"><span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="15" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg></span><span data-l="roll">投掷</span></button>
+  <button class="item dark" data-act="dark"><span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><circle cx="12" cy="12" r="6.5" fill="currentColor" stroke="none"/></svg></span><span data-l="dark">暗骰</span></button>
+  <button class="item adv" data-act="adv"><span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 5 L20 18 H4 Z" fill="currentColor" stroke="none"/></svg></span><span data-l="adv">优势</span></button>
+  <button class="item dis" data-act="dis"><span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 19 L4 6 H20 Z" fill="currentColor" stroke="none"/></svg></span><span data-l="dis">劣势</span></button>
+  <button class="item crit" data-act="crit"><span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 3l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7z"/></svg></span><span data-l="crit">重击</span></button>
   <div class="sep"></div>
-  <button class="item tray" data-act="tray"><span class="ico">＋</span><span data-l="tray">添加到骰盘</span></button>
+  <button class="item tray" data-act="tray"><span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 5 v14 M5 12 h14"/></svg></span><span data-l="tray">添加到骰盘</span></button>
 </div>
 <script type="module">
 import OBR from "@owlbear-rodeo/sdk";
