@@ -1,7 +1,7 @@
 name: Verify QQ account and room permissions
 on:
   push:
-    branches: [codex/qq-cloud-sync-282-20261011, codex/qq-room-cloud-button-281-20261011, codex/qq-account-button-280-20261010, codex/cloud-card-native-20261010, dev, codex/qq-library-entry-dev-20261010, codex/qq-account-permissions-dev-20261010, codex/qq-account-permissions-stable-20261010]
+    branches: [codex/ui-relay283-20261011, codex/qq-cloud-sync-282-20261011, codex/qq-room-cloud-button-281-20261011, codex/qq-account-button-280-20261010, codex/cloud-card-native-20261010, dev, codex/qq-library-entry-dev-20261010, codex/qq-account-permissions-dev-20261010, codex/qq-account-permissions-stable-20261010]
   pull_request:
     paths: ['src/workbench/cloud-upload.ts', 'tools/cloud-upload-selftest.mjs', 'tools/qq-native-browser-selftest.mjs', '.github/workflows/qq-permissions.yml', 'cc-qq.html', 'src/modules/characterCards/**', 'src/workbench/background.ts', 'src/workbench/panel-rpc.ts', 'src/workbench/qq-account-adapter.ts', 'tools/build-workbench-panels.mjs', 'tools/qq-account-session-selftest.mjs', 'tools/qq-panel-selftest.mjs', 'tools/qq-room-browser-selftest.mjs', 'tools/build-workbench-dev.mjs', 'tools/native-owner-selftest.mjs', 'tools/workbench-read-recovery-selftest.mjs', 'vite.config.ts']
   workflow_dispatch:

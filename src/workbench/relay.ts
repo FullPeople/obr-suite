@@ -40,6 +40,7 @@ export class Relay {
  }
  async send(message:any,beforeSend?:()=>void|Promise<void>){try{await this.register();}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}return this.post(message,beforeSend);}
  private async pause(ms:number){await new Promise<void>(resolve=>{const finish=()=>{clearTimeout(timer);this.abort.signal.removeEventListener('abort',finish);resolve();},timer=setTimeout(finish,ms);if(this.abort.signal.aborted)finish();else this.abort.signal.addEventListener('abort',finish,{once:true});});}
+ private deliver(text:string){let batch:unknown;try{batch=JSON.parse(text);}catch{return;}if(Array.isArray(batch))for(const message of batch)this.receive(message);}
  private openSocket(){
   if(this.socket||typeof WebSocket==='undefined'||Date.now()<this.socketRetryAt)return;
   const refused=()=>{this.socketRetryAt=Date.now()+SOCKET_RETRY_MS[Math.min(this.socketFailures++,SOCKET_RETRY_MS.length-1)];};
