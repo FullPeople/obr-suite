@@ -37,3 +37,5 @@ node server/workbench-relay/relay-selftest.mjs
 合并保留当前 dev 的注册去重、重试等待、发送前权限重检、队列字节核算和宿主超时。玩家套接字保活不会延长宿主会话。接收仅承载保活，单帧上限 1 KiB；慢连接输出上限 16 MiB，全部连接待发送缓冲合计上限 32 MiB。
 
 服务自检扩展为 14 项，新增超大输入、慢连接输出及失效宿主清理。部署使用独立封存包、当前中继及 Nginx 备份；卡片存储和现有服务内存上限保留。原始脚本只说明所需配置，不替代正式发布回执。
+
+The latest dev-line changes also normalize DELETE status and include room cloud cards in token binding. The integrated relay retains frame/output bounds and host-only lease renewal; the combined relay self-test covers 19 checks.

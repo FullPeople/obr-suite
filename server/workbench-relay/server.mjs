@@ -72,7 +72,13 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==='POST'&&body.deleteCard){
    if(role!=='host')return reply(res,403,{});
    const {room,card}=body.deleteCard;if(!/^[a-zA-Z0-9_-]+$/.test(room||'')||!/^[a-zA-Z0-9_-]+$/.test(card||''))return reply(res,400,{});
-   const key='card:'+room+':'+card,task=(writes.get(key)||Promise.resolve()).catch(()=>{}).then(async()=>{const result=await fetch(`${process.env.CARD_WRITE_BASE||'http://127.0.0.1:5001'}/api/character/${room}/${card}`,{method:'DELETE',signal:AbortSignal.timeout(60000)});reply(res,result.status===404?200:result.status,result.status===404?{ok:true}:await result.json());});writes.set(key,task);try{await task;}finally{if(writes.get(key)===task)writes.delete(key);}return;
+   const key='card:'+room+':'+card,task=(writes.get(key)||Promise.resolve()).catch(()=>{}).then(async()=>{const result=await fetch(`${process.env.CARD_WRITE_BASE||'http://127.0.0.1:5001'}/api/character/${room}/${card}`,{method:'DELETE',signal:AbortSignal.timeout(60000)});
+    // The durable outcome is the status. A DELETE may answer with an empty or
+    // non-JSON body, and a card that is already gone (404/410) counts as deleted;
+    // parsing failures used to turn a completed delete into a 500 for the host.
+    const text=await result.text();let data={};try{data=text?JSON.parse(text):{};}catch{data={};}const detail=data&&typeof data==='object'&&!Array.isArray(data)?data:{};
+    if(result.ok||result.status===404||result.status===410)return reply(res,200,{...detail,ok:true});
+    reply(res,result.status,{error:typeof detail.error==='string'?detail.error:typeof detail.message==='string'?detail.message:`角色删除失败（${result.status}）`,status:result.status});});writes.set(key,task);try{await task;}finally{if(writes.get(key)===task)writes.delete(key);}return;
   }
   if(req.method==='POST'&&body.saveCard){
    if(role!=='host')return reply(res,403,{});

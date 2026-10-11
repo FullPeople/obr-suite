@@ -98,7 +98,7 @@ body {
   padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;
   font-family:inherit;letter-spacing:0.5px;
 }
-.lang-switch button.on{background:rgba(93,173,226,0.25);color:#7ec8f0}
+.lang-switch button.on{background:rgba(93,173,226,0.25);color:#7ec8f0;border:1px solid rgba(126,200,240,0.75)}
 .lang-switch button + button{border-left:1px solid var(--border)}
 .body {
   flex: 1;
@@ -385,14 +385,16 @@ body {
 .btn:active { transform: translateY(1px); }
 .btn:disabled {
   background: #2a3242;
-  color: #7d8494;
-  border-color: #39414f;
+  color: #aab2c4;
+  border-color: #78839a;
   cursor: default;
 }
 .btn:disabled:hover { background: #2a3242; }
 .btn:disabled:active { transform: none; }
 .notice-block{padding:0;border:0;background:none;line-height:1.7;font-size:13px}.notice-block h2{font-size:19px;margin-bottom:12px;color:#f4f4f6}.notice-block .text{color:#dce0e8}.notice-block a{color:#a9ccef}.hl-card{flex-direction:column;background:none;border:0;padding:0}.hl-card .hl-img{width:100%;height:auto;max-height:none;object-fit:contain;border-radius:0}.hl-card .hl-title{color:#e0e5ed}.head .icon{color:#dfe4ef;background:#555b69;border-color:#70798b}.body{gap:16px}.head .title{font-size:16px}
 .notice-block a{overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
+/* Links outside the notice block sit on light and dark panels alike: inherit the panel text colour and rely on the underline. */
+a{color:inherit;text-decoration:underline;text-underline-offset:2px}
 .announcement-important{margin:0 0 16px;padding:0 0 12px;border-bottom:1px solid var(--border);line-height:1.7}
 .announcement-important>summary{color:#ff8585;font-weight:700;cursor:pointer}
 .announcement-important h3,.announcement-important .step-title{margin:14px 0 6px;font-weight:700}
