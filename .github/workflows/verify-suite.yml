@@ -223,4 +223,4 @@ jobs:
             dist-workbench-dev/
 
       - name: Verify socket authentication, fallback, memory bounds and host expiry
-        run: node server/workbench-relay/relay-selftest.mjs
+        run: node --max-old-space-size=128 server/workbench-relay/relay-selftest.mjs
