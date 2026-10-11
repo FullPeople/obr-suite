@@ -13,7 +13,7 @@
         --border: #353a48;
         --border-strong: #4a4f5e;
         --text: #e6e8ee;
-        --text-dim: #9aa0ad;
+        --text-dim:#aab0bd;
         --accent: #f5a623;
         --accent-dim: rgba(245, 166, 35, 0.4);
         --danger: #e74c3c;
@@ -358,33 +358,33 @@
         <span class="title" data-en="Edit map fog">编辑地图迷雾</span>
         <span class="meta" id="map-meta" data-en="Loading…">加载中…</span>
         <span class="spacer"></span>
-        <button id="btn-undo" title="撤销 (Ctrl+Z)" data-en="↶ Undo" data-en-title="Undo (Ctrl+Z)">↶ 撤销</button>
-        <button id="btn-redo" title="重做 (Ctrl+Shift+Z)" data-en="↷ Redo" data-en-title="Redo (Ctrl+Shift+Z)">↷ 重做</button>
-        <button id="btn-import" data-en="📤 Import" data-en-title="Import a previously-exported mask (with all slider settings) from a JSON file. The current mask is overwritten (undoable)." title="从 JSON 文件导入之前导出的 mask（含所有滑块设置）。当前 mask 会被覆盖（可撤销）。">📤 导入</button>
-        <button id="btn-export" data-en="📥 Export" data-en-title="Export the current mask + all params to a JSON file. RLE-compressed, ~30 KB for a 4K map. Survives redeploy / refresh / closing the modal." title="把当前 mask + 所有参数导出为 JSON 文件下载到本地。RLE 压缩，4K 地图大概 30KB。重新部署 / 刷新 / 关闭 modal 都不会丢这份备份。">📥 导出</button>
-        <button id="btn-snap" data-en="⊞ Snap" data-en-title="Grid snap: polygon / rect / line endpoints snap to map grid intersections. Hold Ctrl to temporarily invert." title="网格吸附：开启后多边形/矩形/直线的端点会自动吸附到地图网格交点。按住 Ctrl 临时反转吸附状态。">⊞ 吸附</button>
-        <button id="btn-fit" title="缩放至适合 (F)" data-en="⊕ Fit" data-en-title="Zoom to fit (F)">⊕ 适合</button>
+        <button id="btn-undo" title="撤销 (Ctrl+Z)" data-en-title="Undo (Ctrl+Z)"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M8 7 H4 V3"/><path d="M4.5 7.5 A8 8 0 1 1 4 12.5"/></svg> <span data-en="Undo">撤销</span></button>
+        <button id="btn-redo" title="重做 (Ctrl+Shift+Z)" data-en-title="Redo (Ctrl+Shift+Z)"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M16 7 h4 V3"/><path d="M19.5 7.5 A8 8 0 1 0 20 12.5"/></svg> <span data-en="Redo">重做</span></button>
+        <button id="btn-import" data-en-title="Import a previously-exported mask (with all slider settings) from a JSON file. The current mask is overwritten (undoable)." title="从 JSON 文件导入之前导出的 mask（含所有滑块设置）。当前 mask 会被覆盖（可撤销）。"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 16 V4 m0 0 l-4 4 m4 -4 l4 4"/><path d="M4 17 v2 a1 1 0 0 0 1 1 h14 a1 1 0 0 0 1 -1 v-2"/></svg> <span data-en="Import">导入</span></button>
+        <button id="btn-export" data-en-title="Export the current mask + all params to a JSON file. RLE-compressed, ~30 KB for a 4K map. Survives redeploy / refresh / closing the modal." title="把当前 mask + 所有参数导出为 JSON 文件下载到本地。RLE 压缩，4K 地图大概 30KB。重新部署 / 刷新 / 关闭 modal 都不会丢这份备份。"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 4 v12 m0 0 l-4 -4 m4 4 l4 -4"/><path d="M4 17 v2 a1 1 0 0 0 1 1 h14 a1 1 0 0 0 1 -1 v-2"/></svg> <span data-en="Export">导出</span></button>
+        <button id="btn-snap" data-en-title="Grid snap: polygon / rect / line endpoints snap to map grid intersections. Hold Ctrl to temporarily invert." title="网格吸附：开启后多边形/矩形/直线的端点会自动吸附到地图网格交点。按住 Ctrl 临时反转吸附状态。"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 3 v9 a6 6 0 0 0 12 0 V3"/><path d="M6 3 h4 v9 a2 2 0 0 0 4 0 V3 h4"/></svg> <span data-en="Snap">吸附</span></button>
+        <button id="btn-fit" title="缩放至适合 (F)" data-en-title="Zoom to fit (F)"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M4 9 V4 h5 M15 4 h5 v5 M20 15 v5 h-5 M9 20 H4 v-5"/><circle cx="12" cy="12" r="3"/></svg> <span data-en="Fit">适合</span></button>
         <button id="btn-clear" class="danger" data-en="Clear mask">清空 mask</button>
-        <button id="btn-save" class="primary" id="btn-save" title="保存 (Ctrl+S)" data-en="✓ Save" data-en-title="Save (Ctrl+S)">✓ 保存</button>
+        <button id="btn-save" class="primary" id="btn-save" title="保存 (Ctrl+S)" data-en-title="Save (Ctrl+S)"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M5 12.5 l4.5 4.5 L19 7.5"/></svg> <span data-en="Save">保存</span></button>
       </header>
 
       <div id="toolbox">
         <button class="tool-btn" data-tool="pan" data-en-title="Pan the map (hold Space to toggle temporarily)" title="拖动地图（按住空格也可以临时切换）">
-          <span class="ico">✋</span><span data-en="Pan">拖动</span>
+          <span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M8 11 V5.5 a1.5 1.5 0 0 1 3 0 V11 M11 10 V4 a1.5 1.5 0 0 1 3 0 v6 M14 10.5 V6 a1.5 1.5 0 0 1 3 0 v7.5 a6 6 0 0 1 -6 6 h-1 a6 6 0 0 1 -5 -2.7 L3.5 14 a1.5 1.5 0 0 1 2.5 -1.6 L8 14"/></svg></span><span data-en="Pan">拖动</span>
         </button>
         <div class="tool-divider"></div>
         <button class="tool-btn on" data-tool="brush" data-en-title="Brush (shortcut 1): manually add walls. The cursor becomes a circle whose size is the brush radius." title="画笔（快捷键 1）：在地图上手动添加墙体。光标会变成圆圈，圈大小就是画笔半径。">
-          <span class="ico">🖌</span><span data-en="Brush">画笔</span>
+          <span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M14 4 l6 6 -8 8 -6 -6 Z"/><path d="M6 12 l-2 2 a3 3 0 0 0 4 4 l2 -2"/></svg></span><span data-en="Brush">画笔</span>
         </button>
         <button class="tool-btn" data-tool="eraser" data-en-title="Eraser (2): erase places already marked as wall. The cursor circle is dashed." title="橡皮（2）：擦除已经标为墙的地方。光标圆圈带虚线。">
-          <span class="ico">🧽</span><span data-en="Eraser">橡皮</span>
+          <span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M3 16 l9 -9 a2 2 0 0 1 2.8 0 l4.2 4.2 a2 2 0 0 1 0 2.8 L13 20 H8 Z"/><path d="M8 20 l-5 -4 M13 20 h8"/></svg></span><span data-en="Eraser">橡皮</span>
         </button>
         <div class="tool-divider"></div>
         <button class="tool-btn" data-tool="lasso" data-en-title="Free lasso (3): the enclosed area is filled / erased per the current mode. Right-click this button to toggle fill / erase." title="自由套索（3）：圈起来的区域按当前模式填/擦。右键此按钮切换填/擦。">
-          <span class="ico">⚪</span><span data-en="Lasso">套索</span>
+          <span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg></span><span data-en="Lasso">套索</span>
         </button>
         <button class="tool-btn" data-tool="polygon" data-en-title="Polygon (4): click to add vertices, double-click to close. Right-click this button to toggle fill / erase." title="多边形（4）：依次点击加角点，双击闭合。右键此按钮切换填/擦。">
-          <span class="ico">⬡</span><span data-en="Polygon">多边</span>
+          <span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 3 L20 7.5 V16.5 L12 21 L4 16.5 V7.5 Z"/></svg></span><span data-en="Polygon">多边</span>
         </button>
         <button class="tool-btn" data-tool="rectangle" data-en-title="Rectangle (5): drag a rect to fill / erase its interior per the current mode. Right-click this button to toggle fill / erase." title="矩形（5）：拖出矩形按当前模式填/擦其内部。右键此按钮切换填/擦。">
           <span class="ico">▭</span><span data-en="Rect">矩形</span>
@@ -394,13 +394,13 @@
         </button>
         <div class="tool-divider"></div>
         <button class="tool-btn" data-tool="magicWand" data-en-title="Magic wand (7): click a pixel to add all connected pixels of a similar color to the mask." title="魔棒（7）：点一个像素，把所有跟它颜色相近的连成一片的像素一起加进 mask。">
-          <span class="ico">🪄</span><span data-en="Wand">魔棒</span>
+          <span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M4 20 L15 9"/><path d="M15 3 l0.7 1.6 L17.3 5.3 l-1.6 0.7 L15 7.6 l-0.7 -1.6 L12.7 5.3 l1.6 -0.7 Z"/><path d="M19 10 l0.5 1 1 0.5 -1 0.5 -0.5 1 -0.5 -1 -1 -0.5 1 -0.5 Z"/></svg></span><span data-en="Wand">魔棒</span>
         </button>
         <button class="tool-btn" data-tool="paintBucket" data-en-title="Paint bucket (8): flood-fill on the mask; click inside a hollow outline to fill the whole room solid." title="油漆桶（8）：在 mask 上做 flood-fill；点空心轮廓内部把整个房间填实。">
-          <span class="ico">🪣</span><span data-en="Fill">油漆</span>
+          <span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M5 9 l7 -5 7 5 -2 10 H7 Z"/><path d="M5 9 c2 1.5 12 1.5 14 0"/></svg></span><span data-en="Fill">油漆</span>
         </button>
         <button class="tool-btn" data-tool="picker" data-en-title="Color picker (9): pick a color from the map; auto-switches to the “Color distance” algorithm targeting it." title="取色器（9）：在地图上吸一个颜色，自动切到『颜色距离』算法以这个颜色为目标识别。">
-          <span class="ico">💧</span><span data-en="Pick">取色</span>
+          <span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 3 c3 4 6 7.5 6 11 a6 6 0 0 1 -12 0 c0 -3.5 3 -7 6 -11 Z"/></svg></span><span data-en="Pick">取色</span>
         </button>
         <!-- 2026-05-26 (Phase D) — Door tool. Two-click placement of a
              straight line. Red = closed (default), green = open. On
@@ -412,7 +412,7 @@
         <button class="tool-btn" data-tool="door"
                 data-en-title="Door (D): two-click to place a straight-line door — first click sets one endpoint, second click commits. Default closed (red). With the tool active, click a door to select; drag endpoint or whole line to move; right-click for toggle open/close + delete. Doors are saved as dynamic-fog-compatible door segments — they need the official dynamic-fog plugin to actually function as doors in OBR vision."
                 title="门（D）：两次点击落一段直线门，第一次点定起点，第二次点定终点。默认关闭（红色）。门工具激活时点击门可选中；拖端点或整段移动；右键弹菜单（开/关 + 删除）。门与 mask 分开存储，画笔和算法擦不掉。保存后会生成兼容 dynamic-fog 插件的门段——需要 OBR 里安装 dynamic-fog 插件才能让门实际起作用。">
-          <span class="ico">🚪</span><span data-en="Door">门</span>
+          <span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M5 21 V4 h11 v17"/><path d="M16 4 l3 2 v15 M12 12 h1"/></svg></span><span data-en="Door">门</span>
         </button>
       </div>
 
@@ -444,9 +444,9 @@
                 data-en-title="Feed the original map to an AI and ask for a clean white-background / black-line walls-only top-down view. Import that here: when shown, it overlays semi-transparently on the original for alignment; when you click 'Apply algorithm', it's used as input instead of the noisy original. Save still binds to the original map.">?</span></h3>
         <div class="row" style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="action" id="btn-bw-import" type="button"
-                  data-en="📂 Import B&amp;W">📂 导入黑白图</button>
+                  ><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M3 7 a2 2 0 0 1 2 -2 h4.5 l2 2 H19 a2 2 0 0 1 2 2 v9 a2 2 0 0 1 -2 2 H5 a2 2 0 0 1 -2 -2 Z"/></svg> <span data-en="Import B&amp;W">导入黑白图</span></button>
           <button class="action" id="btn-bw-clear" type="button" disabled
-                  data-en="✕ Clear">✕ 清除</button>
+                  ><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg> <span data-en="Clear">清除</span></button>
         </div>
         <div class="row">
           <label class="lbl" style="flex-direction:row;align-items:center;gap:8px">
@@ -769,9 +769,9 @@ Both: Wall (drives the fog) + Path (GM sees the orange stroke to confirm the are
 
         <button class="action" id="btn-preview"
                 title="把保存时会输出的曲线/线段直接画在画布上：青色 = Path（贝塞尔曲线），洋红虚线 = Wall 段（OBR 原生迷雾用的）。开启后调平滑/切角/简化滑块会自动刷新预览。"
-                data-en="📐 Preview output"
+                data-en="Preview output"
                 data-en-title="Draws the curves/segments that will be output on save directly onto the canvas: cyan = Path (Bézier curves), magenta dashed = Wall segments (used by OBR's native fog). With it on, moving the smooth/corner/simplify sliders auto-refreshes the preview.">
-          📐 预览输出
+          预览输出
         </button>
         <div style="font-size:11px;color:var(--text-dim);margin-top:6px" id="cc-hint">
           <span data-en="Will detect">将识别到</span> <span id="cc-count" style="color:var(--text)">0</span> <span data-en="separate wall segments,">段独立墙体，共</span>

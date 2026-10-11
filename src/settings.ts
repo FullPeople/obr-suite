@@ -1,5 +1,6 @@
 import {workbenchSettings,featureSettings,workbenchTabs} from './workbench/settings-catalog';
 import {readDiceViewMode,saveDiceViewMode} from './workbench/dice-view-mode';
+import { enhanceSegmentedSelects } from "./utils/segmented";
 import { mountPortalDefault } from "./modules/portals/default-image";
 import OBR from "@owlbear-rodeo/sdk";
 import {
@@ -592,7 +593,7 @@ const SEARCH_DESC: BilingualHtml = {
   <li>结果受<em>基础设置 → 数据版本</em>过滤；玩家能否查怪物由本页下方开关控制</li>
   <li>角色卡 / 怪物面板的特性、法术、武器属性 chip 都能点击 → 自动填入本搜索栏</li>
 </ul>
-<p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>📱 手机端</b>：搜索栏不注册（5etools 全索引太占内存）。手机玩家请在桌面/平板上查。</p>`,
+<p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>${ICONS.phone} 手机端</b>：搜索栏不注册（5etools 全索引太占内存）。手机玩家请在桌面/平板上查。</p>`,
   en: `<p>Top-right search bar + <b>full 5etools</b> autocomplete.</p>
 <ul>
   <li><b>Position</b>: the bar expands AWAY from whichever screen edge it sits on; top half pushes detail down, bottom half pushes it up</li>
@@ -601,7 +602,7 @@ const SEARCH_DESC: BilingualHtml = {
   <li>Filtered by <em>Basics → Data version</em>; player monster-search gated by the toggle below</li>
   <li>Card / monster-panel feature, spell, and weapon-property chips are all click-to-search</li>
 </ul>
-<p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>📱 Mobile</b>: the search bar isn't registered (the 5etools dataset is too memory-heavy on phones). Use a desktop / tablet for lookups.</p>`,
+<p style="color:#f5c876;font-size:11.5px;margin-top:8px"><b>${ICONS.phone} Mobile</b>: the search bar isn't registered (the 5etools dataset is too memory-heavy on phones). Use a desktop / tablet for lookups.</p>`,
 };
 
 // =====================================================================
@@ -995,7 +996,7 @@ function renderPreviewHtml(p: PreviewResult, lang: Language): string {
     return `
       <div class="lib-preview-body">
         <div class="lib-preview-status fail">
-          ✗ ${escapeAttr(p.indexUrl)}
+          ${ICONS.xCircle} ${escapeAttr(p.indexUrl)}
         </div>
         <pre class="lib-preview-err">${escapeAttr(p.errorMsg ?? "未知错误")}</pre>
         <p class="lib-preview-hint">
@@ -1038,7 +1039,7 @@ function renderPreviewHtml(p: PreviewResult, lang: Language): string {
     ? `<p class="lib-preview-empty">${lang === "zh" ? "（没有可探测的数据文件，索引可能为空或没有 c 字段）" : "(no probes — empty index or missing c field)"}</p>`
     : p.dataProbes.map((d) => `
         <div class="lib-preview-probe ${d.ok ? "ok" : "fail"}">
-          <span class="lib-preview-probe-label">${d.ok ? "✓" : "✗"} ${escapeAttr(d.label)}</span>
+          <span class="lib-preview-probe-label">${d.ok ? ICONS.check : ICONS.close} ${escapeAttr(d.label)}</span>
           <span class="lib-preview-probe-url">${escapeAttr(d.url)}</span>
           <span class="lib-preview-probe-status">${escapeAttr(d.statusMsg)}${d.arrayCount != null ? ` · ${d.arrayCount} ${lang === "zh" ? "条" : "entries"}` : ""}</span>
         </div>
@@ -1047,7 +1048,7 @@ function renderPreviewHtml(p: PreviewResult, lang: Language): string {
   return `
     <div class="lib-preview-body">
       <div class="lib-preview-status ok">
-        ✓ ${escapeAttr(p.indexUrl)}
+        ${ICONS.checkCircle} ${escapeAttr(p.indexUrl)}
         <span class="lib-preview-count">· ${p.entryCount} ${lang === "zh" ? "条目" : "entries"} · ${p.sourceMap.length} ${lang === "zh" ? "来源" : "sources"}</span>
       </div>
       <div class="lib-preview-section">
@@ -1079,8 +1080,8 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
   const editable = isGM && !lib.builtin;
   const disabledCount = (lib.disabledSources ?? []).length;
   const sourcesLabel = lang === "zh"
-    ? `📚 来源${disabledCount > 0 ? ` (${disabledCount} 已禁)` : ""}`
-    : `📚 Sources${disabledCount > 0 ? ` (${disabledCount} off)` : ""}`;
+    ? `${ICONS.books} 来源${disabledCount > 0 ? ` (${disabledCount} 已禁)` : ""}`
+    : `${ICONS.books} Sources${disabledCount > 0 ? ` (${disabledCount} off)` : ""}`;
   return `
     <div class="lib-row" data-lib-id="${escapeAttr(lib.id)}">
       <div class="lib-row-head" data-settings-line>
@@ -1090,10 +1091,10 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
           aria-pressed="${lib.enabled}" title="${lang === "zh" ? "启用 / 禁用此库" : "Enable / disable"}"></button>
         <button class="lib-sources-btn" type="button" ${disable}
           title="${lang === "zh" ? "管理此库内的具体来源（按来源代码禁用 / 启用，例如 BOOKOFEBONTIDES）" : "Manage individual sources within this library (e.g. disable BOOKOFEBONTIDES)"}">${sourcesLabel}</button>
-        <button class="lib-preview-btn" type="button" title="${lang === "zh" ? "预览：检测此库的索引和数据文件能否加载" : "Preview: probe this library's index + data files"}">${lang === "zh" ? "🔍 预览" : "🔍 Preview"}</button>
+        <button class="lib-preview-btn" type="button" title="${lang === "zh" ? "预览：检测此库的索引和数据文件能否加载" : "Preview: probe this library's index + data files"}">${ICONS.search} ${lang === "zh" ? "预览" : "Preview"}</button>
         ${
           !lib.builtin
-            ? `<button class="lib-del-btn" type="button" ${disable} title="${lang === "zh" ? "删除此库" : "Delete"}">✕</button>`
+            ? `<button class="lib-del-btn" type="button" ${disable} title="${lang === "zh" ? "删除此库" : "Delete"}" aria-label="${lang === "zh" ? "删除此库" : "Delete"}">${ICONS.close}</button>`
             : ""
         }
       </div>
@@ -1103,7 +1104,7 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
           placeholder="https://example.com">
       </div>
       <label class="lib-row-language">${lang === "zh" ? "资料语言" : "Content language"}
-        <select data-field="language" ${disable} aria-label="${lang === "zh" ? "资料语言" : "Content language"}">
+        <select data-field="language" data-segmented ${disable} aria-label="${lang === "zh" ? "资料语言" : "Content language"}">
           ${([['auto', lang === 'zh' ? '混合 / 未指定' : 'Mixed / unspecified'], ['zh', lang === 'zh' ? '中文' : 'Chinese'], ['en', lang === 'zh' ? '英文' : 'English']] as const).map(([value, label]) => `<option value="${value}" ${getLibraryLanguage(lib) === value ? 'selected' : ''}>${label}</option>`).join('')}
         </select>
         <span role="status" class="lib-language-status"></span>
@@ -1129,11 +1130,11 @@ function renderLocalContentBlock(lang: Language): string {
   const rows = files.map((f) => localFileRowHtml(f, lang)).join("");
   const head = lang === "zh"
     ? `
-      <h3 class="lib-local-h">📁 本地内容（无需托管）</h3>
+      <h3 class="lib-local-h">${ICONS.folder} 本地内容（无需托管）</h3>
       <p class="lib-local-desc">把符合 5etools 规范的 JSON / MD 文件直接导入到本插件，存储在浏览器本地（不上传到任何服务器）。导入的内容会自动合并到搜索框 / 怪物图鉴里。每个客户端独立，DM 端导入的不会自动同步给玩家 —— 想全员共享请使用上面的 URL 库或自己托管。</p>
     `
     : `
-      <h3 class="lib-local-h">📁 Local content (no hosting needed)</h3>
+      <h3 class="lib-local-h">${ICONS.folder} Local content (no hosting needed)</h3>
       <p class="lib-local-desc">Import 5etools-shaped JSON / MD files directly into the suite. Stored in your browser (never uploaded to any server). Imports merge into search + bestiary automatically. Storage is per-client — DM imports don't auto-sync to players. For shared content use the URL libraries above.</p>
     `;
   const buttons = isGM ? `
@@ -1168,11 +1169,11 @@ function renderRemoteSubsBlock(lang: Language): string {
   }
   const head = lang === "zh"
     ? `
-      <h3 class="lib-local-h" style="margin-top:18px">🔗 URL 订阅（自动更新）</h3>
+      <h3 class="lib-local-h" style="margin-top:18px">${ICONS.link} URL 订阅（自动更新）</h3>
       <p class="lib-local-desc">粘贴一份单文件 5etools 风格 JSON 的 <b>原始 URL</b>（例如 GitHub raw 链接、jsDelivr 镜像），插件会下载并在每次会话启动时自动 <b>重新拉取</b>，作者更新的内容会自动到你的桌面上。每个客户端独立缓存。失败时会保留上次的内容并显示错误。</p>
     `
     : `
-      <h3 class="lib-local-h" style="margin-top:18px">🔗 URL subscriptions (auto-update)</h3>
+      <h3 class="lib-local-h" style="margin-top:18px">${ICONS.link} URL subscriptions (auto-update)</h3>
       <p class="lib-local-desc">Paste the <b>raw URL</b> of a single-file 5etools-shape JSON (e.g. a GitHub raw link or jsDelivr mirror). The suite downloads it and <b>re-fetches</b> on every session boot so author updates flow to your table automatically. Each client caches independently. On fetch failure the previous cached content is kept and the row shows the error.</p>
     `;
   const inputRow = isGM ? `
@@ -1180,7 +1181,7 @@ function renderRemoteSubsBlock(lang: Language): string {
       <input class="lib-sub-input" data-settings-draft="subscription-url" data-settings-local type="url" placeholder="${lang === "zh" ? "https://example.com/homebrew.json" : "https://example.com/homebrew.json"}" style="flex:1 1 240px;min-width:180px;padding:4px 6px">
       <button class="lib-sub-add" type="button">${lang === "zh" ? "+ 添加订阅" : "+ Add subscription"}</button>
       <button class="lib-sub-kiwee" type="button" title="${lang === "zh" ? "从 homebrew.kiwee.top 拉取中文社区精选自制内容索引（约 26 个包），逐一加入订阅。已经订阅的会跳过。" : "Pull the curated Chinese-community homebrew index from homebrew.kiwee.top (~26 packs) and subscribe to each. Already-subscribed URLs are skipped."}">${lang === "zh" ? "+ kiwee 推荐自制" : "+ kiwee curated"}</button>
-      ${subs.length > 0 ? `<button class="lib-sub-refresh-all" type="button">${lang === "zh" ? "🔄 刷新全部" : "🔄 Refresh all"}</button>` : ""}
+      ${subs.length > 0 ? `<button class="lib-sub-refresh-all" type="button">${ICONS.refresh} ${lang === "zh" ? "刷新全部" : "Refresh all"}</button>` : ""}
     </div>
   ` : `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>`;
   const empty = lang === "zh"
@@ -1218,7 +1219,7 @@ function subRowHtml(s: RemoteSubscription, meta: LocalFileMeta | null, lang: Lan
     const when = s.lastFetchedAt ? formatSubTime(s.lastFetchedAt, lang) : (lang === "zh" ? "刚刚" : "just now");
     metaLine = `${escapeAttr(kindStr)} · ${meta.count} · ${escapeAttr(when)}`;
   } else if (s.lastError) {
-    metaLine = lang === "zh" ? "❌ 未获取" : "❌ Not fetched";
+    metaLine = `${ICONS.xCircle} ${lang === "zh" ? "未获取" : "Not fetched"}`;
   } else {
     metaLine = lang === "zh" ? "⏳ 等待获取" : "⏳ Pending";
   }
@@ -1226,11 +1227,11 @@ function subRowHtml(s: RemoteSubscription, meta: LocalFileMeta | null, lang: Lan
   const errClass = s.lastError ? " lib-sub-row-err" : "";
   return `
     <div class="lib-local-row lib-sub-row${errClass}" data-sub-url="${escapeAttr(s.url)}"${errAttr}>
-      <span class="lib-local-name" title="${escapeAttr(s.url)}">🔗 ${escapeAttr(display)}</span>
+      <span class="lib-local-name" title="${escapeAttr(s.url)}">${ICONS.link} ${escapeAttr(display)}</span>
       <span class="lib-local-meta">${metaLine}</span>
       ${isGM ? `
-        <button class="lib-sub-refresh" type="button" ${disable} title="${lang === "zh" ? "立即重新获取" : "Re-fetch now"}">🔄</button>
-        <button class="lib-sub-del" type="button" ${disable} title="${lang === "zh" ? "取消订阅并删除缓存" : "Unsubscribe and delete cache"}">✕</button>
+        <button class="lib-sub-refresh" type="button" ${disable} title="${lang === "zh" ? "立即重新获取" : "Re-fetch now"}" aria-label="${lang === "zh" ? "立即重新获取" : "Re-fetch now"}">${ICONS.refresh}</button>
+        <button class="lib-sub-del" type="button" ${disable} title="${lang === "zh" ? "取消订阅并删除缓存" : "Unsubscribe and delete cache"}" aria-label="${lang === "zh" ? "取消订阅" : "Unsubscribe"}">${ICONS.close}</button>
       ` : ""}
     </div>
   `;
@@ -1257,7 +1258,7 @@ function localFileRowHtml(f: LocalFileMeta, lang: Language): string {
     <div class="lib-local-row" data-local-id="${escapeAttr(f.id)}">
       <span class="lib-local-name" title="${escapeAttr(f.filename)}">${escapeAttr(f.filename)}</span>
       <span class="lib-local-meta">${escapeAttr(kindStr)} · ${f.count}</span>
-      ${isGM ? `<button class="lib-local-del" type="button" ${disable} title="${lang === "zh" ? "删除" : "Delete"}">✕</button>` : ""}
+      ${isGM ? `<button class="lib-local-del" type="button" ${disable} title="${lang === "zh" ? "删除" : "Delete"}" aria-label="${lang === "zh" ? "删除" : "Delete"}">${ICONS.close}</button>` : ""}
     </div>
   `;
 }
@@ -1317,7 +1318,7 @@ function renderLibrariesBody(lang: Language): string {
       </div>
       <div class="lib-studio">
         <span class="lib-studio-txt">不想手写 JSON？<b>Monster Studio</b> 是一个在线可视化怪物编辑器：导入 / 表单编辑 / 实时预览 / 导出。导出的 JSON 可直接「本地导入」或放进你的库。</span>
-        <a class="lib-studio-btn" href="https://obr.dnd.center/studio/monster-studio/" target="_blank" rel="noopener">🐲 打开 Monster Studio ↗</a>
+        <a class="lib-studio-btn" href="https://obr.dnd.center/studio/monster-studio/" target="_blank" rel="noopener">${ICONS.dragon} 打开 Monster Studio ↗</a>
       </div>
     `
     : `
@@ -1327,7 +1328,7 @@ function renderLibrariesBody(lang: Language): string {
       </div>
       <div class="lib-studio">
         <span class="lib-studio-txt">Don't want to hand-write JSON? <b>Monster Studio</b> is an online visual monster editor — import / form-edit / live preview / export. The exported JSON imports directly via "Local content" or drops into your library.</span>
-        <a class="lib-studio-btn" href="https://obr.dnd.center/studio/monster-studio/" target="_blank" rel="noopener">🐲 Open Monster Studio ↗</a>
+        <a class="lib-studio-btn" href="https://obr.dnd.center/studio/monster-studio/" target="_blank" rel="noopener">${ICONS.dragon} Open Monster Studio ↗</a>
       </div>
     `;
   const list = libs.map((l) => libraryRowHtml(l, lang, isGM)).join("");
@@ -1344,7 +1345,7 @@ function renderLibrariesBody(lang: Language): string {
       <summary>${ICONS.book ?? ""} 如何编写自己的内容（含 AI 提示词）</summary>
       <div class="lib-tut-body">
         <h4>方式一（推荐）：本地导入 —— 不用托管</h4>
-        <p>用 AI 把你的资料转成符合规范的 JSON 或 MD 文件，然后用上面的 <b>📁 本地内容 → 导入 JSON / MD</b> 直接选文件加载。整个文件存在你浏览器的 localStorage 里，不上传到任何服务器；导入的内容自动并入搜索框 / 怪物图鉴。每个客户端独立存储 —— 想全员共享请使用方式二。</p>
+        <p>用 AI 把你的资料转成符合规范的 JSON 或 MD 文件，然后用上面的 <b>${ICONS.folder} 本地内容 → 导入 JSON / MD</b> 直接选文件加载。整个文件存在你浏览器的 localStorage 里，不上传到任何服务器；导入的内容自动并入搜索框 / 怪物图鉴。每个客户端独立存储 —— 想全员共享请使用方式二。</p>
 
         <h4>方式二：托管 URL 库 —— 全员共享</h4>
         <p>把数据放到 HTTPS 静态站（GitHub Pages / 对象存储等），CORS 必须开放。目录结构：</p>
@@ -1411,7 +1412,7 @@ Any creature within 5 ft. takes {@damage 1d4} cold damage at the start of its tu
 {@atk ms} {@hit 5}, reach 5 ft., one target. {@h}{@damage 2d6+3} cold damage.</code></pre>
 
         <div class="lib-warn" style="margin-top:10px">
-          <b>⚠ 兼容性硬规则</b>（写"托管 URL 库"时务必遵守，否则插件无法识别）：<br>
+          <b>${ICONS.warning} 兼容性硬规则</b>（写"托管 URL 库"时务必遵守，否则插件无法识别）：<br>
           • search/index.json 里每条 <code>"c"</code> <b>必须是数字</b>（1=怪物 / 2=法术 / 3=背景 / 4=物品 / 6=状态 / 7=专长 / 10=种族 / 14=神祇 …）。写成 <code>"c":"monster"</code> 这种字符串形式会导致详情面板显示 <code>?monster</code>，怪物图鉴也搜不到。<br>
           • 数据文件**按来源切分**为 <code>data/bestiary/bestiary-&lt;SOURCE&gt;.json</code> / <code>data/spells/spells-&lt;SOURCE&gt;.json</code> 等。**不要**用 <code>collection-XXX.json</code> 这种把多类目塞一个文件 + 外层 <code>_meta</code> 包裹的合集格式 —— 插件只按"类目→来源→文件"映射查数据。<br>
           • 条目的 <code>p</code> 字段是<b>页码（数字）</b>，不是文件路径字符串。<br>
@@ -1436,7 +1437,7 @@ Any creature within 5 ft. takes {@damage 1d4} cold damage at the start of its tu
       <summary>How to write your own content (with AI prompt)</summary>
       <div class="lib-tut-body">
         <h4>Option A (recommended): Local import — no hosting</h4>
-        <p>Use an LLM to convert your raw notes into a 5etools-shape JSON or MD file, then click <b>📁 Local content → Import JSON / MD</b>. Files live in your browser's localStorage (never uploaded anywhere). Imports merge into the search bar + bestiary automatically. Per-client only — use Option B if you need to share with players.</p>
+        <p>Use an LLM to convert your raw notes into a 5etools-shape JSON or MD file, then click <b>${ICONS.folder} Local content → Import JSON / MD</b>. Files live in your browser's localStorage (never uploaded anywhere). Imports merge into the search bar + bestiary automatically. Per-client only — use Option B if you need to share with players.</p>
 
         <h4>Option B: Hosted URL library — shared</h4>
         <p>Put your JSON data on any HTTPS static host (GitHub Pages, S3, your own server) with CORS enabled. Layout:</p>
@@ -1470,7 +1471,7 @@ Any creature within 5 ft. takes {@damage 1d4} cold damage at the start of its tu
 }</code></pre>
 
         <div class="lib-warn" style="margin-top:10px">
-          <b>⚠ Compatibility hard rules</b> for hosted URL libraries (the plugin can't consume libraries that violate these):<br>
+          <b>${ICONS.warning} Compatibility hard rules</b> for hosted URL libraries (the plugin can't consume libraries that violate these):<br>
           • Every entry in search/index.json must have a <b>NUMERIC</b> <code>"c"</code> field (1=monster / 2=spell / 3=background / 4=item / 6=condition / 7=feat / 10=race / 14=deity / …). String forms like <code>"c":"monster"</code> render as <code>?monster</code> in the details panel and the bestiary won't find the entry.<br>
           • Data files must be <b>split per-source</b>: <code>data/bestiary/bestiary-&lt;SOURCE&gt;.json</code> / <code>data/spells/spells-&lt;SOURCE&gt;.json</code> etc. <b>Do NOT</b> use <code>collection-XXX.json</code> wrappers that pack multiple categories into one file with a top-level <code>_meta</code> block — the plugin resolves data via category → source → file mapping only.<br>
           • The <code>p</code> field on an entry is a <b>numeric page number</b>, not a file path string.<br>
@@ -1653,8 +1654,8 @@ function wireLibrariesBody(root: HTMLElement): void {
           const newDisabled = (getState().libraries ?? []).find((l) => l.id === id)?.disabledSources ?? [];
           const newCount = newDisabled.length;
           const newLabel = lang === "zh"
-            ? `📚 来源${newCount > 0 ? ` (${newCount} 已禁)` : ""}`
-            : `📚 Sources${newCount > 0 ? ` (${newCount} off)` : ""}`;
+            ? `${ICONS.books} 来源${newCount > 0 ? ` (${newCount} 已禁)` : ""}`
+            : `${ICONS.books} Sources${newCount > 0 ? ` (${newCount} off)` : ""}`;
           if (sourcesBtn) sourcesBtn.textContent = newLabel;
         });
       });
@@ -1669,7 +1670,7 @@ function wireLibrariesBody(root: HTMLElement): void {
       if (!previewBox.hidden) {
         previewBox.hidden = true;
         previewBox.innerHTML = "";
-        previewBtn.textContent = getLocalLang() === "zh" ? "🔍 预览" : "🔍 Preview";
+        previewBtn.innerHTML = `${ICONS.search} ${getLocalLang() === "zh" ? "预览" : "Preview"}`;
         return;
       }
       const cur = (getState().libraries ?? []).find((l) => l.id === id);
@@ -1688,7 +1689,7 @@ function wireLibrariesBody(root: HTMLElement): void {
         previewBox.innerHTML = `<div class="lib-preview-body"><pre class="lib-preview-err">${escapeAttr(e?.message || String(e))}</pre></div>`;
       } finally {
         previewBtn.disabled = false;
-        previewBtn.textContent = getLocalLang() === "zh" ? "✕ 关闭预览" : "✕ Close preview";
+        previewBtn.innerHTML = `${ICONS.close} ${getLocalLang() === "zh" ? "关闭预览" : "Close preview"}`;
       }
     });
   });
@@ -3093,8 +3094,8 @@ const TABS: TabDef[] = [
   },
   {
     id: "resourceTracker",
-    zh: `📊 资源追踪`,
-    en: `📊 Resource Tracker`,
+    zh: `${ICONS.chart} 资源追踪`,
+    en: `${ICONS.chart} Resource Tracker`,
     moduleId: "resourceTracker",
     body: {
       zh: `<p><b>资源追踪</b>：为 token 配置消耗品 / 进度 / 数值资源（法术位、生命骰、灵感…）。</p>
@@ -3379,7 +3380,7 @@ const TABS: TabDef[] = [
         </div>
         <div class="row" style="margin-top:10px">
           <button id="wp-btn-export" class="btn-primary" type="button" ${isGM ? "" : "disabled"}>
-            ${isZh ? "📦 导出 .fobr" : "📦 Export .fobr"}
+            ${ICONS.box} ${isZh ? "导出 .fobr" : "Export .fobr"}
           </button>
           ${!isGM ? `<span class="role-notice" style="margin-left:8px">${isZh ? "仅 DM 可导出" : "DM only"}</span>` : ""}
         </div>
@@ -3410,7 +3411,7 @@ const TABS: TabDef[] = [
         <div class="row" style="margin-top:10px">
           <input id="wp-file" type="file" accept=".fobr,application/octet-stream" style="display:none"/>
           <button id="wp-btn-import" class="btn-primary" type="button" ${isGM ? "" : "disabled"}>
-            ${isZh ? "📥 选择 .fobr 文件并导入" : "📥 Pick .fobr and import"}
+            ${ICONS.download} ${isZh ? "选择 .fobr 文件并导入" : "Pick .fobr and import"}
           </button>
         </div>
         <div id="wp-import-progress" style="margin-top:6px;font-size:11.5px;color:var(--text-dim);min-height:18px;font-family:ui-monospace,Consolas,monospace"></div>
@@ -3594,6 +3595,11 @@ function renderTabs() {
 }
 
 function renderContent() {
+  renderContentInner();
+  // Short option lists render as button groups; the hidden select keeps the value.
+  enhanceSegmentedSelects(document);
+}
+function renderContentInner() {
   const tab = findTab(activeTab);
   const s = getState();
 
@@ -3701,8 +3707,13 @@ OBR.onReady(async () => {
   });
   void OBR.broadcast.sendMessage(BC_MODULE_STATUS_QUERY, {}, { destination: "LOCAL" })
     .catch((error) => console.warn("[settings] module status query failed", error));
+  // The role read, the bubble-settings read, the saved-variables read and the
+  // debug-overlay chunk are independent; start them together so the first
+  // render waits for the slowest one instead of their sum.
+  const roleRead = OBR.player.getRole();
+  const overlayModule = import("./utils/debugOverlay").catch(() => null);
   try {
-    isGM = (await OBR.player.getRole()) === "GM";
+    isGM = (await roleRead) === "GM";
   } catch (e) {
     // Falls back to PLAYER view until a role-change event corrects it:
     // GM-only controls (module toggles, repair buttons) stay hidden.
@@ -3732,8 +3743,8 @@ OBR.onReady(async () => {
   // Install debug-overlay listener so this iframe also shows the
   // yellow tint when the user toggles the new debug-mode switch.
   try {
-    const m = await import("./utils/debugOverlay");
-    m.installDebugOverlay();
+    const m = await overlayModule;
+    m?.installDebugOverlay();
   } catch {}
   // Embedded settings must read saved switches before exposing defaults as actionable.
   await variables;

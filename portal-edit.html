@@ -7,8 +7,8 @@
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
   --bg:#292d3c;--bg-strong:#1f2230;--bg-card:#323748;
-  --border:rgba(255,255,255,0.12);--border-strong:rgba(255,255,255,0.20);
-  --text:#e6e8ee;--text-dim:#9aa0b3;
+  --border:rgba(255,255,255,0.24);--border-strong:rgba(255,255,255,0.36);
+  --text:#e6e8ee;--text-dim:#aab0c2;
   --accent:#5dade2;--accent-warm:#f5a623;--accent-red:#e74c3c;--accent-green:#2ecc71;
 }
 html,body{
@@ -215,10 +215,10 @@ html,body{
 <body>
 <div class="card">
   <div class="hdr">
-    <span class="grip" id="drag-handle" title="拖动面板" aria-label="拖动面板">⠿</span>
+    <span class="grip" id="drag-handle" title="拖动面板" aria-label="拖动面板"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/></svg></span>
     <span class="ic">◐</span>
     <span class="ttl" id="title" data-i18n="portalTitle">传送门</span>
-    <button class="x" id="x">×</button>
+    <button class="x" id="x" aria-label="关闭"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
   </div>
 
   <div class="body">

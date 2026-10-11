@@ -8,10 +8,10 @@
 :root{
   --bg:rgba(31,34,48,0.95);
   --bg-soft:rgba(38,42,58,0.95);
-  --border:rgba(255,255,255,0.12);
-  --border-strong:rgba(255,255,255,0.20);
+  --border:rgba(255,255,255,0.24);
+  --border-strong:rgba(255,255,255,0.36);
   --text:#e6e8ee;
-  --text-dim:#9aa0b3;
+  --text-dim:#aab0c2;
   --accent:#5dade2;
   --accent-on:#7ec8f0;
   --green:#7be0a0;
@@ -198,7 +198,7 @@ html,body{
        bestiary-bound monster's bubbles HP. Hidden in initiative
        mode (combat prep) since the GM is rolling, not editing. -->
   <div class="row-hp" id="rowHp">
-    <select class="hp-field" id="hpField">
+    <select class="hp-field" id="hpField" data-segmented>
       <option value="health">HP</option>
       <option value="max health">Max HP</option>
       <option value="armor class">AC</option>
@@ -222,6 +222,8 @@ html,body{
 </div>
 <script type="module">
 import OBR from "@owlbear-rodeo/sdk";
+import { enhanceSegmentedSelects } from "/src/utils/segmented.ts";
+enhanceSegmentedSelects(document);
 
 const BC_FIRE = "com.obr-suite/bestiary-group-save-fire";
 const BC_FIRE_INIT = "com.obr-suite/bestiary-group-init-fire";

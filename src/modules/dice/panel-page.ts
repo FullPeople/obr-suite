@@ -1,4 +1,5 @@
 import {DICE_HISTORY_LIMIT,canSeeDiceHistory,diceHistory,storedDiceHistory,type DiceHistoryVisibility} from './history-policy';
+import { ICONS } from "../../icons";
 import OBR from "@owlbear-rodeo/sdk";
 import { DiceType, DieResult, sidesOf } from "./types";
 import { subscribeToSfx } from "./sfx-broadcast";
@@ -1177,7 +1178,7 @@ function renderCombos() {
       return `
         <div class="combo-card" data-id="${escapeHtml(c.id)}" data-cat="${escapeHtml(g.key)}" draggable="true">
           <div class="combo-card-head">
-            <span class="combo-grip" title="${tt("diceComboDragHint")}" aria-hidden="true">⋮⋮</span>
+            <span class="combo-grip" title="${tt("diceComboDragHint")}" aria-hidden="true">${ICONS.grip}</span>
             <span class="combo-name">${escapeHtml(c.name)}</span>
           </div>
           <div class="combo-formula">${escapeHtml(formula)}</div>
@@ -1195,8 +1196,8 @@ function renderCombos() {
     // on the header. The uncategorized header is always present for
     // its label only — no rename / delete (it's the implicit fallback).
     const headerActions = g.key === UNCATEGORIZED_KEY ? "" : `
-      <button class="cat-act" data-act="rename" type="button" title="${tt("diceComboCatRename")}">✎</button>
-      <button class="cat-act" data-act="del-cat" type="button" title="${tt("diceComboCatDelete")}">✕</button>
+      <button class="cat-act" data-act="rename" type="button" title="${tt("diceComboCatRename")}" aria-label="${tt("diceComboCatRename")}">${ICONS.edit}</button>
+      <button class="cat-act" data-act="del-cat" type="button" title="${tt("diceComboCatDelete")}" aria-label="${tt("diceComboCatDelete")}">${ICONS.close}</button>
     `;
     return `
       <div class="combo-section" data-cat="${escapeHtml(g.key)}">
@@ -1564,7 +1565,7 @@ function renderEntrySolo(h: DiceRollPayload): string {
   const titleText = escapeHtml(h.label || h.rollerName);
   return `
     <div class="${cls.join(" ")}" data-cid="${escapeHtml(cid)}" style="--player-color:${h.rollerColor}" title="${tt("diceHistoryReplayTooltip")}">
-      <button class="entry-del" data-cid="${escapeHtml(cid)}" title="删除这条记录" aria-label="删除">×</button>
+      <button class="entry-del" data-cid="${escapeHtml(cid)}" title="删除这条记录" aria-label="删除">${ICONS.close}</button>
       <div class="body">
         <div class="line1">
           <span class="player">${darkTag}${titleText}</span>
@@ -1596,7 +1597,7 @@ function renderEntryCollective(cid: string, members: DiceRollPayload[]): string 
   const labelOrName = escapeHtml(head.label || head.rollerName);
   return `
     <div class="${cls.join(" ")}" data-cid="${escapeHtml(cid)}" style="--player-color:${head.rollerColor}" title="${tt("diceHistoryReplayTooltip")}">
-      <button class="entry-del" data-cid="${escapeHtml(cid)}" title="删除这条记录（含 ${members.length} 个掷骰）" aria-label="删除">×</button>
+      <button class="entry-del" data-cid="${escapeHtml(cid)}" title="删除这条记录（含 ${members.length} 个掷骰）" aria-label="删除">${ICONS.close}</button>
       <div class="body">
         <div class="line1">
           <span class="player">${darkTag}${collTag}${labelOrName}</span>
@@ -1814,7 +1815,7 @@ function thumbHtml(skin: DiceSkin | null, type: DiceType, animate = false): stri
         return `<img src="${escapeHtml(cached)}" alt="" loading="lazy">`;
       }
       if (cached === null) {
-        return `<span class="webm-fallback" title="webm 缩略图无法预览（CORS / 解码失败）">🎞</span>`;
+        return `<span class="webm-fallback" title="webm 缩略图无法预览（CORS / 解码失败）">${ICONS.film}</span>`;
       }
       return `<img data-webm-src="${escapeHtml(skin.url)}" class="webm-poster-pending" alt="" loading="lazy">`;
     }
@@ -1844,7 +1845,7 @@ function hydrateWebmPosters(): void {
         const span = document.createElement("span");
         span.className = "webm-fallback";
         span.title = "webm 缩略图无法预览（CORS / 解码失败）";
-        span.textContent = "🎞";
+        span.innerHTML = ICONS.film;
         img.replaceWith(span);
       }
     });
@@ -1867,7 +1868,7 @@ async function renderSkinsTab(): Promise<void> {
   // effect modal, so the URL HAS to point at an OBR-hosted asset.
   const hintHtml =
     `<div class="skin-hint">` +
-      `⚠ <b>本地电脑文件不能直接用</b> — 必须先把图片 / webm <b>上传到枭熊</b>：` +
+      `${ICONS.warning} <b>本地电脑文件不能直接用</b> — 必须先把图片 / webm <b>上传到枭熊</b>：` +
       `把它拖进场景作为「附件」，再右键附件选 <b>「设为我的骰子皮肤」</b>，` +
       `或在下方粘贴该附件的 URL（须为 https:// 开头的绝对地址）。` +
     `</div>`;
@@ -1887,7 +1888,7 @@ async function renderSkinsTab(): Promise<void> {
               return `<span class="skin-set-chip" data-set-id="${escapeHtml(s.id)}" title="一键载入「${escapeHtml(s.name)}」（覆盖 ${covered}/7 个骰子）">` +
                 `<span class="skin-set-name">${escapeHtml(s.name)}</span>` +
                 `<span class="skin-set-count">${covered}/7</span>` +
-                `<button class="skin-set-del" type="button" data-set-id="${escapeHtml(s.id)}" title="删除该套组">×</button>` +
+                `<button class="skin-set-del" type="button" data-set-id="${escapeHtml(s.id)}" title="删除该套组" aria-label="删除该套组">${ICONS.close}</button>` +
               `</span>`;
             }).join("") +
           `</div>`
@@ -1914,7 +1915,7 @@ async function renderSkinsTab(): Promise<void> {
       const isActive = !isRandom && !!activeSkin && activeSkin.url === s.url;
       return `<span class="skin-lib-chip${isActive ? " on" : ""}" data-type="${type}" data-url="${escapeHtml(s.url)}" title="${isActive ? "当前活动皮肤" : "点击设为当前皮肤"}">` +
         `<span class="skin-lib-thumb">${thumbHtml(s, type)}</span>` +
-        `<button class="skin-lib-del" type="button" data-type="${type}" data-url="${escapeHtml(s.url)}" title="从皮肤库移除">×</button>` +
+        `<button class="skin-lib-del" type="button" data-type="${type}" data-url="${escapeHtml(s.url)}" title="从皮肤库移除" aria-label="从皮肤库移除">${ICONS.close}</button>` +
       `</span>`;
     }).join("");
     const libStripHtml = defaultChipHtml + (
@@ -2144,8 +2145,12 @@ function hasBoundCard(it: any): boolean {
 
 async function getOwnedSelectedTokenIds(): Promise<string[]> {
   try {
-    const sel = await OBR.player.getSelection();
-    const myId = await OBR.player.getId();
+    // Selection and own id are independent host round trips; the cached id
+    // from onReady avoids the second one entirely once it is known.
+    const [sel, myId] = await Promise.all([
+      OBR.player.getSelection(),
+      myPlayerId ? Promise.resolve(myPlayerId) : OBR.player.getId(),
+    ]);
     if (sel && sel.length) {
       const items = await OBR.scene.items.getItems(sel);
       const filtered = items
@@ -2192,16 +2197,21 @@ async function getOwnedSelectedTokenIds(): Promise<string[]> {
     let bestId: string | null = null;
     let bestD2 = Infinity;
     try {
-      const [vw, vh] = await Promise.all([
+      // World → screen is `world * scale + viewportPosition` (the same
+      // projection the effect page applies every frame). Reading position and
+      // scale once replaces one `transformPoint` round trip per candidate token.
+      const [vw, vh, vp, vscale] = await Promise.all([
         OBR.viewport.getWidth(),
         OBR.viewport.getHeight(),
+        OBR.viewport.getPosition(),
+        OBR.viewport.getScale(),
       ]);
       const cx = vw / 2;
       const cy = vh / 2;
       for (const it of candidates) {
         const p = (it as any).position;
         if (!p) continue;
-        const sp = await OBR.viewport.transformPoint(p);
+        const sp = { x: p.x * vscale + vp.x, y: p.y * vscale + vp.y };
         const dx = sp.x - cx;
         const dy = sp.y - cy;
         const d2 = dx * dx + dy * dy;
@@ -2303,6 +2313,16 @@ async function focusCameraOnTokens(tokenIds: string[]): Promise<void> {
 }
 
 
+/** The roller's id, name and colour as one concurrent batch. The id cached at
+ *  onReady saves its round trip once known. */
+async function readRollerIdentity(): Promise<[string, string, string]> {
+  return Promise.all([
+    myPlayerId ? Promise.resolve(myPlayerId) : OBR.player.getId(),
+    OBR.player.getName(),
+    OBR.player.getColor(),
+  ]);
+}
+
 async function emitOneRoll(opts: {
   dice: DieResult[];
   winnerIdx: number;
@@ -2314,6 +2334,9 @@ async function emitOneRoll(opts: {
   rowStarts?: number[];
   sameHighlight?: boolean;
   collectiveId?: string;
+  // [id, name, color] read once per performRoll and shared by every target,
+  // so a multi-token roll does not repeat three host round trips per token.
+  identity?: [string, string, string];
 }): Promise<void> {
   if (!opts.dice.length) return;
   // Total: sum of all NON-loser dice. Subtraction dice contribute
@@ -2335,11 +2358,7 @@ async function emitOneRoll(opts: {
   let rollerName = tt("diceRollerFallback");
   let rollerColor = "#5dade2";
   try {
-    [rollerId, rollerName, rollerColor] = await Promise.all([
-      OBR.player.getId(),
-      OBR.player.getName(),
-      OBR.player.getColor(),
-    ]);
+    [rollerId, rollerName, rollerColor] = opts.identity ?? await readRollerIdentity();
   } catch {}
 
   const rollId = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -2844,14 +2863,20 @@ async function performRoll(opts: { hidden: boolean }): Promise<void> {
   // click-to-replay overlay can find every member of the group.
   // §9 — non-null only when armed + GM-verified + single target; the
   // loop below then has exactly one iteration.
-  const fixedBuilt = await maybeConsumeFixedForPanel(parsed, targetTokens.length, "panel-roll");
+  // The fixed-roll check and the roller identity are independent reads.
+  const [fixedBuilt, identity] = await Promise.all([
+    maybeConsumeFixedForPanel(parsed, targetTokens.length, "panel-roll"),
+    readRollerIdentity().catch(() => undefined),
+  ]);
 
   const collectiveId = `col-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   let sent = 0;
+  const emits: Promise<void>[] = [];
   for (const tokenId of targetTokens) {
     const built = fixedBuilt ?? buildOneRollDice(parsed);
     if (!built.dice.length) continue;
-    await emitOneRoll({
+    // Every target's broadcast leaves at once; they only share collectiveId.
+    emits.push(emitOneRoll({
       dice: built.dice,
       winnerIdx: built.winnerIdx,
       modifier: totalModifier(parsed),
@@ -2862,9 +2887,11 @@ async function performRoll(opts: { hidden: boolean }): Promise<void> {
       rowStarts: built.rowStarts,
       sameHighlight: built.sameHighlight,
       collectiveId,
-    });
+      identity,
+    }));
     sent++;
   }
+  await Promise.all(emits);
 
   if (sent > 0) {
     setLocked(true);
@@ -3283,22 +3310,21 @@ OBR.onReady(async () => {
   // cache hit (no extraction wait, no flicker, no main-thread
   // stall). Sequential extraction in the background; bounded at
   // O(unique webm count) total work spread across idle frames.
-  try {
-    const lib = await readMyLibrary();
-    prewarmWebmPosters(lib);
-  } catch { /* no library, no prewarm */ }
-
+  // Library, role and player id are three independent host round trips.
+  // They used to run one after another before the DM-only controls and the
+  // roll listeners existed; now they are issued together.
+  const [libResult, roleResult, idResult] = await Promise.allSettled([
+    readMyLibrary(),
+    OBR.player.getRole(),
+    OBR.player.getId(),
+  ]);
+  if (libResult.status === "fulfilled") prewarmWebmPosters(libResult.value);
   // Resolve role + this client's player id. Both feed into the
   // dark-roll redact gate in the BROADCAST_DICE_ROLL listener below.
   // (OBR.player.onChange would also re-resolve if the role ever
   // flipped at runtime, but in practice it doesn't.)
-  try {
-    const role = await OBR.player.getRole();
-    isDM = role === "GM";
-  } catch {}
-  try {
-    myPlayerId = await OBR.player.getId();
-  } catch {}
+  if (roleResult.status === "fulfilled") isDM = roleResult.value === "GM";
+  if (idResult.status === "fulfilled") myPlayerId = idResult.value;
   renderHistorySeg();renderHistoryList();
   const btnDark = document.getElementById("btnDarkRoll") as HTMLButtonElement | null;
   if (btnDark) btnDark.style.display = isDM ? "" : "none";

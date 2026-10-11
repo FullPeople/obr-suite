@@ -19,10 +19,10 @@ html,body{
   --bg-soft:rgba(31,34,48,0.95);
   --bg-strong:#2c3044;
   --bg-card:#262a3a;
-  --border:rgba(255,255,255,0.10);
-  --border-strong:rgba(255,255,255,0.18);
+  --border:rgba(255,255,255,0.24);
+  --border-strong:rgba(255,255,255,0.36);
   --text:#e6e8ee;
-  --text-dim:#8a8e9c;
+  --text-dim:#a3a8b8;
   --accent:#5dade2;
   --accent-on:#7fc3eb;
   --good:#2ecc71;
@@ -80,7 +80,7 @@ html,body{
   min-width:0;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   background:var(--bg-card);
-  border:1px solid var(--border);
+  border:1px solid var(--border-strong);
   border-radius:0;
   padding:6px 0 5px;
   cursor:pointer;
@@ -141,7 +141,7 @@ html,body{
 .d20-box .advdis-stack .ad-btn{
   flex:1;
   background:var(--bg-card);
-  border:1px solid var(--border);
+  border:1px solid var(--border-strong);
   border-radius:0;
   color:var(--text-dim);
   font-size:10px;font-weight:700;
@@ -152,7 +152,7 @@ html,body{
 }
 .d20-box .advdis-stack .ad-btn.adv{
   color:#7be0a0;
-  border-color:rgba(46,204,113,0.35);
+  border-color:rgba(46,204,113,0.65);
 }
 .d20-box .advdis-stack .ad-btn.adv:hover{
   background:rgba(46,204,113,0.14);
@@ -160,7 +160,7 @@ html,body{
 }
 .d20-box .advdis-stack .ad-btn.dis{
   color:#ff8b7a;
-  border-color:rgba(231,76,60,0.35);
+  border-color:rgba(231,76,60,0.65);
 }
 .d20-box .advdis-stack .ad-btn.dis:hover{
   background:rgba(231,76,60,0.14);
@@ -168,7 +168,7 @@ html,body{
 }
 .d20-box .advdis-stack .ad-btn.crit{
   color:#ffb74d;
-  border-color:rgba(255,167,38,0.35);
+  border-color:rgba(255,167,38,0.65);
 }
 .d20-box .advdis-stack .ad-btn.crit:hover{
   background:rgba(255,167,38,0.16);
@@ -198,7 +198,7 @@ html,body{
 .expr-input{
   flex:1;min-width:0;height:46px;
   background:var(--bg-card);
-  border:1px solid var(--border);
+  border:1px solid var(--border-strong);
   border-radius:0;
   padding:0 12px;
   color:var(--text);
@@ -234,7 +234,7 @@ html,body{
 .label-input{
   flex:1;height:34px;width:100%;
   background:var(--bg-card);
-  border:1px solid var(--border);
+  border:1px solid var(--border-strong);
   border-radius:0;
   padding:0 10px;
   font-size:12.5px;font-family:inherit;color:var(--text);
@@ -244,7 +244,7 @@ html,body{
 .label-input:focus{border-color:var(--accent)}
 
 /* === Action buttons === */
-.actions{display:flex;gap:6px}
+.actions{display:flex;gap:6px;flex-wrap:wrap}.actions .btn{min-width:72px}
 .btn{
   flex:1;
   background:var(--bg-strong);
@@ -258,7 +258,7 @@ html,body{
 }
 .btn:hover{background:rgba(255,255,255,0.10)}
 .btn:active{transform:scale(0.98)}
-.btn.primary{
+.btn.primary{color:#0b1320;
   background:linear-gradient(180deg, #5dade2, #4a90c2);
   border-color:#5dade2;
   color:#fff;font-weight:700;
@@ -297,7 +297,7 @@ html,body{
 .btn.danger{
   color:#ffb0a8;
   background:linear-gradient(180deg, rgba(120,40,40,0.45), rgba(70,20,20,0.55));
-  border-color:rgba(231,76,60,0.45);
+  border-color:rgba(231,76,60,0.65);
   font-weight:700;
 }
 .btn.danger:hover{
@@ -308,7 +308,7 @@ html,body{
 .btn.save{
   flex:0 0 auto;padding:9px 14px;
   background:linear-gradient(180deg, rgba(120,90,40,0.45), rgba(70,55,20,0.55));
-  border-color:rgba(204,160,74,0.45);
+  border-color:rgba(204,160,74,0.65);
   color:#e9c987;font-weight:700;
 }
 .btn.save:hover{
@@ -318,7 +318,7 @@ html,body{
 .btn.last{
   flex:0 0 auto;padding:9px 12px;font-weight:700;
   background:linear-gradient(180deg, rgba(50,70,110,0.5), rgba(30,45,75,0.6));
-  border-color:rgba(108,148,200,0.45);
+  border-color:rgba(108,148,200,0.65);
   color:#a9c1e1;
 }
 .btn.last:hover{
@@ -357,7 +357,7 @@ html,body{
 .btn.dark-roll{
   width:100%;
   background:linear-gradient(180deg, rgba(80,40,120,0.45), rgba(50,25,80,0.55));
-  border-color:rgba(155,89,182,0.45);
+  border-color:rgba(155,89,182,0.65);
   color:#cda9e8;
   font-weight:700;
   letter-spacing:0.4px;
@@ -435,7 +435,7 @@ html,body{
 .combo-toolbar .btn.small{
   padding:3px 8px;font-size:11px;
   background:rgba(93,173,226,0.16);
-  border:1px solid rgba(93,173,226,0.36);
+  border:1px solid rgba(93,173,226,0.65);
   color:var(--accent);font-weight:700;
 }
 .combo-toolbar .btn.small:hover{
@@ -814,7 +814,7 @@ html,body{
   margin-top:8px;
   padding:8px 10px;
   background:rgba(0,0,0,0.18);
-  border:1px solid var(--border);
+  border:1px solid var(--border-strong);
   border-radius:0;
 }
 .examples-title{
@@ -827,7 +827,7 @@ html,body{
   display:flex;flex-direction:column;align-items:flex-start;gap:1px;
   padding:6px 10px;
   background:linear-gradient(180deg, rgba(70,80,110,0.4), rgba(40,50,75,0.55));
-  border:1px solid rgba(108,148,200,0.35);
+  border:1px solid rgba(108,148,200,0.65);
   border-radius:0;
   color:#cdd9ec;font-family:inherit;cursor:pointer;
   text-align:left;
@@ -903,7 +903,7 @@ html,body{
 .skin-url-input{
   flex:1;min-width:0;height:26px;
   background:var(--bg-strong);
-  border:1px solid var(--border);
+  border:1px solid var(--border-strong);
   border-radius:0;padding:0 8px;
   color:var(--text);font-size:11px;font-family:inherit;
   outline:none;transition:border-color .12s;
@@ -957,7 +957,7 @@ html,body{
 .skin-sets .btn.small.skin-set-save{
   padding:3px 8px;font-size:11px;
   background:rgba(93,173,226,0.16);
-  border:1px solid rgba(93,173,226,0.36);
+  border:1px solid rgba(93,173,226,0.65);
   color:var(--accent);font-weight:700;
   border-radius:0;
 }
@@ -1236,7 +1236,7 @@ html,body{
                 title="固定你在本客户端的下一次投掷：骰盘/暗骰/组合/单值点击/单角色先攻。通过重新分配真实骰面达成目标总数；群体豁免与群体先攻不生效。一次性，仅 DM。"
                 style="flex:1;">固定下次：关</button>
       </div>
-      <button class="btn force-clr" id="btnForceClr" type="button" data-i18n="diceBtnForceClr">⚠ 强制结束(若动画卡住)</button>
+      <button class="btn force-clr" id="btnForceClr" type="button"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 3 L22 20 H2 Z"/><line x1="12" y1="9" x2="12" y2="14"/><circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"/></svg> <span data-i18n="diceBtnForceClr">强制结束(若动画卡住)</span></button>
 
       <div class="rules-hint">
         <div class="rules-title" data-i18n="diceRulesTitle">表达式说明</div>

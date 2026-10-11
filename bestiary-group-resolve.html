@@ -9,10 +9,10 @@
   --bg:rgba(20,24,38,0.97);
   --bg-strong:#2c3044;
   --bg-card:#262a3a;
-  --border:rgba(255,255,255,0.10);
-  --border-strong:rgba(255,255,255,0.20);
+  --border:rgba(255,255,255,0.24);
+  --border-strong:rgba(255,255,255,0.36);
   --text:#e6e8ee;
-  --text-dim:#9aa0b3;
+  --text-dim:#aab0c2;
   --accent:#5dade2;
   --good:#7be0a0;
   --bad:#ff8b7a;
@@ -199,7 +199,7 @@ html,body{
 <div class="shell">
   <div class="card">
     <div class="head">
-      <div class="ttl">⚖ 群体豁免结算 <span id="abilityLbl" style="color:var(--text-dim);font-weight:600;font-size:12px"></span></div>
+      <div class="ttl"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 3 v18 M5 21 h14 M4 7 h16"/><path d="M7 7 l-3.5 7 a3.5 2.5 0 0 0 7 0 Z M17 7 l-3.5 7 a3.5 2.5 0 0 0 7 0 Z"/></svg> 群体豁免结算 <span id="abilityLbl" style="color:var(--text-dim);font-weight:600;font-size:12px"></span></div>
     </div>
 
     <div class="body">
@@ -211,7 +211,7 @@ html,body{
           <input id="dcInput" type="number" min="0" max="40" step="1" placeholder="14">
         </div>
         <div class="grp">
-          <select id="fieldSelect" title="选择要修改的字段">
+          <select id="fieldSelect" data-segmented title="选择要修改的字段">
             <option value="health">HP</option>
             <option value="max health">Max HP</option>
             <option value="armor class">AC</option>
@@ -238,6 +238,8 @@ html,body{
 
 <script type="module">
 import OBR from "@owlbear-rodeo/sdk";
+import { enhanceSegmentedSelects } from "/src/utils/segmented.ts";
+enhanceSegmentedSelects(document);
 
 const MODAL_ID = "com.obr-suite/bestiary-group-resolve";
 // Channels — group-saves.ts owns the bg side.

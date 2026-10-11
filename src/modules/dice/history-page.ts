@@ -801,9 +801,11 @@ OBR.onReady(async () => {
     render();
   } catch {}
   try {
-    const role = await OBR.player.getRole();
+    // Role and id are independent; one batch instead of two sequential trips
+    // before the roll listener below can accept rows.
+    const [role, id] = await Promise.all([OBR.player.getRole(), OBR.player.getId()]);
     myRole = role === "GM" ? "GM" : "PLAYER";
-    myPlayerId = await OBR.player.getId();
+    myPlayerId = id;
     history = loadHistory();
   } catch {}
   OBR.player.onChange(player=>{const changed=myRole!==player.role||myPlayerId!==player.id;myRole=player.role==='GM'?'GM':'PLAYER';myPlayerId=player.id;history=loadHistory();for(const [id,pending] of pendingEntries)if(!canSeeDiceHistory(pending.entry,historyViewer())){clearTimeout(pending.timer);pendingEntries.delete(id);}if(changed&&activeReplayCid)void clearActiveReplay();render();if(detailRollerKey)renderDetail();});

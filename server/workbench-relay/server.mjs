@@ -4,6 +4,7 @@ import {documentStore} from './documents.mjs';
 import {fileURLToPath} from 'node:url';
 import {gzip,createGunzip} from 'node:zlib';
 import {applyDocumentChanges} from './patches.mjs';
+import {acceptUpgrade,isUpgradeRequest,refuseUpgrade,socketToken} from './websocket.mjs';
 const sharedDocuments=documentStore(process.env.WORKBENCH_DATA_DIR||fileURLToPath(new URL('./data/',import.meta.url)));
 const writes=new Map(),registrations=new Map();
 async function serialized(key,run){const task=(writes.get(key)||Promise.resolve()).catch(()=>{}).then(run);writes.set(key,task);try{return await task;}finally{if(writes.get(key)===task)writes.delete(key);}}
@@ -16,9 +17,24 @@ const hash=s=>createHash('sha256').update(s).digest('hex');
 function reply(res,status,data){if(res.writableEnded||res.destroyed)return;const text=JSON.stringify(data),headers={'Content-Type':'application/json','Cache-Control':'no-store'};if(text.length>4096&&res.compress){gzip(text,{level:4},(error,bytes)=>{if(res.writableEnded||res.destroyed)return;if(!error){headers['Content-Encoding']='gzip';headers.Vary='Accept-Encoding';}res.writeHead(status,headers);res.end(error?text:bytes);});}else{res.writeHead(status,headers);res.end(text);}}
 function clearBox(box){queuedBytes-=box.bytes||0;box.bytes=0;return box.queue.splice(0);}
 function queueSize(box){const bytes=Buffer.byteLength(JSON.stringify(box.queue));queuedBytes+=bytes-(box.bytes||0);box.bytes=bytes;}
-function expireSessions(now=Date.now()){for(const [id,s] of sessions)if(now-s.hostTouched>hostTtl){for(const key of ['host','client']){const box=s[key];if(box.wait){clearTimeout(box.wait.timer);reply(box.wait.res,410,{error:'宿主会话已失效',code:'HOST_EXPIRED'});}clearBox(box);}sessions.delete(id);}for(const [ip,record] of registrations)if(now-record.time>3600000)registrations.delete(ip);}
+function expireSessions(now=Date.now()){for(const [id,s] of sessions)if(now-s.hostTouched>hostTtl){for(const key of ['host','client']){const box=s[key];if(box.wait){clearTimeout(box.wait.timer);reply(box.wait.res,410,{error:'宿主会话已失效',code:'HOST_EXPIRED'});}if(box.socket){box.socket.close(1001);box.socket=null;}clearBox(box);}sessions.delete(id);}for(const [ip,record] of registrations)if(now-record.time>3600000)registrations.delete(ip);}
 function notifyCard(room,card,revision){for(const [id,s] of sessions){if(s.room!==room)continue;const box=s.host;box.queue=box.queue.filter(m=>m.type!=='cardChanged'||m.cardId!==card);if(box.queue.length>=96)continue;box.queue.push({protocol:'full-suite-workbench/v1',session:id,type:'cardChanged',cardId:card,revision});queueSize(box);flush(box);}}
-function flush(box){if(box.wait&&box.queue.length){clearTimeout(box.wait.timer);reply(box.wait.res,200,clearBox(box));box.wait=null;}}
+function flush(box){
+ // A connected socket receives the queue immediately; the long-poll path is
+ // the fallback for proxies that do not forward the Upgrade header.
+ if(box.socket&&box.socket.open&&box.queue.length){const batch=clearBox(box);if(!box.socket.send(JSON.stringify(batch))){box.queue.unshift(...batch);queueSize(box);box.socket=null;}}
+ if(box.wait&&box.queue.length){clearTimeout(box.wait.timer);reply(box.wait.res,200,clearBox(box));box.wait=null;}
+}
+function attachSocket(box,connection,touch){
+ if(box.socket&&box.socket!==connection)box.socket.close(1000);
+ box.socket=connection;let alive=true;
+ // nginx closes an idle proxied connection after proxy_read_timeout; a ping
+ // every 25 s keeps the socket open and detects a dead peer within 50 s.
+ const timer=setInterval(()=>{if(!connection.open){clearInterval(timer);return;}if(!alive){connection.close(1001);return;}alive=false;connection.ping();},25000);timer.unref?.();
+ connection.on('pong',()=>{alive=true;touch();}).on('message',text=>{alive=true;touch();if(text==='ping')connection.send('pong');}).on('close',()=>{clearInterval(timer);if(box.socket===connection)box.socket=null;});
+ if(box.wait){clearTimeout(box.wait.timer);reply(box.wait.res,200,[]);box.wait=null;}
+ flush(box);
+}
 const server=http.createServer(async(req,res)=>{
  res.compress=/\bgzip\b/.test(req.headers['accept-encoding']||'');
  if(req.headers.origin&&req.headers.origin!==origin)return reply(res,403,{error:'origin'});
@@ -37,7 +53,7 @@ const server=http.createServer(async(req,res)=>{
     // server must never consume an hour's allowance in forty seconds.
     if(sessions.size>=maxSessions){res.setHeader('Retry-After','15');return reply(res,503,{error:'中继会话已满，正在等待空位',code:'SESSION_CAPACITY'});}
     if(record.count>=maxRegistrations){res.setHeader('Retry-After',String(Math.max(1,Math.ceil((record.time+3600000-Date.now())/1000))));return reply(res,429,{error:'新会话创建过于频繁，请稍后重试',code:'REGISTRATION_RATE'});}
-    record.count++;registrations.set(ip,record);session={hostKey:secret,clientKey:body.clientKey,host:{queue:[],wait:null,bytes:0},client:{queue:[],wait:null,bytes:0},touched:Date.now(),hostTouched:Date.now()};sessions.set(id,session);
+    record.count++;registrations.set(ip,record);session={hostKey:secret,clientKey:body.clientKey,host:{queue:[],wait:null,bytes:0,socket:null},client:{queue:[],wait:null,bytes:0,socket:null},touched:Date.now(),hostTouched:Date.now()};sessions.set(id,session);
    }
    if(body.room){if(session.room&&session.room!==body.room)return reply(res,409,{error:'宿主房间已改变'});session.room=body.room;}
   }
@@ -57,7 +73,13 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==='POST'&&body.deleteCard){
    if(role!=='host')return reply(res,403,{});
    const {room,card}=body.deleteCard;if(!/^[a-zA-Z0-9_-]+$/.test(room||'')||!/^[a-zA-Z0-9_-]+$/.test(card||''))return reply(res,400,{});
-   const key='card:'+room+':'+card,task=(writes.get(key)||Promise.resolve()).catch(()=>{}).then(async()=>{const result=await fetch(`${process.env.CARD_WRITE_BASE||'http://127.0.0.1:5001'}/api/character/${room}/${card}`,{method:'DELETE',signal:AbortSignal.timeout(60000)});reply(res,result.status===404?200:result.status,result.status===404?{ok:true}:await result.json());});writes.set(key,task);try{await task;}finally{if(writes.get(key)===task)writes.delete(key);}return;
+   const key='card:'+room+':'+card,task=(writes.get(key)||Promise.resolve()).catch(()=>{}).then(async()=>{const result=await fetch(`${process.env.CARD_WRITE_BASE||'http://127.0.0.1:5001'}/api/character/${room}/${card}`,{method:'DELETE',signal:AbortSignal.timeout(60000)});
+    // The durable outcome is the status. A DELETE may answer with an empty or
+    // non-JSON body, and a card that is already gone (404/410) counts as deleted;
+    // parsing failures used to turn a completed delete into a 500 for the host.
+    const text=await result.text();let data={};try{data=text?JSON.parse(text):{};}catch{data={};}const detail=data&&typeof data==='object'&&!Array.isArray(data)?data:{};
+    if(result.ok||result.status===404||result.status===410)return reply(res,200,{...detail,ok:true});
+    reply(res,result.status,{error:typeof detail.error==='string'?detail.error:typeof detail.message==='string'?detail.message:`角色删除失败（${result.status}）`,status:result.status});});writes.set(key,task);try{await task;}finally{if(writes.get(key)===task)writes.delete(key);}return;
   }
   if(req.method==='POST'&&body.saveCard){
    if(role!=='host')return reply(res,403,{});
@@ -82,5 +104,21 @@ const server=http.createServer(async(req,res)=>{
  }catch(error){reply(res,error instanceof SyntaxError?400:500,{error:error instanceof SyntaxError?'invalid message':'relay operation failed'});}
 });
 const sweep=setInterval(expireSessions,60000);sweep.unref();
-server.listen(Number(process.env.PORT||5012),'127.0.0.1');
+// WebSocket receive path. Same session/role/secret checks as the GET long-poll;
+// the bearer secret travels in the Sec-WebSocket-Protocol list because browsers
+// cannot set an Authorization header on a socket. A host must have registered
+// over HTTP first, so a socket never creates a session.
+server.on('upgrade',(req,socket,head)=>{
+ try{
+  if(!isUpgradeRequest(req))return refuseUpgrade(socket,400,'Bad Request');
+  if(req.headers.origin&&req.headers.origin!==origin)return refuseUpgrade(socket,403,'Forbidden');
+  const url=new URL(req.url,'http://localhost'),id=url.searchParams.get('session'),role=url.searchParams.get('role'),secret=socketToken(req);
+  if(!/^[a-f0-9]{64}$/.test(id||'')||!['host','client'].includes(role)||!secret||secret.length>128)return refuseUpgrade(socket,401,'Unauthorized');
+  expireSessions();const session=sessions.get(id);
+  if(!session||!equal(secret,role==='host'?session.hostKey:session.clientKey))return refuseUpgrade(socket,401,'Unauthorized');
+  const touch=()=>{session.touched=Date.now();if(role==='host')session.hostTouched=Date.now();};touch();
+  attachSocket(session[role],acceptUpgrade(req,socket,head),touch);
+ }catch{refuseUpgrade(socket,500,'Internal Server Error');}
+});
+server.listen(Number(process.env.PORT||5012),process.env.RELAY_HOST||'127.0.0.1');
 export {server};
