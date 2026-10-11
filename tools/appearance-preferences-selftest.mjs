@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {createRequire} from 'node:module';
+import {resolve} from 'node:path';
+import vm from 'node:vm';
+const ts=createRequire(resolve(process.env.SUITE_TEST_DEPENDENCY_ROOT||'.','package.json'))('typescript');
+const source=readFileSync(new URL('../src/workbench/panel-rpc.ts',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace('export function panelBridge','function panelBridge');
+const values=new Map(),events=[],metadataWrites=[];
+const OBR={player:{getId:async()=>'player',getRole:async()=>'PLAYER'},room:{id:'fixture-room',getMetadata:async()=>({}),setMetadata:async value=>metadataWrites.push(value)},scene:{isReady:async()=>true,getMetadata:async()=>({})}};
+class StorageEvent{constructor(type,options){this.type=type;Object.assign(this,options);}}
+const context=vm.createContext({OBR,setupServerAdmission(){},tableWorkbench:()=>async()=>{},getState:()=>({enabled:{musicBoard:true}}),qqSession:()=>undefined,localStorage:{getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)},StorageEvent,window:{dispatchEvent:event=>events.push(event)}});
+vm.runInContext(ts.transpileModule(source+'\nglobalThis.bridge=panelBridge(()=>{});',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,context);
+const request=(panel,method,args=[])=>context.bridge(panel,'appearance-test',method,args);
+let count=0;const check=async(name,fn)=>{await fn();count++;console.log('PASS',name);};
+await check('PLAYER saves a personal colour preset without room mutation',async()=>{await request('settings','preferences.write',['full-suite/ui-theme','celadon']);assert.equal(values.get('full-suite/ui-theme'),'celadon');assert.equal(metadataWrites.length,0);assert.equal(events.at(-1).key,'full-suite/ui-theme');});
+await check('reopening settings reads the host preference',async()=>{const result=await request('settings','init');assert.equal(result.preferences['full-suite/ui-theme'],'celadon');});
+await check('night and colour choices are validated and stored personally',async()=>{await request('settings','preferences.write',['full-suite/ui-night','1']);await request('settings','preferences.write',['full-suite/ui-tone','#ABCDEF']);assert.equal(values.get('full-suite/ui-night'),'1');});
+await check('invalid themes, night values, colours and dice modes fail closed',async()=>{for(const [key,value] of [['full-suite/ui-theme','custom'],['full-suite/ui-night','true'],['full-suite/ui-tone','red'],['obr-suite/dice/view-mode','auto']])await assert.rejects(()=>request('settings','preferences.write',[key,value]),/无效偏好/);});
+await check('other feature panels cannot write personal appearance',async()=>{for(const panel of ['music','table','qq'])await assert.rejects(()=>request(panel,'preferences.write',['full-suite/ui-theme','night']),/无效偏好|不支持/);});
+await check('arbitrary keys and oversized values are rejected',async()=>{for(const [key,value] of [['room-permission','all'],['full-suite/ui-theme','x'.repeat(1001)]])await assert.rejects(()=>request('settings','preferences.write',[key,value]),/无效偏好/);});
+await check('clearing a personal preset does not clear other preferences',async()=>{await request('settings','preferences.write',['full-suite/ui-theme',null]);assert.equal(values.has('full-suite/ui-theme'),false);assert.equal(values.get('full-suite/ui-tone'),'#ABCDEF');assert.equal(metadataWrites.length,0);});
+const sdk=readFileSync(new URL('../src/workbench/panel-sdk.ts',import.meta.url),'utf8');for(const key of ['full-suite/ui-theme','full-suite/ui-night','full-suite/ui-tone'])assert(sdk.includes("'"+key+"'"));
+console.log(JSON.stringify({checks:count,roomMetadataWrites:metadataWrites.length,synthetic:true}));
