@@ -421,7 +421,8 @@ function unmountPanels(){rtMountHandle?.unmount();rtMountHandle=null;ccStatHandl
 function invalidate(clear=false){targetGeneration++;loadingTarget=null;requestAbort?.abort();requestAbort=null;if(clear){unmountPanels();renderedTarget=null;lastRendered=null;root.replaceChildren();}root.inert=true;}
 function canNameItem(item:any):boolean {if(!item||!renderedTarget||item.id!==renderedTarget.itemId||item.metadata?.["com.character-cards/boundCardId"]!==renderedTarget.cardId)return false;if(cachedIsGM)return true;return ownsNativeToken(item,playerId);}
 async function targetContext(target:InfoTarget):Promise<{allowed:boolean;live:BubblesData}>{
- const [metadata,room,items]=await Promise.all([OBR.scene.getMetadata(),OBR.room.getMetadata().catch(()=>({} as Record<string,unknown>)),target.itemId?OBR.scene.items.getItems([target.itemId]):Promise.resolve([])]);
+ const roomMetadata=(async():Promise<Record<string,unknown>>=>{try{return await OBR.room.getMetadata();}catch{return {};}})();
+ const [metadata,room,items]=await Promise.all([OBR.scene.getMetadata(),roomMetadata,target.itemId?OBR.scene.items.getItems([target.itemId]):Promise.resolve([])]);
  // A cloud card bound to this token has no scene entry; its registry row carries the same owner/lock fields.
  const entry=(Array.isArray(metadata["com.character-cards/list"])?metadata["com.character-cards/list"] as any[]:[]).find(c=>c?.id===target.cardId)||cloudEntries(room).find(c=>c.id===target.cardId);
  const item=items[0],meta=item?.metadata??{},raw=meta[BUBBLES_META_KEY]??meta[EXTERNAL_BUBBLES_META_KEY];

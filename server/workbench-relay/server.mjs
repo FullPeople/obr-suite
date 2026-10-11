@@ -68,6 +68,9 @@ const server=http.createServer(async(req,res)=>{
   }
   if(req.method==='POST'&&body.sharedDocument){
    if(role!=='host')return reply(res,403,{});
+   // Rules, scene indexes and the inventory ledger belong to the registered room.
+   // A monster override names its own origin room, so it may travel with a copied scene.
+   const key=body.sharedDocument?.key;if(session.room&&typeof key==='string'&&!key.startsWith('monster_')&&key!==session.room+'_room'&&!key.startsWith(session.room+'_')&&key!=='inventory_'+session.room)return reply(res,403,{error:'共享资料不属于当前房间',code:'ROOM_SCOPE'});
    try{const m=body.sharedDocument,write=()=>sharedDocuments(m);return reply(res,200,await (m.operation==='write'&&m.key?.startsWith('inventory_')?serialized('room:'+m.key.slice('inventory_'.length),write):write()));}catch(error){if(!error.status)console.error('sharedDocument storage failure',{key:body.sharedDocument?.key,operation:body.sharedDocument?.operation,phase:error.storagePhase,code:error.code,syscall:error.syscall,renameAttempts:error.renameAttempts,cleanupCode:error.cleanupCode,message:error.message});return reply(res,error.status||500,{error:error.status?error.message:'共享资料保存失败'});}
   }
   if(req.method==='POST'&&body.deleteCard){

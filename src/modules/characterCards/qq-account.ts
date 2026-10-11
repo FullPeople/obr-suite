@@ -36,10 +36,13 @@ async function performQQRequest<T=any>(path:string,method='GET',data?:unknown,ro
   }finally{clearTimeout(timer);}
 }
 const random=()=>btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-export async function connectQQ(){
+/** Six characters both ends derive from the PKCE challenge; the person approving a pairing compares them. */
+export function pairingCode(challenge:string){let h=2166136261;for(let i=0;i<challenge.length;i++){h^=challenge.charCodeAt(i);h=Math.imul(h,16777619)>>>0;}const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let out='';for(let i=0;i<6;i++){out+=alphabet[h%32];h=Math.floor(h/32);}return out;}
+export async function connectQQ(onCode?:(code:string)=>void){
   const verifier=random(),nonce=random();
   const popup=window.open('about:blank','dnd-qq-login','popup,width=620,height=720');if(!popup)throw Error('浏览器阻止了登录窗口，请允许弹出窗口后重试。');
   const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))),challenge=btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  onCode?.(pairingCode(challenge));
   const {connection}=await qqRequest('plugin/start','POST',{challenge});
   popup.location.href=QQ_ORIGIN+'/library/?'+new URLSearchParams({pluginAuth:'1',origin:location.origin,challenge,nonce,connection});
   // Polling survives a provider's opener-isolation policy and needs no third-party cookies.
