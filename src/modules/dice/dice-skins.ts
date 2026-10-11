@@ -172,7 +172,7 @@ function isEmptyLibrary(lib: DiceSkinLibrary): boolean {
 // stores stay in lock-step.
 async function writeActiveBoth(s: DiceSkins): Promise<void> {
   writeLSActive(s);
-  try { await OBR.player.setMetadata({ [SKINS_KEY]: s }); } catch {}
+  try { await writePlayerMetadata({ [SKINS_KEY]: s }); } catch {}
 }
 
 // 2026-05-15 — one-shot session flags for the LS→OBR bootstrap push.
@@ -183,6 +183,41 @@ async function writeActiveBoth(s: DiceSkins): Promise<void> {
 // push runs at most once per browsing session per blob.
 let _activeSyncedThisSession = false;
 let _libSyncedThisSession = false;
+
+// Player metadata snapshot. The first read costs one host round trip and
+// subscribes to player changes; every later read reuses the live copy. The
+// old code only cached a NON-empty result, so a player without custom skins
+// (most players) paid two `getMetadata` round trips on every single roll.
+let _metaSnapshot: Record<string, unknown> | undefined;
+let _metaRead: Promise<Record<string, unknown>> | undefined;
+let _metaSubscribed = false;
+async function playerMetadata(): Promise<Record<string, unknown>> {
+  if (_metaSnapshot) return _metaSnapshot;
+  if (!_metaRead) {
+    if (!_metaSubscribed) {
+      _metaSubscribed = true;
+      try {
+        OBR.player.onChange((p) => {
+          if (p && p.metadata && typeof p.metadata === "object") _metaSnapshot = p.metadata as Record<string, unknown>;
+        });
+      } catch {}
+    }
+    _metaRead = OBR.player.getMetadata()
+      .then((meta) => {
+        // A change event that arrived while this read was in flight is newer.
+        if (!_metaSnapshot) _metaSnapshot = (meta ?? {}) as Record<string, unknown>;
+        return _metaSnapshot;
+      })
+      .finally(() => { _metaRead = undefined; });
+  }
+  return _metaRead;
+}
+/** Write player metadata and keep the local snapshot current immediately, so a
+ *  roll fired before the room echoes the change never resurrects old skins. */
+function writePlayerMetadata(patch: Record<string, unknown>): Promise<void> {
+  _metaSnapshot = { ...(_metaSnapshot ?? {}), ...patch };
+  return OBR.player.setMetadata(patch);
+}
 
 // --- low-level reads --------------------------------------------------------
 
@@ -195,14 +230,14 @@ async function readActiveSkinsRaw(): Promise<DiceSkins> {
     // writes (setActiveSkin etc.) keep OBR in sync from then on.
     if (!_activeSyncedThisSession) {
       _activeSyncedThisSession = true;
-      OBR.player.setMetadata({ [SKINS_KEY]: ls }).catch(() => {});
+      writePlayerMetadata({ [SKINS_KEY]: ls }).catch(() => {});
     }
     return ls;
   }
   // First time on this browser — bootstrap from whatever the current
   // room's OBR metadata happens to have.
   try {
-    const meta = await OBR.player.getMetadata();
+    const meta = await playerMetadata();
     const obr = normalizeSkins(meta?.[SKINS_KEY]);
     if (!isEmptyActive(obr)) {
       writeLSActive(obr);
@@ -238,12 +273,12 @@ async function readLibraryRaw(): Promise<DiceSkinLibrary> {
   if (!isEmptyLibrary(ls)) {
     if (!_libSyncedThisSession) {
       _libSyncedThisSession = true;
-      OBR.player.setMetadata({ [SKIN_LIB_KEY]: ls }).catch(() => {});
+      writePlayerMetadata({ [SKIN_LIB_KEY]: ls }).catch(() => {});
     }
     return ls;
   }
   try {
-    const meta = await OBR.player.getMetadata();
+    const meta = await playerMetadata();
     const obr = normalizeLibrary(meta?.[SKIN_LIB_KEY]);
     if (!isEmptyLibrary(obr)) {
       writeLSLibrary(obr);
@@ -338,7 +373,7 @@ export async function writeMyLibrary(lib: DiceSkinLibrary): Promise<void> {
   // The OBR side replaces the whole SKIN_LIB_KEY blob (no merge) so a
   // removed library entry doesn't linger.
   writeLSLibrary(lib);
-  try { await OBR.player.setMetadata({ [SKIN_LIB_KEY]: lib }); } catch {}
+  try { await writePlayerMetadata({ [SKIN_LIB_KEY]: lib }); } catch {}
 }
 
 /** Read the active-skin map only (one DiceSkin per die at most). */
@@ -390,7 +425,7 @@ export async function removeFromLibrary(type: DiceType, url: string): Promise<vo
     activeChanged = true;
   }
   await writeMyLibrary(lib);
-  if (activeChanged) await OBR.player.setMetadata({ [SKINS_KEY]: active });
+  if (activeChanged) await writePlayerMetadata({ [SKINS_KEY]: active });
 }
 
 /** Toggle the random-pool flag for a die. */

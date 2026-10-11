@@ -7,6 +7,7 @@
 // commit happens in modules/trickster/index.ts.
 
 import OBR from "@owlbear-rodeo/sdk";
+import { enhanceSegmentedSelects } from "../../utils/segmented";
 import {
   PLUGIN_ID,
   TRICKSTER_KEY,
@@ -170,4 +171,5 @@ btnSave.addEventListener("click", async () => {
   } catch {}
 });
 
+enhanceSegmentedSelects(document);
 OBR.onReady(() => { void init(); });

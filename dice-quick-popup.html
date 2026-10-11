@@ -9,10 +9,10 @@
   --bg:rgba(31,34,48,0.97);
   --bg-strong:#2c3044;
   --bg-card:#262a3a;
-  --border:rgba(255,255,255,0.10);
-  --border-strong:rgba(255,255,255,0.18);
+  --border:rgba(255,255,255,0.24);
+  --border-strong:rgba(255,255,255,0.36);
   --text:#e6e8ee;
-  --text-dim:#8a8e9c;
+  --text-dim:#a3a8b8;
   --accent:#5dade2;
   --good:#7be0a0;
   --bad:#ff8b7a;
@@ -76,7 +76,7 @@ html,body{
   position:relative;min-width:0;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   background:var(--bg-card);
-  border:1px solid var(--border);
+  border:1px solid var(--border-strong);
   border-radius:6px;
   padding:4px 0 3px;
   cursor:pointer;
@@ -113,7 +113,7 @@ html,body{
 .expr-input{
   flex:1;min-width:0;height:36px;
   background:var(--bg-card);
-  border:1px solid var(--border);
+  border:1px solid var(--border-strong);
   border-radius:6px;
   padding:0 10px;
   color:var(--text);
@@ -144,7 +144,7 @@ html,body{
 .label-input{
   height:28px;width:100%;
   background:var(--bg-card);
-  border:1px solid var(--border);
+  border:1px solid var(--border-strong);
   border-radius:6px;
   padding:0 10px;
   font-size:12px;font-family:inherit;color:var(--text);
@@ -167,18 +167,18 @@ html,body{
   transition:background .12s, color .12s, border-color .12s;
 }
 .btn-act .ico{font-size:11px}
-.btn-act.dis{color:var(--bad);border-color:rgba(231,76,60,0.40)}
-.btn-act.dis:hover{background:rgba(231,76,60,0.16);border-color:rgba(231,76,60,0.6)}
-.btn-act.normal{color:var(--accent);border-color:rgba(93,173,226,0.40)}
-.btn-act.normal:hover{background:rgba(93,173,226,0.18);border-color:rgba(93,173,226,0.6)}
-.btn-act.adv{color:var(--good);border-color:rgba(46,204,113,0.40)}
-.btn-act.adv:hover{background:rgba(46,204,113,0.16);border-color:rgba(46,204,113,0.6)}
+.btn-act.dis{color:var(--bad);border-color:rgba(255,139,122,0.62)}
+.btn-act.dis:hover{background:rgba(231,76,60,0.16);border-color:rgba(255,139,122,0.85)}
+.btn-act.normal{color:var(--accent);border-color:rgba(93,173,226,0.62)}
+.btn-act.normal:hover{background:rgba(93,173,226,0.18);border-color:rgba(93,173,226,0.85)}
+.btn-act.adv{color:var(--good);border-color:rgba(123,224,160,0.62)}
+.btn-act.adv:hover{background:rgba(46,204,113,0.16);border-color:rgba(123,224,160,0.85)}
 .btn-act.crit{
   flex:0 0 56px;
   font-size:11px;color:var(--crit);
-  border-color:rgba(255,167,38,0.40);
+  border-color:rgba(255,183,77,0.62);
 }
-.btn-act.crit:hover{background:rgba(255,167,38,0.16);border-color:rgba(255,167,38,0.6)}
+.btn-act.crit:hover{background:rgba(255,167,38,0.16);border-color:rgba(255,183,77,0.85)}
 
 /* DM-only dark-roll mini-row — same column layout as .actions above
    so each small button sits flush under its parent mode (劣势/普通/
@@ -215,7 +215,7 @@ html,body{
 <body>
 <div class="popup">
   <div class="popup-hdr">
-    <button class="close-x" id="closeBtn" type="button" title="关闭 / Close" data-lt="close" aria-label="Close">×</button>
+    <button class="close-x" id="closeBtn" type="button" title="关闭 / Close" data-lt="close" aria-label="Close"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
   </div>
   <!-- 7-dice picker — left=+1, right=-1. -->
   <div class="dice-row" id="diceRow">
@@ -240,10 +240,10 @@ html,body{
   <input class="label-input" id="labelInput" type="text" placeholder="备注（可选）" data-lp="labelPh">
 
   <div class="actions">
-    <button class="btn-act dis"    data-act="dis"    type="button"><span class="ico">▼</span><span data-l="dis">劣势</span></button>
-    <button class="btn-act normal" data-act="roll"   type="button"><span class="ico">⚀</span><span data-l="roll">普通</span></button>
-    <button class="btn-act adv"    data-act="adv"    type="button"><span class="ico">▲</span><span data-l="adv">优势</span></button>
-    <button class="btn-act crit"   data-act="crit"   type="button" title="重击 = 表达式中所有骰子翻倍" data-lt="critTitle"><span class="ico">✦</span><span data-l="crit">重击</span></button>
+    <button class="btn-act dis"    data-act="dis"    type="button"><span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 19 L4 6 H20 Z" fill="currentColor" stroke="none"/></svg></span><span data-l="dis">劣势</span></button>
+    <button class="btn-act normal" data-act="roll"   type="button"><span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="15" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg></span><span data-l="roll">普通</span></button>
+    <button class="btn-act adv"    data-act="adv"    type="button"><span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 5 L20 18 H4 Z" fill="currentColor" stroke="none"/></svg></span><span data-l="adv">优势</span></button>
+    <button class="btn-act crit"   data-act="crit"   type="button" title="重击 = 表达式中所有骰子翻倍" data-lt="critTitle"><span class="ico"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M12 3l2 7 7 2-7 2-2 7-2-7-7-2 7-2 2-7z"/></svg></span><span data-l="crit">重击</span></button>
   </div>
 
   <!-- DM-only dark variants — one per mode, flush under the row above.

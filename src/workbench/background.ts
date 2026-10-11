@@ -38,7 +38,7 @@ async function start(){
  let credentials:{hostKey:string;clientKey:string};try{credentials=JSON.parse(localStorage.getItem(storageKey)||'null');}catch{credentials=null as any;}
  if(!credentials?.hostKey||!credentials?.clientKey){credentials={hostKey:crypto.randomUUID()+crypto.randomUUID(),clientKey:crypto.randomUUID()+crypto.randomUUID()};localStorage.setItem(storageKey,JSON.stringify(credentials));}
  const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(credentials.hostKey));const session=[...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('');
- let child:Window|null=null,relayActive=false,relayPeerSeen=0,chosen='',lastSelection='',last='',refreshing=false,again=false,follow=true,lastCatalog='';
+ let child:Window|null=null,relayActive=false,relayPeerSeen=0,directSeen=0,chosen='',lastSelection='',last='',refreshing=false,again=false,follow=true,lastCatalog='';
  let previousSceneCards:string[]=[];let directoryWrite=false;
  let mutation=0,epoch=0,sequence=0,documentCacheVersion=0;
  let catalogCache: {signature:string;value:any}|undefined,lastDocument:any;
@@ -53,7 +53,13 @@ async function start(){
  const shared=sharedDocuments(relay);
  const inventories=inventoryDocuments(relay,OBR.room.id||'default');
  const hostStarted=Date.now();
- const send=(type:string,extra:Record<string,unknown>={},route?:'relay'|'direct')=>{const data={protocol,session,hostStarted,type,...extra};if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch{}if(route==='relay'||route!=='direct'&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).catch(()=>{});};
+ const send=(type:string,extra:Record<string,unknown>={},route?:'relay'|'direct')=>{const data={protocol,session,hostStarted,type,...extra};if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch{}// The first hello always travels over the relay because the workbench has not
+ // found this window yet, which used to open a 45 s window in which every
+ // message (catalog, the full roll list, each SFX event) was also POSTed over
+ // HTTP. A direct message seen within the last 15 s proves the bridge is alive,
+ // so the mirror is skipped; the workbench pings direct every 2.5 s while idle.
+ const directAlive=()=>!!child&&!child.closed&&Date.now()-directSeen<15000;
+ if(route==='relay'||route!=='direct'&&relayActive&&Date.now()-relayPeerSeen<45000&&!directAlive())void relay.send(data).catch(()=>{});};
  OBR.broadcast.onMessage(OPEN_WIKI_CHANNEL,event=>{if(event.connectionId!==playerConnection)return;try{const entry=sharedEntry((event.data as any)?.entry);send('showWiki',{entry,id:crypto.randomUUID()});}catch{}});
  const panels=panelBridge(send,relay);
  const bubble=(item:Item|undefined)=>((item?.metadata[HP]??item?.metadata[LEGACY]??{}) as Record<string,any>);
@@ -599,7 +605,7 @@ async function start(){
   // workbench still knows it, so its next ping restores the direct bridge
   // without waiting for a stale-window timeout or relying on the old plugin.
   if(e.data.type==='ping'&&(!child||child.closed)){child=e.source as Window;last='';lastCatalog='';void refreshSelection();void refresh();void hydrate();}
-  if(e.data.type==='hello'){if(child&&!child.closed&&child!==e.source)return;child=e.source as Window;}if(e.source===child)void receive(e.data);
+  if(e.data.type==='hello'){if(child&&!child.closed&&child!==e.source)return;child=e.source as Window;}if(e.source===child){directSeen=Date.now();void receive(e.data);}
  });
  for(const name of DICE_EVENTS)OBR.broadcast.onMessage(name,event=>send('diceEvent',{event:name,data:event}));
  OBR.player.onChange(player=>send('diceEvent',{event:'player',data:player}));

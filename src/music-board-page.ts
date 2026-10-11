@@ -1,6 +1,7 @@
 // Control surface only. Audio, PeerJS, room writes and reconnection live in
 // modules/musicBoard in the suite background. Closing this document is harmless.
 import OBR from "@owlbear-rodeo/sdk";
+import { enhanceSegmentedSelects } from "./utils/segmented";
 import { bindPanelDrag } from "./utils/panelDrag";
 import { getLocalLang, onLangChange } from "./state";
 import { MUSIC_ACK, MUSIC_COMMAND, MUSIC_LOCAL, MUSIC_READY, MUSIC_VIEW, decodeTracks, trackFrom, type MusicSession, type MusicOp, type Track } from "./modules/musicBoard/model";
@@ -122,6 +123,7 @@ for (const [id,bus] of [["bgmVolume","bgm"],["sfxVolume","sfx"]] as const) el<HT
 el<HTMLInputElement>("mute").addEventListener("change", event => local("volume", { value: { mute: (event.target as HTMLInputElement).checked } }));
 el("pair").addEventListener("click", () => local("pair", { code: el<HTMLInputElement>("pairCode").value }));
 el("unpair").addEventListener("click", () => local("unpair")); el("adopt").addEventListener("click", () => local("adopt"));
+enhanceSegmentedSelects(document);
 const importBus = (): "bgm" | "sfx" => el<HTMLSelectElement>("importBus").value === "sfx" ? "sfx" : "bgm";
 el<HTMLSelectElement>("importBus").addEventListener("change", () => { el("importHint").hidden = importBus() !== "sfx"; });
 el("import").addEventListener("click", () => { try { command({ type: "add", tracks: decodeTracks(el<HTMLTextAreaElement>("importText").value, importBus()) }); } catch(error) { feedback(musicError(error)); } });

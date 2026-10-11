@@ -1,4 +1,5 @@
 import { render } from "preact";
+import { ICONS } from "../../icons";
 import { useEffect, useState, useCallback, useMemo, useRef, memo } from "preact/compat";
 import OBR from "@owlbear-rodeo/sdk";
 import { installDebugOverlay } from "../../utils/debugOverlay";
@@ -1001,7 +1002,7 @@ function App() {
                   aria-label={t(lang, "bestiaryClearSearch")}
                   type="button"
                 >
-                  ✕
+                  <span dangerouslySetInnerHTML={{ __html: ICONS.close }} />
                 </button>
               )}
             </div>
@@ -1032,7 +1033,7 @@ function App() {
                 title={lang === "zh" ? "清空来源筛选" : "Clear source filter"}
                 aria-label={lang === "zh" ? "清空来源筛选" : "Clear source filter"}
               >
-                ✕
+                <span dangerouslySetInnerHTML={{ __html: ICONS.close }} />
               </button>
             )}
           </div>
@@ -1092,12 +1093,12 @@ function App() {
             </button>
           )}
           <button class="sort-btn" onClick={toggleSort} title={t(lang, "bestiarySortByCR")}>
-            CR {sortDesc ? "↓" : "↑"}
+            CR <span dangerouslySetInnerHTML={{ __html: sortDesc ? ICONS.chevronDown : ICONS.chevronUp }} />
           </button>
           {/* The library is kept on disk between opens, so a user who believes
               the mirror has newer content needs one way to force a download. */}
           <button class="sort-btn" disabled={loading} onClick={() => refreshContentRef.current()} title={t(lang, "bestiaryRefresh")} aria-label={t(lang, "bestiaryRefresh")}>
-            ⟳
+            <span dangerouslySetInnerHTML={{ __html: ICONS.refresh }} />
           </button>
         </div>
       </div>

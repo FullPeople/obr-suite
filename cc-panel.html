@@ -112,7 +112,7 @@ html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
 .side-head .head-actions{display:contents}
 #ccTplRow{display:flex;flex-wrap:wrap;gap:4px;grid-column:1 / -1;grid-row:2}
 .side-head .close{grid-column:2;grid-row:1}
-.side-head .icon-btn{background:transparent;border:1px solid rgba(255,255,255,0.1);color:#aaa;cursor:pointer;font-size:11px;padding:3px 8px;font-family:inherit;border-radius:4px;line-height:1.3;text-decoration:none;display:inline-block}
+.side-head .icon-btn{background:transparent;border:1px solid rgba(255,255,255,0.32);color:#c4cad6;cursor:pointer;font-size:11px;padding:3px 8px;font-family:inherit;border-radius:4px;line-height:1.3;text-decoration:none;display:inline-block}
 .side-head .icon-btn:hover{background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.25)}
 .side-head .icon-btn.off{color:#666;text-decoration:line-through;opacity:.7}
 .side-head .icon-btn.on{color:#5dade2;border-color:rgba(93,173,226,0.35)}
@@ -121,12 +121,12 @@ html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
 
 .side-hint{padding:10px 14px;font-size:11px;color:#7aa;background:rgba(52,152,219,0.08);border-bottom:1px solid rgba(255,255,255,0.06);text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px}
 .link-local-btn{
-  background:rgba(46,204,113,0.12);border:1px solid rgba(46,204,113,0.40);
+  background:rgba(46,204,113,0.14);border:1px solid rgba(46,204,113,0.72);
   color:#7be0a0;cursor:pointer;font-family:inherit;font-size:11px;
   padding:5px 10px;border-radius:4px;transition:background .12s, border-color .12s;
 }
 .link-local-btn:hover{background:rgba(46,204,113,0.22);border-color:rgba(46,204,113,0.65)}
-.side-hint-sub{font-size:10px;color:rgba(122,170,170,0.65);margin-top:2px}
+.side-hint-sub{font-size:10px;color:#93bdbd;margin-top:2px}
 .card-refresh{
   position:absolute;top:4px;right:24px;
   background:transparent;border:none;color:#7be0a0;cursor:pointer;
@@ -148,7 +148,7 @@ html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
 .card.active{background:rgba(52,152,219,0.18);border-color:rgba(52,152,219,0.5)}
 .card-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:60px}
 .card-sub{font-size:10px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card-del{position:absolute;top:4px;right:4px;background:transparent;border:none;color:#666;cursor:pointer;width:18px;height:18px;font-size:13px;display:none;border-radius:3px;font-family:inherit;padding:0;line-height:1}
+.card-del{position:absolute;top:4px;right:4px;background:transparent;border:none;color:#aab2c2;cursor:pointer;width:18px;height:18px;font-size:13px;display:none;border-radius:3px;font-family:inherit;padding:0;line-height:1}
 .card:hover .card-del{display:block}
 .card-del:hover{background:rgba(231,76,60,0.25);color:#e74c3c}
 
@@ -206,20 +206,24 @@ html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
 .card.is-hidden .card-name{color:#f5d76e}
 .card.is-hidden .card-sub{color:rgba(245,166,35,0.65)}
 
-.empty-list{padding:30px 12px;text-align:center;color:#666;font-size:11px;line-height:1.6;white-space:pre-line}
+.empty-list{padding:30px 12px;text-align:center;color:#aab0c0;font-size:11px;line-height:1.6;white-space:pre-line}
 .err{padding:8px 12px;font-size:11px;color:#e74c3c;background:rgba(231,76,60,0.1);border-top:1px solid rgba(231,76,60,0.2)}
 .status{padding:6px 12px;font-size:10px;color:#5dade2;text-align:center}
 
 
 .side-head{flex-wrap:wrap;gap:8px}.head-actions{flex-wrap:wrap}.side-hint{display:block;text-align:left;padding:14px}.upload-heading{display:block;font-size:13px;color:#e3e9f2;margin-bottom:6px}.side-hint>span{display:block;line-height:1.5}.upload-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:12px 0}.upload-actions .link-local-btn{width:100%;margin:0;min-height:32px;white-space:nowrap}.upload-actions #btnViewSample{grid-column:1 / -1;grid-row:2;background:transparent;border-color:#627183;color:#bac9dc}.side-hint-sub{line-height:1.5;margin-top:9px}.migration-help{display:block;max-width:100%;text-align:left;color:#b8d1ec;background:none;border:0;text-decoration:underline;text-underline-offset:3px;font-size:11px;line-height:1.6;cursor:pointer}.migration-dialog{margin:auto;width:min(680px,calc(100vw - 24px));max-height:85vh;overflow:auto;padding:20px;background:#202638;color:#e1e5ee;border:1px solid #65758a;border-radius:6px;font-size:13px;line-height:1.8}.migration-dialog::backdrop{background:#0008}.migration-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.migration-dialog h2{font-size:18px;line-height:1.4}.migration-dialog h3{font-size:14px;margin-top:18px}.migration-dialog p{margin:10px 0}.migration-dialog header button{color:inherit;background:transparent;border:0;padding:2px 6px;font-size:22px;cursor:pointer}.migration-site{display:inline-block;padding:7px 14px;margin-top:10px;background:#304967;color:#fff;border:1px solid #7698bc;border-radius:4px}
+.link-local-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px}
+.link-local-btn .ui-ico,.icon-btn .ui-ico,.title .ui-ico{width:1.1em;height:1.1em}
+/* Narrow popovers (phones, small windows): stack the viewer above the sidebar. */
+@media(max-width:560px){.panel{flex-direction:column;padding:10px;gap:10px}.side{width:100%;max-height:46%}.viewer{min-height:40%}.upload-actions{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
-<div class="mini-wrap"><button class="mini-btn" id="miniBtn" data-i18n-title="ccPanelMiniTitle" title="角色卡面板">📇</button></div>
+<div class="mini-wrap"><button class="mini-btn" id="miniBtn" data-i18n-title="ccPanelMiniTitle" title="角色卡面板"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M5.5 17a4 4 0 0 1 7 0"/><line x1="15" y1="9" x2="19" y2="9"/><line x1="15" y1="13" x2="18" y2="13"/></svg></button></div>
 <div class="panel">
   <div class="viewer is-empty" id="viewer">
     <div class="empty-state" id="emptyState">
-      <div class="big">📇</div>
+      <div class="big"><svg class="ui-ico" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M5.5 17a4 4 0 0 1 7 0"/><line x1="15" y1="9" x2="19" y2="9"/><line x1="15" y1="13" x2="18" y2="13"/></svg></div>
       <div id="emptyText" data-i18n="ccPanelEmpty">从右侧选择一张角色卡</div>
       <div style="font-size:11px;opacity:.7" data-i18n="ccPanelEmpty2">拖拽 JSON / XLSX 到右侧栏上传</div>
     </div>
@@ -227,32 +231,29 @@ html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
   <aside class="res-col" id="resCol" style="display:none"></aside>
   <aside class="side" id="side">
     <div class="side-head">
-      <div class="title">📇 <span data-i18n="ccPanelTitle">角色卡</span></div>
+      <div class="title"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M5.5 17a4 4 0 0 1 7 0"/><line x1="15" y1="9" x2="19" y2="9"/><line x1="15" y1="13" x2="18" y2="13"/></svg> <span data-i18n="ccPanelTitle">角色卡</span></div>
       <div class="head-actions">
         <a class="icon-btn" href="https://dnd.center/card/" target="_blank" rel="noopener">打开车卡网站</a>
-        <button class="close" id="closeBtn" data-i18n-title="ccPanelClose" title="关闭 (Esc)">✕</button>
+        <button class="close" id="closeBtn" data-i18n-title="ccPanelClose" title="关闭 (Esc)" aria-label="关闭"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
       </div>
     </div>
     <div class="side-hint"><strong class="upload-heading">上传角色卡</strong>
       <span data-i18n="ccPanelDragHint">拖拽 JSON / XLSX 到此处上传</span>
       <div class="upload-actions"><button id="btnLinkLocal" class="link-local-btn" type="button"
-              data-i18n="ccPanelChooseFile"
               data-i18n-title="ccPanelChooseFileTitle"
               title="打开本地文件选择器上传 JSON / XLSX 角色卡">
-        📁 选择文件
+        <svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M3 7 a2 2 0 0 1 2 -2 h4.5 l2 2 H19 a2 2 0 0 1 2 2 v9 a2 2 0 0 1 -2 2 H5 a2 2 0 0 1 -2 -2 Z"/></svg> <span data-i18n="ccPanelChooseFile">选择文件</span>
       </button>
       <!-- The example is read-only. Pasted JSON creates a scene card after confirmation. -->
       <button id="btnViewSample" class="link-local-btn" type="button"
-              data-i18n="ccPanelViewSample"
               data-i18n-title="ccPanelViewSampleTitle"
               title="打开一份内置的示例角色卡（只读）">
-        👁 查看示例
+        <svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M2 12 c2.5 -4.5 5.7 -6.5 10 -6.5 s7.5 2 10 6.5 c-2.5 4.5 -5.7 6.5 -10 6.5 s-7.5 -2 -10 -6.5 z"/><circle cx="12" cy="12" r="3.2"/></svg> <span data-i18n="ccPanelViewSample">查看示例</span>
       </button>
       <button id="btnPasteJson" class="link-local-btn" type="button"
-              data-i18n="ccPanelPasteJson"
               data-i18n-title="ccPanelPasteJsonTitle"
               title="粘贴角色卡 JSON，确认后上传并添加到当前场景">
-        📋 粘贴 JSON
+        <svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><rect x="6" y="5" width="12" height="16" rx="1.5"/><path d="M9 5 a3 3 0 0 1 6 0"/><path d="M9 11 h6 M9 15 h6"/></svg> <span data-i18n="ccPanelPasteJson">粘贴 JSON</span>
       </button>
       </div><button id="jsonMigrationHelp" class="migration-help" type="button">关于 JSON 与暂时恢复 Excel 导入的说明</button>
       <div class="upload-actions"><a class="link-local-btn" href="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx" download data-i18n="ccPanelDownloadTpl2014" data-i18n-title="ccPanelDownloadTpl2014Title">2014 模板</a>
