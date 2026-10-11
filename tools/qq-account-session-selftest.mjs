@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import {acceptQQSession,clearQQSession,qqSession,qqRequest,QQ_STORAGE} from '../src/modules/characterCards/qq-account.ts';
+const storage=new Map(),events=[];globalThis.localStorage={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};globalThis.window={dispatchEvent:event=>events.push(event.type)};
+const token='synthetic-personal-token-0123456789',candidate={token,expiresAt:Date.now()+60000,accountId:'owner',nickname:'unverified-name',avatar:'https://untrusted.invalid/avatar',csrf:'unverified-csrf'};
+let profile={authenticated:true,account:{id:'owner',nickname:'verified-name',avatar:'https://qlogo.cn/verified-avatar'},csrf:'verified-csrf'},status=200,calls=0;
+globalThis.fetch=async(url,options)=>{calls++;assert.equal(url,'https://dnd.center/api/session');assert.equal(options.headers.Authorization,'Bearer '+token);assert.equal(options.credentials,'omit');return new Response(JSON.stringify(profile),{status});};
+let count=0;async function check(name,fn){await fn();console.log('PASS',++count,name);}
+await check('Malformed or expired sessions are rejected before HTTP',async()=>{for(const value of [null,{}, {...candidate,token:'short'}, {...candidate,expiresAt:0}])await assert.rejects(()=>acceptQQSession(value),/无效/);assert.equal(calls,0);});
+await check('The server verifies identity before the private host stores a session',async()=>{await acceptQQSession(candidate);assert.equal(qqSession().accountId,'owner');assert.equal(qqSession().nickname,'verified-name');assert.equal(qqSession().avatar,'https://qlogo.cn/verified-avatar');assert.equal(qqSession().csrf,'verified-csrf');assert.deepEqual(events,['qq-account-changed']);});
+const original=storage.get(QQ_STORAGE);
+await check('A different account cannot replace an existing session',async()=>{await assert.rejects(()=>acceptQQSession({...candidate,accountId:'other'}),/已失效/);assert.equal(storage.get(QQ_STORAGE),original);});
+await check('Expired server authority or an HTTP failure leaves the old session intact',async()=>{profile={authenticated:false};await assert.rejects(()=>acceptQQSession(candidate),/已失效/);status=503;await assert.rejects(()=>acceptQQSession(candidate),/已失效/);assert.equal(storage.get(QQ_STORAGE),original);});
+await check('Concurrent reads share one request; a different account never receives that account response',async()=>{
+ const flights=[];globalThis.fetch=(url,options)=>new Promise(resolve=>flights.push({url,options,resolve}));
+ const first=qqRequest('cards'),duplicate=qqRequest('cards');assert.equal(first,duplicate);assert.equal(flights.length,1);
+ localStorage.setItem(QQ_STORAGE,JSON.stringify({...candidate,token:token+'-other',accountId:'other'}));const second=qqRequest('cards');assert.notEqual(first,second);assert.equal(flights.length,2);
+ flights[0].resolve(new Response(JSON.stringify({cards:['owner']})));flights[1].resolve(new Response(JSON.stringify({cards:['other']})));assert.deepEqual(await first,{cards:['owner']});assert.deepEqual(await second,{cards:['other']});
+ localStorage.setItem(QQ_STORAGE,original);const next=qqRequest('cards');assert.equal(flights.length,3);flights[2].resolve(new Response(JSON.stringify({cards:['fresh']})));assert.deepEqual(await next,{cards:['fresh']});
+});
+await check('An account switch during CSRF refresh cannot send a mutation with mixed credentials',async()=>{let resolve;globalThis.fetch=(url)=>{assert.equal(url,'https://dnd.center/api/session');return new Promise(done=>resolve=done);};const write=qqRequest('cards','POST',{confirmUpload:true});localStorage.setItem(QQ_STORAGE,JSON.stringify({...candidate,token:token+'-other',accountId:'other'}));resolve(new Response(JSON.stringify({authenticated:true,account:{id:'owner'},csrf:'owner-csrf'})));await assert.rejects(()=>write,/账号已改变/);localStorage.setItem(QQ_STORAGE,original);});
+await check('A failed CSRF read reports that the mutation was never sent',async()=>{let requests=0;globalThis.fetch=async url=>{requests++;assert.equal(url,'https://dnd.center/api/session');throw Error('offline');};await assert.rejects(()=>qqRequest('cards','POST',{}),error=>error.notSent===true);assert.equal(requests,1);});
+await check('Logout clears only the matching personal host session',async()=>{clearQQSession('another-token');assert.equal(storage.get(QQ_STORAGE),original);clearQQSession(token);assert.equal(qqSession(),undefined);assert.deepEqual(events,['qq-account-changed','qq-account-changed']);});
+await check('JSON transport null never adds a body to a read request',async()=>{globalThis.fetch=async(url,options)=>{assert.equal(options.method,'GET');assert.equal(options.body,undefined);assert.equal(options.headers['Content-Type'],undefined);return new Response(JSON.stringify({cards:[]}));};assert.deepEqual(await qqRequest('cards','GET',null),{cards:[]});});
+await check('A late verified connection cannot overwrite a newer completed login',async()=>{
+ localStorage.setItem(QQ_STORAGE,original);const flights=[];globalThis.fetch=(url,options)=>new Promise(resolve=>flights.push({url,options,resolve}));
+ const slow=acceptQQSession({...candidate,token:token+'-slow'}),rejected=assert.rejects(()=>slow,/连接已改变/);
+ const fast=acceptQQSession({...candidate,token:token+'-fast'});
+ flights[1].resolve(new Response(JSON.stringify({authenticated:true,account:{id:'owner'},csrf:'new'})));await fast;
+ flights[0].resolve(new Response(JSON.stringify({authenticated:true,account:{id:'owner'},csrf:'old'})));await rejected;assert.equal(qqSession().token,token+'-fast');
+});
+await check('A different window login during verification remains authoritative',async()=>{
+ localStorage.setItem(QQ_STORAGE,original);let resolve;globalThis.fetch=()=>new Promise(done=>resolve=done);
+ const pending=acceptQQSession(candidate),rejected=assert.rejects(()=>pending,/连接已改变/);
+ localStorage.setItem(QQ_STORAGE,JSON.stringify({...candidate,token:token+'-other-window',accountId:'other'}));
+ resolve(new Response(JSON.stringify({authenticated:true,account:{id:'owner'}})));await rejected;assert.equal(qqSession().accountId,'other');
+});
+await check('Matching logout invalidates an unfinished verified connection',async()=>{
+ localStorage.setItem(QQ_STORAGE,original);let resolve;globalThis.fetch=()=>new Promise(done=>resolve=done);
+ const pending=acceptQQSession(candidate),rejected=assert.rejects(()=>pending,/连接已改变/);clearQQSession(token);
+ resolve(new Response(JSON.stringify({authenticated:true,account:{id:'owner'}})));await rejected;assert.equal(qqSession(),undefined);
+});
+console.log(`QQ personal host connection: ${count} scenarios passed.`);
