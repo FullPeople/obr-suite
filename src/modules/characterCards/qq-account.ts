@@ -2,19 +2,22 @@ export const QQ_ORIGIN='https://dnd.center',QQ_STORAGE='dnd-qq-plugin',QQ_CARDS=
 export type QQSession={token:string;expiresAt:number;accountId?:string;csrf?:string;nickname?:string;avatar?:string};
 export type QQRoom={id:string;capability:string};
 export async function selectQQCard(id:string){const OBR=(await import('@owlbear-rodeo/sdk')).default;await OBR.broadcast.sendMessage('com.obr-suite/workbench/open-cloud-card',{id},{destination:'LOCAL'});await OBR.modal.close('com.obr-suite/qq-card-library');}
+let qqConnectionEpoch=0;
 export async function acceptQQSession(candidate:unknown):Promise<void>{
   const value=candidate as QQSession|undefined;
   if(!value||typeof value.token!=='string'||value.token.length<24||value.token.length>256||!Number.isFinite(value.expiresAt)||value.expiresAt<=Date.now()||value.accountId!==undefined&&(typeof value.accountId!=='string'||value.accountId.length>256))throw Error('无效 QQ 账号连接');
+  const generation=++qqConnectionEpoch,previousToken=qqSession()?.token;
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
   try{
     const response=await fetch(QQ_ORIGIN+'/api/session',{headers:{Authorization:'Bearer '+value.token},credentials:'omit',cache:'no-store',signal:controller.signal});
     const profile=await response.json();
     if(!response.ok||!profile.authenticated||typeof profile.account?.id!=='string'||value.accountId!==undefined&&profile.account.id!==value.accountId)throw Error('QQ 账号连接已失效，请重新登录。');
+    if(generation!==qqConnectionEpoch||qqSession()?.token!==previousToken)throw Error('QQ 账号连接已改变，请重新登录。');
     localStorage.setItem(QQ_STORAGE,JSON.stringify({token:value.token,expiresAt:value.expiresAt,accountId:profile.account.id,csrf:profile.csrf,nickname:profile.account.nickname,avatar:profile.account.avatar}));
     window.dispatchEvent(new Event('qq-account-changed'));
   }finally{clearTimeout(timer);}
 }
-export function clearQQSession(token:unknown):void{if(typeof token==='string'&&qqSession()?.token===token){localStorage.removeItem(QQ_STORAGE);window.dispatchEvent(new Event('qq-account-changed'));}}
+export function clearQQSession(token:unknown):void{if(typeof token==='string'&&qqSession()?.token===token){qqConnectionEpoch++;localStorage.removeItem(QQ_STORAGE);window.dispatchEvent(new Event('qq-account-changed'));}}
 export function qqSession():QQSession|undefined{try{const value=JSON.parse(localStorage.getItem(QQ_STORAGE)||'null');return value?.expiresAt>Date.now()?value:undefined;}catch{return;}}
 export function qqHeaders(room?:QQRoom){const session=qqSession();return {...session?{Authorization:'Bearer '+session.token}:{},...room?{'X-Room-Capability':room.capability}:{}};}
 const qqReads=new Map<string,Promise<any>>();
@@ -50,13 +53,10 @@ export async function connectQQ(onCode?:(code:string)=>void){
   while(Date.now()<deadline){
     const value=await qqRequest('plugin/poll','POST',{connection,verifier});
     if(!value.pending){
-      localStorage.setItem(QQ_STORAGE,JSON.stringify(value));
-      try{const profile=await qqRequest('session');if(!profile.authenticated)throw Error('插件登录未完成。');localStorage.setItem(QQ_STORAGE,JSON.stringify({...value,accountId:profile.account.id,csrf:profile.csrf,nickname:profile.account.nickname,avatar:profile.account.avatar}));}
-      catch(error){localStorage.removeItem(QQ_STORAGE);throw error;}
-      popup.close();window.dispatchEvent(new Event('qq-account-changed'));return;
+      await acceptQQSession(value);popup.close();return;
     }
     await new Promise(resolve=>setTimeout(resolve,1500));
   }
   throw Error('登录连接已超时，请重新开始。');
 }
-export async function disconnectQQ(){try{if(qqSession())await qqRequest('plugin/logout','POST',{});}finally{localStorage.removeItem(QQ_STORAGE);window.dispatchEvent(new Event('qq-account-changed'));}}
+export async function disconnectQQ(){const token=qqSession()?.token;try{if(token)await qqRequest('plugin/logout','POST',{});}finally{clearQQSession(token);}}
