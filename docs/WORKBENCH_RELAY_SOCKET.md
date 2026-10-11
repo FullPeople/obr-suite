@@ -10,13 +10,17 @@
 - **发送**仍为 HTTP POST：保存、共享文档和库存需要应答与 409 冲突码。
 - 实现：`server/workbench-relay/websocket.mjs` 是 RFC 6455 服务端最小实现（握手、掩码解析、text/ping/pong/close、16 MiB 上限），不新增依赖。
 
+## 删除接口的应答
+
+`deleteCard` 过去用 `result.json()` 读角色 API 的 DELETE 应答：空 `204`、空正文或 HTML 错误页都会在中继内抛错，变成 `500 relay operation failed`，宿主只能回答「删除结果尚未确认」，而服务器其实已经删掉（再删一次遇到 404 才"成功"）。现在以状态码为准：任何 2xx、404、410 都回 `{ok:true}`，其余原样带状态码和可读错误。自检用一个假角色 API 覆盖这四种应答。
+
 ## 验证
 
 ```bash
 node server/workbench-relay/relay-selftest.mjs
 ```
 
-11 项：注册前拒绝、错密钥拒绝、推送延迟、持续推送、ping/pong、关闭后长轮询回退、等待中的长轮询被释放、重连后推送、宿主侧套接字。Web 侧 `tests/relaySocket.test.ts` 用可编排的假 WebSocket 验证：首个长轮询不等套接字、套接字打开期间不再轮询、关闭后立即恢复、升级被拒时按退避重试。
+16 项：注册前拒绝、错密钥拒绝、推送延迟、持续推送、ping/pong、关闭后长轮询回退、等待中的长轮询被释放、重连后推送、宿主侧套接字，以及删除接口的 200 JSON、空 204、404、HTML 500、JSON 409 五种应答。Web 侧 `tests/relaySocket.test.ts` 用可编排的假 WebSocket 验证：首个长轮询不等套接字、套接字打开期间不再轮询、关闭后立即恢复、升级被拒时按退避重试。
 
 ## 部署
 

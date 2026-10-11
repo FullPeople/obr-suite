@@ -288,6 +288,7 @@ const TR: Dict = {
   },
   ccBindCurrent: { zh: "当前", en: "Current" },
   ccBindCardDeleted: { zh: "(卡已删除)", en: "(card deleted)" },
+  ccBindCloud: { zh: "云端卡", en: "Cloud card" },
   ccBindNoCards: {
     zh: "这个场景还没有上传任何角色卡",
     en: "No character cards uploaded in this scene yet",
