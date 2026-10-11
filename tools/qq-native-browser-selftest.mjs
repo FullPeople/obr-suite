@@ -62,7 +62,7 @@ async function createContext(role='PLAYER',websiteLogin=false){
   await route.fulfill(existsSync(file)?{contentType:mime[extname(file)]||'application/octet-stream',body:readFileSync(file)}:{status:404,body:'Fixture asset missing'});
  });
  await context.route(/https:\/\/(?:5e|homebrew)\.kiwee\.top\//,route=>route.fulfill({json:{},headers:{'access-control-allow-origin':'*'}}));
- await context.addInitScript(()=>{if(location.protocol!=='https:')return;localStorage.setItem('dnd-card:rules-setup:v1','done');localStorage.setItem('dnd-card:editing','true');localStorage.setItem('dnd-card:announcement-ack','0.1.61');localStorage.setItem('dnd-card:announcement-ack:suite','1.0.281-dev');});
+ await context.addInitScript(versions=>{if(location.protocol!=='https:')return;localStorage.setItem('dnd-card:rules-setup:v1','done');localStorage.setItem('dnd-card:editing','true');localStorage.setItem('dnd-card:announcement-ack',versions.app);localStorage.setItem('dnd-card:announcement-ack:suite',versions.suite);},{app:JSON.parse(readFileSync(join(web,'package.json'),'utf8')).version,suite:JSON.parse(readFileSync(join(root,'dist-workbench-dev/manifest-dev.json'),'utf8')).version});
  context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)));
  const room=await context.newPage();await room.goto('https://obr.dnd.center/qq-native-host/');const popup=context.waitForEvent('page');await room.locator('#open').click();const page=await popup;
  return {context,room,page,host};
