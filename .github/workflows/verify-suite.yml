@@ -28,7 +28,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '24.9.0'
       - name: Install locked Suite dependencies
         run: npm ci
       - name: Install locked paired Web dependencies
@@ -38,12 +38,15 @@ jobs:
         working-directory: .paired-web
         run: |
           npm run verify:automation-source
+          npm run verify:automation-runtime
           npm run verify:automation-progress
       - name: Install official Chromium
         id: browser
         run: |
           npx playwright install --with-deps chromium
           node --input-type=module -e "import {chromium} from '@playwright/test'; console.log('CHROMIUM_PATH='+chromium.executablePath())" >> "$GITHUB_ENV"
+      - name: Personal appearance remains scoped to the player
+        run: node tools/appearance-preferences-selftest.mjs
       - name: Suite regression tests
         id: tests
         run: node tools/verify-suite-candidate.mjs
