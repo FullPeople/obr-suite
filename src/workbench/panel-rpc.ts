@@ -6,7 +6,7 @@ import {SERVER_GRANT,SERVER_ROOM_KEY,SERVER_WINDOW,serverRoom} from '../../exten
 import {setupServerAdmission} from '../../extensions/three-dragon-ante/src/game/server-session';
 import {privateNotesCapability,roomNotes} from './notes';
 import type {Relay} from './relay';
-const personalKeys=new Set(['obr-suite/lang','obr-suite/sfx-dice','obr-suite/sfx-initiative','obr-suite/sfx-on','com.obr-suite/bubbles/scale','obr-suite/boss-bar/preferences']);
+const personalKeys=new Set(['obr-suite/lang','obr-suite/sfx-dice','obr-suite/sfx-initiative','obr-suite/sfx-on','com.obr-suite/bubbles/scale','obr-suite/boss-bar/preferences','full-suite/ui-theme','full-suite/ui-night','full-suite/ui-tone']);
 const musicPrefix='com.obr-suite/music-board:';
 const safeLocal=new Set(['com.obr-suite/state-changed','com.obr-suite/local-content-changed','com.obr-suite/lang-changed','com.obr-suite/module-status/query','com.obr-suite/panel-side-hint','com.obr-suite/boss-bar/preferences-changed','com.obr-suite/settings-closed']);
 export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void,relay?:Pick<Relay,'send'>){
@@ -29,7 +29,7 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
    return {roomId:OBR.room.id,playerId,preferences:Object.fromEntries([...personalKeys].map(key=>[key,localStorage.getItem(key)])),reads:panel==='settings'?{'player.getRole':role,'scene.isReady':sceneReady,'scene.getMetadata':select(scene,['com.obr-suite/state','com.obr-suite/bubbles/settings']),'room.getMetadata':select(room,['com.obr-suite/state-room'])}:undefined};
   }
   const gm=await OBR.player.getRole()==='GM';
-  if(method==='preferences.write'){const [key,value]=args;if(panel!=='settings'||!personalKeys.has(key)||value!==null&&(typeof value!=='string'||value.length>1000))throw Error('无效偏好');if(value===null)localStorage.removeItem(key);else localStorage.setItem(key,value);window.dispatchEvent(new StorageEvent('storage',{key,newValue:value,storageArea:localStorage}));return;}
+  if(method==='preferences.write'){const [key,value]=args;if(panel!=='settings'||!personalKeys.has(key)||value!==null&&(typeof value!=='string'||value.length>1000)||value!==null&&(key==='full-suite/ui-theme'&&!['night','graphite','parchment','celadon'].includes(value)||key==='full-suite/ui-night'&&!['0','1'].includes(value)||key==='full-suite/ui-tone'&&!/^#[0-9a-f]{6}$/i.test(value)))throw Error('无效偏好');if(value===null)localStorage.removeItem(key);else localStorage.setItem(key,value);window.dispatchEvent(new StorageEvent('storage',{key,newValue:value,storageArea:localStorage}));return;}
   if(panel==='table'&&getState().enabled.threeDragonAnte===false&&method!=='dispose')throw Error('三龙牌未开启');
   if(method==='dispose'){if(panel==='table')await table(instance,method,args);for(const [key,off] of subscriptions)if(key.startsWith(`${panel}:${instance}:`)){off();subscriptions.delete(key);}return;}
   if(panel==='studio'&&['studio.read','studio.command'].includes(method)){const {workbenchStudio}=await import('../modules/musicBoard');return method==='studio.read'?workbenchStudio():workbenchStudio(args[0],String(args[1]).slice(0,100));}
