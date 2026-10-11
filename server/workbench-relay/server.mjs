@@ -118,7 +118,7 @@ server.on('upgrade',(req,socket,head)=>{
   if(req.headers.origin&&req.headers.origin!==origin)return refuseUpgrade(socket,403,'Forbidden');
   const url=new URL(req.url,'http://localhost'),id=url.searchParams.get('session'),role=url.searchParams.get('role'),secret=socketToken(req);
   if(!/^[a-f0-9]{64}$/.test(id||'')||!['host','client'].includes(role)||!secret||secret.length>128)return refuseUpgrade(socket,401,'Unauthorized');
-  const session=sessions.get(id);
+  expireSessions();const session=sessions.get(id);
   if(!session||!equal(secret,role==='host'?session.hostKey:session.clientKey))return refuseUpgrade(socket,401,'Unauthorized');
   const touch=()=>{session.touched=Date.now();if(role==='host')session.hostTouched=Date.now();};touch();
   const connection=acceptUpgrade(req,socket,head);

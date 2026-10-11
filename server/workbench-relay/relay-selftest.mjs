@@ -94,6 +94,7 @@ check('slow socket output is bounded instead of accumulating writes',connection.
 const active=await openSocket('client',clientKey),realNow=Date.now;Date.now=()=>realNow()+3601000;
 active.ws.send('ping');for(let i=0;i<50&&!active.messages.length;i++)await wait(5);
 const orphaned=new Promise(resolve=>active.ws.addEventListener('close',event=>resolve(event.code),{once:true}));
+await openSocket('client',clientKey).then(()=>check('expired host credentials cannot reopen a socket',false),()=>check('expired host credentials cannot reopen a socket',true));
 await post('client',clientKey,{type:'expired-fixture'});
 check('client keepalive cannot keep an expired host session alive',await orphaned===1001);
 Date.now=realNow;
