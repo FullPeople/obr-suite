@@ -82,6 +82,11 @@ check('DELETE answered with an empty 204 reports ok instead of a relay failure',
 check('DELETE of a card that is already gone (404) reports ok',(await del('gone404')).body.ok===true);
 const html=await del('html500');check('DELETE answered with a non-JSON 500 passes the status and a readable error',html.status===500&&typeof html.body.error==='string'&&!html.body.ok);
 const locked=await del('json409');check('DELETE refused with JSON keeps the status and message',locked.status===409&&locked.body.error==='card is locked');
+// 11. Shared documents are scoped to the host's registered room.
+const shared=async key=>(await post('host',hostKey,{sharedDocument:{key,operation:'read'}})).status;
+check('a shared document of the registered room is served',await shared('inventory_selftest')===200);
+check('a shared document of another room is refused',await shared('inventory_other')===403);
+check('a monster override keeps its origin room',await shared('monster_other_token1')===200);
 // Incoming socket traffic is only a keepalive; large text must be rejected.
 const large=await openSocket('client',clientKey);
 const closed=new Promise(resolve=>large.ws.addEventListener('close',event=>resolve(event.code),{once:true}));

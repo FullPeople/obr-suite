@@ -43,7 +43,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 .bubble{
   display:flex;flex-direction:column;align-items:center;
   background:rgba(31,34,48,0.94);
-  border:1.5px solid var(--player-color, #5dade2);
+  border:1.5px solid var(--player-color, var(--accent));
   border-radius:10px;
   padding:6px 10px 7px;
   white-space:nowrap;
@@ -59,7 +59,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
   margin-left:-6px;
   border-left:6px solid transparent;
   border-right:6px solid transparent;
-  border-top:8px solid var(--player-color, #5dade2);
+  border-top:8px solid var(--player-color, var(--accent));
   filter:drop-shadow(0 1px 1px rgba(0,0,0,0.5));
 }
 
@@ -72,7 +72,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 }
 
 .bubble .label{
-  font-size:10px;font-weight:700;color:#cdd2e0;
+  font-size:10px;font-weight:700;color:var(--text);
   letter-spacing:0.3px;
   margin-bottom:2px;
   max-width:200px;
@@ -86,18 +86,18 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
   display:inline-flex;align-items:center;gap:1px;
   padding:0 4px;
   border-radius:6px;
-  background:rgba(255,255,255,0.08);
+  background:var(--tint);
   font-size:11px;font-weight:800;color:#fff;
   height:18px;
 }
 .bubble .die img{width:13px;height:13px;-webkit-user-drag:none}
 .bubble .die.crit{background:rgba(255,200,0,0.25);color:#ffd34d}
-.bubble .die.fail{background:rgba(231,76,60,0.25);color:#ff8a7a}
+.bubble .die.fail{background:var(--danger-soft);color:#ff8a7a}
 .bubble .die.loser{opacity:0.4;text-decoration:line-through}
 .bubble .mod{font-size:11px;color:#a0a8ba;font-weight:700}
-.bubble .eq{color:#888;font-weight:700;font-size:11px}
+.bubble .eq{color:var(--text-dim);font-weight:700;font-size:11px}
 .bubble .total{
-  font-size:14px;font-weight:900;color:var(--player-color, #5dade2);
+  font-size:14px;font-weight:900;color:var(--player-color, var(--accent));
   margin-left:3px;
   letter-spacing:-0.5px;
 }
@@ -109,7 +109,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 .bubble .row1.repeat-row{
   /* Same flex row as a normal single roll, plus a thin top divider
      between iterations so the eye groups them vertically. */
-  border-top:1px dashed rgba(255,255,255,0.10);
+  border-top:1px dashed var(--border);
   padding-top:2px;
 }
 .bubble .row1.repeat-row:first-child{border-top:none;padding-top:0}
@@ -124,7 +124,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
   left:50%;top:14px;
   transform:translateX(-50%);
   background:rgba(20,22,32,0.85);
-  border:1px solid rgba(255,255,255,0.15);
+  border:1px solid var(--border);
   border-radius:14px;
   padding:5px 12px;
   font-size:11px;font-weight:600;color:#bcc1d0;

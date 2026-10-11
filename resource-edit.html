@@ -6,15 +6,15 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#1d2030;--bg-strong:#13151f;--bg-card:#262a3a;--bg-elev:#2e3346;
-  --border:rgba(255,255,255,0.24);--border-strong:rgba(255,255,255,0.36);
-  --text:#e6e8ee;--text-dim:#aab0c2;--text-mute:#8a90a6;
-  --accent:#5dade2;--accent-warm:#f5a623;--accent-red:#e74c3c;--accent-green:#2ecc71;
+  --bg:var(--suite-bg,#292d3c);--bg-strong:var(--suite-bg-strong,#1f2230);--bg-card:var(--suite-bg-card,#323748);--bg-elev:#2e3346;
+  --border:var(--suite-border,rgba(255,255,255,0.24));--border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --text:var(--suite-text,#e6e8ee);--text-dim:var(--suite-text-dim,#aab0c2);--text-mute:var(--text-dim);
+  --accent:var(--suite-accent,#5dade2);--accent-warm:var(--warn);--accent-red:var(--danger);--accent-green:var(--success);
 }
 html,body{
   height:100%;width:100%;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
-  color:var(--text);background:rgba(0,0,0,0.55);
+  color:var(--text);background:var(--bg-strong);
   font-size:13px;
   display:flex;align-items:center;justify-content:center;
 }
@@ -25,8 +25,8 @@ html,body{
   max-height:90vh;
   background:var(--bg);
   border:1px solid var(--border-strong);
-  border-radius:0;
-  box-shadow:0 14px 40px rgba(0,0,0,0.6);
+  border-radius:var(--radius);
+  box-shadow:0 14px 40px var(--shadow);
   display:flex;flex-direction:column;
   overflow:hidden;
 }
@@ -37,16 +37,19 @@ html,body{
   border-bottom:1px solid var(--border);
   flex-shrink:0;
 }
-.hdr .ttl{font-size:14px;font-weight:700;flex:1;letter-spacing:0.3px}
+.hdr .ttl{font-size:14px;font-weight:700;letter-spacing:0.3px}
 .hdr .x{
   cursor:pointer;font-size:18px;color:var(--text-dim);line-height:1;
   width:26px;height:26px;
   display:flex;align-items:center;justify-content:center;
-  background:transparent;border:1px solid transparent;border-radius:0;
+  background:transparent;border:1px solid transparent;border-radius:var(--radius);
   font-family:inherit;
   transition:color .12s, background .12s, border-color .12s;
 }
-.hdr .x:hover{color:#fff;background:rgba(231,76,60,0.22);border-color:var(--accent-red)}
+.hdr .x:hover{color:var(--danger);background:var(--danger-soft);border-color:var(--danger)}
+.hdr>.ui-ico{--icon:18px;color:var(--accent);flex:none}
+.hdr .ttl-wrap{flex:1;min-width:0}
+.hdr .sub{font-size:11px;color:var(--text-dim);margin-top:1px;line-height:1.4}
 
 .body{
   flex:1;min-height:0;overflow-y:auto;
@@ -54,7 +57,7 @@ html,body{
   display:flex;flex-direction:column;gap:11px;
 }
 .body::-webkit-scrollbar{width:6px}
-.body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12)}
+.body::-webkit-scrollbar-thumb{background:var(--border)}
 
 /* labelled fields */
 label.field, .field{
@@ -67,19 +70,20 @@ label.field, .field{
 .field input[type=text],
 .field input[type=number],
 .field select{
+  width:100%;min-width:0;
   height:32px;padding:0 10px;
   background:var(--bg-strong);
   border:1px solid var(--border-strong);
-  border-radius:0;
+  border-radius:var(--radius);
   color:var(--text);font-size:13px;outline:none;
   font-family:inherit;
   transition:border-color .12s, background .12s;
 }
 .field input:focus,.field select:focus{
   border-color:var(--accent);
-  background:#171a26;
+  background:var(--bg-strong);
 }
-.row-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row-2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
 
 /* ===== type toggle (个数 / 进度 / 数字) ===== */
 .type-toggle{
@@ -87,7 +91,7 @@ label.field, .field{
   height:32px;
   background:var(--bg-strong);
   border:1px solid var(--border);
-  border-radius:0;
+  border-radius:var(--radius);
   overflow:hidden;
 }
 .type-toggle button{
@@ -97,10 +101,10 @@ label.field, .field{
   cursor:pointer;letter-spacing:0.4px;
   transition:background .12s, color .12s;
 }
-.type-toggle button:hover{color:var(--text);background:rgba(255,255,255,0.04)}
+.type-toggle button:hover{color:var(--text);background:var(--tint)}
 .type-toggle button.on{
-  background:rgba(93,173,226,0.22);
-  color:#7ec8f0;
+  background:var(--accent-soft);
+  color:var(--accent);
   box-shadow:inset 0 -2px 0 0 var(--accent);
 }
 .type-toggle button + button{border-left:1px solid var(--border)}
@@ -114,10 +118,10 @@ label.field, .field{
   max-height:208px;overflow-y:auto;
   background:var(--bg-strong);
   border:1px solid var(--border);
-  border-radius:0;
+  border-radius:var(--radius);
 }
 .icon-grid::-webkit-scrollbar{width:6px}
-.icon-grid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16)}
+.icon-grid::-webkit-scrollbar-thumb{background:var(--border)}
 .icon-pick{
   height:38px;
   display:flex;align-items:center;justify-content:center;
@@ -126,11 +130,11 @@ label.field, .field{
   border:0;
   border-right:1px solid var(--border);
   border-bottom:1px solid var(--border);
-  border-radius:0;
+  border-radius:var(--radius);
   color:var(--text-dim);
   transition:background .08s, color .08s;
 }
-.icon-pick:hover{background:rgba(255,255,255,0.06);color:var(--text)}
+.icon-pick:hover{background:var(--tint);color:var(--text)}
 .icon-pick.on{
   background:var(--accent);
   color:#0b1320;
@@ -152,13 +156,13 @@ label.field, .field{
 .presets-wrap .add{
   font-size:10.5px;color:var(--accent);cursor:pointer;
   background:transparent;border:1px solid transparent;
-  padding:2px 8px;border-radius:0;
+  padding:2px 8px;border-radius:var(--radius);
   font-family:inherit;font-weight:700;
   transition:background .12s, color .12s, border-color .12s;
 }
 .presets-wrap .add:hover{
-  background:rgba(93,173,226,0.15);color:#7ec8f0;
-  border-color:rgba(93,173,226,0.45);
+  background:var(--accent-soft);color:var(--accent);
+  border-color:var(--accent-line);
 }
 .chips{display:flex;flex-wrap:wrap;gap:4px;min-height:24px}
 .chips .empty{font-size:10.5px;color:var(--text-mute);padding:3px 0}
@@ -167,14 +171,14 @@ label.field, .field{
   padding:4px 6px 4px 10px;
   background:var(--bg-card);
   border:1px solid var(--border);
-  border-radius:0;
-  font-size:11px;color:#cdd1de;
+  border-radius:var(--radius);
+  font-size:11px;color:var(--text);
   cursor:pointer;user-select:none;
   transition:background .12s, border-color .12s, color .12s;
 }
 .chip:hover{
-  background:rgba(93,173,226,0.15);
-  border-color:rgba(93,173,226,0.45);
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
   color:var(--text);
 }
 .chip .ico{
@@ -187,7 +191,7 @@ label.field, .field{
   font-size:11px;color:var(--text-mute);line-height:1;
   margin-left:2px;
   background:transparent;border:1px solid transparent;cursor:pointer;
-  padding:1px 5px;border-radius:0;
+  padding:1px 5px;border-radius:var(--radius);
   font-family:inherit;
   transition:color .12s, background .12s, border-color .12s;
 }
@@ -199,7 +203,7 @@ label.field, .field{
   padding:8px 10px;
   background:var(--bg-strong);
   border:1px solid var(--border);
-  border-radius:0;
+  border-radius:var(--radius);
 }
 .preview-icon{
   width:30px;height:30px;
@@ -218,24 +222,15 @@ label.field, .field{
   flex-shrink:0;
   align-items:center;
 }
-.btn{
-  height:30px;padding:0 14px;border-radius:0;
-  background:var(--bg-card);color:var(--text);
-  border:1px solid var(--border-strong);font-size:12px;cursor:pointer;
-  font-family:inherit;font-weight:600;letter-spacing:0.3px;
-  transition:background .12s, border-color .12s, color .12s;
-}
-.btn:hover{background:rgba(93,173,226,0.18);border-color:rgba(93,173,226,0.45);color:#7ec8f0}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:#0b1320;font-weight:700}
-.btn.primary:hover{background:#7ec8f0;border-color:#7ec8f0;color:#0b1320}
-.btn.danger:hover{background:rgba(231,76,60,.20);border-color:rgba(231,76,60,.55);color:#ff7a6b}
+.btn{padding:0 14px;letter-spacing:0.3px}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="hdr">
-    <span class="ttl" id="title" data-i18n="reEditTitle">编辑资源</span>
-    <button class="x" id="btnX" type="button" title="关闭" data-i18n-title="reClose"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
+    <svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+    <div class="ttl-wrap"><div class="ttl" id="title" data-i18n="reEditTitle">编辑资源</div><div class="sub" data-i18n="reEditSub">名字、类型和上限保存到这个令牌；预设可以在其他角色上复用。</div></div>
+    <button class="x" id="btnX" type="button" title="关闭" data-i18n-title="reClose"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
   </div>
   <div class="body">
     <label class="field">

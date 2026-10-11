@@ -238,7 +238,7 @@ async function applyEditorMessage(message: {connectionId: string; data: unknown}
   if (remove ? !target.resourceId || data.resourceId !== target.resourceId : !data.resource || (target.resourceId && data.resource.id !== target.resourceId)) return;
   target.saving = true;
   try {
-    const changed = await commitResourceEdit(target.itemId, target.resourceId, remove ? null : data.resource!, (item) => item.id === target.itemId && sessionCurrent(target) && (!target.cardId || item.metadata[CARD_BINDING] === target.cardId) && canEditCardToken(item));
+    const changed = await commitResourceEdit(target.itemId, target.resourceId, remove ? null : data.resource!, (item) => item.id === target.itemId && sessionCurrent(target) && (!target.cardId || item.metadata[CARD_BINDING] === target.cardId) && canEditCardToken(item), { gm: role === "GM" });
     if (!sessionCurrent(target)) return;
     if (!changed) throw Error("Resource changed or is no longer available");
     await closeModal();

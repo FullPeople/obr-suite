@@ -5,273 +5,254 @@
 <title data-i18n="ccPanelTitle">角色卡面板</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#eee}
+:root{--bg:var(--suite-bg,#292d3c);--bg-card:var(--suite-bg-card,#323748);--bg-strong:var(--suite-bg-strong,#1f2230);--text:var(--suite-text,#e6e8ee);--text-dim:var(--suite-text-dim,#aab0c2);--border:var(--suite-border,rgba(255,255,255,0.24));--border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));--accent:var(--suite-accent,#5dade2);--accent-ink:var(--suite-accent-ink,#0b1320);--danger:var(--suite-danger,#e74c3c);--success:var(--suite-success,#2ecc71);--warn:var(--suite-warn,#f5a623)}
+html,body{height:100%;overflow:hidden;font-family:var(--font);font-size:13px;color:var(--text)}
 html{background:transparent}
-body{background:rgba(10,10,20,0.3);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+body{background:rgba(0,0,0,0.3);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
 
-/* The mini-btn (the old circular blue floating button) was removed —
-   the suite cluster's "角色卡界面" button is now the only way to open
-   this panel, and it always opens already maximized. */
-.mini-wrap{display:none}
-.mini-btn{display:none}
+/* The mini-btn (the old circular floating button) is gone — the suite cluster's
+   "角色卡界面" button is the only way to open this panel. */
+.mini-wrap,.mini-btn{display:none}
 
-/* overflow:hidden — the panel itself is a fixed-size box; any pane
-   whose content is too tall scrolls INTERNALLY (each pane sets its
-   own overflow), the outer frame never gets a scrollbar. */
-.panel{display:flex;height:100%;padding:20px;gap:14px;overflow:hidden}
+/* overflow:hidden — the panel is a fixed box; each pane scrolls internally. */
+.panel{display:flex;height:100%;padding:16px;gap:12px;overflow:hidden}
 
-/* === Left: card viewer (no drop) === */
+/* === Left: card viewer === */
 .viewer{
   flex:1;min-width:0;min-height:0;
-  /* Match the loaded sheet's canvas (cc-fullscreen --bg #1c2030) so the
-     iframe-load gap on first open / card switch / refresh reads as the
-     card color instead of a jarring white flash. */
-  background:#1c2030;border-radius:10px;overflow:hidden;
-  box-shadow:0 8px 40px rgba(0,0,0,0.5);
+  background:var(--bg);border:1px solid var(--border);border-radius:10px;overflow:hidden;
+  box-shadow:0 8px 40px var(--shadow);
   position:relative;
 }
-.viewer iframe{border:none;width:100%;height:100%;display:block;position:absolute;inset:0;background:#1c2030}
-.viewer .empty-state{
-  position:absolute;inset:0;
-  background:rgba(255,255,255,0.04);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  color:rgba(255,255,255,0.4);font-size:15px;
-  border:1px dashed rgba(255,255,255,0.15);border-radius:10px;
-  text-align:center;padding:20px;gap:10px;
-}
-.viewer.has-content{background:#1c2030}
+.viewer iframe{border:none;width:100%;height:100%;display:block;position:absolute;inset:0;background:var(--bg)}
+.viewer .empty-state{position:absolute;inset:0;border-radius:10px;font-size:14px}
+.viewer .empty-state .big{--icon:40px;color:var(--text-dim);opacity:.7}
+.viewer .empty-state .big .ui-ico{width:40px;height:40px}
+.viewer.has-content{background:var(--bg)}
 .viewer.is-empty .empty-state{display:flex}
 .viewer:not(.is-empty) .empty-state{display:none}
-.viewer .empty-state .big{font-size:48px;opacity:.5}
 
 /* === Resource tab column (DM only) === */
 .res-col{
   width:72px;flex-shrink:0;min-height:0;
-  background:rgba(22,33,62,0.85);
+  background:var(--bg);border:1px solid var(--border);
   border-radius:10px;
-  display:flex;flex-direction:column;gap:4px;padding:10px 6px;
-  box-shadow:0 8px 30px rgba(0,0,0,0.4);
-  backdrop-filter:blur(4px);
+  display:flex;flex-direction:column;gap:4px;padding:8px 6px;
+  box-shadow:0 8px 30px var(--shadow);
   overflow-y:auto;
 }
-.res-col::-webkit-scrollbar{width:3px}
-.res-col::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:2px}
 .res-tab{
-  border:1px solid rgba(255,255,255,0.08);
-  background:rgba(255,255,255,0.03);
-  color:#ccc;
+  border:1px solid var(--border);
+  background:var(--bg-card);
+  color:var(--text-dim);
   border-radius:6px;
-  padding:10px 4px;
-  font-size:11px;
-  font-weight:600;
-  cursor:pointer;
-  font-family:inherit;
-  transition:all .15s;
-  display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:8px 4px;
+  font-size:11px;font-weight:600;
+  cursor:pointer;font-family:inherit;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
   line-height:1.2;
 }
-.res-tab:hover{background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.2)}
-.res-tab.active{background:rgba(52,152,219,0.22);color:#fff;border-color:rgba(52,152,219,0.6)}
-.res-tab .ico{font-size:18px;line-height:1}
+.res-tab:hover{color:var(--text);border-color:var(--accent)}
+.res-tab.active{background:var(--accent-soft);color:var(--text);border-color:var(--accent)}
+.res-tab .ico{font-size:18px;line-height:1;--icon:18px}
 .res-tab .lbl{font-size:10px}
 
 /* === Right: sidebar (drop target) === */
 .side{
-  width:260px;flex-shrink:0;
-  background:rgba(22,33,62,0.85);
+  width:272px;flex-shrink:0;
+  background:var(--bg);border:1px solid var(--border);
   border-radius:10px;
   display:flex;flex-direction:column;overflow:hidden;
-  /* min-height:0 — without it the flexbox `min-height:auto` default
-     lets the column's content force `.side` taller than the frame
-     instead of staying boxed; the card list below then can't scroll
-     internally. With it, `.side` is exactly the frame height and
-     `.card-list` gets its own scrollbar. */
   min-height:0;
-  box-shadow:0 8px 30px rgba(0,0,0,0.4);
-  backdrop-filter:blur(4px);
+  box-shadow:0 8px 30px var(--shadow);
   position:relative;
   transition:background .15s, outline .15s;
   outline:3px dashed transparent;
   outline-offset:-6px;
 }
-.side.drag-over{
-  background:rgba(52,152,219,0.35);
-  outline-color:#3498db;
-}
+.side.drag-over{background:var(--accent-soft);outline-color:var(--accent)}
 .side.busy::after{
   pointer-events:none;
-  content:"⏳ 上传中…";
-  position:absolute;inset:0;background:rgba(0,0,0,0.6);
+  content:"上传中…";
+  position:absolute;inset:0;background:var(--overlay);
   display:flex;align-items:center;justify-content:center;
-  color:#fff;font-size:16px;font-weight:600;z-index:20;
+  color:var(--text);font-size:15px;font-weight:600;z-index:20;
 }
-html[lang="en"] .side.busy::after{content:"⏳ Uploading…"}
+html[lang="en"] .side.busy::after{content:"Uploading…"}
 
-.side-head{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.08);display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px}
-.side-head .title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;flex:1;min-width:0}
+.side-head{padding:10px 12px;border-bottom:1px solid var(--border);background:var(--bg-strong);display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+.side-head .title{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px;flex:1;min-width:0;--icon:18px}
+.side-head .title .ui-ico{color:var(--accent)}
 .side-head .head-actions{display:contents}
-#ccTplRow{display:flex;flex-wrap:wrap;gap:4px;grid-column:1 / -1;grid-row:2}
-.side-head .close{grid-column:2;grid-row:1}
-.side-head .icon-btn{background:transparent;border:1px solid rgba(255,255,255,0.32);color:#c4cad6;cursor:pointer;font-size:11px;padding:3px 8px;font-family:inherit;border-radius:4px;line-height:1.3;text-decoration:none;display:inline-block}
-.side-head .icon-btn:hover{background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.25)}
-.side-head .icon-btn.off{color:#666;text-decoration:line-through;opacity:.7}
-.side-head .icon-btn.on{color:#5dade2;border-color:rgba(93,173,226,0.35)}
-.side-head .close{background:transparent;border:none;color:#aaa;cursor:pointer;font-size:18px;padding:2px 6px;font-family:inherit;border-radius:4px}
-.side-head .close:hover{background:rgba(255,255,255,0.08);color:#fff}
+.side-head .close{width:28px;min-width:28px;padding:0;color:var(--text-dim)}
+.side-head .icon-btn{flex-basis:100%}
+.side-head .icon-btn.off{color:var(--text-dim);text-decoration:line-through;opacity:.7}
+.side-head .icon-btn.on{color:var(--accent);border-color:var(--accent)}
 
-.side-hint{padding:10px 14px;font-size:11px;color:#7aa;background:rgba(52,152,219,0.08);border-bottom:1px solid rgba(255,255,255,0.06);text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px}
+.side-hint{padding:12px;border-bottom:1px solid var(--border);display:block;text-align:left}
+.upload-heading{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);margin-bottom:4px;--icon:16px}
+.upload-heading .ui-ico{color:var(--accent)}
+.side-hint>span{display:block;line-height:1.5;font-size:11.5px;color:var(--text-dim)}
+.upload-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0 8px}
+.upload-actions .link-local-btn{width:100%;margin:0;min-height:30px;white-space:nowrap}
+.upload-actions #btnViewSample{grid-column:1 / -1}
 .link-local-btn{
-  background:rgba(46,204,113,0.14);border:1px solid rgba(46,204,113,0.72);
-  color:#7be0a0;cursor:pointer;font-family:inherit;font-size:11px;
-  padding:5px 10px;border-radius:4px;transition:background .12s, border-color .12s;
+  display:inline-flex;align-items:center;justify-content:center;gap:5px;
+  min-height:30px;padding:0 10px;border-radius:var(--radius);
+  background:var(--bg-card);border:1px solid var(--border-strong);
+  color:var(--text);cursor:pointer;font:inherit;font-size:12px;font-weight:600;
+  text-decoration:none;white-space:nowrap;--icon:16px;
+  transition:background .12s, border-color .12s;
 }
-.link-local-btn:hover{background:rgba(46,204,113,0.22);border-color:rgba(46,204,113,0.65)}
-.side-hint-sub{font-size:10px;color:#93bdbd;margin-top:2px}
+.link-local-btn:hover{border-color:var(--accent);background:var(--bg-strong)}
+.link-local-btn.primary,#btnLinkLocal{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.link-local-btn.primary:hover,#btnLinkLocal:hover{filter:brightness(1.08);background:var(--accent)}
+.tpl-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.tpl-label{display:block;font-size:11px;color:var(--text-dim);margin-top:10px}
+.side-hint-sub{font-size:11px;color:var(--text-dim);line-height:1.5;margin-top:8px;display:flex;align-items:flex-start;gap:4px;--icon:14px}
+.side-hint-sub .ui-ico{margin-top:2px;flex:none}
+.migration-help{display:block;max-width:100%;text-align:left;color:var(--accent);background:none;border:0;padding:0;text-decoration:underline;text-underline-offset:3px;font-size:11px;line-height:1.6;cursor:pointer;justify-content:flex-start}
+.migration-dialog{margin:auto;width:min(680px,calc(100vw - 24px));max-height:85vh;overflow:auto;padding:20px;background:var(--bg);color:var(--text);border:1px solid var(--border-strong);border-radius:8px;font-size:13px;line-height:1.8}
+.migration-dialog::backdrop{background:#0008}
+.migration-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.migration-dialog h2{font-size:17px;line-height:1.4}
+.migration-dialog h3{font-size:14px;margin-top:18px}
+.migration-dialog p{margin:10px 0;color:var(--text)}
+.migration-dialog header button{color:var(--text-dim);background:transparent;border:0;padding:2px 6px;font-size:22px;cursor:pointer;line-height:1}
+.migration-dialog header button:hover{color:var(--text)}
+.migration-site{display:inline-flex;align-items:center;gap:6px;padding:0 14px;min-height:32px;margin-top:10px;background:var(--accent);color:var(--accent-ink);border:1px solid var(--accent);border-radius:var(--radius);text-decoration:none;font-weight:600}
+
 .card-refresh{
-  position:absolute;top:4px;right:24px;
-  background:transparent;border:none;color:#7be0a0;cursor:pointer;
-  width:18px;height:18px;font-size:14px;border-radius:3px;
-  font-family:inherit;padding:0;line-height:1;
-  opacity:0.55;transition:opacity .12s, background .12s;
+  position:absolute;top:6px;right:26px;
+  background:transparent;border:none;color:var(--success);cursor:pointer;
+  width:20px;height:20px;border-radius:4px;
+  font-family:inherit;padding:0;line-height:1;--icon:14px;
+  opacity:0.6;transition:opacity .12s, background .12s;
 }
 .card:hover .card-refresh{opacity:1}
-.card-refresh:hover{background:rgba(46,204,113,0.22);opacity:1}
+.card-refresh:hover{background:var(--success-soft);opacity:1}
 .card-refresh.spinning{opacity:1;animation:cc-spin 0.8s linear infinite}
 @keyframes cc-spin { to { transform:rotate(360deg) } }
 
 .card-list{flex:1;min-height:0;overflow-y:auto;padding:6px 8px 10px}
-.card-list::-webkit-scrollbar{width:3px}
-.card-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:2px}
 
-.card{padding:9px 10px;margin-bottom:3px;border-radius:6px;background:rgba(255,255,255,0.04);border:1px solid transparent;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;gap:2px;position:relative}
-.card:hover{background:rgba(255,255,255,0.08)}
-.card.active{background:rgba(52,152,219,0.18);border-color:rgba(52,152,219,0.5)}
-.card-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:60px}
-.card-sub{font-size:10px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card-del{position:absolute;top:4px;right:4px;background:transparent;border:none;color:#aab2c2;cursor:pointer;width:18px;height:18px;font-size:13px;display:none;border-radius:3px;font-family:inherit;padding:0;line-height:1}
-.card:hover .card-del{display:block}
-.card-del:hover{background:rgba(231,76,60,0.25);color:#e74c3c}
+.card{padding:8px 10px;margin-bottom:4px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);cursor:pointer;transition:background .15s,border-color .15s;display:flex;flex-direction:column;gap:2px;position:relative}
+.card:hover{border-color:var(--accent)}
+.card.active{background:var(--accent-soft);border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.card-name{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:70px}
+.card-name .cc-lock-mark{color:var(--warn);--icon:13px}
+.card-sub{font-size:10.5px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-del{position:absolute;top:6px;right:4px;background:transparent;border:none;color:var(--text-dim);cursor:pointer;width:20px;height:20px;--icon:14px;display:none;border-radius:4px;font-family:inherit;padding:0;line-height:1}
+.card:hover .card-del{display:inline-flex}
+.card-del:hover{background:var(--danger-soft);color:var(--danger)}
 
-/* Collapsible folder header (2026-09-14). One per group plus the derived
-   旧版本 / Older versions section; the ungrouped bucket is rendered last. */
+/* Collapsible folder header. One per group plus 旧版本 / Older versions. */
 .group-head{
   display:flex;align-items:center;gap:5px;
   padding:5px 6px;margin:6px 2px 3px;
-  font-size:11px;font-weight:600;color:#9fb0c8;
+  font-size:11px;font-weight:600;color:var(--text-dim);
   border-radius:5px;cursor:pointer;user-select:none;
-  background:rgba(255,255,255,0.03);
+  background:var(--tint);--icon:12px;
 }
-.group-head:hover{background:rgba(255,255,255,0.08);color:#fff}
-.group-head .group-chevron{font-size:10px;line-height:1;opacity:.8;width:9px;text-align:center}
+.group-head:hover{background:var(--hover);color:var(--text)}
+.group-head .group-chevron{line-height:1;opacity:.8;width:12px;text-align:center;display:inline-flex}
 .group-head .group-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.group-head[data-collapsed="1"]{color:#7d8ba1}
-.group-head-older{color:#b08a5a;background:rgba(245,166,35,0.06)}
-.group-head-older:hover{background:rgba(245,166,35,0.14);color:#f5d76e}
+.group-head[data-collapsed="1"]{color:var(--text-dim)}
+.group-head-older{color:var(--warn);background:var(--warn-soft)}
+.group-head-older:hover{background:var(--warn-soft);color:var(--warn)}
 
-/* 📁 move-to-folder action. Same hidden-until-hover stack as ↻ / ×. */
+/* Move-to-folder action. Same hidden-until-hover stack as refresh / delete. */
 .card-group{
-  position:absolute;top:4px;right:60px;
-  background:transparent;border:none;color:#9fb0c8;cursor:pointer;
-  width:18px;height:18px;font-size:11px;line-height:1;display:none;
-  border-radius:3px;font-family:inherit;padding:0;opacity:0.55;
+  position:absolute;top:6px;right:66px;
+  background:transparent;border:none;color:var(--text-dim);cursor:pointer;
+  width:20px;height:20px;--icon:14px;line-height:1;display:none;
+  border-radius:4px;font-family:inherit;padding:0;opacity:0.6;
   transition:opacity .12s, background .12s;
 }
-.card:hover .card-group{display:block}
-.card-group:hover{background:rgba(52,152,219,0.25);opacity:1}
+.card:hover .card-group{display:inline-flex}
+.card-group:hover{background:var(--accent-soft);opacity:1;color:var(--accent)}
 
-/* Visibility toggle (DM only). Sits next to the refresh button at
-   the right edge of the card row. Hidden until row hover or "active"
-   state — pinned visible for cards already in dm-only mode so the
-   DM can re-public them with one click. */
+/* Visibility toggle (DM only). Pinned visible for dm-only cards. */
 .card-vis{
-  position:absolute;top:4px;right:42px;
-  background:transparent;border:none;color:#888;cursor:pointer;
-  width:18px;height:18px;font-size:11px;line-height:1;
-  border-radius:3px;font-family:inherit;padding:0;
-  display:none;opacity:0.55;
+  position:absolute;top:6px;right:46px;
+  background:transparent;border:none;color:var(--text-dim);cursor:pointer;
+  width:20px;height:20px;--icon:14px;line-height:1;
+  border-radius:4px;font-family:inherit;padding:0;
+  display:none;opacity:0.6;
   transition:opacity .12s, background .12s, color .12s;
 }
 .card:hover .card-vis,
-.card.is-hidden .card-vis{display:block;opacity:1}
-.card-vis:hover{background:rgba(245,166,35,0.22);color:#f5a623}
+.card.is-hidden .card-vis{display:inline-flex;opacity:1}
+.card-vis:hover{background:var(--warn-soft);color:var(--warn)}
 
-/* DM-side visual for hidden cards: dim + amber-tinted border so the
-   DM at a glance knows "this card is NOT visible to players". */
-.card.is-hidden{
-  background:rgba(245,166,35,0.06);
-  border-color:rgba(245,166,35,0.30);
-  opacity:0.85;
-}
+/* DM-side visual for hidden cards. */
+.card.is-hidden{background:var(--warn-soft);border-color:var(--warn-line);opacity:0.9}
 .card.is-hidden:hover{opacity:1}
-.card.is-hidden .card-name{color:#f5d76e}
-.card.is-hidden .card-sub{color:rgba(245,166,35,0.65)}
+.card.is-hidden .card-name{color:var(--warn)}
 
-.empty-list{padding:30px 12px;text-align:center;color:#aab0c0;font-size:11px;line-height:1.6;white-space:pre-line}
-.err{padding:8px 12px;font-size:11px;color:#e74c3c;background:rgba(231,76,60,0.1);border-top:1px solid rgba(231,76,60,0.2)}
-.status{padding:6px 12px;font-size:10px;color:#5dade2;text-align:center}
+.empty-list{padding:26px 12px;text-align:center;color:var(--text-dim);font-size:11.5px;line-height:1.6;white-space:pre-line}
+.err{padding:8px 12px;font-size:11px;color:var(--danger);background:var(--danger-soft);border-top:1px solid var(--danger-line)}
+.status{padding:6px 12px;font-size:11px;color:var(--accent);text-align:center;display:flex;align-items:center;justify-content:center;gap:4px;--icon:14px}
 
-
-.side-head{flex-wrap:wrap;gap:8px}.head-actions{flex-wrap:wrap}.side-hint{display:block;text-align:left;padding:14px}.upload-heading{display:block;font-size:13px;color:#e3e9f2;margin-bottom:6px}.side-hint>span{display:block;line-height:1.5}.upload-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:12px 0}.upload-actions .link-local-btn{width:100%;margin:0;min-height:32px;white-space:nowrap}.upload-actions #btnViewSample{grid-column:1 / -1;grid-row:2;background:transparent;border-color:#627183;color:#bac9dc}.side-hint-sub{line-height:1.5;margin-top:9px}.migration-help{display:block;max-width:100%;text-align:left;color:#b8d1ec;background:none;border:0;text-decoration:underline;text-underline-offset:3px;font-size:11px;line-height:1.6;cursor:pointer}.migration-dialog{margin:auto;width:min(680px,calc(100vw - 24px));max-height:85vh;overflow:auto;padding:20px;background:#202638;color:#e1e5ee;border:1px solid #65758a;border-radius:6px;font-size:13px;line-height:1.8}.migration-dialog::backdrop{background:#0008}.migration-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.migration-dialog h2{font-size:18px;line-height:1.4}.migration-dialog h3{font-size:14px;margin-top:18px}.migration-dialog p{margin:10px 0}.migration-dialog header button{color:inherit;background:transparent;border:0;padding:2px 6px;font-size:22px;cursor:pointer}.migration-site{display:inline-block;padding:7px 14px;margin-top:10px;background:#304967;color:#fff;border:1px solid #7698bc;border-radius:4px}
-.link-local-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px}
-.link-local-btn .ui-ico,.icon-btn .ui-ico,.title .ui-ico{width:1.1em;height:1.1em}
 /* Narrow popovers (phones, small windows): stack the viewer above the sidebar. */
-@media(max-width:560px){.panel{flex-direction:column;padding:10px;gap:10px}.side{width:100%;max-height:46%}.viewer{min-height:40%}.upload-actions{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.panel{flex-direction:column;padding:10px;gap:10px}.side{width:100%;max-height:46%}.viewer{min-height:40%}}
 </style>
 </head>
 <body>
-<div class="mini-wrap"><button class="mini-btn" id="miniBtn" data-i18n-title="ccPanelMiniTitle" title="角色卡面板"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M5.5 17a4 4 0 0 1 7 0"/><line x1="15" y1="9" x2="19" y2="9"/><line x1="15" y1="13" x2="18" y2="13"/></svg></button></div>
+<div class="mini-wrap"><button class="mini-btn" id="miniBtn" data-i18n-title="ccPanelMiniTitle" title="角色卡面板"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 19a4 4 0 00-8 0"/><path d="M16 10h2"/><path d="M16 14h2"/><circle cx="9" cy="12" r="3"/><rect x="2" y="5" width="20" height="14" rx="2"/></svg></button></div>
 <div class="panel">
   <div class="viewer is-empty" id="viewer">
     <div class="empty-state" id="emptyState">
-      <div class="big"><svg class="ui-ico" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M5.5 17a4 4 0 0 1 7 0"/><line x1="15" y1="9" x2="19" y2="9"/><line x1="15" y1="13" x2="18" y2="13"/></svg></div>
+      <div class="big"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 19a4 4 0 00-8 0"/><path d="M16 10h2"/><path d="M16 14h2"/><circle cx="9" cy="12" r="3"/><rect x="2" y="5" width="20" height="14" rx="2"/></svg></div>
       <div id="emptyText" data-i18n="ccPanelEmpty">从右侧选择一张角色卡</div>
-      <div style="font-size:11px;opacity:.7" data-i18n="ccPanelEmpty2">拖拽 JSON / XLSX 到右侧栏上传</div>
+      <div class="hint-text" data-i18n="ccPanelEmpty2">拖拽 JSON / XLSX 到右侧栏上传</div>
     </div>
   </div>
   <aside class="res-col" id="resCol" style="display:none"></aside>
   <aside class="side" id="side">
     <div class="side-head">
-      <div class="title"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M5.5 17a4 4 0 0 1 7 0"/><line x1="15" y1="9" x2="19" y2="9"/><line x1="15" y1="13" x2="18" y2="13"/></svg> <span data-i18n="ccPanelTitle">角色卡</span></div>
+      <div class="title"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 19a4 4 0 00-8 0"/><path d="M16 10h2"/><path d="M16 14h2"/><circle cx="9" cy="12" r="3"/><rect x="2" y="5" width="20" height="14" rx="2"/></svg> <span data-i18n="ccPanelTitle">角色卡</span></div>
       <div class="head-actions">
-        <a class="icon-btn" href="https://dnd.center/card/" target="_blank" rel="noopener">打开车卡网站</a>
-        <button class="close" id="closeBtn" data-i18n-title="ccPanelClose" title="关闭 (Esc)" aria-label="关闭"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
+        <button class="close btn btn-ghost btn-sm" id="closeBtn" type="button" data-i18n-title="ccPanelClose" title="关闭 (Esc)" aria-label="关闭"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+        <a class="icon-btn btn btn-sm" href="https://dnd.center/card/" target="_blank" rel="noopener"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>打开车卡网站</a>
       </div>
     </div>
-    <div class="side-hint"><strong class="upload-heading">上传角色卡</strong>
+    <div class="side-hint"><strong class="upload-heading"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>上传角色卡</strong>
       <span data-i18n="ccPanelDragHint">拖拽 JSON / XLSX 到此处上传</span>
       <div class="upload-actions"><button id="btnLinkLocal" class="link-local-btn" type="button"
               data-i18n-title="ccPanelChooseFileTitle"
               title="打开本地文件选择器上传 JSON / XLSX 角色卡">
-        <svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M3 7 a2 2 0 0 1 2 -2 h4.5 l2 2 H19 a2 2 0 0 1 2 2 v9 a2 2 0 0 1 -2 2 H5 a2 2 0 0 1 -2 -2 Z"/></svg> <span data-i18n="ccPanelChooseFile">选择文件</span>
+        <svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg> <span data-i18n="ccPanelChooseFile">选择文件</span>
+      </button>
+      <button id="btnPasteJson" class="link-local-btn" type="button"
+              data-i18n-title="ccPanelPasteJsonTitle"
+              title="粘贴角色卡 JSON，确认后上传并添加到当前场景">
+        <svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg> <span data-i18n="ccPanelPasteJson">粘贴 JSON</span>
       </button>
       <!-- The example is read-only. Pasted JSON creates a scene card after confirmation. -->
       <button id="btnViewSample" class="link-local-btn" type="button"
               data-i18n-title="ccPanelViewSampleTitle"
               title="打开一份内置的示例角色卡（只读）">
-        <svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M2 12 c2.5 -4.5 5.7 -6.5 10 -6.5 s7.5 2 10 6.5 c-2.5 4.5 -5.7 6.5 -10 6.5 s-7.5 -2 -10 -6.5 z"/><circle cx="12" cy="12" r="3.2"/></svg> <span data-i18n="ccPanelViewSample">查看示例</span>
-      </button>
-      <button id="btnPasteJson" class="link-local-btn" type="button"
-              data-i18n-title="ccPanelPasteJsonTitle"
-              title="粘贴角色卡 JSON，确认后上传并添加到当前场景">
-        <svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><rect x="6" y="5" width="12" height="16" rx="1.5"/><path d="M9 5 a3 3 0 0 1 6 0"/><path d="M9 11 h6 M9 15 h6"/></svg> <span data-i18n="ccPanelPasteJson">粘贴 JSON</span>
+        <svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg> <span data-i18n="ccPanelViewSample">查看示例</span>
       </button>
       </div><button id="jsonMigrationHelp" class="migration-help" type="button">关于 JSON 与暂时恢复 Excel 导入的说明</button>
-      <div class="upload-actions"><a class="link-local-btn" href="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx" download data-i18n="ccPanelDownloadTpl2014" data-i18n-title="ccPanelDownloadTpl2014Title">2014 模板</a>
-        <a class="link-local-btn" href="DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx" download data-i18n="ccPanelDownloadTpl2024" data-i18n-title="ccPanelDownloadTpl2024Title">2024 模板</a>
+      <span class="tpl-label">Excel 模板（悲灵卡，枭熊适配版）</span>
+      <div class="tpl-row"><a class="link-local-btn" href="DND5E人物卡_悲灵_弗人_枭熊适配版.xlsx" download data-i18n="ccPanelDownloadTpl2014" data-i18n-title="ccPanelDownloadTpl2014Title"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>2014 模板</a>
+        <a class="link-local-btn" href="DND5R人物卡_悲灵_弗人_枭熊适配版.xlsx" download data-i18n="ccPanelDownloadTpl2024" data-i18n-title="ccPanelDownloadTpl2024Title"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>2024 模板</a>
         </div>
-      <div class="side-hint-sub" data-i18n="ccPanelRefreshHint">每张卡片旁的 ↻ 可重新选择 JSON / XLSX 覆盖更新</div>
+      <div class="side-hint-sub"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span data-i18n="ccPanelRefreshHint">把鼠标移到卡片上，点「刷新」可重新选择 JSON / XLSX 覆盖更新</span></div>
     </div>
     <div id="status" class="status" style="display:none"></div>
     <div id="error" class="err" style="display:none"></div>
     <div class="card-list" id="list"></div>
   </aside>
 </div>
-<dialog id="jsonMigrationDialog" class="migration-dialog" aria-labelledby="migration-title"><header><h2 id="migration-title">关于 JSON 与暂时恢复 Excel 导入的说明</h2><button id="closeMigrationHelp" type="button" aria-label="关闭格式说明">×</button></header>
+<dialog id="jsonMigrationDialog" class="migration-dialog" aria-labelledby="migration-title"><header><h2 id="migration-title">关于 JSON 与暂时恢复 Excel 导入的说明</h2><button id="closeMigrationHelp" type="button" aria-label="关闭格式说明"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></header>
 <p>Excel 适合把表格摆在纸面上，但角色卡同时包含职业、特性、法术、装备和运行中的数值。依赖固定单元格与公式导入，每次调整表格布局、合并单元格或更新模板，都可能让插件读错位置，也让版本维护越来越困难。</p>
 <h3>今后为什么统一使用 JSON？</h3><p>JSON 把每一项角色资料按名称与结构保存，不依赖它显示在哪一格。网站与插件可以使用同一份完整备份，更容易保留条目来源、版本和子内容，也方便及时跟进新的规则与功能。</p>
 <p>JSON 是之后优先适配的角色数据格式。长期来看，结构化资料也为不同桌游规则、更多显示方式和平台之间的互通提供了基础；这些是后续发展方向，并不表示目前已经支持所有规则。</p>
-<h3>你不需要手写 JSON</h3><p>建议直接到车卡网站创建和编辑角色，完成后导出完整 JSON，再拖入这里、选择文件或粘贴上传。修改后重新导出，用角色旁的 ↻ 更新同一张卡。</p>
-<p>旧插件暂时恢复 XLSX 导入，可以选择文件、批量上传、拖拽上传，也可以用角色旁的 ↻ 覆盖更新。支持原有的 2014 / 2024 悲灵角色卡模板，不支持旧式 .xls 文件。JSON 导入继续保留，后续仍建议使用车卡网站；已有上传记录不会因此清除。</p>
+<h3>你不需要手写 JSON</h3><p>建议直接到车卡网站创建和编辑角色，完成后导出完整 JSON，再拖入这里、选择文件或粘贴上传。修改后重新导出，用角色旁的「刷新」更新同一张卡。</p>
+<p>旧插件暂时恢复 XLSX 导入，可以选择文件、批量上传、拖拽上传，也可以用角色旁的「刷新」覆盖更新。支持原有的 2014 / 2024 悲灵角色卡模板，不支持旧式 .xls 文件。JSON 导入继续保留，后续仍建议使用车卡网站；已有上传记录不会因此清除。</p>
 <a class="migration-site" href="https://dnd.center/card/" target="_blank" rel="noopener">前往车卡网站</a></dialog>
 <script type="module" src="/src/modules/characterCards/panel-page.ts"></script>
 </body>

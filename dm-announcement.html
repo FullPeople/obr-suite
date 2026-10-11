@@ -5,17 +5,19 @@
 <title>Full Suite · DM 公告</title>
 <style>
 :root {
-  --bg-soft: rgba(31, 34, 48, 0.97);
-  --bg-card: rgba(15, 17, 28, 0.85);
-  --border: rgba(255, 255, 255, 0.14);
-  --border-strong: #626672;
-  --accent: #5dade2;
-  --accent-dim: #7ec8f0;
-  --warn: #f5a623;
-  --warn-dim: #f0b94a;
-  --text: #e6e8ee;
-  --text-dim:#aab0c2;
-  --text-mute:#979cab;
+  --bg: var(--suite-bg,#292d3c);
+  --bg-soft: var(--bg);
+  --bg-strong: var(--suite-bg-strong,#1f2230);
+  --bg-card:var(--suite-bg-card,#323748);
+  --border:var(--suite-border,rgba(255,255,255,0.24));
+  --border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --accent:var(--suite-accent,#5dade2);
+  --accent-dim:var(--accent);
+  --warn:var(--suite-warn,#f5a623);
+  --warn-dim: var(--warn);
+  --text:var(--suite-text,#e6e8ee);
+  --text-dim:var(--suite-text-dim,#aab0c2);
+  --text-mute:var(--text-dim);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body {
@@ -42,14 +44,14 @@ body {
 }
 .head {
   display: flex; align-items: center; gap: 10px;
-  padding: 14px 18px 12px;
+  padding: 12px 18px 10px;
   border-bottom: 1px solid var(--border);
-  background: #363942;
+  background: var(--bg-strong);
 }
 .auto-progress{
   height:4px;
   width:100%;
-  background:rgba(255,255,255,0.08);
+  background:var(--tint);
   overflow:hidden;
   display:none;
 }
@@ -57,7 +59,7 @@ body {
 .auto-progress .bar{
   width:100%;
   height:100%;
-  background:#8b94a7;
+  background:var(--text-dim);
   transform-origin:left center;
   /* Counts the 3 s the close button stays disabled. Kept in sync with
      READ_GATE_MS in src/dm-announcement.ts — change both together. */
@@ -66,13 +68,14 @@ body {
 .auto-progress.paused .bar{animation-play-state:paused}
 @keyframes ann-progress{from{transform:scaleX(1)}to{transform:scaleX(0)}}
 .head .icon {
-  width: 28px; height: 28px;
+  width: 30px; height: 30px;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(245, 166, 35, 0.18);
-  border: 1px solid rgba(245, 166, 35, 0.4);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
   border-radius: 50%;
-  font-size: 17px; color: var(--warn-dim);
+  color: var(--accent);
   flex-shrink: 0;
+  --icon: 18px;
 }
 .head .title {
   font-size: 14.5px; font-weight: 700;
@@ -89,7 +92,7 @@ body {
    only filters this announcement modal (per-client localStorage,
    doesn't touch the suite-wide language). */
 .lang-switch{
-  display:flex;background:rgba(0,0,0,0.3);border:1px solid var(--border);
+  display:flex;background:var(--bg-strong);border:1px solid var(--border);
   border-radius:5px;overflow:hidden;
   flex-shrink:0;
 }
@@ -98,7 +101,7 @@ body {
   padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;
   font-family:inherit;letter-spacing:0.5px;
 }
-.lang-switch button.on{background:rgba(93,173,226,0.25);color:#7ec8f0;border:1px solid rgba(126,200,240,0.75)}
+.lang-switch button.on{background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent-line)}
 .lang-switch button + button{border-left:1px solid var(--border)}
 .body {
   flex: 1;
@@ -109,7 +112,7 @@ body {
 .body::-webkit-scrollbar { width: 6px; }
 .body::-webkit-scrollbar-track { background: transparent; }
 .body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--border);
   border-radius: 3px;
 }
 .alert-row {
@@ -121,17 +124,17 @@ body {
   font-size: 12.5px; line-height: 1.55;
 }
 .alert-row.warn {
-  border-color: rgba(245, 166, 35, 0.45);
-  background: linear-gradient(180deg, rgba(245, 166, 35, 0.10), rgba(245, 166, 35, 0.04));
+  border-color: var(--warn-line);
+  background: linear-gradient(180deg, var(--warn-soft), var(--warn-soft));
 }
 .alert-row.info {
-  border-color: rgba(93, 173, 226, 0.35);
-  background: linear-gradient(180deg, rgba(93, 173, 226, 0.08), rgba(93, 173, 226, 0.02));
+  border-color: var(--accent-line);
+  background: linear-gradient(180deg, var(--accent-soft), var(--accent-soft));
 }
 .alert-row.primary {
-  border-color: rgba(245, 166, 35, 0.95);
-  background: linear-gradient(180deg, rgba(245, 166, 35, 0.28), rgba(231, 76, 60, 0.18));
-  box-shadow: 0 0 0 1px rgba(245, 166, 35, 0.35) inset, 0 0 24px rgba(245, 166, 35, 0.24);
+  border-color: var(--warn-line);
+  background: linear-gradient(180deg, var(--warn-soft), var(--danger-soft));
+  box-shadow: 0 0 0 1px var(--warn-line) inset, 0 0 24px var(--warn-soft);
   font-size: 13.8px;
   font-weight: 800;
 }
@@ -154,7 +157,7 @@ body {
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
   font-size: 11.5px;
   padding: 1px 5px;
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--tint);
   border-radius: 3px;
   color: var(--accent-dim);
 }
@@ -235,16 +238,16 @@ body {
   font-size: 9.5px; font-weight: 700;
   padding: 1px 6px;
   margin-top: 1px;
-  background: rgba(93, 173, 226, 0.18);
+  background: var(--accent-soft);
   color: var(--accent-dim);
-  border: 1px solid rgba(93, 173, 226, 0.38);
+  border: 1px solid var(--accent-line);
   border-radius: 8px;
   letter-spacing: 0.3px;
 }
 .todo-item .tag.large {
-  background: rgba(245, 166, 35, 0.16);
+  background: var(--warn-soft);
   color: var(--warn-dim);
-  border-color: rgba(245, 166, 35, 0.40);
+  border-color: var(--warn-line);
 }
 
 /* Issues / requests table — A-block. Each row has a type chip
@@ -272,15 +275,15 @@ body {
   white-space: nowrap;
   margin-top: 2px;
 }
-.iss-row .iss-type.t-bug     { background: rgba(231,76,60,0.18); color:#ff8b7a; border:1px solid rgba(231,76,60,0.42); }
-.iss-row .iss-type.t-feature { background: rgba(93,173,226,0.18); color:#7ec8f0; border:1px solid rgba(93,173,226,0.42); }
-.iss-row .iss-type.t-wip     { background: rgba(241,196,15,0.18); color:#f5d76e; border:1px solid rgba(241,196,15,0.40); }
-.iss-row .iss-type.t-done    { background: rgba(46,204,113,0.18); color:#7be0a0; border:1px solid rgba(46,204,113,0.40); }
-.iss-row .iss-type.t-other   { background: rgba(255,255,255,0.06); color:#aab; border:1px solid rgba(255,255,255,0.16); }
-.iss-row .iss-level.l-critical { background: rgba(192,57,43,0.30); color:#ffb1a0; border:1px solid rgba(192,57,43,0.55); }
+.iss-row .iss-type.t-bug     { background: var(--danger-soft); color:var(--danger); border:1px solid var(--danger-line); }
+.iss-row .iss-type.t-feature { background: var(--accent-soft); color:var(--accent); border:1px solid var(--accent-line); }
+.iss-row .iss-type.t-wip     { background: var(--warn-soft); color:var(--warn); border:1px solid var(--warn-line); }
+.iss-row .iss-type.t-done    { background: var(--success-soft); color:var(--success); border:1px solid var(--success-line); }
+.iss-row .iss-type.t-other   { background: var(--tint); color:var(--text-dim); border:1px solid var(--border); }
+.iss-row .iss-level.l-critical { background: var(--danger-line); color:var(--danger); border:1px solid var(--danger-line); }
 .iss-row .iss-level.l-high     { background: rgba(230,126,34,0.20); color:#f0a96a; border:1px solid rgba(230,126,34,0.42); }
-.iss-row .iss-level.l-medium   { background: rgba(241,196,15,0.14); color:#f5d76e; border:1px solid rgba(241,196,15,0.34); }
-.iss-row .iss-level.l-low      { background: rgba(255,255,255,0.04); color:#9aa0b3; border:1px solid rgba(255,255,255,0.12); }
+.iss-row .iss-level.l-medium   { background: var(--warn-soft); color:var(--warn); border:1px solid var(--warn-line); }
+.iss-row .iss-level.l-low      { background: var(--tint); color:var(--text-dim); border:1px solid var(--border); }
 .iss-row .iss-desc { flex: 1; min-width: 0; }
 
 /* Highlights / feature-spotlight cards — B-block. Image on the left
@@ -304,8 +307,8 @@ body {
   width: 96px; height: 60px;
   object-fit: cover;
   border-radius: 4px;
-  background: rgba(0,0,0,0.35);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--bg-strong);
+  border: 1px solid var(--tint);
 }
 .hl-card .hl-img-empty { display: none; }
 .hl-card .hl-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -313,8 +316,8 @@ body {
 .hl-card.no-img .hl-title { color: var(--accent-dim); }
 .hl-card .hl-desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
 .hl-card .hl-desc code {
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.10);
+  background: var(--tint);
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
   font-size: 10.5px;
@@ -340,9 +343,9 @@ body {
   font-family: ui-monospace, "JetBrains Mono", Consolas, monospace;
   font-size: 10.5px; font-weight: 700;
   padding: 1px 7px;
-  background: rgba(93, 173, 226, 0.20);
+  background: var(--accent-soft);
   color: var(--accent);
-  border: 1px solid rgba(93, 173, 226, 0.40);
+  border: 1px solid var(--accent-line);
   border-radius: 9px;
   letter-spacing: 0.2px;
   white-space: nowrap;
@@ -350,8 +353,8 @@ body {
 }
 .cl-row .cl-desc { flex: 1; }
 .cl-row .cl-desc code {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: var(--tint);
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
   font-size: 10.5px;
@@ -361,42 +364,22 @@ body {
 .foot {
   display: flex; align-items: center; justify-content: space-between;
   gap: 10px;
-  padding: 10px 18px 14px;
+  padding: 10px 18px 12px;
   border-top: 1px solid var(--border);
-  background: linear-gradient(0deg, rgba(255, 255, 255, 0.03), transparent);
+  background: var(--bg-strong);
 }
 .foot .credit {
   font-size: 10.5px; color: var(--text-mute);
   font-style: italic;
 }
-.btn {
-  font-family: inherit;
-  font-size: 12.5px; font-weight: 700;
-  padding: 7px 18px;
-  background: var(--accent);
-  color: #0d1828;
-  border: 1px solid var(--accent-dim);
-  border-radius: 7px;
-  cursor: pointer;
-  letter-spacing: 0.3px;
-  transition: background 0.12s, transform 0.06s;
-}
-.btn:hover { background: var(--accent-dim); }
-.btn:active { transform: translateY(1px); }
-.btn:disabled {
-  background: #2a3242;
-  color: #aab2c4;
-  border-color: #78839a;
-  cursor: default;
-}
-.btn:disabled:hover { background: #2a3242; }
-.btn:disabled:active { transform: none; }
-.notice-block{padding:0;border:0;background:none;line-height:1.7;font-size:13px}.notice-block h2{font-size:19px;margin-bottom:12px;color:#f4f4f6}.notice-block .text{color:#dce0e8}.notice-block a{color:#a9ccef}.hl-card{flex-direction:column;background:none;border:0;padding:0}.hl-card .hl-img{width:100%;height:auto;max-height:none;object-fit:contain;border-radius:0}.hl-card .hl-title{color:#e0e5ed}.head .icon{color:#dfe4ef;background:#555b69;border-color:#70798b}.body{gap:16px}.head .title{font-size:16px}
+.btn { padding: 0 18px; min-height: 32px; font-weight: 700; letter-spacing: 0.3px; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.notice-block{padding:0;border:0;background:none;line-height:1.7;font-size:13px}.notice-block h2{font-size:19px;margin-bottom:12px;color:var(--text)}.notice-block .text{color:var(--text)}.notice-block a{color:var(--accent)}.hl-card{flex-direction:column;background:none;border:0;padding:0}.hl-card .hl-img{width:100%;height:auto;max-height:none;object-fit:contain;border-radius:0}.hl-card .hl-title{color:var(--text)}.body{gap:16px}.head .title{font-size:16px}
 .notice-block a{overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
 /* Links outside the notice block sit on light and dark panels alike: inherit the panel text colour and rely on the underline. */
 a{color:inherit;text-decoration:underline;text-underline-offset:2px}
 .announcement-important{margin:0 0 16px;padding:0 0 12px;border-bottom:1px solid var(--border);line-height:1.7}
-.announcement-important>summary{color:#ff8585;font-weight:700;cursor:pointer}
+.announcement-important>summary{color:var(--danger);font-weight:700;cursor:pointer}
 .announcement-important h3,.announcement-important .step-title{margin:14px 0 6px;font-weight:700}
 .announcement-important p{margin:8px 0}
 .announcement-important ul{padding-left:20px}
@@ -404,7 +387,7 @@ a{color:inherit;text-decoration:underline;text-underline-offset:2px}
 .announcement-important .note{margin-top:14px}
 .player-permission-notice .body{min-height:0}
 .player-permission-notice .announcement-important{flex-shrink:0}
-.player-permission-notice .head .title{color:#ff8585;font-weight:800}
+.player-permission-notice .head .title{color:var(--danger);font-weight:800}
 .player-permission-notice .head>div:nth-child(2){min-width:0;overflow-wrap:anywhere}
 .player-permission-notice .foot{flex-wrap:wrap}
 .player-permission-notice #btn-close{margin-left:auto;flex-shrink:0}
@@ -413,7 +396,7 @@ a{color:inherit;text-decoration:underline;text-underline-offset:2px}
 <body>
 <div class="card">
   <div class="head">
-    <div class="icon">!</div>
+    <div class="icon"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg></div>
     <div>
       <div class="title">Full Suite</div>
       <div class="sub">公告 / Announcement</div>
@@ -430,12 +413,12 @@ a{color:inherit;text-decoration:underline;text-underline-offset:2px}
        The user edits that file to change the announcement; no code change
        is needed. See src/dm-announcement.ts for the parser. -->
   <div class="body" id="body">
-    <div style="padding:14px 18px;color:#888;font-size:12px;">加载公告中…</div>
+    <div style="padding:14px 18px;color:var(--text-dim);font-size:12px;">加载公告中…</div>
   </div>
 
   <div class="foot">
     <div class="credit" id="credit"></div>
-    <button class="btn" id="btn-close">我知道了</button>
+    <button class="btn btn-primary" id="btn-close" type="button">我知道了</button>
   </div>
 </div>
 <script type="module" src="/src/dm-announcement.ts"></script>

@@ -19,3 +19,5 @@
 ## 许可
 
 本仓库既有 Suite 源码保持 [GPL-3.0](LICENSE)。分离的 DND-card-web 使用其仓库内的项目专用非商用共享源码许可，不能将两者的许可混为一谈。依赖与资源保留各自许可。
+
+界面图标来自 [Lucide](https://lucide.dev)（ISC 许可），由 `DND-card-web/tools/lucideIcons.mjs --plugin` 生成到 `src/icons.ts` 与静态页面；许可全文见 `THIRD-PARTY-NOTICES.md`。

@@ -10,19 +10,19 @@
 *{margin:0;padding:0;box-sizing:border-box}
 
 :root{
-  --bg:#1a1a2e;
-  --bg-card:#16213e;
-  --bg-strong:#0f1830;
-  --border:rgba(255,255,255,0.24);
-  --border-strong:rgba(255,255,255,0.36);
-  --text:#e6e8ee;
-  --text-dim:#aab0c2;
-  --text-mute:#8a90a0;
-  --accent:#5dade2;
-  --accent-dim:#7ec8f0;
-  --warn:#c89251;
-  --red:#c0392b;
-  --green:#2ecc71;
+  --bg:var(--suite-bg,#292d3c);
+  --bg-card:var(--suite-bg-card,#323748);
+  --bg-strong:var(--suite-bg-strong,#1f2230);
+  --border:var(--suite-border,rgba(255,255,255,0.24));
+  --border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --text:var(--suite-text,#e6e8ee);
+  --text-dim:var(--suite-text-dim,#aab0c2);
+  --text-mute:var(--text-dim);
+  --accent:var(--suite-accent,#5dade2);
+  --accent-dim:var(--accent);
+  --warn:var(--suite-warn,#f5a623);
+  --red:var(--danger);
+  --green:var(--success);
 }
 
 html,body{
@@ -39,7 +39,7 @@ html,body{
   border:1px solid var(--border-strong);
   border-radius:10px;
   display:flex;flex-direction:column;
-  box-shadow:0 8px 24px rgba(0,0,0,0.45);
+  box-shadow:0 8px 24px var(--shadow);
   overflow:hidden;
 }
 
@@ -80,7 +80,7 @@ html,body{
   border:1px solid rgba(0,0,0,0.50);
   white-space:nowrap;
   cursor:grab;
-  box-shadow:0 1px 2px rgba(0,0,0,0.30);
+  box-shadow:0 1px 2px var(--shadow);
   user-select:none;
 }
 .bubble:hover{filter:brightness(1.10)}
@@ -110,7 +110,7 @@ html,body{
 <div class="card" id="card">
   <div class="head">
     <span class="ttl" id="title" data-i18n="stManageTitle">buff 管理</span>
-    <button class="x" id="btnClose" type="button" data-i18n-title="stClosePlain" title="关闭"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
+    <button class="x" id="btnClose" type="button" data-i18n-title="stClosePlain" title="关闭"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
   </div>
   <div class="body" id="grid"></div>
   <div class="foot" data-i18n-html="stManageFootHint">

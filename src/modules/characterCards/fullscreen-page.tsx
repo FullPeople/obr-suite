@@ -1,4 +1,5 @@
 import { render, createContext } from "preact";
+import { ICONS } from "../../icons";
 import { useEffect, useState, useMemo, useCallback, useContext, useRef } from "preact/hooks";
 import OBR from "@owlbear-rodeo/sdk";
 import { fireQuickRoll } from "../dice/tags";
@@ -377,7 +378,7 @@ function Header({
             class={`cc-btn ${editing ? "primary" : ""}`}
             onClick={onToggleEditing}
             title={editing ? T("ccEditTitleOn") : T("ccEditTitleOff")}>
-            <span class="ic">{editing ? "✎" : "🔧"}</span>{editing ? T("ccEditingLabel") : T("ccEditLabel")}
+            <span class="ic" dangerouslySetInnerHTML={{ __html: editing ? ICONS.edit : ICONS.settings2 }} />{editing ? T("ccEditingLabel") : T("ccEditLabel")}
           </button>
         )}
         {/* Save button — only visible in edit mode. Persists the
@@ -390,7 +391,7 @@ function Header({
             onClick={onSaveEdits}
             disabled={savingEdits}
             title={T("ccSaveTitle")}>
-            <span class="ic">💾</span>{savingEdits ? T("ccSaving") : T("ccSaveBtn")}
+            <span class="ic" dangerouslySetInnerHTML={{ __html: ICONS.save }} />{savingEdits ? T("ccSaving") : T("ccSaveBtn")}
           </button>
         )}
         {!previewBadge && (

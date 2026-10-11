@@ -10,7 +10,7 @@ html,body{
   overflow:hidden;
   background:transparent;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  color:#e6e8ee;
+  color:var(--text);
   font-size:12.5px;
 }
 html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
@@ -19,14 +19,14 @@ html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
 html{zoom:var(--panel-zoom, 1)}
 
 :root{
-  --bg-soft:rgba(31,34,48,0.92);
-  --bg-card:rgba(38,42,58,0.95);
-  --bg-card-hover:rgba(50,55,75,0.98);
-  --border:rgba(255,255,255,0.24);
-  --border-strong:rgba(255,255,255,0.36);
-  --text:#e6e8ee;
-  --text-dim:#a3a8b8;
-  --accent:#5dade2;
+  --bg-soft:var(--overlay);
+  --bg-card:var(--suite-bg-card,#323748);
+  --bg-card-hover:var(--hover);
+  --border:var(--suite-border,rgba(255,255,255,0.24));
+  --border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));
+  --text:var(--suite-text,#e6e8ee);
+  --text-dim:var(--suite-text-dim,#aab0c2);
+  --accent:var(--suite-accent,#5dade2);
   --dm:#cda9e8;
   --dm-bg:rgba(80,40,120,0.35);
 }
@@ -50,13 +50,13 @@ html{zoom:var(--panel-zoom, 1)}
   display:flex;align-items:center;
   gap:6px;padding:4px 6px;
   border-top:1px solid var(--border);
-  background:rgba(0,0,0,0.18);
+  background:var(--bg-strong);
 }
 
 .head{
   display:flex;align-items:center;justify-content:space-between;
   padding:8px 12px;
-  background:rgba(0,0,0,0.18);
+  background:var(--bg-strong);
   border-bottom:1px solid var(--border);
   flex-shrink:0;
   gap:6px;
@@ -70,13 +70,13 @@ html{zoom:var(--panel-zoom, 1)}
   width:14px;height:14px;
   display:flex;align-items:center;justify-content:center;
   cursor:grab;
-  color:rgba(255,255,255,0.30);
+  color:var(--text-dim);
   opacity:0.55;
   transition:opacity .12s, color .12s;
   touch-action:none;user-select:none;
 }
-.drag-handle:hover{opacity:1;color:rgba(255,255,255,0.85)}
-.drag-handle.is-dragging{cursor:grabbing;opacity:1;color:#5dade2}
+.drag-handle:hover{opacity:1;color:var(--text-dim)}
+.drag-handle.is-dragging{cursor:grabbing;opacity:1;color:var(--accent)}
 .drag-handle svg{width:12px;height:12px;display:block;pointer-events:none}
 .head-title{
   font-size:11px;font-weight:700;color:var(--text);
@@ -97,7 +97,7 @@ html{zoom:var(--panel-zoom, 1)}
   font-family:inherit;
   transition:background .12s,color .12s;
 }
-.head-x:hover{background:rgba(255,255,255,0.10);color:var(--text)}
+.head-x:hover{background:var(--border);color:var(--text)}
 
 /* Rows render bottom-up: newest at the BOTTOM, oldest at the top.
    `flex-direction: column-reverse` + DOM order (newest-first from
@@ -149,7 +149,7 @@ html{zoom:var(--panel-zoom, 1)}
 .swatch{
   width:6px;height:26px;
   border-radius:3px;
-  background:var(--player-color, #5dade2);
+  background:var(--player-color, var(--accent));
   flex-shrink:0;
 }
 
@@ -194,7 +194,7 @@ html{zoom:var(--panel-zoom, 1)}
   flex-shrink:0;
   display:inline-block;
   padding:1px 5px;
-  background:rgba(46,204,113,0.55);
+  background:var(--success-line);
   border-radius:3px;
   font-size:9px;font-weight:800;
   color:#fff;letter-spacing:0.4px;
@@ -204,12 +204,12 @@ html{zoom:var(--panel-zoom, 1)}
    obviously the source of the on-canvas overlay. Click again on the
    same row to dismiss. */
 .row.replay-on{
-  border-color:var(--player-color, #5dade2);
-  box-shadow:0 0 0 1px var(--player-color, #5dade2), 0 0 12px rgba(93,173,226,0.35);
-  background:linear-gradient(180deg, rgba(93,173,226,0.10), var(--bg-card));
+  border-color:var(--player-color, var(--accent));
+  box-shadow:0 0 0 1px var(--player-color, var(--accent)), 0 0 12px var(--accent-line);
+  background:linear-gradient(180deg, var(--accent-soft), var(--bg-card));
 }
 .total.coll-total{
-  color:#7be0a0;
+  color:var(--success);
   font-weight:900;
 }
 .ago{
@@ -243,7 +243,7 @@ html{zoom:var(--panel-zoom, 1)}
   display:inline-flex;align-items:center;gap:2px;
   padding:1px 5px 1px 3px;
   border-radius:9px;
-  background:rgba(255,255,255,0.06);
+  background:var(--tint);
   font-family:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
   font-weight:700;color:var(--text);
   font-size:10.5px;
@@ -252,7 +252,7 @@ html{zoom:var(--panel-zoom, 1)}
 }
 .die-chip img{width:14px;height:14px;display:block;-webkit-user-drag:none}
 .die-chip.crit{color:#ffd34d;background:rgba(255,200,0,0.16);box-shadow:0 0 6px rgba(255,200,0,0.45)}
-.die-chip.fail{color:#ff8a7a;background:rgba(231,76,60,0.18)}
+.die-chip.fail{color:#ff8a7a;background:var(--danger-soft)}
 .die-chip.loser{opacity:0.4;text-decoration:line-through}
 /* Subtraction dice — half-opacity so they read as "deducted" from
    the total. Mirrors the effect-modal's `.dice.subtract` styling. */
@@ -278,11 +278,12 @@ html{zoom:var(--panel-zoom, 1)}
 }
 
 .empty{
-  flex:1;
+  flex:0 0 auto;margin:auto;
   display:flex;align-items:center;justify-content:center;
   color:var(--text-dim);font-size:11.5px;
-  padding:24px 12px;
+  padding:10px 16px;
   text-align:center;
+  background:var(--bg-card);border:1px solid var(--border);border-radius:8px;
 }
 
 /* === Player-details view ===
@@ -306,13 +307,13 @@ html{zoom:var(--panel-zoom, 1)}
 .detail-head{
   display:flex;align-items:center;gap:8px;
   padding:8px 12px;
-  background:rgba(0,0,0,0.22);
+  background:var(--bg-strong);
   border-bottom:1px solid var(--border);
   flex-shrink:0;
 }
 .detail-swatch{
   width:6px;height:18px;border-radius:3px;
-  background:var(--player-color, #5dade2);
+  background:var(--player-color, var(--accent));
   flex-shrink:0;
 }
 .detail-name{
@@ -352,7 +353,7 @@ html{zoom:var(--panel-zoom, 1)}
 }
 .entry:active{transform:scale(0.99)}
 .entry.crit{border-left-color:#ffcc33}
-.entry.fail{border-left-color:#ff6b6b}
+.entry.fail{border-left-color:var(--danger)}
 .entry.hidden-roll{
   background:linear-gradient(180deg, rgba(110,55,160,0.30), rgba(60,30,95,0.45));
   border-left-color:rgba(180,110,225,0.85);
@@ -360,9 +361,9 @@ html{zoom:var(--panel-zoom, 1)}
 /* Active replay → glow with the roller's color so it's obvious which
    entry's overlay is currently displayed on canvas. */
 .entry.replay-on{
-  border-color:var(--player-color, #5dade2);
-  box-shadow:0 0 0 1px var(--player-color, #5dade2), 0 0 12px rgba(93,173,226,0.35);
-  background:linear-gradient(180deg, rgba(93,173,226,0.10), var(--bg-card));
+  border-color:var(--player-color, var(--accent));
+  box-shadow:0 0 0 1px var(--player-color, var(--accent)), 0 0 12px var(--accent-line);
+  background:linear-gradient(180deg, var(--accent-soft), var(--bg-card));
 }
 
 /* === Collective-roll member strip ===
@@ -387,8 +388,8 @@ html{zoom:var(--panel-zoom, 1)}
   gap:3px;
   padding:2px 7px 2px 4px;
   border-radius:8px;
-  background:rgba(255,255,255,0.05);
-  border:1px solid rgba(255,255,255,0.10);
+  background:var(--tint);
+  border:1px solid var(--border);
   white-space:nowrap;
   flex-shrink:0;
   font-size:10.5px;
@@ -398,16 +399,16 @@ html{zoom:var(--panel-zoom, 1)}
   transition:background .12s, border-color .12s;
 }
 .member-card:hover{
-  background:rgba(93,173,226,0.14);
-  border-color:rgba(93,173,226,0.32);
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
 }
 .member-card.crit{
   background:rgba(255,200,0,0.14);
   border-color:rgba(255,200,0,0.42);
 }
 .member-card.fail{
-  background:rgba(231,76,60,0.14);
-  border-color:rgba(231,76,60,0.40);
+  background:var(--danger-soft);
+  border-color:var(--danger-line);
 }
 .member-card.hidden-roll{
   background:rgba(155,89,182,0.18);
@@ -481,24 +482,24 @@ html{zoom:var(--panel-zoom, 1)}
    visually mark "this is a collective" and a member-strip body
    instead of a single .formula. */
 .coll-entry{
-  border-left-color:rgba(46,204,113,0.55);
+  border-left-color:var(--success-line);
 }
 
 .detail-back{
   flex-shrink:0;
   width:100%;
-  background:linear-gradient(180deg, rgba(60,75,110,0.55), rgba(30,40,65,0.7));
+  background:var(--bg-card);
   border:none;border-top:1px solid var(--border);
-  color:#cdd9ec;font-family:inherit;font-weight:700;
+  color:var(--text);font-family:inherit;font-weight:700;
   padding:10px;font-size:13px;letter-spacing:0.4px;
   cursor:pointer;
   transition:background .12s, color .12s;
 }
 .detail-back:hover{
-  background:linear-gradient(180deg, rgba(80,100,145,0.7), rgba(40,55,85,0.85));
-  color:#fff;
+  background:var(--accent-soft);
+  color:var(--text);
 }
-.detail-back:active{background:rgba(60,75,110,0.85)}
+.detail-back:active{background:var(--accent-line)}
 
 /* Drag handle inside the bottom toolbar. Pointer events route through
    panelDrag.ts; release broadcasts the offset to dice/index.ts which
@@ -506,28 +507,28 @@ html{zoom:var(--panel-zoom, 1)}
 .foot-drag{
   display:inline-flex;align-items:center;justify-content:center;
   height:18px;width:36px;
-  background:rgba(31,34,48,0.72);
-  border:1px solid rgba(255,255,255,0.16);
+  background:var(--bg-card);
+  border:1px solid var(--border);
   border-radius:6px;
-  color:rgba(255,255,255,0.55);
+  color:var(--text-dim);
   cursor:grab;
   touch-action:none;user-select:none;
   transition:color .12s, background .12s;
   flex-shrink:0;
 }
-.foot-drag:hover{color:#fff;background:rgba(50,55,75,0.92)}
-.foot-drag.is-dragging{cursor:grabbing;color:#5dade2}
+.foot-drag:hover{color:var(--text);background:var(--hover)}
+.foot-drag.is-dragging{cursor:grabbing;color:var(--accent)}
 .foot-drag svg{width:18px;height:8px;display:block;pointer-events:none}
 
 /* Circular X dismiss button — Owl-bear sky-blue (枭熊蓝, var(--accent)
-   = #5dade2) per the user's call. Visible only when there's at least
+   = var(--accent)) per the user's call. Visible only when there's at least
    one row to dismiss. Click → BC_DICE_HISTORY_DISMISS → background
    closes the popover; the next dice roll re-auto-opens it. */
 .dismiss-btn{
   margin-left:auto;
   width:22px;height:22px;
   border-radius:50%;
-  background:rgba(93,173,226,0.85);
+  background:var(--accent-line);
   border:1px solid rgba(127,195,235,0.7);
   color:#fff;
   display:none;
@@ -536,7 +537,7 @@ html{zoom:var(--panel-zoom, 1)}
   cursor:pointer;
   font-family:inherit;
   flex-shrink:0;
-  box-shadow:0 1px 4px rgba(0,0,0,0.45);
+  box-shadow:0 1px 4px var(--shadow);
   transition:filter 0.12s, transform 0.08s;
 }
 .dismiss-btn:hover{filter:brightness(1.18)}
@@ -572,7 +573,7 @@ html{zoom:var(--panel-zoom, 1)}
         <circle cx="3" cy="6" r="1" fill="currentColor"/><circle cx="9" cy="6" r="1" fill="currentColor"/><circle cx="15" cy="6" r="1" fill="currentColor"/>
       </svg>
     </div>
-    <button class="dismiss-btn" id="btnDismiss" type="button" title="关闭 / Dismiss" aria-label="关闭投骰记录"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
+    <button class="dismiss-btn" id="btnDismiss" type="button" title="关闭 / Dismiss" aria-label="关闭投骰记录"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
   </div>
 </div>
 <script type="module" src="/src/modules/dice/history-page.ts"></script>

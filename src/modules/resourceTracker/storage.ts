@@ -12,8 +12,11 @@ export type ResourceWriteGuard = (item: Item) => boolean;
 
 /** One edit session uses one atomic operation. An edit of a deleted resource
  * never falls through to create, and duplicate saves never append twice. */
-export async function commitResourceEdit(itemId: string, resourceId: string | null, resource: Resource | null, shouldApply: ResourceWriteGuard): Promise<boolean> {
+export async function commitResourceEdit(itemId: string, resourceId: string | null, resource: Resource | null, shouldApply: ResourceWriteGuard, options: { gm?: boolean } = {}): Promise<boolean> {
   let changed = false;
+  // The workbench already keeps locked resources DM-only; the stable editor must agree, or a token owner
+  // changes a locked resource on the token and the next reconcile makes it canonical.
+  const dmOnly = options.gm === false;
   await OBR.scene.items.updateItems([itemId], (drafts) => {
     const item = drafts[0];
     if (!item || !shouldApply(item)) return;
@@ -21,6 +24,7 @@ export async function commitResourceEdit(itemId: string, resourceId: string | nu
     const values = Array.isArray(raw) ? raw : [];
     const index = resourceId ? values.findIndex((value: any) => value?.id === resourceId) : -1;
     if (resourceId && index < 0) return;
+    if (dmOnly && (values[index]?.locked === true || (resource && !!resource.locked !== !!values[index]?.locked))) return;
     if (!resource) {
       if (!resourceId) return;
       item.metadata[RESOURCES_KEY] = values.filter((value: any) => value?.id !== resourceId);

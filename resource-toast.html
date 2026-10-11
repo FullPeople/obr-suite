@@ -32,10 +32,10 @@ html,body{
   min-width:240px; max-width:380px;
   padding:8px 12px;
   background:rgba(20,24,38,0.92);
-  border:1px solid rgba(255,255,255,0.16);
+  border:1px solid var(--border);
   border-radius:10px;
-  box-shadow:0 8px 22px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.4);
-  color:#e6e8ee;
+  box-shadow:0 8px 22px var(--shadow), 0 0 0 1px rgba(0,0,0,0.4);
+  color:var(--text);
   font-size:12px;
   opacity:0;
   transform:translateY(24px);
@@ -43,16 +43,16 @@ html,body{
 }
 .toast.is-in{opacity:1;transform:translateY(0)}
 .toast.is-out{opacity:0;transform:translateY(-8px)}
-.toast.delta-up{border-color:rgba(46,204,113,0.55);box-shadow:0 8px 22px rgba(46,204,113,0.18)}
-.toast.delta-down{border-color:rgba(231,76,60,0.55);box-shadow:0 8px 22px rgba(231,76,60,0.18)}
+.toast.delta-up{border-color:var(--success-line);box-shadow:0 8px 22px var(--success-soft)}
+.toast.delta-down{border-color:var(--danger-line);box-shadow:0 8px 22px var(--danger-soft)}
 
 .toast .head{
   display:flex;align-items:baseline;gap:6px;
   font-size:11.5px;font-weight:700;
   white-space:nowrap;overflow:hidden;
 }
-.toast .head .name{color:#e6e8ee;flex-shrink:0;text-overflow:ellipsis;overflow:hidden}
-.toast .head .who{color:#9aa0b3;font-weight:500;font-size:10.5px;flex-shrink:1;min-width:0;text-overflow:ellipsis;overflow:hidden}
+.toast .head .name{color:var(--text);flex-shrink:0;text-overflow:ellipsis;overflow:hidden}
+.toast .head .who{color:var(--text-dim);font-weight:500;font-size:10.5px;flex-shrink:1;min-width:0;text-overflow:ellipsis;overflow:hidden}
 .toast .head .delta{
   margin-left:auto;flex-shrink:0;
   font-size:10.5px;font-weight:800;
@@ -61,8 +61,8 @@ html,body{
   font-family:ui-monospace,Consolas,monospace;
   font-variant-numeric:tabular-nums;
 }
-.toast.delta-up .head .delta{background:rgba(46,204,113,0.18);color:#7be0a0}
-.toast.delta-down .head .delta{background:rgba(231,76,60,0.18);color:#ff8b7a}
+.toast.delta-up .head .delta{background:var(--success-soft);color:var(--success)}
+.toast.delta-down .head .delta{background:var(--danger-soft);color:var(--danger)}
 .toast.delta-zero .head .delta{display:none}
 
 /* === Replicated widget styles (mirror of panel.ts ensureStyles()).
@@ -85,14 +85,14 @@ html,body{
 .toast .rt-bar-row{display:flex;align-items:center;gap:6px}
 .toast .rt-bar-num{
   flex:0 0 auto;
-  font-size:11px;font-weight:700;color:#e6e8ee;
+  font-size:11px;font-weight:700;color:var(--text);
   font-variant-numeric:tabular-nums;
   min-width:42px;text-align:center;
 }
 .toast .rt-bar{
   flex:1;height:20px;
-  background:rgba(255,255,255,0.06);
-  border:1px solid rgba(255,255,255,0.10);
+  background:var(--tint);
+  border:1px solid var(--border);
   border-radius:10px;position:relative;
 }
 .toast .rt-bar-fill{
@@ -105,10 +105,10 @@ html,body{
   width:24px;height:24px;
   transform:translate(-50%, -50%);
   display:inline-flex;align-items:center;justify-content:center;
-  background:#1f2230;
+  background:var(--bg);
   border:2px solid #4ade80;
   border-radius:50%;
-  color:#e6e8ee;
+  color:var(--text);
 }
 .toast .rt-bar-thumb svg{width:16px;height:16px}
 
@@ -118,16 +118,16 @@ html,body{
   gap:6px;align-items:center;
 }
 .toast .rt-num-end{
-  font-size:10.5px;font-weight:700;color:#9aa0b3;
+  font-size:10.5px;font-weight:700;color:var(--text-dim);
   font-variant-numeric:tabular-nums;
   padding:2px 4px;
 }
 .toast .rt-num-step{
   width:22px;height:22px;
-  background:rgba(255,255,255,0.06);
-  border:1px solid rgba(255,255,255,0.12);
+  background:var(--tint);
+  border:1px solid var(--border);
   border-radius:5px;
-  color:#e6e8ee;font-size:13px;font-weight:800;line-height:1;
+  color:var(--text);font-size:13px;font-weight:800;line-height:1;
   display:flex;align-items:center;justify-content:center;
 }
 .toast .rt-num-orb{

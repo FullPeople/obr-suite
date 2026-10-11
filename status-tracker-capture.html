@@ -13,10 +13,10 @@
 *{margin:0;padding:0;box-sizing:border-box}
 
 :root{
-  --accent:#5dade2;
-  --warn:#c89251;
-  --red:#c0392b;
-  --green:#2ecc71;
+  --accent:var(--suite-accent,#5dade2);
+  --warn:var(--suite-warn,#f5a623);
+  --red:var(--danger);
+  --green:var(--success);
 }
 
 html,body{
@@ -51,12 +51,12 @@ html,body{
 }
 .ring.hover-clear{
   border-color:var(--red);
-  background:rgba(192,57,43,0.20);
+  background:var(--danger-soft);
   border-style:solid;
 }
 .ring.hover-remove{
   border-color:var(--red);
-  background:rgba(192,57,43,0.20);
+  background:var(--danger-soft);
   border-style:solid;
 }
 .ring.applied{
@@ -92,7 +92,7 @@ html,body{
   color:#fff;
 }
 .cursor-bubble.preset{
-  background:color-mix(in srgb, var(--good, #2ecc71) 80%, transparent);
+  background:color-mix(in srgb, var(--good, var(--success)) 80%, transparent);
   color:#fff;
 }
 </style>

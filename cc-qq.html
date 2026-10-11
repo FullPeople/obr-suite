@@ -1,3 +1,58 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>我的 QQ 卡库</title><style>
-*{box-sizing:border-box}body{height:100vh;display:grid;grid-template-rows:auto 1fr;margin:0;font:14px/1.6 system-ui;color:#333;background:#efefef}header{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 12px;background:#62676a;color:white}button{font:inherit;cursor:pointer}main{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}aside{padding:12px;overflow:auto}h1{font-size:17px;margin:0}h2{font-size:15px}iframe{min-width:0;width:100%;height:100%;border:0}#cards button,#roomCards button{display:block;width:100%;margin:6px 0;text-align:left;padding:8px}.message{color:#9a301e;white-space:pre-line}@media(max-width:650px){main{grid-template-columns:minmax(0,1fr)}#login img{width:120px;height:24px}}
-</style></head><body><header><h1>我的 QQ 卡库</h1><button id="login" aria-label="QQ 登录" style="padding:0;border:0;background:transparent"><picture><source media="(max-width:650px)" srcset="https://dnd.center/card/qq-login-120x24.png"><img src="https://dnd.center/card/qq-login-170x32.png" alt="QQ 登录" width="170" height="32" style="display:block"></picture></button><button id="logout" hidden>退出登录</button><span id="profile"></span><button id="copyAccount" hidden>复制账号 ID</button><button id="refresh">刷新</button><button id="close">关闭</button></header><main><aside><p id="message" class="message" role="status"></p><h2>我的云端卡</h2><p>选择角色卡后导入当前角色簿，直接在原工作台查看和编辑。</p><div id="cards"></div><h2>当前房间</h2><p>加载时默认锁定。卡主解锁后，房间修改自动写回云端原卡。</p><div id="roomCards"></div></aside></main><script type="module" src="/src/modules/characterCards/qq-page.ts"></script></body></html>
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>我的 QQ 卡库</title><style>
+*{box-sizing:border-box}
+:root{--bg:var(--suite-bg,#292d3c);--bg-card:var(--suite-bg-card,#323748);--bg-strong:var(--suite-bg-strong,#1f2230);--text:var(--suite-text,#e6e8ee);--text-dim:var(--suite-text-dim,#aab0c2);--border:var(--suite-border,rgba(255,255,255,0.24));--border-strong:var(--suite-border-strong,rgba(255,255,255,0.36));--accent:var(--suite-accent,#5dade2);--accent-ink:var(--suite-accent-ink,#0b1320);--danger:var(--suite-danger,#e74c3c);--warn:var(--suite-warn,#f5a623)}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;font:13px/1.5 var(--font);color:var(--text);background:var(--bg)}
+main{flex:1;min-height:0;overflow:auto;padding:12px}
+h1{font-size:14px;margin:0}
+.account{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;background:var(--bg-strong);border:1px solid var(--border);flex:none}
+.avatar-fallback{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--bg-strong);border:1px solid var(--border);color:var(--text-dim);--icon:18px;flex:none}
+.account-text{flex:1;min-width:120px;display:flex;flex-direction:column;gap:2px}
+.account-text strong{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-text .acct-id{font-size:11px;color:var(--text-dim);font-family:ui-monospace,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+#login{padding:0;border:0;background:transparent;border-radius:4px;display:inline-flex}
+#login img{display:block;border-radius:4px}
+.message{margin:8px 0 0;padding:8px 10px;border-radius:var(--radius);border:1px solid var(--danger);color:var(--danger);background:transparent;white-space:pre-line;font-size:12px;line-height:1.5}
+.message:empty{display:none}
+.panel-section{margin-top:8px}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.card-grid:empty{display:none}
+.card-grid .grid-note{grid-column:1/-1;font-size:12px;color:var(--text-dim);padding:4px 0}
+.card-tile{display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:10px;min-height:68px;text-align:left;background:var(--bg-strong);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font:inherit;cursor:pointer}
+.card-tile:hover:not(:disabled){border-color:var(--accent)}
+.card-tile:disabled{opacity:.55;cursor:not-allowed}
+.card-tile .tile-name{display:flex;align-items:center;gap:6px;font-weight:600;font-size:13px;min-width:0;--icon:16px}
+.card-tile .tile-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.card-tile .tile-name .ui-icon{color:var(--accent)}
+.card-tile .tile-meta{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:11px;color:var(--text-dim)}
+.card-tile .tile-id{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.room-card{display:flex;flex-direction:column;gap:6px;padding:10px;background:var(--bg-strong);border:1px solid var(--border);border-radius:var(--radius)}
+.room-card.is-active{border-color:var(--accent)}
+.room-card .open{justify-content:flex-start;text-align:left;width:100%;padding:0 6px;min-height:28px;background:transparent;border:1px solid transparent;border-radius:4px;color:var(--text);font:inherit;font-weight:600;--icon:16px}
+.room-card .open:hover:not(:disabled){border-color:var(--accent)}
+.room-card .open span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.room-card .open .ui-icon{color:var(--accent)}
+.room-card .room-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 6px}
+.room-card .room-actions{display:flex;gap:6px;flex-wrap:wrap;padding:0 2px}
+.room-card .room-actions .btn{flex:1 1 auto}
+@media(max-width:420px){.card-grid{grid-template-columns:1fr 1fr}}
+</style></head><body>
+<header class="page-head">
+<svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+<div class="page-text"><h1>我的 QQ 卡库</h1><div class="page-sub" id="connState">正在检查登录状态…</div></div>
+<div class="page-actions"><button id="refresh" class="btn btn-sm" type="button"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>刷新</button><button id="close" class="btn btn-sm btn-ghost" type="button" aria-label="关闭"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>关闭</button></div>
+</header>
+<main>
+<section class="panel-section account" aria-label="账号">
+<img id="avatar" class="avatar" alt="" hidden><span id="avatarFallback" class="avatar-fallback" aria-hidden="true"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg></span>
+<div class="account-text"><strong id="profile">未登录</strong><span id="accountId" class="acct-id">登录后可以读取自己的云端卡，并把它们加载到房间。</span></div>
+<div class="account-actions"><button id="login" aria-label="QQ 登录" type="button"><picture><source media="(max-width:650px)" srcset="https://dnd.center/card/qq-login-120x24.png"><img src="https://dnd.center/card/qq-login-170x32.png" alt="QQ 登录" width="170" height="32"></picture></button><button id="copyAccount" class="btn btn-sm" type="button" hidden><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>复制账号 ID</button><button id="logout" class="btn btn-sm btn-ghost" type="button" hidden><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></svg>退出登录</button></div>
+</section>
+<p id="message" class="message" role="status"></p>
+<section class="panel-section" aria-labelledby="cloudHead"><h2 id="cloudHead"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 13v8"/><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="m8 17 4-4 4 4"/></svg>我的云端卡</h2><p class="section-hint">点一张卡把它加载到当前房间，然后在角色簿里查看和编辑。</p><div id="cards" class="card-grid"></div></section>
+<section class="panel-section" aria-labelledby="roomHead"><h2 id="roomHead"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4.562v16.157a1 1 0 0 1-1.242.97L5 20V5.562a2 2 0 0 1 1.515-1.94l4-1A2 2 0 0 1 13 4.561Z"/></svg>当前房间</h2><p class="section-hint">刚加载的卡默认锁定，只有卡主能打开。卡主解锁后，房间里的修改会自动写回云端原卡。</p><div id="roomCards" class="card-grid"></div></section>
+</main>
+<script type="module" src="/src/modules/characterCards/qq-page.ts"></script></body></html>

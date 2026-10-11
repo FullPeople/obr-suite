@@ -32,7 +32,7 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
    if(method==='account.logout'&&!args.length)return disconnectQQ();
    if(method==='account.request'){
     const [path,verb='GET',data,capability]=args;
-    if(typeof path!=='string'||!(verb==='GET'&&['session','cards'].includes(path)||verb==='POST'&&/^cards\/(?:[A-Z]{6}|[a-f0-9-]{36})\/rooms$/.test(path)||['PUT','DELETE'].includes(verb)&&/^room-cards\/[a-f0-9-]{36}(?:\/lock)?$/.test(path)))throw Error('无效 QQ 卡库请求');
+    if(typeof path!=='string'||!(verb==='GET'&&['session','cards'].includes(path)||verb==='POST'&&/^cards\/(?:[A-Z]{6}|[a-f0-9-]{36})\/rooms$/.test(path)||verb==='PUT'&&/^room-cards\/[a-f0-9-]{36}\/lock$/.test(path)||verb==='DELETE'&&/^room-cards\/[a-f0-9-]{36}$/.test(path)))throw Error('无效 QQ 卡库请求');
     if(verb==='POST'&&data?.room!==OBR.room.id)throw Error('房间已改变，请重新打开卡库');
     const result=await qqRequest(path,verb,data,capability);if(verb==='POST'){imported.set(result.id,result.document);while(imported.size>32)imported.delete(imported.keys().next().value!);}return result;
    }

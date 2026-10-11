@@ -34,6 +34,34 @@ const itemId = params.get("itemId");
 const listEl = document.getElementById("list") as HTMLDivElement;
 const curEl = document.getElementById("cur") as HTMLDivElement;
 const unbindBtn = document.getElementById("unbind") as HTMLButtonElement;
+const tokenNameEl = document.getElementById("tokenName") as HTMLDivElement;
+const searchEl = document.getElementById("search") as HTMLInputElement;
+const countEl = document.getElementById("count") as HTMLSpanElement;
+
+function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString();
+}
+function emptyState(text: string, hint?: string): string {
+  return `<div class="empty-state">${ICONS.idCard}<div>${text}</div>${hint ? `<div class="hint-text">${hint}</div>` : ""}</div>`;
+}
+function cardRow(c: CardEntry, boundId: string | null): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "list-row is-clickable" + (c.id === boundId ? " is-current" : "");
+  el.setAttribute("role", "button");
+  el.tabIndex = 0;
+  el.dataset.name = c.name.toLowerCase();
+  const meta: string[] = [];
+  if (c.uploader) meta.push(escapeHtml(c.uploader));
+  if (c.uploaded_at && fmtDate(c.uploaded_at)) meta.push(escapeHtml(tt("ccBindUploaded").replace("{date}", fmtDate(c.uploaded_at))));
+  if (!meta.length) meta.push(escapeHtml(tt("ccBindRowHint")));
+  el.innerHTML =
+    `<span class="row-icon${c.cloud ? " cloud" : ""}">${c.cloud ? ICONS.upload : ICONS.book}</span>` +
+    `<span class="row-text"><span class="row-title">${escapeHtml(c.name)}</span><span class="row-sub">${meta.join('<span class="dot">·</span>')}</span></span>` +
+    `<span class="row-actions">${c.cloud ? `<span class="chip chip-warn">${ICONS.upload}${escapeHtml(tt("ccBindCloud"))}</span>` : ""}${c.id === boundId ? `<span class="chip chip-accent">${ICONS.check}${escapeHtml(tt("ccBindCurrent"))}</span>` : ""}</span>`;
+  return el;
+}
 
 function escapeHtml(s: string) {
   return String(s).replace(/[&<>"']/g, (c) =>
@@ -337,8 +365,14 @@ async function bindTo(cardId: string | null) {
 
 OBR.onReady(async () => {
   applyI18nDom(lang);
-  if(await OBR.player.getRole()!=='GM'){listEl.textContent=lang==='zh'?'只有 GM 可以管理棋子绑定。':'Only the GM can manage token bindings.';return;}
+  if(await OBR.player.getRole()!=='GM'){listEl.innerHTML=emptyState(lang==='zh'?'只有 GM 可以管理令牌绑定。':'Only the GM can manage token bindings.');tokenNameEl.textContent='';return;}
   const [cards, boundId] = await Promise.all([getCards(), getCurrentBinding()]);
+  // Header subtitle: which token this picker is for.
+  try {
+    const [tok] = itemId ? await OBR.scene.items.getItems([itemId]) : [];
+    const name = tok?.name?.trim();
+    tokenNameEl.textContent = name ? tt("ccBindTokenLabel").replace("{name}", name) : "";
+  } catch { tokenNameEl.textContent = ""; }
 
   // 撤销 ID 修复 — shown only when this token carries the pre-repair
   // backup written by a previous bind's resource-id repair.
@@ -354,7 +388,7 @@ OBR.onReady(async () => {
         btn.title = lang === "zh"
           ? "仅把资源 ID 恢复为修复前的旧 ID（含旧的重复/空 ID）；当前数值、修复后新增的资源全部保留。"
           : "Reverts only the resource IDs to their pre-repair values (including the old duplicate/empty ids); current values and resources added since the repair are kept.";
-        btn.style.cssText = unbindBtn.style.cssText;
+        btn.className = "btn btn-sm";
         btn.addEventListener("click", async () => {
           const confirmMsg = lang === "zh"
             ? "确认撤销 ID 修复？\n\n仅恢复资源 ID 为旧值（旧的重复/空 ID 会回来，相关计数可能重新串联）。数值和新增资源不受影响。"
@@ -371,7 +405,6 @@ OBR.onReady(async () => {
           else btn.disabled = false;
         });
         unbindBtn.insertAdjacentElement("afterend", btn);
-        btn.style.display = "inline-block";
       }
     } catch (e) {
       console.warn("[character-cards] backup-key probe failed", e);
@@ -380,24 +413,45 @@ OBR.onReady(async () => {
 
   if (boundId) {
     const boundCard = cards.find((c) => c.id === boundId);
-    curEl.textContent = boundCard
-      ? `${tt("ccBindCurrent")}: ${boundCard.name}`
-      : `${tt("ccBindCurrent")}: ${tt("ccBindCardDeleted")}`;
-    unbindBtn.style.display = "inline-block";
+    curEl.innerHTML = `<span class="chip chip-accent">${ICONS.link}${escapeHtml(tt("ccBindCurrent"))}: ${escapeHtml(boundCard ? boundCard.name : tt("ccBindCardDeleted"))}</span>`;
+    unbindBtn.style.display = "";
+    unbindBtn.title = tt("ccBindUnbindTitle");
+    unbindBtn.innerHTML = `${ICONS.xCircle}${escapeHtml(tt("ccBindUnbind"))}`;
     unbindBtn.addEventListener("click", () => bindTo(null));
   }
 
   if (cards.length === 0) {
-    listEl.innerHTML = `<div class="empty">${tt("ccBindNoCards")}<br>${tt("ccBindUploadHint")} ${ICONS.idCard} ${tt("ccBindUploadHint2")}</div>`;
+    listEl.innerHTML = emptyState(tt("ccBindNoCards"), tt("ccBindNoCardsHint"));
+    countEl.textContent = "";
     return;
   }
 
   listEl.innerHTML = "";
+  const rows: HTMLElement[] = [];
   for (const c of cards) {
-    const el = document.createElement("div");
-    el.className = "card" + (c.id === boundId ? " cur" : "");
-    el.innerHTML = `<span class="n">${escapeHtml(c.name)}</span><span class="m">${c.cloud ? escapeHtml(tt("ccBindCloud")) : escapeHtml(c.uploader || "")}</span>`;
+    const el = cardRow(c, boundId);
     el.addEventListener("click", () => bindTo(c.id));
+    el.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); void bindTo(c.id); } });
     listEl.appendChild(el);
+    rows.push(el);
   }
+  const noMatch = document.createElement("div");
+  noMatch.className = "empty-state";
+  noMatch.innerHTML = `${ICONS.search}<div>${escapeHtml(tt("ccBindNoMatch"))}</div>`;
+  noMatch.hidden = true;
+  listEl.appendChild(noMatch);
+  const applyFilter = () => {
+    const q = searchEl.value.trim().toLowerCase();
+    let shown = 0;
+    for (const row of rows) {
+      const on = !q || (row.dataset.name || "").includes(q);
+      row.hidden = !on;
+      if (on) shown++;
+    }
+    noMatch.hidden = shown > 0;
+    countEl.textContent = tt("ccBindCount").replace("{n}", String(shown));
+  };
+  searchEl.addEventListener("input", applyFilter);
+  applyFilter();
+  if (cards.length > 6) searchEl.focus();
 });
