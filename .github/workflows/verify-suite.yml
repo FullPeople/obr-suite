@@ -61,6 +61,8 @@ jobs:
           node tools/dice-fast-tail270-selftest.mjs
           node tools/dice-physics270-selftest.mjs
           node tools/dice-render-resource-selftest.mjs
+      - name: Personal appearance remains scoped to the player
+        run: node tools/appearance-preferences-selftest.mjs
       - name: Suite regression tests
         id: tests
         run: node tools/verify-suite-candidate.mjs
