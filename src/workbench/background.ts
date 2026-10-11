@@ -464,7 +464,7 @@ async function start(){
   let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r),job:HydrationJob={key,card,list,started:false,promise,resolve};cardHydrations.set(key,job);
   if(priority)startHydration(job,false);else{hydrationQueue.push(job);pumpHydrations();}return promise;
  }
- async function hydrate(cardId?:string){let list:CatalogValue;try{list=await catalog();}catch{return;}publishAccess(list);for(const card of list.cards.slice(0,24))if(warmCards.size<24)warmCard(`card:${card.id}`);await Promise.all(list.cards.filter(c=>(!cardId||c.id===cardId)&&(!c.qqRoom||chosen===`card:${c.id}`||!documents.has(`${OBR.room.id}:card:${c.id}`))).map(c=>scheduleHydration(c,list,chosen===`card:${c.id}`)));}
+ async function hydrate(cardId?:string){let list:CatalogValue;try{list=await catalog();}catch{return;}publishAccess(list);for(const card of list.cards.slice(0,24))if(warmCards.size<24)warmCard(`card:${card.id}`);await Promise.all(list.cards.filter(c=>!cardId||c.id===cardId).map(c=>scheduleHydration(c,list,chosen===`card:${c.id}`)));}
  async function refresh(){if(!relayActive&&(!child||child.closed))return;if(refreshing){again=true;return;}refreshing=true;
   try{
    const observedVersion=observation.version(),startedEpoch=epoch;
