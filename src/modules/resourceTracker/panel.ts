@@ -35,6 +35,7 @@
 //               Click icon at current=0 resets to max.
 
 import OBR, { Item } from "@owlbear-rodeo/sdk";
+import { ICONS } from "../../icons";
 import { Resource, IconId, PLUGIN_ID } from "./types";
 import { ICON_LIBRARY } from "./icons";
 import { readResources, updateResource, reorderResources } from "./storage";
@@ -413,7 +414,7 @@ export function mountResourcePanel(opts: MountOptions): {
                 title="${escapeAttr(T("rpReorder"))}">≡</span>
           <div class="rt-row-name" title="${escapeAttr(r.name)}">${escapeHtml(r.name || T("rtUnnamed"))}</div>
           <div class="rt-row-meta" data-meta>${r.current} / ${r.max}</div>
-          <button class="rt-row-edit" type="button" data-edit-id="${escapeAttr(r.id)}" title="${escapeAttr(T("rpEdit"))}">⚙</button>
+          <button class="rt-row-edit" type="button" data-edit-id="${escapeAttr(r.id)}" title="${escapeAttr(T("rpEdit"))}" aria-label="${escapeAttr(T("rpEdit"))}">${ICONS.gear}</button>
         </div>
         <div class="rt-pills">${pillsHtml}</div>
       </div>

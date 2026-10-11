@@ -870,7 +870,7 @@ function buildGroupHeader(label: string, collapsed: boolean, onToggle: () => voi
   head.title = label;
   const chevron = document.createElement("span");
   chevron.className = "group-chevron";
-  chevron.textContent = collapsed ? "▸" : "▾";
+  chevron.innerHTML = collapsed ? ICONS.chevronRight : ICONS.chevronDown;
   const text = document.createElement("span");
   text.className = "group-label";
   text.textContent = label;
@@ -1003,7 +1003,8 @@ function render() {
       const name = document.createElement("div");
       name.className = "card-name";
       // Lock prefix on hidden cards so DM can spot them at a glance.
-      name.textContent = (isHidden ? "🔒 " : "") + c.name;
+      name.textContent = c.name;
+      if (isHidden) { const lockMark = document.createElement("span"); lockMark.className = "cc-lock-mark"; lockMark.innerHTML = ICONS.lock; name.prepend(lockMark, " "); }
       const sub = document.createElement("div");
       sub.className = "card-sub";
       const visLabel = isHidden
@@ -1017,7 +1018,7 @@ function render() {
         const visBtn = document.createElement("button");
         visBtn.className = "card-vis";
         visBtn.disabled = !canWrite || changing;
-        visBtn.textContent = isHidden ? "🔒" : "👁";
+        visBtn.innerHTML = isHidden ? ICONS.lock : ICONS.eye;
         visBtn.title = nextVisibilityLevel(v) === "public"
           ? `${visLabel} — ${tt("ccPanelMakePublic")}`
           : `${visLabel || tt("ccPanelVisibilityPublic")} — ${tt("ccPanelMakePrivate")}`;
@@ -1034,7 +1035,7 @@ function render() {
       const groupBtn = document.createElement("button");
       groupBtn.className = "card-group";
       groupBtn.disabled = !canWrite || !canWriteCard(c, isGM, myPlayerId) || changing;
-      groupBtn.textContent = "📁";
+      groupBtn.innerHTML = ICONS.folder;
       groupBtn.title = tt("ccPanelGroupMove");
       groupBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -1049,7 +1050,7 @@ function render() {
       refresh.className = "card-refresh";
       refresh.disabled = !canWrite || !canWriteCard(c, isGM, myPlayerId) || changing;
       refresh.classList.toggle("spinning", activeWrites.some(op => op.kind === "refresh" && op.cardId === c.id));
-      refresh.textContent = "↻";
+      refresh.innerHTML = ICONS.refresh;
       refresh.title = tt("ccPanelRefreshTitle");
       refresh.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -1060,7 +1061,7 @@ function render() {
       const del = document.createElement("button");
       del.className = "card-del";
       del.disabled = !canWrite || !canWriteCard(c, isGM, myPlayerId) || changing;
-      del.textContent = "×";
+      del.innerHTML = ICONS.close;
       del.title = tt("ccPanelDeleteTitle");
       del.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -1314,7 +1315,7 @@ panelSubscriptions.push(onLangChange((next) => {
 }));
 
 OBR.onReady(() => {
-  const qqButton=document.createElement('button');qqButton.textContent='我的 QQ 卡库';
+  const qqButton=document.createElement('button');qqButton.className='link-local-btn';qqButton.type='button';qqButton.textContent='我的 QQ 卡库';
   qqButton.onclick=()=>void OBR.modal.open({id:'com.obr-suite/qq-card-library',url:assetUrl('cc-qq.html'),width:1280,height:850});
   document.getElementById('btnPasteJson')?.parentElement?.append(qqButton);
   if (!panelAlive) return;

@@ -1,4 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { ICONS } from "../../icons";
+import { enhanceSelect } from "../../utils/segmented";
 import { getLocalLang, onLangChange } from "../../state";
 import { BC_TRANSITIONS_RUN, BC_TRANSITIONS_STATUS, CONTROL_ID, REDUCED_MOTION_KEY, type TransitionKind } from "./protocol";
 import "./style.css";
@@ -11,12 +13,12 @@ let requestId = "";
 let responseTimer: ReturnType<typeof setTimeout> | undefined;
 const text = (zh: string, en: string) => lang === "zh" ? zh : en;
 const app = document.getElementById("app")!;
-app.innerHTML = `<main class="control"><header class="head"><h1 id="heading"></h1><button class="close" id="close">×</button></header>
-  <div class="choices"><button class="choice" data-kind="short" aria-pressed="true"><span class="symbol">☕</span><span id="short-label"></span></button>
-  <button class="choice" data-kind="long" aria-pressed="false"><span class="symbol">☾</span><span id="long-label"></span></button>
-  <button class="choice" data-kind="text" aria-pressed="false"><span class="symbol">✦</span><span id="text-label"></span></button></div>
+app.innerHTML = `<main class="control"><header class="head"><h1 id="heading"></h1><button class="close" id="close" aria-label="关闭">${ICONS.close}</button></header>
+  <div class="choices"><button class="choice" data-kind="short" aria-pressed="true"><span class="symbol">${ICONS.coffee}</span><span id="short-label"></span></button>
+  <button class="choice" data-kind="long" aria-pressed="false"><span class="symbol">${ICONS.moon}</span><span id="long-label"></span></button>
+  <button class="choice" data-kind="text" aria-pressed="false"><span class="symbol">${ICONS.sparkle4}</span><span id="text-label"></span></button></div>
   <label class="field hidden" id="custom-field"><span id="custom-label"></span><input id="custom" maxlength="120"></label>
-  <label class="field hidden" id="audience-field"><span id="audience-label"></span><select id="audience"></select></label>
+  <label class="field hidden" id="audience-field"><span id="audience-label"></span><select id="audience" data-segmented></select></label>
   <div class="actions"><button id="preview"></button><button id="play" class="primary hidden"></button></div>
   <label class="preference"><input id="reduced" type="checkbox"><span id="reduced-label"></span></label>
   <p class="hint" id="hint"></p><div class="status" id="status" role="status"></div></main>`;
@@ -45,6 +47,7 @@ async function updateAudience() {
   for (const player of players) select.add(new Option(player.name || player.id, player.id));
   if ([...select.options].some((option) => option.value === selected)) select.value = selected;
   el("audience-field").classList.toggle("hidden", role !== "GM");
+  enhanceSelect(el<HTMLSelectElement>("audience"), { maxOptions: 6 });
   el("play").classList.toggle("hidden", role !== "GM");
 }
 function busy(value: boolean) {

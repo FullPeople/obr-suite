@@ -2,9 +2,13 @@ import {withRequestTimeout} from '../request-timeout';
 import {wireBody} from './wire';
 export type RelayState={status:number;message:string;retryAt:number};
 // Register before any host request; never replay an uncertain data mutation.
+const SOCKET_PROTOCOL='full-suite-relay';
+const SOCKET_RETRY_MS=[15000,30000,60000,120000,300000];
+const SOCKET_OPEN=1;
 export class Relay {
  private stopped=false;private active=false;private abort=new AbortController();private registration?:Promise<void>;private retryAt=0;private failures=0;private lastError?:Error&{status:number};
  constructor(private url:string,private session:string,private role:'host'|'client',private secret:string,private receive:(message:any)=>void,private clientKey?:string,private alive?:()=>void,private room?:string,private changed?:(state:RelayState)=>void){void this.poll();}
+ private socket?:WebSocket;private socketClosed?:Promise<void>;private socketFailures=0;private socketRetryAt=0;private socketNotice=false;
  private endpoint(){return `${this.url}?${new URLSearchParams({session:this.session,role:this.role})}`;}
  private failed(status:number,message:string,retryAfter:string|null){
   if(status===401||status===410)this.active=false;
@@ -36,9 +40,28 @@ export class Relay {
  }
  async send(message:any,beforeSend?:()=>void|Promise<void>){try{await this.register();}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}return this.post(message,beforeSend);}
  private async pause(ms:number){await new Promise<void>(resolve=>{const finish=()=>{clearTimeout(timer);this.abort.signal.removeEventListener('abort',finish);resolve();},timer=setTimeout(finish,ms);if(this.abort.signal.aborted)finish();else this.abort.signal.addEventListener('abort',finish,{once:true});});}
+ private deliver(text:string){let batch:unknown;try{batch=JSON.parse(text);}catch{return;}if(Array.isArray(batch))for(const message of batch)this.receive(message);}
+ private openSocket(){
+  if(this.socket||typeof WebSocket==='undefined'||Date.now()<this.socketRetryAt)return;
+  const refused=()=>{this.socketRetryAt=Date.now()+SOCKET_RETRY_MS[Math.min(this.socketFailures++,SOCKET_RETRY_MS.length-1)];};
+  let socket:WebSocket;
+  try{socket=new WebSocket(this.endpoint().replace(/^http/,'ws'),[SOCKET_PROTOCOL,'token.'+this.secret]);}catch{refused();return;}
+  this.socket=socket;let opened=false;
+  const closeOnAbort=()=>{try{socket.close(1000);}catch{}};
+  this.abort.signal.addEventListener('abort',closeOnAbort,{once:true});
+  const openTimer=setTimeout(()=>{if(!opened)try{socket.close();}catch{}},8000);
+  this.socketClosed=new Promise<void>(resolve=>{
+   socket.onopen=()=>{opened=true;clearTimeout(openTimer);this.socketFailures=0;this.alive?.();if(!this.socketNotice){this.socketNotice=true;console.info('[workbench] relay socket connected');}};
+   socket.onmessage=event=>{this.alive?.();if(event.data==='pong')return;this.deliver(String(event.data));};
+   socket.onerror=()=>{};
+   socket.onclose=()=>{clearTimeout(openTimer);this.abort.signal.removeEventListener('abort',closeOnAbort);if(this.socket===socket){this.socket=undefined;this.socketClosed=undefined;}if(!opened)refused();resolve();};
+  });
+ }
  private async poll(){while(!this.stopped){try{
   if(Date.now()<this.retryAt){await this.pause(this.retryAt-Date.now());if(this.stopped)break;}
   await this.register();
+  if(this.socket?.readyState===SOCKET_OPEN){await this.socketClosed;continue;}
+  this.openSocket();
   const messages=await withRequestTimeout(45000,this.abort.signal,async signal=>this.response(await fetch(this.endpoint(),{headers:{Authorization:`Bearer ${this.secret}`},cache:'no-store',signal})));
   for(const message of messages)this.receive(message);
  }catch(error){if(!this.stopped){if(!(error as any)?.status)this.failed(0,'中继连接暂不可用，正在重新连接',null);await this.pause(Math.max(100,this.retryAt-Date.now()));}}}}

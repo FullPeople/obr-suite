@@ -421,10 +421,10 @@ html[lang="en"] .chip .k{letter-spacing:0}
 .cc-entry{min-width:0;max-width:100%}
 .cc-entry > summary{display:block;list-style:none}
 .cc-entry > summary::-webkit-details-marker{display:none}
-.cc-entry > summary::before{content:"▸ ";color:#9ab}
+.cc-entry > summary::before{content:"";display:inline-block;width:6px;height:6px;margin:0 7px 2px 2px;border-right:1.6px solid #9ab;border-bottom:1.6px solid #9ab;transform:rotate(-45deg);transition:transform .12s}
 .cc-entry[open]{flex-basis:100%;background:rgba(255,255,255,.035);border-radius:4px;padding:3px}
 .cc-entry[open] > summary{max-width:100%;white-space:normal;overflow-wrap:anywhere}
-.cc-entry[open] > summary::before{content:"▾ "}
+.cc-entry[open] > summary::before{transform:rotate(45deg)}
 .cc-entry-body{font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;color:#e4e7ef;padding:6px 4px}
 .cc-entry-actions{display:flex;justify-content:flex-end;padding:0 3px 3px}
 .srch-chip:active{transform:scale(0.96)}

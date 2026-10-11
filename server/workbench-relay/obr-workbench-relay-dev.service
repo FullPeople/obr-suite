@@ -11,6 +11,8 @@ WorkingDirectory=/opt/obr-workbench-relay-dev
 ExecStart=/usr/local/bin/node /opt/obr-workbench-relay-dev/server.mjs
 Environment=PORT=5012
 Environment=RELAY_ORIGIN=https://obr.dnd.center
+Environment=NODE_OPTIONS="--max-old-space-size=96 --max-semi-space-size=4"
+Environment=RELAY_MAX_QUEUED_BYTES=16777216
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

@@ -7,8 +7,8 @@
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
   --bg:#14182a; --bg2:#1c2238; --bg3:#262d4a;
-  --border:rgba(255,255,255,0.10); --border-strong:rgba(255,255,255,0.20);
-  --text:#e6e8ee; --text-dim:#9aa0b3; --text-mute:#5a6075;
+  --border:rgba(255,255,255,0.24); --border-strong:rgba(255,255,255,0.36);
+  --text:#e6e8ee; --text-dim:#aab0c2; --text-mute:#8a90a6;
   --accent:#5dade2; --accent-dim:#7ec8f0; --green:#2ecc71; --red:#e74c3c; --gold:#f5a623;
 }
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--text)}
@@ -252,7 +252,7 @@ body{background:rgba(10,12,22,0.92);backdrop-filter:blur(6px);-webkit-backdrop-f
       <button class="rt-tab on" data-tab="player" id="rtTabPlayer" type="button"><span data-i18n="rtTabPlayers">玩家</span> <span class="rt-tab-n" id="rtTabPlayerN">0</span></button>
       <button class="rt-tab" data-tab="monster" id="rtTabMonster" type="button"><span data-i18n="rtTabMonsters">怪物</span> <span class="rt-tab-n" id="rtTabMonsterN">0</span></button>
     </div>
-    <button class="rt-close" id="rtClose" type="button" title="关闭">×</button>
+    <button class="rt-close" id="rtClose" type="button" title="关闭"><svg class="ui-ico" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-0.18em" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18"/></svg></button>
   </header>
   <div class="rt-presets-bar" id="rtPresetsBar">
     <span class="rt-presets-lbl" data-i18n="rtPresetsLbl">预设</span>

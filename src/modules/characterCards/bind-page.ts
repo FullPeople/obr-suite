@@ -1,5 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
-import {characterDirectory} from './directory';
+import {characterDirectory,DELETED_CARDS} from './directory';
+import {cloudEntries,readCardDocument,requestHostCatalog} from './card-source';
 import { ICONS } from "../../icons";
 import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang } from "../../state";
@@ -24,6 +25,7 @@ interface CardEntry {
   uploader: string;
   uploaded_at: string;
   url: string;
+  cloud: boolean;
 }
 
 const params = new URLSearchParams(location.search);
@@ -41,8 +43,15 @@ function escapeHtml(s: string) {
 
 async function getCards(): Promise<CardEntry[]> {
   try {
-    const [scene,room] = await Promise.all([OBR.scene.getMetadata(),OBR.room.getMetadata()]);
-    return characterDirectory(scene,room).map(entry=>({...entry,name:entry.name||entry.id,uploader:entry.uploader||'',uploaded_at:entry.uploaded_at||'',url:entry.url||''}));
+    const [scene,room,host] = await Promise.all([OBR.scene.getMetadata(),OBR.room.getMetadata(),requestHostCatalog()]);
+    const deleted=new Set(Array.isArray(room[DELETED_CARDS])?room[DELETED_CARDS] as unknown[]:[]),entries=new Map<string,CardEntry>();
+    for(const entry of characterDirectory(scene,room))entries.set(entry.id,{id:entry.id,name:entry.name||entry.id,uploader:entry.uploader||'',uploaded_at:entry.uploaded_at||'',url:entry.url||'',cloud:false});
+    // Cloud cards loaded into the room are registry rows, not directory entries.
+    for(const entry of cloudEntries(room))if(!deleted.has(entry.id))entries.set(entry.id,{...entries.get(entry.id),id:entry.id,name:entry.name||entry.id,uploader:'',uploaded_at:'',url:'',cloud:true});
+    // The workbench host reads the documents; its names win over the upload-time
+    // names kept in metadata, which go stale once a card is renamed on its sheet.
+    for(const card of host||[]){const known=entries.get(card.id);entries.set(card.id,{id:card.id,uploader:known?.uploader||'',uploaded_at:known?.uploaded_at||'',url:known?.url||'',cloud:card.cloud||!!known?.cloud,name:card.name});}
+    return [...entries.values()];
   } catch {
     return [];
   }
@@ -59,60 +68,16 @@ async function getCurrentBinding(): Promise<string | null> {
   }
 }
 
-// Fetch the bound card's parsed data (core_stats / abilities / etc.)
-// and pull out the initiative bonus. Server URL pattern mirrors
-// `info-page.ts` — both share the same `/characters/{room}/{card}/`
-// layout. Returns null on any error (network, missing field, etc.)
-// so the bind path stays best-effort: binding always succeeds even
-// if the dex-mod prefill can't be derived.
-async function fetchCardInitiative(cardId: string): Promise<number | null> {
-  try {
-    const roomId = (OBR.room?.id || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
-    const url = `https://obr.dnd.center/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data.json`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const d = await res.json();
-    const init = d?.core_stats?.initiative;
-    const n = typeof init === "number" ? init : Number(init);
-    return Number.isFinite(n) ? Math.round(n) : null;
-  } catch {
-    return null;
-  }
-}
-
-// HP/AC bubbles seed for the bound token. Mirrors the keys the
-// "Stat Bubbles for D&D" plugin (and our suite's bubbles module) reads
-// to draw the HP bar + heater shield. Without this the HP bar would
-// only appear after the user first edited HP via the cc-info panel.
+// Prefill from the bound card's document: initiative bonus for the tracker,
+// HP/AC for the bubbles bar and the parser's auto-resource bundle (one entry
+// per non-zero spell-slot level, sorcery points, special-resource tracker; the
+// same shape as an OBR Resource on the token). Best-effort: binding succeeds
+// even when the document cannot be read.
 interface BubblesSeed {
   health?: number;
   maxHealth?: number;
   ac?: number;
 }
-async function fetchCardBubblesSeed(cardId: string): Promise<BubblesSeed | null> {
-  try {
-    const roomId = (OBR.room?.id || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
-    const url = `https://obr.dnd.center/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data.json`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const d = await res.json();
-    const cs = d?.core_stats || {};
-    const hp = cs.hp || {};
-    const seed: BubblesSeed = {};
-    if (typeof hp.current === "number") seed.health = hp.current;
-    if (typeof hp.max === "number") seed.maxHealth = hp.max;
-    if (typeof cs.ac === "number") seed.ac = cs.ac;
-    return seed;
-  } catch {
-    return null;
-  }
-}
-
-// 2026-05-15 — auto-resource bundle from the parsed card data. The
-// server builds this in `_build_auto_resources` (one entry per non-
-// zero spell-slot level, sorcery points, special-resource tracker).
-// Each entry has the SAME shape as an OBR Resource saved on the
-// token's metadata, so we can merge it directly.
 interface AutoResource {
   id?: string;
   name: string;
@@ -121,21 +86,35 @@ interface AutoResource {
   max: number;
   icon?: string;
 }
-async function fetchCardAutoResources(cardId: string): Promise<AutoResource[] | null> {
+function initiativeFrom(d: any): number | null {
+  const init = d?.core_stats?.initiative;
+  const n = typeof init === "number" ? init : Number(init);
+  return Number.isFinite(n) ? Math.round(n) : null;
+}
+function bubblesFrom(d: any): BubblesSeed {
+  const cs = d?.core_stats || {};
+  const hp = cs.hp || {};
+  const seed: BubblesSeed = {};
+  if (typeof hp.current === "number") seed.health = hp.current;
+  if (typeof hp.max === "number") seed.maxHealth = hp.max;
+  if (typeof cs.ac === "number") seed.ac = cs.ac;
+  return seed;
+}
+function autoResourcesFrom(d: any): AutoResource[] | null {
+  const arr = d?.auto_resources;
+  if (!Array.isArray(arr)) return null;
+  return arr.filter((r: any): r is AutoResource =>
+    r && typeof r === "object" && typeof r.name === "string"
+    && typeof r.max === "number"
+  );
+}
+async function fetchCardSeed(cardId: string): Promise<{initBonus: number | null; bubblesSeed: BubblesSeed | null; autoResources: AutoResource[] | null}> {
   try {
     const roomId = (OBR.room?.id || "default").replace(/[^a-zA-Z0-9_-]/g, "_");
-    const url = `https://obr.dnd.center/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data.json`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const d = await res.json();
-    const arr = d?.auto_resources;
-    if (!Array.isArray(arr)) return null;
-    return arr.filter((r: any): r is AutoResource =>
-      r && typeof r === "object" && typeof r.name === "string"
-      && typeof r.max === "number"
-    );
+    const d = await readCardDocument(roomId, cardId);
+    return { initBonus: initiativeFrom(d), bubblesSeed: bubblesFrom(d), autoResources: autoResourcesFrom(d) };
   } catch {
-    return null;
+    return { initBonus: null, bubblesSeed: null, autoResources: null };
   }
 }
 
@@ -176,11 +155,7 @@ async function bindTo(cardId: string | null) {
   let bubblesSeed: BubblesSeed | null = null;
   let autoResources: AutoResource[] | null = null;
   if (cardId) {
-    [initBonus, bubblesSeed, autoResources] = await Promise.all([
-      fetchCardInitiative(cardId),
-      fetchCardBubblesSeed(cardId),
-      fetchCardAutoResources(cardId),
-    ]);
+    ({ initBonus, bubblesSeed, autoResources } = await fetchCardSeed(cardId));
     if (autoResources) autoResources = sanitizeAutoResources(autoResources);
   }
   // Filled inside the updateItems mutator (sync), logged after it
@@ -421,7 +396,7 @@ OBR.onReady(async () => {
   for (const c of cards) {
     const el = document.createElement("div");
     el.className = "card" + (c.id === boundId ? " cur" : "");
-    el.innerHTML = `<span class="n">${escapeHtml(c.name)}</span><span class="m">${escapeHtml(c.uploader || "")}</span>`;
+    el.innerHTML = `<span class="n">${escapeHtml(c.name)}</span><span class="m">${c.cloud ? escapeHtml(tt("ccBindCloud")) : escapeHtml(c.uploader || "")}</span>`;
     el.addEventListener("click", () => bindTo(c.id));
     listEl.appendChild(el);
   }

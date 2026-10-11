@@ -1,4 +1,5 @@
 import {ownsNativeToken,canReadNativePopup,canReadNativeCard} from "./native-owner";
+import {cloudEntries,readCardDocument} from "./card-source";
 import OBR from "@owlbear-rodeo/sdk";
 import { installDebugOverlay } from "../../utils/debugOverlay";
 import { ICONS } from "../../icons";
@@ -420,8 +421,9 @@ function unmountPanels(){rtMountHandle?.unmount();rtMountHandle=null;ccStatHandl
 function invalidate(clear=false){targetGeneration++;loadingTarget=null;requestAbort?.abort();requestAbort=null;if(clear){unmountPanels();renderedTarget=null;lastRendered=null;root.replaceChildren();}root.inert=true;}
 function canNameItem(item:any):boolean {if(!item||!renderedTarget||item.id!==renderedTarget.itemId||item.metadata?.["com.character-cards/boundCardId"]!==renderedTarget.cardId)return false;if(cachedIsGM)return true;return ownsNativeToken(item,playerId);}
 async function targetContext(target:InfoTarget):Promise<{allowed:boolean;live:BubblesData}>{
- const [metadata,items]=await Promise.all([OBR.scene.getMetadata(),target.itemId?OBR.scene.items.getItems([target.itemId]):Promise.resolve([])]);
- const entry=(Array.isArray(metadata["com.character-cards/list"])?metadata["com.character-cards/list"] as any[]:[]).find(c=>c?.id===target.cardId);
+ const [metadata,room,items]=await Promise.all([OBR.scene.getMetadata(),OBR.room.getMetadata().catch(()=>({} as Record<string,unknown>)),target.itemId?OBR.scene.items.getItems([target.itemId]):Promise.resolve([])]);
+ // A cloud card bound to this token has no scene entry; its registry row carries the same owner/lock fields.
+ const entry=(Array.isArray(metadata["com.character-cards/list"])?metadata["com.character-cards/list"] as any[]:[]).find(c=>c?.id===target.cardId)||cloudEntries(room).find(c=>c.id===target.cardId);
  const item=items[0],meta=item?.metadata??{},raw=meta[BUBBLES_META_KEY]??meta[EXTERNAL_BUBBLES_META_KEY];
  const live=raw&&typeof raw==="object"?{...raw as BubblesData}:{};
  target.buffs=readBuffIds(item);
@@ -460,7 +462,7 @@ async function showCard(cardId: string, roomId: string, itemId:string|null=bound
     const context=await targetContext(target);if(!isCurrent(target))return;
     if(!context.allowed){unmountPanels();renderedTarget=null;lastRendered=null;root.innerHTML=`<div class="err" data-cc-error="unavailable">${L("unavailable")}</div>`;return;}
     let data=cardCache.get(cacheKey(roomId,cardId));
-    if(!data){const response=await fetch(`https://obr.dnd.center/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(cardId)}/data.json`,{cache:"no-store",signal:abort.signal});if(!response.ok)throw Error(`HTTP ${response.status}`);data=await response.json();}
+    if(!data)data=await readCardDocument(roomId,cardId,abort.signal);
     if(!isCurrent(target))return;
     cardCache.set(cacheKey(roomId,cardId),data);while(cardCache.size>32)cardCache.delete(cardCache.keys().next().value!);renderedTarget=target;lastRendered={data,live:context.live};
     render(data,cardId,roomId,context.live);

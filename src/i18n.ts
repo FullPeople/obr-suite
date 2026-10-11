@@ -129,7 +129,7 @@ const TR: Dict = {
     zh: "开启后，所有普通投掷都会自动变为暗骰（包括组合面板的投掷按钮）。仅 DM 可见。",
     en: "When ON, all normal rolls (including combo panel roll buttons) are auto-treated as Dark Rolls. DM only.",
   },
-  diceBtnForceClr: { zh: "⚠ 强制结束(若动画卡住)", en: "⚠ Force End (if stuck)" },
+  diceBtnForceClr: { zh: "强制结束(若动画卡住)", en: "Force End (if stuck)" },
   diceRulesTitle: { zh: "表达式说明", en: "Expression Guide" },
   diceRule1: {
     zh: "：把若干种骰子和加值组合在一起一起投。",
@@ -288,6 +288,7 @@ const TR: Dict = {
   },
   ccBindCurrent: { zh: "当前", en: "Current" },
   ccBindCardDeleted: { zh: "(卡已删除)", en: "(card deleted)" },
+  ccBindCloud: { zh: "云端卡", en: "Cloud card" },
   ccBindNoCards: {
     zh: "这个场景还没有上传任何角色卡",
     en: "No character cards uploaded in this scene yet",
@@ -333,18 +334,18 @@ const TR: Dict = {
   ccPanelCloseFailed: { zh: "窗口关闭失败，请再试一次。", en: "Could not close the window. Please try again." },
   ccPanelClose: { zh: "关闭 (Esc)", en: "Close (Esc)" },
   ccPanelDragHint: { zh: "拖拽 JSON / XLSX 到此处上传", en: "Drag JSON / XLSX here to upload" },
-  ccPanelChooseFile: { zh: "📁 选择文件", en: "📁 Choose File" },
+  ccPanelChooseFile: { zh: "选择文件", en: "Choose File" },
   ccPanelChooseFileTitle: {
     zh: "打开本地文件选择器上传 JSON / XLSX 角色卡",
     en: "Open local file picker to upload a JSON / XLSX character card",
   },
   // 2026-05-26 — preview entry points right below 选择文件.
-  ccPanelViewSample: { zh: "👁 查看示例", en: "👁 View Example" },
+  ccPanelViewSample: { zh: "查看示例", en: "View Example" },
   ccPanelViewSampleTitle: {
     zh: "打开一份内置的示例角色卡（只读）",
     en: "Open a bundled example character card (read-only)",
   },
-  ccPanelPasteJson: { zh: "📋 粘贴 JSON", en: "📋 Paste JSON" },
+  ccPanelPasteJson: { zh: "粘贴 JSON", en: "Paste JSON" },
   ccPanelPasteJsonTitle: {
     zh: "粘贴角色卡 JSON，确认后上传并添加到当前场景",
     en: "Paste character card JSON, then confirm to upload and add it to the current scene",
@@ -373,8 +374,8 @@ const TR: Dict = {
     en: "No preview payload found — go back to the character card panel and click 'View Example' or 'Paste JSON' again.",
   },
   ccPanelRefreshHint: {
-    zh: "每张卡片旁的 ↻ 可重新选择 JSON / XLSX 覆盖更新",
-    en: "Click ↻ next to a card to re-pick JSON / XLSX and overwrite",
+    zh: "每张卡片旁的刷新按钮可重新选择 JSON / XLSX 覆盖更新",
+    en: "Click the refresh button next to a card to re-pick JSON / XLSX and overwrite",
   },
   ccPanelEmpty: { zh: "从右侧选择一张角色卡", en: "Select a character card from the right" },
   ccPanelEmpty2: { zh: "拖拽 JSON / XLSX 到右侧栏上传", en: "Drag JSON / XLSX onto the right rail to upload" },
