@@ -8,8 +8,8 @@ assert.equal(current.action.height,540);
 assert.equal(legacy.action.width,380);
 assert.equal(legacy.action.popover,'/suite/dice-panel.html');
 const launcher=read('workbench-launcher.html'),action=read('src/workbench/action-history.ts');
-assert.ok(launcher.includes('background:#373942'));
-assert.ok(action.includes('background:#373942;color:#eee'));
+assert.ok(launcher.includes('--bg:var(--suite-bg,#292d3c)'));
+assert.ok(action.includes('background:var(--bg);color:var(--text)'));
 assert.ok(action.includes('OBR.action.setWidth(210)'));
 assert.ok(!action.includes('hidePaper:'));
 assert.ok(action.includes('#action-home{flex:1;min-height:0;overflow:auto'));
@@ -18,5 +18,5 @@ assert.ok(action.includes('#action-history .player,#action-history .label-tag,#a
 assert.ok(action.includes('#action-history .activity-value{white-space:normal}'));
 assert.ok(action.includes('#action-history .foot{flex-wrap:wrap}'));
 assert.ok(launcher.includes('h2,#open,#status,.tips{overflow-wrap:anywhere}'));
-assert.ok(launcher.includes('.btn.timestop-active{background:#ddd2a3;border-color:#70612d;color:#252525}'));
+assert.ok(launcher.includes('.btn.timestop-active{background:var(--warn,#f5a623);border-color:var(--warn,#f5a623);color:#252525}'));
 console.log('Action launcher: 16 source contract assertions passed; DOM geometry/host frame not verified');
