@@ -1,5 +1,6 @@
 import {locateSceneItem} from './locate';
 import {QQ_CARDS,qqSession,qqRequest} from '../modules/characterCards/qq-account';
+import {observeQQChanges,qqChangeRooms} from '../modules/characterCards/qq-change-watch';
 import {uploadRoomCard,cloudRevisionOffset,roomCloudDocument} from './cloud-upload';
 import {workbenchStartup} from './startup-presentation';
 import {nativeCardOwners,ownsNativeToken,canReadNativeCard} from "../modules/characterCards/native-owner";
@@ -57,7 +58,7 @@ async function start(){
  const warmCards=new Set<string>(),warmSnapshots=new Map<string,{document:any;state:string;epoch:number}>();
  let catalogCache: {signature:string;value:any}|undefined,lastDocument:any;
  const cloudPermissions=new Map<string,{scope:string;own:boolean;write:boolean;locked:boolean;name?:string}>();let cloudPermissionVersion=0;
- function cloudPermissionScope(card:any){return JSON.stringify([qqSession()?.token||'',card.qqRoom?.capability,card.locked,card.qqEditors||[]]);}
+ function cloudPermissionScope(card:any){return JSON.stringify([qqSession()?.token||'',card.qqRoom?.id,card.qqRoom?.capability,card.qqCardId,card.locked,card.qqEditors||[]]);}
  function rememberCloudPermission(card:any,info:any,scope:string){if(scope!==cloudPermissionScope(card))return;const next={scope,own:info.owner===true,write:info.write===true,locked:info.locked!==false,name:typeof info.name==='string'?info.name:undefined};if(!sameValue(cloudPermissions.get(card.id),next)){cloudPermissions.set(card.id,next);cloudPermissionVersion++;while(cloudPermissions.size>128)cloudPermissions.delete(cloudPermissions.keys().next().value!);}}
  const stockHistory=new Map<string,{changes:{id:string;before:any[];after:any[]}[];lockChanges?:{id:string;before:boolean;after:boolean}[]}>();
  let queue=Promise.resolve(),groupQueue=Promise.resolve();const seen=new Map<string,any>(),documents=new Map<string,any>(),documentTimes=new Map<string,number>();
@@ -119,8 +120,20 @@ async function start(){
   if(cloud?.qqRoom){
    if(!fresh&&cached&&Date.now()-(documentTimes.get(key)||0)<5000)return cached;
    const flight=cardReads.get(key);if(flight)return flight;
-   const scope=cloudPermissionScope(cloud);
-   const task=(async()=>{const result=await qqRequest('room-cards/'+cloud.qqRoom.id+(cached?'?since='+(documentRevision(cached)-cloudRevisionOffset(cloud)):''),'GET',undefined,cloud.qqRoom),latest=documents.get(key);rememberCloudPermission(cloud,result,scope);if(result.unchanged&&cached){documentTimes.set(key,Date.now());return cached;}const document=roomCloudDocument(result.document,cloud);if(latest&&documentRevision(latest)>documentRevision(document))return latest;cacheDocument(key,document);documentTimes.set(key,Date.now());return document;})();
+   const task=(async()=>{for(;;){
+    const rows=(await observation.read()).room[QQ_CARDS],current=Array.isArray(rows)?rows.find((row:any)=>row.id===cardId):undefined;
+    if(!current?.qqRoom)throw Object.assign(Error('云端角色卡关联已改变，请刷新目录。'),{status:403});
+    const scope=cloudPermissionScope(current),generation=cardInvalidations.get(key)||0,previous=documents.get(key);
+    const result=await qqRequest('room-cards/'+current.qqRoom.id+(previous?'?since='+(documentRevision(previous)-cloudRevisionOffset(current)):''),'GET',undefined,current.qqRoom);
+    // A notice or account change during this read requires another fresh read.
+    if(generation!==(cardInvalidations.get(key)||0))continue;
+    const latestRows=observation.peek().room?.[QQ_CARDS],latestCard=Array.isArray(latestRows)?latestRows.find(row=>row.id===cardId):undefined;
+    if(!latestCard?.qqRoom||scope!==cloudPermissionScope(latestCard))throw Object.assign(Error('QQ 账号或云端卡权限已改变，请重新读取。'),{status:403});
+    const latest=documents.get(key);rememberCloudPermission(current,result,scope);
+    if(result.unchanged&&previous){documentTimes.set(key,Date.now());return latest||previous;}
+    const document=roomCloudDocument(result.document,current);if(latest&&documentRevision(latest)>documentRevision(document))return latest;
+    cacheDocument(key,document);documentTimes.set(key,Date.now());return document;
+   }})();
    cardReads.set(key,task);try{return await task;}finally{if(cardReads.get(key)===task)cardReads.delete(key);}
   }
   if(!fresh&&cached&&documentTimes.has(key))return cached;
@@ -258,7 +271,7 @@ async function start(){
    const verified=cloudPermissions.get(c.id),authority=verified?.scope===cloudPermissionScope(c)?verified:undefined;
    const own=c.qqRoom?authority?.own??qqSession()?.accountId===c.qqOwner:!!playerId&&owner_ids.includes(playerId),locked=c.qqRoom&&authority?authority.locked:c.locked??!!(c.visibility&&c.visibility!=='public');
    const projectedRevision=Math.max(0,...tokens.map(token=>{const baseline=token.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined;return baseline&&baseline.cardId===c.id?baseline.revision:0;}));if(projectedRevision>documentRevision(documents.get(`${OBR.room.id}:card:${c.id}`)))invalidateCard(c.id,projectedRevision);
-   return {...c,cloudRoom:!!c.qqRoom,owner_ids,name:authority?.name||c.name||c.title||primaryToken?.name||c.id,own,write:c.qqRoom?authority?.write??(own||!locked||!!qqSession()?.accountId&&(c.qqEditors||[]).includes(qqSession()!.accountId)):role==='GM'||own,locked,inScene:tokens.length>0,itemId:primaryToken?.id||`card:${c.id}`,classSummary:undefined as ReturnType<typeof classSummary>|undefined,resourceWidgets:undefined as ReturnType<typeof resourceWidgetPresentation>|undefined,resourceAttacks:undefined as ReturnType<typeof quickbarAttackPresentation>,resourceHidden:[] as string[],documentRevision:0,passive:undefined as number|undefined,coins:{} as Record<string,number>,player:party.filter(p=>owner_ids.includes(p.id)).map(p=>p.name).join('、'),conditions:conditionRows({item:primaryToken,scene},undefined),resources:primaryToken?.metadata[RES]||[],stats:bubble(primaryToken)};
+   return {...c,cloudRoom:!!c.qqRoom,owner_ids,name:authority?.name||c.name||c.title||primaryToken?.name||c.id,own,write:c.qqRoom?authority?.write??false:role==='GM'||own,locked,inScene:tokens.length>0,itemId:primaryToken?.id||`card:${c.id}`,classSummary:undefined as ReturnType<typeof classSummary>|undefined,resourceWidgets:undefined as ReturnType<typeof resourceWidgetPresentation>|undefined,resourceAttacks:undefined as ReturnType<typeof quickbarAttackPresentation>,resourceHidden:[] as string[],documentRevision:0,passive:undefined as number|undefined,coins:{} as Record<string,number>,player:party.filter(p=>owner_ids.includes(p.id)).map(p=>p.name).join('、'),conditions:conditionRows({item:primaryToken,scene},undefined),resources:primaryToken?.metadata[RES]||[],stats:bubble(primaryToken)};
   }).filter(c=>c.qqRoom?true:canReadNativeCard(c,c.owner_ids,playerId,role==='GM')).sort((a,b)=>Number(b.write)-Number(a.write)||Number(b.inScene)-Number(a.inScene)||String(a.name).localeCompare(String(b.name),'zh'));
   // The document is the card: its name outranks the upload-time names kept in
   // the scene list, room list and directory, which go stale after a rename.
@@ -881,7 +894,15 @@ async function start(){
  OBR.player.onChange(player=>send('diceEvent',{event:'player',data:player}));
  let changeScheduled=false;
  const changed=()=>{if(changeScheduled)return;changeScheduled=true;queueMicrotask(()=>{changeScheduled=false;void refreshSelection();void refresh();void hydrate();for(const id of warmCards)if(!id.startsWith('card:'))void pushWarmSnapshot(id);});};
- observation.onChange(change=>{if(change==='selection')void refreshSelection();else changed();});OBR.scene.onReadyChange(()=>{followRevision++;finishMapFollow(false);chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
+ const cloudChanges=observeQQChanges({rooms:()=>qqChangeRooms(observation.peek().room||{}),changed:async()=>{
+  const rows=observation.peek().room?.[QQ_CARDS];
+  const cards=Array.isArray(rows)?rows.filter(card=>card?.qqRoom&&typeof card.id==='string'):[];
+  for(const card of cards){invalidateCard(card.id);cloudPermissions.delete(card.id);}
+  cloudPermissionVersion++;catalogCache=undefined;
+  await Promise.all(cards.map(card=>loadCard(card.id,`${OBR.room.id}:card:${card.id}`,true)));
+  await Promise.all([refreshSelection(),refresh()]);void hydrate();
+ }});
+ observation.onChange(change=>{if(change==='selection')void refreshSelection();else{cloudChanges.checkScope();changed();}});OBR.scene.onReadyChange(()=>{followRevision++;finishMapFollow(false);chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
  OBR.broadcast.onMessage('com.obr-suite/cc-card-updated',event=>{const data=event.data as any,id=data?.cardId;if(id){if(!invalidateCard(id,data?.revision))return;void hydrate(id);}else{invalidateCards();void hydrate();}changed();});OBR.broadcast.onMessage('com.obr-suite/workbench/inventory-changed',event=>{if(event.connectionId!==playerConnection)inventories.invalidate();changed();});window.addEventListener('qq-account-changed',changed);onStateChange(changed);rollListeners.add(()=>send('rolls',{rolls:getRollHistory()}));
  const connection=await OBR.player.getConnectionId();OBR.broadcast.onMessage('com.obr-suite/workbench-compose',event=>{if(event.connectionId===connection&&typeof(event.data as any)?.expression==='string')send('compose',{compose:{...(event.data as object),id:crypto.randomUUID()}});});
  // Reuse the transport heartbeat to inspect an actual closed WindowProxy.
