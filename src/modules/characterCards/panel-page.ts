@@ -6,6 +6,11 @@ import { applyI18nDom, t } from "../../i18n";
 import { getLocalLang, onLangChange } from "../../state";
 import { assetUrl } from "../../asset-base";
 import { reconcileUploadedCardShieldState } from "./xlsx-shield-state";
+import {characterDirectory} from './directory';
+import {cloudInformation,isCloudCard,namedCloudCards,invalidateCloudSummaries,readCardDocument} from './cloud-cards';
+import {QQ_CARDS,qqSession,qqRequest,connectQQ,type QQRoom} from './qq-account';
+import {observeQQChanges,qqChangeRooms} from './qq-change-watch';
+import {uploadRoomCard} from '../../workbench/cloud-upload';
 
 let lang = getLocalLang();
 const tt = (k: Parameters<typeof t>[1]) => t(lang, k);
@@ -59,13 +64,16 @@ interface CardEntry {
    *  was stored. Not persisted — acceptUploadedCard strips it before
    *  the entry reaches scene metadata. */
   render_warning?: string;
+  qqRoom?:QQRoom;qqCardId?:string;qqOwner?:string;qqEditors?:string[];qqRevisionOffset?:number;
 }
 
 let nativeItems: Item[] = [], nativeItemsRequest = 0;
 function canSeeCard(card: CardEntry, isGM: boolean, playerId: string): boolean {
+  if(isCloudCard(card))return true;
   return canReadNativeCard(card, nativeCardOwners(nativeItems, card.id), playerId, isGM);
 }
 function canWriteCard(card: CardEntry, gm: boolean, player: string): boolean {
+  if(isCloudCard(card))return false;
   return gm || !!player && nativeCardOwners(nativeItems, card.id).includes(player);
 }
 function applyNativeItems(items: Item[]): void {
@@ -138,6 +146,9 @@ interface PanelWrite {
 const panelWrites = new Set<PanelWrite>();
 let metadataWriteQueue: Promise<unknown> = Promise.resolve();
 let cards: CardEntry[] = [];
+let sceneCardMetadata:Record<string,unknown>={},roomCardMetadata:Record<string,unknown>={},roomMetadataRequest=0,cloudNameRequest=0;
+const cloudNames=new Map<string,string>();
+let cloudScopeChanged=()=>{};
 // Collapsed folder names ("" = the ungrouped bucket) and whether the
 // derived 旧版本 / Older versions section has been expanded. Restored from the
 // per-room panel state blob in loadState() and written back by saveState().
@@ -396,10 +407,10 @@ function showBatchResult(op: PanelWrite, succeeded: number, failures: { name: st
 }
 
 function cardList(meta: Record<string, unknown>): CardEntry[] {
-  const list = meta[SCENE_META_KEY];
-  return Array.isArray(list) ? list.filter((card): card is CardEntry =>
-    !!card && typeof card === "object" && typeof card.id === "string") : [];
+  return characterDirectory(meta,roomCardMetadata).map(card=>({...card,name:cloudNames.get(card.id)||card.name||card.id,uploader:card.uploader||'',uploaded_at:card.uploaded_at||'',url:card.url||''})) as CardEntry[];
 }
+async function refreshCloudNames(){const request=++cloudNameRequest,epoch=sceneEpoch,token=qqSession()?.token,rows=await namedCloudCards(cards);if(!panelAlive||request!==cloudNameRequest||epoch!==sceneEpoch||token!==qqSession()?.token)return;cloudNames.clear();for(const row of rows)if(isCloudCard(row))cloudNames.set(row.id,row.name);cards=cardList(sceneCardMetadata);render();}
+function applyRoomCardSnapshot(meta:Record<string,unknown>){if(!panelAlive)return;roomMetadataRequest++;if(JSON.stringify(meta[QQ_CARDS])!==JSON.stringify(roomCardMetadata[QQ_CARDS])){invalidateCloudSummaries();cloudNames.clear();}roomCardMetadata=meta;cloudScopeChanged();cards=cardList(sceneCardMetadata);render();void refreshCloudNames();}
 
 async function readWriteCards(op: PanelWrite): Promise<CardEntry[]> {
   assertWriteCurrent(op);
@@ -409,7 +420,7 @@ async function readWriteCards(op: PanelWrite): Promise<CardEntry[]> {
   // A complete event received during this read takes precedence over a
   // captured response. Check discovery permission against the latest list.
   if (beforeRead === metadataRequest) applyCardSnapshot(meta);
-  const latest = cards;
+  const latest = cards.filter(card=>!isCloudCard(card));
   assertWriteCurrent(op, latest);
   return latest;
 }
@@ -449,6 +460,7 @@ function applyCardSnapshot(meta: Record<string, unknown>): void {
   // Metadata events contain the complete current snapshot. Apply it now,
   // without a second read that could finish after a newer event.
   ++metadataRequest;
+  sceneCardMetadata=meta;
   cards = cardList(meta);
   metadataLoaded = true;
   for (const op of panelWrites) if (!writeIsCurrent(op)) op.controller.abort();
@@ -465,7 +477,9 @@ async function refreshFromScene(): Promise<void> {
   const epoch = sceneEpoch;
   const valid = () => panelAlive && sceneReady !== false && epoch === sceneEpoch && request === metadataRequest;
   try {
-    const meta = await OBR.scene.getMetadata();
+    const roomRequest=++roomMetadataRequest;
+    const [meta,room]=await Promise.all([OBR.scene.getMetadata(),OBR.room.getMetadata()]);
+    if(panelAlive&&epoch===sceneEpoch&&roomRequest===roomMetadataRequest)applyRoomCardSnapshot(room);
     if (valid()) applyCardSnapshot(meta);
   } catch {
     if (!valid()) return;
@@ -760,7 +774,13 @@ async function deleteCard(id: string) {
   finally { finishPanelWrite(op); }
 }
 
-function selectCard(id: string) {
+let cardSelectionRequest=0;
+function flushCloudFrame(frame:HTMLIFrameElement){if(!frame.dataset.cloudReady)return Promise.resolve();return new Promise<void>((resolve,reject)=>{const requestId=crypto.randomUUID(),finish=(error?:string)=>{clearTimeout(timer);window.removeEventListener('message',receive);error?reject(Error(error)):resolve();},receive=(event:MessageEvent)=>{if(event.source===frame.contentWindow&&event.origin===location.origin&&event.data?.channel==='full-suite-card-cloud/v1'&&event.data.requestId===requestId)finish(event.data.error);};const timer=setTimeout(()=>finish('当前卡的保存尚未确认，请先核对或导出草稿。'),35000);window.addEventListener('message',receive);frame.contentWindow?.postMessage({channel:'full-suite-card-cloud/v1',method:'flush',requestId},location.origin);});}
+async function selectCard(id: string) {
+  const request=++cardSelectionRequest;
+  if(!cards.some(card=>card.id===id&&canSeeCard(card,isGM,myPlayerId)))return;
+  for(const [other,frame] of cardIframes)if(other!==id&&frame.dataset.cloudRoom){await flushCloudFrame(frame);if(request!==cardSelectionRequest||!panelAlive)return;frame.remove();cardIframes.delete(other);}
+  if(request!==cardSelectionRequest||!panelAlive)return;
   current = { type: "card", id };
   render();
 }
@@ -793,6 +813,7 @@ window.addEventListener('message',event=>{
  })().catch(error=>respond({requestId,error:String(error)}));
 });
 function buildCardIframeSrc(card: CardEntry, cacheBust = false): string {
+  if(isCloudCard(card)){const query=new URLSearchParams({intro:'0',lang,qqRoom:card.qqRoom.id});return `${assetUrl('card-viewer/index.html')}?${query}#${new URLSearchParams({cap:card.qqRoom.capability})}`;}
   const params = new URLSearchParams({legacyViewer:"1",intro:"0",lang});
   const dataUrl = new URL(card.url || `/characters/${encodeURIComponent(roomId)}/${encodeURIComponent(card.id)}/index.html`, "https://obr.dnd.center");
   dataUrl.pathname = dataUrl.pathname.replace(/\/(?:index\.html|data\.json)$/, "/data.json");
@@ -809,6 +830,7 @@ function ensureCardIframe(card: CardEntry): HTMLIFrameElement {
     f.setAttribute("scrolling", "yes");
     f.dataset.kind = "card";
     f.dataset.id = card.id;
+    if(isCloudCard(card))f.dataset.cloudRoom=card.qqRoom.id;
     f.style.display = "none";
     f.addEventListener("load", () => {
       try {
@@ -821,6 +843,7 @@ function ensureCardIframe(card: CardEntry): HTMLIFrameElement {
     viewer.appendChild(f);
     cardIframes.set(card.id, f);
   }
+  if(isCloudCard(card)&&f.dataset.cloudRoom!==card.qqRoom.id){f.dataset.cloudRoom=card.qqRoom.id;delete f.dataset.cloudReady;f.src=buildCardIframeSrc(card);}
   return f;
 }
 
@@ -980,8 +1003,8 @@ function render() {
     const currentCards: CardEntry[] = [];
     const olderCards: CardEntry[] = [];
     for (const c of visibleCards) {
-      if (seenNames.has(c.name)) olderCards.push(c);
-      else { seenNames.add(c.name); currentCards.push(c); }
+      if (!isCloudCard(c)&&seenNames.has(c.name)) olderCards.push(c);
+      else { if(!isCloudCard(c))seenNames.add(c.name);currentCards.push(c); }
     }
     const buckets = new Map<string, CardEntry[]>();
     for (const c of currentCards) {
@@ -998,22 +1021,23 @@ function render() {
       card.className = "card" + (isActive ? " active" : "") + (isHidden ? " is-hidden" : "");
       card.dataset.id = c.id;
       const changing = activeWrites.some(op => op.cardId === c.id);
-      card.addEventListener("click", () => selectCard(c.id));
+      card.addEventListener("click", () => {void selectCard(c.id).catch(showError);});
 
       const name = document.createElement("div");
       name.className = "card-name";
       // Lock prefix on hidden cards so DM can spot them at a glance.
       name.textContent = (isHidden ? "🔒 " : "") + c.name;
+      if(isCloudCard(c)){const mark=document.createElement('span');mark.innerHTML=ICONS.cloud;mark.setAttribute('role','img');mark.setAttribute('aria-label','云端同步卡');name.append(mark);}
       const sub = document.createElement("div");
       sub.className = "card-sub";
       const visLabel = isHidden
         ? tt(v === "dm" ? "ccPanelVisibilityDm" : "ccPanelVisibilityOwners")
         : "";
-      sub.textContent = `${c.uploader} · ${timeAgo(c.uploaded_at)}` + (visLabel ? ` · ${visLabel}` : "");
+      sub.textContent = isCloudCard(c)?'云端卡 · 房间修改自动写回原卡':`${c.uploader} · ${timeAgo(c.uploaded_at)}` + (visLabel ? ` · ${visLabel}` : "");
 
       // 👁 / 🔒 visibility toggle — DM only. Cycles public ↔ dm.
       // Native token ownership remains independent of this visibility toggle.
-      if (isGM) {
+      if (isGM&&!isCloudCard(c)) {
         const visBtn = document.createElement("button");
         visBtn.className = "card-vis";
         visBtn.disabled = !canWrite || changing;
@@ -1040,7 +1064,7 @@ function render() {
         e.stopPropagation();
         await moveCardToGroup(c);
       });
-      card.appendChild(groupBtn);
+      if(!isCloudCard(c))card.appendChild(groupBtn);
 
       // ↻ refresh — every card row has one. Clicking opens a file
       // picker so the user can re-pick the (possibly newly-saved)
@@ -1055,7 +1079,7 @@ function render() {
         e.stopPropagation();
         await refreshCardFromPicker(c);
       });
-      card.appendChild(refresh);
+      if(!isCloudCard(c))card.appendChild(refresh);
 
       const del = document.createElement("button");
       del.className = "card-del";
@@ -1070,7 +1094,7 @@ function render() {
 
       card.appendChild(name);
       card.appendChild(sub);
-      card.appendChild(del);
+      if(!isCloudCard(c))card.appendChild(del);
       return card;
     };
 
@@ -1305,6 +1329,33 @@ function openPasteJsonPreview(): void {
 }
 
 // --- setup ---
+const CLOUD_CHANNEL='full-suite-card-cloud/v1';
+const cloudRequests=new Map<string,Promise<unknown>>();
+window.addEventListener('message',event=>{
+ if(event.origin!==location.origin||event.data?.channel!==CLOUD_CHANNEL)return;
+ const frame=[...cardIframes].find(([,frame])=>frame.contentWindow===event.source);if(!frame)return;
+ const [id,iframe]=frame,data=event.data;
+ if(data.method==='ready'){iframe.dataset.cloudReady='1';return;}
+ if(!['status','upload','remove'].includes(data.method)||typeof data.requestId!=='string'||data.requestId.length>80)return;
+ const key=id+':'+data.requestId,reply=(result?:unknown,error?:unknown)=>{if(cardIframes.get(id)===iframe)iframe.contentWindow?.postMessage({channel:CLOUD_CHANNEL,requestId:data.requestId,result,error:error?String(error):undefined},location.origin);};
+ if(cloudRequests.has(key))return;if(cloudRequests.size>=8){reply(undefined,'房间操作正在处理，请稍后重试。');return;}
+ const task=(async()=>{
+  const actor=qqSession(),epoch=sceneEpoch,room=roomId;
+  const currentCard=()=>cards.find(card=>card.id===id);
+  const guard=async()=>{const [scene,metadata,items,player,role,ready]=await Promise.all([OBR.scene.getMetadata(),OBR.room.getMetadata(),OBR.scene.items.getItems(),OBR.player.getId(),OBR.player.getRole(),OBR.scene.isReady()]);if(!panelAlive||epoch!==sceneEpoch||room!==safeRoomId(OBR.room.id)||!ready||actor?.token!==qqSession()?.token)throw Error('账号、场景或角色卡已改变，请重新读取。');const card=characterDirectory(scene,metadata).find(card=>card.id===id);if(!card)throw Error('角色卡已移除，请刷新目录。');return {card,items,player,role};};
+  if(data.method==='status'){const card=currentCard();return {account:actor?{id:actor.accountId,nickname:actor.nickname}:undefined,write:!!card&&canWriteCard(card,isGM,myPlayerId)};}
+  if(data.method==='upload'){
+   const initial=await guard();if(isCloudCard(initial.card))throw Error('这张卡已经是云端卡，请重新打开。');
+   const nativeGuard=async()=>{const live=await guard();if(isCloudCard(live.card)||!(live.role==='GM'||nativeCardOwners(live.items,id).includes(live.player)))throw Error('当前玩家没有这张房间卡的修改权限。');};
+   const original=await readCardDocument(room,id),normalized=await normalizeUpload(original);
+   const result=await uploadRoomCard({roomId:room,cardId:id,playerId:initial.player,native:(normalized as any)?.dnd_card_web,read:()=>readCardDocument(room,id),guard:nativeGuard,session:qqSession,request:qqRequest,storage:localStorage,getMetadata:()=>OBR.room.getMetadata(),setMetadata:update=>OBR.room.setMetadata(update),registryKey:QQ_CARDS});
+   await refreshFromScene();iframe.dataset.cloudRoom=result.entry.qqRoom.id;delete iframe.dataset.cloudReady;iframe.src=buildCardIframeSrc(cards.find(card=>card.id===id)!);return {uploaded:true};
+  }
+  const live=await guard();if(!isCloudCard(live.card)||!(await cloudInformation(live.card,true)).owner)throw Error('只有 QQ 卡主可以移出房间卡，DM 同样需要授权。');
+  await qqRequest('room-cards/'+encodeURIComponent(live.card.qqRoom.id),'DELETE',{},live.card.qqRoom);
+  try{await guard();const metadata=await OBR.room.getMetadata(),rows=Array.isArray(metadata[QQ_CARDS])?metadata[QQ_CARDS] as any[]:[];await OBR.room.setMetadata({[QQ_CARDS]:rows.filter(row=>row.id!==id),['com.obr-suite/workbench/deleted-cards']:[...new Set([...(Array.isArray(metadata['com.obr-suite/workbench/deleted-cards'])?metadata['com.obr-suite/workbench/deleted-cards'] as string[]:[]),id])]});return {removed:true};}catch{return {removed:true,cleanupPending:true};}
+ })();cloudRequests.set(key,task);void task.then(result=>reply(result),error=>reply(undefined,error)).finally(()=>cloudRequests.delete(key));
+});
 panelSubscriptions.push(onLangChange((next) => {
   if (!panelAlive) return;
   lang = next;
@@ -1314,9 +1365,16 @@ panelSubscriptions.push(onLangChange((next) => {
 }));
 
 OBR.onReady(() => {
-  const qqButton=document.createElement('button');qqButton.textContent='我的 QQ 卡库';
-  qqButton.onclick=()=>void OBR.modal.open({id:'com.obr-suite/qq-card-library',url:assetUrl('cc-qq.html'),width:1280,height:850});
+  const qqButton=document.createElement('button');qqButton.className='qq-account-button';
+  const refreshQQButton=()=>{const session=qqSession();qqButton.replaceChildren();qqButton.setAttribute('aria-label',session?'QQ 账号与卡库':'QQ 登录与卡库');if(session){if(session.avatar&&session.avatar.startsWith('https://')){const image=document.createElement('img');image.src=session.avatar;image.width=24;image.height=24;image.alt='';qqButton.append(image);}qqButton.append(session.nickname||'QQ 用户');}else{const image=document.createElement('img');image.src='https://dnd.center/card/qq-login-170x32.png';image.width=170;image.height=32;image.alt='QQ 登录';qqButton.append(image);}for(const frame of cardIframes.values())frame.contentWindow?.postMessage({channel:CLOUD_CHANNEL,method:'account'},location.origin);};refreshQQButton();
+  qqButton.onclick=()=>{if(qqSession())void OBR.modal.open({id:'com.obr-suite/qq-card-library',url:assetUrl('cc-qq.html'),width:1000,height:760});else void connectQQ(code=>showStatus('请在授权页核对校验码 '+code+' 后连接。')).then(()=>{refreshQQButton();return OBR.modal.open({id:'com.obr-suite/qq-card-library',url:assetUrl('cc-qq.html'),width:1000,height:760});}).catch(showError);};
   document.getElementById('btnPasteJson')?.parentElement?.append(qqButton);
+  const accountChanged=()=>{invalidateCloudSummaries();cloudNames.clear();refreshQQButton();void refreshCloudNames();};window.addEventListener('qq-account-changed',accountChanged);window.addEventListener('storage',accountChanged);panelSubscriptions.push(()=>{window.removeEventListener('qq-account-changed',accountChanged);window.removeEventListener('storage',accountChanged);});
+  panelSubscriptions.push(OBR.room.onMetadataChange(applyRoomCardSnapshot));
+  panelSubscriptions.push(OBR.broadcast.onMessage('com.obr-suite/workbench/open-cloud-card',event=>{void(async()=>{if(event.connectionId!==await OBR.player.getConnectionId())return;const id=(event.data as any)?.id;if(typeof id!=='string')return;await refreshFromScene();await selectCard(id);})().catch(showError);}));
+  const notices=observeQQChanges({rooms:()=>qqChangeRooms(roomCardMetadata),changed:async()=>{invalidateCloudSummaries();await refreshCloudNames();refreshQQButton();}});panelSubscriptions.push(notices.stop);
+  cloudScopeChanged=()=>notices.checkScope();panelSubscriptions.push(()=>{cloudScopeChanged=()=>{};});
+  const namesTimer=setInterval(()=>void refreshCloudNames().catch(()=>{}),5000);panelSubscriptions.push(()=>clearInterval(namesTimer));
   if (!panelAlive) return;
   applyI18nDom(lang);
   roomId = safeRoomId(OBR.room.id || "default");
