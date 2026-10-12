@@ -1,6 +1,8 @@
 import {locateSceneItem} from './locate';
 import {QQ_CARDS,qqSession,qqRequest} from '../modules/characterCards/qq-account';
 import {observeQQChanges,qqChangeRooms} from '../modules/characterCards/qq-change-watch';
+import {authorizationLease} from '../modules/characterCards/authorization-lease';
+import {refreshCloudIndependently} from './cloud-refresh';
 import {uploadRoomCard,cloudRevisionOffset,roomCloudDocument} from './cloud-upload';
 import {workbenchStartup} from './startup-presentation';
 import {nativeCardOwners,ownsNativeToken,canReadNativeCard} from "../modules/characterCards/native-owner";
@@ -58,8 +60,11 @@ async function start(){
  const warmCards=new Set<string>(),warmSnapshots=new Map<string,{document:any;state:string;epoch:number}>();
  let catalogCache: {signature:string;value:any}|undefined,lastDocument:any;
  const cloudPermissions=new Map<string,{scope:string;own:boolean;write:boolean;locked:boolean;name?:string}>();let cloudPermissionVersion=0;
+ const cloudLeases=new Map<string,ReturnType<typeof authorizationLease>>(),rejectedCloudRooms=new Map<string,{scope:string;status:number}>();let authorizationChanged=()=>{};
  function cloudPermissionScope(card:any){return JSON.stringify([qqSession()?.token||'',card.qqRoom?.id,card.qqRoom?.capability,card.qqCardId,card.locked,card.qqEditors||[]]);}
- function rememberCloudPermission(card:any,info:any,scope:string){if(scope!==cloudPermissionScope(card))return;const next={scope,own:info.owner===true,write:info.write===true,locked:info.locked!==false,name:typeof info.name==='string'?info.name:undefined};if(!sameValue(cloudPermissions.get(card.id),next)){cloudPermissions.set(card.id,next);cloudPermissionVersion++;while(cloudPermissions.size>128)cloudPermissions.delete(cloudPermissions.keys().next().value!);}}
+ function cloudLease(card:any){let lease=cloudLeases.get(card.id);if(!lease){lease=authorizationLease(()=>{const rows=observation.peek().room?.[QQ_CARDS],live=Array.isArray(rows)?rows.find(row=>row.id===card.id):undefined;return live?cloudPermissionScope(live):'missing';},()=>{cloudPermissionVersion++;catalogCache=undefined;authorizationChanged();});cloudLeases.set(card.id,lease);}return lease;}
+ function rememberCloudPermission(card:any,info:any,read:ReturnType<ReturnType<typeof authorizationLease>['beginRead']>){const lease=cloudLease(card);if(!lease.verifyRead(read,info.write===true))return false;const next={scope:read.scope,own:info.owner===true,write:info.write===true,locked:info.locked!==false,name:typeof info.name==='string'?info.name:undefined};if(!sameValue(cloudPermissions.get(card.id),next)){cloudPermissions.set(card.id,next);cloudPermissionVersion++;while(cloudPermissions.size>128){const oldest=cloudPermissions.keys().next().value!;cloudPermissions.delete(oldest);cloudLeases.get(oldest)?.stop();cloudLeases.delete(oldest);}}return true;}
+ async function readCloudPermission(card:any,read:ReturnType<ReturnType<typeof authorizationLease>['beginRead']>,path:string){try{return await withRequestTimeout(5000,undefined,signal=>qqRequest(path,'GET',undefined,card.qqRoom,{signal}));}catch(error){const lease=cloudLease(card);if(lease.accepts(read))lease.invalidate([401,403,404,410].includes(Number((error as {status?:number})?.status))?'readonly':'checking');throw error;}}
  const stockHistory=new Map<string,{changes:{id:string;before:any[];after:any[]}[];lockChanges?:{id:string;before:boolean;after:boolean}[]}>();
  let queue=Promise.resolve(),groupQueue=Promise.resolve();const seen=new Map<string,any>(),documents=new Map<string,any>(),documentTimes=new Map<string,number>();
  function cacheDocument(key:string,value:any){if(documents.get(key)!==value)documentCacheVersion++;documents.set(key,value);return documents;}
@@ -118,18 +123,19 @@ async function start(){
   const cached=documents.get(key),qqEntries=(await observation.read()).room[QQ_CARDS];
   const cloud=Array.isArray(qqEntries)?qqEntries.find((row:any)=>row.id===cardId):undefined;
   if(cloud?.qqRoom){
+   const rejected=rejectedCloudRooms.get(cardId);if(rejected?.scope===cloudPermissionScope(cloud))throw Object.assign(Error('这张房间卡的授权或连接已失效，其他卡仍可继续同步。'),{status:rejected.status||503});
    if(!fresh&&cached&&Date.now()-(documentTimes.get(key)||0)<5000)return cached;
    const flight=cardReads.get(key);if(flight)return flight;
    const task=(async()=>{for(;;){
     const rows=(await observation.read()).room[QQ_CARDS],current=Array.isArray(rows)?rows.find((row:any)=>row.id===cardId):undefined;
     if(!current?.qqRoom)throw Object.assign(Error('云端角色卡关联已改变，请刷新目录。'),{status:403});
-    const scope=cloudPermissionScope(current),generation=cardInvalidations.get(key)||0,previous=documents.get(key);
-    const result=await qqRequest('room-cards/'+current.qqRoom.id+(previous?'?since='+(documentRevision(previous)-cloudRevisionOffset(current)):''),'GET',undefined,current.qqRoom);
+    const scope=cloudPermissionScope(current),generation=cardInvalidations.get(key)||0,previous=documents.get(key),read=cloudLease(current).beginRead();
+    const result=await readCloudPermission(current,read,'room-cards/'+current.qqRoom.id+(previous?'?since='+(documentRevision(previous)-cloudRevisionOffset(current)):''));
     // A notice or account change during this read requires another fresh read.
     if(generation!==(cardInvalidations.get(key)||0))continue;
     const latestRows=observation.peek().room?.[QQ_CARDS],latestCard=Array.isArray(latestRows)?latestRows.find(row=>row.id===cardId):undefined;
     if(!latestCard?.qqRoom||scope!==cloudPermissionScope(latestCard))throw Object.assign(Error('QQ 账号或云端卡权限已改变，请重新读取。'),{status:403});
-    const latest=documents.get(key);rememberCloudPermission(current,result,scope);
+    const latest=documents.get(key);rememberCloudPermission(current,result,read);
     if(result.unchanged&&previous){documentTimes.set(key,Date.now());return latest||previous;}
     const document=roomCloudDocument(result.document,current);if(latest&&documentRevision(latest)>documentRevision(document))return latest;
     cacheDocument(key,document);documentTimes.set(key,Date.now());return document;
@@ -271,7 +277,7 @@ async function start(){
    const verified=cloudPermissions.get(c.id),authority=verified?.scope===cloudPermissionScope(c)?verified:undefined;
    const own=c.qqRoom?authority?.own??qqSession()?.accountId===c.qqOwner:!!playerId&&owner_ids.includes(playerId),locked=c.qqRoom&&authority?authority.locked:c.locked??!!(c.visibility&&c.visibility!=='public');
    const projectedRevision=Math.max(0,...tokens.map(token=>{const baseline=token.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined;return baseline&&baseline.cardId===c.id?baseline.revision:0;}));if(projectedRevision>documentRevision(documents.get(`${OBR.room.id}:card:${c.id}`)))invalidateCard(c.id,projectedRevision);
-   return {...c,cloudRoom:!!c.qqRoom,owner_ids,name:authority?.name||c.name||c.title||primaryToken?.name||c.id,own,write:c.qqRoom?authority?.write??false:role==='GM'||own,locked,inScene:tokens.length>0,itemId:primaryToken?.id||`card:${c.id}`,classSummary:undefined as ReturnType<typeof classSummary>|undefined,resourceWidgets:undefined as ReturnType<typeof resourceWidgetPresentation>|undefined,resourceAttacks:undefined as ReturnType<typeof quickbarAttackPresentation>,resourceHidden:[] as string[],documentRevision:0,passive:undefined as number|undefined,coins:{} as Record<string,number>,player:party.filter(p=>owner_ids.includes(p.id)).map(p=>p.name).join('、'),conditions:conditionRows({item:primaryToken,scene},undefined),resources:primaryToken?.metadata[RES]||[],stats:bubble(primaryToken)};
+   return {...c,cloudRoom:!!c.qqRoom,owner_ids,name:authority?.name||c.name||c.title||primaryToken?.name||c.id,own,write:c.qqRoom?!!authority?.write&&!!cloudLeases.get(c.id)?.check():role==='GM'||own,locked,inScene:tokens.length>0,itemId:primaryToken?.id||`card:${c.id}`,classSummary:undefined as ReturnType<typeof classSummary>|undefined,resourceWidgets:undefined as ReturnType<typeof resourceWidgetPresentation>|undefined,resourceAttacks:undefined as ReturnType<typeof quickbarAttackPresentation>,resourceHidden:[] as string[],documentRevision:0,passive:undefined as number|undefined,coins:{} as Record<string,number>,player:party.filter(p=>owner_ids.includes(p.id)).map(p=>p.name).join('、'),conditions:conditionRows({item:primaryToken,scene},undefined),resources:primaryToken?.metadata[RES]||[],stats:bubble(primaryToken)};
   }).filter(c=>c.qqRoom?true:canReadNativeCard(c,c.owner_ids,playerId,role==='GM')).sort((a,b)=>Number(b.write)-Number(a.write)||Number(b.inScene)-Number(a.inScene)||String(a.name).localeCompare(String(b.name),'zh'));
   // The document is the card: its name outranks the upload-time names kept in
   // the scene list, room list and directory, which go stale after a rename.
@@ -374,9 +380,11 @@ async function start(){
     await beforeSend();
     const cloudDocument=structuredClone(data);if(cloudDocument.dnd_card_web)cloudDocument.dnd_card_web.id=existing.dnd_card_web.id;
     const scope=cloudPermissionScope(permission.card);
-    try{const result=await qqRequest('room-cards/'+permission.card.qqRoom.id,'PUT',{document:cloudDocument,revision:documentRevision(existing)-cloudRevisionOffset(permission.card)},permission.card.qqRoom);rememberCloudPermission(permission.card,result,scope);cardCommitted(a,roomCloudDocument(result.document,permission.card));return;}
-    catch(error){const failure=error as any;if(failure.status&&failure.status<500)throw error;documentTimes.delete(a.key);
-     try{const confirmed=await qqRequest('room-cards/'+permission.card.qqRoom.id,'GET',undefined,permission.card.qqRoom);if(confirmed.revision+cloudRevisionOffset(permission.card)===documentRevision(existing)+1&&sameValue(confirmed.character,cloudDocument.dnd_card_web)){cardCommitted(a,roomCloudDocument(confirmed.document,permission.card));return;}}catch{}
+    const cloudGuard=async()=>{await beforeSend();const live=await access('card:'+a.cardId);if(!live.card||scope!==cloudPermissionScope(live.card)||!cloudLeases.get(a.cardId)?.check())throw Object.assign(Error('云端编辑权限尚未核验或已过期，本机草稿保留。'),{notSent:true});};
+    try{const result=await qqRequest('room-cards/'+permission.card.qqRoom.id,'PUT',{document:cloudDocument,revision:documentRevision(existing)-cloudRevisionOffset(permission.card)},permission.card.qqRoom,{guard:cloudGuard});const live=await access('card:'+a.cardId);if(!live.card||scope!==cloudPermissionScope(live.card))throw Object.assign(Error('原云端写入已确认，但当前账号或房间授权已改变，本机草稿保留。'),{confirmed:true,scopeChanged:true});cardCommitted(a,roomCloudDocument(result.document,permission.card));return;}
+    catch(error){const failure=error as any;if(failure.notSent||failure.confirmed||failure.scopeChanged||failure.status&&failure.status<500)throw error;documentTimes.delete(a.key);
+     const live=await access('card:'+a.cardId);if(!live.card||scope!==cloudPermissionScope(live.card))throw Object.assign(Error('原账号的写回结果仍待核对，本机草稿保留。'),{uncertain:true,scopeChanged:true});
+     try{const confirmed=await qqRequest('room-cards/'+permission.card.qqRoom.id,'GET',undefined,permission.card.qqRoom),latest=await access('card:'+a.cardId);if(latest.card&&scope===cloudPermissionScope(latest.card)&&confirmed.revision+cloudRevisionOffset(permission.card)===documentRevision(existing)+1&&sameValue(confirmed.character,cloudDocument.dnd_card_web)){cardCommitted(a,roomCloudDocument(confirmed.document,permission.card));return;}}catch{}
      throw Object.assign(Error('云端原卡写回结果暂时无法确认，本机草稿保留。请核对云端版本后再操作。'),{uncertain:true,diagnostic:{code:'ROOM_WRITE_UNKNOWN'}});
     }
   }
@@ -630,10 +638,11 @@ async function start(){
   }
   if(m.type==='cloudInfo'||m.type==='cloudEditors'){
    const a=await access(m.itemId);if(!a.card?.qqRoom)throw Error('当前卡不是云端卡');const actor=qqSession()?.accountId,roomId=OBR.room.id,scope=cloudPermissionScope(a.card);
-   let info=await qqRequest('room-cards/'+a.card.qqRoom.id,'GET',undefined,a.card.qqRoom);
-   if(m.type==='cloudEditors'){if(!info.owner)throw Error('只有 QQ 卡主可以管理编辑者');if(typeof m.accountId!=='string'||! /^[a-f0-9-]{36}$/.test(m.accountId))throw Error('请输入对方的账号 ID');await m._beforeMutation?.();await qqRequest('cards/'+info.cardId+'/editors'+(m.remove?'/'+m.accountId:''),m.remove?'DELETE':'POST',m.remove?{}:{accountId:m.accountId});info=await qqRequest('room-cards/'+a.card.qqRoom.id,'GET',undefined,a.card.qqRoom);}
+   let read=cloudLease(a.card).beginRead(),info=await readCloudPermission(a.card,read,'room-cards/'+a.card.qqRoom.id);
+   if(!cloudLease(a.card).accepts(read))throw Error('已有更新的授权核验，已忽略旧响应。');
+   if(m.type==='cloudEditors'){if(!info.owner)throw Error('只有 QQ 卡主可以管理编辑者');if(typeof m.accountId!=='string'||! /^[a-f0-9-]{36}$/.test(m.accountId))throw Error('请输入对方的账号 ID');await m._beforeMutation?.();await qqRequest('cards/'+info.cardId+'/editors'+(m.remove?'/'+m.accountId:''),m.remove?'DELETE':'POST',m.remove?{}:{accountId:m.accountId},undefined,{guard:async()=>{const live=await access(m.itemId);if(!live.card||scope!==cloudPermissionScope(live.card)||!cloudLease(live.card).accepts(read)||Date.now()-read.startedAt>=6000)throw Object.assign(Error('账号或授权核验已改变，请重新读取。'),{notSent:true});}});read=cloudLease(a.card).beginRead();info=await readCloudPermission(a.card,read,'room-cards/'+a.card.qqRoom.id);}
    if(actor!==qqSession()?.accountId||roomId!==OBR.room.id)throw Error('账号或房间已改变，请重试');
-   rememberCloudPermission(a.card,info,scope);void refreshSelection();void refresh();
+   const current=await access(m.itemId);if(!current.card||scope!==cloudPermissionScope(current.card))throw Error('房间授权已改变，请重新读取。');if(!rememberCloudPermission(a.card,info,read))throw Error('已有更新的授权核验，已忽略旧响应。');void refreshSelection();void refresh();
    if(info.owner){const room=await OBR.room.getMetadata(),rows=Array.isArray(room[QQ_CARDS])?room[QQ_CARDS] as any[]:[];if(rows.find(row=>row.id===a.cardId)?.qqCardId!==info.cardId||!sameValue(rows.find(row=>row.id===a.cardId)?.qqEditors||[],info.editors||[]))await OBR.room.setMetadata({[QQ_CARDS]:rows.map(row=>row.id===a.cardId?{...row,qqCardId:info.cardId,qqEditors:info.editors||[]}:row)});}
    const {character,document,...basic}=info;return basic;
   }
@@ -894,15 +903,17 @@ async function start(){
  OBR.player.onChange(player=>send('diceEvent',{event:'player',data:player}));
  let changeScheduled=false;
  const changed=()=>{if(changeScheduled)return;changeScheduled=true;queueMicrotask(()=>{changeScheduled=false;void refreshSelection();void refresh();void hydrate();for(const id of warmCards)if(!id.startsWith('card:'))void pushWarmSnapshot(id);});};
+ authorizationChanged=changed;
  const cloudChanges=observeQQChanges({rooms:()=>qqChangeRooms(observation.peek().room||{}),changed:async()=>{
   const rows=observation.peek().room?.[QQ_CARDS];
   const cards=Array.isArray(rows)?rows.filter(card=>card?.qqRoom&&typeof card.id==='string'):[];
-  for(const card of cards){invalidateCard(card.id);cloudPermissions.delete(card.id);}
+  for(const card of cards){invalidateCard(card.id);cloudLeases.get(card.id)?.invalidate();cloudPermissions.delete(card.id);}
   cloudPermissionVersion++;catalogCache=undefined;
-  await Promise.all(cards.map(card=>loadCard(card.id,`${OBR.room.id}:card:${card.id}`,true)));
-  await Promise.all([refreshSelection(),refresh()]);void hydrate();
- }});
+  const captured=cards.map(card=>({card,scope:cloudPermissionScope(card)}));
+  await refreshCloudIndependently(captured,row=>loadCard(row.card.id,`${OBR.room.id}:card:${row.card.id}`,true),async()=>{void refreshSelection();await refresh();},()=>{});void hydrate();
+ },scopeStatus:results=>{const rows=observation.peek().room?.[QQ_CARDS];for(const result of results)for(const card of Array.isArray(rows)?rows:[]){if(card.qqRoom?.id!==result.room.id||card.qqRoom.capability!==result.room.capability)continue;if(result.valid)rejectedCloudRooms.delete(card.id);else{rejectedCloudRooms.set(card.id,{scope:cloudPermissionScope(card),status:result.status});cloudLeases.get(card.id)?.invalidate('readonly');cloudPermissions.delete(card.id);}}cloudPermissionVersion++;catalogCache=undefined;changed();}});
  observation.onChange(change=>{if(change==='selection')void refreshSelection();else{cloudChanges.checkScope();changed();}});OBR.scene.onReadyChange(()=>{followRevision++;finishMapFollow(false);chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
+ const verifyForeground=()=>{if(!document.hidden){for(const lease of cloudLeases.values())lease.invalidate();cloudChanges.retry();}};window.addEventListener('focus',verifyForeground);document.addEventListener('visibilitychange',verifyForeground);
  OBR.broadcast.onMessage('com.obr-suite/cc-card-updated',event=>{const data=event.data as any,id=data?.cardId;if(id){if(!invalidateCard(id,data?.revision))return;void hydrate(id);}else{invalidateCards();void hydrate();}changed();});OBR.broadcast.onMessage('com.obr-suite/workbench/inventory-changed',event=>{if(event.connectionId!==playerConnection)inventories.invalidate();changed();});window.addEventListener('qq-account-changed',changed);onStateChange(changed);rollListeners.add(()=>send('rolls',{rolls:getRollHistory()}));
  const connection=await OBR.player.getConnectionId();OBR.broadcast.onMessage('com.obr-suite/workbench-compose',event=>{if(event.connectionId===connection&&typeof(event.data as any)?.expression==='string')send('compose',{compose:{...(event.data as object),id:crypto.randomUUID()}});});
  // Reuse the transport heartbeat to inspect an actual closed WindowProxy.

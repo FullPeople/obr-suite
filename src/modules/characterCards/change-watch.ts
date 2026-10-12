@@ -33,7 +33,7 @@ export function watchCloudChanges(options:ChangeWatchOptions){
    }catch(error){
     if(!alive||generation!==epoch||scope!==options.scope()){cursor=undefined;continue;}
     try{options.failed?.(error);}catch{}
-    if([404,405].includes(Number((error as {status?:number})?.status)))break;
+    if([404,405].includes(Number((error as {status?:number})?.status))&&!(error as {scopeFailure?:boolean})?.scopeFailure)break;
     await delay(Math.min(30000,1000*2**Math.min(failures++,5)));
    }finally{clearTimeout(timeout);controller=undefined;}
   }
