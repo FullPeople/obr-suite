@@ -9,7 +9,7 @@ export class Relay {
   const encoded=await wireBody(message);
   return withRequestTimeout(60000,this.abort.signal,async signal=>{
    const r=await fetch(this.endpoint(),{method:'POST',headers:{Authorization:`Bearer ${this.secret}`,...encoded.headers},body:encoded.body as BodyInit,signal});
-   const data=await r.json();if(!r.ok)throw Object.assign(Error(data.error||(r.status===409?'资料已被其他客户端修改，请刷新后重试':'连接暂不可用')),{status:r.status});this.alive?.();return data;
+   const data=await r.json();if(!r.ok)throw Object.assign(Error(data.error||(r.status===409?'资料已被其他客户端修改，请刷新后重试':'连接暂不可用')),{status:r.status,...r.status===503&&data.accepted===false&&['REQUEST_CAPACITY','STORAGE_CAPACITY'].includes(data.code)?{notSent:true,code:data.code}:{}});this.alive?.();return data;
   });
  }
  private async poll(){while(!this.stopped){try{

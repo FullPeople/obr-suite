@@ -53,7 +53,7 @@ async function start(){
  const shared=sharedDocuments(relay);
  const inventories=inventoryDocuments(relay,OBR.room.id||'default');
  const hostStarted=Date.now();
- const send=(type:string,extra:Record<string,unknown>={},route?:'relay'|'direct')=>{const data={protocol,session,hostStarted,type,...extra};if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch{}if(route==='relay'||route!=='direct'&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).catch(()=>{});};
+ const send=(type:string,extra:Record<string,unknown>={},route?:'relay'|'direct')=>{const data={protocol,session,hostStarted,type,...extra};if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch(error){console.warn('[workbench] direct message failed',{type,error:error instanceof Error?error.name:'unknown'});if(type==='catalog')lastCatalog='';}if(route==='relay'||route!=='direct'&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).catch(()=>{if(type==='catalog')lastCatalog='';});};
  OBR.broadcast.onMessage(OPEN_WIKI_CHANNEL,event=>{if(event.connectionId!==playerConnection)return;try{const entry=sharedEntry((event.data as any)?.entry);send('showWiki',{entry,id:crypto.randomUUID()});}catch{}});
  const panels=panelBridge(send,relay);
  const bubble=(item:Item|undefined)=>((item?.metadata[HP]??item?.metadata[LEGACY]??{}) as Record<string,any>);
@@ -278,7 +278,7 @@ async function start(){
    }).catch(error=>{if(id===chosen&&generation===selectionGeneration)send('error',{message:String(error)});});
   }catch(error){send('error',{message:String(error)});}finally{selecting=false;if(selectAgain){selectAgain=false;void refreshSelection();}}
  }
- type HydrationJob={key:string;card:Awaited<ReturnType<typeof catalog>>['cards'][number];list:Awaited<ReturnType<typeof catalog>>;started:boolean;promise:Promise<void>;resolve:()=>void};
+ type HydrationJob={key:string;card:Awaited<ReturnType<typeof catalog>>['cards'][number];list:Awaited<ReturnType<typeof catalog>>;started:boolean;audit:boolean;promise:Promise<void>;resolve:()=>void};
  const cardHydrations=new Map<string,HydrationJob>(),hydrationQueue:HydrationJob[]=[];let backgroundHydrations=0;
  function pumpHydrations(){while(backgroundHydrations<2&&hydrationQueue.length){const job=hydrationQueue.shift()!;if(!job.started)startHydration(job,true);}}
  function startHydration(job:HydrationJob,background:boolean){if(job.started)return;job.started=true;if(background)backgroundHydrations++;
@@ -288,19 +288,20 @@ async function start(){
     // Invalidation events keep documents fresh. A slow fallback audit recovers
     // missed legacy broadcasts without re-downloading the selected portrait every four seconds.
     const ttl=120000;
-    let doc=await loadCard(c.id,job.key,!documentTimes.has(job.key)||Date.now()-(documentTimes.get(job.key)||0)>ttl);
+    const audit=job.audit;job.audit=false;
+    let doc=await loadCard(c.id,job.key,audit||!documentTimes.has(job.key)||Date.now()-(documentTimes.get(job.key)||0)>ttl);
     if(!mutation)doc=await reconcileRuntime(c.id,job.key,list.items,list.scene,doc,c.write);
-    if(generation!==(cardInvalidations.get(job.key)||0))continue;
+    if(generation!==(cardInvalidations.get(job.key)||0)||job.audit)continue;
     if(!sameValue(before,doc)){void refresh();if(chosen===`card:${c.id}`)void refreshSelection();}break;
    }}catch{}finally{cardHydrations.delete(job.key);job.resolve();if(background)backgroundHydrations--;pumpHydrations();}})();
  }
- function scheduleHydration(card:HydrationJob['card'],list:HydrationJob['list'],priority:boolean){const key=`${OBR.room.id}:card:${card.id}`,existing=cardHydrations.get(key);
-  if(existing){existing.card=card;existing.list=list;if(priority&&!existing.started)startHydration(existing,false);return existing.promise;}
-  let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r),job:HydrationJob={key,card,list,started:false,promise,resolve};cardHydrations.set(key,job);
+ function scheduleHydration(card:HydrationJob['card'],list:HydrationJob['list'],priority:boolean,audit=false){const key=`${OBR.room.id}:card:${card.id}`,existing=cardHydrations.get(key);
+  if(existing){existing.card=card;existing.list=list;existing.audit||=audit;if(priority&&!existing.started)startHydration(existing,false);return existing.promise;}
+  let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r),job:HydrationJob={key,card,list,started:false,audit,promise,resolve};cardHydrations.set(key,job);
   if(priority)startHydration(job,false);else{hydrationQueue.push(job);pumpHydrations();}return promise;
  }
- async function hydrate(cardId?:string){const list=await catalog();await Promise.all(list.cards.filter(c=>!cardId||c.id===cardId).map(c=>scheduleHydration(c,list,chosen===`card:${c.id}`)));}
- async function refresh(){if(!relayActive&&(!child||child.closed))return;if(refreshing){again=true;return;}refreshing=true;
+ async function hydrate(cardId?:string,audit=false){const list=await catalog();await Promise.all(list.cards.filter(c=>!cardId||c.id===cardId).map(c=>scheduleHydration(c,list,chosen===`card:${c.id}`,audit)));}
+ async function refresh(handshakeOnly=false){if(!relayActive&&(!child||child.closed))return;if(refreshing){if(!handshakeOnly)again=true;return;}refreshing=true;
   try{
    const observedVersion=observation.version(),startedEpoch=epoch;
    const list=await catalog(),[rules,observed,inventoryContextNow]=await Promise.all([shared.read(),observation.read(),inventoryContext(list)]),inventory=await inventories.view(inventoryContextNow.definitions,inventoryContextNow.gm,inventoryContextNow.publicId);for(const card of list.cards){const container=inventory.containers[`card:${card.id}`];if(container)card.coins=Object.fromEntries(container.items.filter(row=>row.kind==='currency').map(row=>[row.coin!,row.quantity]));}const data={cards:list.cards.map(({id,name,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player})=>({id,name,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player})),monsters:list.monsters,role:list.role,shared:rules,inventory,settings:getState(),enabled:getState().enabled,visibility:{wiki:getState().enabled.search!==false&&(list.role==='GM'||!getState().searchGmOnly),monsters:getState().enabled.bestiary!==false&&(list.role==='GM'||getState().allowPlayerMonsters)},console:{timeStop:readTimeStop(list.scene[TIME_STOP_META]).active,portalEffects:getState().portalEffects!==false,players:[observed.player,...observed.party.filter(p=>p.id!==observed.player.id)]}};
@@ -563,9 +564,10 @@ async function start(){
   if(conditionsChanged)void OBR.broadcast.sendMessage('com.obr-suite/status/catalog-changed',{},{destination:'ALL'}).catch(error=>console.warn('[workbench] status invalidation pending',error));
   return {snapshot:await snapshot(`card:${a.cardId}`)};
  }
+ let hydratedHandshakeInstance='';
  async function receive(m:any,viaRelay=false){if(m.protocol!==protocol||m.session!==session)return;const route=viaRelay?'relay':'direct';
   if(m.type==='cardChanged'){if(typeof m.cardId==='string'&&invalidateCard(m.cardId,m.revision)){void hydrate(m.cardId);void refreshSelection();void refresh();}return;}
-  if(m.type==='hello'){last='';lastCatalog='';send('ready',{rolls},route);if(viaRelay&&child&&!child.closed)send('ready',{rolls},'direct');if(!viaRelay)void OBR.action.close().catch(()=>{});void refreshSelection();void refresh();void hydrate();return;}
+  if(m.type==='hello'){last='';lastCatalog='';send('ready',{rolls},route);if(viaRelay&&child&&!child.closed)send('ready',{rolls},'direct');if(!viaRelay)void OBR.action.close().catch(()=>{});void refreshSelection();void refresh(true);const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(instance!==hydratedHandshakeInstance){hydratedHandshakeInstance=instance;void hydrate();}return;}
   if(m.type==='ping'){send('pong',{at:Date.now()},route);return;}
   if(m.type==='requestStatus'){const answer=seen.get(m.requestId);if(answer)send('ack',{requestId:m.requestId,...answer},route);else send('requestPending',{requestId:m.requestId,active:activeRequests.has(m.requestId),known:requestRuns.has(m.requestId)},route);return;}
   if(m.type==='cancel'){if(!activeRequests.has(m.requestId)&&!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}
@@ -604,10 +606,11 @@ async function start(){
  for(const name of DICE_EVENTS)OBR.broadcast.onMessage(name,event=>send('diceEvent',{event:name,data:event}));
  OBR.player.onChange(player=>send('diceEvent',{event:'player',data:player}));
  let changeScheduled=false;
- const changed=()=>{if(changeScheduled)return;changeScheduled=true;queueMicrotask(()=>{changeScheduled=false;void refreshSelection();void refresh();void hydrate();});};
- observation.onChange(changed);OBR.scene.onReadyChange(()=>{chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
+ const changed=()=>{if(changeScheduled)return;changeScheduled=true;setTimeout(()=>{changeScheduled=false;void refreshSelection();void refresh();void hydrate();},75);};
+ observation.onChange(changed);OBR.scene.onReadyChange(()=>{hydratedHandshakeInstance='';chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
  OBR.broadcast.onMessage('com.obr-suite/cc-card-updated',event=>{const data=event.data as any,id=data?.cardId;if(id){if(!invalidateCard(id,data?.revision))return;void hydrate(id);}else{invalidateCards();void hydrate();}changed();});OBR.broadcast.onMessage('com.obr-suite/workbench/inventory-changed',event=>{if(event.connectionId!==playerConnection)inventories.invalidate();changed();});onStateChange(changed);rollListeners.add(()=>send('rolls',{rolls}));
  const connection=await OBR.player.getConnectionId();OBR.broadcast.onMessage('com.obr-suite/workbench-compose',event=>{if(event.connectionId===connection&&typeof(event.data as any)?.expression==='string')send('compose',{compose:{...(event.data as object),id:crypto.randomUUID()}});});
  setInterval(()=>send('pong',{at:Date.now()}),10000);
- setInterval(()=>{changed();scheduleInventoryRepair();},4000);
+ setInterval(scheduleInventoryRepair,4000);
+ setInterval(()=>{void refreshSelection();void refresh();void hydrate(undefined,true);},30000);
 }
