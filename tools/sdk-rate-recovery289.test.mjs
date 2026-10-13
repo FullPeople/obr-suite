@@ -56,6 +56,14 @@ test('actual music module suppresses hidden snapshots, coalesces bursts and back
  for(let i=0;i<500;i++)f.room.changed(f.room.state);
  await pause(200);assert.equal(f.attempts,failedAt,'RateLimitHit starts a cooldown rather than immediate replay');
  await pause(1100);assert.ok(f.attempts<=failedAt+2,'recovery remains bounded');
+ if(readFileSync('src/modules/musicBoard/index.ts','utf8').includes('if(WORKBENCH_DEV)')){
+  const clock=Date.now,offset=11000;Date.now=()=>clock()+offset;
+  try{
+   const expired=f.attempts;f.room.changed(f.room.state);await pause(30);assert.equal(f.attempts,expired,'expired workbench lease sends no snapshot');
+   f.emit('com.obr-suite/music-board:ready',{workbench:true,keepAlive:true});await pause(30);assert.equal(f.attempts,expired,'lease renewal does not force idle UI traffic');
+   f.room.changed(f.room.state);await pause(450);assert.ok(f.attempts>expired,'visible workbench receives changes after ten seconds');
+  }finally{Date.now=clock;}
+ }
  const before=f.attempts;f.room.changed(f.room.state);await music.teardownMusicBoard();await pause(500);
  assert.equal(f.attempts,before,'teardown cancels delayed snapshots');assert.equal(f.writes,0,'UI recovery never replays music commands');
  console.log(JSON.stringify({hiddenSnapshots:0,burstUpdates:500,visibleAttempts:f.attempts,musicWrites:f.writes}));
