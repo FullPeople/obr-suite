@@ -12,7 +12,7 @@
 
 ### 问题反馈
 
-- 公告中的 GitHub Issues 链接现在指向当前网站仓库。
+- 问题反馈：[GitHub Issues](https://github.com/FullPeople/DND-card-web/issues)。
 
 ## 1.0.286-dev · 2026-10-12 [history]
 

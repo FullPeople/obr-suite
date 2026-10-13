@@ -18,7 +18,7 @@ export async function workbenchAnnouncement(webRoot){
  const code=output.output.find(file=>file.type==='chunk')?.code;
  const {default:data}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
  if(!/^\d+\.\d+\.\d+-dev$/.test(data.version)||!Array.isArray(data.history)||!data.history.length)throw Error('Invalid paired Suite release notes');
- const lines=['# Full Suite 新版公告','## 版本 [changelog]',`- ${data.version} · Full Suite 新版工作台`,'## 支持与反馈 [info]','- 反馈邮箱：1763086701psw@gmail.com','- Owner 权限图文说明与完整用户指南请在工作台顶部打开「版本公告」。'];
+ const lines=['# Full Suite 新版公告','## 版本 [changelog]',`- ${data.version} · Full Suite 新版工作台`,'## 支持与反馈 [info]','- [GitHub Issues](https://github.com/FullPeople/DND-card-web/issues)','- 反馈邮箱：1763086701psw@gmail.com','- Owner 权限图文说明与完整用户指南请在工作台顶部打开「版本公告」。'];
  for(const [index,release] of data.history.entries()){
   lines.push(`## ${release.title} [${index?'history':'release'}]`);
   for(const section of release.sections){lines.push('### '+section.title);for(const item of section.items)lines.push('- '+item);}
