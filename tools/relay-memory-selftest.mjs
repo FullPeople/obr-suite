@@ -18,9 +18,7 @@ const post=(a,body)=>fetch(url(a,'host'),{method:'POST',headers:{Authorization:'
 const hold=a=>{const request=http.request(url(a,'host'),{method:'POST',headers:{Authorization:'Bearer '+a.host,'Content-Type':'application/json'}},response=>response.resume());request.on('error',()=>{});request.write('{');return request;};
 try{
  for(const a of accounts)assert.equal((await post(a,JSON.stringify({register:true,clientKey:a.client}))).status,200);
- const held=[hold(accounts[0]),hold(accounts[1])];await new Promise(r=>setTimeout(r,100));
- assert.equal((await post(accounts[2],'{}')).status,200); // reserved small control lane survives two stalled uploads
- const busy=await post(accounts[2],JSON.stringify({data:'x'.repeat(70*1024)}));assert.equal(busy.status,503);assert.equal((await busy.json()).code,'REQUEST_CAPACITY');held.forEach(r=>r.destroy());await new Promise(r=>setTimeout(r,100));assert.equal((await post(accounts[2],'{}')).status,200);
+ const held=[hold(accounts[0]),hold(accounts[1])];await new Promise(r=>setTimeout(r,100));const busy=await post(accounts[2],'{}');assert.equal(busy.status,503);assert.equal((await busy.json()).code,'REQUEST_CAPACITY');held.forEach(r=>r.destroy());await new Promise(r=>setTimeout(r,100));assert.equal((await post(accounts[2],'{}')).status,200);
  const payload=JSON.stringify({type:'catalog',data:'x'.repeat(8*1024*1024)});let accepted=0,rejected=0;
  for(let round=0;round<6;round++){
   const polls=accounts.map(a=>fetch(url(a,'client'),{headers:{Authorization:'Bearer '+a.client,'Accept-Encoding':'gzip'},signal:AbortSignal.timeout(3000)}).then(r=>r.arrayBuffer()).catch(()=>null));

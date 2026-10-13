@@ -2,6 +2,7 @@ import {sendMusicMessage} from './transport';
 import {WORKBENCH_DEV} from '../../workbench/channel';
 import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
+import { uiSnapshotPump } from "../../utils/uiSnapshotPump";
 import { assetUrl } from "../../asset-base";
 import { PANEL_IDS, getPanelOffset, registerPanelBbox, BC_PANEL_DRAG_END, BC_PANEL_RESET } from "../../utils/panelLayout";
 import { onViewportResize } from "../../utils/viewportAnchor";
@@ -37,14 +38,18 @@ let sfxTimer: ReturnType<typeof setTimeout> | null = null;
 const unsubs: Array<() => void> = [];
 function stored(key: string): string { try { return localStorage.getItem(key) || ""; } catch { return ""; } }
 function volumes(): LocalVolume { try { const value = JSON.parse(stored(LOCAL_VOLUMES) || "{}"); return { bgm: unit(value.bgm, .8), sfx: unit(value.sfx, 1), mute: value.mute === true }; } catch { return { bgm: .8, sfx: 1, mute: false }; } }
-async function view(force = false): Promise<void> {
-  if (!active || !room || !audio || (!force && ((!panelOpen&&Date.now()>workbenchViewUntil) || Date.now() - lastViewAt < 400))) return;
+let viewForce=false;
+const viewUpdates=uiSnapshotPump(()=>active&&!!room&&!!audio&&(panelOpen||Date.now()<=workbenchViewUntil),async()=>{
+  const force=viewForce;viewForce=false;await publishView(force);
+},error=>console.warn("[music-board] panel status failed",error));
+async function view(force = false): Promise<void> {viewForce ||= force;viewUpdates.request();}
+async function publishView(force = false): Promise<void> {
+  if (!active || !room || !audio) return;
   lastViewAt = Date.now();
   const storedBackup = readBackup(), recoverable = storedBackup?.previous || storedBackup?.current;
   const state=room.state;
-  try { await sendMusicMessage(MUSIC_VIEW, { ...(force||state!==lastViewState?{state}:{}), writer: room.writer, canControl: room.canControl, gm: room.isGM, roomId: OBR.room.id,
-    sound: audio.status, localVolume: audio.volume, progress: audio.progress(), backup: {available:!!recoverable, count:recoverable?.tracks.length || 0, at:recoverable?.at || 0, failed:backupFailed} }, { destination: "LOCAL" }); lastViewState=state; }
-  catch (error) { console.warn("[music-board] panel status failed", error); }
+  await sendMusicMessage(MUSIC_VIEW, { ...(force||state!==lastViewState?{state}:{}), writer: room.writer, canControl: room.canControl, gm: room.isGM, roomId: OBR.room.id,
+    sound: audio.status, localVolume: audio.volume, progress: audio.progress(), backup: {available:!!recoverable, count:recoverable?.tracks.length || 0, at:recoverable?.at || 0, failed:backupFailed} }, { destination: "LOCAL" }); lastViewState=state;
 }
 function command(op: MusicOp): void {
   void submit(op).catch(() => {});
@@ -162,6 +167,7 @@ export async function setupMusicBoard(): Promise<void> {
 }
 export async function teardownMusicBoard(): Promise<void> {
   active = false; epoch++; desiredOpen = false;
+  viewUpdates.cancel();viewForce=false;workbenchViewUntil=0;
   if (nextTimer !== null) clearTimeout(nextTimer); nextTimer = null; durationReported = "";
   if (sfxTimer !== null) clearTimeout(sfxTimer); sfxTimer = null;
   for (const off of unsubs.splice(0)) off(); resizeOff?.(); resizeOff = null;

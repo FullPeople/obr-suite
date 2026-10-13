@@ -5,16 +5,13 @@ import {fileURLToPath} from 'node:url';
 import {gzip,createGunzip} from 'node:zlib';
 import {applyDocumentChanges} from './patches.mjs';
 import {acceptUpgrade,isUpgradeRequest,refuseUpgrade,socketToken} from './websocket.mjs';
-import {storageLane} from './admission.mjs';
 const sharedDocuments=documentStore(process.env.WORKBENCH_DATA_DIR||fileURLToPath(new URL('./data/',import.meta.url)));
 const writes=new Map(),registrations=new Map();
 async function serialized(key,run){const task=(writes.get(key)||Promise.resolve()).catch(()=>{}).then(run);writes.set(key,task);try{return await task;}finally{if(writes.get(key)===task)writes.delete(key);}}
 const limit=(name,fallback)=>{const n=Number(process.env[name]);return Number.isSafeInteger(n)&&n>0?n:fallback;};
 const maxSessions=limit('RELAY_MAX_SESSIONS',512),maxRegistrations=limit('RELAY_REGISTRATIONS_PER_HOUR',30),hostTtl=limit('RELAY_HOST_TTL_MS',3600000),maxQueuedBytes=limit('RELAY_MAX_QUEUED_BYTES',32*1024*1024);
 const maxActivePosts=limit('RELAY_MAX_ACTIVE_POSTS',2),maxBodyBytes=limit('RELAY_MAX_BODY_BYTES',12_000_000);
-const maxSmallPosts=Math.min(32,limit('RELAY_MAX_SMALL_POSTS',16)),smallBodyBytes=64*1024;
-const storageWrites=storageLane(maxActivePosts),storageReads=storageLane(Math.min(4,limit('RELAY_MAX_STORAGE_READS',2)));
-let queuedBytes=0,activePosts=0,activeSmallPosts=0,bodyBytes=0,compressing=false;
+let queuedBytes=0,activePosts=0,bodyBytes=0,compressing=false;
 const sessions=new Map(),origin=process.env.RELAY_ORIGIN||'https://obr.dnd.center';
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 const hash=s=>createHash('sha256').update(s).digest('hex');
@@ -39,11 +36,9 @@ function attachSocket(box,connection,touch){
 }
 
 const server=http.createServer(async(req,res)=>{
- let admitted=false,requestBytes=0,released=false,parserReleased=false,finished=false,handlerDone=false,small=false,storageRelease;
- const cancelled=new AbortController();
- const releaseParser=()=>{if(!admitted||parserReleased)return;parserReleased=true;if(small)activeSmallPosts--;else activePosts--;};
- const release=()=>{releaseParser();if(!admitted||released||!handlerDone)return;released=true;bodyBytes-=requestBytes;};
- res.once('finish',()=>{finished=true;release();});res.once('close',()=>{finished=true;cancelled.abort();release();});
+ let admitted=false,requestBytes=0,released=false,finished=false;
+ const release=()=>{if(!admitted||released)return;released=true;activePosts--;bodyBytes-=requestBytes;};
+ res.once('finish',()=>{finished=true;release();});res.once('close',()=>{finished=true;release();});
  res.compress=/\bgzip\b/.test(req.headers['accept-encoding']||'');
  if(req.headers.origin&&req.headers.origin!==origin)return reply(res,403,{error:'origin'});
  if(req.method==='OPTIONS')return reply(res,405,{});
@@ -52,11 +47,9 @@ const server=http.createServer(async(req,res)=>{
   if(!/^[a-f0-9]{64}$/.test(id||'')||!['host','client'].includes(role)||!secret||secret.length>128)return reply(res,401,{});
   let body={};if(req.method==='POST'){
    const existing=sessions.get(id);if(existing?!equal(secret,role==='host'?existing.hostKey:existing.clientKey):role!=='host'||hash(secret)!==id){req.resume();return reply(res,401,{code:'SESSION_UNAVAILABLE'});}
-   const length=Number(req.headers['content-length']);
-   small=req.headers['content-encoding']!=='gzip'&&Number.isSafeInteger(length)&&length>=0&&length<=smallBodyBytes;
-   if(small?activeSmallPosts>=maxSmallPosts:activePosts>=maxActivePosts){res.setHeader('Retry-After','1');req.resume();return reply(res,503,{code:'REQUEST_CAPACITY',accepted:false,error:'中继正在处理其他请求，请稍后重试'});}
-   admitted=true;if(small)activeSmallPosts++;else activePosts++;
-const stream=req.headers['content-encoding']==='gzip'?req.pipe(createGunzip()):req;let size=0;const chunks=[];for await(const part of stream){size+=part.length;if(size>10_000_000){reply(res,413,{});req.destroy();return;}if(bodyBytes+part.length>maxBodyBytes){res.setHeader('Retry-After','1');reply(res,503,{code:'REQUEST_CAPACITY',accepted:false,error:'中继消息读取繁忙，请稍后重试'});req.destroy();return;}requestBytes+=part.length;bodyBytes+=part.length;chunks.push(part);}body=JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');releaseParser();}
+   if(activePosts>=maxActivePosts){res.setHeader('Retry-After','1');req.resume();return reply(res,503,{code:'REQUEST_CAPACITY',error:'中继正在处理其他请求，请稍后重试'});}
+   admitted=true;activePosts++;
+const stream=req.headers['content-encoding']==='gzip'?req.pipe(createGunzip()):req;let size=0;const chunks=[];for await(const part of stream){size+=part.length;if(size>10_000_000){reply(res,413,{});req.destroy();return;}if(bodyBytes+part.length>maxBodyBytes){res.setHeader('Retry-After','1');reply(res,503,{code:'REQUEST_CAPACITY',error:'中继消息读取繁忙，请稍后重试'});req.destroy();return;}requestBytes+=part.length;bodyBytes+=part.length;chunks.push(part);}body=JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}
   expireSessions();let session=sessions.get(id);
   if(role==='host'&&hash(secret)===id&&req.method==='POST'&&body.register){
    if(typeof body.clientKey!=='string'||body.clientKey.length<40)return reply(res,400,{});
@@ -73,12 +66,6 @@ const stream=req.headers['content-encoding']==='gzip'?req.pipe(createGunzip()):r
   }
   if(!session||!equal(secret,role==='host'?session.hostKey:session.clientKey))return reply(res,401,{error:'宿主会话尚未就绪或连接凭证已失效，请从枭熊房间重新打开工作台',code:'SESSION_UNAVAILABLE'});
   session.touched=Date.now();if(role==='host')session.hostTouched=Date.now();const box=session[role];
-  if(req.method==='POST'&&(body.sharedDocument||body.saveCard||body.deleteCard||body.createCard)){
-   if(role!=='host')return reply(res,403,{});
-   const lane=body.sharedDocument?.operation==='read'?storageReads:storageWrites;
-   storageRelease=await lane.acquire(cancelled.signal);
-   if(!storageRelease){res.setHeader('Retry-After','1');return reply(res,503,{code:'STORAGE_CAPACITY',accepted:false,error:'资料处理队列繁忙，请稍后重试；此次操作尚未执行'});}
-  }
   if(req.method==='POST'&&body.createCard){
    if(role!=='host')return reply(res,403,{});
    const {room,uploader,data}=body.createCard;
@@ -125,7 +112,7 @@ const stream=req.headers['content-encoding']==='gzip'?req.pipe(createGunzip()):r
    if(!body.register){const peer=session[role==='host'?'client':'host'];const next=role==='host'&&['ready','catalog','selection','rolls'].includes(body.type)?peer.queue.filter(m=>m.type!==body.type):[...peer.queue];next.push(body);const bytes=Buffer.byteLength(JSON.stringify(next));if(next.length>96||bytes>12_000_000||queuedBytes-(peer.bytes||0)+bytes>maxQueuedBytes){res.setHeader('Retry-After','5');return reply(res,429,{error:'中继消息队列繁忙',code:'QUEUE_CAPACITY'});}peer.queue=next;queueSize(peer);flush(peer);}reply(res,200,{ok:true});
   }else reply(res,405,{});
  }catch(error){reply(res,error instanceof SyntaxError?400:500,{error:error instanceof SyntaxError?'invalid message':'relay operation failed'});}
- finally{handlerDone=true;storageRelease?.();if(finished||!admitted)release();else releaseParser();}
+ finally{if(finished||!admitted)release();}
 });
 const sweep=setInterval(expireSessions,60000);sweep.unref();
 server.on('upgrade',(req,socket,head)=>{
