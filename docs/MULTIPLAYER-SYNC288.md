@@ -1,3 +1,5 @@
+> Withdrawn from production on 2026-10-13 after player incident reports. See [SDK-RATE-RECOVERY289.md](SDK-RATE-RECOVERY289.md) for containment and the current release scope.
+
 # 多人同步优化 288
 
 本批只修改工作台调度、共享库存重试和 Relay 有限请求额度。规则、资料与骰子权威计算保持原实现，QQ 云卡撤权与 6 秒授权过期保护继续独立生效。

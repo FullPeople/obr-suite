@@ -26,21 +26,31 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let lastVW = 0;
 let lastVH = 0;
 let primed = false;
+let reading=false,nextReadAt=0,failures=0,pollGeneration=0;
 
 const POLL_INTERVAL_MS = 500;
 
 async function tick(): Promise<void> {
-  if (listeners.size === 0) return;
+  if (listeners.size === 0||reading||Date.now()<nextReadAt) return;
+  reading=true;const generation=pollGeneration;
   let vw: number;
   let vh: number;
   try {
-    [vw, vh] = await Promise.all([
+    const results = await Promise.allSettled([
       OBR.viewport.getWidth(),
       OBR.viewport.getHeight(),
     ]);
+    const rejection=results.find(result=>result.status==='rejected');
+    if(rejection?.status==='rejected')throw rejection.reason;
+    [vw,vh]=results.map(result=>result.status==='fulfilled'?result.value:0);
+    failures=0;nextReadAt=0;
   } catch {
+    failures++;nextReadAt=Date.now()+Math.min(8000,1000*2**Math.min(failures,3));
     return;
+  } finally {
+    reading=false;
   }
+  if(generation!==pollGeneration||listeners.size===0||!Number.isFinite(vw)||!Number.isFinite(vh)||vw<=0||vh<=0)return;
   if (!primed) {
     // First successful read just records the baseline so we don't fire
     // a spurious "resize" on initial subscribe.
@@ -69,6 +79,7 @@ function maybeStopPoll(): void {
     clearInterval(pollTimer);
     pollTimer = null;
     primed = false;
+    pollGeneration++;nextReadAt=0;failures=0;
   }
 }
 
