@@ -84,6 +84,7 @@ async function start(){
  // commands and acknowledgements are never replayed by this recovery lane.
  let viewPublication=0;
  const viewPublications=new Map<string,number>();
+ const viewRetryAttempts=new Map<string,number>(),failedWarmViews=new Set<string>();let viewRetryTimer:ReturnType<typeof setTimeout>|undefined;
  const send=(type:string,extra:Record<string,unknown>={},route?:'relay'|'direct')=>{
   const data={protocol,session,hostStarted,type,...extra};
   const retryable=['selection','access','directory','catalog','cacheSnapshot','selectionError'].includes(type);
@@ -99,10 +100,14 @@ async function start(){
    else if(type==='directory')lastDirectory='';
    else if(type==='catalog')lastCatalog='';
    else if(type==='selectionError')selectionFailures.delete(String(extra.targetId||''));
-   else{const signature=JSON.stringify(extra.state),epoch=(extra.access as {epoch?:number}|undefined)?.epoch;for(const [id,snapshot] of warmSnapshots)if(snapshot.document===extra.document&&snapshot.state===signature&&snapshot.epoch===epoch)warmSnapshots.delete(id);}
+   else{const signature=JSON.stringify(extra.state),epoch=(extra.access as {epoch?:number}|undefined)?.epoch;for(const [id,snapshot] of warmSnapshots)if(snapshot.document===extra.document&&snapshot.state===signature&&snapshot.epoch===epoch){warmSnapshots.delete(id);failedWarmViews.add(id);}}
+   const attempts=viewRetryAttempts.get(publicationKey)||0;if(attempts>=4)return;
+   viewRetryAttempts.set(publicationKey,attempts+1);while(viewRetryAttempts.size>128)viewRetryAttempts.delete(viewRetryAttempts.keys().next().value!);
+   if(!viewRetryTimer)viewRetryTimer=setTimeout(()=>{viewRetryTimer=undefined;if(viewer!==warmClientInstance)return;void refreshSelection();void refresh();const ids=[...failedWarmViews];failedWarmViews.clear();for(const id of ids)void pushWarmSnapshot(id);},250);
   };
-  if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch(error){console.warn('[workbench] direct message failed',{type,error:error instanceof Error?error.name:'unknown'});failed();}
-  if(route==='relay'||route!=='direct'&&(!child||child.closed||directClientInstance!==warmClientInstance||Date.now()-directPeerSeen>15000)&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).catch(failed);
+  const delivered=()=>{if(viewer===warmClientInstance&&viewPublications.get(publicationKey)===publication)viewRetryAttempts.delete(publicationKey);};
+  if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);delivered();}catch(error){console.warn('[workbench] direct message failed',{type,error:error instanceof Error?error.name:'unknown'});failed();}
+  if(route==='relay'||route!=='direct'&&(!child||child.closed||directClientInstance!==warmClientInstance||Date.now()-directPeerSeen>15000)&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).then(delivered).catch(failed);
  };
  OBR.broadcast.onMessage(OPEN_WIKI_CHANNEL,event=>{if(event.connectionId!==playerConnection)return;try{const entry=sharedEntry((event.data as any)?.entry);send('showWiki',{entry,id:crypto.randomUUID()});}catch{}});
  OBR.broadcast.onMessage('com.obr-suite/workbench/open-page',event=>{if(event.connectionId!==playerConnection)return;const page=(event.data as any)?.page;if(['settings','announcement','features','music','textEffects','console'].includes(page))send('navigate',{page});});
