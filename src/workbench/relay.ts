@@ -17,6 +17,9 @@ export class Relay {
  }
  private async response(r:Response,operation=false){
   const data=await r.json().catch(()=>({}));if(!r.ok){
+   // A finite admission refusal did not execute this operation. It does not
+   // invalidate the transport or suspend unrelated acknowledgements and views.
+   if(r.status===503&&data.accepted===false&&['REQUEST_CAPACITY','STORAGE_CAPACITY'].includes(data.code))throw Object.assign(Error(data.error||'中继请求暂未执行，请稍后重试'),{status:503,notSent:true,code:data.code});
    // A rejected operation is not a broken connection. In particular, a CAS 409
    // must allow its caller to read the new revision; pausing the whole relay
    // would make that read (and unrelated saves) repeat the previous error.
@@ -28,10 +31,13 @@ export class Relay {
  private async post(message:any,beforeSend?:()=>void|Promise<void>){
   if(Date.now()<this.retryAt)throw Object.assign(Error(this.lastError?.message||'中继连接暂不可用'),{status:this.lastError?.status,notSent:true});
   const encoded=await wireBody(message);
-  // Registration and compression can suspend long enough for an owner grant
-  // to be revoked. Recheck immediately before transmitting the mutation.
-  try{await beforeSend?.();}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}
-  return withRequestTimeout(60000,this.abort.signal,async signal=>this.response(await fetch(this.endpoint(),{method:'POST',headers:{Authorization:`Bearer ${this.secret}`,...encoded.headers},body:encoded.body as BodyInit,signal}),!message?.register));
+  const view=['ready','pong','catalog','selection','access','directory','cacheSnapshot','selectionError','ack','requestPending','hello','ping','requestStatus'].includes(message?.type)&&!message.sharedDocument&&!message.saveCard&&!message.deleteCard&&!message.createCard;
+  for(let attempt=0;;attempt++){
+   // Recheck guards at each physical send, including explicitly unaccepted views.
+   try{await beforeSend?.();}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}
+   try{return await withRequestTimeout(60000,this.abort.signal,async signal=>this.response(await fetch(this.endpoint(),{method:'POST',headers:{Authorization:`Bearer ${this.secret}`,...encoded.headers},body:encoded.body as BodyInit,signal}),!message?.register));}
+   catch(error){if(!view||!(error as any)?.notSent||(error as any)?.status!==503||attempt>=2||this.stopped||this.abort.signal.aborted)throw error;await this.pause(30+Math.random()*60);}
+  }
  }
  private async register(){
   if(this.role!=='host'||this.active)return;

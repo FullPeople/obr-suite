@@ -60,9 +60,9 @@ async function start(){
  const warmCards=new Set<string>(),warmSnapshots=new Map<string,{document:any;state:string;epoch:number}>();
  let catalogCache: {signature:string;value:any}|undefined,lastDocument:any;
  const cloudPermissions=new Map<string,{scope:string;own:boolean;write:boolean;locked:boolean;name?:string}>();let cloudPermissionVersion=0;
- const cloudLeases=new Map<string,ReturnType<typeof authorizationLease>>(),rejectedCloudRooms=new Map<string,{scope:string;status:number}>();let authorizationChanged=()=>{};
+ const cloudLeases=new Map<string,ReturnType<typeof authorizationLease>>(),rejectedCloudRooms=new Map<string,{scope:string;status:number}>();let authorizationChanged=(_cardId?:string)=>{};
  function cloudPermissionScope(card:any){return JSON.stringify([qqSession()?.token||'',card.qqRoom?.id,card.qqRoom?.capability,card.qqCardId,card.locked,card.qqEditors||[]]);}
- function cloudLease(card:any){let lease=cloudLeases.get(card.id);if(!lease){lease=authorizationLease(()=>{const rows=observation.peek().room?.[QQ_CARDS],live=Array.isArray(rows)?rows.find(row=>row.id===card.id):undefined;return live?cloudPermissionScope(live):'missing';},()=>{cloudPermissionVersion++;catalogCache=undefined;authorizationChanged();});cloudLeases.set(card.id,lease);}return lease;}
+ function cloudLease(card:any){let lease=cloudLeases.get(card.id);if(!lease){lease=authorizationLease(()=>{const rows=observation.peek().room?.[QQ_CARDS],live=Array.isArray(rows)?rows.find(row=>row.id===card.id):undefined;return live?cloudPermissionScope(live):'missing';},()=>{cloudPermissionVersion++;catalogCache=undefined;authorizationChanged(card.id);});cloudLeases.set(card.id,lease);}return lease;}
  function rememberCloudPermission(card:any,info:any,read:ReturnType<ReturnType<typeof authorizationLease>['beginRead']>){const lease=cloudLease(card);if(!lease.verifyRead(read,info.write===true))return false;const next={scope:read.scope,own:info.owner===true,write:info.write===true,locked:info.locked!==false,name:typeof info.name==='string'?info.name:undefined};if(!sameValue(cloudPermissions.get(card.id),next)){cloudPermissions.set(card.id,next);cloudPermissionVersion++;while(cloudPermissions.size>128){const oldest=cloudPermissions.keys().next().value!;cloudPermissions.delete(oldest);cloudLeases.get(oldest)?.stop();cloudLeases.delete(oldest);}}return true;}
  async function readCloudPermission(card:any,read:ReturnType<ReturnType<typeof authorizationLease>['beginRead']>,path:string){try{return await withRequestTimeout(5000,undefined,signal=>qqRequest(path,'GET',undefined,card.qqRoom,{signal}));}catch(error){const lease=cloudLease(card);if(lease.accepts(read))lease.invalidate([401,403,404,410].includes(Number((error as {status?:number})?.status))?'readonly':'checking');throw error;}}
  const stockHistory=new Map<string,{changes:{id:string;before:any[];after:any[]}[];lockChanges?:{id:string;before:boolean;after:boolean}[]}>();
@@ -101,7 +101,7 @@ async function start(){
    else if(type==='selectionError')selectionFailures.delete(String(extra.targetId||''));
    else{const signature=JSON.stringify(extra.state),epoch=(extra.access as {epoch?:number}|undefined)?.epoch;for(const [id,snapshot] of warmSnapshots)if(snapshot.document===extra.document&&snapshot.state===signature&&snapshot.epoch===epoch)warmSnapshots.delete(id);}
   };
-  if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch{failed();}
+  if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch(error){console.warn('[workbench] direct message failed',{type,error:error instanceof Error?error.name:'unknown'});failed();}
   if(route==='relay'||route!=='direct'&&(!child||child.closed||directClientInstance!==warmClientInstance||Date.now()-directPeerSeen>15000)&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).catch(failed);
  };
  OBR.broadcast.onMessage(OPEN_WIKI_CHANNEL,event=>{if(event.connectionId!==playerConnection)return;try{const entry=sharedEntry((event.data as any)?.entry);send('showWiki',{entry,id:crypto.randomUUID()});}catch{}});
@@ -483,7 +483,7 @@ async function start(){
    }).catch(error=>{if(id===chosen&&generation===selectionGeneration&&readScene===observation.sceneEpoch()&&readAuthority===observation.authorityVersion(id))selectionFailure(id,error,readAccess);});
   }catch(error){if(chosen)selectionFailure(chosen,error,issuedAccess);else send('error',{message:'角色目录读取未完成；请核对连接后刷新目录'});}finally{selecting=false;if(selectAgain){selectAgain=false;void refreshSelection();}}
  }
- type HydrationJob={key:string;card:Awaited<ReturnType<typeof catalog>>['cards'][number];list:Awaited<ReturnType<typeof catalog>>;started:boolean;promise:Promise<void>;resolve:()=>void};
+ type HydrationJob={key:string;card:Awaited<ReturnType<typeof catalog>>['cards'][number];list:Awaited<ReturnType<typeof catalog>>;started:boolean;audit:boolean;promise:Promise<void>;resolve:()=>void};
  const cardHydrations=new Map<string,HydrationJob>(),hydrationQueue:HydrationJob[]=[];let backgroundHydrations=0;
  function pumpHydrations(){while(backgroundHydrations<2&&hydrationQueue.length){const job=hydrationQueue.shift()!;if(!job.started)startHydration(job,true);}}
  function startHydration(job:HydrationJob,background:boolean){if(job.started)return;job.started=true;if(background)backgroundHydrations++;
@@ -493,19 +493,20 @@ async function start(){
     // Invalidation events keep documents fresh. A slow fallback audit recovers
     // missed legacy broadcasts without re-downloading the selected portrait every four seconds.
     const ttl=120000;
-    let doc=await loadCard(c.id,job.key,!documentTimes.has(job.key)||Date.now()-(documentTimes.get(job.key)||0)>ttl);
+    const audit=job.audit;job.audit=false;
+    let doc=await loadCard(c.id,job.key,audit||!documentTimes.has(job.key)||Date.now()-(documentTimes.get(job.key)||0)>ttl);
     if(!mutation)doc=await reconcileRuntime(c.id,job.key,list.items,list.scene,doc,c.write);
-    if(generation!==(cardInvalidations.get(job.key)||0))continue;
+    if(generation!==(cardInvalidations.get(job.key)||0)||job.audit)continue;
     if(!sameValue(before,doc)){void refresh();if(chosen===`card:${c.id}`)void refreshSelection();}void pushWarmSnapshot(`card:${c.id}`);break;
    }}catch{}finally{cardHydrations.delete(job.key);job.resolve();if(background)backgroundHydrations--;pumpHydrations();}})();
  }
- function scheduleHydration(card:HydrationJob['card'],list:HydrationJob['list'],priority:boolean){const key=`${OBR.room.id}:card:${card.id}`,existing=cardHydrations.get(key);
-  if(existing){existing.card=card;existing.list=list;if(priority&&!existing.started)startHydration(existing,false);return existing.promise;}
-  let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r),job:HydrationJob={key,card,list,started:false,promise,resolve};cardHydrations.set(key,job);
+ function scheduleHydration(card:HydrationJob['card'],list:HydrationJob['list'],priority:boolean,audit=false){const key=`${OBR.room.id}:card:${card.id}`,existing=cardHydrations.get(key);
+  if(existing){existing.card=card;existing.list=list;existing.audit||=audit;if(priority&&!existing.started)startHydration(existing,false);return existing.promise;}
+  let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r),job:HydrationJob={key,card,list,started:false,audit,promise,resolve};cardHydrations.set(key,job);
   if(priority)startHydration(job,false);else{hydrationQueue.push(job);pumpHydrations();}return promise;
  }
- async function hydrate(cardId?:string){let list:CatalogValue;try{list=await catalog();}catch{return;}publishAccess(list);for(const card of list.cards.slice(0,24))if(warmCards.size<24)warmCard(`card:${card.id}`);await Promise.all(list.cards.filter(c=>!cardId||c.id===cardId).map(c=>scheduleHydration(c,list,chosen===`card:${c.id}`)));}
- async function refresh(){if(!relayActive&&(!child||child.closed))return;if(refreshing){again=true;return;}refreshing=true;
+ async function hydrate(cardId?:string,audit=false){let list:CatalogValue;try{list=await catalog();}catch{return;}publishAccess(list);for(const card of list.cards.slice(0,24))if(warmCards.size<24)warmCard(`card:${card.id}`);await Promise.all(list.cards.filter(c=>!cardId||c.id===cardId).map(c=>scheduleHydration(c,list,chosen===`card:${c.id}`,audit)));}
+ async function refresh(handshakeOnly=false){if(!relayActive&&(!child||child.closed))return;if(refreshing){if(!handshakeOnly)again=true;return;}refreshing=true;
   try{
    const observedVersion=observation.version(),startedEpoch=epoch;
    const list=await catalog();const access=publishAccess(list);const [rules,observed,inventoryContextNow]=await Promise.all([shared.read(),observation.read(),inventoryContext(list)]),inventory=await inventories.view(inventoryContextNow.definitions,inventoryContextNow.gm,inventoryContextNow.publicId);for(const card of list.cards){const container=inventory.containers[`card:${card.id}`];if(container)card.coins=Object.fromEntries(container.items.filter(row=>row.kind==='currency').map(row=>[row.coin!,row.quantity]));}const personalQQ=qqSession();const data={qqAccount:personalQQ?{id:personalQQ.accountId,nickname:personalQQ.nickname,avatar:personalQQ.avatar}:null,cards:list.cards.map(({id,name,cloudRoom,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})=>({id,name,cloudRoom,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})),monsters:list.monsters,role:list.role,shared:rules,inventory,settings:getState(),enabled:getState().enabled,visibility:{wiki:getState().enabled.search!==false&&(list.role==='GM'||!getState().searchGmOnly),monsters:getState().enabled.bestiary!==false&&(list.role==='GM'||getState().allowPlayerMonsters)},console:{timeStop:readTimeStop(list.scene[TIME_STOP_META]).active,portalEffects:getState().portalEffects!==false,players:[observed.player,...observed.party.filter(p=>p.id!==observed.player.id)]}};
@@ -848,10 +849,11 @@ async function start(){
   if(conditionsChanged)void OBR.broadcast.sendMessage('com.obr-suite/status/catalog-changed',{},{destination:'ALL'}).catch(error=>console.warn('[workbench] status invalidation pending',error));
   return {snapshot:await snapshot(`card:${a.cardId}`)};
  }
+ let hydratedHandshakeScope='';
  async function receive(m:any,viaRelay=false){if(m.protocol!==protocol||m.session!==session)return;const route=viaRelay?'relay':'direct';
   if(m.type==='cardChanged'){if(typeof m.cardId==='string'&&invalidateCard(m.cardId,m.revision)){void hydrate(m.cardId);void refreshSelection();void refresh();}return;}
   if(m.type==='startup'){workbenchStartup.update(m.clientInstance,m.startupPhase);return;}
-  if(m.type==='hello'){workbenchStartup.hello(typeof m.clientInstance==='string'?m.clientInstance:'legacy',m.startupPhase,viaRelay?undefined:child||undefined,m.clientStarted);last='';lastCatalog='';lastDirectory='';lastAccessEpoch=0;const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(instance!==warmClientInstance){warmClientInstance=instance;warmSnapshots.clear();}send('ready',{qqAccount:publicQQ(),rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},route);if(viaRelay&&child&&!child.closed)send('ready',{qqAccount:publicQQ(),rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},'direct');if(!viaRelay)void OBR.action.close().catch(()=>{});void refreshSelection();void refresh();void hydrate();return;}
+  if(m.type==='hello'){workbenchStartup.hello(typeof m.clientInstance==='string'?m.clientInstance:'legacy',m.startupPhase,viaRelay?undefined:child||undefined,m.clientStarted);last='';lastCatalog='';lastDirectory='';lastAccessEpoch=0;const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(instance!==warmClientInstance){warmClientInstance=instance;warmSnapshots.clear();}send('ready',{qqAccount:publicQQ(),rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},route);if(viaRelay&&child&&!child.closed)send('ready',{qqAccount:publicQQ(),rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},'direct');if(!viaRelay)void OBR.action.close().catch(()=>{});void refreshSelection();void refresh(true);const scope=JSON.stringify([instance,observation.sceneEpoch(),observation.authorityVersion(),qqSession()?.accountId||'']);if(scope!==hydratedHandshakeScope){hydratedHandshakeScope=scope;void hydrate();}return;}
   if(m.type==='ping'){workbenchStartup.update(m.clientInstance,m.startupPhase);send('pong',{at:Date.now()},route);return;}
   if(m.type==='requestStatus'){const answer=seen.get(m.requestId);if(answer)send('ack',{requestId:m.requestId,...answer},route);else send('requestPending',{requestId:m.requestId,active:activeRequests.has(m.requestId),known:requestRuns.has(m.requestId)},route);return;}
   if(m.type==='cancel'){if(!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}
@@ -902,8 +904,8 @@ async function start(){
  for(const name of DICE_EVENTS)OBR.broadcast.onMessage(name,event=>{if(name==='com.obr-suite/dice-roll'&&!canForwardDiceHistory(event))return;send('diceEvent',{event:name,data:event});});
  OBR.player.onChange(player=>send('diceEvent',{event:'player',data:player}));
  let changeScheduled=false;
- const changed=()=>{if(changeScheduled)return;changeScheduled=true;queueMicrotask(()=>{changeScheduled=false;void refreshSelection();void refresh();void hydrate();for(const id of warmCards)if(!id.startsWith('card:'))void pushWarmSnapshot(id);});};
- authorizationChanged=changed;
+ const changed=()=>{if(changeScheduled)return;changeScheduled=true;setTimeout(()=>{changeScheduled=false;void refreshSelection();void refresh();void hydrate();for(const id of warmCards)if(!id.startsWith('card:'))void pushWarmSnapshot(id);},75);};
+ authorizationChanged=cardId=>{void refreshSelection();void refresh();if(cardId)void hydrate(cardId);};
  const cloudChanges=observeQQChanges({rooms:()=>qqChangeRooms(observation.peek().room||{}),changed:async()=>{
   const rows=observation.peek().room?.[QQ_CARDS];
   const cards=Array.isArray(rows)?rows.filter(card=>card?.qqRoom&&typeof card.id==='string'):[];
@@ -921,5 +923,6 @@ async function start(){
  setInterval(()=>{workbenchStartup.releaseClosedWindow();send('pong',{at:Date.now()});},10000);
  // Recover missed SDK ownership events without requiring a DM card switch.
  setInterval(()=>{if(child&&!child.closed||relayActive&&Date.now()-relayPeerSeen<45000)void observation.refreshAuthority().catch(()=>{});},4000);
- setInterval(()=>{changed();scheduleInventoryRepair();},4000);
+ setInterval(scheduleInventoryRepair,4000);
+ setInterval(()=>{void refreshSelection();void refresh();void hydrate(undefined,true);},30000);
 }
