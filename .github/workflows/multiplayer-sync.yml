@@ -1,7 +1,7 @@
 name: Multiplayer synchronization regression
 on:
   push:
-    branches: [dev, main, 'codex/multiplayer*']
+    branches: [dev, main, 'codex/multiplayer*', 'codex/sdk-rate*']
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,13 +20,12 @@ jobs:
       - run: npm ci
       - name: Check host types
         run: npx tsc --noEmit
-      - name: Actual inventory client, CAS, permissions and uncertain receipts
-        run: node --test tools/inventory-concurrency288.test.mjs
-      - name: Reserved control capacity and finite storage queues
-        if: ${{ hashFiles('tools/relay-multiplayer288.test.mjs') != '' }}
-        run: node --test tools/relay-multiplayer288.test.mjs tools/relay-capacity.test.mjs
+      - name: Actual music UI and viewport SDK rate recovery
+        run: node --test tools/sdk-rate-recovery289.test.mjs
+      - name: Music authority, handoff and movement-only party updates
+        run: node src/modules/musicBoard/selftest.mjs
       - name: Retain the 256 MiB Relay memory limit
-        if: ${{ hashFiles('server/workbench-relay/admission.mjs') != '' }}
+        if: ${{ hashFiles('tools/relay-memory-selftest.mjs') != '' }}
         run: node tools/relay-memory-selftest.mjs
       - name: Inventory projection and operation compatibility
         run: node tools/workbench-inventory-sync-selftest.mjs

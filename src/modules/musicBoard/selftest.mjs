@@ -31,14 +31,14 @@ function network() {
     const callbacks = new Map();
     const on = (key, fn) => { if (!callbacks.has(key)) callbacks.set(key, new Set()); callbacks.get(key).add(fn); return () => callbacks.get(key).delete(fn); };
     const player = { id, connectionId: id, role, name: id }; players.set(id, player);
-    const client = { readGate: null, readCalls: 0, emit: (key, data) => { for (const fn of [...(callbacks.get(key) || [])]) void fn(data); }, sdk: null };
+    const client = { readGate: null, readCalls: 0, sceneReadCalls: 0, emit: (key, data) => { for (const fn of [...(callbacks.get(key) || [])]) void fn(data); }, sdk: null };
     client.sdk = {
       player: { getId: async () => id, getConnectionId: async () => id, getRole: async () => player.role, onChange: fn => on("player", fn) },
       party: { getPlayers: async () => [...players.values()].filter(p => p.id !== id), onChange: fn => on("party", fn) },
       room: { id:"music-test-room", getMetadata: async () => { client.readCalls++; const copy = structuredClone(metadata); const blocked = client.readGate; if (blocked) await blocked.promise; return copy; },
         setMetadata: async patch => { if(roomError){const error=roomError;roomError="";throw Error(error);}writes.push({ id, patch: structuredClone(patch) }); const blocked = writeGate; if (blocked) await blocked.promise;
           metadata = { ...metadata, ...structuredClone(patch) }; for (const target of clients.values()) target.emit("metadata", structuredClone(metadata)); }, onMetadataChange: fn => on("metadata", fn) },
-      scene: { isReady: async () => sceneReady, getMetadata: async () => ({ "com.obr-suite/music-board:state": { bgm: { url: "https://example.invalid/legacy.ogg", name: "Legacy", loop: true, paused: false, position: 12 }, sfx: [{ id: "old", url: "https://example.invalid/sfx.ogg", name: "Old" }] },...structuredClone(sceneMetadata)}),
+      scene: { isReady: async () => sceneReady, getMetadata: async () => (client.sceneReadCalls++, { "com.obr-suite/music-board:state": { bgm: { url: "https://example.invalid/legacy.ogg", name: "Legacy", loop: true, paused: false, position: 12 }, sfx: [{ id: "old", url: "https://example.invalid/sfx.ogg", name: "Old" }] },...structuredClone(sceneMetadata)}),
         onReadyChange:fn=>on("scene-ready",fn),onMetadataChange:fn=>on("scene-meta",fn),
         setMetadata:async patch=>{sceneWrites.push(structuredClone(patch));Object.assign(sceneMetadata,structuredClone(patch));for(const target of clients.values())target.emit("scene-meta",structuredClone(sceneMetadata))}
       },
@@ -117,6 +117,10 @@ async function roomTest(mutation) {
     await other.submit({type:"add",tracks:[track("quota-race")]});
     assert.deepEqual(pool.metadata,beforeRace,"SDK quota race falls back without altering the failed room snapshot");
     assert.ok(pool.sceneMetadata[sceneKey].tracks.some(track=>track.id==='quota-race'));
+    await settle();const ownerClient=pool.clients.get(other.connectionId),readsBeforeParty=ownerClient.sceneReadCalls;
+    for(let i=0;i<200;i++){pool.players.get('B').selection=['moving-token-'+i];pool.changed();}
+    await settle();assert.equal(ownerClient.sceneReadCalls,readsBeforeParty,'selection-only party changes cannot schedule owner scene reads');
+
     const beforePermission=structuredClone(other.state);pool.roomError="permission denied";
     await assert.rejects(other.submit({type:"add",tracks:[track("must-not-write")]}),/permission denied/);
     assert.deepEqual(other.state,beforePermission,"host permissions are not bypassed through scene fallback");

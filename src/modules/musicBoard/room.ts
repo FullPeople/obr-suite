@@ -65,7 +65,8 @@ export class RoomMusic {
     if (!this.active || epoch !== this.epoch) return;
     this.self = { id, connectionId, role } as Player;
     let partyVersion = 0;
-    this.unsubs.push(OBR.party.onChange(players => { partyVersion++; this.party = players; this.changed(this.state); this.ensureSceneOwner(); }),
+    this.unsubs.push(OBR.party.onChange(players => { const previousWriter=this.writer;partyVersion++;this.party=players;
+      if(previousWriter!==this.writer){this.changed(this.state);this.ensureSceneOwner();} }),
       OBR.player.onChange(player => { if (this.self?.id === player.id && this.self?.connectionId === player.connectionId && this.self?.role === player.role) return;
         this.self = player; this.changed(this.state); this.ensureSceneOwner(); }),
       OBR.room.onMetadataChange(metadata => {
