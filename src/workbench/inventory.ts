@@ -37,7 +37,11 @@ export function inventoryDocuments(relay:Relay,room:string){
  let reading:Promise<any>|undefined;
  async function read(force=false){if(force||!cached||Date.now()-readAt>10000){if(!reading)reading=relay.send({sharedDocument:{key,operation:'read'}}).finally(()=>{reading=undefined;});const value=await reading;if(!cached||value.revision>=cached.revision){cached={revision:value.revision,data:value.data||emptyLedger()};readAt=Date.now();}}return cached!;}
  async function transaction<T extends {ledger:Ledger}>(change:(ledger:Ledger)=>T){
-  for(let attempt=0;attempt<5;attempt++){const current=await read(true),result=change(current.data);if(result.ledger===current.data)return {...result,revision:current.revision};try{const next=await relay.send({sharedDocument:{key,operation:'write',expected:current.revision,data:result.ledger}});if(!cached||next.revision>=cached.revision){cached=next;readAt=Date.now();}return {...result,revision:next.revision};}catch(error){const status=(error as any)?.status;if(status===409&&attempt<4)continue;if(status&&status<500)throw error;
+  const deadline=performance.now()+3000;
+  for(let attempt=0;attempt<12;attempt++){const current=await read(true),result=change(current.data);if(result.ledger===current.data)return {...result,revision:current.revision};try{const next=await relay.send({sharedDocument:{key,operation:'write',expected:current.revision,data:result.ledger}});if(!cached||next.revision>=cached.revision){cached=next;readAt=Date.now();}return {...result,revision:next.revision};}catch(error){if((error as any)?.notSent)throw error;const status=(error as any)?.status;if(status===409&&attempt<11&&performance.now()<deadline){
+    const remaining=deadline-performance.now(),delay=Math.min(remaining,20+Math.random()*Math.min(230,20*2**Math.min(attempt,4)));
+    if(delay>0)await new Promise(resolve=>setTimeout(resolve,delay));continue;
+   }if(status&&status<500)throw error;
    try{const next=await relay.send({sharedDocument:{key,operation:'read'}}),added=result.ledger.receipts.filter(receipt=>!current.data.receipts.some(r=>r.id===receipt.id));if(same(next.data,result.ledger)||added.length&&added.every(receipt=>next.data?.receipts?.some((r:any)=>r.id===receipt.id))){if(!cached||next.revision>=cached.revision){cached=next;readAt=Date.now();}return {...result,revision:next.revision};}}catch{}
    throw Object.assign(Error('库存保存结果暂时无法确认；本地改动已保留，请恢复连接后核对。'),{uncertain:true,diagnostic:{code:'INVENTORY_RESULT_UNKNOWN'}});
   }}

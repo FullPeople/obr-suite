@@ -1,0 +1,32 @@
+name: Multiplayer synchronization regression
+on:
+  push:
+    branches: [dev, main, 'codex/multiplayer*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: multiplayer-sync-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  synchronization:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.9.0'
+      - run: npm ci
+      - name: Check host types
+        run: npx tsc --noEmit
+      - name: Actual inventory client, CAS, permissions and uncertain receipts
+        run: node --test tools/inventory-concurrency288.test.mjs
+      - name: Reserved control capacity and finite storage queues
+        if: ${{ hashFiles('tools/relay-multiplayer288.test.mjs') != '' }}
+        run: node --test tools/relay-multiplayer288.test.mjs tools/relay-capacity.test.mjs
+      - name: Retain the 256 MiB Relay memory limit
+        if: ${{ hashFiles('server/workbench-relay/admission.mjs') != '' }}
+        run: node tools/relay-memory-selftest.mjs
+      - name: Inventory projection and operation compatibility
+        run: node tools/workbench-inventory-sync-selftest.mjs
