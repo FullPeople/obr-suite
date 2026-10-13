@@ -14,3 +14,5 @@ Small shared fixes:
 `tools/sdk-rate-recovery289.test.mjs` bundles actual music index and viewport code at mocked SDK boundaries. It covers 500 hidden/visible updates, fresh trailing permission, nested RateLimitHit, cancellation and no command replay; viewport reads delayed by 1.2 seconds stay at one pair. Music selftest adds 200 selection-only party changes and retains permission, handoff, deduplication and scene quota scenarios. These are isolated regression checks, not real multiplayer acceptance.
 
 The withdrawn admission/concurrency experiment remains in history and unused tests for investigation. It is not this release's production gate.
+
+Music success receipts include an optional persisted revision. New control pages wait for the corresponding displayed state before allowing another shared action; the dev editor also waits before closing a successful edit/import. Receipts without a revision remain compatible. Real browser regression initially reproduced pause/resume using stale displayed state, then passed after this correction, including native editing and imports.

@@ -163,7 +163,7 @@ export class RoomMusic {
         ok = true;
       }
     } catch (failure) { error = failure instanceof Error ? failure.message : "failed"; console.warn("[music-board] room command rejected", { type: request.op.type, error }); }
-    if (current()) await OBR.broadcast.sendMessage(MUSIC_ACK, { requestId: request.requestId, receiver: senderId, ok, error: ok ? undefined : error }, { destination: "ALL" });
+    if (current()) await OBR.broadcast.sendMessage(MUSIC_ACK, { requestId: request.requestId, receiver: senderId, ok, revision: ok ? this.state.revision : undefined, error: ok ? undefined : error }, { destination: "ALL" });
   }
   async stop(): Promise<void> {
     this.active = false; this.epoch++; for (const off of this.unsubs.splice(0)) off();
