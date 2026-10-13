@@ -17,6 +17,9 @@ export class Relay {
  }
  private async response(r:Response,operation=false){
   const data=await r.json().catch(()=>({}));if(!r.ok){
+   // A finite admission refusal did not execute this operation. It does not
+   // invalidate the transport or suspend unrelated acknowledgements and views.
+   if(r.status===503&&data.accepted===false&&['REQUEST_CAPACITY','STORAGE_CAPACITY'].includes(data.code))throw Object.assign(Error(data.error||'中继请求暂未执行，请稍后重试'),{status:503,notSent:true,code:data.code});
    // A rejected operation is not a broken connection. In particular, a CAS 409
    // must allow its caller to read the new revision; pausing the whole relay
    // would make that read (and unrelated saves) repeat the previous error.
