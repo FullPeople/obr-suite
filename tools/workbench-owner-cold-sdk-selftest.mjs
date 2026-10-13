@@ -17,7 +17,7 @@ const out=resolve(process.env.PROFILE_OUT||'../owner-cold-sdk-evidence');mkdirSy
 const baseline=process.env.OWNER_BASELINE_REF;
 const readSource=(path)=>baseline?execFileSync('git',['show',baseline+':'+relative(root,path)],{cwd:root,encoding:'utf8'}):readFileSync(path,'utf8');
 const source=readSource(join(root,'src/workbench/background.ts'));
-let profiled=source.replace('setInterval(()=>{changed();scheduleInventoryRepair();},4000);', "(window as any).hostSetupComplete=true;setInterval(()=>{changed();scheduleInventoryRepair();},4000);");
+let profiled=source.replace(/setInterval\(scheduleInventoryRepair,4000\);|setInterval\(\(\)=>\{changed\(\);scheduleInventoryRepair\(\);\},4000\);/,match=>"(window as any).hostSetupComplete=true;"+match);
 if(!profiled.includes('hostSetupComplete'))throw Error('Production setup marker changed');
 const counts='{}';
 const serveOnly=process.env.OWNER_SERVE_ONLY==='1';
