@@ -86,7 +86,7 @@ import {
 const POPOVER_ID = "com.obr-suite/settings";
 const KOFI_URL = "https://ko-fi.com/fullpeople";
 const EMAIL = "1763086701psw@gmail.com";
-const GITHUB_URL = "https://github.com/FullPeople/DND-card/issues";
+const GITHUB_URL = "https://github.com/FullPeople/DND-card-web/issues";
 const BUBBLES_SETTINGS_KEY = "com.obr-suite/bubbles/settings";
 const DEFAULT_BUBBLES_PLAYER_THRESHOLD = 25;
 const DEFAULT_BUBBLES_VERTICAL_OFFSET = -20;
