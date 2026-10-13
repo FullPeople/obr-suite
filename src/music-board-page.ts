@@ -13,8 +13,10 @@ import { ICONS } from "./icons";
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 interface View { state: MusicSession; canControl: boolean; gm: boolean; writer: string; sound: SoundStatus; roomId: string;
   localVolume: LocalVolume; progress: {position:number; duration:number}; backup?: {available:boolean; count:number; at:number; failed:boolean} }
-interface Pending { timer:ReturnType<typeof setTimeout>; resolve:(value:boolean)=>void }
+interface Pending { timer:ReturnType<typeof setTimeout>; resolve:(value:boolean)=>void; revision?:number }
 let current: View | null = null, connectionId = "", alive = true, librarySignature = "", queueSignature = "";
+let confirmedRevision=0;
+function awaitingState():boolean { return !!current && current.state.revision < confirmedRevision; }
 let catalog: Track[] = [], catalogLoading = false, editing: Track | null = null, editingRevision = 0, formBus:"bgm"|"sfx" = "bgm", formLoop = true, formColor = "#50525b";
 let importTracks: Track[] | null = null, importBus:"bgm"|"sfx" = "bgm", importMode:"merge"|"replace" = "merge", importRevision = 0, backupRequest = "";
 let backupTimer:ReturnType<typeof setTimeout> | undefined;
@@ -28,15 +30,22 @@ try { document.documentElement.dataset.suiteNight = localStorage.getItem("full-s
 
 function feedback(value:string):void { el("feedback").textContent = value; }
 function local(type:string, extra:object = {}):void { void OBR.broadcast.sendMessage(MUSIC_LOCAL,{type,...extra},{destination:"LOCAL"}).catch(error=>feedback(musicError(error))); }
+function finishCommand(requestId:string,ok:boolean,message:string):void {
+  const entry=pending.get(requestId); if(!entry)return;
+  clearTimeout(entry.timer);pending.delete(requestId);feedback(message);render();entry.resolve(ok);
+}
 function command(op:MusicOp):Promise<boolean> {
-  if (!current?.canControl || pending.size >= (op.type === "sfx" ? 4 : 1)) return Promise.resolve(false);
+  if (!current?.canControl || awaitingState() || pending.size >= (op.type === "sfx" ? 4 : 1)) return Promise.resolve(false);
   if (["pause","resume","seek","loop","stop"].includes(op.type)) op = {...op, expectedPlaybackId:current.state.bgm?.playbackId || ""};
   const requestId = crypto.randomUUID();
   return new Promise(resolve=>{
-    const timer = setTimeout(()=>finish(false,mt("noWriter")),7500);
-    const finish = (ok:boolean,message:string) => { const entry=pending.get(requestId); if (!entry) return; clearTimeout(entry.timer); pending.delete(requestId); feedback(message); render(); entry.resolve(ok); };
-    pending.set(requestId,{timer,resolve}); feedback(mt("saving")); render();
-    void sendMusicMessage(MUSIC_COMMAND,{requestId,op},{destination:"ALL"}).catch(error=>finish(false,musicError(error)));
+    const timer=setTimeout(()=>{
+      // A received success remains success even if its UI snapshot is delayed.
+      const saved=typeof pending.get(requestId)?.revision==='number';
+      finishCommand(requestId,saved,saved?mt("completed"):mt("noWriter"));
+    },7500);
+    pending.set(requestId,{timer,resolve});feedback(mt("saving"));render();
+    void sendMusicMessage(MUSIC_COMMAND,{requestId,op},{destination:"ALL"}).catch(error=>finishCommand(requestId,false,musicError(error)));
   });
 }
 function fmt(seconds:number):string { return !Number.isFinite(seconds)||seconds<0 ? "--:--" : Math.floor(seconds/60)+":"+String(Math.floor(seconds%60)).padStart(2,"0"); }
@@ -95,21 +104,21 @@ function render():void {
   el("play").textContent=mt(bgm&&!bgm.paused?"pause":"play"); el("loop").setAttribute("aria-pressed",String(bgm?.track.loop||false));
   el("soundNotice").hidden=current?.sound==="ready"; el("soundMessage").textContent=current?.sound==="blocked"?mt("blocked"):current?.sound==="error"?mt("audioError"):"";
   el("readOnly").hidden=!current||current.canControl; el("permission").hidden=!current?.gm; el<HTMLInputElement>("allowPlayers").checked=state?.allowPlayers!==false;
-  el("saved").textContent=!current?mt("loading"):pending.size?mt("saving"):current.backup?.failed?mt("backupFailed"):mt("saved");
+  el("saved").textContent=!current?mt("loading"):pending.size||awaitingState()?mt("saving"):current.backup?.failed?mt("backupFailed"):mt("saved");
   if(current) {
     for(const [id,value] of [["bgmVolume",current.localVolume.bgm],["sfxVolume",current.localVolume.sfx],["roomBgmVolume",state!.bus.bgm],["roomSfxVolume",state!.bus.sfx]] as const) { const input=el<HTMLInputElement>(id); if(document.activeElement!==input) input.value=String(Math.round(value*100)); el(id+"Value").textContent=input.value; }
     el("mute").setAttribute("aria-pressed",String(current.localVolume.mute));
     const seek=el<HTMLInputElement>("seek"); if(document.activeElement!==seek) { seek.max=String(current.progress.duration||100); seek.value=String(current.progress.position||0); }
     renderLibrary(); renderQueue();
   }
-  for(const input of document.querySelectorAll<HTMLInputElement|HTMLButtonElement>("[data-shared]")) input.disabled=!current?.canControl||pending.size>=(input.dataset.retrigger?4:1)||input.dataset.unavailable==="true";
+  for(const input of document.querySelectorAll<HTMLInputElement|HTMLButtonElement>("[data-shared]")) input.disabled=!current?.canControl||awaitingState()||pending.size>=(input.dataset.retrigger?4:1)||input.dataset.unavailable==="true";
   el<HTMLButtonElement>("previous").disabled ||= !state?.history?.length;
   el<HTMLButtonElement>("play").disabled ||= !bgm&&!state?.queue.length;
   el<HTMLButtonElement>("next").disabled ||= !state?.queue.length;
   el<HTMLButtonElement>("stop").disabled ||= !bgm;
   el<HTMLButtonElement>("loop").disabled ||= !bgm;
   el<HTMLInputElement>("seek").disabled ||= !bgm||!current?.progress.duration;
-  el<HTMLInputElement>("allowPlayers").disabled=!current?.gm||pending.size>0;
+  el<HTMLInputElement>("allowPlayers").disabled=!current?.gm||awaitingState()||pending.size>0;
   el<HTMLButtonElement>("clearQueue").disabled ||= !state?.queue.length;
   el<HTMLButtonElement>("enqueueVisible").disabled ||= !visibleTracks().some(track=>track.bus==="bgm");
   el<HTMLButtonElement>("applyImport").disabled ||= !importTracks || (importMode==="merge"&&!importTracks.length);
@@ -204,8 +213,24 @@ window.addEventListener("pagehide",()=>{alive=false;clearTimeout(backupTimer);fo
 OBR.onReady(async()=>{
   try {
     connectionId=await OBR.player.getConnectionId();if(!alive)return;
-    unsubs.push(onMusicMessage(MUSIC_VIEW,event=>{if(event.connectionId!==connectionId||!alive)return;const update=event.data as View;if(!update.state&&!current)return;current={...update,state:update.state||current!.state};render();}),
-      OBR.broadcast.onMessage(MUSIC_ACK,event=>{const result=event.data as {requestId:string;receiver:string;ok:boolean;error?:string};if(!current||event.connectionId!==current.writer||result.receiver!==connectionId)return;const entry=pending.get(result.requestId);if(!entry)return;clearTimeout(entry.timer);pending.delete(result.requestId);feedback(result.ok?mt("completed"):musicError(result.error));render();entry.resolve(result.ok);}),
+    unsubs.push(onMusicMessage(MUSIC_VIEW,event=>{
+      if(event.connectionId!==connectionId||!alive)return;
+      const update=event.data as View;if(!update.state&&!current)return;
+      if(current&&update.roomId!==current.roomId)confirmedRevision=0;
+      current={...update,state:update.state||current!.state};
+      for(const [id,entry] of pending)if(typeof entry.revision==='number'&&current.state.revision>=entry.revision)finishCommand(id,true,mt("completed"));
+      render();
+    }),
+      OBR.broadcast.onMessage(MUSIC_ACK,event=>{
+        const result=event.data as {requestId:string;receiver:string;ok:boolean;revision?:number;error?:string};
+        if(!current||event.connectionId!==current.writer||result.receiver!==connectionId)return;
+        const entry=pending.get(result.requestId);if(!entry)return;
+        if(result.ok&&Number.isSafeInteger(result.revision)&&result.revision!>=0){
+          confirmedRevision=Math.max(confirmedRevision,result.revision!);entry.revision=result.revision;
+          if(current.state.revision<result.revision!){render();return;}
+        }
+        finishCommand(result.requestId,result.ok,result.ok?mt("completed"):musicError(result.error));
+      }),
       onMusicMessage(MUSIC_BACKUP,event=>{const result=event.data as {requestId:string;backup?:{tracks:unknown[]}};if(event.connectionId!==connectionId||result.requestId!==backupRequest||!alive)return;clearTimeout(backupTimer);backupRequest="";if(!result.backup){feedback(mt("backupUnavailable"));return;}openImport();el<HTMLTextAreaElement>("importText").value=JSON.stringify({format:"obr-music-library",version:1,tracks:result.backup.tracks});previewImport();}));
     await OBR.broadcast.sendMessage(MUSIC_READY,{workbench:true},{destination:"LOCAL"});
   } catch(error) { feedback(musicError(error)); }
