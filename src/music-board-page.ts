@@ -20,6 +20,14 @@ function awaitingState():boolean { return !!current && current.state.revision < 
 let catalog: Track[] = [], catalogLoading = false, editing: Track | null = null, editingRevision = 0, formBus:"bgm"|"sfx" = "bgm", formLoop = true, formColor = "#50525b";
 let importTracks: Track[] | null = null, importBus:"bgm"|"sfx" = "bgm", importMode:"merge"|"replace" = "merge", importRevision = 0, backupRequest = "";
 let backupTimer:ReturnType<typeof setTimeout> | undefined;
+let viewLeaseTimer:ReturnType<typeof setInterval> | undefined;
+function renewViewLease():void {
+  if(!alive||document.visibilityState!=='visible')return;
+  // The same-origin workbench hides inactive frames; native popovers use panelOpen.
+  const frame=window.frameElement;if(frame&&frame.getClientRects().length===0)return;
+  void OBR.broadcast.sendMessage(MUSIC_READY,{workbench:true,keepAlive:true},{destination:"LOCAL"}).catch(()=>{});
+}
+
 const filters = {bus:"all" as "all"|"bgm"|"sfx", favorite:false, group:"", tag:""};
 const pending = new Map<string,Pending>(), unsubs:Array<()=>void> = [];
 const palette: Array<[string,MusicTextKey]> = [["#50525b","gray"],["#58796a","green"],["#627caa","blue"],["#8b709e","purple"],["#ae8550","amber"],["#ac687c","rose"]];
@@ -209,7 +217,7 @@ el("defaults").addEventListener("click",()=>{
   void fetch("https://obr.dnd.center/music/manifest.json",{signal:abort.signal}).then(response=>{if(!response.ok)throw Error("failed");return response.json();}).then(value=>{if(!alive)return;catalog=(Array.isArray(value.tracks)?value.tracks:[]).map(trackFrom).filter((track:Track|null):track is Track=>!!track);el("catalogError").textContent="";renderCatalog();}).catch(()=>{if(alive)el("catalogError").textContent=mt("failed");}).finally(()=>{clearTimeout(timer);catalogLoading=false;});
 });
 unsubs.push(onLangChange(translate)); translate(); bindPanelDrag(el("drag"),"music-board");
-window.addEventListener("pagehide",()=>{alive=false;clearTimeout(backupTimer);for(const off of unsubs)off();for(const entry of pending.values()){clearTimeout(entry.timer);entry.resolve(false);}pending.clear();});
+window.addEventListener("pagehide",()=>{alive=false;clearTimeout(backupTimer);clearInterval(viewLeaseTimer);for(const off of unsubs)off();for(const entry of pending.values()){clearTimeout(entry.timer);entry.resolve(false);}pending.clear();});
 OBR.onReady(async()=>{
   try {
     connectionId=await OBR.player.getConnectionId();if(!alive)return;
@@ -233,5 +241,10 @@ OBR.onReady(async()=>{
       }),
       onMusicMessage(MUSIC_BACKUP,event=>{const result=event.data as {requestId:string;backup?:{tracks:unknown[]}};if(event.connectionId!==connectionId||result.requestId!==backupRequest||!alive)return;clearTimeout(backupTimer);backupRequest="";if(!result.backup){feedback(mt("backupUnavailable"));return;}openImport();el<HTMLTextAreaElement>("importText").value=JSON.stringify({format:"obr-music-library",version:1,tracks:result.backup.tracks});previewImport();}));
     await OBR.broadcast.sendMessage(MUSIC_READY,{workbench:true},{destination:"LOCAL"});
+    if(new URLSearchParams(location.search).has("instance")){
+      viewLeaseTimer=setInterval(renewViewLease,5000);
+      document.addEventListener("visibilitychange",renewViewLease);
+      unsubs.push(()=>document.removeEventListener("visibilitychange",renewViewLease));
+    }
   } catch(error) { feedback(musicError(error)); }
 });
