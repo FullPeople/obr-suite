@@ -21,22 +21,26 @@ export function clearQQSession(token:unknown):void{if(typeof token==='string'&&q
 export function qqSession():QQSession|undefined{try{const value=JSON.parse(localStorage.getItem(QQ_STORAGE)||'null');return value?.expiresAt>Date.now()?value:undefined;}catch{return;}}
 export function qqHeaders(room?:QQRoom){const session=qqSession();return {...session?{Authorization:'Bearer '+session.token}:{},...room?{'X-Room-Capability':room.capability}:{}};}
 const qqReads=new Map<string,Promise<any>>();
-export function qqRequest<T=any>(path:string,method='GET',data?:unknown,room?:QQRoom):Promise<T>{
- const actor=qqSession()?.token||'',key=JSON.stringify([actor,path,room?.id,room?.capability]);if(method!=='GET')return performQQRequest<T>(path,method,data,room);const pending=qqReads.get(key);if(pending)return pending;const task=performQQRequest<T>(path,method,data,room).finally(()=>{if(qqReads.get(key)===task)qqReads.delete(key);});qqReads.set(key,task);return task;
+export type QQRequestOptions={signal?:AbortSignal;guard?:()=>void|Promise<void>};
+export function qqRequest<T=any>(path:string,method='GET',data?:unknown,room?:QQRoom,options:QQRequestOptions={}):Promise<T>{
+ const actor=qqSession()?.token||'',key=JSON.stringify([actor,path,room?.id,room?.capability]);if(method!=='GET'||options.signal||options.guard)return performQQRequest<T>(path,method,data,room,options);const pending=qqReads.get(key);if(pending)return pending;const task=performQQRequest<T>(path,method,data,room,options).finally(()=>{if(qqReads.get(key)===task)qqReads.delete(key);});qqReads.set(key,task);return task;
 }
-async function performQQRequest<T=any>(path:string,method='GET',data?:unknown,room?:QQRoom):Promise<T>{
+async function performQQRequest<T=any>(path:string,method='GET',data?:unknown,room?:QQRoom,options:QQRequestOptions={}):Promise<T>{
   if(method==='GET'||method==='HEAD')data=undefined;
-  let session=qqSession();
+  let session=qqSession();const actor=session?.token||'',proof=room?{...room}:undefined;
   if(method!=='GET'&&session&&!['plugin/start','plugin/poll','plugin/logout'].includes(path)){
     let fresh;try{fresh=await qqRequest('session');}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}
     if(!fresh.authenticated||fresh.account.id!==session.accountId||qqSession()?.token!==session.token)throw Object.assign(Error('QQ 账号已改变，请重新连接。'),{status:403,notSent:true});
     session={...session,csrf:fresh.csrf};
   }
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+  const controller=new AbortController(),abort=()=>controller.abort();options.signal?.addEventListener('abort',abort,{once:true});if(options.signal?.aborted)abort();const timer=setTimeout(abort,30000);
   try{
-    const response=await fetch(QQ_ORIGIN+'/api/'+path,{method,credentials:'omit',cache:'no-store',signal:controller.signal,headers:{...qqHeaders(room),...(data===undefined?{}:{'Content-Type':'application/json'}),...session?.csrf?{'X-CSRF-Token':session.csrf}:{}},...data===undefined?{}:{body:JSON.stringify(data)}});
+    const requestBody=data===undefined?undefined:JSON.stringify(data);
+    if(options.guard)await options.guard();if(controller.signal.aborted)throw Object.assign(Error('QQ 操作已取消。'),{notSent:true});
+    if(method!=='GET'&&(actor!==(qqSession()?.token||'')||proof?.id!==room?.id||proof?.capability!==room?.capability))throw Object.assign(Error('QQ 账号或房间连接已改变，原操作未发送。'),{notSent:true});
+    const response=await fetch(QQ_ORIGIN+'/api/'+path,{method,credentials:'omit',cache:'no-store',signal:controller.signal,headers:{...actor?{Authorization:'Bearer '+actor}:{},...proof?{'X-Room-Capability':proof.capability}:{},...(data===undefined?{}:{'Content-Type':'application/json'}),...session?.csrf?{'X-CSRF-Token':session.csrf}:{}},...requestBody===undefined?{}:{body:requestBody}});
     const value=await response.json();if(!response.ok)throw Object.assign(Error(value.message||'QQ 卡库操作失败。'),{status:response.status});return value;
-  }finally{clearTimeout(timer);}
+  }finally{clearTimeout(timer);options.signal?.removeEventListener('abort',abort);}
 }
 const random=()=>btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 /** Six characters both ends derive from the PKCE challenge; the person approving a pairing compares them. */
