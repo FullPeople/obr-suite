@@ -47,6 +47,8 @@ for(const width of [360,1280]){
   const guide=page.locator('.announcement-important');check(`${width} ${channel} guide collapsed`,!await guide.evaluate(el=>el.open));
   check(`${width} ${channel} exact Chinese title`,await guide.locator('summary').innerText()==='关于设置玩家单独权限的重要说明');
   const body=await page.locator('#body').innerText();check(`${width} ${channel} no wrong release`,channel==='suite'?body.includes('该插件不再更新'):!body.includes('该插件不再更新'));
+  check(`${width} ${channel} current issue tracker`,await page.locator('#body a[href="https://github.com/FullPeople/DND-card-web/issues"]').count()>0);
+  check(`${width} ${channel} no retired issue tracker`,await page.locator('#body a[href="https://github.com/FullPeople/DND-card/issues"]').count()===0);
   check(`${width} ${channel} own notice version`,(await page.locator('.cl-version').first().innerText())===versions[channel]);
   await guide.locator('summary').click();check(`${width} ${channel} original guide retained`,(await guide.innerText()).includes('每个 Token 单独指派；一个玩家可以拥有多个角色（PC + 召唤物等）。'));
   await page.waitForFunction(()=>[...document.querySelectorAll('.announcement-important img')].every(img=>img.complete&&img.naturalWidth>0));
