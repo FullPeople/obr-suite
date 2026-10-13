@@ -13,6 +13,8 @@ const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElem
 interface View { state: MusicSession; canControl: boolean; gm: boolean; writer: string; pair: PairStatus; sound: SoundStatus;
   localVolume: LocalVolume; progress: { position: number; duration: number }; pairCode: string }
 let current: View | null = null, connectionId = "", alive = true, librarySignature = "", catalog: Track[] = [], catalogLoading = false;
+let confirmedRevision=0;
+function awaitingState():boolean { return !!current && current.state.revision < confirmedRevision; }
 const pending = new Map<string, ReturnType<typeof setTimeout>>(), unsubs: Array<() => void> = [];
 const mini = new URLSearchParams(location.search).get("mini") === "1";
 document.body.classList.toggle("mini", mini);
@@ -31,7 +33,7 @@ function local(type: string, extra: object = {}): void {
   void OBR.broadcast.sendMessage(MUSIC_LOCAL, { type, ...extra }, { destination: "LOCAL" }).catch(error => feedback(musicError(error)));
 }
 function command(op: MusicOp): void {
-  if (!current?.canControl || pending.size) return;
+  if (!current?.canControl || awaitingState() || pending.size) return;
   if (["pause", "resume", "seek", "loop", "stop"].includes(op.type)) op = { ...op, expectedPlaybackId: current.state.bgm?.playbackId || "" };
   const requestId = crypto.randomUUID();
   const timeout = setTimeout(() => { pending.delete(requestId); feedback(mt("noWriter")); render(); }, 7500);
@@ -43,7 +45,7 @@ function command(op: MusicOp): void {
 function fmt(seconds: number): string { if (!Number.isFinite(seconds) || seconds < 0) return "--:--"; return Math.floor(seconds / 60) + ":" + String(Math.floor(seconds % 60)).padStart(2,"0"); }
 function button(label: string, action: () => void, shared = true): HTMLButtonElement {
   const node = document.createElement("button"); node.type = "button"; node.textContent = label; node.addEventListener("click", action);
-  if (shared) { node.dataset.shared = ""; node.disabled = !current?.canControl || pending.size > 0; } return node;
+  if (shared) { node.dataset.shared = ""; node.disabled = !current?.canControl || awaitingState() || pending.size > 0; } return node;
 }
 function trackRow(track: Track): HTMLDivElement {
   const row = document.createElement("div"); row.className = "track-row";
@@ -93,11 +95,11 @@ function render(): void {
     const seek = el<HTMLInputElement>("seek"); if (document.activeElement !== seek) { seek.max = String(current.progress.duration || 100); seek.value = String(current.progress.position || 0); }
     renderLibrary();
   }
-  for (const input of document.querySelectorAll<HTMLInputElement | HTMLButtonElement>("[data-shared]")) input.disabled = !current?.canControl || pending.size > 0;
+  for (const input of document.querySelectorAll<HTMLInputElement | HTMLButtonElement>("[data-shared]")) input.disabled = !current?.canControl || awaitingState() || pending.size > 0;
   el<HTMLButtonElement>("play").disabled ||= !bgm && !state?.queue.length;
   el<HTMLInputElement>("seek").disabled ||= !bgm || !current?.progress.duration;
   el<HTMLInputElement>("loop").disabled ||= !bgm;
-  el<HTMLInputElement>("allowPlayers").disabled = !current?.gm || pending.size > 0;
+  el<HTMLInputElement>("allowPlayers").disabled = !current?.gm || awaitingState() || pending.size > 0;
 }
 function renderCatalog(): void {
   el("catalogTracks").replaceChildren();
@@ -143,9 +145,9 @@ OBR.onReady(async () => {
   unsubs.push(OBR.broadcast.onMessage(MUSIC_VIEW, event => { if (event.connectionId !== connectionId || !alive) return;
     current = event.data as View; render(); }),
     OBR.broadcast.onMessage(MUSIC_ACK, event => {
-      const result = event.data as { requestId: string; receiver: string; ok: boolean; error?: string };
+      const result = event.data as { requestId: string; receiver: string; ok: boolean; revision?: number; error?: string };
       if (!current || event.connectionId !== current.writer || result.receiver !== connectionId) return;
-      const timer = pending.get(result.requestId); if (!timer) return; clearTimeout(timer); pending.delete(result.requestId);
+      const timer = pending.get(result.requestId); if (!timer) return; clearTimeout(timer); pending.delete(result.requestId); if(result.ok&&Number.isSafeInteger(result.revision)&&result.revision!>=0)confirmedRevision=Math.max(confirmedRevision,result.revision!);
       if (!result.ok) feedback(musicError(result.error)); render();
     }));
   await OBR.broadcast.sendMessage(MUSIC_READY, {}, { destination: "LOCAL" });
