@@ -62,7 +62,10 @@ async function createContext(role='PLAYER',websiteLogin=false){
   await route.fulfill(existsSync(file)?{contentType:mime[extname(file)]||'application/octet-stream',body:readFileSync(file)}:{status:404,body:'Fixture asset missing'});
  });
  await context.route(/https:\/\/(?:5e|homebrew)\.kiwee\.top\//,route=>route.fulfill({json:{},headers:{'access-control-allow-origin':'*'}}));
- await context.addInitScript(versions=>{if(location.protocol!=='https:')return;localStorage.setItem('dnd-card:rules-setup:v1','done');localStorage.setItem('dnd-card:editing','true');localStorage.setItem('dnd-card:announcement-ack',versions.app);localStorage.setItem('dnd-card:announcement-ack:suite',versions.suite);},{app:JSON.parse(readFileSync(join(web,'package.json'),'utf8')).version,suite:JSON.parse(readFileSync(join(root,'dist-workbench-dev/manifest-dev.json'),'utf8')).version});
+ // The host can advance independently of the unchanged paired Web editor.
+ const noticeSource=readFileSync(join(web,'src/platform/announcement.ts'),'utf8'),suiteNotice=noticeSource.match(/announcementVersionFor[^\n]*mode==='suite'\?'([^']+)'/);
+ assert(suiteNotice,'Paired Web announcement version must be explicit in this fixture');
+ await context.addInitScript(versions=>{if(location.protocol!=='https:')return;localStorage.setItem('dnd-card:rules-setup:v1','done');localStorage.setItem('dnd-card:editing','true');localStorage.setItem('dnd-card:announcement-ack',versions.app);localStorage.setItem('dnd-card:announcement-ack:suite',versions.suite);},{app:JSON.parse(readFileSync(join(web,'package.json'),'utf8')).version,suite:suiteNotice[1]});
  context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)));
  const room=await context.newPage();await room.goto('https://obr.dnd.center/qq-native-host/');const [page]=await Promise.all([context.waitForEvent('page'),room.locator('#open').click()]);
  return {context,room,page,host};
