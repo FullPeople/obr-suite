@@ -38,7 +38,7 @@ export function requestHostCatalog(timeoutMs=1200):Promise<HostCard[]|undefined>
     const finish=(value?:HostCard[])=>{if(done)return;done=true;clearTimeout(timer);try{off();}catch{}resolve(value);};
     const off=OBR.broadcast.onMessage(CATALOG_REPLY,event=>{
       const data=event.data as any;if(!data||data.nonce!==nonce)return;
-      finish(Array.isArray(data.cards)?data.cards.filter((c:any)=>c&&typeof c.id==="string").map((c:any)=>({id:c.id,name:typeof c.name==="string"&&c.name?c.name:c.id,cloud:!!c.cloud,locked:!!c.locked,inScene:!!c.inScene})):undefined);
+      finish(Array.isArray(data.cards)?data.cards.filter((c:any)=>c&&typeof c.id==="string"&&(cloudFeaturesEnabled||!c.cloud)).map((c:any)=>({id:c.id,name:typeof c.name==="string"&&c.name?c.name:c.id,cloud:!!c.cloud,locked:!!c.locked,inScene:!!c.inScene})):undefined);
     });
     const timer=setTimeout(()=>finish(),timeoutMs);
     OBR.broadcast.sendMessage(CATALOG_REQUEST,{nonce},{destination:"LOCAL"}).catch(()=>finish());

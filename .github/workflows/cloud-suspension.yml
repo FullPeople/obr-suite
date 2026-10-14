@@ -1,0 +1,29 @@
+name: Cloud suspension release checks
+on:
+  push:
+    branches: [dev, main, codex/cloud-release295-dev-20261015]
+    paths: ['src/cloud-availability.ts', 'src/modules/characterCards/**', 'src/workbench/**', 'tools/cloud-suspended-selftest.mjs', 'package*.json', 'public/manifest*.json', '.github/workflows/cloud-suspension.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  directed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.9.0'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Actual paused account, RPC, old-page and data-retention boundaries
+        run: |
+          node tools/cloud-suspended-selftest.mjs
+          if test -f tools/native-owner-selftest.mjs; then node tools/native-owner-selftest.mjs; fi
+          if test -f tools/workbench-delete-selftest.mjs; then node tools/workbench-delete-selftest.mjs; fi
+          if test -f tools/workbench-read-recovery-selftest.mjs; then node tools/workbench-read-recovery-selftest.mjs; fi
+      - name: Typecheck the final host source
+        run: node node_modules/typescript/bin/tsc
