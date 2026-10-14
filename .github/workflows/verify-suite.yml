@@ -51,6 +51,8 @@ jobs:
           node tools/build-legacy-card-viewer.mjs --web-built
       - name: Install official Chromium
         run: npx playwright install --with-deps chromium
+      - name: Verify transparent Boss and initiative canvases in actual built iframes
+        run: node tools/transparent-canvas-browser.mjs --built dist --channel suite --legacy
       - name: Stable regressions including QQ ordering and personal preferences
         run: node tools/verify-suite-candidate.mjs
       - name: Actual legacy picker binding and permission revocation
@@ -66,6 +68,7 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
           path: |
+            .local-evidence/transparent-canvas291/
             .local-evidence/verification/
             .local-evidence/directory259/
             .local-evidence/qq-room/
