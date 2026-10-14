@@ -1,5 +1,6 @@
 import OBR from '@owlbear-rodeo/sdk';
-import {CHANNEL} from '../../extensions/workbench-dice3d/src/types';
+import {diceIdentity} from './dice-identity';
+const CHANNEL='com.obr-suite/workbench-dice3d.v1';
 import {workbenchObservation} from './observation';
 import type {DiceRollPayload} from '../modules/dice';
 export type TokenResult={itemId:string;text:string;total:number;color:string;hidden:boolean};
@@ -8,8 +9,8 @@ const closed=new Set<string>(),visibility=new Map<string,boolean>();
 const groups=new Map<string,{rows:TokenResult[];visible:boolean}>(),tracked=new Set<string>();
 export async function setupTokenResults(){
  if(bus)return;if(starting)return starting;const own=generation;
- const task=(async()=>{const data=await workbenchObservation().read();if(own!==generation)return;
-  bus=new BroadcastChannel(`${CHANNEL}:local:${data.player.connectionId}`);epoch=workbenchObservation().sceneEpoch();
+ const task=(async()=>{const player=await diceIdentity();if(own!==generation)return;
+  bus=new BroadcastChannel(`${CHANNEL}:local:${player.connectionId}`);epoch=workbenchObservation().sceneEpoch();
   bus.onmessage=e=>{if(e.data?.type==='track-tokens'){tracked.clear();for(const id of e.data.ids||[])if(typeof id==='string')tracked.add(id);void refresh();}};void refresh();})();
  starting=task;try{await task;}finally{if(starting===task)starting=undefined;}
 }
@@ -41,7 +42,7 @@ export function teardownTokenResults(){generation++;starting=undefined;clearTime
 async function refresh(){
  if(!bus||flight===generation)return;const current=bus,ownGeneration=generation;let own=serial;clearTimeout(timer);flight=ownGeneration;
  try{
-  const observation=workbenchObservation(),data=observation.peek();if(epoch!==observation.sceneEpoch()||!data.ready){
+  const observation=workbenchObservation(),data=observation.peek();if(epoch!==observation.sceneEpoch()||data.ready===false){
    const changed=epoch!==observation.sceneEpoch()||groups.size||closed.size||visibility.size||tracked.size;
    epoch=observation.sceneEpoch();groups.clear();closed.clear();visibility.clear();tracked.clear();if(changed)serial++;
    // This cleanup belongs to this refresh. Only a later external mutation
@@ -50,9 +51,9 @@ async function refresh(){
   }
   const ids=new Set([...tracked,...[...groups.values()].flatMap(g=>g.rows.map(r=>r.itemId))]);
   if(!ids.size){bus.postMessage({type:'token-results',groups:[],anchors:{}});return;}
-  const [position,scale,dpi]=await Promise.all([OBR.viewport.getPosition(),OBR.viewport.getScale(),OBR.scene.grid.getDpi()]);if(bus!==current||generation!==ownGeneration||own!==serial||epoch!==observation.sceneEpoch())return;
+  const [position,scale,dpi,items,identity]=await Promise.all([OBR.viewport.getPosition(),OBR.viewport.getScale(),OBR.scene.grid.getDpi(),OBR.scene.items.getItems([...ids]),diceIdentity()]);if(bus!==current||generation!==ownGeneration||own!==serial||epoch!==observation.sceneEpoch())return;
   const anchors:Record<string,{x:number;y:number}>={};
-  for(const item of data.items||[]){if(!ids.has(item.id)||data.role!=='GM'&&!item.visible)continue;const image=item as any,half=image.image?.height&&image.grid?.dpi?Math.abs(image.image.height/image.grid.dpi*dpi*(image.scale?.y??1))/2:dpi/2;
+  for(const item of items){if(!ids.has(item.id)||identity.role!=='GM'&&!item.visible)continue;const image=item as any,half=image.image?.height&&image.grid?.dpi?Math.abs(image.image.height/image.grid.dpi*dpi*(image.scale?.y??1))/2:dpi/2;
    anchors[item.id]={x:item.position.x*scale+position.x,y:(item.position.y-half)*scale+position.y-40};}
   const history=[...groups].find(([id,g])=>id.startsWith('history:')&&g.visible);
   bus.postMessage({type:'token-results',anchors,scale,groups:(history?[history]:[...groups]).map(([id,g])=>({id,visible:g.visible,rows:g.rows.filter(row=>anchors[row.itemId])}))});

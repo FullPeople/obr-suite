@@ -104,7 +104,7 @@ export function fireQuickRoll(req: QuickRollRequest): void {
   // BC_QUICK_ROLL to remote would cause every receiving client to
   // ALSO roll independently → N parallel rolls + N history entries
   // (the bug the user hit).
-  OBR.broadcast.sendMessage(BC_QUICK_ROLL, req, { destination: "LOCAL" }).catch(() => {});
+  OBR.broadcast.sendMessage(BC_QUICK_ROLL, {...req,commandId:crypto.randomUUID()}, { destination: "LOCAL" }).catch(() => {});
 }
 
 // Resolve the token to anchor a quick-roll on. Tries:

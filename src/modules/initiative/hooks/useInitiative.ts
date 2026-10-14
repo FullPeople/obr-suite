@@ -1,3 +1,5 @@
+import {WORKBENCH_DEV} from '../../../workbench/channel';
+import {rollLightInitiative} from '../../../workbench/dice-light-initiative';
 import { useState, useEffect, useCallback, useMemo, useRef } from "preact/compat";
 import OBR, { type Item } from "@owlbear-rodeo/sdk";
 import { InitiativeItem, CombatState, TurnChangePayload } from "../types";
@@ -920,7 +922,7 @@ export function useInitiative() {
 
   const updateModifier = useCallback((itemId: string, mod: number) => updateEditableValue(itemId, mod, "modifier"), [updateEditableValue]);
 
-  const rollInitiativeLocal = useCallback(async (itemId: string, type: RollType) => {
+  const rollInitiativeLocal = useCallback(async (itemId: string, type: RollType) => { if(WORKBENCH_DEV){await rollLightInitiative(itemId,type,t(getLocalLang(),"initiative"));return;}
     // §9 — DM fixed initiative d20 (checklist: 单角色先攻 劣势/普通/优势).
     // Fresh GM verification at THIS execution entry — the armed flag is
     // client-local state, not proof of role. The fixed value targets
@@ -1066,7 +1068,7 @@ export function useInitiative() {
   const diceRollingRef = useRef(false);
   useEffect(() => { diceRollingRef.current = diceRolling; }, [diceRolling]);
 
-  const rollInitiativeDicePlus = useCallback(async (itemId: string, type: RollType) => {
+  const rollInitiativeDicePlus = useCallback(async (itemId: string, type: RollType) => { if(WORKBENCH_DEV){await rollLightInitiative(itemId,type,t(getLocalLang(),"initiative"));return;}
     const item = allItemsRef.current.find((i) => i.id === itemId);
     // Allow re-rolls during preparing — only block while a roll is mid-flight
     // (Dice+ result hasn't come back yet) so we don't fire concurrent rolls.

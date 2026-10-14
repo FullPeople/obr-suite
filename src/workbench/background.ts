@@ -705,7 +705,7 @@ async function start(){
    await OBR.broadcast.sendMessage('com.obr-suite/cc-card-updated',{cardId:record.id},{destination:'ALL'});return {created:entry};
   }
   if(m.type==='rules')return {shared:await shared.write(m),sequence:++sequence};
-  if(m.type==='diceRpc'){let target;if(m.itemId&&(['init','player.getSelection','scene.items.getItems'].includes(m.method)||m.method==='broadcast.sendMessage'&&m.args?.[0]==='com.obr-suite/dice-quick-roll'))target=await access(typeof m.key==='string'&&m.key.startsWith(`${OBR.room.id}:card:`)?`card:${m.key.slice(`${OBR.room.id}:card:`.length)}`:m.itemId);return diceRpc(String(m.method),Array.isArray(m.args)?m.args:[],target,access);}
+  if(m.type==='diceRpc')return diceRpc(String(m.method),Array.isArray(m.args)?m.args:[],{itemId:m.itemId});
   if(m.type==='console'){
    const role=(await observation.read()).role,enabled=getState().enabled as any,key=String(m.action);
    if(role!=='GM')throw Error('仅 DM 可使用控制台');if(!['settings','announcement','playerPermissions','portalEffects'].includes(key)&&!enabled[key])throw Error('该模块已关闭');
@@ -724,8 +724,8 @@ async function start(){
    else throw Error('未知操作');return;
   }
   if(m.type==='roll'){
-   if(!getState().enabled.dice)throw Error('投骰模块未开启');let id:string|null=null;if(m.itemId){const a=await access(m.itemId);if(a.key!==m.key)throw Error('角色关联已改变');id=a.item?.id||null;}
-   await executeRoll({expression:m.expression,label:m.label,itemId:id,advMode:m.advMode,critMode:!!m.critMode,hidden:!!m.hidden});return;
+   if(!getState().enabled.dice)throw Error('投骰模块未开启');const id=m.itemId||null;
+   return executeRoll({expression:m.expression,label:m.label,itemId:id,advMode:m.advMode,critMode:!!m.critMode,hidden:!!m.hidden,commandId:m.requestId});
   }
   const a=await access(typeof m.key==='string'&&m.key.startsWith(`${OBR.room.id}:card:`)?`card:${m.key.slice(`${OBR.room.id}:card:`.length)}`:m.itemId);if((m.key?a.key!==m.key:!['delete','resource','stats','statsLock','lock'].includes(m.type))||!a.write)throw Error('角色关联或修改权限已改变');
   if(m.type==='monsterSave'){

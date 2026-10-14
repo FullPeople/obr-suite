@@ -1,0 +1,35 @@
+name: Lightweight 2D dice
+on:
+  push:
+    branches: [dev]
+    paths: ['src/workbench/dice*', 'src/modules/dice/**', 'tools/*dice*', '.github/workflows/dice-light292.yml']
+  workflow_dispatch:
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 233a0638e85bd8ff8856022736340e11998dd18d
+          path: .paired-web
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            .paired-web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+        working-directory: .paired-web
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build:workbench-dev
+        env:
+          DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      - run: node tools/dice-light292-browser.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dice-light292-evidence
+          path: .local-evidence/light292/result.json

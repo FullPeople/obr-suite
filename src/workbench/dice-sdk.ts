@@ -1,10 +1,6 @@
 import './tone';
 import {installExpressionHistory,rememberExpression} from './expression-history';
 import {readFixedRoll,disarmFixedRoll} from '../modules/dice/fixed-roll';
-import {diceLoadingUi} from './dice-loading-ui';
-import {STYLE_CHOICES} from '../../extensions/workbench-dice3d/src/material-styles';
-import {BUILD} from '../../extensions/workbench-dice3d/src/types';
-import {readDiceViewMode} from './dice-view-mode';
 // SDK facade for the original dice pages embedded in the external workbench.
 // Only the dedicated dice allowlist is forwarded by the authenticated host.
 import type OBRType from '@owlbear-rodeo/sdk';
@@ -14,41 +10,19 @@ const subscriptions=new Map<string,Set<(v:any)=>void>>();
 let roomId='',reads:Record<string,any>={};
 const read=(method:string,...args:any[])=>Object.prototype.hasOwnProperty.call(reads,method)?Promise.resolve(structuredClone(reads[method])):rpc(method,...args);
 document.body.inert=true;
-function rpc(method:string,...args:any[]):Promise<any>{const id=crypto.randomUUID();return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{waiting.delete(id);reject(Error('枭熊连接超时'));},method==='dice3d.submit'||method==='broadcast.sendMessage'?245000:20000);waiting.set(id,{resolve,reject,timer});parent.postMessage({channel,id,method,args},location.origin);});}
+function rpc(method:string,...args:any[]):Promise<any>{const id=crypto.randomUUID();return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{waiting.delete(id);reject(Error('枭熊连接超时'));},20000);waiting.set(id,{resolve,reject,timer});parent.postMessage({channel,id,method,args},location.origin);});}
 function on(key:string,fn:(v:any)=>void){if(!subscriptions.has(key))subscriptions.set(key,new Set());subscriptions.get(key)!.add(fn);return()=>subscriptions.get(key)?.delete(fn);}
 window.addEventListener('message',event=>{if(event.source!==parent||event.origin!==location.origin||event.data?.channel!==channel)return;const m=event.data;if(m.event==='snapshot'){reads=m.data.reads;return;}if(m.event==='player'){for(const [key,field] of [['getId','id'],['getConnectionId','connectionId'],['getRole','role'],['getName','name'],['getColor','color'],['getMetadata','metadata']])if(m.data[field]!==undefined)reads['player.'+key]=m.data[field];}if(m.event){subscriptions.get(m.event)?.forEach(fn=>fn(m.data));return;}const pending=waiting.get(m.id);if(pending){clearTimeout(pending.timer);waiting.delete(m.id);m.error?pending.reject(Error(m.error)):pending.resolve(m.result);}});
-const loading=diceLoadingUi(async()=>{const state=await rpc('dice3d.retry');loading.update(state);return state;});
-const ready=rpc('init').then(async data=>{roomId=data.roomId;reads=data.reads;loading.update(data.diceLoading??await rpc('dice3d.status'));installExpressionHistory();});
-let watching=false;
-async function watchLoading(){if(watching)return;watching=true;while(document.body.isConnected){await new Promise(resolve=>setTimeout(resolve,500));try{loading.update(await rpc('dice3d.status'));}catch(error){loading.update({ready:false,error:String(error)});}}}
-function install3dChoices(){
- const skinPane=document.querySelector<HTMLElement>('.tabPane[data-tab="skins"]');if(!skinPane)return;
- if(readDiceViewMode()==='2d'){document.querySelectorAll<HTMLElement>('[data-tab="skins"]').forEach(el=>el.remove());return;}
- const material=document.createElement('div');material.id='dice3d-material';material.setAttribute('role','group');material.setAttribute('aria-label','3D 骰子材质');
- const preview=document.createElement('iframe');preview.title='当前七骰样式的 3D 展示';preview.className='dice3d-skin-preview';
- let selected=String(reads['player.getMetadata']?.['com.obr-suite/dice/3d-theme']||'ink_sketch'),started=false;
- const active=()=>skinPane.classList.contains('on')||skinPane.classList.contains('active');
- const update=()=>{for(const button of material.querySelectorAll('button'))button.setAttribute('aria-pressed',String(button.dataset.material===selected));
-  if(active()&&!started){started=true;preview.src='/suite-dev/dice3d/skin-preview.html?v='+BUILD;}
-  if(started)preview.contentWindow?.postMessage({channel:'workbench-dice-preview/v1',theme:selected,color:reads['player.getColor']||'#50525b',active:active()},location.origin);
- };
- for(const choice of STYLE_CHOICES){const button=document.createElement('button');button.type='button';button.dataset.material=choice.id;button.textContent=choice.name;button.onclick=async()=>{if(button.disabled)return;for(const b of material.querySelectorAll('button'))b.disabled=true;try{await rpc('dice3d.material',choice.id);selected=choice.id;reads['player.getMetadata']={...reads['player.getMetadata'],'com.obr-suite/dice/3d-theme':selected};update();}catch(error){await rpc('notification.show',String(error),'ERROR');}finally{for(const b of material.querySelectorAll('button'))b.disabled=false;}};material.append(button);}
- preview.onload=update;new MutationObserver(update).observe(skinPane,{attributes:true,attributeFilter:['class']});
- window.addEventListener('message',event=>{if(event.source===preview.contentWindow&&event.origin===location.origin&&event.data?.channel==='workbench-dice-preview/v1'&&event.data.ready)update();});
- on('player',()=>{selected=String(reads['player.getMetadata']?.['com.obr-suite/dice/3d-theme']||'ink_sketch');update();});
- const title=document.createElement('p');title.textContent='骰子材质 · 使用你的枭熊玩家颜色';const volume=document.createElement('input');volume.type='range';volume.min='0';volume.max='100';volume.value=localStorage.getItem('obr-suite/dice3d/volume')||'100';volume.setAttribute('aria-label','3D 骰子音量');volume.oninput=()=>{localStorage.setItem('obr-suite/dice3d/volume',volume.value);void rpc('dice3d.audio',Number(volume.value)/100);};const label=document.createElement('label');label.className='dice3d-volume';label.textContent='骰子音量 ';label.append(volume);skinPane.replaceChildren(title,material,label,preview);update();
-}
-const api:any={isAvailable:true,isReady:true,onReady:(fn:()=>void)=>{void ready.then(async()=>{void watchLoading();await fn();install3dChoices();
- // A quick composer has no history consumer. Replaying every saved result on
- // each open needlessly occupies the shared, rate-limited dice transport.
- if(subscriptions.get('com.obr-suite/dice-roll')?.size)await rpc('dice3d.history');
- document.body.dataset.bridgeReady='true';parent.postMessage({channel,ready:true},location.origin);}).catch(error=>{loading.update({ready:false,error:String(error)});document.body.dataset.bridgeError=String(error);});},room:{get id(){return roomId;}},
- dice3d:{submit:async(req:any)=>{const result=await rpc('dice3d.submit',{...req,visibility:'all',globalDark:localStorage.getItem('obr-suite/dice/global-dark-roll')==='1'});rememberExpression(req.expression);return result;}},
+const ready=rpc('init').then(data=>{roomId=data.roomId;reads=data.reads;installExpressionHistory();});
+const api:any={isAvailable:true,isReady:true,onReady:(fn:()=>void)=>{void ready.then(async()=>{document.body.inert=false;document.querySelectorAll<HTMLElement>('[data-tab="skins"]').forEach(el=>el.remove());await fn();
+ document.body.dataset.bridgeReady='true';parent.postMessage({channel,ready:true},location.origin);
+ }).catch(error=>{document.body.dataset.bridgeError=String(error);document.body.inert=false;});},room:{get id(){return roomId;}},
+ dice2d:{submit:async(req:any)=>{const result=await rpc('dice2d.submit',{...req,commandId:crypto.randomUUID(),fixedArm:readFixedRoll(),globalDark:localStorage.getItem('obr-suite/dice/global-dark-roll')==='1'});rememberExpression(req.expression);if(result?.fixedConsumed)disarmFixedRoll();return result;}},
  player:Object.fromEntries(['getId','getConnectionId','getName','getColor','getRole','getMetadata','getSelection','setMetadata'].map(key=>[key,async(...args:any[])=>{if(key==='setMetadata'){const result=await rpc('player.'+key,...args);reads['player.getMetadata']={...reads['player.getMetadata'],...args[0]};return result;}return read('player.'+key,...args);}])),
  party:{getPlayers:()=>read('party.getPlayers')},
  scene:{grid:{getDpi:()=>read('scene.grid.getDpi')},items:{getItems:async(filter:any)=>{const rows=await rpc('scene.items.getItems',Array.isArray(filter)?filter:undefined);return typeof filter==='function'?rows.filter(filter):Array.isArray(filter)?rows.filter((r:any)=>filter.includes(r.id)):rows;}}},
  viewport:Object.fromEntries(['getWidth','getHeight','getPosition','getScale','transformPoint','animateTo','animateToBounds'].map(key=>[key,(...args:any[])=>rpc('viewport.'+key,...args)])),
- broadcast:{onMessage:(name:string,fn:any)=>on(name,fn),sendMessage:async(...args:any[])=>{if(args[0]==='com.obr-suite/dice-quick-roll')args[1]={...args[1],fixedArm:readFixedRoll(),globalDark:localStorage.getItem('obr-suite/dice/global-dark-roll')==='1'};const expression=args[1]?.expression||(document.getElementById('exprInput') as HTMLInputElement)?.value;const result=await rpc('broadcast.sendMessage',...args);if(['com.obr-suite/dice-quick-roll','com.obr-suite/dice-roll'].includes(args[0]))rememberExpression(expression);if(result?.fixedConsumed)disarmFixedRoll();return result;}},
+ broadcast:{onMessage:(name:string,fn:any)=>on(name,fn),sendMessage:async(...args:any[])=>{if(args[0]==='com.obr-suite/dice-quick-roll')args[1]={...args[1],commandId:crypto.randomUUID(),fixedArm:readFixedRoll(),globalDark:localStorage.getItem('obr-suite/dice/global-dark-roll')==='1'};const expression=args[1]?.expression||(document.getElementById('exprInput') as HTMLInputElement)?.value;const result=await rpc('broadcast.sendMessage',...args);if(['com.obr-suite/dice-quick-roll','com.obr-suite/dice-roll'].includes(args[0]))rememberExpression(expression);if(result?.fixedConsumed)disarmFixedRoll();return result;}},
  notification:{show:(...args:any[])=>rpc('notification.show',...args)},
  modal:{close:async()=>{parent.postMessage({channel,close:true},location.origin);}}
 };

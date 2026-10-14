@@ -1,3 +1,5 @@
+import {WORKBENCH_DEV} from '../../workbench/channel';
+import {rollLightInitiative} from '../../workbench/dice-light-initiative';
 import OBR, { Item } from "@owlbear-rodeo/sdk";
 import { fireQuickRoll } from "../dice/tags";
 import { broadcastDiceRoll, BROADCAST_DICE_ROLL, isGlobalDarkRollEnabled, type DiceRollPayload } from "../dice";
@@ -263,6 +265,7 @@ async function fireInitiative(
   variant: "adv" | "normal" | "dis",
 ): Promise<void> {
   if (lastSelection.length === 0) return;
+  if(WORKBENCH_DEV){const collectiveId="col-"+crypto.randomUUID();await Promise.all(lastSelection.map(m=>rollLightInitiative(m.itemId,variant,"先攻",collectiveId)));return;}
   const lang = getLocalLang();
   const variantLabel = lang === "zh"
     ? (variant === "adv" ? "先攻 (优势)" : variant === "dis" ? "先攻 (劣势)" : "先攻")

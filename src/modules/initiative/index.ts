@@ -1,3 +1,5 @@
+import {WORKBENCH_DEV} from '../../workbench/channel';
+import {rollLightInitiative} from '../../workbench/dice-light-initiative';
 import { setPanelOpen } from "../../utils/panelObstacles";
 import OBR from "@owlbear-rodeo/sdk";
 // 2026-05-14 — drag-in auto-roll uses broadcastDiceRoll directly so
@@ -832,6 +834,8 @@ export async function setupInitiative(): Promise<void> {
             // showed another. We attach the roll to each entry then
             // both consumers read from there.
             type EntryWithRoll = Entry & { d20: number };
+            if(WORKBENCH_DEV){await Promise.all(toAdd.map(e=>rollLightInitiative(e.id,'normal',t(lastLang,'initiative'))));}
+            else {
             const rolled: EntryWithRoll[] = toAdd.map((e) => ({
               ...e,
               d20: Math.floor(Math.random() * 20) + 1,
@@ -894,6 +898,7 @@ export async function setupInitiative(): Promise<void> {
               } catch (e) {
                 console.warn("[obr-suite/initiative] auto-roll broadcast failed", e);
               }
+            }
             }
           }
         }

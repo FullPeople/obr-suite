@@ -1,6 +1,6 @@
 import OBR from '@owlbear-rodeo/sdk';
 import {isGlobalDarkRollEnabled,type DiceRollPayload} from '../modules/dice';
-import {submitDice3dGroup} from './dice3d';
+import {executeRoll} from './dice';
 import {setTokenResults,toggleTokenResults,clearTokenResults} from './token-results';
 import {workbenchObservation} from './observation';
 export const GROUP_RESULT_CONTROL='com.obr-suite/workbench/group-result-control';
@@ -68,7 +68,7 @@ export function createGroupRolls(deps:{observation:ReturnType<typeof workbenchOb
     if(group!==current)return;
     const title=message.kind==='initiative'?'先攻':labels[abilities.indexOf(message.ability)]+(message.kind==='save'?'豁免':'检定');
     const requests=current.targets.map(t=>{const bonus=message.kind==='initiative'?t.initiative:message.kind==='save'?t.saves[message.ability]:t.ability[message.ability];return {itemId:t.itemId,expression:`1d20${bonus>=0?'+':''}${bonus}`,label:title,advMode:message.variant==='normal'?undefined:message.variant,hidden:t.hidden||!!message.hidden||isGlobalDarkRollEnabled(),collectiveId:id};});
-    const results=await submitDice3dGroup(requests,id);if(group!==current)return;
+    const results=await Promise.all(requests.map(request=>executeRoll(request)));if(group!==current)return;
     current.targets=current.targets.map((target,i)=>({...target,result:results[i].total,hidden:!!results[i].hidden}));current.phase='resolve';
     setTokenResults(id,results,current.visible);
     if(message.kind==='initiative'){

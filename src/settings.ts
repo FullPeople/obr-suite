@@ -2544,9 +2544,9 @@ const TABS: TabDef[] = [
           <button class="tog ${sfxOn ? "on" : ""}" data-key="sfxDice" type="button" aria-pressed="${sfxOn}"></button>
         </div>
         <div class="row"><div class="lbl">${lang === 'zh' ? '骰子显示' : 'Dice display'}
-          <div class="desc"><em>${lang === 'zh' ? '2D 使用旧版平面骰子，不加载皮肤；3D 保留当前效果。只影响你自己，刷新枭熊房间后生效。' : '2D uses the original flat dice without skins; 3D keeps the current effects. Local preference; refresh the Owlbear room to apply.'}</em></div>
+          <div class="desc"><em>${lang === 'zh' ? '当前统一使用旧版轻量 2D 骰子。3D 暂不可用。' : 'Lightweight 2D dice are currently enabled for everyone. 3D is temporarily unavailable.'}</em></div>
           <div data-key="diceViewNotice" role="status"></div>
-        </div><select data-key="diceViewMode" aria-label="${lang === 'zh' ? '骰子显示模式' : 'Dice display mode'}"><option value="2d" ${readDiceViewMode()==='2d'?'selected':''}>2D</option><option value="3d" ${readDiceViewMode()==='3d'?'selected':''}>3D</option></select></div>
+        </div><select data-key="diceViewMode" aria-label="${lang === 'zh' ? '骰子显示模式' : 'Dice display mode'}"><option value="2d" ${readDiceViewMode()==='2d'?'selected':''}>2D</option><option value="3d" disabled>3D · ${lang === 'zh' ? '暂不可用' : 'Temporarily unavailable'}</option></select></div>
         ${DICE_DESC[lang]}
       `;
     },

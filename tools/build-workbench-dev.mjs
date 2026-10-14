@@ -24,5 +24,4 @@ console.log('Dev bundle ready: '+output);
 execFileSync(node,[join(root,'tools/build-workbench-panels.mjs')],{cwd:root,stdio:'inherit'});
 
 execFileSync(node,[join(root,'tools/build-legacy-card-viewer.mjs'),'--web-built','--out-dir','dist-workbench-dev'],{cwd:root,env:{...process.env,DND_CARD_WEB_ROOT:web},stdio:'inherit'});
-// Panels alone cannot deliver the separately compiled 3D overlay and worker.
-execFileSync(node,[join(root,'tools/build-production-dice3d.mjs')],{cwd:root,env:{...process.env,DND_CARD_WEB_ROOT:web},stdio:'inherit'});
+// 3D source is retained, but this release deliberately ships no physical renderer or Jolt/WASM.
