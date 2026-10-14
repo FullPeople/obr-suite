@@ -759,9 +759,15 @@ async function start(){
   }
   if(m.type==='delete'){
    if(a.card?.qqRoom){
-    await m._beforeMutation?.();await qqRequest('room-cards/'+a.card.qqRoom.id,'DELETE',{},a.card.qqRoom);
-    const room=await OBR.room.getMetadata();await OBR.room.setMetadata({[QQ_CARDS]:(room[QQ_CARDS] as any[]).filter(c=>c.id!==a.cardId),[DELETED]:[...new Set([...(Array.isArray(room[DELETED])?room[DELETED] as string[]:[]),a.cardId])]});
-    documents.delete(a.key);documentCacheVersion++;return {deleted:a.cardId};
+    await m._beforeMutation?.();
+    const guard=async()=>{try{await m._beforeMutation?.();}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}};
+    try{await qqRequest('room-cards/'+a.card.qqRoom.id,'DELETE',{},a.card.qqRoom,{guard});}catch(error){const e=error as any;if(e?.notSent||e?.status&&e.status<500)throw error;throw Object.assign(Error('删除结果尚未确认；请先刷新目录并核对，勿重复提交'),{uncertain:true,status:e?.status,diagnostic:{code:'DELETE_RESULT_UNKNOWN',operation:'delete',phase:'delete-document'}});}
+    // The cloud DELETE is durable too. Metadata cleanup cannot undo it or
+    // turn its confirmed result into a failed/uncertain delete receipt.
+    m._committed={kind:'delete',id:a.targetId};m._phase='delete-directory';
+    documents.delete(a.key);documentCacheVersion++;invalidateCard(a.cardId);
+    m._assertAuthority?.();const room=await OBR.room.getMetadata();m._assertAuthority?.();await OBR.room.setMetadata({[QQ_CARDS]:(room[QQ_CARDS] as any[]||[]).filter(c=>c.id!==a.cardId),[DELETED]:[...new Set([...(Array.isArray(room[DELETED])?room[DELETED] as string[]:[]),a.cardId])]});
+    return {deleted:a.cardId};
    }
    if(!a.cardId)throw Error('没有角色卡');if(a.role!=='GM'&&a.items.some(item=>item.metadata[BIND]===a.cardId&&!ownsNativeToken(item,playerId)))throw Error('此卡还绑定其他所属玩家的棋子，仅 DM 可删除');const location=documentLocation(a.cardId);
    try{await relay.send({deleteCard:{room:location.room,card:location.card}},m._beforeMutation);}catch(error){const e=error as any;if(e?.notSent||e?.status&&e.status<500)throw error;throw Object.assign(Error('删除结果尚未确认；请先刷新目录并核对，勿重复提交'),{uncertain:true,status:e?.status,diagnostic:{code:'DELETE_RESULT_UNKNOWN',operation:'delete',phase:'delete-document'}});}
