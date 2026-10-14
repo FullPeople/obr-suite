@@ -173,7 +173,9 @@ html, body, #root { height: 100%; background: transparent; }
   overflow: visible;                 /* so mod overlay + below-card buttons escape */
   cursor: pointer;
   background: rgba(22, 33, 62, 0.9);
-  border: 2px solid rgba(255, 255, 255, 0.08);
+  /* Keep the idle slot geometry without drawing a dark edge around every
+     portrait. Hover/active/preparing states still opt into a visible border. */
+  border: 2px solid transparent;
   /* Establish a stacking context so the roll-buttons inside can use
      z-index:-1 to slip BEHIND the slot's content (image + count
      footer) without going behind the slot's BACKGROUND. Without
