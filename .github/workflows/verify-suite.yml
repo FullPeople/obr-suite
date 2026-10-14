@@ -63,7 +63,7 @@ jobs:
           node tools/dice-render-resource-selftest.mjs
       - name: Personal appearance remains scoped to the player
         run: node tools/appearance-preferences-selftest.mjs
-      - name: QQ personal session request and account-switch regression
+      - name: QQ personal session or cloud suspension regression
         run: node tools/qq-account-session-selftest.mjs
       - name: Suite regression tests
         id: tests

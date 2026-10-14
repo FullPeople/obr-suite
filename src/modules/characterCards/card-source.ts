@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import {cloudFeaturesEnabled,assertCloudEnabled} from '../../cloud-availability';
 import {QQ_CARDS,qqRequest,type QQRoom} from "./qq-account";
 import {roomCloudDocument} from "../../workbench/cloud-upload";
 // Cards a token can be bound to come from two stores: uploaded cards live in
@@ -8,16 +9,18 @@ import {roomCloudDocument} from "../../workbench/cloud-upload";
 // names it displays so a rename on the sheet shows up everywhere.
 export type CloudEntry={id:string;name?:string;qqRoom:QQRoom;qqOwner?:string;locked?:boolean;visibility?:string;owner_ids?:string[]};
 export function cloudEntries(room:Record<string,unknown>):CloudEntry[]{
+  if(!cloudFeaturesEnabled)return [];
   const rows=room[QQ_CARDS];
   return Array.isArray(rows)?rows.filter((row:any):row is CloudEntry=>!!row&&typeof row.id==="string"&&typeof row.qqRoom?.id==="string"&&typeof row.qqRoom?.capability==="string"):[];
 }
 export async function cloudEntry(cardId:string):Promise<CloudEntry|undefined>{
-  try{return cloudEntries(await OBR.room.getMetadata()).find(row=>row.id===cardId);}catch{return undefined;}
+  try{const rows=(await OBR.room.getMetadata())[QQ_CARDS];return Array.isArray(rows)?rows.find(row=>row?.id===cardId&&row.qqRoom):undefined;}catch{return undefined;}
 }
 /** The room document of a card: data.json for uploaded cards, the dnd.center room card for cloud cards. */
 export async function readCardDocument(roomId:string,cardId:string,signal?:AbortSignal):Promise<any>{
   const cloud=await cloudEntry(cardId);
   if(cloud){
+    assertCloudEnabled();
     const result=await qqRequest("room-cards/"+cloud.qqRoom.id,"GET",undefined,cloud.qqRoom);
     if(!result||typeof result.document!=="object"||!result.document)throw Error("云端卡资料暂不可用");
     return roomCloudDocument(result.document,cloud);

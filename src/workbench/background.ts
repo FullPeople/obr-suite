@@ -1,4 +1,5 @@
 import {locateSceneItem} from './locate';
+import {cloudFeaturesEnabled,assertCloudEnabled} from '../cloud-availability';
 import {completeRuntimeProjection,observeRuntimeProjection,runtimeProjectionApplied} from './runtime-completion';
 import {bubblePresentation} from '../modules/bubbles/presentation';
 import {QQ_CARDS,qqSession,qqRequest} from '../modules/characterCards/qq-account';
@@ -108,7 +109,7 @@ async function start(){
  };
  OBR.broadcast.onMessage(OPEN_WIKI_CHANNEL,event=>{if(event.connectionId!==playerConnection)return;try{const entry=sharedEntry((event.data as any)?.entry);send('showWiki',{entry,id:crypto.randomUUID()});}catch{}});
  OBR.broadcast.onMessage('com.obr-suite/workbench/open-page',event=>{if(event.connectionId!==playerConnection)return;const page=(event.data as any)?.page;if(['settings','announcement','features','music','textEffects','console'].includes(page))send('navigate',{page});});
- const selectCloudCard=async(id:string,document?:unknown)=>{await observation.refreshAuthority();const a=await access('card:'+id);if(!a.card?.qqRoom)throw Error('云端卡已移出房间');if(document){cacheDocument(`${OBR.room.id}:card:${id}`,document);documentTimes.set(`${OBR.room.id}:card:${id}`,Date.now());}chosen='card:'+id;follow=false;selectionGeneration++;last='';await refreshSelection();send('navigate',{page:'sheet'});};
+ const selectCloudCard=async(id:string,document?:unknown)=>{assertCloudEnabled();await observation.refreshAuthority();const a=await access('card:'+id);if(!a.card?.qqRoom)throw Error('云端卡已移出房间');if(document){cacheDocument(`${OBR.room.id}:card:${id}`,document);documentTimes.set(`${OBR.room.id}:card:${id}`,Date.now());}chosen='card:'+id;follow=false;selectionGeneration++;last='';await refreshSelection();send('navigate',{page:'sheet'});};
  const panels=panelBridge(send,relay,selectCloudCard);
  OBR.broadcast.onMessage('com.obr-suite/workbench/open-cloud-card',event=>{if(event.connectionId===playerConnection&&typeof(event.data as any)?.id==='string')void selectCloudCard((event.data as any).id);});
  // Popovers outside the workbench window (the bind picker, the token info
@@ -125,6 +126,7 @@ async function start(){
   const cached=documents.get(key),qqEntries=(await observation.read()).room[QQ_CARDS];
   const cloud=Array.isArray(qqEntries)?qqEntries.find((row:any)=>row.id===cardId):undefined;
   if(cloud?.qqRoom){
+   assertCloudEnabled();
    const rejected=rejectedCloudRooms.get(cardId);if(rejected?.scope===cloudPermissionScope(cloud))throw Object.assign(Error('这张房间卡的授权或连接已失效，其他卡仍可继续同步。'),{status:rejected.status||503});
    if(!fresh&&cached&&Date.now()-(documentTimes.get(key)||0)<5000)return cached;
    const flight=cardReads.get(key);if(flight)return flight;
@@ -267,9 +269,9 @@ async function start(){
   // Recovery may fill missing directory entries, but an old scene snapshot
   // must not overwrite an existing room entry on every room-change event.
   // Rename/lock/import commands update the directory explicitly.
-  const compact=all.filter(c=>!c.qqRoom).map(c=>({...c,...directory.find(row=>row.id===c.id)})).map(({id,name,owner_ids,locked,visibility,url})=>({id,name,owner_ids,locked,visibility,url}));
+  const compact=[...all.filter(c=>!c.qqRoom).map(c=>({...c,...directory.find(row=>row.id===c.id)})).map(({id,name,owner_ids,locked,visibility,url})=>({id,name,owner_ids,locked,visibility,url})),...(!cloudFeaturesEnabled?directory.filter(row=>all.some(card=>card.id===row.id&&card.qqRoom)):[])];
   if(role==='GM'&&!directoryWrite&&!sameValue(directory,compact)){directoryWrite=true;void OBR.room.setMetadata({[DIRECTORY]:compact}).catch(error=>console.warn('[workbench] directory recovery pending',error)).finally(()=>{directoryWrite=false;});}
-  const cards=all.map(c=>{const tokens=items.filter(i=>i.metadata[BIND]===c.id);
+  const cards=all.filter(c=>cloudFeaturesEnabled||!c.qqRoom).map(c=>{const tokens=items.filter(i=>i.metadata[BIND]===c.id);
    // Native Set Owner is authoritative. Do not revive stale importer/editor
    // grants when ownership changes or when a token leaves the scene.
    const owner_ids=c.qqRoom?(c.owner_ids||[]):nativeCardOwners(tokens,c.id);
@@ -620,6 +622,7 @@ async function start(){
   }
  });
  async function command(m:any){
+  if(['qqLibrary','cloudInfo','cloudEditors','cloudUpload'].includes(m.type))assertCloudEnabled();
   if(m.type==='qqLibrary'){await OBR.modal.open({id:'com.obr-suite/qq-card-library',url:assetUrl('cc-qq.html'),width:1280,height:850});return;}
   if(m.type==='groupRoll'){const result=await groups.handle(m);if(m.action==='close')finishMapFollow();return result;}
   if(m.type==='refreshCatalog'){await observation.refreshCatalog();const list=await catalog();return {catalog:{cards:list.cards,monsters:list.monsters,sequence:++sequence},access:publishAccess(list)};}

@@ -1,4 +1,5 @@
 import {QQ_CARDS,acceptQQSession,clearQQSession,qqSession,qqRequest,disconnectQQ} from '../modules/characterCards/qq-account';
+import {assertCloudEnabled} from '../cloud-availability';
 import {markPlayerPermissionsRead} from '../player-permission-notice';
 import { requestTextEffect } from '../modules/textEffects';
 import { REQUEST as TEXT_EFFECT_REQUEST, STATUS as TEXT_EFFECT_STATUS } from '../modules/textEffects/protocol';
@@ -26,6 +27,7 @@ export function panelBridge(send:(type:string,data:Record<string,unknown>)=>void
   if(typeof instance!=='string'||!/^[a-zA-Z0-9-]{1,80}$/.test(instance))throw Error('无效窗口');
   if(!['settings','music','table','notes','permissions','textEffects','qq'].includes(panel))throw Error('无效功能页');
   if(panel==='qq'){
+   assertCloudEnabled();
    if(method==='account.attach'&&args.length===1)return acceptQQSession(args[0]);
    if(method==='account.clear'&&args.length===1)return clearQQSession(args[0]);
    if(method==='account.status'&&!args.length){const session=qqSession();return session?{authenticated:true,account:{id:session.accountId,nickname:session.nickname}}:{authenticated:false};}

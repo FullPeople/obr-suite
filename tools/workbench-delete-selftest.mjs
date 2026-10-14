@@ -31,7 +31,7 @@ function fixture({cloud=false,ids=['a'],role='GM'}={}){
  };
  const transmit=async(id,before)=>{await hooks.beforeSend?.();try{await before?.();}catch(error){throw Object.assign(error,{notSent:true});}posts.push(id);await hooks.post?.();deleted.add(id);await hooks.afterDelete?.();return {};};
  host=vm.createContext({console,performance,structuredClone,Map,Set,Promise,Date,
-  protocol:'full-suite-workbench/v1',session:'delete',BIND,DIRECTORY,ROOM_LIST,LIST,QQ_CARDS,DELETED,playerId:'me',
+  protocol:'full-suite-workbench/v1',session:'delete',BIND,DIRECTORY,ROOM_LIST,LIST,QQ_CARDS,DELETED,playerId:'me',assertCloudEnabled:()=>{},
   OBR:sdk,devManifest:{version:'synthetic-delete'},
   access:async itemId=>{const id=itemId.replace(/^card:/,''),card=rows.find(row=>row.id===id);if(!card||world.room[DELETED].includes(id))throw Error('没有角色卡');return {card,cardId:id,targetId:'card:'+id,key:'room:card:'+id,write:world.role==='GM'||owner==='me',role:world.role,items:world.items};},
   catalog,publishAccess:data=>{host.accessHistory.set(host.accessEpoch,data);return data;},accessEpoch:1,accessHistory:new Map(),

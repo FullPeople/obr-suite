@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import {cloudFeaturesEnabled} from '../src/cloud-availability.ts';
+if(!cloudFeaturesEnabled){await import('./cloud-suspended-selftest.mjs');process.exit(0);}
 import {acceptQQSession,clearQQSession,qqSession,qqRequest,QQ_STORAGE} from '../src/modules/characterCards/qq-account.ts';
 const storage=new Map(),events=[];globalThis.localStorage={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};globalThis.window={dispatchEvent:event=>events.push(event.type)};
 const token='synthetic-personal-token-0123456789',candidate={token,expiresAt:Date.now()+60000,accountId:'owner',nickname:'unverified-name',avatar:'https://untrusted.invalid/avatar',csrf:'unverified-csrf'};

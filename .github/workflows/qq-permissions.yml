@@ -54,10 +54,11 @@ jobs:
           node tools/qq-account-session-selftest.mjs
           node tools/native-owner-selftest.mjs
           node tools/workbench-delete-selftest.mjs
+          node tools/cloud-suspended-selftest.mjs
           node tools/workbench-read-recovery-selftest.mjs
           npm run build:workbench-dev
       - run: npx playwright install --with-deps chromium
-      - name: Connect real page and HTTP permissions with synthetic accounts
+      - name: Verify active QQ permissions or paused cloud boundaries
         run: node tools/qq-room-browser-selftest.mjs
       - uses: actions/upload-artifact@v4
         if: always()

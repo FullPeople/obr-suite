@@ -7,7 +7,8 @@ let metadata={[QQ_CARDS]:[],secret:'unrelated-room-state'};
 const source=readFileSync(new URL('../src/workbench/panel-rpc.ts',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace('export function panelBridge','function panelBridge');
 const OBR={room:{id:'room',getMetadata:async()=>structuredClone(metadata),setMetadata:async value=>{writes.push(value);metadata={...metadata,...value};},onMetadataChange:fn=>{listeners.set('room',fn);return()=>listeners.delete('room');}},player:{getId:async()=>'player',getRole:async()=>'PLAYER'}};
 const accounts=[];let personal={accountId:'owner',token:'synthetic-private-token'};
-const context=vm.createContext({OBR,QQ_CARDS,qqSession:()=>personal,acceptQQSession:async value=>accounts.push(['attach',value]),clearQQSession:value=>accounts.push(['clear',value]),setupServerAdmission(){},tableWorkbench:()=>async()=>{},events});
+// Explicit enabled-feature policy fixture; production suspension is covered separately.
+const context=vm.createContext({OBR,QQ_CARDS,assertCloudEnabled:()=>{},qqSession:()=>personal,acceptQQSession:async value=>accounts.push(['attach',value]),clearQQSession:value=>accounts.push(['clear',value]),setupServerAdmission(){},tableWorkbench:()=>async()=>{},events});
 vm.runInContext(ts.transpileModule(source+'\nglobalThis.bridge=panelBridge((...args)=>events.push(args));',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,context);
 const request=(method,args=[])=>context.bridge('qq','qq-window',method,args),plain=value=>JSON.parse(JSON.stringify(value));
 let count=0;async function check(name,fn){await fn();console.log('PASS',++count,name);}

@@ -1,3 +1,4 @@
+import {assertCloudEnabled} from '../cloud-availability.ts';
 type Receipt={characterId:string;source:string;creating?:boolean;cloudId?:string;room?:{id:string;capability:string}};
 type Dependencies={roomId:string;cardId:string;playerId:string;native?:any;read:()=>Promise<any>;guard:()=>Promise<void>;session:()=>{accountId?:string;token:string}|undefined;request:(path:string,method?:string,data?:unknown)=>Promise<any>;storage:Pick<Storage,'getItem'|'setItem'|'removeItem'>;getMetadata:()=>Promise<Record<string,any>>;setMetadata:(update:Record<string,unknown>)=>Promise<void>;registryKey:string};
 export const cloudRevisionOffset=(entry:any)=>Number.isSafeInteger(entry?.qqRevisionOffset)&&entry.qqRevisionOffset>=0?entry.qqRevisionOffset:0;
@@ -7,6 +8,7 @@ const sourceHash=async(document:any)=>Array.from(new Uint8Array(await crypto.sub
 // Upload receipts belong to this player's host. An unknown POST outcome must
 // be reconciled against the personal library before another upload is allowed.
 export async function uploadRoomCard(d:Dependencies){
+ assertCloudEnabled();
  const actor=d.session();if(!actor?.accountId)throw Error('请先登录 QQ 账号。');
  const guard=async()=>{if(d.session()?.token!==actor.token)throw Error('QQ 账号已改变，请重新打开云端设置。');await d.guard();if(d.session()?.token!==actor.token)throw Error('QQ 账号已改变，请重新打开云端设置。');};
  await guard();const document=await d.read(),native=document?.dnd_card_web||d.native;

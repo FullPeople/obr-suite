@@ -1,8 +1,10 @@
 import {QQ_CARDS,QQ_ORIGIN,QQ_STORAGE,qqSession,clearQQSession,type QQRoom} from './qq-account';
 import {watchCloudChanges} from './change-watch';
+import {cloudFeaturesEnabled,assertCloudEnabled} from '../../cloud-availability';
 
 /** Keep room proofs in memory; no character data is included in a notice. */
 export function qqChangeRooms(metadata:Record<string,unknown>):QQRoom[]{
+ if(!cloudFeaturesEnabled)return [];
  const rows=metadata[QQ_CARDS];if(!Array.isArray(rows))return [];
  const rooms=new Map<string,QQRoom>();
  for(const row of rows){const room=row?.qqRoom;if(typeof room?.id==='string'&&room.id&&typeof room.capability==='string'&&room.capability)rooms.set(room.id,{id:room.id,capability:room.capability});}
@@ -10,6 +12,7 @@ export function qqChangeRooms(metadata:Record<string,unknown>):QQRoom[]{
 }
 
 export async function qqChangeNotice(rooms:QQRoom[],cursor:string|undefined,signal:AbortSignal):Promise<unknown>{
+ assertCloudEnabled();
  const session=qqSession(),controller=new AbortController(),abort=()=>controller.abort();
  signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();
  const timer=setTimeout(abort,30000);
@@ -26,6 +29,7 @@ async function probeRoom(room:QQRoom,token:string,signal:AbortSignal):Promise<QQ
  catch{return {room,valid:false,status:0};}finally{clearTimeout(timer);signal.removeEventListener('abort',abort);}
 }
 export function observeQQChanges(options:{rooms:()=>QQRoom[];changed:()=>Promise<void>;scopeStatus?:(results:QQScopeStatus[])=>void}){
+ if(!cloudFeaturesEnabled)return {stop:()=>{},retry:()=>{},checkScope:()=>{},blockedRooms:()=>new Set<string>(),done:Promise.resolve()};
  const scope=()=>JSON.stringify([qqSession()?.token||'',options.rooms()]);
  let current=scope(),alive=true;
  const excluded=new Map<string,{key:string;retryAt:number}>(),key=(room:QQRoom)=>JSON.stringify([qqSession()?.token||'',room.id,room.capability]);

@@ -12,7 +12,9 @@ const checks=[];
 async function check(name,run){await run();checks.push({name,passed:true});console.log('PASS '+name);}
 const compile=s=>ts.transpileModule(s,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
 function declaration(file,name){const source=ts.createSourceFile(file,read(file),ts.ScriptTarget.Latest,true);let found;const visit=node=>{if(ts.isFunctionDeclaration(node)&&node.name?.text===name)found=node.getText(source);ts.forEachChild(node,visit);};visit(source);assert.ok(found,`${file}:${name}`);return found.replace(/^export /,'');}
-function scope(source,bindings={}){const context=vm.createContext({console,structuredClone,Map,Set,Promise,...bindings});vm.runInContext(compile(source),context);return context;}
+// Historical enabled-cloud policy fixtures remain explicit; the product's paused
+// entry points are covered separately by cloud-suspended-selftest.mjs.
+function scope(source,bindings={}){const context=vm.createContext({console,structuredClone,Map,Set,Promise,cloudFeaturesEnabled:true,assertCloudEnabled:()=>{},...bindings});vm.runInContext(compile(source),context);return context;}
 const policy=read('src/modules/characterCards/native-owner.ts').replaceAll('export ','');
 const rules=scope(policy);const BIND='com.character-cards/boundCardId',LIST='com.character-cards/list',ROOM_LIST='com.character-cards/list-room',DIRECTORY='com.obr-suite/workbench/cards',HP='com.obr-suite/bubbles/data',LEGACY='com.owlbear-rodeo-bubbles-extension/metadata',RES='com.obr-suite/resources/data',RUNTIME_BASELINE='com.obr-suite/workbench/runtime-baseline';
 const token=(owner='me',id='one',locked=true)=>({id,type:'IMAGE',createdUserId:owner,locked,name:id,metadata:{[BIND]:'hero',[HP]:{locked:true,health:20,'max health':30}}});
@@ -41,6 +43,22 @@ function reset({role='PLAYER',owner='me',locked=true,visibility='owners',items}=
 await check('host ignores stale editor/importer grants; native owner sees locked card and keeps existing write right',async()=>{reset();let data=await host.catalog();assert.equal(data.cards.length,1);assert.equal(data.cards[0].write,true);assert.deepEqual([...data.cards[0].owner_ids],['me']);world.room['com.obr-suite/workbench/card-editors']={hero:[]};version++;assert.equal((await host.catalog()).cards[0].write,true);});
 await check('locked nonowner and no-owner cards are absent even with matching legacy assignment',async()=>{for(const owner of ['other','']){reset({owner});world.room['com.obr-suite/workbench/card-editors']={hero:['me']};world.scene[LIST][0].owner_ids=['me'];assert.equal((await host.catalog()).cards.length,0);await assert.rejects(()=>host.access('card:hero'));}});
 await check('no current scene token never revives historical grants; public off-scene cards remain readonly',async()=>{reset({items:[]});assert.equal((await host.catalog()).cards.length,0);reset({items:[],locked:false,visibility:'public'});assert.equal((await host.access('card:hero')).write,false);});
+await check('paused cloud cards disappear for GM and players without deleting their registry or recovering them as native cards',async()=>{
+ const setMetadata=sdk.room.setMetadata;
+ try{
+  host.cloudFeaturesEnabled=false;
+  for(const role of ['GM','PLAYER']){
+   reset({role});const cloudToken=token('me','cloud-token');cloudToken.metadata[BIND]='cloud';world.items.push(cloudToken);
+   const row={id:'cloud',name:'Cloud',owner_ids:['me'],locked:true,visibility:'owners',retained:'authored'};world.room[DIRECTORY].push(row);
+   world.room[QQ_CARDS]=[{...row,qqRoom:{id:'saved-room',capability:'authored-proof'},qqOwner:'saved-account'}];
+   const registry=structuredClone(world.room[QQ_CARDS]);sdk.room.setMetadata=async patch=>{Object.assign(world.room,patch);};
+   const data=await host.catalog();assert.deepEqual([...data.cards].map(card=>card.id),['hero']);
+   await assert.rejects(()=>host.access('card:cloud'),/权限/);await assert.rejects(()=>host.access('cloud-token'),/权限/);
+   for(const type of ['readCard','save','delete'])await assert.rejects(()=>host.command({type,itemId:'card:cloud'}),/权限/);
+   assert.deepEqual(world.room[QQ_CARDS],registry);assert.deepEqual(world.room[DIRECTORY].find(card=>card.id==='cloud'),row);
+  }
+ }finally{host.cloudFeaturesEnabled=true;sdk.room.setMetadata=setMetadata;}
+});
 await check('unlocked nonowner read succeeds; host rejects HP, resource, delete and full-card writes',async()=>{reset({owner:'other',locked:false,visibility:'public'});assert.equal((await host.access('card:hero')).write,false);assert.ok(await host.command({type:'readCard',itemId:'card:hero'}));for(const type of ['stats','resource','delete','save'])await assert.rejects(()=>host.command({type,itemId:'card:hero',key:'room:card:hero'}),/权限/);assert.equal(writes.length,0);});
 await check('QQ room grants use the logged-in cloud owner and unlock members independently of native token ownership',async()=>{
  reset({items:[]});world.room[QQ_CARDS]=[{id:'cloud',name:'Cloud',qqRoom:{id:'grant',capability:'synthetic'},qqOwner:'account-owner',locked:true,owner_ids:['foreign']}];qqAccount='account-owner';
