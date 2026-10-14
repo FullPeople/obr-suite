@@ -23,8 +23,10 @@ export function runtimeProjectionApplied(item: Token, cardId: string, doc: any, 
   if (!expected || !expected.stats || typeof expected.stats !== 'object'
     || !expected.resources || typeof expected.resources !== 'object' || !Array.isArray(expected.conditions)) return false;
   const actual = tokenRuntime(item.metadata, {stats: {}, resources: {}, conditions: []});
-  return (['stats', 'resources', 'conditions'] as const)
-    .every(key => !rights[key] || sameValue(actual[key], expected[key]));
+  // Legacy tokens may retain additional stats which the document does not own.
+  return (!rights.stats || Object.keys(expected.stats).every(key => sameValue(actual.stats[key], expected.stats[key])))
+    && (!rights.resources || sameValue(actual.resources, expected.resources))
+    && (!rights.conditions || sameValue(actual.conditions, expected.conditions));
 }
 
 /** Observe local metadata application; never wait for every participant or poll SDK getters. */

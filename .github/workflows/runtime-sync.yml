@@ -32,6 +32,8 @@ jobs:
           node tools/runtime-completion-selftest.mjs
           node tools/workbench-runtime-176-selftest.mjs
           node tools/workbench-owner-authority-selftest.mjs
+          node tools/native-owner-selftest.mjs
+          node tools/workbench-read-recovery-selftest.mjs
           npm run test:bubbles
       - name: Actual SDK and iframe completion/recovery
         run: node tools/runtime-completion-browser-selftest.mjs

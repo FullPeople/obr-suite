@@ -142,4 +142,8 @@ await test('malformed metadata stamps cannot confirm a saved document or crash t
   const item = token(14, 3); delete item.metadata[BASE].value;
   assert.equal(runtimeProjectionApplied(item, 'hero', document()), false);
 });
+await test('legacy documents confirm their authoritative stats without deleting extra token stats', async () => {
+  const legacy = document(); delete legacy.core_stats.hp.max; delete legacy.core_stats.ac;
+  assert.equal(runtimeProjectionApplied(token(18, 2), 'hero', legacy), true);
+});
 console.log(JSON.stringify({controlled: true, realRoomVerified: false, passed: reports.length}));
