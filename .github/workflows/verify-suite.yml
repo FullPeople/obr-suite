@@ -76,6 +76,10 @@ jobs:
         run: |
           npm run build:workbench-dev
           npm run build:three-dragon
+      - name: Verify transparent Boss and initiative canvases in actual built iframes
+        env:
+          PLAYWRIGHT_EXECUTABLE_PATH: ${{ env.CHROMIUM_PATH }}
+        run: node tools/transparent-canvas-browser.mjs --built dist-workbench-dev --channel suite-dev
       - name: Verify native music panel ships without the retired website panel
         run: node --input-type=module -e "import assert from 'node:assert/strict';import {existsSync} from 'node:fs';assert(existsSync('dist-workbench-dev/workbench-panels/music.html'));assert(!existsSync('dist-workbench-dev/workbench-panels/studio.html'));"
       - name: Document editing, separate monster tabs and readable camera bindings
@@ -179,6 +183,7 @@ jobs:
             .local-evidence/owner-cold-browser/
             .local-evidence/verification/owner-cold-sdk/vm-results.json
             .local-evidence/permission-notice/
+            .local-evidence/transparent-canvas291/
             .local-evidence/verification/*.log
             .local-evidence/verification/results.json
             .local-evidence/dice-mode278/
