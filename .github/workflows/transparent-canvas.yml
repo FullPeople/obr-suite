@@ -1,0 +1,23 @@
+name: Transparent GM and player canvas
+on:
+  push:
+    branches: [dev]
+    paths: ['boss-bar.html', 'initiative-panel.html', 'src/utils/transparent-canvas*', 'tools/*transparent-canvas*', '.github/workflows/transparent-canvas.yml']
+  workflow_dispatch:
+jobs:
+  canvas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: node tools/build-transparent-canvas.mjs .local-evidence/canvas --fixture
+      - run: node tools/transparent-canvas-native-browser.mjs --built .local-evidence/canvas --out .local-evidence/canvas-proof
+      - uses: actions/upload-artifact@v4
+        with:
+          name: transparent-canvas-proof
+          path: .local-evidence/canvas-proof
