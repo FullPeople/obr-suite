@@ -83,6 +83,11 @@
   --suite-overlay: rgba(237, 244, 241, 0.96);
 }
 
+/* Transparent overlays negotiate their canvas scheme with the embedding
+   iframe. Forcing the preset's light/dark scheme paints an opaque UA canvas
+   when the host uses the opposite scheme, despite transparent backgrounds. */
+:root[data-suite-canvas="transparent"] { color-scheme: light dark; }
+
 /* ---- 2. page tokens --------------------------------------------------- */
 :root {
   --bg: var(--suite-bg);
