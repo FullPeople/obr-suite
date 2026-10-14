@@ -33,6 +33,7 @@ import OBR, {
   Math2,
   Vector2,
 } from "@owlbear-rodeo/sdk";
+import { bubblePresentation } from "./presentation";
 import { assetUrl } from "../../asset-base";
 import { DEFAULT_PLAYER_THRESHOLD, SCENE_BUBBLES_SETTINGS_KEY, readScenePlayerThreshold, quantiseRatio } from "./display-policy";
 import { resolveAnchorBox, type AnchorBox, type AnchorRef, type Frame } from "./anchor-box";
@@ -897,6 +898,10 @@ interface BubbleEntry {
 const entries = new Map<string, BubbleEntry>();
 
 interface BubbleSession {
+  items?: Item[];
+  itemVersion: number;
+  gridVersion: number;
+  metadata?: Record<string, unknown>;
   initialized: boolean;
   ready: boolean;
   sceneRevision: number;
@@ -1792,32 +1797,22 @@ async function syncBubbles(): Promise<void> {
   syncOwner = own;
   try {
     if (!readEnabled()) {
+      bubblePresentation.stop();
       await clearAll();
       return;
     }
 
-    // Items, grid dpi and scene metadata are three independent host reads.
-    // They used to run in sequence on every sync, so a remote HP change
-    // waited three round trips before the bubble could redraw; now it waits
-    // for the slowest one. cachedSceneDpi is still refreshed opportunistically
-    // every sync (a non-default grid can change it) and the bounds-poll reads
-    // it without awaiting, so this keeps it warm.
-    let allItems: Item[];
-    let dpiRead: number | undefined;
-    let metaRead: Record<string, unknown> | undefined;
-    try {
-      const [items, dpiResult, metaResult] = await Promise.all([
-        OBR.scene.items.getItems(),
-        OBR.scene.grid.getDpi().then((v) => v, () => undefined),
-        OBR.scene.getMetadata().then((v) => v as Record<string, unknown>, () => undefined),
-      ]);
-      allItems = items;
-      dpiRead = dpiResult;
-      metaRead = metaResult;
+    // SDK change events already contain the complete item snapshot. Reuse it:
+    // an HP edit must not wait on another full-scene/grid/metadata RPC round.
+    if (!own.items) {
+      const version = own.itemVersion;
+      let items: Item[];
+      try { items = await OBR.scene.items.getItems(); } catch { return; }
+      if (!current()) return;
+      if (version === own.itemVersion) own.items = items;
     }
-    catch { return; }
-    if (!current()) return;
-    if (typeof dpiRead === "number") cachedSceneDpi = dpiRead;
+    const allItems = own.items;
+    if (!allItems || !current()) return;
     const sceneDpi = cachedSceneDpi;
 
     const userScale = readUserScale();
@@ -1832,7 +1827,7 @@ async function syncBubbles(): Promise<void> {
     // Refresh the cached combat-active flag at sync time so a player
     // who joins during combat picks up the right view mode without
     // waiting for the next metadata-change event.
-    if (metaRead) cachedCombatActive = readCombatActive(metaRead);
+    if (own.metadata) cachedCombatActive = readCombatActive(own.metadata);
     if (!current()) return;
     const isGM = role === "GM";
 
@@ -2060,6 +2055,7 @@ async function syncBubbles(): Promise<void> {
     for (const e of entries.values()) if (e.shimmerIds.length) { anyShimmer = true; break; }
     if (anyShimmer) ensureAnimationTimer();
     else stopAnimationTimer();
+    bubblePresentation.commit(allItems.filter(isImage));
   } finally {
     if (syncOwner === own) syncOwner = null;
     if (session === own && own.queuedSync) {
@@ -2070,6 +2066,7 @@ async function syncBubbles(): Promise<void> {
 }
 
 async function clearAll(): Promise<void> {
+  bubblePresentation.invalidate();
   const ids: string[] = [];
   for (const e of entries.values()) ids.push(...e.ids);
   entries.clear();
@@ -2139,11 +2136,76 @@ async function sweepStaleBubbleItems(shouldApply: () => boolean): Promise<void> 
 // --- Module lifecycle --------------------------------------------------
 
 export async function setupBubbles(): Promise<void> {
-  const own: BubbleSession = { initialized: false, ready: false, sceneRevision: 0, roleRevision: 0, queuedSync: false, readyTimer: null };
+  const own: BubbleSession = { itemVersion: 0, gridVersion: 0, initialized: false, ready: false, sceneRevision: 0, roleRevision: 0, queuedSync: false, readyTimer: null };
   session = own;
+  if (readEnabled()) bubblePresentation.start(); else bubblePresentation.stop();
   role = "PLAYER";
   myPlayerId = "";
   const active = () => session === own;
+  bubblePresentation.setRefresh(items => {
+    if (!active() || own.items === items) return;
+    own.items = items as Item[]; own.itemVersion++; scheduleSync();
+  });
+  const acceptSceneMetadata = (meta: Record<string, unknown>) => {
+    if (!active()) return;
+    const next = readCombatActive(meta);
+    const nextThreshold = readScenePlayerThreshold(meta as Record<string, unknown>);
+    const nextAutoScale = readSceneAutoScaleText(meta as Record<string, unknown>);
+    const nextVOffset = readSceneVerticalOffset(meta as Record<string, unknown>);
+    const nextOffsetByText = readSceneOffsetByText(meta as Record<string, unknown>);
+    const nextOverhead = readSceneOverheadMode(meta as Record<string, unknown>);
+    const nextAnchor = readSceneAnchorMode(meta as Record<string, unknown>);
+    // 2026-10-08 — another client (or this one, after its own flush)
+    // rewrote the anchor table. `loadAnchorMemory` is a no-op while a
+    // local calibration is still queued, so this can't swallow one.
+    loadAnchorMemory(meta as Record<string, unknown>);
+    if (
+      next !== cachedCombatActive ||
+      nextThreshold !== cachedPlayerThreshold ||
+      nextAutoScale !== cachedAutoScaleText ||
+      nextVOffset !== cachedVerticalOffset ||
+      nextOffsetByText !== cachedOffsetByText ||
+      nextOverhead !== cachedOverheadMode ||
+      nextAnchor !== cachedAnchorMode
+    ) {
+      const autoScaleChanged = nextAutoScale !== cachedAutoScaleText;
+      // Any of the layout-affecting DM settings (offset / offset-by-
+      // text / overhead mode / anchor basis) changing also needs a
+      // full rebuild, not just a patchGeometry — same reasoning as
+      // autoScale.
+      const layoutChanged =
+        nextVOffset !== cachedVerticalOffset ||
+        nextOffsetByText !== cachedOffsetByText ||
+        nextOverhead !== cachedOverheadMode ||
+        nextAnchor !== cachedAnchorMode;
+      cachedCombatActive = next;
+      cachedPlayerThreshold = nextThreshold;
+      cachedAutoScaleText = nextAutoScale;
+      cachedVerticalOffset = nextVOffset;
+      cachedOffsetByText = nextOffsetByText;
+      cachedOverheadMode = nextOverhead;
+      cachedAnchorMode = nextAnchor;
+      if (autoScaleChanged || layoutChanged) {
+        void clearAll();
+      }
+      scheduleSync();
+    }
+  };
+  // Subscribe before the initial RPCs: a late read cannot replace a newer event.
+  unsubs.push(OBR.scene.items.onChange(items => {
+    if (!active()) return;
+    own.items = items; own.itemVersion++; scheduleSync();
+  }));
+  unsubs.push(OBR.scene.onMetadataChange(meta => {
+    if (!active()) return;
+    const anchorChanged = JSON.stringify(own.metadata?.[BUBBLE_ANCHORS_KEY]) !== JSON.stringify(meta[BUBBLE_ANCHORS_KEY]);
+    own.metadata = meta; acceptSceneMetadata(meta);
+    if (anchorChanged) scheduleSync();
+  }));
+  unsubs.push(OBR.scene.grid.onChange(g => {
+    if (!active()) return;
+    own.gridVersion++; cachedSceneDpi = g.dpi; scheduleSync();
+  }));
   unsubs.push(onPresentedBossesChange(() => { if (active()) scheduleSync(); }));
   // Subscribe before initial reads: a newer role event must also invalidate
   // a pending snapshot when it happens to equal the safe default above.
@@ -2154,11 +2216,12 @@ export async function setupBubbles(): Promise<void> {
     if (nextRole !== role) { role = nextRole; changed = true; }
     if (p.id && p.id !== myPlayerId) { myPlayerId = p.id; changed = true; }
     if (changed || !own.initialized) own.roleRevision++;
-    if (changed) scheduleSync();
+    if (changed) { bubblePresentation.invalidate(); scheduleSync(); }
   }));
   unsubs.push(OBR.scene.onReadyChange((ready) => {
     if (!active()) return;
     const revision = ++own.sceneRevision;
+    own.items = undefined; own.itemVersion++; own.gridVersion++; own.metadata = undefined;
     own.ready = false;
     if (own.readyTimer) clearTimeout(own.readyTimer);
     own.readyTimer = null;
@@ -2170,8 +2233,11 @@ export async function setupBubbles(): Promise<void> {
       own.readyTimer = null;
       const current = () => active() && own.sceneRevision === revision;
       if (!current()) return;
-      void sweepStaleBubbleItems(current).then(() => {
+      const gridVersion = own.gridVersion;
+      void Promise.all([sweepStaleBubbleItems(current), OBR.scene.grid.getDpi().catch(() => undefined), OBR.scene.getMetadata().catch(() => undefined)]).then(([, dpi, meta]) => {
         if (!current()) return;
+        if (typeof dpi === "number" && gridVersion === own.gridVersion) cachedSceneDpi = dpi;
+        if (!own.metadata && meta) { own.metadata = meta; acceptSceneMetadata(meta); }
         own.ready = true;
         scheduleSync();
       });
@@ -2198,22 +2264,8 @@ export async function setupBubbles(): Promise<void> {
     if (own.roleRevision === initialIdRevision) myPlayerId = next;
   } catch {}
   if (!active()) return;
-  try { const next = await OBR.scene.grid.getDpi(); if (!active()) return; cachedSceneDpi = next; } catch {}
+  try { const version = own.gridVersion, next = await OBR.scene.grid.getDpi(); if (!active()) return; if (version === own.gridVersion) cachedSceneDpi = next; } catch {}
   if (!active()) return;
-  // Refresh DPI cache when the grid changes so the bounds-poll's
-  // synchronous read is never stale.
-  try {
-    unsubs.push(OBR.scene.grid.onChange((g) => {
-      if (!active()) return;
-      cachedSceneDpi = g.dpi;
-      scheduleSync();
-    }));
-  } catch {}
-
-  unsubs.push(OBR.scene.items.onChange(() => {
-    if (active()) scheduleSync();
-  }));
-
   // 2026-05-14 (#4) — `storage` listener now only watches the
   // STILL-per-client keys: enabled + scale. verticalOffset /
   // offsetByText / overheadMode moved to scene metadata and are
@@ -2221,6 +2273,9 @@ export async function setupBubbles(): Promise<void> {
   const onStorage = (e: StorageEvent) => {
     if (!active()) return;
     if (e.key === LS_BUBBLES_ENABLED || e.key === LS_BUBBLES_SCALE) {
+      if (e.key === LS_BUBBLES_ENABLED) {
+        if (readEnabled()) bubblePresentation.start(); else bubblePresentation.stop();
+      }
       void clearAll().then(() => { if (active()) void syncBubbles().catch(() => {}); });
     }
   };
@@ -2232,68 +2287,13 @@ export async function setupBubbles(): Promise<void> {
   if (!active()) return;
 
   try {
-    const meta = await OBR.scene.getMetadata();
+    const sceneRevision = own.sceneRevision;
+    const initialMeta = await OBR.scene.getMetadata();
     if (!active()) return;
-    cachedPlayerThreshold = readScenePlayerThreshold(meta as Record<string, unknown>);
-    cachedAutoScaleText = readSceneAutoScaleText(meta as Record<string, unknown>);
-    cachedVerticalOffset = readSceneVerticalOffset(meta as Record<string, unknown>);
-    cachedOffsetByText = readSceneOffsetByText(meta as Record<string, unknown>);
-    cachedOverheadMode = readSceneOverheadMode(meta as Record<string, unknown>);
-    cachedAnchorMode = readSceneAnchorMode(meta as Record<string, unknown>);
-    // 2026-10-08 — adopt whatever this room already learned about its
-    // tokens' in-cell positions before the first sync pass runs.
-    loadAnchorMemory(meta as Record<string, unknown>);
+    const meta = own.metadata ?? (sceneRevision === own.sceneRevision ? initialMeta : undefined);
+    if (meta) { own.metadata = meta; acceptSceneMetadata(meta); }
   } catch {}
   if (!active()) return;
-
-  // Combat state and synced bubble settings changes.
-  unsubs.push(
-    OBR.scene.onMetadataChange((meta) => {
-      if (!active()) return;
-      const next = readCombatActive(meta);
-      const nextThreshold = readScenePlayerThreshold(meta as Record<string, unknown>);
-      const nextAutoScale = readSceneAutoScaleText(meta as Record<string, unknown>);
-      const nextVOffset = readSceneVerticalOffset(meta as Record<string, unknown>);
-      const nextOffsetByText = readSceneOffsetByText(meta as Record<string, unknown>);
-      const nextOverhead = readSceneOverheadMode(meta as Record<string, unknown>);
-      const nextAnchor = readSceneAnchorMode(meta as Record<string, unknown>);
-      // 2026-10-08 — another client (or this one, after its own flush)
-      // rewrote the anchor table. `loadAnchorMemory` is a no-op while a
-      // local calibration is still queued, so this can't swallow one.
-      loadAnchorMemory(meta as Record<string, unknown>);
-      if (
-        next !== cachedCombatActive ||
-        nextThreshold !== cachedPlayerThreshold ||
-        nextAutoScale !== cachedAutoScaleText ||
-        nextVOffset !== cachedVerticalOffset ||
-        nextOffsetByText !== cachedOffsetByText ||
-        nextOverhead !== cachedOverheadMode ||
-        nextAnchor !== cachedAnchorMode
-      ) {
-        const autoScaleChanged = nextAutoScale !== cachedAutoScaleText;
-        // Any of the layout-affecting DM settings (offset / offset-by-
-        // text / overhead mode / anchor basis) changing also needs a
-        // full rebuild, not just a patchGeometry — same reasoning as
-        // autoScale.
-        const layoutChanged =
-          nextVOffset !== cachedVerticalOffset ||
-          nextOffsetByText !== cachedOffsetByText ||
-          nextOverhead !== cachedOverheadMode ||
-          nextAnchor !== cachedAnchorMode;
-        cachedCombatActive = next;
-        cachedPlayerThreshold = nextThreshold;
-        cachedAutoScaleText = nextAutoScale;
-        cachedVerticalOffset = nextVOffset;
-        cachedOffsetByText = nextOffsetByText;
-        cachedOverheadMode = nextOverhead;
-        cachedAnchorMode = nextAnchor;
-        if (autoScaleChanged || layoutChanged) {
-          void clearAll();
-        }
-        scheduleSync();
-      }
-    }),
-  );
 
   // 2026-05-10: bubble-guard select-tool mode removed. The custom
   // canvasDragMode under Select fundamentally can't beat OBR's native
@@ -2351,6 +2351,8 @@ export async function setupBubbles(): Promise<void> {
 const LEGACY_GUARD_MODE_ID = "com.obr-suite/bubbles/guard-mode";
 
 export async function teardownBubbles(): Promise<void> {
+  bubblePresentation.setRefresh(undefined);
+  bubblePresentation.stop();
   const old = session;
   session = null;
   if (old?.readyTimer) clearTimeout(old.readyTimer);
