@@ -7,7 +7,7 @@ body {
 }
 
 :root {
-  color-scheme: light dark;
+  color-scheme: normal !important;
   --bg-primary: #1a1a2e;
   --bg-secondary: #16213e;
   --bg-card: #0f3460;
@@ -19,7 +19,7 @@ body {
   --gold: #f5a623;
 }
 
-html, body, #root { height: 100%; background: transparent; }
+html, body, #root { height: 100%; background: transparent !important; }
 
 /* ===================== HORIZONTAL STRIP (expanded mode) ===================== */
 .app-hbar {
@@ -37,7 +37,7 @@ html, body, #root { height: 100%; background: transparent; }
      have their own background fills, so the panel doesn't need a
      surface — the user wanted to see the underlying map through
      the gaps between cards. */
-  background: transparent;
+  background: transparent !important;
   /* hidden vertical — prevents the scrollbar when content nudges past iframe
      height. Roll buttons and active bulge are tuned to fit inside. */
   overflow: hidden;

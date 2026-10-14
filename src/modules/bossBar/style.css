@@ -1,6 +1,6 @@
 /* Match the embedding iframe's scheme; a forced dark root makes the browser
    paint an opaque canvas even when html/body backgrounds are transparent. */
-:root { color-scheme: light dark; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; color: #ffefd5; }
+:root { color-scheme: normal !important; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; color: #ffefd5; }
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; min-width: 0; background: transparent !important; overflow: hidden; }
 button, input, select { font: inherit; }

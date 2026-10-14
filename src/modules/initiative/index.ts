@@ -115,7 +115,7 @@ function getDragInAutoEnabled(): boolean {
 // during active combat. Teardown unwinds all of the above.
 
 const POPOVER_ID = "com.obr-suite/initiative-panel";
-const PANEL_URL = assetUrl("initiative-panel.html");
+const PANEL_URL = assetUrl("initiative-panel-v131.html");
 // 2026-05-14 — initiative-new-item.html (set-initiative modal) is no
 // longer opened from this module; drag-in now auto-rolls without a
 // popup. The HTML file is kept on disk for backward compat in case

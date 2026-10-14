@@ -80,7 +80,7 @@ function syncPanel(): Promise<void> {
       // only this module's ID before any newer session can open it.
       openedSession = opening;
       try {
-        await OBR.modal.open({ id: PANEL, url: `${assetUrl("boss-bar.html")}?session=${encodeURIComponent(opening)}`,
+        await OBR.modal.open({ id: PANEL, url: `${assetUrl("boss-bar-v131.html")}?session=${encodeURIComponent(opening)}`,
           fullScreen: true, hidePaper: true, hideBackdrop: true, disablePointerEvents: true });
       } catch (error) {
         await OBR.modal.close(PANEL); openedSession = ""; throw error;
