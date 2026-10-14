@@ -1,0 +1,17 @@
+name: Relay receipt delivery
+on:
+  push:
+    branches: [dev]
+    paths: ['server/workbench-relay/**', 'tools/relay-*', '.github/workflows/relay-receipts.yml']
+  workflow_dispatch:
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --check server/workbench-relay/server.mjs
+      - run: node tools/relay-receipt-selftest.mjs
+      - run: python3 tools/relay-request-streaming-selftest.py

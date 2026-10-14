@@ -29,6 +29,8 @@ assert json.loads((active/'manifest-dev.json').read_text())['version'] == args.e
 stable_before = digest_tree(base / 'suite')
 staging = pathlib.Path(tempfile.mkdtemp(prefix='.workbench-' + version + '-', dir=base))
 with tarfile.open('/tmp/suite-dev-' + version + '.tar.gz') as package:
+    required_space = sum(member.size for member in package.getmembers()) + 128 * 1024 * 1024
+    assert shutil.disk_usage(active).free >= required_space, 'Insufficient service-usable space for staging and request/data headroom'
     for member in package.getmembers():
         dest = (staging / member.name).resolve()
         if not dest.is_relative_to(staging.resolve()) or member.issym() or member.islnk():
@@ -40,10 +42,10 @@ assert all(hashlib.sha256((candidate / name).read_bytes()).hexdigest() == value 
 assert json.loads((candidate/'manifest-dev.json').read_text())['version'] == version + '-dev'
 assert (candidate/'workbench/index.html').is_file()
 new_relay = pathlib.Path('/tmp/workbench-relay-' + version)
-for filename in ['server.mjs', 'documents.mjs', 'patches.mjs']:
+for filename in ['server.mjs', 'documents.mjs', 'patches.mjs', 'websocket.mjs', 'queue-policy.mjs']:
     subprocess.run(['/usr/local/bin/node', '--check', str(new_relay/filename)], check=True)
 relay_backup.mkdir()
-for filename in ['server.mjs', 'documents.mjs', 'patches.mjs']:
+for filename in ['server.mjs', 'documents.mjs', 'patches.mjs', 'websocket.mjs', 'queue-policy.mjs']:
     if (relay/filename).exists(): shutil.copy2(relay/filename, relay_backup/filename)
 if dropin.exists(): shutil.copy2(dropin, relay_backup/'workbench-data.conf')
 nginx_config = pathlib.Path('/etc/nginx/sites-enabled/obr-plugins').resolve()
@@ -54,13 +56,13 @@ assert replacements == 1, 'Expected exactly one development relay location'
 shutil.copy2(nginx_config, relay_backup/'nginx-config')
 web_moved = False
 desired_dropin = '[Service]\nStateDirectory=obr-workbench-relay-dev\nStateDirectoryMode=0700\nEnvironment=WORKBENCH_DATA_DIR=/var/lib/obr-workbench-relay-dev\n'
-relay_changed = not dropin.exists() or dropin.read_text() != desired_dropin or any(not (relay/name).exists() or (relay/name).read_bytes() != (new_relay/name).read_bytes() for name in ['server.mjs','documents.mjs','patches.mjs'])
+relay_changed = not dropin.exists() or dropin.read_text() != desired_dropin or any(not (relay/name).exists() or (relay/name).read_bytes() != (new_relay/name).read_bytes() for name in ['server.mjs','documents.mjs','patches.mjs','websocket.mjs','queue-policy.mjs'])
 try:
     # StateDirectory stays writable under the existing ProtectSystem=strict.
     # Shared room/scene data never enters a public static directory.
     dropin.parent.mkdir(parents=True, exist_ok=True)
     if relay_changed: dropin.write_text(desired_dropin)
-    for filename in ['server.mjs','documents.mjs','patches.mjs']:
+    for filename in ['server.mjs','documents.mjs','patches.mjs','websocket.mjs','queue-policy.mjs']:
         if not relay_changed: continue
         temp = relay/(filename+'.new')
         shutil.copyfile(new_relay/filename, temp)
@@ -86,7 +88,7 @@ except BaseException:
     if web_moved:
         if active.exists(): os.rename(active, staging/'failed-suite-dev')
         os.rename(backup, active)
-    for filename in ['server.mjs','documents.mjs','patches.mjs']:
+    for filename in ['server.mjs','documents.mjs','patches.mjs','websocket.mjs','queue-policy.mjs']:
         if (relay_backup/filename).exists(): shutil.copy2(relay_backup/filename, relay/filename)
         else: (relay/filename).unlink(missing_ok=True)
     if (relay_backup/'workbench-data.conf').exists(): shutil.copy2(relay_backup/'workbench-data.conf', dropin)
