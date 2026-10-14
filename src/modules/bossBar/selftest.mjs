@@ -168,7 +168,9 @@ async function browserTest(pageFile) {
   const runtime = process.env.CODEX_PLAYWRIGHT_DIR || "C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright";
   const { chromium } = await import(pathToFileURL(join(runtime, "index.mjs")).href);
   const css = readFileSync(join(root, "src/modules/bossBar/style.css"), "utf8");
-  const html = readFileSync(join(root, "boss-bar.html"), "utf8").replace('<script type="module" src="/src/modules/bossBar/page.ts"></script>', '<script type="module" src="/page.js"></script>').replace("</head>", `<style>${css}</style></head>`);
+  const sourceHtml = readFileSync(join(root, "boss-bar.html"), "utf8");
+  assert.match(sourceHtml, /<style>html,body\{background:transparent!important\}<\/style>/, "fullscreen overlay must be transparent before module CSS loads");
+  const html = sourceHtml.replace('<script type="module" src="/src/modules/bossBar/page.ts"></script>', '<script type="module" src="/page.js"></script>').replace("</head>", `<style>${css}</style></head>`);
   const hostHtml = '<!doctype html><html><body style="margin:0"><button id="map" style="position:fixed;inset:0;width:100vw;height:100vh" onclick="window.mapClicks=(window.mapClicks||0)+1">Map input</button><button id="other" style="position:fixed;left:30px;top:30px" onclick="window.otherClicks=(window.otherClicks||0)+1">Other component</button><iframe id="overlay" src="/?session=test" style="position:fixed;inset:0;width:100vw;height:100vh;border:0;background:transparent;pointer-events:none"></iframe><script>window.wheels=0;document.addEventListener("wheel",()=>window.wheels++);</script></body></html>';
   const server = createServer((request, response) => { response.setHeader("content-type", request.url === "/page.js" ? "text/javascript" : "text/html"); response.end(request.url === "/page.js" ? readFileSync(pageFile) : request.url === "/host" ? hostHtml : html); });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve)); const base = `http://127.0.0.1:${server.address().port}`;
