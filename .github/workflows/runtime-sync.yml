@@ -1,0 +1,46 @@
+name: Runtime synchronization
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - src/workbench/**
+      - src/modules/bubbles/**
+      - tools/runtime-completion-*
+      - .github/workflows/runtime-sync.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: runtime-sync-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.9.0'
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Typecheck and runtime regression
+        run: |
+          node node_modules/typescript/bin/tsc
+          node tools/runtime-completion-selftest.mjs
+          node tools/workbench-runtime-176-selftest.mjs
+          node tools/workbench-owner-authority-selftest.mjs
+          node tools/native-owner-selftest.mjs
+          node tools/workbench-read-recovery-selftest.mjs
+          npm run test:bubbles
+      - name: Actual SDK and iframe completion/recovery
+        run: node tools/runtime-completion-browser-selftest.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-sync-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: workbench-test-output/runtime-browser/results.json

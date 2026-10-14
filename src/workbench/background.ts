@@ -1,4 +1,6 @@
 import {locateSceneItem} from './locate';
+import {completeRuntimeProjection,observeRuntimeProjection,runtimeProjectionApplied} from './runtime-completion';
+import {bubblePresentation} from '../modules/bubbles/presentation';
 import {QQ_CARDS,qqSession,qqRequest} from '../modules/characterCards/qq-account';
 import {observeQQChanges,qqChangeRooms} from '../modules/characterCards/qq-change-watch';
 import {authorizationLease} from '../modules/characterCards/authorization-lease';
@@ -198,9 +200,8 @@ async function start(){
   return doc;
  }
  const runtimeProjections=new Map<string,{pending:boolean;doc:any;work:Promise<void>}>();
- // Scene metadata is a projection of an already committed card. Keep one SDK
- // write in flight per card and coalesce its successors to the latest document;
- // their durable ACKs do not wait on this presentation lane.
+ // Scene metadata projects committed data. Coalesce one unapplied projection
+ // per card; observing its metadata releases the lane even if its SDK reply is late.
  function projectRuntime(cardId:string,doc:any):Promise<void>{
   const key=`${OBR.room.id}:card:${cardId}`,existing=runtimeProjections.get(key);
   if(existing){existing.pending=true;if(documentRevision(doc)>=documentRevision(existing.doc))existing.doc=doc;return existing.work;}
@@ -221,7 +222,8 @@ async function start(){
   const role=(await observation.read()).role;
   const projection=(item:Item)=>{const rights=runtimeProjectionRights(doc,item),current=tokenRuntime(item.metadata,value),next={stats:rights.stats?value.stats:current.stats,resources:rights.resources?value.resources:current.resources,conditions:rights.conditions?value.conditions:current.conditions};return {rights,next,stamp:{version:1,cardId,revision,value:next} as RuntimeBaseline};};
   const pending=tokens.filter(item=>role==='GM'||ownsNativeToken(item,playerId)).filter(item=>{const {rights,next,stamp}=projection(item);return Object.values(rights).some(Boolean)&&(!sameValue(item.metadata[RUNTIME_BASELINE],stamp)||!sameValue(tokenRuntime(item.metadata,value),next));});if(!pending.length)return;
-  await OBR.scene.items.updateItems(pending.map(i=>i.id),drafts=>{for(const item of drafts){const observed=pending.find(i=>i.id===item.id),previous=item.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined;
+  await observeRuntimeProjection({observation,cardId,document:doc,definitions:defs,tokenIds:pending.map(item=>item.id),
+   start:()=>OBR.scene.items.updateItems(pending.map(i=>i.id),drafts=>{for(const item of drafts){const observed=pending.find(i=>i.id===item.id),previous=item.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined;
    if(observation.peek().role!=='GM'&&!ownsNativeToken(item,playerId))continue;
    if(item.metadata[BIND]!==cardId||!observed||previous?.cardId===cardId&&previous.revision>revision)continue;
    // A genuine scene edit after the read is handled by the next reconciliation.
@@ -230,7 +232,7 @@ async function start(){
    if(rights.stats){item.metadata[HP]={...bubble(item),...value.stats};if(item.metadata[LEGACY])item.metadata[LEGACY]={...item.metadata[LEGACY] as object,...value.stats};}
    if(rights.resources)item.metadata[RES]=structuredClone(Object.values(value.resources));
    if(rights.conditions)item.metadata[STATUS_BUFFS_KEY]=[...value.conditions];item.metadata[RUNTIME_BASELINE]=structuredClone(stamp);
-  }});
+  }})});
  }
  async function catalog(){
   const {ready,scene,room,items,role,party,player}=await observation.read();
@@ -365,7 +367,7 @@ async function start(){
  async function snapshot(id:string,existing?:Awaited<ReturnType<typeof catalog>>){
   let a=await access(id,existing);const sceneEpoch=observation.sceneEpoch(),identity=targetReadIdentity(a),doc=await read(a);a=await access(id);if(targetReadIdentity(a)!==identity||sceneEpoch!==observation.sceneEpoch())throw Error('角色关联或场景已改变');
   const b=bubble(a.item),canonical=a.cardId?documentRuntime(doc,definitionsFor(a.scene)):undefined;
-  return {sequence:++sequence,clientInstance,clientSelection,access:publishAccess(a),state:{key:a.key,targetId:a.targetId,itemId:a.item?.id||`card:${a.cardId}`,name:doc?.identity?.character_name||doc?.name||a.card?.name||a.item?.name,cardId:a.cardId,slug:a.slug,kind:a.cardId?'character':a.slug?'monster':'token',cloudRoom:!!a.card?.qqRoom,documentRevision:a.cardId?documentRevision(doc):undefined,projectionPending:!!a.cardId&&a.items.some(item=>item.metadata[BIND]===a.cardId&&(item.metadata[RUNTIME_BASELINE] as RuntimeBaseline|undefined)?.revision!==documentRevision(doc)),stats:canonical?{...a.card?.stats,...canonical.stats}:Object.fromEntries(fields.filter(k=>typeof b[k]==='number').map(k=>[k,b[k]])),write:a.write,role:a.role,pinned:!follow,tokenPortrait:tokenPortrait(a.item),locked:a.card?.locked??a.item?.metadata['com.obr-suite/workbench/locked']===true,statsLocked:b.locked!==false,...live(a),conditions:conditionRows(a,doc),resources:canonical?Object.values(canonical.resources):live(a).resources},document:doc};
+  return {sequence:++sequence,clientInstance,clientSelection,access:publishAccess(a),state:{key:a.key,targetId:a.targetId,itemId:a.item?.id||`card:${a.cardId}`,name:doc?.identity?.character_name||doc?.name||a.card?.name||a.item?.name,cardId:a.cardId,slug:a.slug,kind:a.cardId?'character':a.slug?'monster':'token',cloudRoom:!!a.card?.qqRoom,documentRevision:a.cardId?documentRevision(doc):undefined,projectionPending:!!a.cardId&&a.items.some(item=>item.metadata[BIND]===a.cardId&&(!runtimeProjectionApplied(item,a.cardId,doc,definitionsFor(a.scene))||bubblePresentation.pending([item]))),stats:canonical?{...a.card?.stats,...canonical.stats}:Object.fromEntries(fields.filter(k=>typeof b[k]==='number').map(k=>[k,b[k]])),write:a.write,role:a.role,pinned:!follow,tokenPortrait:tokenPortrait(a.item),locked:a.card?.locked??a.item?.metadata['com.obr-suite/workbench/locked']===true,statsLocked:b.locked!==false,...live(a),conditions:conditionRows(a,doc),resources:canonical?Object.values(canonical.resources):live(a).resources},document:doc};
  }
  async function persistDocument(a:Awaited<ReturnType<typeof access>>,existing:any,data:any,inventoryGuard?:{key:string;revision:number},conditionGrant=false,requestGuard?:()=>void|Promise<void>){
   await requestGuard?.();await observation.refreshAuthority();
@@ -521,7 +523,12 @@ async function start(){
   await requestGuard?.();
   if(a.cardId){
    const doc=await read(a);
-   void projectRuntime(a.cardId,doc).catch(error=>console.warn('[workbench] runtime projection pending',error));
+   const observed=await observation.read();
+   const tokenIds=observed.items.filter(item=>item.metadata[BIND]===a.cardId
+    &&(observed.role==='GM'||ownsNativeToken(item,playerId))
+    &&Object.values(runtimeProjectionRights(doc,item)).some(Boolean)).map(item=>item.id);
+   await completeRuntimeProjection({observation,cardId:a.cardId,document:doc,
+    definitions:definitionsFor(observed.scene),tokenIds,start:()=>projectRuntime(a.cardId,doc)});
    // Locking is metadata-owned, so its SDK write still determines success.
    if(patch.stats&&'locked' in patch.stats){const ids=a.items.filter(i=>i.metadata[BIND]===a.cardId).map(i=>i.id);await requestGuard?.();await OBR.scene.items.updateItems(ids,drafts=>{assertIntent?.();if(observation.peek().role!=='GM')throw Error('仅 DM 可锁定生命条');for(const item of drafts)if(item.metadata[BIND]===a.cardId)item.metadata[HP]={...bubble(item),locked:patch.stats.locked};});}
    return;
@@ -903,6 +910,8 @@ async function start(){
  OBR.player.onChange(player=>send('diceEvent',{event:'player',data:player}));
  let changeScheduled=false;
  const changed=()=>{if(changeScheduled)return;changeScheduled=true;queueMicrotask(()=>{changeScheduled=false;void refreshSelection();void refresh();void hydrate();for(const id of warmCards)if(!id.startsWith('card:'))void pushWarmSnapshot(id);});};
+ // Local renderer receipts only refresh the selected display status, not every card.
+ bubblePresentation.onChange(()=>{void refreshSelection();});
  authorizationChanged=changed;
  const cloudChanges=observeQQChanges({rooms:()=>qqChangeRooms(observation.peek().room||{}),changed:async()=>{
   const rows=observation.peek().room?.[QQ_CARDS];
@@ -912,7 +921,7 @@ async function start(){
   const captured=cards.map(card=>({card,scope:cloudPermissionScope(card)}));
   await refreshCloudIndependently(captured,row=>loadCard(row.card.id,`${OBR.room.id}:card:${row.card.id}`,true),async()=>{void refreshSelection();await refresh();},()=>{});void hydrate();
  },scopeStatus:results=>{const rows=observation.peek().room?.[QQ_CARDS];for(const result of results)for(const card of Array.isArray(rows)?rows:[]){if(card.qqRoom?.id!==result.room.id||card.qqRoom.capability!==result.room.capability)continue;if(result.valid)rejectedCloudRooms.delete(card.id);else{rejectedCloudRooms.set(card.id,{scope:cloudPermissionScope(card),status:result.status});cloudLeases.get(card.id)?.invalidate('readonly');cloudPermissions.delete(card.id);}}cloudPermissionVersion++;catalogCache=undefined;changed();}});
- observation.onChange(change=>{if(change==='selection')void refreshSelection();else{cloudChanges.checkScope();changed();}});OBR.scene.onReadyChange(()=>{followRevision++;finishMapFollow(false);chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
+ observation.onChange(change=>{if(change==='selection')void refreshSelection();else{bubblePresentation.request(observation.peek().items||[]);cloudChanges.checkScope();changed();}});OBR.scene.onReadyChange(()=>{followRevision++;finishMapFollow(false);chosen='';selectionGeneration++;lastSelection='';previousSceneCards=[];invalidateCards();changed();});
  const verifyForeground=()=>{if(!document.hidden){for(const lease of cloudLeases.values())lease.invalidate();cloudChanges.retry();}};window.addEventListener('focus',verifyForeground);document.addEventListener('visibilitychange',verifyForeground);
  OBR.broadcast.onMessage('com.obr-suite/cc-card-updated',event=>{const data=event.data as any,id=data?.cardId;if(id){if(!invalidateCard(id,data?.revision))return;void hydrate(id);}else{invalidateCards();void hydrate();}changed();});OBR.broadcast.onMessage('com.obr-suite/workbench/inventory-changed',event=>{if(event.connectionId!==playerConnection)inventories.invalidate();changed();});window.addEventListener('qq-account-changed',changed);onStateChange(changed);rollListeners.add(()=>send('rolls',{rolls:getRollHistory()}));
  const connection=await OBR.player.getConnectionId();OBR.broadcast.onMessage('com.obr-suite/workbench-compose',event=>{if(event.connectionId===connection&&typeof(event.data as any)?.expression==='string')send('compose',{compose:{...(event.data as object),id:crypto.randomUUID()}});});
