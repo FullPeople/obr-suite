@@ -83,10 +83,20 @@
   --suite-overlay: rgba(237, 244, 241, 0.96);
 }
 
-/* Transparent overlays negotiate their canvas scheme with the embedding
-   iframe. Forcing the preset's light/dark scheme paints an opaque UA canvas
-   when the host uses the opposite scheme, despite transparent backgrounds. */
-:root[data-suite-canvas="transparent"] { color-scheme: light dark; }
+/* Owlbear's transparent frames use the browser's default canvas scheme.
+   `light dark` can select the OS preference while a normal embedding frame
+   still uses light, causing Chromium to paint a solid dark canvas. Neither
+   Suite presets nor the SDK theme mode describe that embedding element.
+   Keep the legacy default at the root; style controls inside the page. */
+:root[data-suite-canvas="transparent"] {
+  color-scheme: normal !important;
+  background: transparent !important;
+}
+:root[data-suite-canvas="transparent"] body:not(.config),
+:root[data-suite-canvas="transparent"] #root,
+:root[data-suite-canvas="transparent"] #bossBars {
+  background: transparent !important;
+}
 
 /* ---- 2. page tokens --------------------------------------------------- */
 :root {

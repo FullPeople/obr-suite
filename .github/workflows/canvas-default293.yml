@@ -1,0 +1,21 @@
+name: Default transparent overlay canvas
+on:
+  push:
+    branches: [dev]
+    paths: ['src/styles/suite-ui.css', 'boss-bar.html', 'initiative-panel.html', 'hp-bar.html', 'tools/*transparent-canvas*', '.github/workflows/canvas-default293.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: node tools/transparent-canvas-logic.mjs
+      - run: node --check tools/build-transparent-canvas-hotfix.mjs
+      - run: node --check tools/transparent-canvas-browser.mjs

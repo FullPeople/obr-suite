@@ -37,15 +37,16 @@ await new Promise(ready=>fixtureServer.listen(0,'127.0.0.1',ready));
 const fixtureUrl=`http://127.0.0.1:${fixtureServer.address().port}/`;
 const checks=[],controls=[],configuration=[];
 try{
- // Emulating prefers-color-scheme via DevTools also overrides the embedded
- // document's preference, bypassing the host negotiation this test exercises.
- // Set the actual embedding element's scheme instead of a global emulation.
- for(const preferred of ['host-negotiated']){
-  const context=await browser.newContext({viewport:{width:900,height:700},colorScheme:null});
+ // The SDK palette mode is not the iframe's CSS color-scheme. In particular,
+ // a default (`normal`) owner still uses light while propagating the system
+ // preference. Cover that missing dark-system/default-owner regression.
+ // This fixture does not establish the actual room's embedding styles.
+ for(const preferred of ['light','dark']){
+  const context=await browser.newContext({viewport:{width:900,height:700},colorScheme:preferred});
   await context.route('**/*',route=>route.request().resourceType()==='script'?route.abort():route.continue());
   const page=await context.newPage();
   const failed=[];page.on('requestfailed',request=>{if(request.resourceType()!=='script')failed.push({url:request.url(),error:request.failure()?.errorText});});
-  for(const host of ['light','dark'])for(const file of ['boss-bar.html','initiative-panel.html']){
+  for(const host of ['normal','light'])for(const file of ['boss-bar.html','initiative-panel.html']){
    fixtureBody=`<!doctype html><html style="color-scheme:${host}"><head><style>html,body{margin:0;width:100%;height:100%;background:rgb(31,172,145)}iframe{position:absolute;left:20px;top:20px;width:800px;height:600px;border:0;background:transparent}</style></head><body><iframe src="${origin+file}"></iframe></body></html>`;
    await page.goto(fixtureUrl);
    const frame=page.frames().find(frame=>frame.url().startsWith(origin));assert(frame,'Production iframe did not load: '+JSON.stringify({frames:page.frames().map(frame=>frame.url()),failed}));
@@ -55,7 +56,7 @@ try{
     await frame.waitForFunction(theme=>document.documentElement.dataset.suiteTheme===theme,theme);}
     await frame.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))));
     const canvas=await frame.evaluate(()=>({scheme:getComputedStyle(document.documentElement).colorScheme,prefersDark:matchMedia('(prefers-color-scheme: dark)').matches,root:getComputedStyle(document.documentElement).backgroundColor,body:getComputedStyle(document.body).backgroundColor}));
-    assert.equal(canvas.prefersDark,host==='dark','A global browser emulation bypassed the embedding element preference');
+    if(!baseline)assert.equal(canvas.scheme,'normal','Transparent root must retain the legacy default');
     const shot=await page.screenshot();
     const pixel=await page.evaluate(async data=>{const image=new Image();image.src='data:image/png;base64,'+data;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);return [...ctx.getImageData(22,22,1,1).data];},shot.toString('base64'));
     const transparent=pixel[0]===31&&pixel[1]===172&&pixel[2]===145&&pixel[3]===255;
@@ -80,7 +81,7 @@ try{
   await context.close();
  }
  const mismatches=checks.filter(check=>!check.transparent);
- const proof={origin,baseline,passed:!mismatches.length&&controls.every(check=>check.unchanged)&&configuration.every(check=>check.retained),transparentCases:checks.length,opaqueControlCases:controls.length,configurationCases:configuration.length,mismatchCount:mismatches.length,checks,controls,configuration,realOwlbearRoomVerified:false,externalApplicationScriptsBlocked:true};
+ const proof={origin,baseline,passed:!mismatches.length&&controls.every(check=>check.unchanged)&&configuration.every(check=>check.retained),transparentCases:checks.length,opaqueControlCases:controls.length,configurationCases:configuration.length,mismatchCount:mismatches.length,checks,controls,configuration,embeddingSchemes:['normal','light'],explicitDarkEmbeddingVerified:false,realOwlbearRoomVerified:false,externalApplicationScriptsBlocked:true};
  writeFileSync(join(out,'results.json'),JSON.stringify(proof,null,2)+'\n');
  assert(controls.every(check=>check.unchanged),'Ordinary settings theme was changed');
  assert(configuration.every(check=>check.retained),'Boss configuration background was removed');
