@@ -1,4 +1,5 @@
 import OBR from '@owlbear-rodeo/sdk';
+import {cloudFeaturesEnabled,cloudDisabledMessage} from '../../cloud-availability';
 import {assetUrl} from '../../asset-base';
 import {QQ_CARDS,qqSession,qqRequest,connectQQ,disconnectQQ,type QQRoom} from './qq-account';
 type Entry={id:string;name:string;qqRoom:QQRoom;qqOwner:string;locked:boolean;visibility:string;owner_ids:string[]};
@@ -36,4 +37,4 @@ async function refresh(){
     }el('roomCards').append(row);
   }
 }
-OBR.onReady(async()=>{room=OBR.room.id;player=await OBR.player.getId();el('login').onclick=()=>void act(async()=>{await connectQQ();await refresh();});el('logout').onclick=()=>void act(async()=>{await disconnectQQ();(el('editor') as HTMLIFrameElement).src='about:blank';await refresh();});el('refresh').onclick=()=>void act(refresh);el('close').onclick=()=>void OBR.modal.close('com.obr-suite/qq-card-library');OBR.room.onMetadataChange(()=>void act(refresh));window.addEventListener('storage',()=>void act(refresh));void act(refresh);});
+if(!cloudFeaturesEnabled){document.querySelectorAll<HTMLButtonElement>('button:not(#close)').forEach(button=>{button.hidden=true;button.disabled=true;});message(cloudDisabledMessage);el('close').onclick=()=>void OBR.modal.close('com.obr-suite/qq-card-library');}else OBR.onReady(async()=>{room=OBR.room.id;player=await OBR.player.getId();el('login').onclick=()=>void act(async()=>{await connectQQ();await refresh();});el('logout').onclick=()=>void act(async()=>{await disconnectQQ();(el('editor') as HTMLIFrameElement).src='about:blank';await refresh();});el('refresh').onclick=()=>void act(refresh);el('close').onclick=()=>void OBR.modal.close('com.obr-suite/qq-card-library');OBR.room.onMetadataChange(()=>void act(refresh));window.addEventListener('storage',()=>void act(refresh));void act(refresh);});

@@ -1,4 +1,5 @@
 import {locateSceneItem} from '../../workbench/locate';
+import {cloudFeaturesEnabled} from '../../cloud-availability';
 import {nativeCardOwners,canReadNativeCard} from "./native-owner";
 import OBR, {type Item} from "@owlbear-rodeo/sdk";
 import { ICONS } from "../../icons";
@@ -1314,9 +1315,11 @@ panelSubscriptions.push(onLangChange((next) => {
 }));
 
 OBR.onReady(() => {
+  if(cloudFeaturesEnabled){
   const qqButton=document.createElement('button');qqButton.textContent='我的 QQ 卡库';
   qqButton.onclick=()=>void OBR.modal.open({id:'com.obr-suite/qq-card-library',url:assetUrl('cc-qq.html'),width:1280,height:850});
   document.getElementById('btnPasteJson')?.parentElement?.append(qqButton);
+  }
   if (!panelAlive) return;
   applyI18nDom(lang);
   roomId = safeRoomId(OBR.room.id || "default");
