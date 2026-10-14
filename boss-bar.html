@@ -3,6 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The display runs in a fullscreen host iframe. Make its very first
+         paint transparent, before the module stylesheet has loaded. -->
+    <style>html,body{background:transparent!important}</style>
     <title>Boss</title>
   </head>
   <body>
