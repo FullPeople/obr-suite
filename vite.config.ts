@@ -85,6 +85,7 @@ export default defineConfig(({ command }) => ({
         "timestop-overlay": resolve(__dirname, "timestop-overlay.html"),
         "search-bar": resolve(__dirname, "search-bar.html"),
         "initiative-panel": resolve(__dirname, "initiative-panel.html"),
+        "initiative-panel-v294": resolve(__dirname, "initiative-panel-v294.html"),
         "initiative-combat-effect": resolve(
           __dirname,
           "initiative-combat-effect.html"
@@ -149,6 +150,7 @@ export default defineConfig(({ command }) => ({
         "fullfog-light-edit": resolve(__dirname, "fullfog-light-edit.html"),
         "hp-bar": resolve(__dirname, "hp-bar.html"),
         "boss-bar": resolve(__dirname, "boss-bar.html"),
+        "boss-bar-v294": resolve(__dirname, "boss-bar-v294.html"),
         // Shared music controls; playback lives in the background module.
         "music-board": resolve(__dirname, "music-board.html"),
         // Public compatibility URL is a static website link; historical game

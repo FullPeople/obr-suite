@@ -10,6 +10,9 @@ execFileSync(node,[join(web,'node_modules/vite/bin/vite.js'),'build'],{cwd:web,s
 execFileSync(node,[join(root,'node_modules/typescript/bin/tsc')],{cwd:root,stdio:'inherit'});
 execFileSync(node,[join(root,'node_modules/vite/bin/vite.js'),'build','--outDir','dist-workbench-dev'],{cwd:root,env:{...process.env,SUITE_BASE:'suite-dev',SUITE_CHANNEL:'dev'},stdio:'inherit'});
 const output=join(root,'dist-workbench-dev');mkdirSync(join(output,'workbench'),{recursive:true});
+// Both install URLs must stay in the dev channel; the public legacy manifest
+// is otherwise copied here by Vite with a /suite/ background URL.
+copyFileSync(join(output,'manifest-dev.json'),join(output,'manifest.json'));
 // Explicit traversal also works across Windows local/network drive boundaries.
 function copyTree(source,destination){mkdirSync(destination,{recursive:true});for(const entry of readdirSync(source,{withFileTypes:true})){const from=join(source,entry.name),to=join(destination,entry.name);if(entry.isDirectory())copyTree(from,to);else if(entry.isFile())copyFileSync(from,to);}}
 copyTree(join(web,'dist'),join(output,'workbench'));

@@ -94,7 +94,9 @@
 }
 :root[data-suite-canvas="transparent"] body:not(.config),
 :root[data-suite-canvas="transparent"] #root,
-:root[data-suite-canvas="transparent"] #bossBars {
+:root[data-suite-canvas="transparent"] #bossBars,
+:root[data-suite-canvas="transparent"] .app-hbar,
+:root[data-suite-canvas="transparent"] .hbar-cluster {
   background: transparent !important;
 }
 
