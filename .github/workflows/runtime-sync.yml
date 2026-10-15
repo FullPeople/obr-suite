@@ -36,6 +36,7 @@ jobs:
           node tools/runtime-completion-selftest.mjs
           node tools/scene-event-performance-selftest.mjs
           node tools/operation-lanes-selftest.mjs
+          node tools/dice-identity-selftest.mjs
           node tools/workbench-runtime-176-selftest.mjs
           node tools/workbench-owner-authority-selftest.mjs
           node tools/native-owner-selftest.mjs

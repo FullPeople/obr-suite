@@ -54,8 +54,8 @@ await check('repair indices are validated before any fragment is queued',async()
  const {h,sent}=host(),out=outgoing();h.outgoing.set('roll',out);await assert.rejects(h.receive({v:1,build:BUILD,from:'spectator',type:'missing',id:'roll',indices:[-1]},'spectator'),/repair index/);assert.equal(sent.length,0);
 });
 await check('empty composer submissions do not clear input or send an empty formula',async()=>{
- const source=readFileSync('tools/build-workbench-dice.mjs','utf8').match(/const physicalPanelAdapter=`([\s\S]*?)`;/)![1];
- let sent=0,cleared=0;const c:any={readFixedRoll:()=>false,getOwnedSelectedTokenIds:async()=>[],crypto:{randomUUID:()=> 'test'},saveLastExpr:()=>{},btnLastRoll:{},setExpression:()=>{cleared++;},labelInput:{},expression:'',OBR:{dice3d:{submit:async()=>{sent++;}},notification:{show:async()=>{}}}};vm.createContext(c);vm.runInContext(source,c);await c.performPhysicalPanelRoll('', '',false,true);assert.equal(sent,0);assert.equal(cleared,0);
+ const source=readFileSync('tools/build-workbench-dice.mjs','utf8').match(/const lightPanelAdapter=`([\s\S]*?)`;/)![1];
+ let sent=0,cleared=0;const c:any={parseExpr:()=>[],exprIsEmpty:()=>true,shakeButtonWithReason:()=>{},btnRoll:{},tt:x=>x,readFixedRoll:()=>false,getOwnedSelectedTokenIds:async()=>[],crypto:{randomUUID:()=> 'test'},saveLastExpr:()=>{},btnLastRoll:{},setExpression:()=>{cleared++;},labelInput:{},expression:'',OBR:{dice3d:{submit:async()=>{sent++;}},notification:{show:async()=>{}}}};vm.createContext(c);vm.runInContext(source,c);await c.performLightPanelRoll('', '',false,true);assert.equal(sent,0);assert.equal(cleared,0);
 });
 await check('card quick popup double click submits once and retains input on a failed submission',async()=>{
  const html=readFileSync('dice-quick-popup.html','utf8'),source=html.slice(html.indexOf('let submitting = false;'),html.indexOf('OBR.onReady(async () => {'));

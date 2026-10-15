@@ -11,7 +11,7 @@ const CHANNEL='com.obr-suite/workbench-dice3d.v1',MODAL='com.obr-suite/dice-ligh
 export const rolls:DiceRollPayload[]=[];
 export const rollListeners=new Set<()=>void>();
 export const rollStates=new Map<string,'received'|'started'|'result'|'complete'>();
-let player:DiceIdentity|undefined,bus:BroadcastChannel|undefined,rendererReady=false,generation=0,startup:Promise<void>|undefined;
+let player:DiceIdentity|undefined,bus:BroadcastChannel|undefined,rendererReady=false,generation=0,startup:Promise<void>|undefined,replay='';
 let unsubs:(()=>void)[]=[],party:any[]=[],historyKey='';
 const queued=new Map<string,DiceRollPayload>(),seen=new Set<string>(),commands=new Map<string,Promise<DiceRollPayload>>();
 const report=(error:unknown)=>console.warn('[dice-light]',error);
@@ -47,7 +47,8 @@ async function startDice(own:number){
  };
  unsubs.push(serveLightDice(profile.connectionId,executeRoll));
  unsubs.push(OBR.party.onChange(p=>{party=p;}));void OBR.party.getPlayers().then(p=>{if(own===generation)party=p;}).catch(report);
- unsubs.push(OBR.player.onChange(p=>{if(own!==generation)return;const before=player?.role;Object.assign(profile,p);if(before!==profile.role){resetTokenResults();bus?.postMessage({type:'clear'});rollListeners.forEach(fn=>fn());}}));
+ let viewerRole=profile.role;
+ unsubs.push(OBR.player.onChange(p=>{if(own!==generation)return;const before=viewerRole;viewerRole=p.role;Object.assign(profile,p);if(before!==viewerRole){replay='';queued.clear();resetTokenResults();bus?.postMessage({type:'clear'});rollListeners.forEach(fn=>fn());}}));
  unsubs.push(OBR.broadcast.onMessage(BROADCAST_DICE_ROLL,event=>{
   if(own!==generation||event.connectionId===profile.connectionId||!validResult(event.data))return;
   const p=event.data,sender=party.find(peer=>peer.connectionId===event.connectionId);
@@ -57,8 +58,14 @@ async function startDice(own:number){
  unsubs.push(OBR.broadcast.onMessage('com.obr-suite/dice-quick-roll',event=>{if(event.connectionId===profile.connectionId)void executeRoll(event.data as QuickRollRequest).catch(report);}));
  unsubs.push(OBR.broadcast.onMessage('com.obr-suite/dice3d-reveal',event=>{if(event.connectionId===profile.connectionId)void lightDiceRpc('reveal',[(event.data as any)?.rollId]).catch(report);}));
  unsubs.push(OBR.broadcast.onMessage('com.obr-suite/dice-light-history-request',event=>{if(event.connectionId!==profile.connectionId)return;for(const p of getRollHistory())void OBR.broadcast.sendMessage(BROADCAST_DICE_ROLL,p,{destination:'LOCAL'}).catch(report);}));
- unsubs.push(OBR.broadcast.onMessage('com.obr-suite/dice-replay',event=>{if(event.connectionId!==profile.connectionId)return;const m=event.data as any,id=`history:${m?.cid}`;if(m?.action==='close')clearTokenResults(id);else if(['open','toggle'].includes(m?.action))setTokenResults(id,getRollHistory().filter(r=>r.rollId===m.cid||r.collectiveId===m.cid));}));
- unsubs.push(OBR.broadcast.onMessage('com.obr-suite/workbench/group-result-control',event=>{const sender=event.connectionId===profile.connectionId?profile:party.find(p=>p.connectionId===event.connectionId),m=event.data as any;if(sender?.role!=='GM'||typeof m?.id!=='string'||!m.id.startsWith('group-'))return;if(m.action==='close')clearTokenResults(m.id);else if(['hide','show'].includes(m.action))toggleTokenResults(m.id,m.action==='show');}));
+ unsubs.push(OBR.broadcast.onMessage('com.obr-suite/dice-replay',event=>{
+  if(own!==generation||event.connectionId!==profile.connectionId)return;const m=event.data as any;
+  if(typeof m?.cid!=='string'||!m.cid||!['open','toggle','close'].includes(m.action))return;
+  if(m.action==='close'&&replay!==m.cid)return;
+  if(m.action==='close'||m.action==='toggle'&&replay===m.cid){clearTokenResults(`history:${m.cid}`);replay='';}
+  else{const rows=getRollHistory().filter(r=>r.rollId===m.cid||r.collectiveId===m.cid);if(!rows.length)return;if(replay)clearTokenResults(`history:${replay}`);replay=m.cid;setTokenResults(`history:${m.cid}`,rows);}
+ }));
+ unsubs.push(OBR.broadcast.onMessage('com.obr-suite/workbench/group-result-control',event=>{if(own!==generation)return;const sender=event.connectionId===profile.connectionId?profile:party.find(p=>p.connectionId===event.connectionId),m=event.data as any;if(sender?.role!=='GM'||typeof m?.id!=='string'||!m.id.startsWith('group-'))return;if(m.action==='close')clearTokenResults(m.id);else if(['hide','show'].includes(m.action))toggleTokenResults(m.id,m.action==='show');}));
  setupActivityPanel();void setupTokenResults().catch(report);
  void OBR.modal.open({id:MODAL,url:`/suite-dev/workbench-dice/overlay2d.html?client=${encodeURIComponent(profile.connectionId)}`,fullScreen:true,hideBackdrop:true,hidePaper:true,disablePointerEvents:true}).catch(report);
 }
@@ -89,4 +96,4 @@ export async function lightDiceRpc(method:string,args:any[]){
   const revealed={...p,hidden:false,visibility:'all' as const};remember(revealed);void OBR.broadcast.sendMessage(BROADCAST_DICE_ROLL,revealed,{destination:'REMOTE'}).catch(report);return;
  }throw Error('3D 暂不可用');
 }
-export function teardownWorkbenchDice(){generation++;unsubs.splice(0).forEach(fn=>fn());teardownTokenResults();resetDiceIdentity();bus?.close();bus=undefined;startup=undefined;player=undefined;rendererReady=false;queued.clear();seen.clear();commands.clear();rolls.length=0;rollStates.clear();void OBR.modal.close(MODAL).catch(report);rollListeners.forEach(fn=>fn());}
+export function teardownWorkbenchDice(){generation++;unsubs.splice(0).forEach(fn=>fn());teardownTokenResults();resetDiceIdentity();bus?.close();bus=undefined;startup=undefined;player=undefined;rendererReady=false;queued.clear();seen.clear();commands.clear();replay='';rolls.length=0;rollStates.clear();void OBR.modal.close(MODAL).catch(report);rollListeners.forEach(fn=>fn());}
