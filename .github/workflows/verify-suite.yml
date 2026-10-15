@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: db670b9b18e1e99820e676b8506b076ba916c651
+          ref: 280f5627dbad90d127b07c16dd55b8ffe96e88b3
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
