@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: 2948267cf503ea525dd2bc037406460f1572c48f
+          ref: db670b9b18e1e99820e676b8506b076ba916c651
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -99,7 +99,12 @@ jobs:
             sleep 1
           done
           node tools/text-effects-browser-selftest.mjs
+      - name: Verify the active lightweight dice package and remote isolation
+        run: node tools/dice-light292-browser.mjs
+      # Physical-package tests remain available only for a build that ships it.
+      # The active light test above requires zero physics workers or WASM requests.
       - name: Verify legacy 2D dice, display settings and no-skin requests
+        if: ${{ hashFiles('dist-workbench-dev/dice3d/production-build.json') != '' }}
         run: node tools/dice-mode278-browser.mjs
       - name: Verify built settings palette and browser persistence
         run: |
@@ -107,10 +112,12 @@ jobs:
           cp -R dist-workbench-dev/workbench-panels .local-evidence/palette257/panels
           WORKBENCH_SETTINGS_TEST_OUT=.local-evidence/palette257 node tools/workbench-palette257-selftest.mjs
       - name: Verify exact production dice package and native readiness
+        if: ${{ hashFiles('dist-workbench-dev/dice3d/production-build.json') != '' }}
         run: |
           node tools/dice-production-package-selftest.mjs
           PLAYWRIGHT_EXECUTABLE_PATH="$CHROMIUM_PATH" node tools/dice-production-readiness-browser.mjs
       - name: Verify small-roll transport with actual SDK, Jolt and visible WebGL pixels
+        if: ${{ hashFiles('dist-workbench-dev/dice3d/production-build.json') != '' }}
         env:
           PLAYWRIGHT_EXECUTABLE_PATH: ${{ env.CHROMIUM_PATH }}
           DICE_LATENCY_SOFTWARE: '1'
@@ -123,6 +130,7 @@ jobs:
           node tools/dice-latency-build.mjs
           node tools/dice-latency-browser.mjs
       - name: Verify all die families and real numeric flight without a target
+        if: ${{ hashFiles('dist-workbench-dev/dice3d/production-build.json') != '' }}
         env:
           PLAYWRIGHT_EXECUTABLE_PATH: ${{ env.CHROMIUM_PATH }}
           DICE_LATENCY_SOFTWARE: '1'
@@ -186,6 +194,7 @@ jobs:
             .local-evidence/transparent-canvas291/
             .local-evidence/verification/*.log
             .local-evidence/verification/results.json
+            .local-evidence/light292/
             .local-evidence/dice-mode278/
             .local-evidence/cue276/result.json
             .local-evidence/cue276-unit/result.json
