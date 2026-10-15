@@ -763,15 +763,21 @@ export async function setupInitiative(): Promise<void> {
     );
     unsubs.push(
       OBR.scene.items.onChange(async (sceneItems) => {
-        const meta = await OBR.scene.getMetadata();
-        const combat = meta[COMBAT_STATE_KEY] as any;
-        const active = !!combat?.inCombat || !!combat?.preparing;
-
         const characterItems = sceneItems.filter(
           (i) =>
             i.type === "IMAGE" &&
             (i.layer === "CHARACTER" || i.layer === "MOUNT")
         );
+
+        // Ordinary HP, resource, position and unrelated-item events cannot
+        // introduce an initiative participant. Avoid another SDK round trip.
+        if (characterItems.every((item) => knownItemIds.has(item.id))) {
+          knownItemIds = new Set(characterItems.map((item) => item.id));
+          return;
+        }
+        const meta = await OBR.scene.getMetadata();
+        const combat = meta[COMBAT_STATE_KEY] as any;
+        const active = !!combat?.inCombat || !!combat?.preparing;
 
         if (!active) {
           knownItemIds.clear();

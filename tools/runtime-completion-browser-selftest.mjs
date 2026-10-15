@@ -149,17 +149,24 @@ try {
  await page.waitForFunction(()=>localItems.some(item=>item.metadata?.['com.obr-suite/bubbles/role']==='hp-text'));
  // A callback-only update must redraw without a new items/grid/scene read.
  const counters=await page.evaluate(()=>rpc.length);
- await page.evaluate(()=>{items[0].metadata['com.obr-suite/bubbles/data'].health=19;emitItems();});
+ // Model a hidden room tab: timer-based paint scheduling is clamped, while
+ // metadata messages and local SDK writes are still delivered normally.
+ await frame().evaluate(()=>{const original=window.setTimeout;window.setTimeout=function(handler,delay,...args){return original.call(this,handler,delay===16?3000:delay,...args);};});
+ const nativeAt=await page.evaluate(()=>{const at=performance.now();items[0].metadata['com.obr-suite/bubbles/data'].health=19;emitItems();return at;});
  await page.waitForFunction(()=>draws.some(draw=>JSON.stringify(draw.items).includes('19/30')));
  const readIds=['OBR_SCENE_ITEMS_GET_ALL_ITEMS','OBR_SCENE_ITEMS_GET_ITEMS','OBR_SCENE_GRID_GET_DPI','OBR_SCENE_GET_METADATA'];
  const extraReads=await page.evaluate(({counters,readIds})=>rpc.slice(counters).filter(m=>readIds.includes(m.id)),{counters,readIds});
  assert.deepEqual(extraReads,[]);
+ const drawnAt=await page.evaluate(()=>draws.find(draw=>JSON.stringify(draw.items).includes('19/30')).at);
+ assert.ok(drawnAt-nativeAt<1500,'Runtime rendering waited for the clamped background timer');
  reports.push('metadata change redraws the HP bar with zero additional scene/grid/metadata reads');
+ reports.push('runtime rendering and local completion do not depend on a hidden-tab paint timer');
  // Restore the persisted value before starting the production workbench.
  await page.evaluate(()=>{items[0].metadata['com.obr-suite/bubbles/data'].health=20;emitItems();});
  await page.waitForTimeout(100);
  await frame().evaluate(async()=>{await window.startWorkbench();window.probe.activate();});
  const savedBefore=saves;
+ const readsBefore=await page.evaluate(()=>rpc.length);
  await page.evaluate(()=>{holdDraw=true;});
  await frame().evaluate(()=>window.probe.request({requestId:'view-one',type:'stats',itemId:'card:hero',patch:{health:18},expected:{health:20}}));
  await page.waitForFunction(()=>heldDraws.length>0);
@@ -170,7 +177,12 @@ try {
  const first=await page.evaluate(()=>results.find(m=>m.type==='ack'&&m.requestId==='view-one'));
  assert.equal(first.ok,true);assert.equal(first.result.snapshot.state.projectionPending,false);
  assert.ok(first.at>=released);assert.equal(saves,savedBefore+1);
+ const authorityReads=await page.evaluate(start=>rpc.slice(start).filter(m=>['OBR_SCENE_ITEMS_GET_ALL_ITEMS','OBR_SCENE_ITEMS_GET_ITEMS'].includes(m.id)).length,readsBefore);
+ // Receive, document preparation, final send and token projection each retain
+ // their authority boundary; SDK updateItems also fetches its callback draft.
+ assert.ok(authorityReads<=5,`Repeated authority guards reread the entire scene ${authorityReads} times`);
  reports.push('saved data does not produce a complete receipt before the local HP renderer finishes');
+ reports.push('each mutation retains fresh permission checks without duplicating their scene reads');
  // Hold both SDK responses after their metadata events: later projections must still proceed.
  await page.evaluate(()=>{holdReply=true;});
  await frame().evaluate(()=>window.probe.request({requestId:'view-two',type:'stats',itemId:'card:hero',patch:{health:16},expected:{health:18}}));

@@ -81,10 +81,11 @@ async function hydrateOnSceneReady(): Promise<void> {
 // On scene metadata change: if sync is on AND the cards list changed,
 // mirror it to room metadata. Dedup with lastSceneCardsJson so we
 // only fire OBR.room.setMetadata when the list actually moved.
-async function mirrorCardsIfChanged(): Promise<void> {
+async function mirrorCardsIfChanged(meta: Record<string, unknown>): Promise<void> {
   const s = getState();
   if (!s.crossSceneSyncCards) return;
-  const sceneCards = await readSceneCards();
+  const value = meta[SCENE_CARDS_KEY];
+  const sceneCards = Array.isArray(value) ? value : null;
   if (sceneCards === null) return;  // this scene has no list of its own to mirror
   const json = JSON.stringify(sceneCards);
   if (json === lastSceneCardsJson) return;
@@ -126,7 +127,7 @@ export async function setupCrossSceneCards(): Promise<void> {
   unsubs.push(
     OBR.scene.onMetadataChange(async (meta) => {
       if (!(SCENE_CARDS_KEY in meta)) return;
-      await mirrorCardsIfChanged();
+      await mirrorCardsIfChanged(meta);
     }),
   );
   // Initial hydrate if scene is already ready when this module starts.

@@ -916,6 +916,7 @@ let myPlayerId = "";  // own id — used to detect token ownership for full-bar 
 let unsubs: Array<() => void> = [];
 let syncOwner: BubbleSession | null = null;
 let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+let urgentSyncOwner: BubbleSession | null = null;
 // Scene DPI cached at setup + on grid changes so the bounds-poll
 // doesn't have to await `OBR.scene.grid.getDpi()` every frame.
 let cachedSceneDpi = 150;
@@ -963,11 +964,25 @@ function stopAnimationTimer(): void {
 }
 
 let scheduleSyncCount = 0;
-function scheduleSync(): void {
+function scheduleSync(urgent = false): void {
   const own = session;
   if (!own?.initialized || !own.ready) return;
   scheduleSyncCount++;
-  if (pendingTimer) return;
+  // The workbench can be visible while its room tab is hidden. Chrome may
+  // delay a paint timer for seconds there; committed runtime must still reach
+  // the local SDK renderer before the edit's completion receipt is issued.
+  if (urgent) {
+    if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+    if (urgentSyncOwner === own) return;
+    urgentSyncOwner = own;
+    queueMicrotask(() => {
+      if (urgentSyncOwner !== own) return;
+      urgentSyncOwner = null;
+      if (session === own) void syncBubbles().catch((e) => console.warn("[obr-suite/bubbles] sync failed", e));
+    });
+    return;
+  }
+  if (pendingTimer || urgentSyncOwner === own) return;
   // Debounce reduced from 60 → 16 ms (one frame). The original 60 ms
   // was set when a single onChange could spam many events during a
   // resize gesture, but the upstream cluster has since coalesced
@@ -2060,7 +2075,7 @@ async function syncBubbles(): Promise<void> {
     if (syncOwner === own) syncOwner = null;
     if (session === own && own.queuedSync) {
       own.queuedSync = false;
-      scheduleSync();
+      scheduleSync(true);
     }
   }
 }
@@ -2143,8 +2158,9 @@ export async function setupBubbles(): Promise<void> {
   myPlayerId = "";
   const active = () => session === own;
   bubblePresentation.setRefresh(items => {
-    if (!active() || own.items === items) return;
-    own.items = items as Item[]; own.itemVersion++; scheduleSync();
+    if (!active()) return;
+    if (own.items !== items) { own.items = items as Item[]; own.itemVersion++; }
+    scheduleSync(true);
   });
   const acceptSceneMetadata = (meta: Record<string, unknown>) => {
     if (!active()) return;
@@ -2194,7 +2210,8 @@ export async function setupBubbles(): Promise<void> {
   // Subscribe before the initial RPCs: a late read cannot replace a newer event.
   unsubs.push(OBR.scene.items.onChange(items => {
     if (!active()) return;
-    own.items = items; own.itemVersion++; scheduleSync();
+    own.items = items; own.itemVersion++;
+    scheduleSync(bubblePresentation.pending(items.filter(isImage)));
   }));
   unsubs.push(OBR.scene.onMetadataChange(meta => {
     if (!active()) return;
