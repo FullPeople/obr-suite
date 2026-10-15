@@ -13,10 +13,15 @@ export class Relay {
  private failed(status:number,message:string,retryAfter:string|null){
   if(status===401||status===410)this.active=false;
   const serverDelay=Number(retryAfter),delay=Number.isFinite(serverDelay)&&serverDelay>0?Math.min(serverDelay*1000,3600000):Math.min(30000,1400*2**Math.min(this.failures++,5));
-  this.retryAt=Math.max(this.retryAt,Date.now()+delay);this.lastError=Object.assign(Error(message),{status});this.changed?.({status,message,retryAt:this.retryAt});return this.lastError;
+  this.retryAt=Math.max(this.retryAt,Date.now()+delay);this.lastError=Object.assign(Error(message),{status,retryAfterMs:this.retryAt-Date.now()});this.changed?.({status,message,retryAt:this.retryAt});return this.lastError;
  }
  private async response(r:Response,operation=false){
   const data=await r.json().catch(()=>({}));if(!r.ok){
+   // Admission failure belongs to this delivery. A busy view must not pause receipts.
+   if(operation&&[429,503].includes(r.status)&&['REQUEST_CAPACITY','QUEUE_CAPACITY'].includes(data.code)){
+    const seconds=Number(r.headers.get('Retry-After'));
+    throw Object.assign(Error(data.error||'中继正在处理其他请求'),{status:r.status,code:data.code,notSent:true,retryAfterMs:Number.isFinite(seconds)&&seconds>0?Math.min(seconds*1000,30000):1000});
+   }
    // A rejected operation is not a broken connection. In particular, a CAS 409
    // must allow its caller to read the new revision; pausing the whole relay
    // would make that read (and unrelated saves) repeat the previous error.
@@ -38,7 +43,21 @@ export class Relay {
   if(!this.registration)this.registration=this.post({register:true,clientKey:this.clientKey,...(this.room?{room:this.room}:{})}).then(()=>{this.active=true;}).finally(()=>{this.registration=undefined;});
   await this.registration;
  }
- async send(message:any,beforeSend?:()=>void|Promise<void>){try{await this.register();}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}return this.post(message,beforeSend);}
+ async send(message:any,beforeSend?:()=>void|Promise<void>){
+  try{await this.register();}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}
+  const retryable=message?.protocol==='full-suite-workbench/v1'&&typeof message.type==='string'&&!['ready','catalog','selection','rolls','directory','access','cacheSnapshot','groupRollState'].includes(message.type);
+  const receipt=retryable&&message.type==='ack'&&typeof message.requestId==='string';
+  // Unknown transmission may repeat a receipt, never a business command.
+  const deadline=Math.min(Date.now()+10000,typeof message?.expiresAt==='number'?message.expiresAt:Infinity);
+  for(;;){try{return await this.post(message,beforeSend);}catch(error){
+   const failure=error as Error&{status?:number;notSent?:boolean;code?:string;retryAfterMs?:number};
+   const delay=failure.retryAfterMs||1000;
+   const safe=!!failure.notSent&&['REQUEST_CAPACITY','QUEUE_CAPACITY'].includes(failure.code||'')||receipt&&(!failure.status||failure.status===429||failure.status>=500);
+   if(this.stopped||!retryable||!safe||Date.now()+delay>=deadline)throw error;
+   await this.pause(delay);
+   if(this.stopped)throw error;
+  }}
+ }
  private async pause(ms:number){await new Promise<void>(resolve=>{const finish=()=>{clearTimeout(timer);this.abort.signal.removeEventListener('abort',finish);resolve();},timer=setTimeout(finish,ms);if(this.abort.signal.aborted)finish();else this.abort.signal.addEventListener('abort',finish,{once:true});});}
  private deliver(text:string){let batch:unknown;try{batch=JSON.parse(text);}catch{return;}if(Array.isArray(batch))for(const message of batch)this.receive(message);}
  private openSocket(){

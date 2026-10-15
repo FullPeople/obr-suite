@@ -13,7 +13,7 @@ type State = ReturnType<typeof readTimeStop>;
 type Session = {
   alive: boolean; ready: boolean | undefined; epoch: number; role: "GM" | "PLAYER"; roleRevision: number;
   connection: string; id: string; initialized: boolean; readRevision: number; hasMetadata: boolean;
-  state: State; displayRevision: number; desiredKey: string; busy: boolean; menuTouched: boolean; menuLabel?: string;
+  state: State; displayRevision: number; desiredKey: string; busy: boolean; menuTouched: boolean; menuLabel?: string; notifiedState?: string; noticeRevision?: number;
   unsubs: Array<() => void>; drags: Set<Promise<void>>; startup?: Promise<void>;
 };
 type WindowLease = {
@@ -38,7 +38,13 @@ async function role(own: Session) {
   return own.role;
 }
 async function notify(own: Session) {
-  if (current(own)) await local(STATE, { active: own.ready === true && own.state.active }).catch(log);
+  if (!current(own)) return;
+  const active = own.ready === true && own.state.active, key = `${own.epoch}:${active}`;
+  if (own.notifiedState === key) return;
+  own.notifiedState = key;
+  const revision = own.noticeRevision = (own.noticeRevision || 0) + 1;
+  try { await local(STATE, { active }); }
+  catch (error) { if (own.noticeRevision === revision) own.notifiedState = undefined; log(error); }
 }
 
 /** Exact per-window ownership: old close/open replies never target a newer CG. */

@@ -428,6 +428,15 @@ async function fetchCardSnapshot(cardId: string, room: string, signal: AbortSign
 // the GM has write access to every bound token regardless of who owns
 // it; players run their own copies of this listener but bail at the
 // role gate so we don't fight over the same writes.
+function cardRefreshChanged(metadata: Record<string, unknown>, snap: NonNullable<Awaited<ReturnType<typeof fetchCardSnapshot>>>): boolean {
+  const current = metadata[BUBBLES_META_KEY] as Record<string, unknown> | undefined;
+  const external = metadata[EXTERNAL_BUBBLES_META_KEY] as Record<string, unknown> | undefined;
+  if (!current || typeof current !== 'object' || Array.isArray(current)) return true;
+  if (snap.maxHp != null && current['max health'] !== snap.maxHp || snap.ac != null && current['armor class'] !== snap.ac
+      || !('temporary health' in current) || snap.initBonus != null && metadata[INIT_DEXMOD_META] !== snap.initBonus) return true;
+  if (external != null && Object.keys(current).some(key => JSON.stringify(external[key]) !== JSON.stringify(current[key]))) return true;
+  return false;
+}
 async function propagateCardRefresh(cardId: string): Promise<void> {
   if (!active || !sceneReady || ccRole !== "GM" || !cards.has(cardId)) return;
   const run = generation, scene = sceneGeneration, room = OBR.room.id || "default";
@@ -445,10 +454,11 @@ async function propagateCardRefresh(cardId: string): Promise<void> {
         (it.metadata as Record<string, unknown> | undefined)?.[BIND_META] === cardId,
     );
     if (!valid() || boundTokens.length === 0) return;
-    const ids = boundTokens.map((it: any) => it.id);
+    const ids = boundTokens.filter((it: any) => cardRefreshChanged(it.metadata, snap)).map((it: any) => it.id);
+    if (!ids.length) return;
     await OBR.scene.items.updateItems(ids, (drafts: any[]) => {
       for (const d of drafts) {
-        if (!valid() || d.metadata[BIND_META] !== cardId) continue;
+        if (!valid() || d.metadata[BIND_META] !== cardId || !cardRefreshChanged(d.metadata, snap)) continue;
         // Bubbles seed: merge new max/ac into whichever shape already
         // exists on the token (suite key takes priority, fall through
         // to legacy Stat-Bubbles external key). Preserves all other
