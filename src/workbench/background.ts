@@ -20,6 +20,7 @@ import {documentChanges,expandChanges} from './document-delta';
 import {documentCoins} from './currency';
 import {cardLocation,type CardLocation} from './card-location';
 import {publishWorkbenchNotice,setupWorkbenchNotices} from './notices';
+import {operationLanes} from './operation-lanes';
 import {tokenPortrait} from './token-portrait';
 import {conditionCommands,type ConditionRow} from './condition-commands';
 import devManifest from '../../public/manifest-dev.json';
@@ -47,6 +48,7 @@ const MONSTER='com.obr-suite/workbench/monster';
 const monsterOverrides=new Map<string,{revision:number;data:any}>();
 const DELETED='com.obr-suite/workbench/deleted-cards';
 const fields=['health','max health','temporary health','armor class'];
+type AuthorityGuard=(()=>void|Promise<void>)&{refreshesAuthority?:boolean};
 export function setupWorkbench(){if(WORKBENCH_DEV){setupWorkbenchNotices();void setupWorkbenchDice().catch(error=>{console.error('[workbench] dice startup failed',error);void OBR.notification.show(String(error),'ERROR');});return start();}return Promise.resolve();}
 async function start(){
  const observation=workbenchObservation();
@@ -69,7 +71,7 @@ async function start(){
  function rememberCloudPermission(card:any,info:any,read:ReturnType<ReturnType<typeof authorizationLease>['beginRead']>){const lease=cloudLease(card);if(!lease.verifyRead(read,info.write===true))return false;const next={scope:read.scope,own:info.owner===true,write:info.write===true,locked:info.locked!==false,name:typeof info.name==='string'?info.name:undefined};if(!sameValue(cloudPermissions.get(card.id),next)){cloudPermissions.set(card.id,next);cloudPermissionVersion++;while(cloudPermissions.size>128){const oldest=cloudPermissions.keys().next().value!;cloudPermissions.delete(oldest);cloudLeases.get(oldest)?.stop();cloudLeases.delete(oldest);}}return true;}
  async function readCloudPermission(card:any,read:ReturnType<ReturnType<typeof authorizationLease>['beginRead']>,path:string){try{return await withRequestTimeout(5000,undefined,signal=>qqRequest(path,'GET',undefined,card.qqRoom,{signal}));}catch(error){const lease=cloudLease(card);if(lease.accepts(read))lease.invalidate([401,403,404,410].includes(Number((error as {status?:number})?.status))?'readonly':'checking');throw error;}}
  const stockHistory=new Map<string,{changes:{id:string;before:any[];after:any[]}[];lockChanges?:{id:string;before:boolean;after:boolean}[]}>();
- let queue=Promise.resolve(),groupQueue=Promise.resolve();const seen=new Map<string,any>(),documents=new Map<string,any>(),documentTimes=new Map<string,number>();
+ const writeLanes=operationLanes();let groupQueue=Promise.resolve();const seen=new Map<string,any>(),documents=new Map<string,any>(),documentTimes=new Map<string,number>();
  function cacheDocument(key:string,value:any){if(documents.get(key)!==value)documentCacheVersion++;documents.set(key,value);return documents;}
  const cardReads=new Map<string,Promise<any>>(),cardEtags=new Map<string,string>(),cardLocations=new Map<string,CardLocation|Error>();
  const monsterSceneDocuments=new Map<string,any>();
@@ -181,7 +183,7 @@ async function start(){
  async function reconcileRuntime(cardId:string,key:string,items:Item[],scene:Record<string,unknown>,doc:any,write:boolean){
   if(!write||!(await access(`card:${cardId}`)).write)return doc;
   const originalAuthority=observation.authorityVersion('card:'+cardId);
-  const requestGuard=async()=>{await observation.refreshAuthority();if(originalAuthority!==observation.authorityVersion('card:'+cardId)||!(await access(`card:${cardId}`)).write)throw Object.assign(Error('角色修改权限已改变'),{status:403});};
+  const requestGuard=Object.assign(async()=>{await observation.refreshAuthority();if(originalAuthority!==observation.authorityVersion('card:'+cardId)||!(await access(`card:${cardId}`)).write)throw Object.assign(Error('角色修改权限已改变'),{status:403});},{refreshesAuthority:true});
   // The catalog may have been produced before another card's slow download.
   // Scene observations must be read now, not replayed from that old catalog.
   ({items,scene}=await observation.read());
@@ -371,15 +373,16 @@ async function start(){
   const b=bubble(a.item),canonical=a.cardId?documentRuntime(doc,definitionsFor(a.scene)):undefined;
   return {sequence:++sequence,clientInstance,clientSelection,access:publishAccess(a),state:{key:a.key,targetId:a.targetId,itemId:a.item?.id||`card:${a.cardId}`,name:doc?.identity?.character_name||doc?.name||a.card?.name||a.item?.name,cardId:a.cardId,slug:a.slug,kind:a.cardId?'character':a.slug?'monster':'token',cloudRoom:!!a.card?.qqRoom,documentRevision:a.cardId?documentRevision(doc):undefined,projectionPending:!!a.cardId&&a.items.some(item=>item.metadata[BIND]===a.cardId&&(!runtimeProjectionApplied(item,a.cardId,doc,definitionsFor(a.scene))||bubblePresentation.pending([item]))),stats:canonical?{...a.card?.stats,...canonical.stats}:Object.fromEntries(fields.filter(k=>typeof b[k]==='number').map(k=>[k,b[k]])),write:a.write,role:a.role,pinned:!follow,tokenPortrait:tokenPortrait(a.item),locked:a.card?.locked??a.item?.metadata['com.obr-suite/workbench/locked']===true,statsLocked:b.locked!==false,...live(a),conditions:conditionRows(a,doc),resources:canonical?Object.values(canonical.resources):live(a).resources},document:doc};
  }
- async function persistDocument(a:Awaited<ReturnType<typeof access>>,existing:any,data:any,inventoryGuard?:{key:string;revision:number},conditionGrant=false,requestGuard?:()=>void|Promise<void>){
-  await requestGuard?.();await observation.refreshAuthority();
+ async function recheckAuthority(guard?:AuthorityGuard){await guard?.();if(!guard?.refreshesAuthority)await observation.refreshAuthority();}
+ async function persistDocument(a:Awaited<ReturnType<typeof access>>,existing:any,data:any,inventoryGuard?:{key:string;revision:number},conditionGrant=false,requestGuard?:AuthorityGuard){
+  await recheckAuthority(requestGuard);
   const sceneEpoch=observation.sceneEpoch(),authorityVersion=observation.authorityVersion('card:'+a.cardId);
   const permission=await access(`card:${a.cardId}`);if(!permission.write&&!(conditionGrant&&permission.card&&!permission.card.locked))throw Error('角色修改权限已改变');
   stampRuntimeProjectionAuthority(existing,data,playerId,permission.role==='GM',conditionGrant,definitionsFor(permission.scene));
   data[DOCUMENT_REVISION]=documentRevision(existing)+1;
   const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(existing))),expected=[...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('');
   const location=documentLocation(a.cardId);
-  const beforeSend=async()=>{await requestGuard?.();await observation.refreshAuthority();const live=await access(`card:${a.cardId}`);if(sceneEpoch!==observation.sceneEpoch()||authorityVersion!==observation.authorityVersion('card:'+a.cardId)||live.key!==a.key||(!live.write&&!(conditionGrant&&live.card&&!live.card.locked)))throw Object.assign(Error('角色修改权限已改变'),{status:403});};
+  const beforeSend=async()=>{await recheckAuthority(requestGuard);const live=await access(`card:${a.cardId}`);if(sceneEpoch!==observation.sceneEpoch()||authorityVersion!==observation.authorityVersion('card:'+a.cardId)||live.key!==a.key||(!live.write&&!(conditionGrant&&live.card&&!live.card.locked)))throw Object.assign(Error('角色修改权限已改变'),{status:403});};
   if(permission.card?.qqRoom){
     await beforeSend();
     const cloudDocument=structuredClone(data);if(cloudDocument.dnd_card_web)cloudDocument.dnd_card_web.id=existing.dnd_card_web.id;
@@ -883,7 +886,7 @@ async function start(){
   const grantIdentity=(grant:any)=>JSON.stringify(grant?{write:grant.write,locked:grant.locked,grantVersion:grant.grantVersion}:null);
   const assertAuthority=()=>{if(cancelledRequests.has(m.requestId)||typeof m.expiresAt==='number'&&Date.now()>m.expiresAt)throw Object.assign(Error('操作在发送前已取消或过期'),{status:403});if(targetMutation&&(receivedScene!==observation.sceneEpoch()||receivedRole!==observation.peek().role||commandTargets.some((id,index)=>receivedAuthority[index]!==observation.authorityVersion(id))))throw Object.assign(Error('角色修改权限已改变'),{status:403});};
   const beforeMutation=async()=>{if(!targetMutation)return;await observation.refreshAuthority();assertAuthority();const current=publishAccess(await catalog()),issued=accessHistory.get(m.accessEpoch);if(receivedScene!==observation.sceneEpoch()||receivedRole!==current.role||commandTargets.some((id,index)=>receivedAuthority[index]!==observation.authorityVersion(id))||Number.isSafeInteger(m.accessEpoch)&&(!issued||m.accessScope!==current.scope||m.accessRoom!==current.room||issued.role!==current.role||JSON.stringify(issued.enabled)!==JSON.stringify(current.enabled)||commandTargets.some(id=>grantIdentity(grantFor(issued,id))!==grantIdentity(grantFor(current,id)))))throw Object.assign(Error('角色修改权限已改变，请重新确认当前角色'),{status:403});};
-  Object.assign(beforeMutation,{assertCurrent:assertAuthority});
+  Object.assign(beforeMutation,{assertCurrent:assertAuthority,refreshesAuthority:true});
   const receivedAt=performance.now();
   const run=async()=>{let answer=seen.get(m.requestId);if(!answer){const began=performance.now(),steps:{phase:string;ms:number}[]=[];let phase='authorize',phaseStart=began;
    Object.defineProperty(m,'_phase',{configurable:true,get:()=>phase,set:(next:string)=>{const now=performance.now();steps.push({phase,ms:Math.round((now-phaseStart)*10)/10});phase=next;phaseStart=now;}});
@@ -904,7 +907,15 @@ async function start(){
     answer={ok:true,result};void hydrate();scheduleInventoryRepair();
    }else if(m._inventoryCommitted){answer.uncertain=true;answer.diagnostic={...answer.diagnostic,code:'PARTIAL_INVENTORY_COMMIT',inventoryCommitted:true};}
   }finally{activeRequests.delete(m.requestId);if(writes){mutation--;epoch++;}}steps.push({phase,ms:Math.round((performance.now()-phaseStart)*10)/10});answer.timing={transport:route,version:devManifest.version,queueMs:Math.round(began-receivedAt),hostMs:Math.round(performance.now()-began),steps};seen.set(m.requestId,answer);if(seen.size>256)seen.delete(seen.keys().next().value!);}send('ack',{requestId:m.requestId,...answer},route);if(!['locate','readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','cloudInfo','showEntry'].includes(m.type)){void refreshSelection();void refresh();}};
-  const task=m.type==='groupRoll'?(groupQueue=groupQueue.then(run).catch(()=>{})):['locate','readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','console','cloudInfo','showEntry'].includes(m.type)||m.type==='inventory'&&['silent','containerLock'].includes(m.operation?.action)?run():(queue=queue.then(run).catch(()=>{}));requestRuns.set(m.requestId,task);void task.finally(()=>{requestRuns.delete(m.requestId);cancelledRequests.delete(m.requestId);});
+  // Only entity-local document/runtime writes use separate lanes. Commands
+  // which can rewrite shared catalogs or the inventory ledger retain a room
+  // barrier, including against entity work already in progress.
+  const entityKeys=['stats','resource','monsterSave'].includes(m.type)?commandTargets.map(id=>{
+   if(id.startsWith('card:'))return id;
+   const item=observation.peek().items?.find(item=>item.id===id.replace(/^(monster|token):/,''));
+   return typeof item?.metadata[BIND]==='string'?`card:${item.metadata[BIND]}`:id;
+  }):null;
+  const task=m.type==='groupRoll'?(groupQueue=groupQueue.then(run).catch(()=>{})):['locate','readCard','refreshCard','refreshCatalog','diceRpc','roll','panelRpc','console','cloudInfo','showEntry'].includes(m.type)||m.type==='inventory'&&['silent','containerLock'].includes(m.operation?.action)?run():writeLanes.run(entityKeys,run).catch(()=>{});requestRuns.set(m.requestId,task);void task.finally(()=>{requestRuns.delete(m.requestId);cancelledRequests.delete(m.requestId);});
  }
  window.addEventListener('message',e=>{if(e.origin!==origin||e.data?.protocol!==protocol||!e.source)return;
   if(e.data.type==='discover'){try{const source=e.source as Window;if(source!==window&&source.parent===parent)source.postMessage({protocol,type:'background',nonce:e.data.nonce,session,clientKey:credentials.clientKey},origin);}catch{}return;}

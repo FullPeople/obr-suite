@@ -5,7 +5,11 @@ on:
     paths:
       - src/workbench/**
       - src/modules/bubbles/**
+      - src/modules/initiative/index.ts
+      - src/modules/cross-scene-cards.ts
       - tools/runtime-completion-*
+      - tools/scene-event-performance-selftest.mjs
+      - tools/operation-lanes-selftest.mjs
       - .github/workflows/runtime-sync.yml
   workflow_dispatch:
 permissions:
@@ -30,6 +34,9 @@ jobs:
         run: |
           node node_modules/typescript/bin/tsc
           node tools/runtime-completion-selftest.mjs
+          node tools/scene-event-performance-selftest.mjs
+          node tools/operation-lanes-selftest.mjs
+          node tools/dice-identity-selftest.mjs
           node tools/workbench-runtime-176-selftest.mjs
           node tools/workbench-owner-authority-selftest.mjs
           node tools/native-owner-selftest.mjs

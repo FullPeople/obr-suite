@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import {uploadRoomCard} from '../src/workbench/cloud-upload.ts';
+import {uploadRoomCard as suspendedUpload} from '../src/workbench/cloud-upload.ts';
+import {build} from 'rolldown';
+import {mkdirSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const output=resolve('workbench-test-output/cloud-upload');mkdirSync(output,{recursive:true});
+const file=resolve(output,'enabled-engine.mjs');
+await build({input:resolve('src/workbench/cloud-upload.ts'),plugins:[{name:'enabled-engine-fixture',resolveId(id){if(id.endsWith('/cloud-availability.ts'))return'virtual:availability';},load(id){if(id==='virtual:availability')return'export const assertCloudEnabled=()=>{};';}}],output:{file,format:'esm'}});
+const {uploadRoomCard}=await import(pathToFileURL(file).href);
 const registryKey='qq';let count=0;
 function fixture(){
  const storage=new Map(),calls=[],cards=[],document={dnd_card_web:{id:'native',name:'最新角色',selections:[],runtime:{hp:7}}};let actor={accountId:'owner',token:'private-owner-token'},metadata={unrelated:'keep'},allowed=true,fail,commits=0;
@@ -7,6 +15,7 @@ function fixture(){
  return {d,calls,cards,storage,document,get metadata(){return metadata;},get commits(){return commits;},fail:value=>fail=value,deny:()=>allowed=false};
 }
 async function check(name,fn){await fn();console.log('PASS',++count,name);}
+await check('The production cloud pause rejects before reading, sending or changing the registry',async()=>{const f=fixture();await assert.rejects(()=>suspendedUpload(f.d),error=>error.code==='CLOUD_DISABLED'&&error.notSent===true);assert.equal(f.calls.length,0);assert.equal(f.commits,0);assert.equal(f.storage.size,0);});
 await check('Fresh native content uploads and binds the same room card; unrelated metadata survive',async()=>{const f=fixture(),result=await uploadRoomCard(f.d);assert.equal(result.entry.id,f.d.cardId);assert.equal(result.entry.qqCardId,'cloud');assert.equal(result.entry.qqRoom.id,'room-link');assert.equal(result.entry.locked,true);assert.equal(f.metadata.unrelated,'keep');assert.equal(f.cards[0].character.runtime.hp,7);assert.equal(f.storage.size,0);assert(!JSON.stringify(f.metadata).includes('private-owner-token'));});
 await check('A failed session preflight can be retried without an unknown create receipt',async()=>{const f=fixture();f.fail('not-sent');await assert.rejects(()=>uploadRoomCard(f.d));assert.equal(f.storage.size,0);await uploadRoomCard(f.d);assert.equal(f.cards.length,1);});
 await check('A lost create response is reconciled without issuing another POST',async()=>{const f=fixture();f.fail('create');await assert.rejects(()=>uploadRoomCard(f.d),/response lost/);await uploadRoomCard(f.d);assert.equal(f.calls.filter(([p,m])=>p==='cards'&&m==='POST').length,1);assert.equal(f.cards.length,1);});

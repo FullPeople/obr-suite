@@ -51,4 +51,7 @@ try{
  for(const p of pages){assert.equal(await p.evaluate(()=>window.sdkStats.fullReads),0);assert.equal(await p.evaluate(()=>window.physicsWorkers),0);assert.equal(await p.evaluate(()=>window.host.readDiceViewMode()),'2d');}
  assert.deepEqual(requests,[]);assert.deepEqual(failures,[]);
  const result={passed:true,syntheticClients:4,ordinaryLocalAndRemote:true,blockedRemoteDoesNotBlockLocal:true,commandAndRollDedup:true,darkVisibility:true,externalComposerFormulaOnly:true,formulas:formulas.length,fullCatalogReads:0,physicsWorkers:0,wasmRequests:0,realOwlbearRoom:false};writeFileSync(join(fixture,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+}catch(error){
+ const debug={error:String(error),failures,requests,pages:await Promise.all(context.pages().map(async page=>({url:page.url(),state:await page.evaluate(()=>({ready:window.ready,stats:window.sdkStats,rollStates:[...(window.host?.rollStates||[])],frames:[...document.querySelectorAll('iframe')].map(frame=>({url:frame.src,ready:frame.contentDocument?.body?.dataset}))})).catch(error=>({error:String(error)}))}))) };
+ writeFileSync(join(fixture,'failure.json'),JSON.stringify(debug,null,2));console.error(JSON.stringify({error:debug.error,failures,pages:debug.pages.map(p=>({url:p.url,ready:p.state.ready,rollStates:p.state.rollStates,frames:p.state.frames}))}));throw error;
 }finally{await browser.close();server.close();}
