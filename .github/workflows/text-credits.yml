@@ -2,7 +2,7 @@ name: Credits text style
 on:
   push:
     branches: [codex/credits-style-release-20261015, dev]
-    paths: ['src/modules/textEffects/**', 'tools/text-effects-*', 'package*.json', 'public/manifest-dev.json', '.github/workflows/text-credits.yml']
+    paths: ['src/modules/textEffects/**', 'tools/text-effects-*', 'tools/extension-manifest-selftest.mjs', 'package*.json', 'public/manifest-dev.json', '.github/workflows/text-credits.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -31,6 +31,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm ci --no-audit --no-fund
         working-directory: .paired-web
+      - run: node tools/extension-manifest-selftest.mjs
       - run: npx tsc --noEmit
       - run: node tools/text-effects-selftest.mjs
       - run: node node_modules/vite/bin/vite.js build --outDir dist-workbench-dev
