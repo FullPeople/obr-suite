@@ -1,5 +1,6 @@
 import { ENTRY_EFFECTS, EXIT_EFFECTS, HOLD_EFFECTS, ORNAMENTS, FLOWS, EASINGS, ORDERS, DIRECTIONS, SUB_EFFECTS } from './catalog';
 import { BLOCK_EFFECTS } from './motion';
+import { creditsPreset } from './credits-preset';
 export const FONTS = { sans: '"Microsoft YaHei", "PingFang SC", sans-serif', serif: '"Full Text Serif", "Noto Serif SC", "Songti SC", SimSun, serif', mono: 'Consolas, "Microsoft YaHei", monospace', kai: 'KaiTi, STKaiti, "Songti SC", serif', rounded: 'YouYuan, "Yuanti SC", "Microsoft YaHei", sans-serif', song: 'SimSun, "Songti SC", serif', roman: '"Full Text Roman", "Palatino Linotype", "Book Antiqua", Georgia, serif' } as const;
 export const MOTIONS = ['fade', 'rise', 'left', 'right', 'zoom', 'typewriter'] as const;
 export const DECORATIONS = ORNAMENTS.map(item => item.id);
@@ -98,7 +99,7 @@ export const entryTime = (c:TextEffectConfig) => presentationTimes(c).arrival;
 export const exitTime = (c:TextEffectConfig) => c.sequence==='staged'&&c.decoration!=='none'&&c.decorationAnimation!=='none'?Math.max(c.exit,c.exit*.35+c.decorationTime):c.exit;
 export const duration = (c:TextEffectConfig) => Math.round(c.startDelay+entryTime(c)+narrationTime(c)+c.hold+exitTime(c)+c.endDelay);
 export const hasContent = (c:TextEffectConfig) => !!(c.title.trim()||c.subtitle.trim()||c.body.trim()||c.decoration!=='none'||c.background!=='transparent'&&c.opacity>0);
-export const PRESETS: {name:string;config:TextEffectConfig}[] = [{name:'默认演出',config:{...DEFAULT_CONFIG}}];
+export const PRESETS: {name:string;config:TextEffectConfig}[] = [{name:'默认演出',config:{...DEFAULT_CONFIG}},{name:'片尾贡献名单',config:creditsPreset(DEFAULT_CONFIG)}];
 export function initialEditorConfig(value:unknown):TextEffectConfig|null {
  const parsed=parseConfig(value);if(!parsed)return null;
  const source=value as Record<string,unknown>,previous={...DEFAULT_CONFIG,

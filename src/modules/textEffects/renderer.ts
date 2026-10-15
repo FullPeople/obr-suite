@@ -110,7 +110,7 @@ export function renderEffect(root:HTMLElement,c:TextEffectConfig,options:RenderO
     paint(glyph.el,pose,glyph);
    }
   }
-  if(scrolling){body.style.transform=c.writing==='vertical'?`translateX(${-availableWidth+(body.scrollWidth+availableWidth)*bodyProgress}px)`:`translateY(${availableHeight-(body.scrollHeight+availableHeight)*bodyProgress}px)`;body.style.opacity=String(lastTime>=exitAt?1-exitProgress:1);}else{body.style.transform='none';body.style.opacity='1';}
+  if(scrolling){body.style.transform=snapshot?'translateY(0px)':c.writing==='vertical'?`translateX(${-availableWidth+(body.scrollWidth+availableWidth)*bodyProgress}px)`:`translateY(${availableHeight-(body.scrollHeight+availableHeight)*bodyProgress}px)`;body.style.opacity=String(lastTime>=exitAt?1-exitProgress:1);}else{body.style.transform='none';body.style.opacity='1';}
   const soloClock=bodyProgress*(groups[2].glyphs.length/c.cps*1000+c.soloPause);
   solo.hidden=flow!=='solo'||bodyProgress>=1||t<arrive||!c.body||soloClock>=groups[2].glyphs.length/c.cps*1000;
   if(!solo.hidden){const glyphs=groups[2].glyphs,index=Math.min(glyphs.length-1,Math.floor(soloClock/1000*c.cps));solo.textContent=glyphs[index]?.ink.textContent||'';solo.style.fontSize=`${Math.min(stageWidth,stageHeight)*c.soloSize}px`;solo.style.transform=`scale(${1+(1-(bodyProgress*glyphs.length)%1)*.12*c.soloImpact})`;}

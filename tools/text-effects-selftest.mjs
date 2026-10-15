@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import ts from 'typescript';
-const files=new Map(['catalog','model','motion','protocol','index'].map(name=>[name,ts.transpileModule(readFileSync(new URL(`../src/modules/textEffects/${name}.ts`,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText]));
+const files=new Map(['catalog','model','credits-preset','motion','protocol','index'].map(name=>[name,ts.transpileModule(readFileSync(new URL(`../src/modules/textEffects/${name}.ts`,import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText]));
 let clock=1000000,sequence=0;
 const clients=[],metadata={},packets=[];
 const tick=async()=>{for(let i=0;i<15;i++)await new Promise(resolve=>setImmediate(resolve));};
@@ -37,7 +37,7 @@ await check('all original presets validate and unsafe CSS/NaN/oversized text are
  const normalized=gm.model.parseConfig({...config,secret:'not sent'});assert.equal('secret'in normalized,false);
 });
 await check('flat default follows the reference and old atmospheric drafts retain text without glow',async()=>{
- const c=gm.model.DEFAULT_CONFIG;assert.equal(c.title,'战斗开始');assert.equal(c.subtitle,'BATTLE START');assert.equal(c.color,'#ffffff');assert.equal(c.decoration,'frame');assert.equal(c.background,'transparent');assert.equal(c.entry,'drop');assert.equal(c.leave,'through');assert.equal(c.glow,0);assert.equal(c.outline,0);assert.equal(gm.model.PRESETS.length,1);
+ const c=gm.model.DEFAULT_CONFIG;assert.equal(c.title,'战斗开始');assert.equal(c.subtitle,'BATTLE START');assert.equal(c.color,'#ffffff');assert.equal(c.decoration,'frame');assert.equal(c.background,'transparent');assert.equal(c.entry,'drop');assert.equal(c.leave,'through');assert.equal(c.glow,0);assert.equal(c.outline,0);assert.equal(gm.model.PRESETS.length,2);assert.equal(gm.model.PRESETS[1].name,'片尾贡献名单');
  for(const decoration of ['rays','mist','sparks','rings']){const migrated=gm.model.parseConfig({...config,title:'自定义标题',decoration,glow:50,idle:'glow'});assert.ok(migrated);assert.equal(migrated.title,'自定义标题');assert.equal(migrated.decoration,'none');assert.equal(migrated.glow,0);assert.equal(migrated.idle,'none');}
  const times=gm.model.presentationTimes(c);assert.ok(times.lead>0);assert.ok(times.subtitleStart>times.lead);assert.equal(gm.model.entryTime(c),times.arrival);
  assert.equal(gm.model.duration(c),4225);
@@ -104,5 +104,16 @@ await check('motion endpoints, seeded randomness and every easing stay finite an
 });
 await check('maximum Chinese config stays under native payload limit and extended timing is shared',async()=>{
  const large={...config,title:'字'.repeat(160),subtitle:'字'.repeat(240),body:'字'.repeat(1800),flow:'char',startDelay:500,endDelay:300,subtitleDelay:200};assert.ok(new TextEncoder().encode(JSON.stringify({requestId:webcrypto.randomUUID(),action:'play',preview:false,config:large})).length<12000);const result=await request(gm,{preview:true,config:large});assert.equal(result.expiresAt,clock+500+gm.model.duration(large)+500);
+});
+await check('credits is independent, preserves editable names and broadcasts through the existing bounded protocol',async()=>{
+ const preset=gm.model.PRESETS.find(row=>row.name==='片尾贡献名单');assert.ok(preset);const credits=preset.config;
+ assert.equal(credits.flow,'scroll');assert.equal(credits.background,'solid');assert.equal(credits.backgroundColor,'#000000');assert.equal(credits.pageSplit,false);assert.equal(credits.scrollFade,true);
+ assert.ok(credits.body.includes('地下城主')&&credits.body.includes('冒险者')&&credits.body.includes('特别感谢'));
+ const edited=gm.model.parseConfig({...credits,body:'地下城主\n阿青\n\n冒险者\n小林 · 游侠\n\n感谢同行'});
+ assert.ok(edited);assert.equal(gm.model.initialEditorConfig(JSON.parse(JSON.stringify(edited))).body,edited.body);
+ assert.equal(gm.model.DEFAULT_CONFIG.body,'');assert.equal(gm.model.PRESETS[0].config.title,'战斗开始');
+ const result=await request(gm,{config:edited});const packet=packets.findLast(row=>row.name===p.PLAY);
+ assert.equal(packet.data.config.body,edited.body);assert.equal(packet.data.config.flow,'scroll');assert.ok(result.expiresAt>clock+gm.model.duration(edited));
+ await gm.controller.requestTextEffect({requestId:webcrypto.randomUUID(),action:'stop',preview:false,id:result.id});assert.ok(clients.every(c=>c.live.size===0));
 });
 console.log(`Text effects: ${count} scenarios passed; real Owlbear room not exercised.`);

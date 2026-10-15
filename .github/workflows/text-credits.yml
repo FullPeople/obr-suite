@@ -1,0 +1,41 @@
+name: Credits text style
+on:
+  push:
+    branches: [codex/credits-style-release-20261015, dev]
+    paths: ['src/modules/textEffects/**', 'tools/text-effects-*', 'package*.json', 'public/manifest-dev.json', '.github/workflows/text-credits.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  credits:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
+      SUITE_BASE: suite-dev
+      SUITE_CHANNEL: dev
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 1310bf8083a790edbc98bc44b417fbb5367aa4c6
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.9.0'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+        working-directory: .paired-web
+      - run: npx tsc --noEmit
+      - run: node tools/text-effects-selftest.mjs
+      - run: node node_modules/vite/bin/vite.js build --outDir dist-workbench-dev
+      - run: node tools/build-text-effects-fixture.mjs
+      - run: node tools/build-workbench-panels.mjs
+        env:
+          WORKBENCH_PANEL_ONLY: textEffects
+          WORKBENCH_PANEL_OUT: .local-evidence/text-effects/panels
