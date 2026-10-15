@@ -12,7 +12,7 @@ function declaration(file,name){
  function visit(node){if(ts.isFunctionDeclaration(node)&&node.name?.text===name)found=node.getText(source);ts.forEachChild(node,visit);}
  visit(source);assert.ok(found,`${file}:${name}`);return found.replace(/^export /,'');
 }
-const source=['command','receive'].map(name=>declaration('src/workbench/background.ts',name)).join('\n')+'\n'+declaration('src/modules/characterCards/native-owner.ts','ownsNativeToken');
+const source=declaration('src/workbench/operation-lanes.ts','operationLanes')+'\nconst writeLanes=operationLanes();\n'+['command','receive'].map(name=>declaration('src/workbench/background.ts',name)).join('\n')+'\n'+declaration('src/modules/characterCards/native-owner.ts','ownsNativeToken');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
 const BIND='bind',DIRECTORY='directory',ROOM_LIST='room-list',LIST='scene-list',QQ_CARDS='cloud',DELETED='deleted';
 const checks=[];
@@ -39,7 +39,7 @@ function fixture({cloud=false,ids=['a'],role='GM'}={}){
   relay:{send:async(payload,before)=>transmit(payload.deleteCard.card,before)},qqRequest:async(path,method,_data,_room,options)=>{assert.equal(method,'DELETE');return transmit(path.replace('room-cards/cloud-',''),options?.guard);},
   documentLocation:id=>({room:'room',card:id}),documents:new Map(ids.map(id=>['room:card:'+id,{}])),documentCacheVersion:0,invalidateCard:()=>{},chosen:'card:a',
   send:(type,data)=>messages.push({type,...data}),refresh:async()=>{},refreshSelection:async()=>{},
-  activeRequests:new Set(),cancelledRequests:new Set(),requestRuns:new Map(),seen:new Map(),stockHistory:new Map(),queue:Promise.resolve(),groupQueue:Promise.resolve(),mutation:0,epoch:0,
+  activeRequests:new Set(),cancelledRequests:new Set(),requestRuns:new Map(),seen:new Map(),stockHistory:new Map(),groupQueue:Promise.resolve(),mutation:0,epoch:0,
  });
  vm.runInContext(compiled,host);
  const request=async(id,requestId='delete-'+id)=>{
