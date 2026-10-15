@@ -7,9 +7,13 @@ on:
       - src/modules/bubbles/**
       - src/modules/initiative/index.ts
       - src/modules/cross-scene-cards.ts
+      - src/modules/timeStop.ts
+      - src/modules/characterCards/index.ts
       - tools/runtime-completion-*
       - tools/scene-event-performance-selftest.mjs
       - tools/operation-lanes-selftest.mjs
+      - tools/scene-rpc-dedup-selftest.mjs
+      - tools/relay-capacity-selftest.mjs
       - .github/workflows/runtime-sync.yml
   workflow_dispatch:
 permissions:
@@ -20,15 +24,29 @@ concurrency:
 jobs:
   runtime:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
+    env:
+      DND_CARD_WEB_ROOT: ${{ github.workspace }}/.paired-web
     steps:
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: 1310bf8083a790edbc98bc44b417fbb5367aa4c6
+          path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24.9.0'
       - run: npm ci --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+        working-directory: .paired-web
+      - name: Verify the exact paired source and real rule evidence
+        working-directory: .paired-web
+        run: npm run verify:automation-source && npm run verify:automation-runtime
       - run: npx playwright install --with-deps chromium
       - name: Typecheck and runtime regression
         run: |
@@ -36,6 +54,8 @@ jobs:
           node tools/runtime-completion-selftest.mjs
           node tools/scene-event-performance-selftest.mjs
           node tools/operation-lanes-selftest.mjs
+          node tools/scene-rpc-dedup-selftest.mjs
+          node tools/relay-capacity-selftest.mjs
           node tools/dice-identity-selftest.mjs
           node tools/workbench-runtime-176-selftest.mjs
           node tools/workbench-owner-authority-selftest.mjs
@@ -44,10 +64,20 @@ jobs:
           npm run test:bubbles
       - name: Actual SDK and iframe completion/recovery
         run: node tools/runtime-completion-browser-selftest.mjs
+      - name: All current candidate regression programs
+        run: node tools/verify-suite-candidate.mjs
+      - name: Build and verify the active paired 2D production package
+        run: |
+          npm run build:workbench-dev
+          node tools/dice-light292-browser.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: runtime-sync-${{ github.sha }}
           retention-days: 7
           if-no-files-found: warn
-          path: workbench-test-output/runtime-browser/results.json
+          path: |
+            workbench-test-output/runtime-browser/results.json
+            .local-evidence/verification/results.json
+            .local-evidence/verification/*.log
+            .local-evidence/light292/result.json
