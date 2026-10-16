@@ -100,7 +100,7 @@ async function connectEditor() {
     if(!subscribed){subscribed=true;
     OBR.broadcast.onMessage(STATUS, event => { if (event.connectionId === connection) receive(event.data); });
     OBR.player.onChange(player => { role = player.role; availability(); });
-    OBR.scene.onReadyChange(next => { sceneReady = next; stopTarget = undefined; availability(); status.textContent = next ? role === 'GM' ? '已连接枭熊，可以预览或向房间播放。' : '已连接枭熊，可以在自己的画面中预览。' : '场景已关闭，配置和本地预览仍可使用。'; });
+    OBR.scene.onReadyChange(next => { sceneReady = next; stopTarget = undefined; availability(); if(connected&&bridgeOnline)status.textContent = next ? role === 'GM' ? '已连接枭熊，可以预览或向房间播放。' : '已连接枭熊，可以在自己的画面中预览。' : '场景已关闭，配置和本地预览仍可使用。'; });
     }
     status.textContent = sceneReady ? role === 'GM' ? '已连接枭熊，可以预览或向房间播放。' : '已连接枭熊，可以在自己的画面中预览。' : '请打开枭熊场景；配置和本地预览仍可使用。';
     availability();
