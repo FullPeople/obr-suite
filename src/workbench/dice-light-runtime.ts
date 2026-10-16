@@ -16,6 +16,17 @@ let unsubs:(()=>void)[]=[],party:any[]=[],historyKey='';
 const queued=new Map<string,DiceRollPayload>(),seen=new Set<string>(),commands=new Map<string,Promise<DiceRollPayload>>();
 const report=(error:unknown)=>console.warn('[dice-light]',error);
 export function getRollHistory(){return diceHistory(rolls,{role:player?.role||'',playerId:player?.id||''});}
+/** Remove the local client's persisted roll archive as one operation.
+ * The history UI and the workbench host keep separate in-memory copies; only
+ * clearing localStorage lets the host replay deleted rows after a reconnect. */
+export function deleteDiceHistory(cid?:string){
+ const kept=cid?rolls.filter(row=>(row.collectiveId||row.rollId)!==cid):[],removed=rolls.length-kept.length;
+ rolls.splice(0,rolls.length,...kept);
+ try{localStorage.setItem(historyKey,JSON.stringify(storedDiceHistory(rolls)));}catch{}
+ if(replay&&(!cid||replay===cid)){clearTokenResults(`history:${replay}`);replay='';}
+ rollListeners.forEach(fn=>fn());
+ return {removed};
+}
 export function canForwardDiceHistory(event:{connectionId:string;data:unknown}){return event.connectionId===player?.connectionId&&validResult(event.data)&&canSeeDiceHistory(event.data,{role:player?.role||'',playerId:player?.id||''});}
 function validResult(p:any):p is DiceRollPayload{return !!p&&typeof p.rollId==='string'&&p.rollId.length<=120&&typeof p.rollerId==='string'&&Array.isArray(p.dice)&&p.dice.length>0&&p.dice.length<=100&&Number.isFinite(p.total)&&Number.isFinite(p.modifier)&&Number.isFinite(p.ts)&&p.dice.every((d:any)=>/^d\d{1,4}$/.test(d.type)&&Number.isSafeInteger(d.value)&&Math.abs(d.value)<=1e9);}
 function remember(p:DiceRollPayload){
@@ -35,7 +46,7 @@ export function setupWorkbenchDice(){return startup??=startDice(generation);}
 async function startDice(own:number){
  const profile=await diceIdentity();if(own!==generation)return;player=profile;
  historyKey=`obr-suite/dice/history:${String(OBR.room.id||'default').replace(/[^a-zA-Z0-9_-]/g,'_')}`;
- try{const prior=JSON.parse(localStorage.getItem(historyKey)||'[]');if(Array.isArray(prior))rolls.push(...storedDiceHistory(prior));}catch{}
+ try{const prior=JSON.parse(localStorage.getItem(historyKey)||'[]');if(Array.isArray(prior)){const stored=storedDiceHistory(prior);rolls.push(...stored);localStorage.setItem(historyKey,JSON.stringify(stored));}}catch{}
  bus=new BroadcastChannel(`${CHANNEL}:local:${profile.connectionId}`);
  bus.onmessage=event=>{
   if(own!==generation)return;const m=event.data;
@@ -52,7 +63,7 @@ async function startDice(own:number){
  unsubs.push(OBR.broadcast.onMessage(BROADCAST_DICE_ROLL,event=>{
   if(own!==generation||event.connectionId===profile.connectionId||!validResult(event.data))return;
   const p=event.data,sender=party.find(peer=>peer.connectionId===event.connectionId);
-  if(sender&&sender.id!==p.rollerId||p.hidden&&sender?.role!=='GM'||!canSeeDiceHistory(p,{role:profile.role,playerId:profile.id}))return;
+  if(!sender||sender.id!==p.rollerId||p.hidden&&sender.role!=='GM'||!canSeeDiceHistory(p,{role:profile.role,playerId:profile.id}))return;
   play(p);queueMicrotask(()=>remember(p));
  }));
  unsubs.push(OBR.broadcast.onMessage('com.obr-suite/dice-quick-roll',event=>{if(event.connectionId===profile.connectionId)void executeRoll(event.data as QuickRollRequest).catch(report);}));
@@ -89,6 +100,7 @@ export async function resolveDiceTarget(id:unknown,identity?:DiceIdentity):Promi
 }
 export async function lightDiceRpc(method:string,args:any[]){
  await setupWorkbenchDice();if(method==='history')return getRollHistory();
+ if(method==='historyDelete')return deleteDiceHistory(typeof args[0]==='string'&&args[0]?args[0]:undefined);
  if(method==='clear'){bus?.postMessage({type:'clear'});return;}
  if(method==='status')return {ready:true,mode:'2d',physics:false};
  if(method==='reveal'){
