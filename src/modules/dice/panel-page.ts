@@ -235,13 +235,13 @@ function saveCombos() {
     localStorage.setItem(LS_COMBOS, JSON.stringify(file));
   } catch {}
 }
-function loadHistory(): DiceRollPayload[] {
+function loadHistory(fallback: DiceRollPayload[] = []): DiceRollPayload[] {
   try {
     const v = localStorage.getItem(LS_HISTORY);
     if (!v) return [];
     const p = JSON.parse(v);
     if (Array.isArray(p)) {const rows=storedDiceHistory(p) as DiceRollPayload[];if(p.length>HISTORY_CAP)localStorage.setItem(LS_HISTORY,JSON.stringify(rows));return rows;}
-  } catch {}
+  } catch { return fallback; }
   return [];
 }
 function saveHistory() { try { localStorage.setItem(LS_HISTORY, JSON.stringify(storedDiceHistory(history))); } catch {} }
@@ -3211,6 +3211,11 @@ btnFixedRoll?.addEventListener("click", () => {
 });
 window.addEventListener("storage", (e) => {
   if (e.key === FIXED_ROLL_LS_KEY) refreshFixedRollUi();
+  if (e.key === LS_HISTORY) {
+    history = loadHistory();
+    renderHistorySeg();
+    renderHistoryList();
+  }
 });
 
 // 上一次: refill expression with the last successfully-rolled expr.
@@ -3368,7 +3373,7 @@ OBR.onReady(async () => {
     if (!canSeeDiceHistory(data,historyViewer())) {
       return;
     }
-    history=storedDiceHistory([data,...loadHistory(),...history]);
+    history=storedDiceHistory([data,...loadHistory(history)]);
     saveHistory();
     if (activeTab === "history") {
       renderHistorySeg();
