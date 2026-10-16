@@ -62,6 +62,8 @@ jobs:
           node tools/native-owner-selftest.mjs
           node tools/workbench-read-recovery-selftest.mjs
           npm run test:bubbles
+      - name: Actual binding picker under suspended and isolated enabled cloud profiles
+        run: node tools/character-directory259-selftest.mjs
       - name: Actual SDK and iframe completion/recovery
         run: node tools/runtime-completion-browser-selftest.mjs
       - name: All current candidate regression programs
