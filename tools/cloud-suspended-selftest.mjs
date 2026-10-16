@@ -32,8 +32,8 @@ await build({input:entry,platform:'node',external:[/^node:/],plugins:[{name:'syn
 await import(pathToFileURL(join(out,'test.mjs')).href);
 function declaration(file,name){const source=ts.createSourceFile(file,readFileSync(join(root,file),'utf8'),ts.ScriptTarget.Latest,true);let found;function visit(node){if(ts.isFunctionDeclaration(node)&&node.name?.text===name)found=node.getText(source);ts.forEachChild(node,visit);}visit(source);assert.ok(found,`${file}:${name}`);return found.replace(/^export /,'');}
 const mutations=[];
-const context=vm.createContext({console,Map,Set,Promise,assertCloudEnabled:globalThis.cloudPauseProof.assertCloudEnabled,setupServerAdmission:()=>{},tableWorkbench:()=>()=>{},OBR:{room:{setMetadata:()=>mutations.push('metadata')}},workbenchPanelRequest:()=>mutations.push('frame-rpc'),parent:{postMessage:()=>mutations.push('postMessage')}});
-const adapter=readFileSync(join(root,'src/workbench/qq-account-adapter.ts'),'utf8').replace(/^import.*\n/gm,'').replace(/^export \{.*\n/gm,'').replaceAll('export ','');
+const context=vm.createContext({exports:{},console,Map,Set,Promise,assertCloudEnabled:globalThis.cloudPauseProof.assertCloudEnabled,setupServerAdmission:()=>{},tableWorkbench:()=>()=>{},OBR:{room:{setMetadata:()=>mutations.push('metadata')}},workbenchPanelRequest:()=>mutations.push('frame-rpc'),parent:{postMessage:()=>mutations.push('postMessage')}});
+const adapter=readFileSync(join(root,'src/workbench/qq-account-adapter.ts'),'utf8').replace(/^import.*\r?\n/gm,'').replace(/^export \{.*\r?\n/gm,'').replaceAll('export ','');
 vm.runInContext(ts.transpileModule(declaration('src/workbench/background.ts','command')+'\n'+declaration('src/workbench/panel-rpc.ts','panelBridge')+'\n'+adapter,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,context);
 for(const type of ['qqLibrary','cloudInfo','cloudEditors','cloudUpload'])await assert.rejects(()=>context.command({type}),error=>error.code==='CLOUD_DISABLED');
 const panel=context.panelBridge(()=>{});
@@ -42,6 +42,6 @@ for(const invoke of [()=>context.qqRequest('cards'),()=>context.connectQQ(),()=>
 assert.deepEqual(mutations,[]);console.log('PASS host and embedded QQ RPC cannot reopen login or mutate preserved room metadata');
 const nodes=new Map(['message','close','login','logout','refresh','copyAccount'].map(id=>[id,{hidden:false,disabled:false,textContent:''}]));
 const page=vm.createContext({cloudFeaturesEnabled:false,cloudDisabledMessage:'paused',document:{querySelectorAll:()=>[...nodes].filter(([id])=>id!=='close').map(([,node])=>node),getElementById:id=>nodes.get(id)},OBR:{onReady:callback=>callback(),modal:{close:()=>{}}},console});
-vm.runInContext(ts.transpileModule(readFileSync(join(root,'src/modules/characterCards/qq-page.ts'),'utf8').replace(/^import.*\n/gm,''),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,page);
+vm.runInContext(ts.transpileModule(readFileSync(join(root,'src/modules/characterCards/qq-page.ts'),'utf8').replace(/^import.*\r?\n/gm,''),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,page);
 assert.equal(nodes.get('message').textContent,'paused');for(const [id,node] of nodes)if(id!=='close'){assert.equal(node.hidden,true);assert.equal(node.disabled,true);}assert.equal(typeof nodes.get('close').onclick,'function');console.log('PASS direct legacy QQ page exposes no active login/library controls');
 console.log(JSON.stringify({passed:true,synthetic:true,realRoom:false,realCredentials:false,cloudNetworkRequests:0,cloudMetadataMutations:0}));

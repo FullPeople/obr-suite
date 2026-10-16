@@ -5,7 +5,7 @@ import {pathToFileURL} from 'node:url';
 import {build} from 'rolldown';
 
 const out=resolve('workbench-test-output/scene-event-performance');mkdirSync(out,{recursive:true});
-const source=readFileSync('src/modules/initiative/index.ts','utf8');
+const source=readFileSync('src/modules/initiative/index.ts','utf8').replaceAll('\r\n','\n');
 const start=source.indexOf('OBR.scene.items.onChange(async (sceneItems) => {');
 const end=source.indexOf('\n      })\n    );',start);
 assert(start>0&&end>start,'Production initiative callback boundary changed');

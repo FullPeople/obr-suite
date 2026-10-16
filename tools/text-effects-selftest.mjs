@@ -48,7 +48,7 @@ await check('preview opens only the requesting client and does not create scene 
 });
 await check('GM room play reaches sender and both player clients with bounded shared parameters',async()=>{
  const before=clients.map(c=>c.opens.length),result=await request(gm);await tick();assert.equal(result.preview,false);
- for(const [i,c]of clients.entries()){assert.equal(c.opens.length,before[i]+1);assert.equal(c.live.size,1);assert.equal(c.opens.at(-1).disablePointerEvents,true);}
+ for(const [i,c]of clients.entries()){assert.equal(c.opens.length,before[i]+1);assert.equal(c.live.size,1);assert.equal(c.opens.at(-1).disablePointerEvents,false);assert.equal(c.opens.at(-1).hidePaper,true);assert.equal(c.opens.at(-1).hideBackdrop,true);assert.equal(c.opens.at(-1).fullScreen,true);}
  const message=packets.findLast(packet=>packet.name===p.PLAY);assert.equal(message.options.destination,'REMOTE');assert.ok(new TextEncoder().encode(JSON.stringify(message.data)).length<12000);assert.equal(Object.keys(metadata).length,1);
 });
 await check('same request is idempotent; changed data under that identity is rejected',async()=>{

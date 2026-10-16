@@ -19,6 +19,7 @@ import {
 } from "./types";
 import { prefersReducedMotion } from "../transitions/protocol";
 import { needsPortalIconMigration, migratePortalIconDraft, applyPortalImage, isPortalImage } from "./appearance";
+import { portalGeometry, insidePortal } from './geometry';
 import { resolveDefaultPortalImage } from "./default-image";
 // NOT `../../i18n`. This module is on background.ts's boot path, and
 // that file is one ~600-key object literal indexed dynamically, so
@@ -230,8 +231,9 @@ function readPortalMeta(it: Item): PortalMeta | null {
 // `offset` point lands. We always set offset to image-center, so
 // `position` IS the geometric center of the visible icon — same
 // pattern OBR's bestiary spawn uses.
+let portalSceneDpi = 150;
 function portalCenter(it: Item): { x: number; y: number } {
-  return { x: it.position.x, y: it.position.y };
+  return portalGeometry(it, portalSceneDpi).center;
 }
 
 // --- Live preview (local-only, scales with the drag) ---------------------
@@ -794,6 +796,7 @@ async function onDragEnd() {
     return;
   }
 
+  portalSceneDpi = await OBR.scene.grid.getDpi();
   const portals = items.filter(isPortal);
   if (portals.length === 0) return;
   const visiblePortals = portals.filter((p) => p.visible);
@@ -829,16 +832,9 @@ async function onDragEnd() {
   }
   if (groupCandidates.size === 0) return;
 
-  // Trigger geometry: token center must enter the portal's visible
-  // glow. Scale + offset math in createPortal() makes the rendered
-  // image diameter = 2×pm.radius scene-units, so pm.radius is the
-  // visible boundary radius. Earlier versions added the token's
-  // image-bounds radius to extend the trigger; that turned out
-  // to over-fire — token PNGs typically have transparent padding,
-  // so the real visible character lives well inside the bounding
-  // box, and the trigger radius would grow by 30-50% of the visible
-  // mismatch. Using just pm.radius makes the trigger == the visible
-  // ring, predictable for both DM and players.
+  // The token image center must enter the current portal ellipse. Resolve
+  // dimensions and anchors again after image replacement or resize; stored
+  // creation radius only supports legacy items without valid image geometry.
   for (const tok of items) {
     if (!groupCandidates.has(tok.id)) continue;
     if (tok.layer !== "CHARACTER" && tok.layer !== "MOUNT") continue;
@@ -847,8 +843,8 @@ async function onDragEnd() {
     for (const p of visiblePortals) {
       const pm = readPortalMeta(p);
       if (!pm) continue;
-      const d = dist(tok.position, portalCenter(p));
-      if (d <= pm.radius) {
+      const point = portalGeometry(tok, portalSceneDpi, 0).center;
+      if (insidePortal(point, portalGeometry(p, portalSceneDpi, pm.radius))) {
         await openDestinationPopover(p, items, [...groupCandidates]);
         return;
       }
@@ -917,7 +913,8 @@ async function openDestinationPopover(
     screenX = screen.x;
     screenY = screen.y;
     const vScale = await OBR.viewport.getScale();
-    portalScreenRadius = entryMeta.radius * vScale;
+    const geometry = portalGeometry(entryPortal, portalSceneDpi, entryMeta.radius);
+    portalScreenRadius = Math.hypot(geometry.rx * geometry.sin, geometry.ry * geometry.cos) * vScale;
   } catch {}
 
   // Clamp so the popover never lands outside the OBR viewport.
@@ -1623,6 +1620,7 @@ async function teleport(
 
   let dpi = 150;
   try { dpi = await OBR.scene.grid.getDpi(); } catch {}
+  portalSceneDpi = dpi;
   const spacing = dpi;
   const center = portalCenter(dest);
 
@@ -1630,7 +1628,8 @@ async function teleport(
   // land on top of them. Anyone within the destination's trigger
   // radius + 1 grid cell is "already there" and skipped during placement.
   const destMeta = readPortalMeta(dest);
-  const destRadius = destMeta?.radius ?? spacing;
+  const destinationGeometry = portalGeometry(dest, portalSceneDpi, destMeta?.radius ?? spacing);
+  const destRadius = Math.max(destinationGeometry.rx, destinationGeometry.ry);
   let occupants: Point[] = [];
   let allItems: Item[] = [];
   try {
@@ -1771,6 +1770,8 @@ async function migrateLegacyPortals(): Promise<void> {
 }
 
 export async function setupPortals(): Promise<void> {
+  portalSceneDpi = await OBR.scene.grid.getDpi();
+  unsubs.push(OBR.scene.grid.onChange(grid => { portalSceneDpi = grid.dpi; }));
   portalEditorActive = true; ++portalEditorAuthority;
   try { editorConnectionId = await OBR.player.getConnectionId(); } catch { editorConnectionId = ""; }
   try { role = (await OBR.player.getRole()) as "GM" | "PLAYER"; } catch (e) {

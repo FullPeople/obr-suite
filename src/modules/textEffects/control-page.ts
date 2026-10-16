@@ -87,16 +87,35 @@ button('room-play').onclick = () => void submit('play', false);
 button('room-stop').onclick = () => void submit('stop', stopTarget?.preview ?? true);
 button('close').onclick = () => { void OBR.popover.close('com.obr-suite/text-effects/control').catch(() => {}); };
 listPresets(); controls(); draw();
-OBR.onReady(async () => {
+let connectionGeneration=0,connectionTimer:ReturnType<typeof setTimeout>|undefined,subscribed=false,connectionAlive=true,bridgeOnline=true;
+async function connectEditor() {
+  if(!connectionAlive||!bridgeOnline)return;
+  const generation=++connectionGeneration;
+  if(connectionTimer)clearTimeout(connectionTimer);
   try {
-    [connection, role, sceneReady] = await Promise.all([OBR.player.getConnectionId(), OBR.player.getRole(), OBR.scene.isReady()]);
+    const values = await Promise.all([OBR.player.getConnectionId(), OBR.player.getRole(), OBR.scene.isReady()]);
+    if(!connectionAlive||generation!==connectionGeneration)return;
+    [connection, role, sceneReady] = values;
     connected = true;
+    if(!subscribed){subscribed=true;
     OBR.broadcast.onMessage(STATUS, event => { if (event.connectionId === connection) receive(event.data); });
     OBR.player.onChange(player => { role = player.role; availability(); });
     OBR.scene.onReadyChange(next => { sceneReady = next; stopTarget = undefined; availability(); status.textContent = next ? role === 'GM' ? '已连接枭熊，可以预览或向房间播放。' : '已连接枭熊，可以在自己的画面中预览。' : '场景已关闭，配置和本地预览仍可使用。'; });
+    }
     status.textContent = sceneReady ? role === 'GM' ? '已连接枭熊，可以预览或向房间播放。' : '已连接枭熊，可以在自己的画面中预览。' : '请打开枭熊场景；配置和本地预览仍可使用。';
     availability();
-  } catch { showError('枭熊连接未能建立，配置和本地预览仍可使用。'); }
+  } catch {
+    if(!connectionAlive||generation!==connectionGeneration)return;
+    connected=false;availability();status.textContent='正在重新连接枭熊，配置和本地预览仍可使用。';
+    connectionTimer=setTimeout(()=>void connectEditor(),1500);
+  }
+}
+OBR.onReady(()=>void connectEditor());
+window.addEventListener('workbench-connection',event=>{
+ const state=(event as CustomEvent).detail;
+ bridgeOnline=state?.online===true;
+ if(!state?.online){connectionGeneration++;if(connectionTimer)clearTimeout(connectionTimer);connected=false;availability();status.textContent=state?.message||'正在重新连接枭熊，配置和本地预览仍可使用。';}
+ else if(!connected)void connectEditor();
 });
 const expiryTimer = setInterval(availability, 1000);
-window.addEventListener('pagehide', () => { clearInterval(expiryTimer); presentation?.dispose(); for (const value of pending.values()) { clearTimeout(value.timer); value.reject(Error('配置面板已关闭')); } pending.clear(); }, { once: true });
+window.addEventListener('pagehide', () => { connectionAlive=false;connectionGeneration++;if(connectionTimer)clearTimeout(connectionTimer);clearInterval(expiryTimer); presentation?.dispose(); for (const value of pending.values()) { clearTimeout(value.timer); value.reject(Error('配置面板已关闭')); } pending.clear(); }, { once: true });
