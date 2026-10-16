@@ -95,6 +95,8 @@ async function start(){
   const state=extra.state as {key?:string;itemId?:string}|undefined;
   const publicationKey=type==='cacheSnapshot'?`${type}:${state?.key||''}:${state?.itemId||''}`:type;
   const publication=retryable?++viewPublication:0,viewer=warmClientInstance;
+  const authority=observation.authorityVersion();const guardedView=retryable||['ready','rolls','groupRollState'].includes(type);
+  const beforeView=()=>{if(guardedView&&(authority!==observation.authorityVersion()||viewer!==warmClientInstance))throw Object.assign(Error('显示权限或当前页面已改变，未发送旧快照'),{status:403,notSent:true});};
   if(retryable){viewPublications.delete(publicationKey);viewPublications.set(publicationKey,publication);while(viewPublications.size>128)viewPublications.delete(viewPublications.keys().next().value!);}
   const failed=()=>{
    if(!retryable||viewer!==warmClientInstance||viewPublications.get(publicationKey)!==publication)return;
@@ -107,7 +109,7 @@ async function start(){
    else{const signature=JSON.stringify(extra.state),epoch=(extra.access as {epoch?:number}|undefined)?.epoch;for(const [id,snapshot] of warmSnapshots)if(snapshot.document===extra.document&&snapshot.state===signature&&snapshot.epoch===epoch)warmSnapshots.delete(id);}
   };
   if(route!=='relay'&&child&&!child.closed)try{child.postMessage(data,origin);}catch{failed();}
-  if(route==='relay'||route!=='direct'&&(!child||child.closed||directClientInstance!==warmClientInstance||Date.now()-directPeerSeen>15000)&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data).catch(failed);
+  if(route==='relay'||route!=='direct'&&(!child||child.closed||directClientInstance!==warmClientInstance||Date.now()-directPeerSeen>15000)&&relayActive&&Date.now()-relayPeerSeen<45000)void relay.send(data,beforeView).catch(failed);
  };
  OBR.broadcast.onMessage(OPEN_WIKI_CHANNEL,event=>{if(event.connectionId!==playerConnection)return;try{const entry=sharedEntry((event.data as any)?.entry);send('showWiki',{entry,id:crypto.randomUUID()});}catch{}});
  OBR.broadcast.onMessage('com.obr-suite/workbench/open-page',event=>{if(event.connectionId!==playerConnection)return;const page=(event.data as any)?.page;if(['settings','announcement','features','music','textEffects','console'].includes(page))send('navigate',{page});});
@@ -870,7 +872,7 @@ async function start(){
  async function receive(m:any,viaRelay=false){if(m.protocol!==protocol||m.session!==session)return;const route=viaRelay?'relay':'direct';
   if(m.type==='cardChanged'){if(typeof m.cardId==='string'&&invalidateCard(m.cardId,m.revision)){void hydrate(m.cardId);void refreshSelection();void refresh();}return;}
   if(m.type==='startup'){workbenchStartup.update(m.clientInstance,m.startupPhase);return;}
-  if(m.type==='hello'){workbenchStartup.hello(typeof m.clientInstance==='string'?m.clientInstance:'legacy',m.startupPhase,viaRelay?undefined:child||undefined,m.clientStarted);last='';lastCatalog='';lastDirectory='';lastAccessEpoch=0;const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(instance!==warmClientInstance){warmClientInstance=instance;warmSnapshots.clear();}send('ready',{qqAccount:publicQQ(),rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},route);if(viaRelay&&child&&!child.closed)send('ready',{qqAccount:publicQQ(),rolls:getRollHistory(),groupRoll:groups.snapshot(),groupRevision:groups.revision()},'direct');if(!viaRelay)void OBR.action.close().catch(()=>{});void refreshSelection();void refresh();void hydrate();return;}
+  if(m.type==='hello'){if(!workbenchStartup.hello(typeof m.clientInstance==='string'?m.clientInstance:'legacy',m.startupPhase,viaRelay?undefined:child||undefined,m.clientStarted))return;last='';lastCatalog='';lastDirectory='';lastAccessEpoch=0;const instance=typeof m.clientInstance==='string'?m.clientInstance:'legacy';if(instance!==warmClientInstance){warmClientInstance=instance;warmSnapshots.clear();}send('ready',{clientInstance:instance,controlReady:true,groupDeferred:true,role:observation.peek().role,enabled:getState().enabled,qqAccount:publicQQ()},route);send('rolls',{rolls:getRollHistory()},route);send('groupRollState',{group:groups.snapshot(),groupRevision:groups.revision(),snapshot:true,clientInstance:instance},route);if(viaRelay&&child&&!child.closed)send('ready',{clientInstance:instance,controlReady:true,groupDeferred:true,role:observation.peek().role,enabled:getState().enabled,qqAccount:publicQQ()},'direct');if(!viaRelay)void OBR.action.close().catch(()=>{});void refreshSelection();void refresh();void hydrate();return;}
   if(m.type==='ping'){workbenchStartup.update(m.clientInstance,m.startupPhase);send('pong',{at:Date.now()},route);return;}
   if(m.type==='requestStatus'){const answer=seen.get(m.requestId);if(answer)send('ack',{requestId:m.requestId,...answer},route);else send('requestPending',{requestId:m.requestId,active:activeRequests.has(m.requestId),known:requestRuns.has(m.requestId)},route);return;}
   if(m.type==='cancel'){if(!seen.has(m.requestId))cancelledRequests.add(m.requestId);return;}

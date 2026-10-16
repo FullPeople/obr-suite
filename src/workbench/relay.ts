@@ -30,12 +30,27 @@ export class Relay {
   }
   this.retryAt=0;this.failures=0;this.lastError=undefined;this.alive?.();return data;
  }
- private async post(message:any,beforeSend?:()=>void|Promise<void>){
+ private postLanes=[Promise.resolve(),Promise.resolve()];private queuedPosts=0;private queuedViews=new Map<string,object>();private viewVersions=new Map<string,number>();private viewVersion=0;
+ private async post(message:any, beforeSend?:()=>void|Promise<void>){
+  if(this.queuedPosts>=64)throw Object.assign(Error('中继发送队列繁忙，请稍后重试'),{status:429,notSent:true});
+  this.queuedPosts++;
+  try{
+   const text=JSON.stringify(message),small=text.length<4096&&new TextEncoder().encode(text).length<=4096,lane=small?0:1;
+   const view=message?.protocol==='full-suite-workbench/v1'&&['ready','catalog','selection','rolls','directory','access','cacheSnapshot','groupRollState'].includes(message.type)?message.type+':'+(message.type==='cacheSnapshot'?message.state?.key||message.state?.itemId||'':''):undefined;
+   const marker={};if(view)this.queuedViews.set(view,marker);
+   const current=()=>{if(view&&this.queuedViews.get(view)!==marker)throw Object.assign(Error('较新的显示状态已替代本次传输'),{status:409,code:'SUPERSEDED_VIEW',notSent:true});};
+   const previous=this.postLanes[lane];let release!:()=>void;this.postLanes[lane]=new Promise<void>(resolve=>{release=resolve;});
+   await previous;
+   try{current();const encoded=await wireBody(message);current();return await this.transmit(message,encoded,beforeSend);}finally{if(view&&this.queuedViews.get(view)===marker)this.queuedViews.delete(view);release();}
+  }finally{this.queuedPosts--;}
+ }
+ private async transmit(message:any,encoded:Awaited<ReturnType<typeof wireBody>>,beforeSend?:()=>void|Promise<void>){
   if(Date.now()<this.retryAt)throw Object.assign(Error(this.lastError?.message||'中继连接暂不可用'),{status:this.lastError?.status,notSent:true});
-  const encoded=await wireBody(message);
+
   // Registration and compression can suspend long enough for an owner grant
   // to be revoked. Recheck immediately before transmitting the mutation.
   try{await beforeSend?.();}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}
+  if(this.stopped||typeof message?.expiresAt==='number'&&message.expiresAt<=Date.now())throw Object.assign(Error('操作已取消或过期，未发送'),{status:408,notSent:true});
   return withRequestTimeout(60000,this.abort.signal,async signal=>this.response(await fetch(this.endpoint(),{method:'POST',headers:{Authorization:`Bearer ${this.secret}`,...encoded.headers},body:encoded.body as BodyInit,signal}),!message?.register));
  }
  private async register(){
@@ -44,12 +59,15 @@ export class Relay {
   await this.registration;
  }
  async send(message:any,beforeSend?:()=>void|Promise<void>){
+  const view=message?.protocol==='full-suite-workbench/v1'&&['ready','catalog','selection','rolls','directory','access','cacheSnapshot','groupRollState'].includes(message.type)?message.type+':'+(message.type==='cacheSnapshot'?message.state?.key||message.state?.itemId||'':''):undefined;
+  const version=view?++this.viewVersion:0;if(view){this.viewVersions.set(view,version);while(this.viewVersions.size>128)this.viewVersions.delete(this.viewVersions.keys().next().value!);}
+  const current=()=>{if(view&&this.viewVersions.get(view)!==version)throw Object.assign(Error('较新的显示状态已替代本次传输'),{status:409,code:'SUPERSEDED_VIEW',notSent:true});};
   try{await this.register();}catch(error){throw Object.assign(error instanceof Error?error:Error(String(error)),{notSent:true});}
-  const retryable=message?.protocol==='full-suite-workbench/v1'&&typeof message.type==='string'&&!['ready','catalog','selection','rolls','directory','access','cacheSnapshot','groupRollState'].includes(message.type);
+  const retryable=message?.protocol==='full-suite-workbench/v1'&&typeof message.type==='string';
   const receipt=retryable&&message.type==='ack'&&typeof message.requestId==='string';
   // Unknown transmission may repeat a receipt, never a business command.
   const deadline=Math.min(Date.now()+10000,typeof message?.expiresAt==='number'?message.expiresAt:Infinity);
-  for(;;){try{return await this.post(message,beforeSend);}catch(error){
+  for(;;){try{current();return await this.post(message,()=>{current();return beforeSend?.();});}catch(error){
    const failure=error as Error&{status?:number;notSent?:boolean;code?:string;retryAfterMs?:number};
    const delay=failure.retryAfterMs||1000;
    const safe=!!failure.notSent&&['REQUEST_CAPACITY','QUEUE_CAPACITY'].includes(failure.code||'')||receipt&&(!failure.status||failure.status===429||failure.status>=500);

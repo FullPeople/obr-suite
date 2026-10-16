@@ -10,15 +10,15 @@ export class StartupPresentation {
  private known(phase:unknown):phase is string{return typeof phase==='string'&&['loading','playing','waiting','fading','complete','failed','cancelled'].includes(phase);}
  /** A new document replaces the old client, even when its WindowProxy survives. */
  hello(client:string,phase:unknown,source?:{readonly closed:boolean},started?:unknown){
-  if(!client||this.retired.has(client))return;
+  if(!client||this.retired.has(client))return false;
   const time=typeof started==='number'&&Number.isFinite(started)&&started>0?started:0;
   // Direct and relay messages may cross. The document/activation time rejects even an
   // old hello first observed after a newer client or a host restart.
-  if(time<this.clientStarted||time===this.clientStarted&&time>0&&this.client!==client)return;
+  if(time<this.clientStarted||time===this.clientStarted&&time>0&&this.client!==client)return false;
   if(time>this.clientStarted)this.clientStarted=time;
   if(client!==this.client){if(this.client)this.retired.add(this.client);this.client=client;this.phase='loading';this.source=undefined;this.revision++;}
   if(source)this.source=source;
-  this.update(client,phase===undefined?'complete':phase);
+  this.update(client,phase===undefined?'complete':phase);return true;
  }
  update(client:string,phase:unknown){
   if(client!==this.client||!this.known(phase)||this.phase===phase)return;

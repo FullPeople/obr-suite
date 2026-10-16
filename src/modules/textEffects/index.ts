@@ -30,7 +30,8 @@ async function show(event: EffectEvent, preview: boolean, expectedEpoch: number)
   const url = `${assetUrl('text-effect-display.html')}#${encodeURIComponent(JSON.stringify(payload))}`;
   windows.add(modalId);
   try {
-    await OBR.modal.open({ id: modalId, url, fullScreen: true, hidePaper: true, hideBackdrop: true, disablePointerEvents: true });
+    // Use the foreground modal layer so native popovers cannot cover playback.
+    await OBR.modal.open({ id: modalId, url, fullScreen: true, hidePaper: true, hideBackdrop: true, disablePointerEvents: false });
     // A scene change or stop may finish before the native open acknowledgment.
     if (ownSequence !== sequence || epoch !== expectedEpoch) await closeWindow(modalId);
   } catch (error) { if (current?.event.id === event.id) closeCurrent(); throw error; }

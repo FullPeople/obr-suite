@@ -37,6 +37,13 @@ try{
  await check('role and scene changes gate room actions but keep local editing',async()=>{
   await page.evaluate(()=>window.refresh('PLAYER'));await wait(async()=>await button('播放到房间').isDisabled());assert.equal(await button('在枭熊中预览').isEnabled(),true);await page.evaluate(()=>window.scene(false));await wait(async()=>await button('在枭熊中预览').isDisabled());assert.equal(await button('播放预览').isEnabled(),true);await page.evaluate(()=>{window.refresh('GM');window.scene(true);});await wait(async()=>await button('播放到房间').isEnabled());
  });
+ await check('bridge disconnect stops room controls and reconnect preserves edited configuration',async()=>{
+  await tab('文字');await field('标题').fill('连接恢复保留配置');
+  await frame().locator('body').evaluate(()=>window.dispatchEvent(new CustomEvent('workbench-connection',{detail:{online:false}})));
+  await wait(async()=>await button('播放到房间').isDisabled());assert.equal(await button('在枭熊中预览').isDisabled(),true);assert.equal(await button('播放预览').isEnabled(),true);
+  await frame().locator('body').evaluate(()=>window.dispatchEvent(new CustomEvent('workbench-connection',{detail:{online:true}})));
+  await wait(async()=>await button('播放到房间').isEnabled());assert.equal(await field('标题').inputValue(),'连接恢复保留配置');
+ });
  await check('settings scroll independently while preview and play buttons remain fixed at desktop and mobile sizes',async()=>{
   await frame().locator('[data-preset="builtin:0"]').click();await tab('样式');await frame().getByText('描边与阴影',{exact:true}).click();await frame().getByText('副标题样式',{exact:true}).click();
   for(const [width,height]of[[1440,1000],[390,900],[320,900],[320,480]]){await page.setViewportSize({width,height});await page.waitForTimeout(100);const before=await frame().locator('#preview').boundingBox();await frame().locator('#settings').evaluate(el=>el.scrollTop=el.scrollHeight);const after=await frame().locator('#preview').boundingBox(),dimensions=await frame().locator('html').evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth,height:el.clientHeight,body:document.body.scrollHeight,settings:document.querySelector('#settings').clientHeight,scroll:document.querySelector('#settings').scrollHeight}));assert.ok(Math.abs(before.y-after.y)<1);assert.ok(dimensions.settings>45,JSON.stringify(dimensions));assert.ok((await button('播放到房间').boundingBox()).y<height);assert.equal(await frame().locator('#settings').evaluate(el=>el.scrollTop>0),true);const overflow=await frame().locator('html').evaluate(el=>el.scrollWidth-el.clientWidth);assert.ok(overflow<=1,String(overflow));await page.screenshot({path:join(out,`text-effects-${width}x${height}.png`)});}

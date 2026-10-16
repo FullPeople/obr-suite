@@ -30,7 +30,7 @@ try{
  await relay.send({protocol,type:'ack',requestId:'initial',ok:true});
  holdBodies();await wait(()=>relayLoad().activePosts===2,'Two real streaming requests must occupy bulk admission');
  const rejected=statuses.filter(status=>status===503).length;
- await assert.rejects(relay.send({protocol,type:'cacheSnapshot',document:{padding:'.'.repeat(10000)}}),error=>error.code==='REQUEST_CAPACITY'&&error.notSent===true);
+ await assert.rejects(relay.send({protocol,type:'cacheSnapshot',expiresAt:Date.now()+900,document:{padding:'.'.repeat(10000)}}),error=>error.code==='REQUEST_CAPACITY'&&error.notSent===true);
  assert.equal(statuses.filter(status=>status===503).length,rejected+1);
  const receiptAt=Date.now();await relay.send({protocol,type:'ack',requestId:'while-bulk-busy',ok:true});assert(Date.now()-receiptAt<1000,'A failed view must not globally pause the reserved small receipt lane');
  const large={protocol,type:'ack',requestId:'large-receipt',ok:true,result:{padding:'.'.repeat(12000)}};
