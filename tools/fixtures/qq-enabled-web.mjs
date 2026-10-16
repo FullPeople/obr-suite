@@ -13,7 +13,7 @@ export async function prepareQQWebFixture(web,out){
  for(const [configFile,mode,name]of [['vite.config.ts','production','viewer'],['vite.config.ts','standalone','cloud/card'],['vite.library.config.ts','cloud-library','cloud/library']]){
   let toggles=0;const profile={name:'test-only-qq-enabled',enforce:'pre',transform(code,id){const path=id.replaceAll('\\','/').split('?')[0];if(path===flag.replaceAll('\\','/')){assert.equal(code.split(needle).length,2);toggles++;return code.replace(needle,'export const cloudFeaturesEnabled:boolean=true;');}if(path===css.replaceAll('\\','/')){assert.equal(code.split(hidden).length,2);return code.replace(hidden,'');}}};
   const {config}=await vite.loadConfigFromFile({command:'build',mode},join(web,configFile));
-  await vite.build({...config,root:web,configFile:false,mode,plugins:[...(config.plugins||[]),profile],build:{...config.build,outDir:join(root,name),emptyOutDir:true}});assert(toggles>0);builds.push({name,toggles});
+  await vite.build({...config,root:config.root?resolve(web,config.root):web,configFile:false,mode,plugins:[...(config.plugins||[]),profile],build:{...config.build,outDir:join(root,name),emptyOutDir:true}});assert(toggles>0);builds.push({name,toggles});
  }
  }finally{process.chdir(previous);assert.equal(readFileSync(flag,'utf8'),original);assert.equal(readFileSync(css,'utf8'),cssOriginal);}
  writeFileSync(join(root,'fixture-profile.json'),JSON.stringify({testOnly:true,productionCloudEnabled:false,sourceSha256:createHash('sha256').update(original).digest('hex'),builds},null,2));

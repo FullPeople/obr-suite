@@ -24,13 +24,13 @@ const {newCharacter}=await import(pathToFileURL(join(out,'model.mjs'))),source=n
 const card=store.create(owner,{...source,id:crypto.randomUUID(),name:'QQ 插件房间验收'});store.create(other,{...source,id:crypto.randomUUID(),name:'他人私有卡应不可见'});
 const server=createCloudServer(store,'https://dnd.center');await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const api='http://127.0.0.1:'+server.address().port;
-const browser=await chromium.launch({channel:process.env.CI?undefined:'msedge'}),contexts=[],pages=[],errors=[];let metadata={};
+const browser=await chromium.launch(process.env.PLAYWRIGHT_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH}:{channel:process.env.CI?undefined:'msedge'}),contexts=[],pages=[],errors=[];let metadata={};
 const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.webp':'image/webp'};
 async function context(authenticated=false){
  const context=await browser.newContext({viewport:{width:1440,height:960}});contexts.push(context);context.on('response',response=>{const url=new URL(response.url());if(url.pathname.startsWith('/api/room-cards'))console.log(JSON.stringify({method:response.request().method(),path:url.pathname,status:response.status()}));});
  await context.exposeBinding('qqFixture',async(_source,operation,update)=>{if(operation==='write'){metadata={...metadata,...update};return;}return structuredClone(metadata);});
  if(authenticated)await context.addCookies([{name:'dnd_cloud',value:issued.token,url:'https://dnd.center/api/',secure:true,httpOnly:true,sameSite:'Strict'}]);
- await context.route('https://dnd.center/api/**',async route=>{const request=route.request(),url=new URL(request.url()),response=await context.request.fetch(api+url.pathname+url.search,{method:request.method(),headers:await request.allHeaders(),data:request.postData()||undefined});await route.fulfill({response});});
+ await context.route('https://dnd.center/api/**',async route=>{const request=route.request(),url=new URL(request.url());const response=await context.request.fetch(api+url.pathname+url.search,{method:request.method(),headers:await request.allHeaders(),data:request.postData()||undefined});await route.fulfill({response});});
  await context.route(/https:\/\/(?:obr\.)?dnd\.center\/(?!api\/).*/,async route=>{
   const pathname=new URL(route.request().url()).pathname;
   if(pathname==='/qq-fixture/'){await route.fulfill({contentType:'text/html',body:readFileSync(join(root,'cc-qq.html'),'utf8').replace('/src/modules/characterCards/qq-page.ts','/qq-fixture/page.js')});return;}
@@ -49,7 +49,7 @@ async function context(authenticated=false){
 const {expect}=createRequire(join(web,'package.json'))('@playwright/test');
 try{
  const host=await context(true);await expect(host.locator('#cards')).toContainText('登录后读取自己的卡库');
- const popupEvent=host.context().waitForEvent('page');await host.locator('#login').click();const popup=await popupEvent;
+ const popupEvent=host.context().waitForEvent('page');await host.locator('#login').click();const popup=await popupEvent;pages.push(popup);
  await popup.getByRole('button',{name:'连接当前账号'}).click();await expect(host.locator('#cards')).toContainText(card.character.name);await expect(host.locator('#cards')).not.toContainText('他人私有卡');
  host.once('dialog',dialog=>dialog.accept());await host.locator('#cards button').click();await expect(host.locator('#roomCards')).toContainText('解锁给房间成员');
  assert.equal(Object.keys(metadata).length,1);assert(!JSON.stringify(metadata).includes(issued.token),'Website session must never enter room metadata');
