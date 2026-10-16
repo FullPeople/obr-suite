@@ -5,6 +5,7 @@ on:
     paths:
       - src/workbench/**
       - src/modules/bubbles/**
+      - src/modules/dice/**
       - src/modules/initiative/index.ts
       - src/modules/cross-scene-cards.ts
       - src/modules/timeStop.ts
@@ -16,6 +17,7 @@ on:
       - tools/relay-capacity-selftest.mjs
       - tools/appearance-preferences-selftest.mjs
       - tools/workbench-selftest.mjs
+      - tools/dice-history-storage-browser.mjs
       - .github/workflows/runtime-sync.yml
   workflow_dispatch:
 permissions:
@@ -74,6 +76,8 @@ jobs:
         run: |
           npm run build:workbench-dev
           node tools/dice-light292-browser.mjs
+      - name: Actual dice history deletion, storage synchronization and panel remount
+        run: node tools/dice-history-storage-browser.mjs
       - name: Actual document editing, native bindings and cloud suspension browser flow
         run: xvfb-run -a npm run test:workbench
       - uses: actions/upload-artifact@v4
@@ -89,3 +93,4 @@ jobs:
             .local-evidence/verification/results.json
             .local-evidence/verification/*.log
             .local-evidence/light292/result.json
+            .local-evidence/dice-history-storage/result.json
