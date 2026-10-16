@@ -15,6 +15,7 @@ on:
       - tools/scene-rpc-dedup-selftest.mjs
       - tools/relay-capacity-selftest.mjs
       - tools/appearance-preferences-selftest.mjs
+      - tools/workbench-selftest.mjs
       - .github/workflows/runtime-sync.yml
   workflow_dispatch:
 permissions:
@@ -73,6 +74,8 @@ jobs:
         run: |
           npm run build:workbench-dev
           node tools/dice-light292-browser.mjs
+      - name: Actual document editing, native bindings and cloud suspension browser flow
+        run: xvfb-run -a npm run test:workbench
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -81,6 +84,8 @@ jobs:
           if-no-files-found: warn
           path: |
             workbench-test-output/runtime-browser/results.json
+            workbench-test-output/cloud-suspension-ui.json
+            workbench-test-output/cloud-authorization-ui.json
             .local-evidence/verification/results.json
             .local-evidence/verification/*.log
             .local-evidence/light292/result.json
