@@ -17,6 +17,7 @@ export async function diceRpc(method:string,args:any[],target:any){
  };
  if(method==='dice2d.submit')return submit(args[0]);
  if(method==='dice2d.history')return getRollHistory();
+ if(method==='dice2d.historyDelete')return lightDiceRpc('historyDelete',args);
  if(method.startsWith('dice3d.'))return lightDiceRpc(method.slice(7),args);
  if(method==='init')return {roomId:OBR.room.id,mode:'2d',reads:{'player.getId':p.id,'player.getConnectionId':p.connectionId,'player.getName':p.name,'player.getColor':p.color,'player.getRole':p.role,'player.getMetadata':p.metadata,'player.getSelection':itemId&&!itemId.startsWith('card:')?[itemId]:[],'scene.items.getItems':[],'party.getPlayers':[],'scene.grid.getDpi':100}};
  if(method==='player.getSelection')return itemId&&!itemId.startsWith('card:')?[itemId]:[];
