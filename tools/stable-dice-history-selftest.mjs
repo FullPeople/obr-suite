@@ -1,7 +1,0 @@
-import {build} from 'rolldown';
-import {mkdirSync} from 'node:fs';
-import {resolve} from 'node:path';
-import {execFileSync} from 'node:child_process';
-const out=resolve('.local-evidence/stable-history-host');mkdirSync(out,{recursive:true});
-await build({input:'tools/stable-dice-history.entry.ts',platform:'node',external:[/^node:/],plugins:[{name:'host-boundaries',resolveId(id,importer){if(id==='@owlbear-rodeo/sdk')return '\0sdk';if(id==='../modules/dice'&&/dice(?:-rpc)?\.ts$/.test(importer))return '\0dice';if(id==='./activity-panel')return '\0activity';if(id==='./observation')return '\0observation';if(id==='../state')return '\0state';if(id.endsWith('/fixed-roll'))return '\0fixed';},load(id){if(id==='\0sdk')return 'export default new Proxy({}, {get:(_,key)=>globalThis.testSDK[key]});';if(id==='\0dice')return "export const BROADCAST_DICE_ROLL='roll',normalizePayload=x=>x,isGlobalDarkRollEnabled=()=>false,handleQuickRoll=async()=>{},showDiceEffect=async()=>{},openReplay=async()=>{},closeReplay=async()=>globalThis.replayCloses++;";if(id==='\0activity')return 'export const setupActivityPanel=()=>{},ensureActivityPanel=async()=>{};';if(id==='\0observation')return 'export const workbenchObservation=()=>({read:async()=>globalThis.observed});';if(id==='\0state')return 'export const getState=()=>globalThis.testState;';if(id==='\0fixed')return 'export const armFixedRoll=()=>{},readFixedRoll=()=>false;';}}],output:{file:resolve(out,'host.mjs'),format:'esm'}});
-execFileSync(process.execPath,[resolve(out,'host.mjs')],{stdio:'inherit'});

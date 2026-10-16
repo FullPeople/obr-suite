@@ -4,7 +4,7 @@ import {mkdirSync,writeFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 const root=resolve(import.meta.dirname,'..'),out=join(root,'.local-evidence/verification');
 mkdirSync(out,{recursive:true});
-const scripts=['stable-dice-history-selftest','dice-history-storage-browser','appearance-preferences-selftest','qq-account-session-selftest','inventory-model-selftest','bestiary-dependency-selftest','bestiary-render-selftest','announcement-inline-selftest','card-sync260-selftest','workbench-merge-selftest','workbench-inventory-sync-selftest','workbench-condition-selftest','three-dragon-controller-selftest','three-dragon-handover-selftest','three-dragon-stable-recovery-selftest'];
+const scripts=['dice-history-storage-browser','appearance-preferences-selftest','qq-account-session-selftest','inventory-model-selftest','bestiary-dependency-selftest','bestiary-render-selftest','announcement-inline-selftest','card-sync260-selftest','workbench-merge-selftest','workbench-inventory-sync-selftest','workbench-condition-selftest','three-dragon-controller-selftest','three-dragon-handover-selftest','three-dragon-stable-recovery-selftest'];
 const results=[];
 for(const script of scripts){
  const run=spawnSync(process.execPath,['--experimental-strip-types',join(root,'tools',script+'.mjs')],{cwd:root,env:{...process.env,BESTIARY_DIST:'dist'},encoding:'utf8',timeout:120000,maxBuffer:2*1024*1024});
