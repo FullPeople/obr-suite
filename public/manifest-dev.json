@@ -1,11 +1,11 @@
 {
   "name": "Full Suite (Dev)",
-  "version": "1.0.298-dev",
+  "version": "1.0.299-dev",
   "manifest_version": 1,
   "author": "FullPeople",
   "description": "Full Suite 测试版 / dev build.",
   "icon": "/suite-dev/exe_icon.png",
-  "background_url": "/suite-dev/background.html?release=298-feedback",
+  "background_url": "/suite-dev/background.html?release=299-feedback",
   "permissions": [
     {
       "name": "autoplay",
