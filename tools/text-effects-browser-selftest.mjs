@@ -41,6 +41,7 @@ try{
   await tab('文字');await field('标题').fill('连接恢复保留配置');
   await frame().locator('body').evaluate(()=>window.dispatchEvent(new CustomEvent('workbench-connection',{detail:{online:false}})));
   await wait(async()=>await button('播放到房间').isDisabled());assert.equal(await button('在枭熊中预览').isDisabled(),true);assert.equal(await button('播放预览').isEnabled(),true);
+  await page.evaluate(()=>{window.scene(false);window.scene(true);});await page.waitForTimeout(100);assert.doesNotMatch(await frame().locator('#status').textContent(),/已连接枭熊/,'late scene-ready must not fabricate connection status');
   await frame().locator('body').evaluate(()=>window.dispatchEvent(new CustomEvent('workbench-connection',{detail:{online:true}})));
   await wait(async()=>await button('播放到房间').isEnabled());assert.equal(await field('标题').inputValue(),'连接恢复保留配置');
  });
