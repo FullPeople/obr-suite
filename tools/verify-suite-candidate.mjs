@@ -7,7 +7,7 @@ mkdirSync(out,{recursive:true});
 const scripts=['dice-history-storage-browser','appearance-preferences-selftest','qq-account-session-selftest','inventory-model-selftest','bestiary-dependency-selftest','bestiary-render-selftest','announcement-inline-selftest','card-sync260-selftest','workbench-merge-selftest','workbench-inventory-sync-selftest','workbench-condition-selftest','three-dragon-controller-selftest','three-dragon-handover-selftest','three-dragon-stable-recovery-selftest'];
 const results=[];
 for(const script of scripts){
- const run=spawnSync(process.execPath,['--experimental-strip-types',join(root,'tools',script+'.mjs')],{cwd:root,env:{...process.env,BESTIARY_DIST:'dist'},encoding:'utf8',timeout:120000,maxBuffer:2*1024*1024});
+ const run=spawnSync(process.execPath,[...(script==='qq-account-session-selftest'?['--import',join(root,'tools/fixtures/qq-enabled-loader.mjs')]:[]),'--experimental-strip-types',join(root,'tools',script+'.mjs')],{cwd:root,env:{...process.env,BESTIARY_DIST:'dist'},encoding:'utf8',timeout:120000,maxBuffer:2*1024*1024});
  const log=(run.stdout||'')+(run.stderr||'')+(run.error?'\n'+run.error:'');
  writeFileSync(join(out,script+'.log'),log);
  results.push({script,exitCode:run.status,passed:run.status===0});

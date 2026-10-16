@@ -53,6 +53,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Verify transparent Boss and initiative canvases in actual built iframes
         run: node tools/transparent-canvas-browser.mjs --built dist --channel suite --legacy
+      - name: Actual production cloud suspension and retained sessions
+        run: node tools/cloud-suspended-selftest.mjs
       - name: Stable regressions including QQ ordering and personal preferences
         run: node tools/verify-suite-candidate.mjs
       - name: Actual legacy picker binding and permission revocation

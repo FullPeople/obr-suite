@@ -1,6 +1,7 @@
 // Actual QQ UI, HTTP permissions and built five-page editor; synthetic SDK/accounts.
 import assert from 'node:assert/strict';
 import {build} from 'rolldown';
+import {prepareQQWebFixture} from './fixtures/qq-enabled-web.mjs';
 import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {resolve,join,extname} from 'node:path';
 import {createRequire} from 'node:module';
@@ -11,10 +12,12 @@ const {CloudStore,createCloudServer}=await import(pathToFileURL(join(web,'dist-c
 const {chromium}=createRequire(join(web,'package.json'))('@playwright/test');
 const {ANNOUNCEMENT_KEY,APP_VERSION,announcementVersionFor}=await import(pathToFileURL(join(web,'src/platform/announcement.ts')));
 const out=join(root,'.local-evidence/qq-room');mkdirSync(out,{recursive:true});
+const suiteFlag=join(root,'src/cloud-availability.ts'),productionFlag=readFileSync(suiteFlag,'utf8'),enabledNeedle='export const cloudFeaturesEnabled:boolean=false;';assert.equal(productionFlag.split(enabledNeedle).length,2);
+const {viewerRoot,cloudRoot}=await prepareQQWebFixture(web,out);
 const sdk=join(out,'sdk.ts');
 writeFileSync(sdk,`const handlers=new Set<()=>void>();(window as any).qqMetadataChanged=()=>handlers.forEach(fn=>fn());
 export default {onReady:(fn:()=>void)=>queueMicrotask(fn),room:{id:'synthetic-qq-room',getMetadata:()=>((window as any).qqFixture('read')),setMetadata:(update:unknown)=>(window as any).qqFixture('write',update),onMetadataChange:(fn:()=>void)=>{handlers.add(fn);return()=>handlers.delete(fn);}},player:{getId:async()=>'synthetic-player'},modal:{close:async()=>{}}};`);
-await build({input:join(root,'src/modules/characterCards/qq-page.ts'),plugins:[{name:'synthetic-sdk',resolveId:id=>id==='@owlbear-rodeo/sdk'?sdk:undefined,transform:code=>code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/suite-dev/'))}],output:{file:join(out,'page.js'),format:'esm',codeSplitting:false}});
+await build({input:join(root,'src/modules/characterCards/qq-page.ts'),plugins:[{name:'synthetic-sdk',resolveId:id=>id==='@owlbear-rodeo/sdk'?sdk:undefined,transform(code,id){if(id.replaceAll('\\','/').endsWith('/src/cloud-availability.ts')){assert.equal(code.split(enabledNeedle).length,2);code=code.replace(enabledNeedle,'export const cloudFeaturesEnabled:boolean=true;');}return code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/suite-dev/'));}}],output:{file:join(out,'page.js'),format:'esm',codeSplitting:false}});
 const store=new CloudStore(':memory:'),owner=store.provisionVerifiedAccount('fixture:qq-owner'),other=store.provisionVerifiedAccount('fixture:qq-other'),issued=store.issueVerifiedSession(owner.id);
 await build({input:join(web,'src/core/model.ts'),output:{file:join(out,'model.mjs'),format:'esm',codeSplitting:false}});
 const {newCharacter}=await import(pathToFileURL(join(out,'model.mjs'))),source=newCharacter();
@@ -32,9 +35,10 @@ async function context(authenticated=false){
   const pathname=new URL(route.request().url()).pathname;
   if(pathname==='/qq-fixture/'){await route.fulfill({contentType:'text/html',body:readFileSync(join(root,'cc-qq.html'),'utf8').replace('/src/modules/characterCards/qq-page.ts','/qq-fixture/page.js')});return;}
   if(pathname==='/qq-fixture/page.js'){await route.fulfill({contentType:'text/javascript',body:readFileSync(join(out,'page.js'),'utf8')});return;}
-  const relative=pathname.startsWith('/suite-dev/card-viewer/')?'dist/'+pathname.slice('/suite-dev/card-viewer/'.length):'dist-cloud/'+pathname.slice(1);
-  const file=resolve(web,relative+(pathname.endsWith('/')?'index.html':''));
-  if(!file.startsWith(web+String.fromCharCode(92))&&!file.startsWith(web+'/'))throw Error('Fixture path escaped');
+  const base=pathname.startsWith('/suite-dev/card-viewer/')?viewerRoot:cloudRoot;
+  const relative=pathname.startsWith('/suite-dev/card-viewer/')?pathname.slice('/suite-dev/card-viewer/'.length):pathname.slice(1);
+  const file=resolve(base,relative+(pathname.endsWith('/')?'index.html':''));
+  if(!file.startsWith(base+String.fromCharCode(92))&&!file.startsWith(base+'/'))throw Error('Fixture path escaped');
   await route.fulfill(existsSync(file)?{contentType:mime[extname(file)]||'application/octet-stream',body:readFileSync(file)}:{status:404,body:'Fixture asset missing'});
  });
  await context.route(/https:\/\/(?:5e|homebrew)\.kiwee\.top\//,route=>route.fulfill({json:{},headers:{'access-control-allow-origin':'*'}}));
@@ -61,6 +65,6 @@ try{
  host.once('dialog',dialog=>dialog.accept());await host.locator('#cards button').click();await expect(host.getByRole('button',{name:'移出房间'})).toBeVisible();store.delete(card.id,owner,store.read(card.id,owner).revision);
  await host.getByRole('button',{name:'移出房间'}).click();await expect(host.locator('#roomCards button')).toHaveCount(0);assert.equal(store.slots(owner).used,0);
  assert.deepEqual(errors,[]);await host.screenshot({path:join(out,'qq-owner.png')});
- const result={synthetic:true,realQQ:false,realRoom:false,checks:['popup-pkce-connection','own-library-only','personal-session-not-in-metadata','loaded-card-default-locked','unlocked-member-five-page-editor','automatic-original-writeback','owner-relock-removes-member-editor','room-remove-retains-original','locked-owner-five-page-edit','expired-room-entry-can-be-removed','deleted-original-room-entry-can-be-removed']};
+ const result={testOnly:true,productionCloudEnabled:false,synthetic:true,realQQ:false,realRoom:false,checks:['popup-pkce-connection','own-library-only','personal-session-not-in-metadata','loaded-card-default-locked','unlocked-member-five-page-editor','automatic-original-writeback','owner-relock-removes-member-editor','room-remove-retains-original','locked-owner-five-page-edit','expired-room-entry-can-be-removed','deleted-original-room-entry-can-be-removed']};
  writeFileSync(join(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
-}catch(error){console.error(JSON.stringify({errors}));for(const [i,page] of pages.entries()){await page.screenshot({path:join(out,'failure-'+i+'.png')});for(const frame of page.frames())console.error(JSON.stringify({frame:new URL(frame.url()).pathname,visible:await frame.evaluate(()=>document.visibilityState),text:(await frame.locator('body').innerText()).slice(0,1800)}));}throw error;}finally{for(const context of contexts)await context.unrouteAll({behavior:'ignoreErrors'});await browser.close();await new Promise(resolve=>server.close(resolve));store.close();}
+}catch(error){console.error(JSON.stringify({errors}));for(const [i,page] of pages.entries()){await page.screenshot({path:join(out,'failure-'+i+'.png')});for(const frame of page.frames())console.error(JSON.stringify({frame:new URL(frame.url()).pathname,visible:await frame.evaluate(()=>document.visibilityState),text:(await frame.locator('body').innerText()).slice(0,1800)}));}throw error;}finally{assert.equal(readFileSync(suiteFlag,'utf8'),productionFlag);for(const context of contexts)await context.unrouteAll({behavior:'ignoreErrors'});await browser.close();await new Promise(resolve=>server.close(resolve));store.close();}

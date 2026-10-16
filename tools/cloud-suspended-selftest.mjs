@@ -7,7 +7,7 @@ import ts from 'typescript';
 const root=resolve(import.meta.dirname,'..'),read=file=>readFileSync(resolve(root,file),'utf8');
 const saved=JSON.stringify({token:'authored-saved-token',expiresAt:Date.now()+86400000,accountId:'fixture'}),storage=new Map([['dnd-qq-plugin',saved]]),calls=[];
 const nodes=new Map(['message','close','login','logout','refresh'].map(id=>[id,{hidden:false,disabled:false,textContent:''}]));
-const context=vm.createContext({console,Map,Set,Promise,Date,JSON,Error,
+const context=vm.createContext({console,Map,Set,Promise,Date,JSON,Error,exports:{},
  localStorage:{getItem:key=>storage.get(key),setItem:()=>calls.push('storage-write'),removeItem:()=>calls.push('storage-delete')},
  fetch:async()=>calls.push('fetch'),window:{open:()=>calls.push('popup'),addEventListener:()=>calls.push('subscription')},
  OBR:{onReady:callback=>callback(),modal:{close:()=>{}}},document:{getElementById:id=>nodes.get(id),querySelectorAll:()=>[...nodes].filter(([id])=>id!=='close').map(([,node])=>node)}
