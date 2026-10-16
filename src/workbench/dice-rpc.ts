@@ -1,5 +1,5 @@
 import {armFixedRoll,readFixedRoll} from '../modules/dice/fixed-roll';
-import {executeRoll} from './dice';
+import {executeRoll,deleteDiceHistory} from './dice';
 import OBR from '@owlbear-rodeo/sdk';
 import {getState} from '../state';
 import {normalizePayload,BROADCAST_DICE_ROLL} from '../modules/dice';
@@ -13,6 +13,7 @@ export async function diceRpc(method:string,args:any[],target:any,access:(id:str
  if(method==='init'){
   return {roomId:OBR.room.id,reads:{'player.getId':player.id,'player.getConnectionId':player.connectionId,'player.getName':player.name,'player.getColor':player.color,'player.getMetadata':player.metadata,'party.getPlayers':observed.party,'scene.grid.getDpi':await OBR.scene.grid.getDpi(),'player.getRole':playerRole,'player.getSelection':target?.item?[target.item.id]:[],'scene.items.getItems':target?.item?[target.item]:[]}};
  }
+ if(method==='dice2d.historyDelete'){if(args.length>1||args[0]!==undefined&&(typeof args[0]!=='string'||!args[0]||args[0].length>200))throw Error('无效的骰子历史编号');return deleteDiceHistory(args[0]);}
  if(method==='player.getSelection')return target?.item?[target.item.id]:[];
  if(method==='scene.items.getItems'){
   if(target?.cardId&&!target.item)return [];

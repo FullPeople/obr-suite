@@ -105,7 +105,7 @@ function commitPending(rollId: string): void {
   pendingEntries.delete(rollId);
   clearTimeout(p.timer);
   if(!canSeeDiceHistory(p.entry,historyViewer()))return;
-  history=storedDiceHistory([p.entry,...loadHistory(),...history]);
+  history=storedDiceHistory([p.entry,...loadHistory(history)]);
   saveHistory();
   render();
   if (detailRollerKey) {
@@ -137,13 +137,13 @@ const detailBack = document.getElementById("detailBack") as HTMLButtonElement;
 // the active view.
 let detailRollerKey: string | null = null;
 
-function loadHistory(): HistoryEntry[] {
+function loadHistory(fallback: HistoryEntry[] = []): HistoryEntry[] {
   try {
     const v = localStorage.getItem(LS_HISTORY);
     if (!v) return [];
     const p = JSON.parse(v);
     if (Array.isArray(p)) {const rows=storedDiceHistory(p) as HistoryEntry[];if(p.length>HISTORY_CAP)localStorage.setItem(LS_HISTORY,JSON.stringify(rows));return rows;}
-  } catch {}
+  } catch { return fallback; }
   return [];
 }
 

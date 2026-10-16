@@ -235,16 +235,20 @@ function saveCombos() {
     localStorage.setItem(LS_COMBOS, JSON.stringify(file));
   } catch {}
 }
-function loadHistory(): DiceRollPayload[] {
+function loadHistory(fallback: DiceRollPayload[] = []): DiceRollPayload[] {
   try {
     const v = localStorage.getItem(LS_HISTORY);
     if (!v) return [];
     const p = JSON.parse(v);
     if (Array.isArray(p)) {const rows=storedDiceHistory(p) as DiceRollPayload[];if(p.length>HISTORY_CAP)localStorage.setItem(LS_HISTORY,JSON.stringify(rows));return rows;}
-  } catch {}
+  } catch { return fallback; }
   return [];
 }
 function saveHistory() { try { localStorage.setItem(LS_HISTORY, JSON.stringify(storedDiceHistory(history))); } catch {} }
+async function deleteWorkbenchHistory(cid?:string){
+ const remove=(OBR as any).dice2d?.historyDelete;
+ if(typeof remove==='function')await remove(cid);
+}
 function loadLastExpr(): string {
   try { return localStorage.getItem(LS_LAST_EXPR) ?? ""; } catch { return ""; }
 }
@@ -3211,6 +3215,11 @@ btnFixedRoll?.addEventListener("click", () => {
 });
 window.addEventListener("storage", (e) => {
   if (e.key === FIXED_ROLL_LS_KEY) refreshFixedRollUi();
+  if (e.key === LS_HISTORY) {
+    history = loadHistory();
+    renderHistorySeg();
+    renderHistoryList();
+  }
 });
 
 // 上一次: refill expression with the last successfully-rolled expr.
@@ -3237,7 +3246,7 @@ document.querySelectorAll<HTMLButtonElement>("#examplesRow .example-btn").forEac
   });
 });
 
-btnClearHist.addEventListener("click", () => {
+btnClearHist.addEventListener("click", async () => {
   if (!confirm(tt("diceConfirmClearHistory"))) return;
   // Close any active replay overlay before wiping history — otherwise
   // the on-canvas bubbles would keep referencing a roll whose entry
@@ -3250,10 +3259,13 @@ btnClearHist.addEventListener("click", () => {
       OBR.broadcast.sendMessage(BC_DICE_REPLAY, { cid, action: "close" }, { destination: "REMOTE" });
     } catch {}
   }
-  history = [];
-  saveHistory();
-  renderHistorySeg();
-  renderHistoryList();
+  try{
+    await deleteWorkbenchHistory();
+    history = [];
+    saveHistory();
+    renderHistorySeg();
+    renderHistoryList();
+  }catch(error){void OBR.notification.show(String(error),"ERROR");}
 });
 
 tabBtns.forEach((b) => {
@@ -3368,7 +3380,7 @@ OBR.onReady(async () => {
     if (!canSeeDiceHistory(data,historyViewer())) {
       return;
     }
-    history=storedDiceHistory([data,...loadHistory(),...history]);
+    history=storedDiceHistory([data,...loadHistory(history)]);
     saveHistory();
     if (activeTab === "history") {
       renderHistorySeg();
@@ -3485,7 +3497,7 @@ OBR.onReady(async () => {
 // Clicks on the × intercept the row's replay-click via .entry-del
 // detection and remove every history entry sharing that cid (a
 // collective roll = one logical entry).
-historyList.addEventListener("click", (e) => {
+historyList.addEventListener("click", async (e) => {
   const target = e.target as HTMLElement | null;
   // Delete-button path runs FIRST so its presence inside .entry doesn't
   // double-fire as a row click + replay open.
@@ -3506,10 +3518,13 @@ historyList.addEventListener("click", (e) => {
     }
     // A collective roll has multiple entries with the same cid; remove
     // them all so the visual row disappears in one click.
-    history = history.filter((h) => (h.collectiveId ?? h.rollId) !== cid);
-    saveHistory();
-    renderHistorySeg();
-    renderHistoryList();
+    try{
+      await deleteWorkbenchHistory(cid);
+      history = history.filter((h) => (h.collectiveId ?? h.rollId) !== cid);
+      saveHistory();
+      renderHistorySeg();
+      renderHistoryList();
+    }catch(error){void OBR.notification.show(String(error),"ERROR");}
     return;
   }
 

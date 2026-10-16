@@ -20,6 +20,7 @@ const api:any={isAvailable:true,isReady:true,onReady:(fn:()=>void)=>{void ready.
  scene:{grid:{getDpi:()=>read('scene.grid.getDpi')},items:{getItems:async(filter:any)=>{const rows=await rpc('scene.items.getItems',Array.isArray(filter)?filter:undefined);return typeof filter==='function'?rows.filter(filter):Array.isArray(filter)?rows.filter((r:any)=>filter.includes(r.id)):rows;}}},
  viewport:Object.fromEntries(['getWidth','getHeight','getPosition','getScale','transformPoint','animateTo','animateToBounds'].map(key=>[key,(...args:any[])=>rpc('viewport.'+key,...args)])),
  broadcast:{onMessage:(name:string,fn:any)=>on(name,fn),sendMessage:async(...args:any[])=>{if(args[0]==='com.obr-suite/dice-quick-roll')args[1]={...args[1],fixedArm:readFixedRoll(),globalDark:localStorage.getItem('obr-suite/dice/global-dark-roll')==='1'};const expression=args[1]?.expression||(document.getElementById('exprInput') as HTMLInputElement)?.value;const result=await rpc('broadcast.sendMessage',...args);if(['com.obr-suite/dice-quick-roll','com.obr-suite/dice-roll'].includes(args[0]))rememberExpression(expression);if(result?.fixedConsumed)disarmFixedRoll();return result;}},
+ dice2d:{historyDelete:(cid?:string)=>rpc('dice2d.historyDelete',cid)},
  notification:{show:(...args:any[])=>rpc('notification.show',...args)},
  modal:{close:async()=>{parent.postMessage({channel,close:true},location.origin);}}
 };
