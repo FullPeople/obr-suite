@@ -1,7 +1,7 @@
 import OBR from '@owlbear-rodeo/sdk';
 import {isGlobalDarkRollEnabled,type DiceRollPayload} from '../modules/dice';
 import {executeRoll} from './dice';
-import {setTokenResults,toggleTokenResults,clearTokenResults} from './token-results';
+import {toggleTokenResults,clearTokenResults} from './token-results';
 import {workbenchObservation} from './observation';
 export const GROUP_RESULT_CONTROL='com.obr-suite/workbench/group-result-control';
 const abilities=['str','dex','con','int','wis','cha'] as const,labels=['力量','敏捷','体质','智力','感知','魅力'];
@@ -70,7 +70,9 @@ export function createGroupRolls(deps:{observation:ReturnType<typeof workbenchOb
     const requests=current.targets.map(t=>{const bonus=message.kind==='initiative'?t.initiative:message.kind==='save'?t.saves[message.ability]:t.ability[message.ability];return {itemId:t.itemId,expression:`1d20${bonus>=0?'+':''}${bonus}`,label:title,advMode:message.variant==='normal'?undefined:message.variant,hidden:t.hidden||!!message.hidden||isGlobalDarkRollEnabled(),collectiveId:id};});
     const results=await Promise.all(requests.map(request=>executeRoll(request)));if(group!==current)return;
     current.targets=current.targets.map((target,i)=>({...target,result:results[i].total,hidden:!!results[i].hidden}));current.phase='resolve';
-    setTokenResults(id,results,current.visible);
+    // The renderer publishes token labels when the real dice reveal occurs.
+    // Keep the visibility intent without showing results before the animation.
+    toggleTokenResults(id,current.visible);
     if(message.kind==='initiative'){
      await Promise.all(current.targets.map(async target=>{const latest=await deps.resolveTarget(target.itemId);if(latest.key!==target.key)throw Error('目标关联已改变，先攻未写入');}));
      if(group!==current||operationEpoch!==deps.observation.sceneEpoch())throw Error('场景已改变，先攻未写入');

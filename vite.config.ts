@@ -5,6 +5,7 @@ import { resolve } from "path";
 import {workbenchDice3dPlugin} from './tools/workbench-dice3d-vite';
 import {workbenchAnnouncementPlugin} from './tools/workbench-announcement.mjs';
 import {suiteUiPlugin} from './tools/suite-ui.mjs';
+import {nativeCanvasPlugin} from './tools/native-canvas-plugin.mjs';
 
 // Dual deploy targets:
 //   stable → /suite/      (default)
@@ -53,8 +54,8 @@ const SUITE_CHANNEL = (process.env.SUITE_CHANNEL || "stable").toLowerCase();
 export default defineConfig(({ command }) => ({
   plugins:
     command === "serve"
-      ? [preact(), basicSsl(),suiteUiPlugin(),workbenchAnnouncementPlugin(SUITE_BASE==='/suite-dev/')]
-      : [preact(),suiteUiPlugin(),workbenchDice3dPlugin(SUITE_BASE==='/suite-dev/'),workbenchAnnouncementPlugin(SUITE_BASE==='/suite-dev/')],
+      ? [preact(), basicSsl(),suiteUiPlugin(),nativeCanvasPlugin(),workbenchAnnouncementPlugin(SUITE_BASE==='/suite-dev/')]
+      : [preact(),suiteUiPlugin(),nativeCanvasPlugin(),workbenchDice3dPlugin(SUITE_BASE==='/suite-dev/'),workbenchAnnouncementPlugin(SUITE_BASE==='/suite-dev/')],
   worker:{format:'es'},
   base: SUITE_BASE,
   server: {

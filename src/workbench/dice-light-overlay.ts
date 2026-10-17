@@ -6,6 +6,8 @@ const active=new Map<string,HTMLIFrameElement>(),seen=new Set<string>();
 let anchors:Record<string,{x:number;y:number}>={},scale=1;
 const sendAnchor=(frame:HTMLIFrameElement,p:DiceRollPayload)=>frame.contentWindow?.postMessage({channel,type:'anchor',data:{...(anchors[p.itemId||'']||{x:innerWidth/2,y:innerHeight/2}),scale:anchors[p.itemId||'']?scale:1}},location.origin);
 const records=new Map<string,DiceRollPayload>();
+let labelsTimer:ReturnType<typeof setTimeout>|undefined;
+function pruneLabels(){clearTimeout(labelsTimer);let next=Infinity;for(const el of document.querySelectorAll<HTMLElement>('.dice-light-label')){const at=Number(el.dataset.expiresAt);if(!at)continue;if(at<=Date.now())el.remove();else next=Math.min(next,at);}if(Number.isFinite(next))labelsTimer=setTimeout(pruneLabels,Math.max(0,next-Date.now()));}
 bus.onmessage=event=>{
  const m=event.data;
  if(m.type==='roll'){
@@ -15,7 +17,8 @@ bus.onmessage=event=>{
   const frame=document.createElement('iframe');frame.title='2D 骰子动画';frame.style.cssText='position:fixed;inset:0;width:100%;height:100%;border:0;background:transparent;pointer-events:none';frame.src='./effect2d.html#'+q;active.set(p.rollId,frame);document.body.append(frame);
   bus.postMessage({type:'track-tokens',ids:[...active.keys()].map(id=>records.get(id)?.itemId).filter(Boolean)});
  }else if(m.type==='clear'){for(const frame of active.values())frame.contentWindow?.postMessage({channel,type:'clear'},location.origin);}
- else if(m.type==='token-results'){anchors=m.anchors||{};scale=m.scale||1;for(const [id,frame]of active)sendAnchor(frame,records.get(id)!);document.querySelectorAll('.dice-light-label').forEach(n=>n.remove());for(const group of m.groups||[])if(group.visible)for(const row of group.rows){const a=anchors[row.itemId];if(!a)continue;const el=document.createElement('div');el.className='dice-light-label';el.style.cssText=`position:fixed;left:${a.x}px;top:${a.y}px;color:${row.color};font:bold 18px sans-serif;text-shadow:0 1px 3px #000;transform:translate(-50%,-100%)`;el.textContent=row.total+' · '+row.text;document.body.append(el);}}
+ else if(m.type==='token-results-remove'){for(const el of document.querySelectorAll<HTMLElement>('.dice-light-label'))if(m.ids?.includes(el.dataset.resultGroup))el.remove();pruneLabels();}
+ else if(m.type==='token-results'){anchors=m.anchors||{};scale=m.scale||1;for(const [id,frame]of active)sendAnchor(frame,records.get(id)!);document.querySelectorAll('.dice-light-label').forEach(n=>n.remove());for(const group of m.groups||[])if(group.visible&&(!group.expiresAt||group.expiresAt>Date.now()))for(const row of group.rows){const a=anchors[row.itemId];if(!a)continue;const el=document.createElement('div');el.className='dice-light-label';el.dataset.resultGroup=group.id;el.dataset.expiresAt=String(group.expiresAt||'');el.style.cssText=`position:fixed;left:${a.x}px;top:${a.y}px;color:${row.color};font:bold 18px sans-serif;text-shadow:0 1px 3px #000;transform:translate(-50%,-100%)`;el.textContent=row.total+' · '+row.text;document.body.append(el);}pruneLabels();}
 };
 window.addEventListener('message',event=>{
  if(event.origin!==location.origin||event.data?.channel!==channel)return;
@@ -23,7 +26,8 @@ window.addEventListener('message',event=>{
  if(m.type==='ready')sendAnchor(frame,records.get(id)!);
  else if(m.type==='started')bus.postMessage({type:'started',rollId:id});
  else if(m.type==='result')bus.postMessage({type:'result',rollId:id});
- else if(m.type==='complete'){frame.remove();active.delete(id);bus.postMessage({type:'complete',rollId:id});}
+ else if(m.type==='complete'){frame.remove();active.delete(id);bus.postMessage({type:'complete',rollId:id});bus.postMessage({type:'track-tokens',ids:[...active.keys()].map(key=>records.get(key)?.itemId).filter(Boolean)});}
  else if(m.type==='sfx')bus.postMessage({type:'sfx',data:m.data});
 });
 bus.postMessage({type:'overlay-ready'});
+window.addEventListener('pagehide',()=>{clearTimeout(labelsTimer);bus.close();},{once:true});
