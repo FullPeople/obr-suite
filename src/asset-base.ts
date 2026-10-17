@@ -16,8 +16,9 @@
 // Use `assetUrl("foo.html")` instead of writing a literal
 // "https://obr.dnd.center/suite/foo.html". Pass the path RELATIVE to
 // the suite root, no leading slash.
+import {nativeCanvasPath} from './native-canvas';
 export const ASSET_BASE = `${location.origin}${import.meta.env.BASE_URL}`;
 
 export function assetUrl(path: string): string {
-  return `${ASSET_BASE}${path}`;
+  return `${ASSET_BASE}${nativeCanvasPath(path)}`;
 }

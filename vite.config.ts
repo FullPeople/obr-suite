@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import preact from "@preact/preset-vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import { resolve } from "path";
+import {nativeCanvasPlugin} from './tools/native-canvas-plugin.mjs';
 
 // Dual deploy targets:
 //   stable → /suite/      (default)
@@ -50,8 +51,8 @@ const SUITE_CHANNEL = (process.env.SUITE_CHANNEL || "stable").toLowerCase();
 export default defineConfig(({ command }) => ({
   plugins:
     command === "serve"
-      ? [preact(), basicSsl()]
-      : [preact()],
+      ? [preact(), basicSsl(),nativeCanvasPlugin()]
+      : [preact(),nativeCanvasPlugin()],
   base: SUITE_BASE,
   server: {
     cors: { origin: "*" },
