@@ -1,12 +1,12 @@
 {
   "name": "Full Suite",
-  "version": "1.3.33",
+  "version": "1.3.34",
   "manifest_version": 1,
   "author": "FullPeople",
   "homepage_url": "https://github.com/FullPeople/obr-suite",
   "description": "All-in-one TRPG suite / TRPG 全能套装：动态迷雾、骰子、先攻、怪物图鉴、角色卡、搜索、时停、视口、传送门、变身",
   "icon": "/suite/exe_icon.png",
-  "background_url": "/suite/background.html?release=133",
+  "background_url": "/suite/background.html?release=134",
   "permissions": [
     {
       "name": "autoplay",
