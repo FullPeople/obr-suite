@@ -30,7 +30,8 @@ if(!origin){
 }
 origin=origin.replace(/\/?$/,'/');
 const executablePath=process.env.PLAYWRIGHT_EXECUTABLE_PATH||process.env.TRANSPARENT_CHROME;
-const browser=await chromium.launch(executablePath?{executablePath}:process.platform==='win32'?{channel:'msedge'}:{});
+const launchOptions=executablePath?{executablePath}:process.platform==='win32'?{channel:'msedge'}:{};
+const browsers=[];
 let fixtureBody='';
 const fixtureServer=createServer((request,response)=>{response.writeHead(200,{'Content-Type':'text/html','Cache-Control':'no-store'});response.end(fixtureBody);});
 await new Promise(ready=>fixtureServer.listen(0,'127.0.0.1',ready));
@@ -42,25 +43,30 @@ try{
  // preference. Cover that missing dark-system/default-owner regression.
  // This fixture does not establish the actual room's embedding styles.
  for(const preferred of ['light','dark']){
-  const context=await browser.newContext({viewport:{width:900,height:700},colorScheme:preferred});
+  // Set the browser preference at launch. DevTools media emulation overrides
+  // iframe negotiation and cannot establish the actual embedding behavior.
+  const browser=await chromium.launch({...launchOptions,args:preferred==='dark'?['--force-dark-mode']:[]});browsers.push(browser);
+  const context=await browser.newContext({viewport:{width:900,height:700},colorScheme:null});
   await context.route('**/*',route=>route.request().resourceType()==='script'?route.abort():route.continue());
   const page=await context.newPage();
   const failed=[];page.on('requestfailed',request=>{if(request.resourceType()!=='script')failed.push({url:request.url(),error:request.failure()?.errorText});});
-  for(const host of ['normal','light'])for(const file of ['boss-bar.html','initiative-panel.html']){
-   fixtureBody=`<!doctype html><html style="color-scheme:${host}"><head><style>html,body{margin:0;width:100%;height:100%;background:rgb(31,172,145)}iframe{position:absolute;left:20px;top:20px;width:800px;height:600px;border:0;background:transparent}</style></head><body><iframe src="${origin+file}"></iframe></body></html>`;
+  for(const variant of baseline?['baseline']:['native','generic'])for(const host of variant==='generic'?['light','dark']:['normal','light'])for(const file of ['boss-bar.html','initiative-panel.html','timestop-overlay.html',...(!legacy?['boss-bar-v294.html','initiative-panel-v294.html','hp-bar.html','text-effect-display.html']:[])]){
+   const documentUrl=origin+(variant==='native'?file.replace(/\.html$/,'-native.html'):file);
+   fixtureBody=`<!doctype html><html style="color-scheme:${host}"><head><style>html,body{margin:0;width:100%;height:100%;background:rgb(31,172,145)}iframe{position:absolute;left:20px;top:20px;width:800px;height:600px;border:0;background:transparent}</style></head><body><iframe src="${documentUrl}"></iframe></body></html>`;
    await page.goto(fixtureUrl);
    const frame=page.frames().find(frame=>frame.url().startsWith(origin));assert(frame,'Production iframe did not load: '+JSON.stringify({frames:page.frames().map(frame=>frame.url()),failed}));
    await frame.waitForFunction(()=>document.styleSheets.length>0);
+   if(file==='hp-bar.html')await frame.evaluate(()=>{const card=document.querySelector('.card');if(!card)throw Error('Missing HP card');if(getComputedStyle(card).backgroundColor==='rgba(0, 0, 0, 0)')throw Error('The authored HP card lost its fill');card.style.visibility='hidden';});
    for(const theme of legacy?['legacy']:['night','graphite','parchment','celadon']){
     if(!legacy){await frame.evaluate(theme=>{localStorage.setItem('full-suite/ui-theme',theme);window.dispatchEvent(new StorageEvent('storage',{key:'full-suite/ui-theme'}));},theme);
     await frame.waitForFunction(theme=>document.documentElement.dataset.suiteTheme===theme,theme);}
     await frame.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))));
     const canvas=await frame.evaluate(()=>({scheme:getComputedStyle(document.documentElement).colorScheme,prefersDark:matchMedia('(prefers-color-scheme: dark)').matches,root:getComputedStyle(document.documentElement).backgroundColor,body:getComputedStyle(document.body).backgroundColor}));
-    if(!baseline)assert.equal(canvas.scheme,'normal','Transparent root must retain the legacy default');
+    if(!baseline)assert.equal(canvas.scheme,variant==='native'?'normal':'light dark','Embedding contract differs');
     const shot=await page.screenshot();
     const pixel=await page.evaluate(async data=>{const image=new Image();image.src='data:image/png;base64,'+data;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);return [...ctx.getImageData(22,22,1,1).data];},shot.toString('base64'));
     const transparent=pixel[0]===31&&pixel[1]===172&&pixel[2]===145&&pixel[3]===255;
-    checks.push({file,host,preferred,theme,...canvas,pixel,transparent});
+    checks.push({file,documentUrl,variant,host,preferred,theme,authorContentHidden:file==='hp-bar.html',...canvas,pixel,transparent});
     if(host==='light'&&(theme==='night'||legacy))writeFileSync(join(out,file.replace('.html','')+'.png'),shot);
    }
    if(file==='boss-bar.html'){
@@ -81,11 +87,11 @@ try{
   await context.close();
  }
  const mismatches=checks.filter(check=>!check.transparent);
- const proof={origin,baseline,passed:!mismatches.length&&controls.every(check=>check.unchanged)&&configuration.every(check=>check.retained),transparentCases:checks.length,opaqueControlCases:controls.length,configurationCases:configuration.length,mismatchCount:mismatches.length,checks,controls,configuration,embeddingSchemes:['normal','light'],explicitDarkEmbeddingVerified:false,realOwlbearRoomVerified:false,externalApplicationScriptsBlocked:true};
+ const proof={origin,baseline,passed:!mismatches.length&&controls.every(check=>check.unchanged)&&configuration.every(check=>check.retained),transparentCases:checks.length,opaqueControlCases:controls.length,configurationCases:configuration.length,mismatchCount:mismatches.length,checks,controls,configuration,nativeEmbeddingSchemes:['normal','light'],genericEmbeddingSchemes:['light','dark'],preferenceMode:'browser startup preference without media emulation',realOwlbearRoomVerified:false,externalApplicationScriptsBlocked:true};
  writeFileSync(join(out,'results.json'),JSON.stringify(proof,null,2)+'\n');
  assert(controls.every(check=>check.unchanged),'Ordinary settings theme was changed');
  assert(configuration.every(check=>check.retained),'Boss configuration background was removed');
  if(baseline)assert(mismatches.length>0,'The reported production canvas regression was not reproduced');
  else assert.equal(mismatches.length,0,JSON.stringify(mismatches.slice(0,3)));
  console.log(JSON.stringify({baseline,passed:proof.passed,transparentCases:checks.length,opaqueControlCases:controls.length,mismatchCount:mismatches.length}));
-}finally{await browser.close();await new Promise(done=>fixtureServer.close(done));if(server)await new Promise(done=>server.close(done));}
+}finally{await Promise.all(browsers.map(browser=>browser.close()));await new Promise(done=>fixtureServer.close(done));if(server)await new Promise(done=>server.close(done));}

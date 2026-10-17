@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: cf1add887bcbd41de97f70794c8f230843192369
+          ref: 82114d67b732f4ede0e804f1e6bd66717de3b2d5
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -80,6 +80,7 @@ jobs:
         env:
           PLAYWRIGHT_EXECUTABLE_PATH: ${{ env.CHROMIUM_PATH }}
         run: |
+          node tools/native-canvas-selftest.mjs
           node tools/transparent-canvas-browser.mjs --built dist-workbench-dev --channel suite-dev
           node tools/text-effects-canvas-browser.mjs
       - name: Verify native music panel ships without the retired website panel
@@ -152,7 +153,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for source in tools/three-dragon-website-entry.html tools/build-workbench-panels.mjs tools/build-three-dragon-overlay.mjs three-dragon-ante.html vite.config.ts; do
+          for source in tools/three-dragon-website-entry.html tools/build-workbench-panels.mjs tools/build-three-dragon-overlay.mjs three-dragon-ante.html vite.config.ts tools/native-canvas-plugin.mjs src/native-canvas.ts; do
             tar -xOf dist-workbench-dev/workbench/suite-source.zip "$source" | cmp - "$source"
           done
       - name: Verify final public website links and retired-game negative controls

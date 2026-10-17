@@ -6,7 +6,13 @@ import type {DiceRollPayload} from '../modules/dice';
 export type TokenResult={itemId:string;text:string;total:number;color:string;hidden:boolean};
 let bus:BroadcastChannel|undefined,timer:ReturnType<typeof setTimeout>|undefined,flight=-1,generation=0,starting:Promise<void>|undefined,serial=0,epoch=-1;
 const closed=new Set<string>(),visibility=new Map<string,boolean>();
-const groups=new Map<string,{rows:TokenResult[];visible:boolean}>(),tracked=new Set<string>();
+const groups=new Map<string,{rows:TokenResult[];visible:boolean;expiresAt?:number}>(),tracked=new Set<string>();
+const resultTimers=new Map<string,ReturnType<typeof setTimeout>>();
+export const TOKEN_RESULT_HOLD_MS=5000;
+function stopResultTimer(id:string){clearTimeout(resultTimers.get(id));resultTimers.delete(id);}
+function stopResultTimers(){resultTimers.forEach(clearTimeout);resultTimers.clear();}
+function expireResult(id:string){stopResultTimer(id);const group=groups.get(id);if(id.startsWith('group-')&&group){group.visible=false;serial++;bus?.postMessage({type:'token-results-remove',ids:[id]});void refresh();}else clearTokenResults(id);}
+function armResult(id:string,expiresAt:number){stopResultTimer(id);resultTimers.set(id,setTimeout(()=>expireResult(id),Math.max(0,expiresAt-Date.now())));}
 export async function setupTokenResults(){
  if(bus)return;if(starting)return starting;const own=generation;
  const task=(async()=>{const player=await diceIdentity();if(own!==generation)return;
@@ -18,7 +24,7 @@ export function setTokenResults(id:string,rows:DiceRollPayload[],visible?:boolea
  const currentEpoch=workbenchObservation().sceneEpoch();
  // Retire the previous scene before storing a result from the new one. With
  // an idle empty renderer, refresh may not have observed the ready transition.
- if(epoch!==-1&&epoch!==currentEpoch){epoch=currentEpoch;groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;}
+ if(epoch!==-1&&epoch!==currentEpoch){epoch=currentEpoch;stopResultTimers();groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;}
  if(closed.has(id))return;
  if(id.startsWith('history:')){
   for(const [key,group] of groups){
@@ -33,18 +39,23 @@ export function setTokenResults(id:string,rows:DiceRollPayload[],visible?:boolea
  }
  // The latest display control outranks the visibility captured when a roll
  // started; a late completion must not undo a subsequent cancellation.
- groups.set(id,{visible:visibility.get(id)??visible??groups.get(id)?.visible??true,rows:rows.filter(r=>r.itemId).map(r=>({itemId:r.itemId!,text:r.label||r.expression||'',total:r.total,color:r.rollerColor||'#fff',hidden:!!r.hidden}))});serial++;void setupTokenResults().then(refresh);
+ // Every automatic result has a reading deadline. Only explicitly opened
+ // history stays until closed. A new group member gets its own reading time.
+ const expiresAt=id.startsWith('history:')?undefined:id.startsWith('group-')?Date.now()+TOKEN_RESULT_HOLD_MS:groups.get(id)?.expiresAt??Date.now()+TOKEN_RESULT_HOLD_MS;
+ groups.set(id,{visible:visibility.get(id)??visible??true,expiresAt,rows:rows.filter(r=>r.itemId).map(r=>({itemId:r.itemId!,text:r.label||r.expression||'',total:r.total,color:r.rollerColor||'#fff',hidden:!!r.hidden}))});
+ if(expiresAt!==undefined)armResult(id,expiresAt);
+ serial++;void setupTokenResults().then(refresh);
 }
-export function toggleTokenResults(id:string,visible:boolean){visibility.set(id,visible);const group=groups.get(id);if(group){group.visible=visible;serial++;void refresh();}}
-export function clearTokenResults(id:string){if(id.startsWith('group-'))closed.add(id);if(closed.size>100)closed.delete(closed.values().next().value!);groups.delete(id);serial++;void refresh();}
-export function resetTokenResults(){groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;void refresh();}
-export function teardownTokenResults(){generation++;starting=undefined;clearTimeout(timer);timer=undefined;bus?.close();bus=undefined;groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;}
+export function toggleTokenResults(id:string,visible:boolean){visibility.set(id,visible);const group=groups.get(id);if(group){group.visible=visible;if(visible&&!id.startsWith('history:')){group.expiresAt=Date.now()+TOKEN_RESULT_HOLD_MS;armResult(id,group.expiresAt);}serial++;void refresh();}}
+export function clearTokenResults(id:string){stopResultTimer(id);if(!id.startsWith('history:'))closed.add(id);if(closed.size>1000)closed.delete(closed.values().next().value!);groups.delete(id);serial++;bus?.postMessage({type:'token-results-remove',ids:[id]});void refresh();}
+export function resetTokenResults(){stopResultTimers();groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;bus?.postMessage({type:'token-results',groups:[],anchors:{}});void refresh();}
+export function teardownTokenResults(){generation++;starting=undefined;clearTimeout(timer);timer=undefined;stopResultTimers();bus?.postMessage({type:'token-results',groups:[],anchors:{}});bus?.close();bus=undefined;groups.clear();closed.clear();visibility.clear();tracked.clear();serial++;}
 async function refresh(){
  if(!bus||flight===generation)return;const current=bus,ownGeneration=generation;let own=serial;clearTimeout(timer);flight=ownGeneration;
  try{
   const observation=workbenchObservation(),data=observation.peek();if(epoch!==observation.sceneEpoch()||data.ready===false){
    const changed=epoch!==observation.sceneEpoch()||groups.size||closed.size||visibility.size||tracked.size;
-   epoch=observation.sceneEpoch();groups.clear();closed.clear();visibility.clear();tracked.clear();if(changed)serial++;
+   epoch=observation.sceneEpoch();stopResultTimers();groups.clear();closed.clear();visibility.clear();tracked.clear();if(changed)serial++;
    // This cleanup belongs to this refresh. Only a later external mutation
    // should request another pass; an unready scene is not a pending update.
    own=serial;
@@ -56,7 +67,7 @@ async function refresh(){
   for(const item of items){if(!ids.has(item.id)||identity.role!=='GM'&&!item.visible)continue;const image=item as any,half=image.image?.height&&image.grid?.dpi?Math.abs(image.image.height/image.grid.dpi*dpi*(image.scale?.y??1))/2:dpi/2;
    anchors[item.id]={x:item.position.x*scale+position.x,y:(item.position.y-half)*scale+position.y-40};}
   const history=[...groups].find(([id,g])=>id.startsWith('history:')&&g.visible);
-  bus.postMessage({type:'token-results',anchors,scale,groups:(history?[history]:[...groups]).map(([id,g])=>({id,visible:g.visible,rows:g.rows.filter(row=>anchors[row.itemId])}))});
+  bus.postMessage({type:'token-results',anchors,scale,groups:(history?[history]:[...groups]).map(([id,g])=>({id,visible:g.visible,expiresAt:g.expiresAt,rows:g.rows.filter(row=>anchors[row.itemId])}))});
  }catch(error){console.warn('[dice] token anchor update failed',error);}
- finally{if(flight===ownGeneration)flight=-1;if(bus===current&&generation===ownGeneration){if(own!==serial)queueMicrotask(()=>void refresh());else if(groups.size||tracked.size)timer=setTimeout(()=>void refresh(),100);}}
+ finally{if(flight===ownGeneration)flight=-1;if(bus===current&&generation===ownGeneration){if(own!==serial)queueMicrotask(()=>void refresh());else if([...groups.values()].some(g=>g.visible)||tracked.size)timer=setTimeout(()=>void refresh(),100);}}
 }

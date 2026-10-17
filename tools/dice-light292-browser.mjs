@@ -12,10 +12,10 @@ const bus=new BroadcastChannel('fixture-obr-292'),listeners=new Map();
 const stats=window.sdkStats={fullReads:0,remote:0,local:0,modals:0,messages:[],held:false};
 const receive=m=>listeners.get(m.name)?.forEach(fn=>fn({connectionId:m.connectionId,data:m.data}));bus.onmessage=e=>receive(e.data);
 const never=()=>new Promise(()=>{}),change=()=>()=>{};
-const sdk={room:{id:'light292-room'},player:{onChange:change,...Object.fromEntries(['Id','ConnectionId','Name','Color','Role','Metadata'].map(k=>['get'+k,async()=>profile[k[0].toLowerCase()+k.slice(1)]]))},
+const sdk={room:{id:'light292-room',onMetadataChange:change},player:{onChange:change,...Object.fromEntries(['Id','ConnectionId','Name','Color','Role','Metadata'].map(k=>['get'+k,async()=>profile[k[0].toLowerCase()+k.slice(1)]]))},
  party:{onChange:change,getPlayers:async()=>['p1','p2','p3','gm'].map(id=>({id,connectionId:id,role:id==='gm'?'GM':'PLAYER'}))},
  scene:{isReady:async()=>true,onReadyChange:change,onMetadataChange:change,getMetadata:()=>{stats.fullReads++;return never();},grid:{getDpi:async()=>100},items:{onChange:change,getItems:async ids=>{if(!Array.isArray(ids)){stats.fullReads++;return never();}return ids.map(id=>({id,visible:true,position:{x:100,y:100},metadata:{},createdUserId:profile.id}));},updateItems:async()=>{}}},
- viewport:{getPosition:async()=>({x:0,y:0}),getScale:async()=>1},notification:{show:async()=>{}},action:{open:async()=>{}},
+ viewport:{getPosition:async()=>stats.holdViewport?never():({x:0,y:0}),getScale:async()=>1},notification:{show:async()=>{}},action:{open:async()=>{}},
  modal:{open:async options=>{stats.modals++;const frame=document.createElement('iframe');frame.id='renderer';frame.style.cssText='width:800px;height:600px;border:0';frame.src=options.url;document.body.append(frame);},close:async()=>{}},
  broadcast:{onMessage:(name,fn)=>{if(!listeners.has(name))listeners.set(name,new Set());listeners.get(name).add(fn);return()=>listeners.get(name).delete(fn);},sendMessage:(name,data,options)=>{stats.messages.push({name,data,destination:options.destination});if(options.destination==='LOCAL'){stats.local++;receive({name,data,connectionId:id});return Promise.resolve();}stats.remote++;if(stats.held)return never();bus.postMessage({name,data,connectionId:id});return Promise.resolve();}}
 };export default sdk;`;
@@ -24,6 +24,7 @@ writeFileSync(join(fixture,'dice.ts'),`export const BROADCAST_DICE_ROLL='com.obr
 writeFileSync(join(fixture,'activity.ts'),`export const setupActivityPanel=()=>{};export const ensureActivityPanel=async()=>{};`);
 writeFileSync(join(fixture,'state.ts'),`export const getState=()=>({enabled:{dice:true}});`);
 writeFileSync(join(fixture,'entry.ts'),`import * as host from '${join(root,'src/workbench/dice.ts').replaceAll('\\','/')}';import {diceRpc} from '${join(root,'src/workbench/dice-light-rpc.ts').replaceAll('\\','/')}';import {calculateLightRoll} from '${join(root,'src/workbench/dice-light-engine.ts').replaceAll('\\','/')}';import {readDiceViewMode} from '${join(root,'src/workbench/dice-view-mode.ts').replaceAll('\\','/')}';window.host={...host,calculateLightRoll,readDiceViewMode};window.formulaRequests=[];window.addEventListener('message',event=>{const m=event.data;if(event.origin!==location.origin||m?.channel!=='workbench-dice-frame/v1'||!m.method)return;if(m.method==='dice2d.submit'||m.method==='broadcast.sendMessage')window.formulaRequests.push(m);void diceRpc(m.method,m.args,{itemId:null}).then(result=>event.source.postMessage({channel:m.channel,id:m.id,result},location.origin));});void host.setupWorkbenchDice().then(()=>window.ready=true);`);
+writeFileSync(join(fixture,'entry.ts'),readFileSync(join(fixture,'entry.ts'),'utf8')+`import * as results from '${join(root,'src/workbench/token-results.ts').replaceAll('\\','/')}';import {rollLightInitiative} from '${join(root,'src/workbench/dice-light-initiative.ts').replaceAll('\\','/')}';window.results=results;window.rollInitiative=rollLightInitiative;`);
 await build({input:join(fixture,'entry.ts'),plugins:[{name:'fixture-sdk',resolveId(id,importer){if(id==='@owlbear-rodeo/sdk')return join(fixture,'sdk.ts');if(id==='../modules/dice')return join(fixture,'dice.ts');if(id==='../state'&&importer?.includes('dice-light-rpc'))return join(fixture,'state.ts');if(id==='./activity-panel'&&importer?.includes('dice-light-runtime'))return join(fixture,'activity.ts');},transform(code){return code.replaceAll('import.meta.env.BASE_URL',JSON.stringify('/suite-dev/'));}}],output:{file:join(fixture,'probe.js'),format:'esm'}});
 writeFileSync(join(fixture,'index.html'),'<body><script type="module" src="/fixture/probe.js"></script>');
 const server=createServer((req,res)=>{const path=new URL(req.url,'http://localhost').pathname;const file=path.startsWith('/fixture/')?join(fixture,path.slice(9)):join(out,path.replace(/^\/suite-dev\//,''));if(!existsSync(file)){res.writeHead(404);res.end();return;}res.setHeader('content-type',extname(file)==='.js'?'text/javascript':extname(file)==='.html'?'text/html':'image/png');res.end(readFileSync(file));});
@@ -49,6 +50,25 @@ try{
  const composer=pages[2].locator('#composer').contentFrame();await composer.locator('body[data-bridge-ready="true"]').waitFor();await composer.locator('#exprInput').fill('1d8+3');await composer.locator('#btnRoll').click();await pages[2].waitForFunction(()=>window.formulaRequests.some(m=>m.method==='dice2d.submit'));
  const submission=await pages[2].evaluate(()=>window.formulaRequests.find(m=>m.method==='dice2d.submit'));assert.equal(submission.args[0].expression,'1d8+3');assert.equal(submission.args[0].dice,undefined);
  for(const p of pages){assert.equal(await p.evaluate(()=>window.sdkStats.fullReads),0);assert.equal(await p.evaluate(()=>window.physicsWorkers),0);assert.equal(await p.evaluate(()=>window.host.readDiceViewMode()),'2d');}
+ // Exercise actual ordinary and initiative label lifetimes, including a stuck
+ // viewport RPC. A stale snapshot must not keep the renderer painted forever.
+ const p=pages[0],labels=p.locator('#renderer').contentFrame().locator('.dice-light-label');
+ const tokenRoll=await p.evaluate(()=>window.host.executeRoll({expression:'1d20',itemId:'token-one',label:'普通投骰'}));
+ await labels.filter({hasText:'普通投骰'}).waitFor();
+ await p.evaluate(()=>window.sdkStats.holdViewport=true);
+ await labels.filter({hasText:'普通投骰'}).waitFor({state:'detached',timeout:7000});
+ // Reopen explicitly managed history without reviving the retired automatic ID.
+ await p.reload();await p.waitForFunction(()=>window.ready);
+ await p.evaluate(row=>window.results.setTokenResults('group-lifetime',[row]),tokenRoll);
+ await labels.waitFor();await labels.waitFor({state:'detached',timeout:7000});
+ await p.evaluate(()=>window.results.toggleTokenResults('group-lifetime',true));await labels.waitFor();
+ await p.evaluate(()=>window.results.clearTokenResults('group-lifetime'));await labels.waitFor({state:'detached'});
+ await p.evaluate(row=>{window.results.setTokenResults('history:manual',[row]);},tokenRoll);
+ await labels.waitFor();await p.waitForTimeout(5300);assert.equal(await labels.count(),1);
+ await p.evaluate(()=>window.results.clearTokenResults('history:manual'));await labels.waitFor({state:'detached'});
+ const initiative=await p.evaluate(()=>window.rollInitiative('token-one','normal','先攻'));
+ assert(Number.isFinite(initiative.total));await labels.filter({hasText:'先攻'}).waitFor();
+ await labels.filter({hasText:'先攻'}).waitFor({state:'detached',timeout:7000});
  assert.deepEqual(requests,[]);assert.deepEqual(failures,[]);
  const result={passed:true,syntheticClients:4,ordinaryLocalAndRemote:true,blockedRemoteDoesNotBlockLocal:true,commandAndRollDedup:true,darkVisibility:true,externalComposerFormulaOnly:true,formulas:formulas.length,fullCatalogReads:0,physicsWorkers:0,wasmRequests:0,realOwlbearRoom:false};writeFileSync(join(fixture,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }catch(error){
