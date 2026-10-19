@@ -496,8 +496,8 @@ async function start(){
  }
  type HydrationJob={key:string;card:Awaited<ReturnType<typeof catalog>>['cards'][number];list:Awaited<ReturnType<typeof catalog>>;started:boolean;requested:boolean;promise:Promise<void>;resolve:()=>void};
  const cardHydrations=new Map<string,HydrationJob>(),hydrationQueue:HydrationJob[]=[];let backgroundHydrations=0;
- let hydrationWanted=new Set<string>();
- function pumpHydrations(){while(backgroundHydrations<2&&hydrationQueue.length){const job=hydrationQueue.shift()!;if(job.started)continue;if(!job.requested&&!hydrationWanted.has(job.card.id)){if(cardHydrations.get(job.key)===job)cardHydrations.delete(job.key);job.resolve();continue;}startHydration(job,true);}}
+ let hydrationWanted=new Set<string>(),hydrationAllowed=new Set<string>();
+ function pumpHydrations(){while(backgroundHydrations<2&&hydrationQueue.length){const job=hydrationQueue.shift()!;if(job.started)continue;if(!hydrationAllowed.has(job.card.id)||!job.requested&&!hydrationWanted.has(job.card.id)){if(cardHydrations.get(job.key)===job)cardHydrations.delete(job.key);job.resolve();continue;}startHydration(job,true);}}
  function startHydration(job:HydrationJob,background:boolean){if(job.started)return;job.started=true;if(background)backgroundHydrations++;
   void (async()=>{const before=documents.get(job.key);try{for(;;){const generation=cardInvalidations.get(job.key)||0,{card:c,list}=job;
     // The selected card bypasses unrelated downloads. Other cards retain a
@@ -518,7 +518,7 @@ async function start(){
  }
  async function hydrate(cardId?:string){let list:CatalogValue;try{list=await catalog();}catch{return;}publishAccess(list);
   const focus=chosen.startsWith('card:')?chosen.slice(5):list.items.find(item=>item.id===chosen)?.metadata[BIND] as string|undefined;
-  const window=hydrationWindow(list.cards,focus);hydrationWanted=new Set(window.map(card=>card.id));
+  const window=hydrationWindow(list.cards,focus);hydrationWanted=new Set(window.map(card=>card.id));hydrationAllowed=new Set(list.cards.map(card=>card.id));
   const targets=cardId?requestedHydration(list.cards,window,cardId,warmCards):window;
   for(const card of targets)warmCard(`card:${card.id}`,false);
   await Promise.all(targets.map(card=>scheduleHydration(card,list,card.id===focus,!!cardId)));
