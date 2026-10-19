@@ -39,6 +39,7 @@ import {sharedDocuments} from './shared';
 import {clampStat,parseStatInput} from '../utils/statEdit';
 import {BC_TRANSITIONS_RUN,BC_TRANSITIONS_STATUS} from '../modules/transitions/protocol';
 import {TIME_STOP_META,readTimeStop} from '../modules/timeStopProtocol';
+import {hydrationWindow,requestedHydration} from './hydration-window';
 import {assetUrl} from '../asset-base';
 import {ANNOUNCEMENT_MODAL_ID} from '../announcement-source';
 import {hasReadPlayerPermissions,PLAYER_PERMISSION_MODAL_ID} from '../player-permission-notice';
@@ -323,7 +324,8 @@ async function start(){
   // ledger. The full catalog supplies those independent sections afterwards.
   const directory={qqAccount:publicQQ(),cards:list.cards.map(({id,name,cloudRoom,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})=>({id,name,cloudRoom,owner_ids,write,locked,inScene,itemId,resources,stats,passive,coins,conditions,documentRevision,player,classSummary,resourceWidgets,resourceAttacks,resourceHidden})),monsters:list.monsters,role:list.role,enabled:access.enabled};
   const signature=JSON.stringify(directory);if(signature!==lastDirectory){lastDirectory=signature;send('directory',{sequence:++sequence,access,...directory});}return access;}
- function warmCard(id:string){warmCards.delete(id);warmCards.add(id);while(warmCards.size>24){const old=warmCards.values().next().value!;warmCards.delete(old);warmSnapshots.delete(old);}}
+ let warmFocus='';
+ function warmCard(id:string,prefetch=true){warmCards.delete(id);warmCards.add(id);while(warmCards.size>24){const old=warmCards.values().next().value!;warmCards.delete(old);warmSnapshots.delete(old);}if(prefetch&&id!==warmFocus){warmFocus=id;void hydrate();}}
  // While following a multi-bound card, retain the selected native token.
  // A canonical background card refresh must not switch its monster alternative
  // back to the first binding. Explicit card-tab choices still use the primary.
@@ -492,9 +494,10 @@ async function start(){
    }).catch(error=>{if(id===chosen&&generation===selectionGeneration&&readScene===observation.sceneEpoch()&&readAuthority===observation.authorityVersion(id))selectionFailure(id,error,readAccess);});
   }catch(error){if(chosen)selectionFailure(chosen,error,issuedAccess);else send('error',{message:'角色目录读取未完成；请核对连接后刷新目录'});}finally{selecting=false;if(selectAgain){selectAgain=false;void refreshSelection();}}
  }
- type HydrationJob={key:string;card:Awaited<ReturnType<typeof catalog>>['cards'][number];list:Awaited<ReturnType<typeof catalog>>;started:boolean;promise:Promise<void>;resolve:()=>void};
+ type HydrationJob={key:string;card:Awaited<ReturnType<typeof catalog>>['cards'][number];list:Awaited<ReturnType<typeof catalog>>;started:boolean;requested:boolean;promise:Promise<void>;resolve:()=>void};
  const cardHydrations=new Map<string,HydrationJob>(),hydrationQueue:HydrationJob[]=[];let backgroundHydrations=0;
- function pumpHydrations(){while(backgroundHydrations<2&&hydrationQueue.length){const job=hydrationQueue.shift()!;if(!job.started)startHydration(job,true);}}
+ let hydrationWanted=new Set<string>();
+ function pumpHydrations(){while(backgroundHydrations<2&&hydrationQueue.length){const job=hydrationQueue.shift()!;if(job.started)continue;if(!job.requested&&!hydrationWanted.has(job.card.id)){if(cardHydrations.get(job.key)===job)cardHydrations.delete(job.key);job.resolve();continue;}startHydration(job,true);}}
  function startHydration(job:HydrationJob,background:boolean){if(job.started)return;job.started=true;if(background)backgroundHydrations++;
   void (async()=>{const before=documents.get(job.key);try{for(;;){const generation=cardInvalidations.get(job.key)||0,{card:c,list}=job;
     // The selected card bypasses unrelated downloads. Other cards retain a
@@ -508,12 +511,18 @@ async function start(){
     if(!sameValue(before,doc)){void refresh();if(chosen===`card:${c.id}`)void refreshSelection();}void pushWarmSnapshot(`card:${c.id}`);break;
    }}catch{}finally{cardHydrations.delete(job.key);job.resolve();if(background)backgroundHydrations--;pumpHydrations();}})();
  }
- function scheduleHydration(card:HydrationJob['card'],list:HydrationJob['list'],priority:boolean){const key=`${OBR.room.id}:card:${card.id}`,existing=cardHydrations.get(key);
-  if(existing){existing.card=card;existing.list=list;if(priority&&!existing.started)startHydration(existing,false);return existing.promise;}
-  let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r),job:HydrationJob={key,card,list,started:false,promise,resolve};cardHydrations.set(key,job);
+ function scheduleHydration(card:HydrationJob['card'],list:HydrationJob['list'],priority:boolean,requested=false){const key=`${OBR.room.id}:card:${card.id}`,existing=cardHydrations.get(key);
+  if(existing){existing.card=card;existing.list=list;existing.requested||=requested;if(priority&&!existing.started)startHydration(existing,false);return existing.promise;}
+  let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r),job:HydrationJob={key,card,list,started:false,requested,promise,resolve};cardHydrations.set(key,job);
   if(priority)startHydration(job,false);else{hydrationQueue.push(job);pumpHydrations();}return promise;
  }
- async function hydrate(cardId?:string){let list:CatalogValue;try{list=await catalog();}catch{return;}publishAccess(list);for(const card of list.cards.slice(0,24))if(warmCards.size<24)warmCard(`card:${card.id}`);await Promise.all(list.cards.filter(c=>!cardId||c.id===cardId).map(c=>scheduleHydration(c,list,chosen===`card:${c.id}`)));}
+ async function hydrate(cardId?:string){let list:CatalogValue;try{list=await catalog();}catch{return;}publishAccess(list);
+  const focus=chosen.startsWith('card:')?chosen.slice(5):list.items.find(item=>item.id===chosen)?.metadata[BIND] as string|undefined;
+  const window=hydrationWindow(list.cards,focus);hydrationWanted=new Set(window.map(card=>card.id));
+  const targets=cardId?requestedHydration(list.cards,window,cardId,warmCards):window;
+  for(const card of targets)warmCard(`card:${card.id}`,false);
+  await Promise.all(targets.map(card=>scheduleHydration(card,list,card.id===focus,!!cardId)));
+ }
  async function refresh(){if(!relayActive&&(!child||child.closed))return;if(refreshing){again=true;return;}refreshing=true;
   try{
    const observedVersion=observation.version(),startedEpoch=epoch;
