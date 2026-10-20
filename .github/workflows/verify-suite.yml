@@ -168,6 +168,8 @@ jobs:
         env:
           PLAYWRIGHT_EXECUTABLE_PATH: ${{ env.CHROMIUM_PATH }}
         run: node tools/dice-cue276-browser.mjs
+      - name: Source archives include committed build files and reject private or changed input
+        run: node --test tools/reviewed-source-archive-selftest.mjs
       - name: Verify public-link source archive is reproducible
         shell: bash
         run: |
