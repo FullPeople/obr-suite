@@ -22,6 +22,7 @@
 // data, the migration step is skipped.
 
 import { idbGet, idbPut, idbUpdate, idbGetAll, idbClear } from "./idbStore";
+import { isLocalClassKind, localClassRows, localClassDetails, type LocalClassReference } from "./localClassCatalog";
 
 /** Broadcast id used to invalidate search/bestiary in-memory caches
  *  whenever the local content set changes. Listeners (search/page,
@@ -88,7 +89,11 @@ export type LocalKind =
   | "table"
   | "action"
   | "recipe"
-  | "deck";
+  | "deck"
+  | "class"
+  | "subclass"
+  | "classFeature"
+  | "subclassFeature";
 
 /** Category number lookup matching CATEGORY in modules/search/page.ts. */
 const KIND_TO_CATEGORY: Record<LocalKind, number> = {
@@ -115,6 +120,10 @@ const KIND_TO_CATEGORY: Record<LocalKind, number> = {
   action: 42,
   recipe: 48,
   deck: 52,
+  class: 5,
+  subclass: 40,
+  classFeature: 30,
+  subclassFeature: 41,
 };
 
 /** Each imported file = one row in the user's "本地内容" list. */
@@ -333,9 +342,15 @@ function readSubs(): RemoteSubsState {
   return memSubs;
 }
 
-/** Public read: ordered list of imported files (newest first). */
+/** Derive current kind/count badges from the stored body, including legacy
+ * mixed packs; reading never rewrites metadata or refetches a source. */
 export function getLocalFiles(): LocalFileMeta[] {
-  return [...readIndex().files].sort((a, b) => b.addedAt - a.addedAt);
+  return readIndex().files.map(meta => {
+    const body = readFile(meta.id), kinds = detectKinds(body);
+    if (!kinds.length) return meta;
+    return { ...meta, kind: kinds.includes(meta.kind) ? meta.kind : kinds[0], kinds: kinds.length > 1 ? kinds : undefined,
+      count: kinds.reduce((sum, kind) => sum + body[kind].length, 0) };
+  }).sort((a, b) => b.addedAt - a.addedAt);
 }
 
 /** Compact signature of the current local-content state. Used by
@@ -394,6 +409,7 @@ export interface SearchIndexEntry {
   // Annotation so per-entry data fetches know to look in local store
   // rather than over the wire.
   __local?: true;
+  localClass?: LocalClassReference;
 }
 export interface SearchIndexFile {
   x: SearchIndexEntry[];
@@ -411,16 +427,24 @@ export function getLocalIndexFile(): SearchIndexFile {
   let nextSourceNum = 9000;
 
   for (const meta of idx.files) {
-    // Multi-kind files (post 2026-05-27 refactor) emit one search
-    // index batch per recognised kind. Legacy single-kind files fall
-    // back to `[meta.kind]` so older imports keep working unchanged.
-    const fileKinds: LocalKind[] = meta.kinds && meta.kinds.length > 0
-      ? meta.kinds
-      : [meta.kind];
+    // Newly supported kinds must also appear in previously cached mixed packs.
+    // The original bodies already retain all top-level arrays.
+    const body = readFile(meta.id);
+    const fileKinds = body ? detectKinds(body) : [];
     for (const k of fileKinds) {
       const cat = KIND_TO_CATEGORY[k];
       if (typeof cat !== "number") continue;
       const entries = getLocalFileEntries(meta.id, k);
+      if (isLocalClassKind(k)) {
+        for (const row of localClassRows(meta.id, body).filter(row => row.ref.kind === k)) {
+          const source = String(row.record.source ?? "HOMEBREW").trim() || "HOMEBREW";
+          if (!sourceNumByCode.has(source)) { sourceNumByCode.set(source, nextSourceNum++); out.m.s[source] = sourceNumByCode.get(source)!; }
+          const suffix = row.context ? ` (${row.context})` : "";
+          out.x.push({ id: nextId++, c: cat, n: row.english + suffix, cn: row.name + suffix,
+            s: source, u: `local-class-${meta.id}-${row.ref.digest}`, __local: true, localClass: row.ref });
+        }
+        continue;
+      }
       for (const e of entries) {
         if (!e || typeof e !== "object") continue;
         const engName = String(e.ENG_name ?? e.name ?? "").trim();
@@ -445,6 +469,13 @@ export function getLocalIndexFile(): SearchIndexFile {
     }
   }
   return out;
+}
+
+/** Exact, pack-bound lookup. A stale selection must not become a different source. */
+export function getLocalClassData(ref: LocalClassReference, language: "zh" | "en"): any | null {
+  if (!readIndex().files.some(file => file.id === ref.fileId)) return null;
+  const body = readFile(ref.fileId);
+  return body ? localClassDetails(ref, body, language) : null;
 }
 
 /** Per-entry data lookup: given a category key (from CATEGORY[c].data.key
