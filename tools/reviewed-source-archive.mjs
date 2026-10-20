@@ -19,6 +19,8 @@ export function reviewedSourceArchive(sourceRoot,destination){
   return {path,blob,location};
  });
  if(!tree.length||tree.some(row=>row.location===output))throw Error('Source archive cannot replace tracked source');
+ const attributes=execFileSync('git',['--no-replace-objects','check-attr','--cached','-z','--stdin','export-ignore','export-subst'],{cwd:root,input:tree.map(row=>row.path).join('\0')+'\0',maxBuffer:16*1024*1024}).toString().split('\0');
+ for(let i=0;i+2<attributes.length;i+=3)if(!['unspecified','unset'].includes(attributes[i+2]))throw Error('Source archive export attributes would omit or rewrite committed bytes');
  const verify=()=>{
   if(git('rev-parse','HEAD').toString().trim()!==revision||git('diff','--cached','--name-only',revision).length)throw Error('Source revision or index changed');
   for(const row of tree){

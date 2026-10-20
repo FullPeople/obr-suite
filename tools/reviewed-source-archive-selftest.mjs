@@ -47,5 +47,11 @@ test('rejects a staged source change without discarding it or creating an archiv
 test('refuses a Git export filter that silently omits a committed build dependency',t=>{
  const {root,git,output}=fixture(t);writeFileSync(join(root,'.gitattributes'),'tools/needed.mjs export-ignore\n');git('add','.gitattributes');
  git('-c','user.name=Source test','-c','user.email=source@example.invalid','commit','-qm','authored export exclusion');
- assert.throws(()=>reviewedSourceArchive(root,output),/file list differs/);
+ assert.throws(()=>reviewedSourceArchive(root,output),/export attributes/);assert.equal(existsSync(output),false);
+});
+test('refuses export substitution that rewrites a committed source byte sequence',t=>{
+ const {root,git,output}=fixture(t);writeFileSync(join(root,'tools/needed.mjs'),'export const revision = "$Format:%H$";\n');
+ writeFileSync(join(root,'.gitattributes'),'tools/needed.mjs export-subst\n');git('add','.gitattributes','tools/needed.mjs');
+ git('-c','user.name=Source test','-c','user.email=source@example.invalid','commit','-qm','authored export substitution');
+ assert.throws(()=>reviewedSourceArchive(root,output),/export attributes/);assert.equal(existsSync(output),false);
 });
