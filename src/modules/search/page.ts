@@ -22,12 +22,14 @@ import {
   getLocalIndexFile,
   getLocalDataByKeySource,
   getLocalClassData,
+  getLocalRecordData,
   getLocalContentSignature,
   initLocalContent,
   forceReloadLocalContent,
   BC_LOCAL_CONTENT_CHANGED,
 } from "../../utils/localContent";
 import type { LocalClassReference } from "../../utils/localClassCatalog";
+import type { LocalRecordReference } from "../../utils/localRecordCatalog";
 import { groupSpellcastingByDisplay } from "../bestiary/spellcasting-display";
 
 // Suite-version of the search bar — independent top-right popover with
@@ -77,6 +79,7 @@ interface Entry {
   local?: boolean;
   __local?: boolean;
   localClass?: LocalClassReference;
+  localRecord?: LocalRecordReference;
 }
 interface IndexFile {
   x: Entry[];
@@ -175,6 +178,8 @@ const CATEGORY: Record<number, CategoryInfo> = {
   55: { label: "地点" },
   56: { label: "物品集合", data: { file: "items.json", key: "itemGroup" } },
   57: { label: "物品", data: { file: "items.json", key: "item" } },
+  1001: { label: "设施" },
+  1002: { label: "物件" },
 };
 // English labels for the result-category chips (lang === "en"). Keyed by
 // the same numeric category code as CATEGORY. categoryInfo() swaps these
@@ -194,6 +199,7 @@ const CATEGORY_LABEL_EN: Record<number, string> = {
   48: "Recipe", 49: "Rule", 50: "Skill", 51: "Sense", 52: "Deck",
   53: "Card", 54: "Weapon Mastery", 55: "Place", 56: "Item Group",
   57: "Item", 58: "Weapon Property",
+  1001: "Facility", 1002: "Object",
 };
 function categoryInfo(c: number): CategoryInfo {
   const info = CATEGORY[c] ?? { label: `?${c}` };
@@ -215,10 +221,17 @@ function srcCode(s: Entry["s"]): string {
 function sourceLabel(code: string, entry?: Entry): string {
   const name = sourceNames.get(`${entry?.library}|${code.toUpperCase()}`);
   const label = name ? `${code} (${name})` : code;
-  return entry?.localClass ? `${label} · ${entry.localClass.edition === "unknown" ? tr("版本未标明", "Edition unspecified") : entry.localClass.edition}` : label;
+  const ref = entry?.localClass || entry?.localRecord;
+  return ref ? `${label} · ${ref.edition === "unknown" ? tr("版本未标明", "Edition unspecified") : ref.edition}` : label;
+}
+function entryCategory(entry: Entry): CategoryInfo {
+  const info = categoryInfo(entry.c), kind = entry.localRecord?.kind;
+  return kind === "magicvariant" ? {...info, label: tr("魔法物品模板", "Magic item template")}
+    : kind === "baseitem" ? {...info, label: tr("基础物品", "Base item")} : info;
 }
 
 function searchMergeKey(entry: Entry, source: string): string {
+  if (entry.localRecord) return JSON.stringify(["local-record",entry.localRecord.fileId,entry.localRecord.kind,entry.localRecord.digest]);
   return entry.localClass ? JSON.stringify(["local-class", entry.localClass.fileId, entry.localClass.kind, entry.localClass.digest])
     : `${(entry.n || entry.cn || "").trim().toLowerCase()}|${source.toLowerCase()}|${entry.c ?? ""}`;
 }
@@ -604,8 +617,9 @@ function search(query: string, idx: IndexFile, opts: FilterOpts): Entry[] {
   for (let i = 0; i < idx.x.length; i++) {
     const e = idx.x[i];
     const code = keyCode[i];
-    if (e.localClass && e.localClass.edition !== "unknown" && opts.dataVersion !== "all" && e.localClass.edition !== opts.dataVersion) continue;
-    if (!passesVersion(code, opts.dataVersion)) continue;
+    const profile = e.localClass || e.localRecord;
+    if (profile && profile.edition !== "unknown" && opts.dataVersion !== "all" && profile.edition !== opts.dataVersion) continue;
+    if ((!profile || profile.edition === "unknown") && !passesVersion(code, opts.dataVersion)) continue;
 
     if ((e.c === 1 || e.c === 46) && !opts.isGM && !opts.allowPlayerMonsters) {
       continue;
@@ -800,6 +814,7 @@ function matchesEntry(entry: Entry, data: DataEntry): boolean {
 }
 
 async function findEntryData(entry: Entry): Promise<DataEntry | null> {
+  if (entry.localRecord) return getLocalRecordData(entry.localRecord, getLocalLang());
   if (entry.localClass) return getLocalClassData(entry.localClass, getLocalLang());
   const generation = contentGeneration;
   const cat = categoryInfo(entry.c);
@@ -1548,14 +1563,15 @@ function renderResults(hits: Entry[], q: string) {
   countEl.textContent = String(hits.length);
   const parts: string[] = [];
   hits.forEach((e, idx) => {
-    const cat = categoryInfo(e.c);
+    const cat = entryCategory(e);
     const display = !e.local && getLocalLang() === "en" ? e.n || e.cn || "" : e.cn || e.n;
     // Retain translated aliases in the search index without adding a second
     // language to the English result surface. Authored local titles stay intact.
     const alternate = getLocalLang() === "en" ? "" : e.n;
     const sub = alternate && alternate !== display ? alternate : "";
     const code = srcCode(e.s).toUpperCase();
-    const edClass =
+    const profile = e.localClass || e.localRecord;
+    const edClass = profile && profile.edition !== "unknown" ? `ed-${profile.edition}` :
       CORE_2014.has(code)
         ? "ed-2014"
         : CORE_2024.has(code)
@@ -1568,7 +1584,7 @@ function renderResults(hits: Entry[], q: string) {
           <span class="name">${highlight(display, q)}</span>
           ${sub ? `<span class="sub">${highlight(sub, q)}</span>` : ""}
         </span>
-        <span class="src ${edClass}">${escapeHtml(e.localClass ? `${code} · ${e.localClass.edition === "unknown" ? tr("版本未标明", "Edition unspecified") : e.localClass.edition}` : code)}</span>
+        <span class="src ${edClass}">${escapeHtml(profile ? `${code} · ${profile.edition === "unknown" ? tr("版本未标明", "Edition unspecified") : profile.edition}` : code)}</span>
       </div>`
     );
   });
@@ -1671,7 +1687,7 @@ async function sendMissingReport(
 
 async function renderPreviewFor(entry: Entry) {
   const isCurrent = previewRequests.next();
-  const cat = categoryInfo(entry.c);
+  const cat = entryCategory(entry);
   const display = !entry.local && getLocalLang() === "en" ? entry.n || entry.cn || "" : entry.cn || entry.n;
   const code = srcCode(entry.s).toUpperCase();
   const page = entry.p ? ` · p.${entry.p}` : "";
@@ -1711,7 +1727,7 @@ async function renderPreviewFor(entry: Entry) {
     reportBtn.addEventListener("click", () => void sendMissingReport(entry, bodyEl, reportBtn));
   }
 
-  if (!cat.data) {
+  if (!cat.data && !entry.localRecord && !entry.localClass) {
     bodyEl.innerHTML = `<div class="prev-empty">${tr("该分类暂无内置详情", "No built-in details for this category")}<br><span class="prev-empty-sub">${escapeHtml(cat.label)} · ${tr("仅显示名称与来源", "Name and source only")}</span></div>`;
     return;
   }
