@@ -23,6 +23,7 @@ import {
   getLocalDataByKeySource,
   getLocalClassData,
   getLocalRecordData,
+  getLocalBookData,
   getLocalContentSignature,
   initLocalContent,
   forceReloadLocalContent,
@@ -30,6 +31,8 @@ import {
 } from "../../utils/localContent";
 import type { LocalClassReference } from "../../utils/localClassCatalog";
 import type { LocalRecordReference } from "../../utils/localRecordCatalog";
+import type {LocalBookReference} from '../../utils/localBookCatalog';
+import {renderLocalBook,bindLocalBookControls} from './localBookPreview';
 import { groupSpellcastingByDisplay } from "../bestiary/spellcasting-display";
 
 // Suite-version of the search bar — independent top-right popover with
@@ -80,6 +83,7 @@ interface Entry {
   __local?: boolean;
   localClass?: LocalClassReference;
   localRecord?: LocalRecordReference;
+  localBook?: LocalBookReference;
 }
 interface IndexFile {
   x: Entry[];
@@ -221,7 +225,7 @@ function srcCode(s: Entry["s"]): string {
 function sourceLabel(code: string, entry?: Entry): string {
   const name = sourceNames.get(`${entry?.library}|${code.toUpperCase()}`);
   const label = name ? `${code} (${name})` : code;
-  const ref = entry?.localClass || entry?.localRecord;
+  const ref = entry?.localClass || entry?.localRecord || entry?.localBook;
   return ref ? `${label} · ${ref.edition === "unknown" ? tr("版本未标明", "Edition unspecified") : ref.edition}` : label;
 }
 function entryCategory(entry: Entry): CategoryInfo {
@@ -231,6 +235,7 @@ function entryCategory(entry: Entry): CategoryInfo {
 }
 
 function searchMergeKey(entry: Entry, source: string): string {
+  if(entry.localBook)return JSON.stringify(['local-book',entry.localBook.fileId,entry.localBook.kind,entry.localBook.digest]);
   if (entry.localRecord) return JSON.stringify(["local-record",entry.localRecord.fileId,entry.localRecord.kind,entry.localRecord.digest]);
   return entry.localClass ? JSON.stringify(["local-class", entry.localClass.fileId, entry.localClass.kind, entry.localClass.digest])
     : `${(entry.n || entry.cn || "").trim().toLowerCase()}|${source.toLowerCase()}|${entry.c ?? ""}`;
@@ -617,7 +622,7 @@ function search(query: string, idx: IndexFile, opts: FilterOpts): Entry[] {
   for (let i = 0; i < idx.x.length; i++) {
     const e = idx.x[i];
     const code = keyCode[i];
-    const profile = e.localClass || e.localRecord;
+    const profile = e.localClass || e.localRecord || e.localBook;
     if (profile && profile.edition !== "unknown" && opts.dataVersion !== "all" && profile.edition !== opts.dataVersion) continue;
     if ((!profile || profile.edition === "unknown") && !passesVersion(code, opts.dataVersion)) continue;
 
@@ -814,6 +819,7 @@ function matchesEntry(entry: Entry, data: DataEntry): boolean {
 }
 
 async function findEntryData(entry: Entry): Promise<DataEntry | null> {
+  if(entry.localBook)return getLocalBookData(entry.localBook,getLocalLang());
   if (entry.localRecord) return getLocalRecordData(entry.localRecord, getLocalLang());
   if (entry.localClass) return getLocalClassData(entry.localClass, getLocalLang());
   const generation = contentGeneration;
@@ -1727,7 +1733,7 @@ async function renderPreviewFor(entry: Entry) {
     reportBtn.addEventListener("click", () => void sendMissingReport(entry, bodyEl, reportBtn));
   }
 
-  if (!cat.data && !entry.localRecord && !entry.localClass) {
+  if (!cat.data && !entry.localRecord && !entry.localClass && !entry.localBook) {
     bodyEl.innerHTML = `<div class="prev-empty">${tr("该分类暂无内置详情", "No built-in details for this category")}<br><span class="prev-empty-sub">${escapeHtml(cat.label)} · ${tr("仅显示名称与来源", "Name and source only")}</span></div>`;
     return;
   }
@@ -1773,7 +1779,9 @@ async function renderPreviewFor(entry: Entry) {
     if (isCurrent() && metaEl.isConnected) metaEl.textContent = `${cat.label} · ${sourceLabel(code, origin)}${page}${originLabel}`;
   });
   const c = entry.c;
-  if (c === 1 || c === 46) {
+  if(entry.localBook){
+    bodyEl.innerHTML=renderLocalBook(data,{escape:escapeHtml,rich:richTags,tr,monster:record=>renderMonster(entry,record),metadata:record=>entry.c===13?renderAdventure(entry,record):renderBook(entry,record)});bindLocalBookControls(bodyEl);
+  } else if (c === 1 || c === 46) {
     bodyEl.innerHTML = renderMonster(entry, data);
   } else if (c === 2) {
     bodyEl.innerHTML = chipsFor(entry, data) + renderSpell(entry, data);

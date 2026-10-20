@@ -1279,7 +1279,7 @@ const KIND_LABELS: Record<Language, Record<string, string>> = {
     deity: "神祇", language: "语言", psionic: "灵能", reward: "奖励",
     variantrule: "副规则", trap: "陷阱", hazard: "灾害", cult: "教派",
     boon: "恩惠", disease: "疾病", table: "表格", action: "动作",
-    recipe: "食谱", deck: "牌组", class: "职业", subclass: "子职业", classFeature: "职业能力", subclassFeature: "子职能力", baseitem: "基础物品", charoption: "角色选项", facility: "设施", magicvariant: "魔法物品模板", object: "物件",
+    recipe: "食谱", deck: "牌组", class: "职业", subclass: "子职业", classFeature: "职业能力", subclassFeature: "子职能力", baseitem: "基础物品", charoption: "角色选项", facility: "设施", magicvariant: "魔法物品模板", object: "物件", book:"书籍", adventure:"冒险",
   },
   en: {
     monster: "Monster", spell: "Spell", item: "Item", feat: "Feat", race: "Race",
@@ -1287,7 +1287,7 @@ const KIND_LABELS: Record<Language, Record<string, string>> = {
     vehicle: "Vehicle", deity: "Deity", language: "Language", psionic: "Psionic",
     reward: "Reward", variantrule: "Rule", trap: "Trap", hazard: "Hazard",
     cult: "Cult", boon: "Boon", disease: "Disease", table: "Table",
-    action: "Action", recipe: "Recipe", deck: "Deck", class: "Class", subclass: "Subclass", classFeature: "Class feature", subclassFeature: "Subclass feature", baseitem: "Base item", charoption: "Character option", facility: "Facility", magicvariant: "Magic item template", object: "Object",
+    action: "Action", recipe: "Recipe", deck: "Deck", class: "Class", subclass: "Subclass", classFeature: "Class feature", subclassFeature: "Subclass feature", baseitem: "Base item", charoption: "Character option", facility: "Facility", magicvariant: "Magic item template", object: "Object", book:"Book", adventure:"Adventure",
   },
 };
 

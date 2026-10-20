@@ -24,6 +24,7 @@
 import { idbGet, idbPut, idbUpdate, idbGetAll, idbClear } from "./idbStore";
 import { isLocalClassKind, localClassRows, localClassDetails, type LocalClassReference } from "./localClassCatalog";
 import { LOCAL_RECORD_CATEGORIES, isLocalRecordKind, localRecordRows, localRecordDetails, type LocalRecordKind, type LocalRecordReference } from "./localRecordCatalog";
+import { LOCAL_BOOK_CATEGORIES, isLocalBookKind, localBookRows, localBookDetails, type LocalBookKind, type LocalBookReference } from "./localBookCatalog";
 
 /** Broadcast id used to invalidate search/bestiary in-memory caches
  *  whenever the local content set changes. Listeners (search/page,
@@ -68,6 +69,7 @@ const LEGACY_LS_FILE_PREFIX = "obr-suite/local-content/file:";
 /** Top-level kind of a single imported file. Maps to the JSON top-level
  *  key (`"monster"` → bestiary, `"spell"` → spells, etc.). */
 export type LocalKind =
+  | LocalBookKind
   | LocalRecordKind
   | "monster"
   | "spell"
@@ -127,7 +129,9 @@ const KIND_TO_CATEGORY: Record<LocalKind, number> = {
   classFeature: 30,
   subclassFeature: 41,
   ...LOCAL_RECORD_CATEGORIES,
+  ...LOCAL_BOOK_CATEGORIES,
 };
+const kindCount=(body:any,kind:LocalKind)=>isLocalBookKind(kind)?localBookRows('',body).filter(row=>row.ref.kind===kind).length:Array.isArray(body?.[kind])?body[kind].length:0;
 
 /** Each imported file = one row in the user's "本地内容" list. */
 export interface LocalFileMeta {
@@ -352,7 +356,7 @@ export function getLocalFiles(): LocalFileMeta[] {
     const body = readFile(meta.id), kinds = detectKinds(body);
     if (!kinds.length) return meta;
     return { ...meta, kind: kinds.includes(meta.kind) ? meta.kind : kinds[0], kinds: kinds.length > 1 ? kinds : undefined,
-      count: kinds.reduce((sum, kind) => sum + body[kind].length, 0) };
+      count: kinds.reduce((sum, kind) => sum + kindCount(body,kind), 0) };
   }).sort((a, b) => b.addedAt - a.addedAt);
 }
 
@@ -374,6 +378,7 @@ export function getLocalFileEntries(id: string, kind?: LocalKind): any[] {
   const content = readFile(id);
   if (!content) return [];
   if (kind) {
+    if(isLocalBookKind(kind))return localBookRows(id,content).filter(row=>row.ref.kind===kind).map(row=>row.record);
     return Array.isArray(content[kind]) ? content[kind] : [];
   }
   // Concat every recognised kind. We iterate KIND_TO_CATEGORY keys in
@@ -381,6 +386,7 @@ export function getLocalFileEntries(id: string, kind?: LocalKind): any[] {
   // across runs.
   const out: any[] = [];
   for (const k of Object.keys(KIND_TO_CATEGORY) as LocalKind[]) {
+    if(isLocalBookKind(k)){out.push(...localBookRows(id,content).filter(row=>row.ref.kind===k).map(row=>row.record));continue;}
     const arr = content[k];
     if (Array.isArray(arr)) out.push(...arr);
   }
@@ -414,6 +420,7 @@ export interface SearchIndexEntry {
   __local?: true;
   localClass?: LocalClassReference;
   localRecord?: LocalRecordReference;
+  localBook?: LocalBookReference;
 }
 export interface SearchIndexFile {
   x: SearchIndexEntry[];
@@ -439,6 +446,13 @@ export function getLocalIndexFile(): SearchIndexFile {
       const cat = KIND_TO_CATEGORY[k];
       if (typeof cat !== "number") continue;
       const entries = getLocalFileEntries(meta.id, k);
+      if(isLocalBookKind(k)){
+        for(const row of localBookRows(meta.id,body).filter(row=>row.ref.kind===k)){
+          if(!sourceNumByCode.has(row.source)){sourceNumByCode.set(row.source,nextSourceNum++);out.m.s[row.source]=sourceNumByCode.get(row.source)!;}
+          out.x.push({id:nextId++,c:cat,n:row.english,cn:row.name,s:row.source,u:`local-book-${meta.id}-${row.ref.kind}-${row.ref.digest}`,__local:true,localBook:row.ref});
+        }
+        continue;
+      }
       if (isLocalRecordKind(k)) {
         for (const row of localRecordRows(meta.id, body).filter(row => row.ref.kind === k)) {
           if (!sourceNumByCode.has(row.source)) { sourceNumByCode.set(row.source, nextSourceNum++); out.m.s[row.source] = sourceNumByCode.get(row.source)!; }
@@ -495,6 +509,10 @@ export function getLocalRecordData(ref: LocalRecordReference, language: "zh" | "
   const body = readFile(ref.fileId);
   return body ? localRecordDetails(ref, body, language) : null;
 }
+export function getLocalBookData(ref:LocalBookReference,language:'zh'|'en'):any|null{
+  if(!ref||!readIndex().files.some(file=>file.id===ref.fileId))return null;
+  const body=readFile(ref.fileId);return body?localBookDetails(ref,body,language):null;
+}
 
 /** Per-entry data lookup: given a category key (from CATEGORY[c].data.key
  *  in search/page.ts) and a source code, return the locally-stored
@@ -540,11 +558,7 @@ export function getAllLocalMonsters(): any[] {
  *  with code paths that still want a single primary kind; the
  *  multi-kind enabled importer uses detectKinds() instead. */
 function detectKind(parsed: any): LocalKind | null {
-  if (!parsed || typeof parsed !== "object") return null;
-  for (const k of Object.keys(KIND_TO_CATEGORY) as LocalKind[]) {
-    if (Array.isArray(parsed[k]) && parsed[k].length > 0) return k;
-  }
-  return null;
+  return detectKinds(parsed)[0]||null;
 }
 
 /** Detect EVERY recognised top-level kind in the file. Returns them
@@ -556,7 +570,7 @@ function detectKinds(parsed: any): LocalKind[] {
   if (!parsed || typeof parsed !== "object") return [];
   const out: LocalKind[] = [];
   for (const k of Object.keys(KIND_TO_CATEGORY) as LocalKind[]) {
-    if (Array.isArray(parsed[k]) && parsed[k].length > 0) out.push(k);
+    if (kindCount(parsed,k)>0) out.push(k);
   }
   return out;
 }
@@ -597,7 +611,7 @@ export async function importLocalJson(filename: string, jsonText: string): Promi
   // show a meaningful "N entries" badge in the UI.
   let count = 0;
   for (const k of kinds) {
-    if (Array.isArray(parsed[k])) count += parsed[k].length;
+    count += kindCount(parsed,k);
   }
   const meta: LocalFileMeta = {
     id,
@@ -934,7 +948,7 @@ export async function refreshRemoteSubscription(url: string): Promise<Subscripti
 
   let count = 0;
   for (const k of kinds) {
-    if (Array.isArray(parsed[k])) count += parsed[k].length;
+    count += kindCount(parsed,k);
   }
   try {
     const saved = await idbUpdate([IDB_INDEX_KEY, IDB_SUBS_KEY], ([indexValue, subsValue]) => {

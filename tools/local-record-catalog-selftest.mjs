@@ -83,8 +83,8 @@ try{
   const page=await open(context);assert.equal((await add(page,{magicvariant:[record('magicvariant','Original changed template',{entries:undefined,_copy:{name:'Outside template',source:'OTHER',_mod:{inherits:{bonusWeapon:'+4'}}}})]})).ok,true);
   const [entry]=await rows(page);const before=await page.evaluate(entry=>JSON.stringify(window.api.getLocalFileEntries(entry.localRecord.fileId,'magicvariant')),entry);const detail=await page.evaluate(entry=>window.api.getLocalRecordData(entry.localRecord,'en'),entry);assert.match(JSON.stringify(detail.entries),/unsupported modifiers/);assert.match(JSON.stringify(detail.entries),/Weapon bonus.*\+4/);assert.equal(await page.evaluate(entry=>JSON.stringify(window.api.getLocalFileEntries(entry.localRecord.fileId,'magicvariant')),entry),before);
  });
- await run('unrelated book-only input is still rejected and original imported content remains intact',async context=>{
-  const page=await open(context);await add(page,{monster:[{name:'Original kept monster',source:'AUTH'}]});assert.equal((await add(page,{book:[{name:'Original volume',source:'AUTH'}],bookData:[{id:'AUTH',data:[]}]})).ok,false);assert.equal((await rows(page)).filter(row=>row.c===1).length,1);
+ await run('unrecognized content is still rejected and original imported content remains intact',async context=>{
+  const page=await open(context);await add(page,{monster:[{name:'Original kept monster',source:'AUTH'}]});assert.equal((await add(page,{authoredUnsupportedContent:[{name:'Original unsupported content',source:'AUTH'}]})).ok,false);assert.equal((await rows(page)).filter(row=>row.c===1).length,1);
  });
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 console.log(JSON.stringify({passed,failed:failures.length,scope:'Authored inputs; real importer, native IndexedDB and search previews. SDK lifecycle stub only, no real room or rule automation.'}));if(failures.length)process.exitCode=1;
