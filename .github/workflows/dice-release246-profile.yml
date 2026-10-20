@@ -1,6 +1,12 @@
 name: Verify released dice resources 246
 on:
   workflow_dispatch:
+    inputs:
+      retained_physical:
+        description: Run retained physical diagnostics even when the active build is light
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [codex/ui-permissions284-20261011, codex/ui-relay283-20261011, codex/qq-cloud-sync-282-20261011, codex/qq-room-cloud-button-281-20261011, codex/dice-package-repair252-20261007, codex/card-suite-followup-suite-20261007, codex/resource-repair246-20261005, dev]
 permissions:
@@ -15,7 +21,48 @@ env:
   DICE_LATENCY_SOFTWARE: '1'
   DICE_LATENCY_SMALL: '1'
 jobs:
+  runtime_profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      mode: ${{ steps.profile.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: FullPeople/DND-card-web
+          ref: a17685fbd7871984f672f7221d4b6b55b9204aad
+          path: .paired-web
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.9.0'
+      - name: Install locked dependencies and official browser
+        run: |
+          npm ci
+          npm --prefix .paired-web ci
+          npx playwright install --with-deps chromium
+      - name: Reject incomplete, stale or unknown dice packages
+        run: node --test tools/dice-diagnostic-profile.test.mjs
+      - name: Build the actual current Suite package
+        run: npm run build:workbench-dev
+      - name: Validate the applicable runtime before selecting diagnostics
+        id: profile
+        run: node tools/verify-dice-diagnostic-profile.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dice-diagnostic-runtime-${{ github.sha }}
+          path: |
+            .local-evidence/ci-dice-profile/
+            .local-evidence/light292/
+          include-hidden-files: true
+          retention-days: 7
   paired_timing:
+    needs: runtime_profile
+    if: ${{ needs.runtime_profile.outputs.mode == 'physical' || (github.event_name == 'workflow_dispatch' && inputs.retained_physical) }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -72,6 +119,8 @@ jobs:
           include-hidden-files: true
           retention-days: 7
   captured_behavior:
+    needs: runtime_profile
+    if: ${{ needs.runtime_profile.outputs.mode == 'physical' || (github.event_name == 'workflow_dispatch' && inputs.retained_physical) }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -123,6 +172,8 @@ jobs:
           include-hidden-files: true
           retention-days: 7
   lifecycle:
+    needs: runtime_profile
+    if: ${{ needs.runtime_profile.outputs.mode == 'physical' || (github.event_name == 'workflow_dispatch' && inputs.retained_physical) }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -163,6 +214,8 @@ jobs:
           retention-days: 7
 
   pixels_and_viewports:
+    needs: runtime_profile
+    if: ${{ needs.runtime_profile.outputs.mode == 'physical' || (github.event_name == 'workflow_dispatch' && inputs.retained_physical) }}
     # Compare the new release to the actual deployed 279 renderer. Historical
     # timing/resource baselines remain unchanged in the other jobs.
     env:
