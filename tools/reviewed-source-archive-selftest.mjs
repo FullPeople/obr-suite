@@ -60,3 +60,8 @@ test('verifies UTF-8 source filenames independently of the Windows console code 
  git('-c','user.name=Source test','-c','user.email=source@example.invalid','commit','-qm','authored UTF-8 filename');
  const proof=reviewedSourceArchive(root,output);assert.equal(proof.trackedFiles,6);assert.ok(readFileSync(output).includes(Buffer.from(path,'utf8')));
 });
+test('keeps committed archive bytes exact without changing the checkout line-ending setting',t=>{
+ const {root,git,output}=fixture(t),before=readFileSync(join(root,'tools/needed.mjs'));git('config','core.autocrlf','true');
+ const proof=reviewedSourceArchive(root,output);assert.equal(proof.trackedFiles,5);
+ assert.equal(git('config','--get','core.autocrlf').toString().trim(),'true');assert.deepEqual(readFileSync(join(root,'tools/needed.mjs')),before);
+});

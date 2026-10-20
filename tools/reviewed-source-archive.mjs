@@ -58,7 +58,7 @@ export function reviewedSourceArchive(sourceRoot,destination){
    if(blob!==row.blob)throw Error('Tracked source bytes differ from commit: '+row.path);
   }
  };
- verify();git('archive','--format=zip','--output='+output,revision);
+ verify();git('-c','core.autocrlf=false','-c','core.eol=lf','archive','--format=zip','--output='+output,revision);
  verifyArchive(readFileSync(output),tree,revision);
  verify();
  return {revision,trackedFiles:tree.length,archiveSha256:createHash('sha256').update(readFileSync(output)).digest('hex')};
