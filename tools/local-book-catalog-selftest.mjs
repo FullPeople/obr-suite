@@ -4,6 +4,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'node:http';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 const root=process.env.DND_LOCAL_CONTENT_ROOT||fileURLToPath(new URL('..',import.meta.url));
 const pagePath=resolve(root,'src/modules/search/page.ts').replaceAll('\\','/');
@@ -12,7 +13,8 @@ const aliases={'../../state':'state','../dice/context-menu':'menu','../dice/sfx-
 const compiled=await build({input:'probe',plugins:[{name:'local-book-browser-probe',resolveId(id,importer){if(id==='probe')return '\0probe';if(id==='@owlbear-rodeo/sdk')return '\0stub:sdk';const path=importer?.replaceAll('\\','/');if(id==='../../state'&&path?.endsWith('/dice/tags.ts'))return '\0stub:state';if(path===pagePath&&aliases[id])return '\0stub:'+aliases[id];},load(id){if(id.startsWith('\0stub:'))return stubs[id.slice(6)];if(id==='\0probe')return `import * as api from ${JSON.stringify(resolve(root,'src/utils/localContent.ts'))};import ${JSON.stringify(pagePath)};window.api=api;`;},transform(code,id){if(id.replaceAll('\\','/')===pagePath)return code+'\nwindow.searchApi={loadIndex,findEntryData,renderPreviewFor,search,invalidateSearchContent};';}}],output:{format:'esm'},logLevel:'silent'});
 const script=compiled.output.find(row=>row.type==='chunk').code;
 const html='<div id="wrap"><input id="q"><button id="clear"></button><div id="count"></div><div id="drop"></div><div id="preview"></div></div><script type="module" src="/probe.js"></script>';
-const server=createServer((request,response)=>{response.setHeader('Content-Type',request.url==='/probe.js'?'text/javascript':'text/html');response.end(request.url==='/probe.js'?script:html);});
+const actualHtml=readFileSync(resolve(root,'search-bar.html'),'utf8').replace('<script type="module" src="/src/modules/search/page.ts"></script>','<script type="module" src="/probe.js"></script>').replace('</head>','<style>'+readFileSync(resolve(root,'src/styles/suite-ui.css'),'utf8')+'</style></head>');
+const server=createServer((request,response)=>{response.setHeader('Content-Type',request.url==='/probe.js'?'text/javascript':'text/html');response.end(request.url==='/probe.js'?script:request.url==='/actual.html'?actualHtml:html);});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const base=`http://127.0.0.1:${server.address().port}`,browser=await chromium.launch({headless:true,channel:process.env.CI?undefined:'msedge'});
 let passed=0;const failures=[];
@@ -82,6 +84,12 @@ try{
  });
  await run('a failed image preview can be retried and hidden without touching the stored document',async context=>{
   const page=await open(context),body=pack();let failed=true;await page.route('https://retry-image.test/**',route=>failed?route.fulfill({status:503,body:'Unavailable authored image.'}):route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>'}));body.bookData[0].data=[{type:'image',title:'Retry image',href:{type:'external',url:'https://retry-image.test/picture.svg'}}];assert.equal((await add(page,body)).ok,true);const [entry]=await rows(page);await preview(page,entry);await page.getByRole('button',{name:'展开图片',exact:true}).click();await page.locator('[data-image-error]').waitFor();assert.equal(await page.locator('.local-book-reading img').count(),0);failed=false;await page.getByRole('button',{name:'展开图片',exact:true}).click();await page.getByRole('button',{name:'收起图片',exact:true}).waitFor();assert.equal(await page.locator('.local-book-reading img').count(),1);await page.getByRole('button',{name:'收起图片',exact:true}).click();assert.equal(await page.locator('.local-book-reading img').count(),0);const detail=await page.evaluate(entry=>window.api.getLocalBookData(entry.localBook,'en'),entry);assert.deepEqual(detail._localBook.data,body.bookData[0].data);
+ });
+ await run('the actual narrow search page gives a book readable width and restores other preview layouts',async context=>{
+  const page=await context.newPage();await page.setViewportSize({width:390,height:720});await page.goto(base+'/actual.html');await page.waitForFunction(()=>window.api&&window.searchApi);await page.evaluate(()=>window.api.initLocalContent());const body=pack();body.monster=[{name:'Authored retained monster',source:'AUTH'}];body.bookData[0].data=Array.from({length:12},(_,i)=>({type:'section',name:`Authored chapter ${i}`,entries:['Authored paragraph. '.repeat(25)]}));assert.equal((await add(page,body)).ok,true);
+  await page.locator('#q').fill('Authored Volume');await page.locator('#drop .row-item').first().click();await page.locator('.local-book-reading').waitFor();assert((await page.locator('.local-book-reading').boundingBox()).width>=300,'Narrow book reader is squeezed by the result list');
+  await page.getByRole('button',{name:'Authored chapter 11',exact:true}).click();assert(await page.locator('#local-book-section-11').evaluate(el=>{const r=el.getBoundingClientRect(),b=el.closest('.preview').getBoundingClientRect();return r.top<b.bottom&&r.bottom>b.top;}),'Last chapter must be visible inside the real preview scroller');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.locator('#q').fill('Authored retained monster');await page.locator('#drop .row-item').first().click();await page.locator('.local-book-reading').waitFor({state:'detached'});assert.equal(await page.locator('#drop').evaluate(el=>el.getBoundingClientRect().width),280);
  });
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 console.log(JSON.stringify({passed,failed:failures.length,scope:'Authored inputs; actual importer/native IndexedDB/search and real tag renderer; SDK lifecycle/message delivery stub only, no real-room or rule-automation acceptance.'}));if(failures.length)process.exitCode=1;

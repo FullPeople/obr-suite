@@ -299,6 +299,25 @@ mark{
 .preview blockquote{border-left:3px solid var(--warn-line);padding:4px 10px;margin:8px 0;color:var(--text-dim);font-style:italic}
 .preview .quote-by{font-size:10.5px;color:var(--text-dim);margin-top:4px;font-style:normal}
 
+/* Saved documents keep the existing theme and a readable narrow viewport. */
+.preview:has(.local-book-reading){overflow-wrap:anywhere}
+.preview:has(.local-book-reading) .prev-title{color:var(--text)}
+.preview:has(.local-book-reading) nav{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0}
+.preview [data-local-book-target],.preview [data-local-book-image]{
+  font:inherit;color:var(--text);background:var(--tint);
+  border:1px solid var(--border);border-radius:4px;padding:4px 6px;cursor:pointer;
+}
+.preview [data-local-book-target]:hover,.preview [data-local-book-image]:hover{background:var(--accent-soft)}
+.preview [data-local-book-target]:focus-visible,.preview [data-local-book-image]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.local-book-source{margin-top:12px}
+.local-book-source summary,.local-book-notice summary{cursor:pointer}
+.local-book-notice{margin:8px 0;padding:6px;border:1px solid var(--warn-line)}
+@media(max-width:600px){
+  .wrap > .body:has(.local-book-reading){flex-direction:column}
+  .body:has(.local-book-reading) > .drop{width:auto;flex:0 0 auto;max-height:112px;border-right:0;border-bottom:1px solid var(--border)}
+  .body:has(.local-book-reading) > .preview{min-height:0;padding:10px}
+}
+
 /* 5etools rollable inline tags ({@dice} / {@damage} / {@hit} etc.).
    Click → fires a quick-roll on the currently-selected token. */
 .preview .rollable{
