@@ -21,11 +21,13 @@ import { applyI18nDom } from "../../i18n";
 import {
   getLocalIndexFile,
   getLocalDataByKeySource,
+  getLocalClassData,
   getLocalContentSignature,
   initLocalContent,
   forceReloadLocalContent,
   BC_LOCAL_CONTENT_CHANGED,
 } from "../../utils/localContent";
+import type { LocalClassReference } from "../../utils/localClassCatalog";
 import { groupSpellcastingByDisplay } from "../bestiary/spellcasting-display";
 
 // Suite-version of the search bar — independent top-right popover with
@@ -73,6 +75,8 @@ interface Entry {
   library?: string;
   contentLanguage?: ContentLanguage;
   local?: boolean;
+  __local?: boolean;
+  localClass?: LocalClassReference;
 }
 interface IndexFile {
   x: Entry[];
@@ -210,7 +214,33 @@ function srcCode(s: Entry["s"]): string {
 }
 function sourceLabel(code: string, entry?: Entry): string {
   const name = sourceNames.get(`${entry?.library}|${code.toUpperCase()}`);
-  return name ? `${code} (${name})` : code;
+  const label = name ? `${code} (${name})` : code;
+  return entry?.localClass ? `${label} · ${entry.localClass.edition === "unknown" ? tr("版本未标明", "Edition unspecified") : entry.localClass.edition}` : label;
+}
+
+function searchMergeKey(entry: Entry, source: string): string {
+  return entry.localClass ? JSON.stringify(["local-class", entry.localClass.fileId, entry.localClass.kind, entry.localClass.digest])
+    : `${(entry.n || entry.cn || "").trim().toLowerCase()}|${source.toLowerCase()}|${entry.c ?? ""}`;
+}
+
+function resolveSourceCode(entry: Entry, index: IndexFile): string {
+  if (entry.s == null) return "";
+  if (typeof entry.s === "string") return entry.s.toLowerCase();
+  for (const [code, id] of Object.entries(index.m?.s || {})) if (id === entry.s) return code.toLowerCase();
+  return String(entry.s).toLowerCase();
+}
+
+function rebuildCachedLocalIndex(cached: IndexFile): IndexFile {
+  const local = getLocalIndexFile();
+  const out: IndexFile = { x: [], m: { s: { ...cached.m?.s, ...local.m.s } } };
+  const seen = new Set<string>();
+  const current = local.x.map(entry => ({ ...entry, u: entry.u || "", local: true, contentLanguage: "auto" as const }));
+  for (const entry of [...current, ...cached.x.filter(entry => !entry.local && !entry.__local)]) {
+    const key = searchMergeKey(entry, resolveSourceCode(entry, cached));
+    if (seen.has(key)) continue;
+    seen.add(key); out.x.push(entry);
+  }
+  return out;
 }
 
 // --- Index + books fetch & cache ---
@@ -246,7 +276,9 @@ async function loadIndex(): Promise<IndexFile> {
       if (raw) {
         const parsed = JSON.parse(raw) as { ts: number; data: IndexFile };
         if (Date.now() - parsed.ts < CACHE_TTL_MS && parsed.data?.x?.length) {
-          indexCache = parsed.data;
+          // Keep usable remote/offline results, but derive local rows from
+          // the current raw store, including packs imported by older versions.
+          indexCache = rebuildCachedLocalIndex(parsed.data);
           indexRetryAt = Infinity;
           buildSourceMap(indexCache);
           return indexCache;
@@ -343,28 +375,17 @@ async function loadIndex(): Promise<IndexFile> {
     //   unique source identity, and the display path's
     //   `srcCode(e.s)` short-circuits on the string branch — the
     //   stale `sourceById` numeric map is never consulted again.
-    const resolveSourceCode = (e: Entry, lib: IndexFile): string => {
-      if (e.s == null) return "";
-      if (typeof e.s === "string") return e.s.toLowerCase();
-      const map = lib.m?.s || {};
-      for (const [code, id] of Object.entries(map)) {
-        if (id === e.s) return code.toLowerCase();
-      }
-      return String(e.s).toLowerCase();
-    };
     const seen = new Set<string>();
     const mergedByKey = new Map<string, Entry>();
     for (const { idx, cfg } of allValid) {
       for (const e of idx.x) {
-        const cn = (e.cn || "").trim().toLowerCase();
-        const n = (e.n || "").trim().toLowerCase();
         const src = resolveSourceCode(e, idx);
         // Per-library source blacklist (e.g. user disabled
         // BOOKOFEBONTIDES inside the partnered library). Apply BEFORE
         // dedupe so an entry available in another library where the
         // source is allowed still gets through under that library.
         if (cfg.disabledSources.size > 0 && src && cfg.disabledSources.has(src)) continue;
-        const key = `${n || cn}|${src}|${e.c ?? ""}`;
+        const key = searchMergeKey(e, src);
         if (seen.has(key)) {
           // Keep alternate query names even when their translated body loses
           // priority. Existing character-card chips may still search in Chinese.
@@ -583,6 +604,7 @@ function search(query: string, idx: IndexFile, opts: FilterOpts): Entry[] {
   for (let i = 0; i < idx.x.length; i++) {
     const e = idx.x[i];
     const code = keyCode[i];
+    if (e.localClass && e.localClass.edition !== "unknown" && opts.dataVersion !== "all" && e.localClass.edition !== opts.dataVersion) continue;
     if (!passesVersion(code, opts.dataVersion)) continue;
 
     if ((e.c === 1 || e.c === 46) && !opts.isGM && !opts.allowPlayerMonsters) {
@@ -778,6 +800,7 @@ function matchesEntry(entry: Entry, data: DataEntry): boolean {
 }
 
 async function findEntryData(entry: Entry): Promise<DataEntry | null> {
+  if (entry.localClass) return getLocalClassData(entry.localClass, getLocalLang());
   const generation = contentGeneration;
   const cat = categoryInfo(entry.c);
   if (!cat.data) return null;
@@ -1545,7 +1568,7 @@ function renderResults(hits: Entry[], q: string) {
           <span class="name">${highlight(display, q)}</span>
           ${sub ? `<span class="sub">${highlight(sub, q)}</span>` : ""}
         </span>
-        <span class="src ${edClass}">${escapeHtml(code)}</span>
+        <span class="src ${edClass}">${escapeHtml(e.localClass ? `${code} · ${e.localClass.edition === "unknown" ? tr("版本未标明", "Edition unspecified") : e.localClass.edition}` : code)}</span>
       </div>`
     );
   });
