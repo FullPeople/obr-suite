@@ -55,3 +55,8 @@ test('refuses export substitution that rewrites a committed source byte sequence
  git('-c','user.name=Source test','-c','user.email=source@example.invalid','commit','-qm','authored export substitution');
  assert.throws(()=>reviewedSourceArchive(root,output),/export attributes/);assert.equal(existsSync(output),false);
 });
+test('verifies UTF-8 source filenames independently of the Windows console code page',t=>{
+ const {root,git,output}=fixture(t),path='tools/原创依赖.mjs';writeFileSync(join(root,path),'export const authored = "保留原字节";\n');git('add',path);
+ git('-c','user.name=Source test','-c','user.email=source@example.invalid','commit','-qm','authored UTF-8 filename');
+ const proof=reviewedSourceArchive(root,output);assert.equal(proof.trackedFiles,6);assert.ok(readFileSync(output).includes(Buffer.from(path,'utf8')));
+});
