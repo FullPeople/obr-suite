@@ -51,6 +51,10 @@ jobs:
         run: |
           node src/modules/musicBoard/selftest.mjs
           node src/modules/musicBoard/browser-selftest.mjs
+      - name: Monster collection indexes, details and source exclusions
+        run: |
+          node tools/bestiary-homebrew-selftest.mjs
+          node tools/bestiary-dependency-selftest.mjs
       - name: Grid-box anchoring and cross-scene picker regression
         run: |
           npm run test:bubbles

@@ -27,6 +27,8 @@ import {
   BC_LOCAL_CONTENT_CHANGED,
 } from "../../utils/localContent";
 import { groupSpellcastingByDisplay } from "../bestiary/spellcasting-display";
+import { collectionMonsterSearchIndex, safeCollectionPath } from "../../utils/monsterSourceIndex";
+import { fetchLocalizedMonster } from "../bestiary/detail-data";
 
 // Suite-version of the search bar — independent top-right popover with
 // its OWN visible input row (not driven by cluster). The popover resizes
@@ -73,6 +75,7 @@ interface Entry {
   library?: string;
   contentLanguage?: ContentLanguage;
   local?: boolean;
+  collectionPath?: string;
 }
 interface IndexFile {
   x: Entry[];
@@ -259,6 +262,14 @@ async function loadIndex(): Promise<IndexFile> {
     const perLibrary = await Promise.all(
       sources.map(async (cfg) => {
         try {
+          if (cfg.indexFormat === "monster-source-index") {
+            const idx = await collectionMonsterSearchIndex(cfg, path=>loadSourceFile(cfg,path), (collectionPath,error)=>{
+              if (contentAbort.signal.aborted) throw error;
+              incomplete = true;
+              console.warn("[obr-suite/search] monster collection unavailable", {base:cfg.base,collectionPath,error});
+            });
+            return {idx,cfg};
+          }
           const res = await fetchContentJson(`${cfg.base}/${cfg.indexPath}`, { cache: "no-cache", signal: contentAbort.signal });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const idx = await res.json() as IndexFile;
@@ -392,7 +403,7 @@ async function loadIndex(): Promise<IndexFile> {
     // chips need them to resolve. The same language order/blacklist applies;
     // successful files are shared with subsequent property detail requests.
     try {
-      const propertyFiles = await Promise.all(sources.map(async (cfg) => {
+      const propertyFiles = await Promise.all(sources.filter(cfg => !cfg.indexFormat).map(async (cfg) => {
         try { return { cfg, body: await loadSourceFile(cfg, "items-base.json") }; }
         catch { return { cfg, body: null }; }
       }));
@@ -640,7 +651,7 @@ async function loadSourceFile(source: ContentSource, path: string): Promise<any 
   if (existing) return existing;
   const signal = contentAbort.signal;
   const pending = (async () => {
-    const response = await fetchContentJson(`${source.base}/data/${path}`, { cache: "no-cache", signal });
+    const response = await fetchContentJson(`${source.base}/${source.indexFormat ? "" : "data/"}${path}`, { cache: "no-cache", signal });
     if (!response.ok) {
       if (response.status === 404) return null;
       throw new Error(`HTTP ${response.status}`);
@@ -658,6 +669,13 @@ async function loadSourceFile(source: ContentSource, path: string): Promise<any 
 async function loadCategoryData(entry: Entry, cat = categoryInfo(entry.c), source?: ContentSource): Promise<DataEntry[]> {
   if (!cat.data) return [];
   if (!source) return getLocalDataByKeySource(cat.data.key, srcCode(entry.s)) as DataEntry[];
+  if (source.indexFormat === "monster-source-index") {
+    if (cat.data.key !== "monster" || !safeCollectionPath(entry.collectionPath)) return [];
+    const body = await loadSourceFile(source, entry.collectionPath);
+    if (!Array.isArray(body?.monster)) throw Error("Invalid monster collection");
+    return body.monster.filter((row: any) => row && !source.disabledSources.has(String(row.source ?? "").toLowerCase()))
+      .map((row: any) => ({...row,_contentLibrary:source.id,_contentLanguage:source.language}));
+  }
   const data = cat.data;
   let files: string[];
   if ("allClassFiles" in data) {
@@ -786,6 +804,9 @@ async function findEntryData(entry: Entry): Promise<DataEntry | null> {
   const sources = getEnabledLibrarySources().filter((source) => !source.disabledSources.has(code.toLowerCase()));
   // A stale selection is never permission to fetch a disabled library.
   if (entry.library && !sources.some((source) => source.id === entry.library)) return null;
+  if (entry.c === 1 && sources.some(source => source.id === entry.library && source.indexFormat === "monster-source-index")) {
+    return fetchLocalizedMonster(`${code}::${entry.n}`);
+  }
   const availableKey = `${cat.data.key}|${code}`;
   let unavailable = false;
   for (const source of [undefined, ...sources]) {

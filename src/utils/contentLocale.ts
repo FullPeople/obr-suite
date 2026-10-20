@@ -7,6 +7,7 @@ export interface ContentSource {
   id: string;
   base: string;
   indexPath: string;
+  indexFormat?: "monster-source-index";
   language: ContentLanguage;
   disabledSources: Set<string>;
 }
@@ -31,8 +32,9 @@ export function selectContentLibraries(libraries: readonly ContentLibrary[], lan
       const indexPath = library.indexPath?.replace(/^\/+/, "") || "search/index.json";
       const locale = getLibraryLanguage(library);
       const disabledSources = new Set((library.disabledSources ?? []).map((source) => source.trim().toLowerCase()).filter(Boolean));
-      const identity = JSON.stringify([library.id, base, indexPath, locale, [...disabledSources].sort()]);
-      return { identity, id: library.id, base, indexPath, language: locale, disabledSources };
+      const indexFormat = library.indexFormat;
+      const identity = JSON.stringify([library.id, base, indexPath, locale, [...disabledSources].sort(), indexFormat ?? "search"]);
+      return { identity, id: library.id, base, indexPath, indexFormat, language: locale, disabledSources };
     });
   const rank = (source: ContentSource) => source.language === language ? 0 : source.language === "auto" ? 1 : 2;
   return sources.sort((a, b) => rank(a) - rank(b));

@@ -55,6 +55,7 @@ import { SettingsContent } from "./utils/settingsContent";
 import { renderSettingsModuleStatus } from "./utils/settingsModuleStatus";
 import { renderFogSettings } from "./utils/fogSettingsView";
 import { getLibraryLanguage } from "./utils/contentLocale";
+import { monsterSourceFiles } from "./utils/monsterSourceIndex";
 import { getBossPreferences, setBossPreferences, BOSS_PREFERENCES_CHANGED, BOSS_PREFERENCES_KEY } from "./modules/bossBar/preferences";
 import { BC_TRANSITIONS_OPEN } from "./modules/transitions/protocol";
 import {
@@ -868,6 +869,7 @@ interface PreviewResult {
   state: "loading" | "ok" | "fail";
   errorMsg?: string;
   entryCount: number;
+  sampled?: boolean;
   sourceMap: Array<{ code: string; id: number }>;
   entries: PreviewIndexEntry[];
   dataProbes: Array<{
@@ -879,9 +881,9 @@ interface PreviewResult {
   }>;
 }
 
-async function probeLibrary(baseUrl: string): Promise<PreviewResult> {
+async function probeLibrary(baseUrl: string, config?: LibraryConfig): Promise<PreviewResult> {
   const cleanBase = baseUrl.replace(/\/+$/, "");
-  const indexUrl = `${cleanBase}/search/index.json`;
+  const indexUrl = `${cleanBase}/${config?.indexPath || "search/index.json"}`;
   const result: PreviewResult = {
     baseUrl: cleanBase,
     indexUrl,
@@ -903,6 +905,29 @@ async function probeLibrary(baseUrl: string): Promise<PreviewResult> {
     try { parsed = JSON.parse(text); } catch (e: any) {
       result.state = "fail";
       result.errorMsg = `JSON 解析失败：${e?.message || String(e)}`;
+      return result;
+    }
+    if (config?.indexFormat === "monster-source-index") {
+      const properties = await fetch(`${cleanBase}/_generated/index-props.json`, {cache:"no-cache"});
+      if (!properties.ok) throw Error(`Monster property index HTTP ${properties.status}`);
+      const files = monsterSourceFiles(parsed, await properties.json());
+      result.sourceMap = Object.keys(files).map((code,id)=>({code,id}));
+      result.sampled = true;
+      result.state = "ok";
+      for (const path of [...new Set(Object.values(files))].slice(0,2)) {
+        const url = `${cleanBase}/${path}`;
+        try {
+          const response = await fetch(url,{cache:"no-cache"});
+          if (!response.ok) throw Error(`HTTP ${response.status}`);
+          const body = await response.json();
+          if (!Array.isArray(body.monster)) throw Error("Invalid monster collection");
+          result.entryCount += body.monster.length;
+          result.entries.push(...body.monster.slice(0,15).map((row:any)=>({c:1,n:row.ENG_name||row.name,cn:row.name,s:row.source})));
+          result.dataProbes.push({label:path,url,ok:true,statusMsg:"200 OK",arrayCount:body.monster.length});
+        } catch (error) {
+          result.dataProbes.push({label:path,url,ok:false,statusMsg:String(error)});
+        }
+      }
       return result;
     }
     if (!parsed || !Array.isArray(parsed.x)) {
@@ -1050,7 +1075,7 @@ function renderPreviewHtml(p: PreviewResult, lang: Language): string {
     <div class="lib-preview-body">
       <div class="lib-preview-status ok">
         ${ICONS.checkCircle} ${escapeAttr(p.indexUrl)}
-        <span class="lib-preview-count">· ${p.entryCount} ${lang === "zh" ? "条目" : "entries"} · ${p.sourceMap.length} ${lang === "zh" ? "来源" : "sources"}</span>
+        <span class="lib-preview-count">· ${p.entryCount} ${p.sampled ? (lang === "zh" ? "抽样怪物（非总数）" : "sampled monsters (not the total)") : (lang === "zh" ? "条目" : "entries")} · ${p.sourceMap.length} ${lang === "zh" ? "来源" : "sources"}</span>
       </div>
       <div class="lib-preview-section">
         <div class="lib-preview-h">${lang === "zh" ? "来源映射 (m.s)" : "Source map (m.s)"}</div>
@@ -1104,6 +1129,7 @@ function libraryRowHtml(lib: LibraryConfig, lang: Language, isGM: boolean): stri
         <input class="lib-url" data-field="baseUrl" data-settings-draft="${escapeAttr(JSON.stringify([lib.id, "baseUrl"]))}" type="text" value="${escapeAttr(lib.baseUrl)}" ${editable ? "" : "readonly"} ${disable}
           placeholder="https://example.com">
       </div>
+      ${lib.indexFormat === "monster-source-index" ? `<p class="lib-row-hint">${lang === "zh" ? "独立第三方怪物库，供图鉴、搜索和怪物详情使用；开启后按需下载资料包。" : "Separate third-party monster library for the bestiary, search and monster details. Enable it to load its collections."}</p>` : ""}
       <label class="lib-row-language">${lang === "zh" ? "资料语言" : "Content language"}
         <select data-field="language" data-segmented ${disable} aria-label="${lang === "zh" ? "资料语言" : "Content language"}">
           ${([['auto', lang === 'zh' ? '混合 / 未指定' : 'Mixed / unspecified'], ['zh', lang === 'zh' ? '中文' : 'Chinese'], ['en', lang === 'zh' ? '英文' : 'English']] as const).map(([value, label]) => `<option value="${value}" ${getLibraryLanguage(lib) === value ? 'selected' : ''}>${label}</option>`).join('')}
@@ -1587,6 +1613,12 @@ function wireLibrariesBody(root: HTMLElement): void {
         const res = await fetch(`${cur.baseUrl.replace(/\/+$/, "")}/${indexPath}`, { cache: "no-cache" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const idx = await res.json();
+        if (cur.indexFormat === "monster-source-index") {
+          const properties = await fetch(`${cur.baseUrl.replace(/\/+$/, "")}/_generated/index-props.json`, {cache:"no-cache"});
+          if (!properties.ok) throw Error(`Monster property index HTTP ${properties.status}`);
+          const files = monsterSourceFiles(idx, await properties.json());
+          codes = Object.keys(files).sort();
+        } else {
         // Source map: { [code]: id }. We list all codes, but rank by
         // entry count so the most-used sources are at the top.
         const map = (idx?.m?.s ?? {}) as Record<string, number>;
@@ -1604,6 +1636,7 @@ function wireLibrariesBody(root: HTMLElement): void {
           }
         }
         codes.sort((a, b) => (entryCounts.get(b) ?? 0) - (entryCounts.get(a) ?? 0) || a.localeCompare(b));
+        }
       } catch (e: any) {
         sourcesBox.innerHTML = `<div class="lib-sources-err">${lang === "zh" ? "加载失败：" : "Failed: "}${escapeAttr(e?.message ?? String(e))}</div>`;
         return;
@@ -1627,7 +1660,7 @@ function wireLibrariesBody(root: HTMLElement): void {
           <label class="lib-source-row">
             <input type="checkbox" class="lib-source-cb" data-code="${escapeAttr(code)}" ${enabled ? "checked" : ""} ${cbDisable}>
             <span class="lib-source-code">${escapeAttr(code)}</span>
-            <span class="lib-source-count">${count}</span>
+            <span class="lib-source-count">${cur.indexFormat ? "" : count}</span>
           </label>
         `;
       }).join("");
@@ -1684,7 +1717,7 @@ function wireLibrariesBody(root: HTMLElement): void {
         getLocalLang()
       );
       try {
-        const result = await probeLibrary(cur.baseUrl);
+        const result = await probeLibrary(cur.baseUrl, cur);
         previewBox.innerHTML = renderPreviewHtml(result, getLocalLang());
       } catch (e: any) {
         previewBox.innerHTML = `<div class="lib-preview-body"><pre class="lib-preview-err">${escapeAttr(e?.message || String(e))}</pre></div>`;

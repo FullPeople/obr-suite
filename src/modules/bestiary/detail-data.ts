@@ -6,6 +6,7 @@ import { createContentRequests } from "../../utils/contentRequests";
 const fetchContentJson=createContentRequests(2);
 import { makeSlug, resolveCopy, copyModTargetsAvailable } from "./data";
 import { annotateMonster, canonicalMonsterKey, monsterFingerprint } from "./provenance";
+import { monsterSourceFiles } from "../../utils/monsterSourceIndex";
 
 let context = "";
 let generation = 0;
@@ -24,9 +25,16 @@ async function read(source: ContentSource, file: string): Promise<any | null> {
   const own = generation;
   const signal = controller.signal;
   const request = (async () => {
-    const response = await fetchContentJson(`${source.base}/data/bestiary/${file}`, { cache: "no-cache", signal });
+    const sourceIndexed = source.indexFormat === "monster-source-index";
+    const path = sourceIndexed ? (file === "index.json" ? source.indexPath : file) : `data/bestiary/${file}`;
+    const response = await fetchContentJson(`${source.base}/${path}`, { cache: "no-cache", signal });
     if (!response.ok) { if (response.status === 404) return null; throw new Error(`HTTP ${response.status}`); }
-    const body = await response.json();
+    let body = await response.json();
+    if (sourceIndexed && file === "index.json") {
+      const properties = await fetchContentJson(`${source.base}/_generated/index-props.json`, { cache: "no-cache", signal });
+      if (!properties.ok) throw Error(`Monster property index HTTP ${properties.status}`);
+      body = monsterSourceFiles(body, await properties.json());
+    }
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Invalid monster data");
     if (own !== generation) throw new DOMException("Content changed", "AbortError");
     files.set(key, body); return body;
@@ -62,7 +70,7 @@ async function fromSource(source: ContentSource, code: string, names: string[], 
   const nextStack = new Set(stack).add(identity);
   const index = await read(source, "index.json");
   const indexed = Object.entries(index ?? {}).find(([key, value]) => key.toLowerCase() === code.toLowerCase() && typeof value === "string")?.[1];
-  const candidates = indexed ? [String(indexed)] : [...new Set([code.toLowerCase(), code, code.toUpperCase()].map((value) => `bestiary-${value}.json`))];
+  const candidates = indexed ? [String(indexed)] : source.indexFormat ? [] : [...new Set([code.toLowerCase(), code, code.toUpperCase()].map((value) => `bestiary-${value}.json`))];
   for (const file of candidates) {
     const body = await read(source, file); if (!body) continue;
     if (!Array.isArray(body.monster)) throw new Error("Invalid monster list");
