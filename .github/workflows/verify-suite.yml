@@ -55,6 +55,13 @@ jobs:
         run: |
           node tools/bestiary-homebrew-selftest.mjs
           node tools/bestiary-dependency-selftest.mjs
+      - name: Monster source controls in actual built workbench settings
+        env:
+          WORKBENCH_PANEL_ONLY: settings
+          WORKBENCH_PANEL_OUT: .local-evidence/monster-settings/panels
+        run: |
+          node tools/build-workbench-panels.mjs
+          node tools/workbench-monster-library-settings-selftest.mjs
       - name: Grid-box anchoring and cross-scene picker regression
         run: |
           npm run test:bubbles
