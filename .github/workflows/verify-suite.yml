@@ -72,6 +72,8 @@ jobs:
         run: node tools/local-content-cache-selftest.mjs
       - name: Local class catalogue identities, cached imports and actual search previews
         run: node tools/local-class-catalog-selftest.mjs
+      - name: Local reference categories, templates and saved source identities
+        run: node tools/local-record-catalog-selftest.mjs
       - name: Retired fog context menu
         run: FOG_MENU_EVIDENCE=.local-evidence/fog-menu node tools/fog-menu-retirement-selftest.mjs
       - name: Typecheck and build stable host with paired card viewer

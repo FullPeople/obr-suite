@@ -23,6 +23,7 @@
 
 import { idbGet, idbPut, idbUpdate, idbGetAll, idbClear } from "./idbStore";
 import { isLocalClassKind, localClassRows, localClassDetails, type LocalClassReference } from "./localClassCatalog";
+import { LOCAL_RECORD_CATEGORIES, isLocalRecordKind, localRecordRows, localRecordDetails, type LocalRecordKind, type LocalRecordReference } from "./localRecordCatalog";
 
 /** Broadcast id used to invalidate search/bestiary in-memory caches
  *  whenever the local content set changes. Listeners (search/page,
@@ -67,6 +68,7 @@ const LEGACY_LS_FILE_PREFIX = "obr-suite/local-content/file:";
 /** Top-level kind of a single imported file. Maps to the JSON top-level
  *  key (`"monster"` → bestiary, `"spell"` → spells, etc.). */
 export type LocalKind =
+  | LocalRecordKind
   | "monster"
   | "spell"
   | "item"
@@ -124,6 +126,7 @@ const KIND_TO_CATEGORY: Record<LocalKind, number> = {
   subclass: 40,
   classFeature: 30,
   subclassFeature: 41,
+  ...LOCAL_RECORD_CATEGORIES,
 };
 
 /** Each imported file = one row in the user's "本地内容" list. */
@@ -410,6 +413,7 @@ export interface SearchIndexEntry {
   // rather than over the wire.
   __local?: true;
   localClass?: LocalClassReference;
+  localRecord?: LocalRecordReference;
 }
 export interface SearchIndexFile {
   x: SearchIndexEntry[];
@@ -435,6 +439,14 @@ export function getLocalIndexFile(): SearchIndexFile {
       const cat = KIND_TO_CATEGORY[k];
       if (typeof cat !== "number") continue;
       const entries = getLocalFileEntries(meta.id, k);
+      if (isLocalRecordKind(k)) {
+        for (const row of localRecordRows(meta.id, body).filter(row => row.ref.kind === k)) {
+          if (!sourceNumByCode.has(row.source)) { sourceNumByCode.set(row.source, nextSourceNum++); out.m.s[row.source] = sourceNumByCode.get(row.source)!; }
+          const suffix = row.ordinal ? ` · ${row.ordinal}` : "";
+          out.x.push({id:nextId++,c:cat,n:row.english+suffix,cn:row.name+suffix,s:row.source,u:`local-record-${meta.id}-${row.ref.kind}-${row.ref.digest}`,__local:true,localRecord:row.ref});
+        }
+        continue;
+      }
       if (isLocalClassKind(k)) {
         for (const row of localClassRows(meta.id, body).filter(row => row.ref.kind === k)) {
           const source = String(row.record.source ?? "HOMEBREW").trim() || "HOMEBREW";
@@ -476,6 +488,12 @@ export function getLocalClassData(ref: LocalClassReference, language: "zh" | "en
   if (!readIndex().files.some(file => file.id === ref.fileId)) return null;
   const body = readFile(ref.fileId);
   return body ? localClassDetails(ref, body, language) : null;
+}
+
+export function getLocalRecordData(ref: LocalRecordReference, language: "zh" | "en"): any | null {
+  if (!readIndex().files.some(file => file.id === ref.fileId)) return null;
+  const body = readFile(ref.fileId);
+  return body ? localRecordDetails(ref, body, language) : null;
 }
 
 /** Per-entry data lookup: given a category key (from CATEGORY[c].data.key
