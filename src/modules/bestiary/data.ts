@@ -268,6 +268,15 @@ export async function loadMonsterBySlug(slug:string):Promise<any|null>{
 // monster (same or different source), with `_mod` describing per-field edits.
 // We implement the most common mod modes: replaceArr / insertArr / appendArr /
 // prependArr / removeArr. This is enough for stats + action sections to render.
+function copyArrayEntryMatches(entry: any, needle: any): boolean {
+  if (typeof needle === "string" || typeof needle === "number" || typeof needle === "boolean") {
+    return entry === needle || typeof needle === "string" && !!entry &&
+      typeof entry === "object" && (entry.name === needle || entry.ENG_name === needle);
+  }
+  if (!entry || typeof entry !== "object" || !needle || typeof needle !== "object") return false;
+  return typeof needle.name === "string" && entry.name === needle.name ||
+    typeof needle.ENG_name === "string" && entry.ENG_name === needle.ENG_name;
+}
 function applyMod(target: any, field: string, spec: any) {
   if (!spec || typeof spec !== "object") return;
   const mode = spec.mode;
@@ -275,15 +284,7 @@ function applyMod(target: any, field: string, spec: any) {
   if (mode === "replaceArr") {
     if (!Array.isArray(target[field])) return;
     const needle = spec.replace;
-    const idx = target[field].findIndex((x: any) => {
-      if (typeof needle === "string") {
-        return x && (x.name === needle || x.ENG_name === needle);
-      }
-      if (needle && typeof needle === "object") {
-        return x && (x.name === needle.name || x.ENG_name === needle.ENG_name);
-      }
-      return false;
-    });
+    const idx = target[field].findIndex((entry: any) => copyArrayEntryMatches(entry, needle));
     if (idx !== -1) target[field].splice(idx, 1, ...items);
   } else if (mode === "insertArr") {
     if (!Array.isArray(target[field])) target[field] = [];
@@ -299,7 +300,7 @@ function applyMod(target: any, field: string, spec: any) {
     if (!Array.isArray(target[field])) return;
     const names = Array.isArray(spec.names) ? spec.names : (spec.names ? [spec.names] : []);
     target[field] = target[field].filter(
-      (x: any) => !names.some((n: any) => x && (x.name === n || x.ENG_name === n))
+      (entry: any) => !names.some((name: any) => copyArrayEntryMatches(entry, name))
     );
   }
   // Other modes (addSpells, scalarMultProp, etc.) intentionally not handled —
@@ -364,13 +365,11 @@ export function copyModTargetsAvailable(child: any, parent: any): boolean {
       const entries = Array.isArray(draft[field]) ? draft[field] : [];
       if (spec?.mode === "replaceArr") {
         const needle = spec.replace;
-        if (!entries.some((entry: any) => typeof needle === "string"
-          ? entry?.name === needle || entry?.ENG_name === needle
-          : needle && (entry?.name === needle.name || entry?.ENG_name === needle.ENG_name))) return false;
+        if (!entries.some((entry: any) => copyArrayEntryMatches(entry, needle))) return false;
       }
       if (spec?.mode === "removeArr") {
         const names = Array.isArray(spec.names) ? spec.names : spec.names ? [spec.names] : [];
-        if (!names.every((name: string) => entries.some((entry: any) => entry?.name === name || entry?.ENG_name === name))) return false;
+        if (!names.every((name: string) => entries.some((entry: any) => copyArrayEntryMatches(entry, name)))) return false;
       }
       applyMod(draft, field, spec);
     }
