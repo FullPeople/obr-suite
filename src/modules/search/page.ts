@@ -21,11 +21,18 @@ import { applyI18nDom } from "../../i18n";
 import {
   getLocalIndexFile,
   getLocalDataByKeySource,
+  getLocalClassData,
+  getLocalRecordData,
+  getLocalBookData,
   getLocalContentSignature,
   initLocalContent,
   forceReloadLocalContent,
   BC_LOCAL_CONTENT_CHANGED,
 } from "../../utils/localContent";
+import type { LocalClassReference } from "../../utils/localClassCatalog";
+import type { LocalRecordReference } from "../../utils/localRecordCatalog";
+import type {LocalBookReference} from '../../utils/localBookCatalog';
+import {renderLocalBook,bindLocalBookControls} from './localBookPreview';
 import { groupSpellcastingByDisplay } from "../bestiary/spellcasting-display";
 import { collectionMonsterSearchIndex, safeCollectionPath } from "../../utils/monsterSourceIndex";
 import { fetchLocalizedMonster } from "../bestiary/detail-data";
@@ -76,6 +83,10 @@ interface Entry {
   contentLanguage?: ContentLanguage;
   local?: boolean;
   collectionPath?: string;
+  __local?: boolean;
+  localClass?: LocalClassReference;
+  localRecord?: LocalRecordReference;
+  localBook?: LocalBookReference;
 }
 interface IndexFile {
   x: Entry[];
@@ -174,6 +185,8 @@ const CATEGORY: Record<number, CategoryInfo> = {
   55: { label: "地点" },
   56: { label: "物品集合", data: { file: "items.json", key: "itemGroup" } },
   57: { label: "物品", data: { file: "items.json", key: "item" } },
+  1001: { label: "设施" },
+  1002: { label: "物件" },
 };
 // English labels for the result-category chips (lang === "en"). Keyed by
 // the same numeric category code as CATEGORY. categoryInfo() swaps these
@@ -193,6 +206,7 @@ const CATEGORY_LABEL_EN: Record<number, string> = {
   48: "Recipe", 49: "Rule", 50: "Skill", 51: "Sense", 52: "Deck",
   53: "Card", 54: "Weapon Mastery", 55: "Place", 56: "Item Group",
   57: "Item", 58: "Weapon Property",
+  1001: "Facility", 1002: "Object",
 };
 function categoryInfo(c: number): CategoryInfo {
   const info = CATEGORY[c] ?? { label: `?${c}` };
@@ -213,7 +227,41 @@ function srcCode(s: Entry["s"]): string {
 }
 function sourceLabel(code: string, entry?: Entry): string {
   const name = sourceNames.get(`${entry?.library}|${code.toUpperCase()}`);
-  return name ? `${code} (${name})` : code;
+  const label = name ? `${code} (${name})` : code;
+  const ref = entry?.localClass || entry?.localRecord || entry?.localBook;
+  return ref ? `${label} · ${ref.edition === "unknown" ? tr("版本未标明", "Edition unspecified") : ref.edition}` : label;
+}
+function entryCategory(entry: Entry): CategoryInfo {
+  const info = categoryInfo(entry.c), kind = entry.localRecord?.kind;
+  return kind === "magicvariant" ? {...info, label: tr("魔法物品模板", "Magic item template")}
+    : kind === "baseitem" ? {...info, label: tr("基础物品", "Base item")} : info;
+}
+
+function searchMergeKey(entry: Entry, source: string): string {
+  if(entry.localBook)return JSON.stringify(['local-book',entry.localBook.fileId,entry.localBook.kind,entry.localBook.digest]);
+  if (entry.localRecord) return JSON.stringify(["local-record",entry.localRecord.fileId,entry.localRecord.kind,entry.localRecord.digest]);
+  return entry.localClass ? JSON.stringify(["local-class", entry.localClass.fileId, entry.localClass.kind, entry.localClass.digest])
+    : `${(entry.n || entry.cn || "").trim().toLowerCase()}|${source.toLowerCase()}|${entry.c ?? ""}`;
+}
+
+function resolveSourceCode(entry: Entry, index: IndexFile): string {
+  if (entry.s == null) return "";
+  if (typeof entry.s === "string") return entry.s.toLowerCase();
+  for (const [code, id] of Object.entries(index.m?.s || {})) if (id === entry.s) return code.toLowerCase();
+  return String(entry.s).toLowerCase();
+}
+
+function rebuildCachedLocalIndex(cached: IndexFile): IndexFile {
+  const local = getLocalIndexFile();
+  const out: IndexFile = { x: [], m: { s: { ...cached.m?.s, ...local.m.s } } };
+  const seen = new Set<string>();
+  const current = local.x.map(entry => ({ ...entry, u: entry.u || "", local: true, contentLanguage: "auto" as const }));
+  for (const entry of [...current, ...cached.x.filter(entry => !entry.local && !entry.__local)]) {
+    const key = searchMergeKey(entry, resolveSourceCode(entry, cached));
+    if (seen.has(key)) continue;
+    seen.add(key); out.x.push(entry);
+  }
+  return out;
 }
 
 // --- Index + books fetch & cache ---
@@ -249,7 +297,9 @@ async function loadIndex(): Promise<IndexFile> {
       if (raw) {
         const parsed = JSON.parse(raw) as { ts: number; data: IndexFile };
         if (Date.now() - parsed.ts < CACHE_TTL_MS && parsed.data?.x?.length) {
-          indexCache = parsed.data;
+          // Keep usable remote/offline results, but derive local rows from
+          // the current raw store, including packs imported by older versions.
+          indexCache = rebuildCachedLocalIndex(parsed.data);
           indexRetryAt = Infinity;
           buildSourceMap(indexCache);
           return indexCache;
@@ -354,28 +404,17 @@ async function loadIndex(): Promise<IndexFile> {
     //   unique source identity, and the display path's
     //   `srcCode(e.s)` short-circuits on the string branch — the
     //   stale `sourceById` numeric map is never consulted again.
-    const resolveSourceCode = (e: Entry, lib: IndexFile): string => {
-      if (e.s == null) return "";
-      if (typeof e.s === "string") return e.s.toLowerCase();
-      const map = lib.m?.s || {};
-      for (const [code, id] of Object.entries(map)) {
-        if (id === e.s) return code.toLowerCase();
-      }
-      return String(e.s).toLowerCase();
-    };
     const seen = new Set<string>();
     const mergedByKey = new Map<string, Entry>();
     for (const { idx, cfg } of allValid) {
       for (const e of idx.x) {
-        const cn = (e.cn || "").trim().toLowerCase();
-        const n = (e.n || "").trim().toLowerCase();
         const src = resolveSourceCode(e, idx);
         // Per-library source blacklist (e.g. user disabled
         // BOOKOFEBONTIDES inside the partnered library). Apply BEFORE
         // dedupe so an entry available in another library where the
         // source is allowed still gets through under that library.
         if (cfg.disabledSources.size > 0 && src && cfg.disabledSources.has(src)) continue;
-        const key = `${n || cn}|${src}|${e.c ?? ""}`;
+        const key = searchMergeKey(e, src);
         if (seen.has(key)) {
           // Keep alternate query names even when their translated body loses
           // priority. Existing character-card chips may still search in Chinese.
@@ -594,7 +633,9 @@ function search(query: string, idx: IndexFile, opts: FilterOpts): Entry[] {
   for (let i = 0; i < idx.x.length; i++) {
     const e = idx.x[i];
     const code = keyCode[i];
-    if (!passesVersion(code, opts.dataVersion)) continue;
+    const profile = e.localClass || e.localRecord || e.localBook;
+    if (profile && profile.edition !== "unknown" && opts.dataVersion !== "all" && profile.edition !== opts.dataVersion) continue;
+    if ((!profile || profile.edition === "unknown") && !passesVersion(code, opts.dataVersion)) continue;
 
     if ((e.c === 1 || e.c === 46) && !opts.isGM && !opts.allowPlayerMonsters) {
       continue;
@@ -796,6 +837,9 @@ function matchesEntry(entry: Entry, data: DataEntry): boolean {
 }
 
 async function findEntryData(entry: Entry): Promise<DataEntry | null> {
+  if(entry.localBook)return getLocalBookData(entry.localBook,getLocalLang());
+  if (entry.localRecord) return getLocalRecordData(entry.localRecord, getLocalLang());
+  if (entry.localClass) return getLocalClassData(entry.localClass, getLocalLang());
   const generation = contentGeneration;
   const cat = categoryInfo(entry.c);
   if (!cat.data) return null;
@@ -1546,14 +1590,15 @@ function renderResults(hits: Entry[], q: string) {
   countEl.textContent = String(hits.length);
   const parts: string[] = [];
   hits.forEach((e, idx) => {
-    const cat = categoryInfo(e.c);
+    const cat = entryCategory(e);
     const display = !e.local && getLocalLang() === "en" ? e.n || e.cn || "" : e.cn || e.n;
     // Retain translated aliases in the search index without adding a second
     // language to the English result surface. Authored local titles stay intact.
     const alternate = getLocalLang() === "en" ? "" : e.n;
     const sub = alternate && alternate !== display ? alternate : "";
     const code = srcCode(e.s).toUpperCase();
-    const edClass =
+    const profile = e.localClass || e.localRecord;
+    const edClass = profile && profile.edition !== "unknown" ? `ed-${profile.edition}` :
       CORE_2014.has(code)
         ? "ed-2014"
         : CORE_2024.has(code)
@@ -1566,7 +1611,7 @@ function renderResults(hits: Entry[], q: string) {
           <span class="name">${highlight(display, q)}</span>
           ${sub ? `<span class="sub">${highlight(sub, q)}</span>` : ""}
         </span>
-        <span class="src ${edClass}">${escapeHtml(code)}</span>
+        <span class="src ${edClass}">${escapeHtml(profile ? `${code} · ${profile.edition === "unknown" ? tr("版本未标明", "Edition unspecified") : profile.edition}` : code)}</span>
       </div>`
     );
   });
@@ -1669,7 +1714,7 @@ async function sendMissingReport(
 
 async function renderPreviewFor(entry: Entry) {
   const isCurrent = previewRequests.next();
-  const cat = categoryInfo(entry.c);
+  const cat = entryCategory(entry);
   const display = !entry.local && getLocalLang() === "en" ? entry.n || entry.cn || "" : entry.cn || entry.n;
   const code = srcCode(entry.s).toUpperCase();
   const page = entry.p ? ` · p.${entry.p}` : "";
@@ -1709,7 +1754,7 @@ async function renderPreviewFor(entry: Entry) {
     reportBtn.addEventListener("click", () => void sendMissingReport(entry, bodyEl, reportBtn));
   }
 
-  if (!cat.data) {
+  if (!cat.data && !entry.localRecord && !entry.localClass && !entry.localBook) {
     bodyEl.innerHTML = `<div class="prev-empty">${tr("该分类暂无内置详情", "No built-in details for this category")}<br><span class="prev-empty-sub">${escapeHtml(cat.label)} · ${tr("仅显示名称与来源", "Name and source only")}</span></div>`;
     return;
   }
@@ -1755,7 +1800,9 @@ async function renderPreviewFor(entry: Entry) {
     if (isCurrent() && metaEl.isConnected) metaEl.textContent = `${cat.label} · ${sourceLabel(code, origin)}${page}${originLabel}`;
   });
   const c = entry.c;
-  if (c === 1 || c === 46) {
+  if(entry.localBook){
+    bodyEl.innerHTML=renderLocalBook(data,{escape:escapeHtml,rich:richTags,tr,monster:record=>renderMonster(entry,record),metadata:record=>entry.c===13?renderAdventure(entry,record):renderBook(entry,record)});bindLocalBookControls(bodyEl);
+  } else if (c === 1 || c === 46) {
     bodyEl.innerHTML = renderMonster(entry, data);
   } else if (c === 2) {
     bodyEl.innerHTML = chipsFor(entry, data) + renderSpell(entry, data);

@@ -1207,7 +1207,7 @@ function renderRemoteSubsBlock(lang: Language): string {
     <div class="lib-local-actions" data-settings-line style="gap:6px;flex-wrap:wrap">
       <input class="lib-sub-input" data-settings-draft="subscription-url" data-settings-local type="url" placeholder="${lang === "zh" ? "https://example.com/homebrew.json" : "https://example.com/homebrew.json"}" style="flex:1 1 240px;min-width:180px;padding:4px 6px">
       <button class="lib-sub-add" type="button">${lang === "zh" ? "+ 添加订阅" : "+ Add subscription"}</button>
-      <button class="lib-sub-kiwee" type="button" title="${lang === "zh" ? "从 homebrew.kiwee.top 拉取中文社区精选自制内容索引（约 26 个包），逐一加入订阅。已经订阅的会跳过。" : "Pull the curated Chinese-community homebrew index from homebrew.kiwee.top (~26 packs) and subscribe to each. Already-subscribed URLs are skipped."}">${lang === "zh" ? "+ kiwee 推荐自制" : "+ kiwee curated"}</button>
+      <button class="lib-sub-kiwee" type="button" title="${lang === "zh" ? "从 homebrew.kiwee.top 读取最新中文社区自制内容清单，逐一加入订阅。已订阅的地址会跳过。" : "Read the current Chinese-community homebrew list from homebrew.kiwee.top and subscribe to each pack. Already-subscribed URLs are skipped."}">${lang === "zh" ? "+ kiwee 推荐自制" : "+ kiwee curated"}</button>
       ${subs.length > 0 ? `<button class="lib-sub-refresh-all" type="button">${ICONS.refresh} ${lang === "zh" ? "刷新全部" : "Refresh all"}</button>` : ""}
     </div>
   ` : `<p class="role-notice">${lang === "zh" ? "玩家端只读 · 由 DM 设置" : "Read-only · Set by DM"}</p>`;
@@ -1305,7 +1305,7 @@ const KIND_LABELS: Record<Language, Record<string, string>> = {
     deity: "神祇", language: "语言", psionic: "灵能", reward: "奖励",
     variantrule: "副规则", trap: "陷阱", hazard: "灾害", cult: "教派",
     boon: "恩惠", disease: "疾病", table: "表格", action: "动作",
-    recipe: "食谱", deck: "牌组",
+    recipe: "食谱", deck: "牌组", class: "职业", subclass: "子职业", classFeature: "职业能力", subclassFeature: "子职能力", baseitem: "基础物品", charoption: "角色选项", facility: "设施", magicvariant: "魔法物品模板", object: "物件", book:"书籍", adventure:"冒险",
   },
   en: {
     monster: "Monster", spell: "Spell", item: "Item", feat: "Feat", race: "Race",
@@ -1313,7 +1313,7 @@ const KIND_LABELS: Record<Language, Record<string, string>> = {
     vehicle: "Vehicle", deity: "Deity", language: "Language", psionic: "Psionic",
     reward: "Reward", variantrule: "Rule", trap: "Trap", hazard: "Hazard",
     cult: "Cult", boon: "Boon", disease: "Disease", table: "Table",
-    action: "Action", recipe: "Recipe", deck: "Deck",
+    action: "Action", recipe: "Recipe", deck: "Deck", class: "Class", subclass: "Subclass", classFeature: "Class feature", subclassFeature: "Subclass feature", baseitem: "Base item", charoption: "Character option", facility: "Facility", magicvariant: "Magic item template", object: "Object", book:"Book", adventure:"Adventure",
   },
 };
 
