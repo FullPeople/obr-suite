@@ -80,6 +80,43 @@ export async function idbPut(key: string, value: unknown): Promise<void> {
   });
 }
 
+/** Read metadata and commit its dependent file/index changes in one transaction. */
+export async function idbUpdate<T>(keys: readonly string[], edit: (values: unknown[]) => {
+  result: T;
+  put?: ReadonlyArray<readonly [string, unknown]>;
+  delete?: readonly string[];
+}): Promise<T> {
+  const db = await openDb();
+  return new Promise<T>((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite"), store = tx.objectStore(STORE);
+    const values: unknown[] = new Array(keys.length);
+    let remaining = keys.length, result: T, failure: unknown;
+    tx.oncomplete = () => resolve(result);
+    tx.onerror = () => { failure ??= tx.error; };
+    tx.onabort = () => reject(failure ?? tx.error ?? new Error("IndexedDB update aborted"));
+    const apply = () => {
+      try {
+        const changes = edit(values);
+        result = changes.result;
+        for (const [key, value] of changes.put ?? []) store.put(value, key);
+        for (const key of changes.delete ?? []) store.delete(key);
+      } catch (error) {
+        failure = error;
+        // A synchronous put failure does not automatically abort earlier requests.
+        try { tx.abort(); } catch { reject(error); }
+      }
+    };
+    if (!remaining) apply();
+    else keys.forEach((key, index) => {
+      const request = store.get(key);
+      request.onsuccess = () => {
+        values[index] = request.result;
+        if (--remaining === 0) apply();
+      };
+    });
+  });
+}
+
 /** Delete a single key. Resolves whether the key existed or not. */
 export async function idbDelete(key: string): Promise<void> {
   try {

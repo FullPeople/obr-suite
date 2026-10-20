@@ -21,7 +21,7 @@
 // localStorage entries. Re-runs of init are idempotent — if IDB has
 // data, the migration step is skipped.
 
-import { idbGet, idbPut, idbDelete, idbGetAll, idbClear } from "./idbStore";
+import { idbGet, idbPut, idbUpdate, idbGetAll, idbClear } from "./idbStore";
 
 /** Broadcast id used to invalidate search/bestiary in-memory caches
  *  whenever the local content set changes. Listeners (search/page,
@@ -300,42 +300,37 @@ function readIndex(): LocalIndexState {
   return memIndex;
 }
 
-async function writeIndex(state: LocalIndexState): Promise<void> {
-  memIndex = state;
-  try { await idbPut(IDB_INDEX_KEY, state); }
-  catch (e) { console.warn("[obr-suite/localContent] writeIndex failed", e); }
-}
-
 function readFile(id: string): any | null {
   return memFiles.has(id) ? memFiles.get(id) : null;
 }
 
-async function writeFile(id: string, content: any): Promise<void> {
-  memFiles.set(id, content);
-  try {
-    await idbPut(IDB_FILE_PREFIX + id, content);
-  } catch (e) {
-    // IDB quota or open failure. Roll back the in-memory entry so
-    // the index stays consistent with what's actually persisted.
-    memFiles.delete(id);
-    console.error("[obr-suite/localContent] writeFile failed", e);
-    throw e;
-  }
+function storedIndex(value: unknown): LocalIndexState {
+  if (value == null) return { files: [] };
+  if (typeof value === "object" && Array.isArray((value as LocalIndexState).files)) return value as LocalIndexState;
+  throw new Error("本地资料索引格式异常");
 }
 
-async function deleteFile(id: string): Promise<void> {
-  memFiles.delete(id);
-  try { await idbDelete(IDB_FILE_PREFIX + id); } catch {}
+function storedSubs(value: unknown): RemoteSubsState {
+  if (value == null) return { list: [] };
+  if (typeof value === "object" && Array.isArray((value as RemoteSubsState).list)) return value as RemoteSubsState;
+  throw new Error("资料订阅索引格式异常");
+}
+
+async function replaceImportedFile(meta: LocalFileMeta, content: unknown): Promise<void> {
+  const saved = await idbUpdate([IDB_INDEX_KEY], ([value]) => {
+    const state = storedIndex(value);
+    const stale = state.files.filter(row => row.filename === meta.filename && row.kind === meta.kind);
+    const ids = new Set(stale.map(row => row.id));
+    const index = { ...state, files: [...state.files.filter(row => !ids.has(row.id)), meta] };
+    return { result: { index, ids }, put: [[IDB_FILE_PREFIX + meta.id, content], [IDB_INDEX_KEY, index]] as const, delete: [...ids].filter(id => id !== meta.id).map(id => IDB_FILE_PREFIX + id) };
+  });
+  for (const id of saved.ids) memFiles.delete(id);
+  memFiles.set(meta.id, content);
+  memIndex = saved.index;
 }
 
 function readSubs(): RemoteSubsState {
   return memSubs;
-}
-
-async function writeSubs(state: RemoteSubsState): Promise<void> {
-  memSubs = state;
-  try { await idbPut(IDB_SUBS_KEY, state); }
-  catch (e) { console.warn("[obr-suite/localContent] writeSubs failed", e); }
 }
 
 /** Public read: ordered list of imported files (newest first). */
@@ -546,26 +541,8 @@ export async function importLocalJson(filename: string, jsonText: string): Promi
   // two entries — the bestiary listing showed both, and bound
   // tokens kept showing the older monster data because slug lookups
   // hit whichever entry rawBySlug saw last. Now we look for a
-  // matching filename + primary kind and delete it first.
-  const existing = readIndex().files.filter(
-    (f) => f.filename === filename && f.kind === primaryKind,
-  );
-  for (const stale of existing) {
-    await deleteFile(stale.id);
-  }
-  if (existing.length > 0) {
-    const state = readIndex();
-    state.files = state.files.filter(
-      (f) => !(f.filename === filename && f.kind === primaryKind),
-    );
-    await writeIndex(state);
-  }
+  // matching filename + primary kind and replace it atomically.
   const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    await writeFile(id, parsed);
-  } catch (e: any) {
-    return { ok: false, error: `存储失败 —— IndexedDB 写入异常：${e?.message || String(e)}` };
-  }
   // Count = sum across every recognised kind so multi-kind packs
   // (e.g. kiwee homebrew with `creature` + `spell` + `subclassFeature`)
   // show a meaningful "N entries" badge in the UI.
@@ -581,9 +558,8 @@ export async function importLocalJson(filename: string, jsonText: string): Promi
     count,
     addedAt: Date.now(),
   };
-  const state = readIndex();
-  state.files.push(meta);
-  await writeIndex(state);
+  try { await replaceImportedFile(meta, parsed); }
+  catch (e: any) { return { ok: false, error: `存储失败 —— IndexedDB 写入异常：${e?.message || String(e)}` }; }
   return { ok: true, meta };
 }
 
@@ -648,25 +624,7 @@ export async function importLocalMd(filename: string, mdText: string): Promise<I
   if (sections.legendary?.length) monster.legendary = sections.legendary;
   const synth = { monster: [monster] };
   // 2026-05-12 — same replace-on-duplicate behaviour as importLocalJson.
-  const existing = readIndex().files.filter(
-    (f) => f.filename === filename && f.kind === "monster",
-  );
-  for (const stale of existing) {
-    await deleteFile(stale.id);
-  }
-  if (existing.length > 0) {
-    const state = readIndex();
-    state.files = state.files.filter(
-      (f) => !(f.filename === filename && f.kind === "monster"),
-    );
-    await writeIndex(state);
-  }
   const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    await writeFile(id, synth);
-  } catch (e: any) {
-    return { ok: false, error: `存储失败 —— IndexedDB 写入异常：${e?.message || String(e)}` };
-  }
   const meta: LocalFileMeta = {
     id,
     filename,
@@ -674,9 +632,8 @@ export async function importLocalMd(filename: string, mdText: string): Promise<I
     count: 1,
     addedAt: Date.now(),
   };
-  const state = readIndex();
-  state.files.push(meta);
-  await writeIndex(state);
+  try { await replaceImportedFile(meta, synth); }
+  catch (e: any) { return { ok: false, error: `存储失败 —— IndexedDB 写入异常：${e?.message || String(e)}` }; }
   return { ok: true, meta };
 }
 
@@ -791,10 +748,12 @@ function parseMdBodySections(body: string): {
 
 export async function removeLocalFile(id: string): Promise<void> {
   await initLocalContent();
-  const state = readIndex();
-  state.files = state.files.filter((f) => f.id !== id);
-  await writeIndex(state);
-  await deleteFile(id);
+  const state = await idbUpdate([IDB_INDEX_KEY], ([value]) => {
+    const old = storedIndex(value), index = { ...old, files: old.files.filter(row => row.id !== id) };
+    return { result: index, put: [[IDB_INDEX_KEY, index]] as const, delete: [IDB_FILE_PREFIX + id] };
+  });
+  memFiles.delete(id);
+  memIndex = state;
 }
 
 export async function clearAllLocal(): Promise<void> {
@@ -864,14 +823,33 @@ export async function addRemoteSubscription(url: string): Promise<SubscriptionRe
   if (!/^https?:\/\//i.test(cleanUrl)) {
     return { ok: false, error: "URL 必须以 http:// 或 https:// 开头" };
   }
-  const state = readSubs();
-  if (state.list.some((s) => s.url === cleanUrl)) {
-    return { ok: false, error: "该 URL 已经订阅过了 / Already subscribed" };
-  }
-  const sub: RemoteSubscription = { url: cleanUrl, addedAt: Date.now() };
-  state.list.push(sub);
-  await writeSubs(state);
+  try {
+    const saved = await idbUpdate([IDB_SUBS_KEY], ([value]) => {
+      const state = storedSubs(value);
+      if (state.list.some(row => row.url === cleanUrl)) return { result: { state, added: false } };
+      const next = { ...state, list: [...state.list, { url: cleanUrl, addedAt: Date.now() }] };
+      return { result: { state: next, added: true }, put: [[IDB_SUBS_KEY, next]] as const };
+    });
+    memSubs = saved.state;
+    if (!saved.added) return { ok: false, error: "该 URL 已经订阅过了 / Already subscribed" };
+  } catch (e: any) { return { ok: false, error: `订阅保存失败：${e?.message || String(e)}` }; }
   return refreshRemoteSubscription(cleanUrl);
+}
+
+async function recordSubscriptionError(sub: RemoteSubscription, message: string): Promise<RemoteSubscription | undefined> {
+  try {
+    memSubs = await idbUpdate([IDB_SUBS_KEY], ([value]) => {
+      const state = storedSubs(value);
+      if (!state.list.some(row => row.url === sub.url && row.addedAt === sub.addedAt)) return { result: state };
+      const next = { ...state, list: state.list.map(row => row.url === sub.url && row.addedAt === sub.addedAt ? { ...row, lastError: message } : row) };
+      return { result: next, put: [[IDB_SUBS_KEY, next]] as const };
+    });
+  } catch (error) {
+    const local = readSubs().list.find(row => row.url === sub.url && row.addedAt === sub.addedAt);
+    if (local) local.lastError = message;
+    console.warn("[obr-suite/localContent] failed to persist subscription error", error);
+  }
+  return readSubs().list.find(row => row.url === sub.url && row.addedAt === sub.addedAt);
 }
 
 /** Force-fetch a single subscription. Replaces the previous file
@@ -879,8 +857,7 @@ export async function addRemoteSubscription(url: string): Promise<SubscriptionRe
  *  leave the cached file intact and only update `lastError`. */
 export async function refreshRemoteSubscription(url: string): Promise<SubscriptionResult> {
   await initLocalContent();
-  const state = readSubs();
-  const sub = state.list.find((s) => s.url === url);
+  const sub = readSubs().list.find((s) => s.url === url);
   if (!sub) return { ok: false, error: "未找到对应的订阅" };
 
   let text: string;
@@ -889,64 +866,49 @@ export async function refreshRemoteSubscription(url: string): Promise<Subscripti
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     text = await res.text();
   } catch (e: any) {
-    sub.lastError = `网络错误：${e?.message || String(e)}`;
-    await writeSubs(state);
-    return { ok: false, sub, error: sub.lastError };
+    const error = `网络错误：${e?.message || String(e)}`;
+    return { ok: false, sub: await recordSubscriptionError(sub, error), error };
   }
   let parsed: any;
   try {
     parsed = JSON.parse(text);
   } catch (e: any) {
-    sub.lastError = `JSON 解析失败：${e?.message || String(e)}`;
-    await writeSubs(state);
-    return { ok: false, sub, error: sub.lastError };
+    const error = `JSON 解析失败：${e?.message || String(e)}`;
+    return { ok: false, sub: await recordSubscriptionError(sub, error), error };
   }
   const kinds = detectKinds(parsed);
   if (kinds.length === 0) {
-    sub.lastError = "JSON 顶层缺少识别的内容键（应为 monster / spell / item / feat 等）";
-    await writeSubs(state);
-    return { ok: false, sub, error: sub.lastError };
+    const error = "JSON 顶层缺少识别的内容键（应为 monster / spell / item / feat 等）";
+    return { ok: false, sub: await recordSubscriptionError(sub, error), error };
   }
   const primaryKind = kinds[0];
 
-  // Replace any existing file for this subscription. We reuse the
-  // same fileId so that downstream references (search index cache
-  // keys, bestiary slug lookups) don't churn unnecessarily across
-  // refreshes — the contents change in place.
-  const idx = readIndex();
-  if (sub.fileId) {
-    await deleteFile(sub.fileId);
-    idx.files = idx.files.filter((f) => f.id !== sub.fileId);
-  }
-  const id = sub.fileId ?? `remote-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    await writeFile(id, parsed);
-  } catch (e: any) {
-    sub.lastError = `存储失败：${e?.message || String(e)}`;
-    await writeSubs(state);
-    return { ok: false, sub, error: sub.lastError };
-  }
   let count = 0;
   for (const k of kinds) {
     if (Array.isArray(parsed[k])) count += parsed[k].length;
   }
-  const meta: LocalFileMeta = {
-    id,
-    filename: deriveSubFilename(url),
-    kind: primaryKind,
-    kinds: kinds.length > 1 ? kinds : undefined,
-    count,
-    addedAt: Date.now(),
-    remoteUrl: url,
-  };
-  idx.files.push(meta);
-  await writeIndex(idx);
-
-  sub.fileId = id;
-  sub.lastFetchedAt = Date.now();
-  delete sub.lastError;
-  await writeSubs(state);
-  return { ok: true, sub, meta };
+  try {
+    const saved = await idbUpdate([IDB_INDEX_KEY, IDB_SUBS_KEY], ([indexValue, subsValue]) => {
+      const oldIndex = storedIndex(indexValue), oldSubs = storedSubs(subsValue);
+      const current = oldSubs.list.find(row => row.url === url && row.addedAt === sub.addedAt);
+      if (!current) throw new Error("该订阅已移除或替换，未保存迟到的刷新结果");
+      // Keep the URL's file identity and commit content plus both indexes together.
+      const id = current.fileId ?? `remote-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const meta: LocalFileMeta = { id, filename: deriveSubFilename(url), kind: primaryKind, kinds: kinds.length > 1 ? kinds : undefined, count, addedAt: Date.now(), remoteUrl: url };
+      const nextSub = { ...current, fileId: id, lastFetchedAt: Date.now() };
+      delete nextSub.lastError;
+      const index = { ...oldIndex, files: [...oldIndex.files.filter(row => row.id !== id), meta] };
+      const subscriptions = { ...oldSubs, list: oldSubs.list.map(row => row === current ? nextSub : row) };
+      return { result: { index, subscriptions, sub: nextSub, meta }, put: [[IDB_FILE_PREFIX + id, parsed], [IDB_INDEX_KEY, index], [IDB_SUBS_KEY, subscriptions]] as const };
+    });
+    memFiles.set(saved.meta.id, parsed);
+    memIndex = saved.index;
+    memSubs = saved.subscriptions;
+    return { ok: true, sub: saved.sub, meta: saved.meta };
+  } catch (e: any) {
+    const error = `存储失败：${e?.message || String(e)}`;
+    return { ok: false, sub: await recordSubscriptionError(sub, error), error };
+  }
 }
 
 /** Remove a subscription AND its cached file together — a "delete"
@@ -954,17 +916,15 @@ export async function refreshRemoteSubscription(url: string): Promise<Subscripti
  *  is left with an orphaned local file they didn't manually import. */
 export async function removeRemoteSubscription(url: string): Promise<void> {
   await initLocalContent();
-  const state = readSubs();
-  const sub = state.list.find((s) => s.url === url);
-  if (!sub) return;
-  if (sub.fileId) {
-    await deleteFile(sub.fileId);
-    const idx = readIndex();
-    idx.files = idx.files.filter((f) => f.id !== sub.fileId);
-    await writeIndex(idx);
-  }
-  state.list = state.list.filter((s) => s.url !== url);
-  await writeSubs(state);
+  const saved = await idbUpdate([IDB_INDEX_KEY, IDB_SUBS_KEY], ([indexValue, subsValue]) => {
+    const oldIndex = storedIndex(indexValue), oldSubs = storedSubs(subsValue), sub = oldSubs.list.find(row => row.url === url);
+    const index = { ...oldIndex, files: oldIndex.files.filter(row => row.id !== sub?.fileId) };
+    const subscriptions = { ...oldSubs, list: oldSubs.list.filter(row => row.url !== url) };
+    return { result: { index, subscriptions, fileId: sub?.fileId }, put: [[IDB_INDEX_KEY, index], [IDB_SUBS_KEY, subscriptions]] as const, delete: sub?.fileId ? [IDB_FILE_PREFIX + sub.fileId] : [] };
+  });
+  if (saved.fileId) memFiles.delete(saved.fileId);
+  memIndex = saved.index;
+  memSubs = saved.subscriptions;
 }
 
 let refreshStalePromise: Promise<{ refreshed: number; failed: number }> | null = null;
