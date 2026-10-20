@@ -21,15 +21,52 @@ export function isLocalClassKind(value: string): value is LocalClassKind {
 }
 const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
 const equal = (a: unknown, b: unknown) => text(a).toLowerCase() === text(b).toLowerCase();
-const editionValue = (row: Row, body: Row) => row.edition || body._meta?.edition || "";
-function edition(row: Row, body: Row): LocalClassReference["edition"] {
-  const value = String(editionValue(row, body)).toLowerCase();
+type DerivedCache = WeakMap<object, WeakMap<object, Map<string, string>>>;
+const editionValues: DerivedCache = new WeakMap(), recordDigests: DerivedCache = new WeakMap();
+function cachedValue(cache: DerivedCache, row: Row, body: Row, kind: string, compute: () => string): string {
+  // Stored packs are immutable snapshots. A refresh/reload supplies a new body,
+  // so a cached derivation can never survive replacement of that snapshot.
+  let records = cache.get(body);
+  if (!records) { records = new WeakMap(); cache.set(body, records); }
+  let values = records.get(row);
+  if (!values) { values = new Map(); records.set(row, values); }
+  if (!values.has(kind)) values.set(kind, compute());
+  return values.get(kind)!;
+}
+function editionValue(row: Row, body: Row, kind?: string): string {
+  return cachedValue(editionValues, row, body, kind || "", () => inheritedEditionValue(row, body, kind));
+}
+function inheritedEditionValue(row: Row, body: Row, kind?: string): string {
+  if (row.edition) return String(row.edition);
+  const ownsClass = (parent: Row) => equal(parent.classSource || "PHB", row.classSource || "PHB") && equal(parent.className, row.className);
+  let parents: Row[] = [], parentKind = "class";
+  if (kind === "subclassFeature") {
+    parentKind = "subclass";
+    parents = rowsOf(body, "subclass").filter(parent => ownsClass(parent) && equal(parent.source || "PHB", row.subclassSource || "PHB") &&
+      [parent.shortName, parent.ENG_shortName, parent.name, parent.ENG_name].some(name => equal(name, row.subclassShortName)));
+  }
+  if (!parents.length && ["subclass", "classFeature", "subclassFeature"].includes(kind || "")) {
+    parentKind = "class";
+    parents = rowsOf(body, "class").filter(parent => equal(parent.source || "PHB", row.classSource || "PHB") &&
+      [parent.name, parent.ENG_name].some(name => equal(name, row.className)));
+  }
+  if (parents.length) {
+    const profiles = new Set(parents.map(parent => {
+      const value = editionValue(parent, body, parentKind).toLowerCase();
+      return ["classic", "2014"].includes(value) ? "2014" : ["one", "2024"].includes(value) ? "2024" : value;
+    }));
+    return profiles.size === 1 ? [...profiles][0] : "ambiguous-owner-edition";
+  }
+  return String(body._meta?.edition || "");
+}
+function edition(row: Row, body: Row, kind?: string): LocalClassReference["edition"] {
+  const value = editionValue(row, body, kind).toLowerCase();
   return ["classic", "2014"].includes(value) ? "2014" : ["one", "2024"].includes(value) ? "2024" : "unknown";
 }
 function digest(kind: string, row: Row, body: Row): string {
   // Bind the complete authored record, including context and edition. Different
   // definitions with the same name must not silently select one another.
-  return sha256Hex(JSON.stringify([kind, editionValue(row, body), row]));
+  return cachedValue(recordDigests, row, body, kind, () => sha256Hex(JSON.stringify([kind, editionValue(row, body, kind), row])));
 }
 const nameOf = (row: Row) => text(row.name) || text(row._copy?.name) || text(row.ENG_name) || text(row._copy?.ENG_name);
 const englishOf = (row: Row) => text(row.ENG_name) || text(row._copy?.ENG_name) || nameOf(row);
@@ -47,7 +84,7 @@ export function localClassRows(fileId: string, body: Row): LocalClassRow[] {
       if (!name) continue;
       const context = [text(record.className), text(record.subclassShortName),
         Number.isFinite(record.level) ? `Lv. ${record.level}` : ""].filter(Boolean).join(" / ");
-      rows.push({ ref: { fileId, kind, digest: digest(kind, record, body), edition: edition(record, body) },
+      rows.push({ ref: { fileId, kind, digest: digest(kind, record, body), edition: edition(record, body, kind) },
         record, name, english: englishOf(record), context });
     }
   }
@@ -70,7 +107,7 @@ export function localClassDetails(ref: LocalClassReference, body: Row, language:
     const key = digest(kind, row, body), copy = row._copy;
     if (visited.has(key) || visited.size >= 24 || Object.keys(copy._mod || {}).length) return null;
     visited.add(key);
-    const parents = rowsOf(body, kind).filter(parent => parent !== row && edition(parent, body) === ref.edition &&
+    const parents = rowsOf(body, kind).filter(parent => parent !== row && edition(parent, body, kind) === ref.edition &&
       [parent.name, parent.ENG_name].some(value => equal(value, copy.name) || (copy.ENG_name && equal(value, copy.ENG_name))) &&
       ["source", "className", "classSource", "shortName"].every(field => !copy[field] || equal(parent[field], copy[field])));
     if (parents.length !== 1) return null;
@@ -82,7 +119,7 @@ export function localClassDetails(ref: LocalClassReference, body: Row, language:
     if (typeof uid !== "string") return notice(tr("引用格式暂不支持", "Unsupported reference"), String(uid ?? ""));
     const parts = uid.split("|");
     const name = parts[0];
-    let candidates = rowsOf(body, kind).filter(row => edition(row, body) === ref.edition &&
+    let candidates = rowsOf(body, kind).filter(row => edition(row, body, kind) === ref.edition &&
       [row.name, row.ENG_name, row._copy?.name, row._copy?.ENG_name].some(value => equal(value, name)));
     // Source UID defaults follow the existing card Wiki reference contract:
     // subclass source defaults independently to PHB; feature source to its owner.
