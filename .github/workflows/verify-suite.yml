@@ -174,10 +174,14 @@ jobs:
       - name: Verify public-link source archive is reproducible
         shell: bash
         run: |
-          set -euo pipefail
-          for source in tools/three-dragon-website-entry.html tools/build-workbench-panels.mjs tools/build-three-dragon-overlay.mjs three-dragon-ante.html vite.config.ts tools/native-canvas-plugin.mjs src/native-canvas.ts; do
-            tar -xOf dist-workbench-dev/workbench/suite-source.zip "$source" | cmp - "$source"
-          done
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          sources = ['tools/three-dragon-website-entry.html', 'tools/build-workbench-panels.mjs', 'tools/build-three-dragon-overlay.mjs', 'three-dragon-ante.html', 'vite.config.ts', 'tools/native-canvas-plugin.mjs', 'src/native-canvas.ts']
+          with ZipFile('dist-workbench-dev/workbench/suite-source.zip') as archive:
+              for source in sources:
+                  assert archive.read(source) == Path(source).read_bytes(), source
+          PY
       - name: Verify final public website links and retired-game negative controls
         run: node tools/three-dragon-website-entry-selftest.mjs --built
       - name: Public website links wide and narrow browser regression

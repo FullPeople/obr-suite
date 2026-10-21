@@ -25,9 +25,15 @@ function fixture(t){
 test('contains every committed build/config file and excludes ignored and untracked files',t=>{
  const {root,git,output}=fixture(t),proof=reviewedSourceArchive(root,output);
  assert.equal(proof.revision,git('rev-parse','HEAD').toString().trim());assert.equal(proof.trackedFiles,5);
- const listed=execFileSync('tar',['-tf',output],{encoding:'utf8'}).trim().split(/\r?\n/).filter(path=>!path.endsWith('/')).sort();
+ const python=process.env.PYTHON||(process.platform==='win32'?'python':'python3');
+ const archived=JSON.parse(execFileSync(python,['-c',[
+  'import base64, json, sys, zipfile',
+  'with zipfile.ZipFile(sys.argv[1]) as archive:',
+  '    print(json.dumps({info.filename: base64.b64encode(archive.read(info)).decode("ascii") for info in archive.infolist() if not info.is_dir()}))'
+ ].join('\n'),output],{encoding:'utf8'}));
+ const listed=Object.keys(archived).sort();
  assert.deepEqual(listed,['.github/workflows/check.yml','.gitignore','LICENSE','tools/needed.mjs','vite.config.ts']);
- for(const path of listed)assert.deepEqual(execFileSync('tar',['-xOf',output,path]),readFileSync(join(root,path)));
+ for(const path of listed)assert.deepEqual(Buffer.from(archived[path],'base64'),readFileSync(join(root,path)));
 });
 test('rejects a missing tracked helper before creating an archive',t=>{
  const {root,output}=fixture(t);rmSync(join(root,'tools/needed.mjs'));
