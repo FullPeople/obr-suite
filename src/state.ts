@@ -69,6 +69,8 @@ export interface LibraryConfig {
    *  filename (`search/index-partnered.json`) so the field overrides
    *  it per-library. */
   indexPath?: string;
+  /** A collection source/property index used by the optional monster library. */
+  indexFormat?: "monster-source-index";
   /** Per-library blacklist of source codes the user wants to exclude
    *  (added 2026-05-09). Each entry is an UPPERCASE source code as
    *  emitted by 5etools — e.g. `"BOOKOFEBONTIDES"`, `"DMG"`. The
@@ -166,6 +168,17 @@ export interface SuiteState {
 }
 
 export const DEFAULT_LIBRARIES: LibraryConfig[] = [
+  {
+    id: "kiwee-homebrew-monsters",
+    name: "kiwee 第三方怪物库",
+    baseUrl: "https://homebrew.kiwee.top",
+    indexPath: "_generated/index-sources.json",
+    indexFormat: "monster-source-index",
+    language: "zh",
+    // Existing rooms choose whether to add this separate collection.
+    enabled: false,
+    builtin: true,
+  },
   {
     id: "5etools-kiwee",
     name: "5etools (kiwee.top 镜像)",
@@ -325,6 +338,7 @@ function merge(partial: any): SuiteState {
           indexPath: typeof lib.indexPath === "string" && lib.indexPath.length > 0
             ? lib.indexPath
             : undefined,
+          indexFormat: lib.indexFormat === "monster-source-index" ? lib.indexFormat : undefined,
           disabledSources: disabledSources && disabledSources.length > 0
             ? disabledSources
             : undefined,
@@ -442,6 +456,7 @@ function suiteStateEqual(a: SuiteState, b: SuiteState): boolean {
     const bDisabled = (lb.disabledSources ?? []).slice().sort().join(",");
     if (aDisabled !== bDisabled) return false;
     if ((la.indexPath ?? "") !== (lb.indexPath ?? "")) return false;
+    if (la.indexFormat !== lb.indexFormat) return false;
     if (la.language !== lb.language) return false;
   }
   return true;

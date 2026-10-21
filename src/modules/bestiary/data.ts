@@ -5,6 +5,7 @@ import { selectContentLibraries, contentConfigurationKey } from "../../utils/con
 import { annotateMonster, canonicalMonsterKey, monsterFingerprint } from "./provenance";
 import { fetchContentJson, mapWithConcurrency, createContentIdleDeadline, CONTENT_REQUEST_LIMIT } from "../../utils/contentRequests";
 import { getAllLocalMonsters, initLocalContent } from "../../utils/localContent";
+import { monsterSourceFiles } from "../../utils/monsterSourceIndex";
 import { readContentMeta, readContentFiles, writeContentCache, dropContentCache, type ContentCacheMeta } from "./contentCache";
 
 // "2014" = strictly PHB + MM (the original core books). "2024" = strictly
@@ -267,6 +268,15 @@ export async function loadMonsterBySlug(slug:string):Promise<any|null>{
 // monster (same or different source), with `_mod` describing per-field edits.
 // We implement the most common mod modes: replaceArr / insertArr / appendArr /
 // prependArr / removeArr. This is enough for stats + action sections to render.
+function copyArrayEntryMatches(entry: any, needle: any): boolean {
+  if (typeof needle === "string" || typeof needle === "number" || typeof needle === "boolean") {
+    return entry === needle || typeof needle === "string" && !!entry &&
+      typeof entry === "object" && (entry.name === needle || entry.ENG_name === needle);
+  }
+  if (!entry || typeof entry !== "object" || !needle || typeof needle !== "object") return false;
+  return typeof needle.name === "string" && entry.name === needle.name ||
+    typeof needle.ENG_name === "string" && entry.ENG_name === needle.ENG_name;
+}
 function applyMod(target: any, field: string, spec: any) {
   if (!spec || typeof spec !== "object") return;
   const mode = spec.mode;
@@ -274,15 +284,7 @@ function applyMod(target: any, field: string, spec: any) {
   if (mode === "replaceArr") {
     if (!Array.isArray(target[field])) return;
     const needle = spec.replace;
-    const idx = target[field].findIndex((x: any) => {
-      if (typeof needle === "string") {
-        return x && (x.name === needle || x.ENG_name === needle);
-      }
-      if (needle && typeof needle === "object") {
-        return x && (x.name === needle.name || x.ENG_name === needle.ENG_name);
-      }
-      return false;
-    });
+    const idx = target[field].findIndex((entry: any) => copyArrayEntryMatches(entry, needle));
     if (idx !== -1) target[field].splice(idx, 1, ...items);
   } else if (mode === "insertArr") {
     if (!Array.isArray(target[field])) target[field] = [];
@@ -298,7 +300,7 @@ function applyMod(target: any, field: string, spec: any) {
     if (!Array.isArray(target[field])) return;
     const names = Array.isArray(spec.names) ? spec.names : (spec.names ? [spec.names] : []);
     target[field] = target[field].filter(
-      (x: any) => !names.some((n: any) => x && (x.name === n || x.ENG_name === n))
+      (entry: any) => !names.some((name: any) => copyArrayEntryMatches(entry, name))
     );
   }
   // Other modes (addSpells, scalarMultProp, etc.) intentionally not handled —
@@ -363,13 +365,11 @@ export function copyModTargetsAvailable(child: any, parent: any): boolean {
       const entries = Array.isArray(draft[field]) ? draft[field] : [];
       if (spec?.mode === "replaceArr") {
         const needle = spec.replace;
-        if (!entries.some((entry: any) => typeof needle === "string"
-          ? entry?.name === needle || entry?.ENG_name === needle
-          : needle && (entry?.name === needle.name || entry?.ENG_name === needle.ENG_name))) return false;
+        if (!entries.some((entry: any) => copyArrayEntryMatches(entry, needle))) return false;
       }
       if (spec?.mode === "removeArr") {
         const names = Array.isArray(spec.names) ? spec.names : spec.names ? [spec.names] : [];
-        if (!names.every((name: string) => entries.some((entry: any) => entry?.name === name || entry?.ENG_name === name))) return false;
+        if (!names.every((name: string) => entries.some((entry: any) => copyArrayEntryMatches(entry, name)))) return false;
       }
       applyMod(draft, field, spec);
     }
@@ -408,7 +408,9 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
     await initLocalContent();
     if (generation !== loadGeneration) return [];
     const sources = getLibrarySources();
-    const bases = [...new Set(sources.map((source) => source.base))];
+    const groupKey = (source: typeof sources[number]) => JSON.stringify([source.base, source.indexFormat ?? "search", source.indexFormat ? source.indexPath : ""]);
+    const groups = [...new Map(sources.map(source => [groupKey(source), source])).values()];
+    const groupIndex = (source: typeof sources[number]) => groups.findIndex(group => groupKey(group) === groupKey(source));
     const localMonsters = getAllLocalMonsters().map((monster) => annotateMonster(monster)) as Monster[];
     const annotated = new WeakMap<object, Map<string, any>>();
     const tag = (monster: any, source: typeof sources[number]) => {
@@ -417,12 +419,12 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
       if (!versions.has(source.identity)) versions.set(source.identity, annotateMonster(monster, source));
       return versions.get(source.identity);
     };
-    const candidates = () => sources.map((source) => ({ source, monsters: (perLibraryMonsters[bases.indexOf(source.base)] ?? []).flat()
+    const candidates = () => sources.map((source) => ({ source, monsters: (perLibraryMonsters[groupIndex(source)] ?? []).flat()
       .filter((monster) => monster && typeof monster === "object" && !source.disabledSources.has(String(monster.source ?? "").trim().toLowerCase()))
       .map((monster) => tag(monster, source)) }));
-    const perLibraryMonsters: Monster[][][] = bases.map(() => []);
+    const perLibraryMonsters: Monster[][][] = groups.map(() => []);
     const failed = new Map<string, MonsterLoadFailure>();
-    const dependencyMonsters: Monster[][] = bases.map(() => []);
+    const dependencyMonsters: Monster[][] = groups.map(() => []);
     let loadedFiles = 0;
     let lastPreviewAt = 0;
     let previewRows: ParsedMonster[] = [];
@@ -456,7 +458,11 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
     publish(true);
     const cacheKey = (value: string) => `bestiary:${value}`;
     const refreshed: Array<{ key: string; meta: ContentCacheMeta; files: Record<string, unknown[]> }> = [];
-    await Promise.all(bases.map(async (base, libraryIndex) => {
+    await Promise.all(groups.map(async (group, libraryIndex) => {
+      const base = group.base, sourceIndexed = group.indexFormat === "monster-source-index";
+      const groupSources = sources.filter(source => groupKey(source) === groupKey(group));
+      const dataPath = (file: string) => sourceIndexed ? file : `data/bestiary/${file}`;
+      const indexPath = sourceIndexed ? group.indexPath : "data/bestiary/index.json";
       // This is an inactivity deadline, not a total time budget: large healthy
       // libraries must finish even when their total load takes over 30 seconds.
       const sourceDeadline = createContentIdleDeadline(30_000, signal);
@@ -475,13 +481,18 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
         let files: string[] | null = null;
         let indexMeta: ContentCacheMeta | null = null;
         try {
-          const response = await request("data/bestiary/index.json");
+          const response = await request(indexPath);
           if (response.ok) {
-            const index = await response.json();
+            let index = await response.json();
+            if (sourceIndexed) {
+              const properties = await request("_generated/index-props.json");
+              if (!properties.ok) throw Error(`Monster property index HTTP ${properties.status}`);
+              index = monsterSourceFiles(index, await properties.json());
+            }
             if (!index || typeof index !== "object" || Array.isArray(index)) throw new Error("Invalid bestiary index");
             for (const [code, name] of Object.entries(index)) if(typeof name === "string")indexFiles.set(code.trim().toLowerCase(),name);
             files = [...new Set(Object.entries(index).filter(([code, name]) => typeof name === "string" &&
-              sources.some((source) => source.base === base && !source.disabledSources.has(code.trim().toLowerCase())))
+              groupSources.some((source) => !source.disabledSources.has(code.trim().toLowerCase())))
               .map(([, name]) => name as string))];
             // A stable serialisation of the index is the cheap half of the cache
             // key; the response validator is the half that catches a mirror
@@ -493,11 +504,11 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
               lastModified: response.lastModified ?? "",
             };
             sourceDeadline.progress();
-          } else if (response.status !== 404) recordFailure("data/bestiary/index.json", `HTTP ${response.status}`);
-        } catch (error) { recordFailure("data/bestiary/index.json", error); }
+          } else if (response.status !== 404 || sourceIndexed) recordFailure(indexPath, `HTTP ${response.status}`);
+        } catch (error) { recordFailure(indexPath, error); }
         if (files !== null) {
           files.forEach(file => visitedFiles.add(file));
-          const key = cacheKey(base);
+          const key = cacheKey(groupKey(group));
           const raw = await cachedPayload(key, files, indexMeta);
           if (raw) {
             // Everything this library needs is already on disk: no data-file
@@ -519,7 +530,7 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
               // more ways, so a slow link is exactly where this matters.
               for (let attempt = 0; attempt < 2 && !loaded; attempt++) {
                 try {
-                  const response = await request(`data/bestiary/${filename}`);
+                  const response = await request(dataPath(filename));
                   if (!response.ok) throw new Error(`HTTP ${response.status}`);
                   const data = await response.json();
                   if (!Array.isArray(data.monster)) throw new Error("Invalid monster list");
@@ -535,7 +546,7 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
                 collected[filename] = loaded;
                 loadedFiles++;
                 sourceDeadline.progress();
-              } else recordFailure(`data/bestiary/${filename}`, lastError);
+              } else recordFailure(dataPath(filename), lastError);
               publish();
             });
             // Remember the whole payload for the next iframe that opens — but
@@ -544,8 +555,8 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
             // cached library.
             if (indexMeta && !signal.aborted && Object.keys(collected).length === files.length) refreshed.push({ key, meta: indexMeta, files: collected });
           }
-        } else {
-          const paths = [...new Set(sources.filter((source) => source.base === base).map((source) => source.indexPath))];
+        } else if (!sourceIndexed) {
+          const paths = [...new Set(groupSources.map((source) => source.indexPath))];
           const sourceCodes = new Set<string>();
           for (const path of paths) {
             try {
@@ -562,7 +573,7 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
             } catch (error) { recordFailure(path, error); }
           }
           const fallbackSources = [...sourceCodes];
-          await mapWithConcurrency(fallbackSources.filter((code) => sources.some((source) => source.base === base && !source.disabledSources.has(code.toLowerCase()))), CONTENT_REQUEST_LIMIT, async (source, fileIndex) => {
+          await mapWithConcurrency(fallbackSources.filter((code) => groupSources.some((source) => !source.disabledSources.has(code.toLowerCase()))), CONTENT_REQUEST_LIMIT, async (source, fileIndex) => {
             for (const variant of new Set([source, source.toLowerCase(), source.toUpperCase()])) {
               try {
                 const response = await request(`data/bestiary/bestiary-${variant}.json`);
@@ -599,14 +610,14 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
               visitedFiles.add(filename);
               for (let attempt=0;attempt<2;attempt++) {
                 try {
-                  const response=await request(`data/bestiary/${filename}`);
+                  const response=await request(dataPath(filename));
                   if(!response.ok)throw Error(`HTTP ${response.status}`);
                   const data=await response.json();
                   if(!Array.isArray(data.monster))throw Error("Invalid monster dependency list");
                   dependencyMonsters[libraryIndex].push(...data.monster);
                   loadedFiles++; sourceDeadline.progress(); publish(); return;
                 }catch(error){
-                  if(attempt===1||sourceDeadline.signal.aborted){recordFailure(`data/bestiary/${filename}`,error);return;}
+                  if(attempt===1||sourceDeadline.signal.aborted){recordFailure(dataPath(filename),error);return;}
                 }
               }
             });
@@ -630,8 +641,8 @@ async function performMonsterLoad(generation: number, signal: AbortSignal): Prom
     // come first; compatible libraries can supply missing core dependencies.
     const candidateGroups = candidates();
     const parentGroups = sources.map(source => ({source, monsters:[
-      ...(perLibraryMonsters[bases.indexOf(source.base)]??[]).flat(),
-      ...dependencyMonsters[bases.indexOf(source.base)],
+      ...(perLibraryMonsters[groupIndex(source)]??[]).flat(),
+      ...dependencyMonsters[groupIndex(source)],
     ].filter(monster=>monster&&typeof monster==='object').map(monster=>tag(monster,source))}));
     const remoteMonsters: any[] = [];
     const allGroups = candidateGroups.map((group) => ({ monsters: group.monsters, parents: [

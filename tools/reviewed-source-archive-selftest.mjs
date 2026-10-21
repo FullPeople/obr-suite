@@ -1,0 +1,73 @@
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,realpathSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {dirname,join} from 'node:path';
+import {test} from 'node:test';
+import {reviewedSourceArchive} from './reviewed-source-archive.mjs';
+
+function fixture(t){
+ const parent=realpathSync(tmpdir()),root=mkdtempSync(join(parent,'reviewed-source-'));
+ t.after(()=>{assert.equal(dirname(realpathSync(root)),parent);rmSync(root,{recursive:true,force:true});});
+ const git=(...args)=>execFileSync('git',args,{cwd:root,stdio:'pipe'});
+ git('init','-q');git('config','core.autocrlf','false');
+ mkdirSync(join(root,'tools'));mkdirSync(join(root,'.github/workflows'),{recursive:true});
+ writeFileSync(join(root,'LICENSE'),'Authored license fixture.\n');
+ writeFileSync(join(root,'vite.config.ts'),"import './tools/needed.mjs';\n");
+ writeFileSync(join(root,'tools/needed.mjs'),'export const original = true;\n');
+ writeFileSync(join(root,'.github/workflows/check.yml'),'name: Authored source fixture\n');
+ writeFileSync(join(root,'.gitignore'),'.local-evidence/\noutput/\n');
+ git('add','.');git('-c','user.name=Source test','-c','user.email=source@example.invalid','commit','-qm','authored fixture');
+ mkdirSync(join(root,'.local-evidence'));writeFileSync(join(root,'.local-evidence/private.txt'),'authored private marker');
+ writeFileSync(join(root,'untracked.txt'),'authored untracked marker');mkdirSync(join(root,'output'));
+ return {root,git,output:join(root,'output/source.zip')};
+}
+test('contains every committed build/config file and excludes ignored and untracked files',t=>{
+ const {root,git,output}=fixture(t),proof=reviewedSourceArchive(root,output);
+ assert.equal(proof.revision,git('rev-parse','HEAD').toString().trim());assert.equal(proof.trackedFiles,5);
+ const python=process.env.PYTHON||(process.platform==='win32'?'python':'python3');
+ const archived=JSON.parse(execFileSync(python,['-c',[
+  'import base64, json, sys, zipfile',
+  'with zipfile.ZipFile(sys.argv[1]) as archive:',
+  '    print(json.dumps({info.filename: base64.b64encode(archive.read(info)).decode("ascii") for info in archive.infolist() if not info.is_dir()}))'
+ ].join('\n'),output],{encoding:'utf8'}));
+ const listed=Object.keys(archived).sort();
+ assert.deepEqual(listed,['.github/workflows/check.yml','.gitignore','LICENSE','tools/needed.mjs','vite.config.ts']);
+ for(const path of listed)assert.deepEqual(Buffer.from(archived[path],'base64'),readFileSync(join(root,path)));
+});
+test('rejects a missing tracked helper before creating an archive',t=>{
+ const {root,output}=fixture(t);rmSync(join(root,'tools/needed.mjs'));
+ assert.throws(()=>reviewedSourceArchive(root,output));assert.equal(existsSync(output),false);
+});
+test('rejects raw line-ending drift even when Git text normalization reports no change',t=>{
+ const {root,git,output}=fixture(t);git('config','core.autocrlf','true');
+ writeFileSync(join(root,'tools/needed.mjs'),'export const original = true;\r\n');
+ assert.equal(git('diff','--name-only').toString().trim(),'');
+ assert.throws(()=>reviewedSourceArchive(root,output),/bytes differ/);assert.equal(existsSync(output),false);
+});
+test('rejects a staged source change without discarding it or creating an archive',t=>{
+ const {root,git,output}=fixture(t);writeFileSync(join(root,'tools/needed.mjs'),'export const original = false;\n');git('add','tools/needed.mjs');
+ assert.throws(()=>reviewedSourceArchive(root,output),/index changed/);assert.equal(existsSync(output),false);
+ assert.equal(git('diff','--cached','--name-only').toString().trim(),'tools/needed.mjs');
+});
+test('refuses a Git export filter that silently omits a committed build dependency',t=>{
+ const {root,git,output}=fixture(t);writeFileSync(join(root,'.gitattributes'),'tools/needed.mjs export-ignore\n');git('add','.gitattributes');
+ git('-c','user.name=Source test','-c','user.email=source@example.invalid','commit','-qm','authored export exclusion');
+ assert.throws(()=>reviewedSourceArchive(root,output),/export attributes/);assert.equal(existsSync(output),false);
+});
+test('refuses export substitution that rewrites a committed source byte sequence',t=>{
+ const {root,git,output}=fixture(t);writeFileSync(join(root,'tools/needed.mjs'),'export const revision = "$Format:%H$";\n');
+ writeFileSync(join(root,'.gitattributes'),'tools/needed.mjs export-subst\n');git('add','.gitattributes','tools/needed.mjs');
+ git('-c','user.name=Source test','-c','user.email=source@example.invalid','commit','-qm','authored export substitution');
+ assert.throws(()=>reviewedSourceArchive(root,output),/export attributes/);assert.equal(existsSync(output),false);
+});
+test('verifies UTF-8 source filenames independently of the Windows console code page',t=>{
+ const {root,git,output}=fixture(t),path='tools/原创依赖.mjs';writeFileSync(join(root,path),'export const authored = "保留原字节";\n');git('add',path);
+ git('-c','user.name=Source test','-c','user.email=source@example.invalid','commit','-qm','authored UTF-8 filename');
+ const proof=reviewedSourceArchive(root,output);assert.equal(proof.trackedFiles,6);assert.ok(readFileSync(output).includes(Buffer.from(path,'utf8')));
+});
+test('keeps committed archive bytes exact without changing the checkout line-ending setting',t=>{
+ const {root,git,output}=fixture(t),before=readFileSync(join(root,'tools/needed.mjs'));git('config','core.autocrlf','true');
+ const proof=reviewedSourceArchive(root,output);assert.equal(proof.trackedFiles,5);
+ assert.equal(git('config','--get','core.autocrlf').toString().trim(),'true');assert.deepEqual(readFileSync(join(root,'tools/needed.mjs')),before);
+});

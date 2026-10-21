@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: FullPeople/DND-card-web
-          ref: a17685fbd7871984f672f7221d4b6b55b9204aad
+          ref: e09c606fb2e6b7ae0c73317c0567ee147b8fe615
           path: .paired-web
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -51,6 +51,18 @@ jobs:
         run: |
           node src/modules/musicBoard/selftest.mjs
           node src/modules/musicBoard/browser-selftest.mjs
+      - name: Monster collection indexes, details and source exclusions
+        run: |
+          node tools/bestiary-homebrew-selftest.mjs
+          node tools/bestiary-dependency-selftest.mjs
+      - name: Monster and local content controls in actual built workbench settings
+        env:
+          WORKBENCH_PANEL_ONLY: settings
+          WORKBENCH_PANEL_OUT: .local-evidence/monster-settings/panels
+        run: |
+          node tools/build-workbench-panels.mjs
+          node tools/workbench-monster-library-settings-selftest.mjs
+          node tools/workbench-local-content-settings-selftest.mjs
       - name: Grid-box anchoring and cross-scene picker regression
         run: |
           npm run test:bubbles
@@ -157,13 +169,19 @@ jobs:
         env:
           PLAYWRIGHT_EXECUTABLE_PATH: ${{ env.CHROMIUM_PATH }}
         run: node tools/dice-cue276-browser.mjs
+      - name: Source archives include committed build files and reject private or changed input
+        run: node --test tools/reviewed-source-archive-selftest.mjs
       - name: Verify public-link source archive is reproducible
         shell: bash
         run: |
-          set -euo pipefail
-          for source in tools/three-dragon-website-entry.html tools/build-workbench-panels.mjs tools/build-three-dragon-overlay.mjs three-dragon-ante.html vite.config.ts tools/native-canvas-plugin.mjs src/native-canvas.ts; do
-            tar -xOf dist-workbench-dev/workbench/suite-source.zip "$source" | cmp - "$source"
-          done
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          sources = ['tools/three-dragon-website-entry.html', 'tools/build-workbench-panels.mjs', 'tools/build-three-dragon-overlay.mjs', 'three-dragon-ante.html', 'vite.config.ts', 'tools/native-canvas-plugin.mjs', 'src/native-canvas.ts']
+          with ZipFile('dist-workbench-dev/workbench/suite-source.zip') as archive:
+              for source in sources:
+                  assert archive.read(source) == Path(source).read_bytes(), source
+          PY
       - name: Verify final public website links and retired-game negative controls
         run: node tools/three-dragon-website-entry-selftest.mjs --built
       - name: Public website links wide and narrow browser regression
@@ -202,6 +220,8 @@ jobs:
             .local-evidence/owner-cold-browser/
             .local-evidence/verification/owner-cold-sdk/vm-results.json
             .local-evidence/permission-notice/
+            .local-evidence/monster-settings/
+            .local-evidence/local-content-settings/
             .local-evidence/transparent-canvas291/
             .local-evidence/verification/*.log
             .local-evidence/verification/results.json
