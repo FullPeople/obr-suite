@@ -1525,10 +1525,9 @@ Any creature within 5 ft. takes {@damage 1d4} cold damage at the start of its tu
 
 function wireLibrariesBody(root: HTMLElement): void {
   const list = root.querySelector<HTMLDivElement>("#libList");
-  if (!list) return;
 
   // Per-row edits
-  list.querySelectorAll<HTMLDivElement>(".lib-row").forEach((row) => {
+  list?.querySelectorAll<HTMLDivElement>(".lib-row").forEach((row) => {
     const id = row.dataset.libId ?? "";
     const nameInp = row.querySelector<HTMLInputElement>('input[data-field="name"]');
     const urlInp = row.querySelector<HTMLInputElement>('input[data-field="baseUrl"]');
