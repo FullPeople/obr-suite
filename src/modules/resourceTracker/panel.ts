@@ -412,6 +412,7 @@ export function mountResourcePanel(opts: MountOptions): {
                 draggable="true"
                 title="${escapeAttr(T("rpReorder"))}">≡</span>
           <div class="rt-row-name" title="${escapeAttr(r.name)}">${escapeHtml(r.name || T("rtUnnamed"))}</div>
+          ${r.longRest ? `<span class="rt-row-rest" title="${escapeAttr(T("rpLongRest"))}">☾</span>` : ""}
           <div class="rt-row-meta" data-meta>${r.current} / ${r.max}</div>
           <button class="rt-row-edit" type="button" data-edit-id="${escapeAttr(r.id)}" title="${escapeAttr(T("rpEdit"))}">⚙</button>
         </div>
@@ -1124,6 +1125,12 @@ function ensureStyles(): void {
     .rt-row-grip:active { cursor:grabbing }
     .rt-row-head { display:flex; align-items:center; gap:8px; margin-bottom:6px }
     .rt-row-name { flex:1; font-size:12px; font-weight:600; color:#e6e8ee; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+    /* 长休恢复标记：☾ 表示 GM 播放长休过场时该资源会回满 */
+    .rt-row-rest {
+      flex:none; font-size:11px; line-height:1; color:#8f7fd4;
+      background:rgba(143,127,212,0.16); border:1px solid rgba(143,127,212,0.4);
+      border-radius:4px; padding:3px 5px; cursor:default; user-select:none;
+    }
     .rt-row-meta { font-size:11px; color:#9aa0b3; font-variant-numeric:tabular-nums; transition:color .18s }
     .rt-row-edit {
       background:none; border:none; cursor:pointer; color:#9aa0b3;

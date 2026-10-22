@@ -66,6 +66,7 @@ function normaliseResource(raw: unknown): Resource | null {
     current: cur,
     max: max,
     icon: typeof r.icon === "string" ? r.icon : "gem",
+    longRest: r.longRest === true,
     order: typeof r.order === "number" ? r.order : undefined,
   };
 }

@@ -2606,8 +2606,8 @@ const TABS: TabDef[] = [
         : "Open the transition panel for short rests, long rests or a custom message. The quick bar also has a Transitions button."}</p>
       <button id="openTransitions" class="layout-editor-btn" type="button" ${getState().enabled.transitions ? "" : "disabled"}>${lang === "zh" ? "打开转场面板" : "Open transition panel"}</button>
       <p class="meta">${lang === "zh"
-        ? (gm ? "可选择全部玩家或指定玩家；预览只显示在自己的屏幕。转场不会修改角色卡的生命值或资源。" : "玩家可以在自己的屏幕预览。面向其他玩家的转场由 DM 发起，不会修改角色卡的生命值或资源。")
-        : (gm ? "Choose everyone or selected players; previews appear only on your screen. Cues do not change character HP or resources." : "Players can preview on their own screen. The GM sends cues to other players. Cues do not change character HP or resources.")}</p>`,
+        ? (gm ? "可选择全部玩家或指定玩家；预览只显示在自己的屏幕。短休与文字仅播放演出；长休会先弹出选择界面，由你勾选哪些单位恢复生命值、法术位与标记「长休恢复」的资源。" : "玩家可以在自己的屏幕预览。面向其他玩家的转场由 DM 发起。GM 播放长休时，可勾选哪些单位恢复生命值与资源。")
+        : (gm ? "Choose everyone or selected players; previews appear only on your screen. Short rest and custom are presentation-only; long rest opens a picker where you choose which units recover HP, spell slots and long-rest resources." : "Players can preview on their own screen. The GM sends cues to other players. During a long rest the GM picks which units recover HP and resources.")}</p>`,
     afterRender: (root) => {
       root.querySelector<HTMLButtonElement>("#openTransitions")?.addEventListener("click", async () => {
         try { await OBR.broadcast.sendMessage(BC_TRANSITIONS_OPEN, {}, { destination: "LOCAL" }); }

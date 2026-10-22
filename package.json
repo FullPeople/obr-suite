@@ -11,6 +11,7 @@
     "build:workbench-dev": "node tools/build-workbench-dev.mjs",
     "test:workbench": "node tools/workbench-selftest.mjs",
     "test:bubbles": "node src/modules/bubbles/selftest.mjs",
+    "test:long-rest": "node src/modules/longRest/selftest.mjs",
     "build:card-viewer": "node tools/build-legacy-card-viewer.mjs"
   },
   "dependencies": {

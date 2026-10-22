@@ -8,6 +8,8 @@ export const SCENE_KEY = `${TRANSITIONS_ID}/scene-key`;
 export const REDUCED_MOTION_KEY = `${TRANSITIONS_ID}/reduced-motion`;
 export const CONTROL_ID = `${TRANSITIONS_ID}/control`;
 export const DISPLAY_ID = `${TRANSITIONS_ID}/display`;
+/** GM-only popover that picks which units receive the long-rest recovery. */
+export const PICKER_ID = `${TRANSITIONS_ID}/long-rest-picker`;
 // Includes the longer night-to-dawn sequence and a small iframe startup margin.
 export const TRANSITION_TTL_MS = 12_000;
 export const transitionDuration = (kind: TransitionKind, reduced = false) => reduced ? 3_400 : kind === "long" ? 8_800 : kind === "short" ? 6_000 : 5_800;
@@ -23,6 +25,21 @@ export interface TransitionEvent {
   targets: "all" | string[];
 }
 export interface TransitionPeer { id: string; connectionId: string; role: "GM" | "PLAYER" }
+/**
+ * Local (same-machine) run request from the control page or the long-rest
+ * picker. `longRest` is only present on GM, non-preview long-rest runs:
+ * the picker lists every unit the GM EXCLUDED from the recovery, so an
+ * empty/absent list means "restore everything".
+ */
+export interface RunRequest {
+  kind: TransitionKind;
+  text?: string;
+  targets?: "all" | string[];
+  preview?: boolean;
+  requestId?: string;
+  issuedAt?: number;
+  longRest?: { excluded: string[] };
+}
 export function parseTransition(value: unknown): TransitionEvent | null {
   if (!value || typeof value !== "object") return null;
   const v = value as TransitionEvent;

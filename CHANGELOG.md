@@ -42,6 +42,11 @@ All notable changes to this project follow [Keep a Changelog](https://keepachang
   - **Light occlusion.** A light on a token you do not own is hidden unless a wall-free sight line reaches it from one of your own lights — so an NPC's torch two rooms away no longer lights your screen. Per-light **Ambient** opts a fixed source (wall sconce, daylight) out of the rule entirely.
   - **Settings → 动态迷雾** gains the toggles above plus a passthrough for the OBR scene's own **"整张地图铺满迷雾"**. With scene fog unfilled, walls and lights have no visible effect at all — the most likely explanation for "lighting ignores walls".
   - No new dependencies: upstream's 6.8 MB CanvasKit WASM is replaced by a pure-TS geometry core, since the background iframe loads on every client. `tools/dynfog-selftest.mjs` runs 40 checks under node (geometry plus the line-of-sight index); `tools/dynfog-visual.mjs` renders the engine's actual wall output to [`docs/dynfog-walls.svg`](docs/dynfog-walls.svg).
+- **长休过场现在真的「长休」：GM 播放长休时先弹出仅 GM 可见的选择界面，勾选哪些单位恢复生命值、法术位与自设的长休恢复资源。** 转场模块此前只负责演出（`kind: "long"` 的黑夜→黎明动画），场景数据一个字节都不动；现在 GM 在转场面板选「长休」点播放时，控制页会先打开 `long-rest-picker` 悬浮窗（`src/modules/longRest/`），列出场景里**所有有东西可恢复**的单位——生命值未满的、或消耗了标记资源的——每行直接写出恢复计划（如「生命值 23 / 45 → 45」「☾ 一环法术位 1 / 4 → 4」），并用标签标明它是角色卡绑定、图鉴绑定还是未绑定。取消勾选的单位保持现状；确认后恢复**先落地、过场再播放**，玩家看着动画时数字已经回满。恢复逻辑在 background 侧重算（而非照搬选择器打开时的快照），所以 GM 挑人的几分钟里发生的任何数据变化，都以播放那一刻为准。
+  - **生命值回满同时写两个命名空间。** 实时血量住在 bubbles metadata 里，suite 自己的键 `com.obr-suite/bubbles/data` 与上游 Bubbles 扩展的 `com.owlbear-rodeo-bubbles-extension/metadata` 可能各存一份；只写前者会让装了扩展的桌面显示旧值。现在按 `statEdit` 的既有约定写：自有键整体替换，外部键仅在已存在时浅合并（保留 `dm only`、`name` 等它自己的字段）。角色卡、图鉴绑定、裸血条三条路径都读同一份 bubbles，所以一律覆盖。
+  - **法术位走资源追踪器的「长休恢复」开关。** 插件里的法术位本来就是每 token 的 count 资源；资源编辑模态框新增「长休恢复」复选框（资源面板行上以 ☾ 标记），勾选的资源在长休时回满。恢复用展开合并逐条写回，`order`、`unlimited` 等未知字段不丢。共享图鉴表里的怪物施法条目是纯展示（没有用量状态），无可恢复。
+  - **预览与非 GM 一律不碰数据。** `preview: true` 的请求（含玩家角色发出的降级请求）直接走原演出路径；短休与文字过场即使带上 `longRest` 字段也忽略。
+  - `src/modules/longRest/selftest.mjs` 覆盖规划、双命名空间写入、资源合并、排除单位、接线顺序（恢复先于广播）、预览/玩家守卫等用例，外加 3 项「故意改坏必须失败」的反向变异验证；已注册为 `npm run test:long-rest`。
 
 ### Fixed
 

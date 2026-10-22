@@ -124,6 +124,7 @@ export default defineConfig(({ command }) => ({
         "portal-blink": resolve(__dirname, "portal-blink.html"),
         "transition-control": resolve(__dirname, "transition-control.html"),
         "transition-display": resolve(__dirname, "transition-display.html"),
+        "long-rest-picker": resolve(__dirname, "long-rest-picker.html"),
         "trickster-edit": resolve(__dirname, "trickster-edit.html"),
         "circleimage": resolve(__dirname, "circleimage.html"),
         "transform": resolve(__dirname, "transform.html"),
