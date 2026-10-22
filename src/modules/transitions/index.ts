@@ -4,9 +4,10 @@ import { assetUrl } from "../../asset-base";
 import { getLocalLang } from "../../state";
 import {
   BC_TRANSITIONS_OPEN, BC_TRANSITIONS_RUN, BC_TRANSITIONS_PLAY, BC_TRANSITIONS_STATUS,
-  BC_TRANSITIONS_DISMISS, CONTROL_ID, DISPLAY_ID, SCENE_KEY, TRANSITION_TTL_MS,
-  createTransitionGate, parseTransition, prefersReducedMotion, type TransitionEvent, type TransitionPeer,
+  BC_TRANSITIONS_DISMISS, CONTROL_ID, DISPLAY_ID, PICKER_ID, SCENE_KEY, TRANSITION_TTL_MS,
+  createTransitionGate, parseTransition, prefersReducedMotion, type RunRequest, type TransitionEvent, type TransitionPeer,
 } from "./protocol";
+import { collectCandidates, applyLongRest } from "../longRest/recover";
 import { removeOrphanScreenTransitions, stopScreenTransition } from "./screen-effect";
 
 let running = false;
@@ -97,7 +98,7 @@ async function openControl() {
 
 async function localRequest(value: unknown, sender: string) {
   if (!running || sender !== myConnection) return;
-  const request = value as { kind?: string; text?: string; targets?: "all" | string[]; preview?: boolean; requestId?: string; issuedAt?: number };
+  const request = value as RunRequest;
   if (!request || !["short", "long", "text"].includes(request.kind ?? "")) return;
   if (typeof request.issuedAt !== "number" || !Number.isFinite(request.issuedAt)
     || request.issuedAt < readyAt || request.issuedAt > Date.now() + 1_000
@@ -132,6 +133,25 @@ async function localRequest(value: unknown, sender: string) {
     if (!preview) {
       if (await currentRole() !== "GM") throw new Error("role");
       if (ownEpoch !== epoch || !ready || !running || Date.now() - request.issuedAt > TRANSITION_TTL_MS) return;
+      // Long rest: apply the GM's recovery picks BEFORE the cutscene goes
+      // out, so the numbers land while players watch. Candidates are
+      // re-collected here rather than taken from the picker — the scene
+      // may have changed while the GM was choosing — only the excluded
+      // ids travel with the request. A failed recovery must not cancel
+      // the show; it is logged for the GM to notice.
+      if (event.kind === "long") {
+        try {
+          const raw = request.longRest?.excluded;
+          const excluded = new Set(
+            Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string" && id.length <= 100) : [],
+          );
+          const items = await OBR.scene.items.getItems();
+          if (ownEpoch !== epoch || !ready || !running) return;
+          await applyLongRest(collectCandidates(items), excluded);
+        } catch (error) {
+          console.warn("[transitions] long-rest recovery failed", error);
+        }
+      }
       await OBR.broadcast.sendMessage(BC_TRANSITIONS_PLAY, event, { destination: "REMOTE" });
     }
     if (ownEpoch !== epoch || !ready) return;
@@ -175,6 +195,9 @@ export async function setupTransitions(): Promise<void> {
     gate.clear();
     void closeDisplay();
     void OBR.popover.close(CONTROL_ID).catch(() => {});
+    // A long-rest picker left over from the previous scene would list
+    // stale units — close it with the rest of the transitions UI.
+    void OBR.popover.close(PICKER_ID).catch(() => {});
     if (next) void removeOrphanScreenTransitions(true);
   };
   unsubs.push(OBR.scene.onReadyChange(sceneChanged), OBR.player.onChange((player) => {
@@ -215,5 +238,6 @@ export async function teardownTransitions(): Promise<void> {
   await closeDisplay();
   await Promise.all([...nativeWindows].map(closeNative));
   await OBR.popover.close(CONTROL_ID).catch(() => {});
+  await OBR.popover.close(PICKER_ID).catch(() => {});
   await removeOrphanScreenTransitions();
 }

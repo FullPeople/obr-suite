@@ -193,6 +193,18 @@ label.field, .field{
 }
 .chip .del:hover{color:#fff;background:var(--accent-red);border-color:var(--accent-red)}
 
+/* ===== check row (长休恢复) ===== */
+.check-field{
+  flex-direction:row;align-items:center;gap:8px;
+  cursor:pointer;user-select:none;
+}
+.check-field input[type=checkbox]{
+  width:15px;height:15px;flex:none;cursor:pointer;accent-color:var(--accent);
+}
+.check-field .check-txt{display:flex;flex-direction:column;gap:2px}
+.check-field .check-txt b{font-size:12px;font-weight:700;color:var(--text)}
+.check-field .check-txt i{font-size:10.5px;font-style:normal;color:var(--text-dim);line-height:1.5}
+
 /* ===== preview row ===== */
 .preview-row{
   display:flex;align-items:center;gap:8px;
@@ -267,6 +279,14 @@ label.field, .field{
       <span data-i18n="reLblIcon">图标</span>
       <div class="icon-grid" id="iconGrid"></div>
     </div>
+
+    <label class="field check-field" id="longRestField">
+      <input type="checkbox" id="longRest" />
+      <span class="check-txt">
+        <b data-i18n="reLblLongRest">长休恢复</b>
+        <i data-i18n="reLongRestTip">勾选后，GM 播放「长休」过场时会把该资源回满</i>
+      </span>
+    </label>
 
     <div class="presets-wrap">
       <div class="lbl-row">

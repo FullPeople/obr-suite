@@ -55,6 +55,9 @@ export interface Resource {
   current: number;
   max: number;
   icon: IconId;
+  /** 长休恢复：勾选后，「长休」过场会把该资源回满（current = max）。
+   *  默认 false —— 未勾选的资源（如已花费的灵感、任务道具）不受长休影响。 */
+  longRest?: boolean;
   /** Optional sort hint — lower values render first. Defaults to
    *  insertion order via the array index when undefined. */
   order?: number;

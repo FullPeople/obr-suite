@@ -51,6 +51,7 @@ interface ResourcePreset {
   type: ResourceType;
   max: number;
   icon: IconId;
+  longRest?: boolean;
 }
 
 const BC_RESOURCE_SAVE = `${PLUGIN_ID}/edit-save`;
@@ -75,6 +76,7 @@ const btnSave = $("btnSave");
 const btnDelete = $("btnDelete");
 const btnAddPreset = $("btnAddPreset");
 const chipsPresets = $("chipsPresets");
+const chkLongRest = $i("longRest");
 const cardEl = document.querySelector<HTMLElement>(".card");
 
 let selectedIcon: IconId = "gem";
@@ -140,6 +142,7 @@ function applyPresetIntoForm(p: ResourcePreset): void {
   selectedType = p.type;
   selectedIcon = p.icon;
   inpMax.value = String(p.max);
+  chkLongRest.checked = p.longRest === true;
   // For "count" type the new resource starts FULL by convention; for
   // bar/number we mirror max into current too — the user can tweak after.
   inpCurrent.value = String(p.max);
@@ -180,6 +183,7 @@ btnAddPreset.addEventListener("click", () => {
     type: selectedType,
     max,
     icon: selectedIcon,
+    longRest: chkLongRest.checked,
   };
   const arr = readPresets();
   // Replace any existing preset with the same name + type combo so users
@@ -267,6 +271,7 @@ function applyPayload(p: HashPayload): void {
     inpCurrent.value = String(p.resource.current);
     inpMax.value = String(p.resource.max);
     selectedIcon = p.resource.icon;
+    chkLongRest.checked = p.resource.longRest === true;
   } else {
     editingResourceId = null;
     titleEl.textContent = T("reNewTitle");
@@ -278,6 +283,7 @@ function applyPayload(p: HashPayload): void {
     inpCurrent.value = "2";
     inpMax.value = "2";
     selectedIcon = "gem";
+    chkLongRest.checked = false;
   }
   applyTypeToggleClasses();
   renderIconGrid();
@@ -351,6 +357,7 @@ btnSave.addEventListener("click", () => {
     current,
     max,
     icon: selectedIcon,
+    longRest: chkLongRest.checked,
   };
   broadcast(BC_RESOURCE_SAVE, { itemId, resource });
 });

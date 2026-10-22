@@ -1,6 +1,7 @@
 import OBR from "@owlbear-rodeo/sdk";
+import { assetUrl } from "../../asset-base";
 import { getLocalLang, onLangChange } from "../../state";
-import { BC_TRANSITIONS_RUN, BC_TRANSITIONS_STATUS, CONTROL_ID, REDUCED_MOTION_KEY, type TransitionKind } from "./protocol";
+import { BC_TRANSITIONS_RUN, BC_TRANSITIONS_STATUS, CONTROL_ID, PICKER_ID, REDUCED_MOTION_KEY, type TransitionKind } from "./protocol";
 import "./style.css";
 
 let lang = getLocalLang();
@@ -34,7 +35,10 @@ function translate() {
   el("preview").textContent = text("自己预览", "Preview for me");
   el("play").textContent = text("播放转场", "Play transition");
   el("reduced-label").textContent = text("减少动态（仅自己）", "Reduce motion for me");
-  el("hint").textContent = text("仅播放演出，不会更改生命值、法术位或休息资源。", "Presentation only. HP, spell slots and rest resources stay unchanged.");
+  el("hint").textContent = text(
+    "短休与文字仅播放演出。长休会先弹出选择界面：勾选的单位恢复生命值、法术位与标记「长休恢复」的资源。",
+    "Short rest and custom are presentation-only. Long rest opens a picker first: checked units recover HP, spell slots and long-rest resources.",
+  );
 }
 async function updateAudience() {
   const [nextRole, players] = await Promise.all([OBR.player.getRole(), OBR.party.getPlayers()]);
@@ -54,6 +58,27 @@ function busy(value: boolean) {
 async function run(preview: boolean) {
   const custom = el<HTMLInputElement>("custom").value.trim();
   if (kind === "text" && !custom) { el<HTMLInputElement>("custom").focus(); return; }
+  const audience = el<HTMLSelectElement>("audience").value;
+  const targets: "all" | string[] = audience === "all" ? "all" : [audience];
+  // GM long rest: the picker decides WHO recovers and then sends the run
+  // request itself (with its own requestId — choosing can outlive the
+  // transitions TTL). Previews never touch data, so they go direct.
+  if (!preview && kind === "long" && role === "GM") {
+    el("status").textContent = text("请在弹出的界面中选择获得恢复的单位。", "Pick who recovers in the popup.");
+    const payload = { text: custom, targets };
+    const url = `${assetUrl("long-rest-picker.html")}#${encodeURIComponent(JSON.stringify(payload))}`;
+    try {
+      const [vw, vh] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]);
+      await OBR.popover.open({ id: PICKER_ID, url, width: 400, height: 420,
+        anchorPosition: { left: vw / 2, top: vh / 2 },
+        anchorReference: "POSITION", anchorOrigin: { horizontal: "CENTER", vertical: "CENTER" },
+        transformOrigin: { horizontal: "CENTER", vertical: "CENTER" }, disableClickAway: true,
+      });
+    } catch {
+      el("status").textContent = text("未能打开选择界面，请重试。", "Could not open the picker. Please retry.");
+    }
+    return;
+  }
   requestId = crypto.randomUUID();
   busy(true);
   el("status").textContent = text("正在准备…", "Preparing…");
@@ -62,10 +87,9 @@ async function run(preview: boolean) {
     busy(false);
     el("status").textContent = text("未收到回应，请稍后重试。", "No response. Please try again.");
   }, 6_000);
-  const audience = el<HTMLSelectElement>("audience").value;
   try {
     await OBR.broadcast.sendMessage(BC_TRANSITIONS_RUN, { kind, text: custom,
-      targets: audience === "all" ? "all" : [audience], preview, requestId, issuedAt: Date.now() }, { destination: "LOCAL" });
+      targets, preview, requestId, issuedAt: Date.now() }, { destination: "LOCAL" });
   } catch {
     if (responseTimer) clearTimeout(responseTimer);
     busy(false);

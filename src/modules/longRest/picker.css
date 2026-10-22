@@ -1,0 +1,33 @@
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#eeeef5;background:#191a24;font-synthesis:none;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0}button{font:inherit;cursor:pointer}button:disabled{cursor:default;opacity:.45}button:focus-visible,input:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}
+
+.pick{padding:16px;display:grid;gap:12px}
+.head{display:flex;justify-content:space-between;align-items:center}
+.head h1{font-size:17px;letter-spacing:.02em;margin:0}
+.close{border:0;background:transparent;color:#bbbccc;font-size:24px;line-height:1;padding:2px 5px}
+.close:hover,.close:focus-visible{color:#f0eaff}
+.hint{color:#999dab;font-size:11.5px;line-height:1.55;margin:0}
+
+.tools{display:flex;align-items:center;gap:8px}
+.count{font-size:12px;color:#d2c7f7;font-variant-numeric:tabular-nums}
+.spacer{flex:1}
+.btn{min-height:34px;padding:0 14px;border:1px solid #5b536f;border-radius:8px;background:transparent;color:#e0d9f5;font-size:13px}
+.btn:hover,.btn:focus-visible{border-color:#8f7fd4;color:#f0eaff}
+.btn.slim{min-height:28px;padding:0 10px;font-size:12px}
+.btn.primary{background:#b4a0f0;border-color:#b4a0f0;color:#211936;font-weight:650}
+.btn.primary:hover,.btn.primary:focus-visible{background:#c6b6f6;border-color:#c6b6f6}
+
+.list{display:grid;gap:6px;max-height:min(46vh,420px);overflow:auto;padding-right:2px}
+.row{display:flex;gap:9px;align-items:flex-start;border:1px solid #414253;border-radius:9px;padding:9px 10px;background:#242530;cursor:pointer}
+.row:hover{border-color:#565274}
+.row.on{border-color:#ae9bf4;background:#2c2a3c}
+.row input{margin:2px 0 0;accent-color:#b4a0f0;flex:none}
+.body{display:grid;gap:3px;min-width:0}
+.name{font-size:13px;font-weight:600;color:#e6e8ee;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tags{display:flex;flex-wrap:wrap;gap:4px}
+.tag{border:1px solid #4a4763;border-radius:99px;padding:0 7px;font-size:10.5px;line-height:16px;color:#b8baca;background:#2b2b3a}
+.plan{font-size:11px;line-height:1.5;color:#9aa0b3;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+
+.actions{display:flex;gap:8px}
+.actions .btn{flex:1}
+.status{min-height:15px;font-size:12px;color:#d2c7f7;margin:0}
